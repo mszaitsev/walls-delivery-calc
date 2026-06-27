@@ -2080,6 +2080,7 @@ final class DeliveryServicesAdminPage {
 			'skipped' => 'skipped',
 			'errors' => 'errors',
 			'batch_size' => 'batch_size',
+			'pending_empty_regions_remaining' => 'Осталось необработанных пустых регионов',
 			'empty_regions_remaining' => 'empty_regions_remaining',
 			'updated_at' => 'updated_at',
 			'memory_peak_mb' => 'memory_peak_mb',

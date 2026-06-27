@@ -76,27 +76,42 @@ $result200 = $service->enrich_one( $GLOBALS['wpdb']->yandex_delivery_geo_v2[1] )
 yd_geo_v2_region_enrichment_assert( 'updated' === $result200['status'] && 'Смоленская' === $result200['region'] && 'single_region' === $result200['reason'] && 2 === $result200['candidate_count'], 'Multiple close candidates in the same region must update with single_region reason.' );
 $result300 = $service->enrich_one( $GLOBALS['wpdb']->yandex_delivery_geo_v2[2] );
 yd_geo_v2_region_enrichment_assert( 'needs_review' === $result300['status'] && 'multiple_regions' === $result300['reason'] && '' === (string) $geo_repository->find_by_geo_id( 300 )['region'], 'Similar candidates from multiple regions must stay needs_review.' );
+$raw300 = json_decode( (string) ( $geo_repository->find_by_geo_id( 300 )['raw_stats_json'] ?? '' ), true );
+yd_geo_v2_region_enrichment_assert( 'needs_review' === (string) ( $raw300['region_enrichment']['status'] ?? '' ), 'needs_review enrichment attempts must be audited.' );
 $result400 = $service->enrich_one( $GLOBALS['wpdb']->yandex_delivery_geo_v2[3] );
 yd_geo_v2_region_enrichment_assert( 'updated' === $result400['status'] && 'Ставропольский' === $result400['region'] && 'dominant_candidate' === $result400['reason'], 'Dominant nearby candidate must update region.' );
 $result500 = $service->enrich_one( $GLOBALS['wpdb']->yandex_delivery_geo_v2[4] );
 yd_geo_v2_region_enrichment_assert( 'skipped' === $result500['status'] && 'invalid_coords' === $result500['reason'], 'Invalid geo coordinates must be skipped.' );
+$raw500 = json_decode( (string) ( $geo_repository->find_by_geo_id( 500 )['raw_stats_json'] ?? '' ), true );
+yd_geo_v2_region_enrichment_assert( 'skipped' === (string) ( $raw500['region_enrichment']['status'] ?? '' ), 'skipped enrichment attempts must be audited.' );
 
 yd_geo_v2_region_enrichment_assert( 2 === $geo_repository->count_empty_active_regions(), 'Repository must count remaining active empty regions.' );
+yd_geo_v2_region_enrichment_assert( 0 === $geo_repository->count_pending_empty_region_rows_for_enrichment(), 'Audited empty-region rows must not remain pending.' );
 $batch = $service->enrich_batch( 0, 10 );
-yd_geo_v2_region_enrichment_assert( 2 === $batch['processed'] && 1 === $batch['needs_review'] && 1 === $batch['skipped'], 'Batch enrichment must process remaining empty regions.' );
+yd_geo_v2_region_enrichment_assert( 0 === $batch['processed'] && true === $batch['done'], 'Batch enrichment must skip already audited empty-region rows.' );
 
+$GLOBALS['yd_geo_v2_region_enrichment_options'] = array();
+$GLOBALS['wpdb']->yandex_delivery_geo_v2 = array(
+	$geo( 710, '', 'Неткандидата г', 55.0, 37.0, 3.0, 40 ),
+	$geo( 720, '', 'Павловск', 59.6850, 30.4300, 6.0, 30 ),
+	$geo( 730, '', 'Алгасово с', 0.0, 0.0, 3.0, 20 ),
+	$geo( 740, '', 'Брянск г', 53.2434, 34.3642, 3.0, 10 ),
+);
 $runner_repository = new YandexDeliveryGeoV2Repository( $GLOBALS['wpdb'] );
 $runner = new YandexGeoV2RegionEnrichmentRunner( new YandexGeoV2RegionEnrichmentService( $runner_repository, $GLOBALS['wpdb'], null, $region_repository ), $runner_repository );
 $state = $runner->start();
-yd_geo_v2_region_enrichment_assert( 'enriching_regions' === $state['status'] && 2 === $state['empty_regions_remaining'], 'Runner start must switch to enriching_regions.' );
+yd_geo_v2_region_enrichment_assert( 'enriching_regions' === $state['status'] && 4 === $state['empty_regions_remaining'] && 10 === $state['batch_size'], 'Runner start must switch to enriching_regions with batch size 10.' );
 $state = $runner->run_step();
-yd_geo_v2_region_enrichment_assert( 'done' === $state['status'] && 2 === $state['processed'] && 1 === $state['needs_review'] && 1 === $state['skipped'], 'Runner step must update enrichment counters.' );
+yd_geo_v2_region_enrichment_assert( 'done' === $state['status'] && 4 === $state['processed'] && 1 === $state['updated'] && 1 === $state['needs_review'] && 1 === $state['not_found'] && 1 === $state['skipped'] && 0 === $state['pending_empty_regions_remaining'], 'Runner step must process each pending empty region once.' );
+yd_geo_v2_region_enrichment_assert( 0 === $runner_repository->count_pending_empty_region_rows_for_enrichment(), 'Runner must leave no already-attempted empty rows pending.' );
+$after_done = $runner->run_step();
+yd_geo_v2_region_enrichment_assert( 4 === $after_done['processed'] && 1 === $after_done['not_found'] && 1 === $after_done['needs_review'] && 1 === $after_done['skipped'], 'Second runner step must not repeat not_found, needs_review, or skipped rows.' );
 $runner->start();
 $paused = $runner->pause();
 $after_pause = $runner->run_step();
 yd_geo_v2_region_enrichment_assert( 'paused' === $paused['status'] && $after_pause['processed'] === $paused['processed'], 'Runner pause must stop enrichment loop.' );
 $reset = $runner->reset();
-yd_geo_v2_region_enrichment_assert( 'idle' === $reset['status'] && 0 === $reset['processed'], 'Runner reset must clear state.' );
+yd_geo_v2_region_enrichment_assert( 'idle' === $reset['status'] && 0 === $reset['processed'], 'Runner reset must clear state without clearing audit flags.' );
 
 $geo_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/GeoV2/YandexDeliveryGeoV2Repository.php' );
 $service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexGeoV2RegionEnrichmentService.php' );
@@ -104,9 +119,9 @@ $runner_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carri
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/yandex-delivery-pickup-v2-runner.js' );
 $mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMapperV2Service.php' );
-yd_geo_v2_region_enrichment_assert( str_contains( $service_source, 'YandexGeoV2RegionEnrichmentService' ) && str_contains( $runner_source, 'YandexGeoV2RegionEnrichmentRunner' ), 'Enrichment service and runner must exist.' );
-yd_geo_v2_region_enrichment_assert( str_contains( $geo_repository_source, 'update_region_from_location' ) && str_contains( $geo_repository_source, 'region_enrichment' ), 'Geo v2 repository must expose update_region_from_location with audit.' );
-yd_geo_v2_region_enrichment_assert( str_contains( $admin_source, 'Обогащение пустых регионов geo_v2' ) && str_contains( $admin_source, 'Запустить обогащение регионов' ) && str_contains( $admin_source, 'wdc_yandex_geo_v2_region_enrichment_start' ), 'Admin UI must contain geo_v2 region enrichment block and AJAX actions.' );
+yd_geo_v2_region_enrichment_assert( str_contains( $service_source, 'YandexGeoV2RegionEnrichmentService' ) && str_contains( $service_source, 'find_pending_empty_region_rows_for_enrichment' ) && str_contains( $runner_source, 'YandexGeoV2RegionEnrichmentRunner' ) && str_contains( $runner_source, 'private const BATCH_SIZE = 10' ) && str_contains( $runner_source, 'count_pending_empty_region_rows_for_enrichment' ), 'Enrichment service and runner must use pending rows with batch size 10.' );
+yd_geo_v2_region_enrichment_assert( str_contains( $geo_repository_source, 'update_region_from_location' ) && str_contains( $geo_repository_source, 'mark_region_enrichment_attempt' ) && str_contains( $geo_repository_source, 'find_pending_empty_region_rows_for_enrichment' ) && str_contains( $geo_repository_source, 'count_pending_empty_region_rows_for_enrichment' ), 'Geo v2 repository must expose region enrichment update, attempt, and pending methods.' );
+yd_geo_v2_region_enrichment_assert( str_contains( $admin_source, 'Обогащение пустых регионов geo_v2' ) && str_contains( $admin_source, 'Осталось необработанных пустых регионов' ) && str_contains( $admin_source, 'Запустить обогащение регионов' ) && str_contains( $admin_source, 'wdc_yandex_geo_v2_region_enrichment_start' ), 'Admin UI must contain geo_v2 region enrichment block, pending count, and AJAX actions.' );
 yd_geo_v2_region_enrichment_assert( str_contains( $js_source, 'data-wdc-yandex-geo-v2-region-enrichment' ) && str_contains( $js_source, 'enriching_regions' ), 'JS must contain geo_v2 region enrichment loop.' );
 yd_geo_v2_region_enrichment_assert( ! str_contains( $mapper_source, 'YandexGeoV2RegionEnrichmentService' ) && ! str_contains( $mapper_source, 'update_region_from_location' ), 'Main mapper v2 pipeline must not call enrichment directly.' );
 

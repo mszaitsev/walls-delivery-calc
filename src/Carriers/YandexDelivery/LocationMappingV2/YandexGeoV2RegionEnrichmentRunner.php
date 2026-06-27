@@ -9,7 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class YandexGeoV2RegionEnrichmentRunner {
 	private const STATE_OPTION = 'wdc_yandex_geo_v2_region_enrichment_state';
-	private const BATCH_SIZE = 50;
+	private const BATCH_SIZE = 10;
 
 	public function __construct( private YandexGeoV2RegionEnrichmentService $service, private YandexDeliveryGeoV2Repository $geo_repository ) {
 	}
@@ -20,7 +20,8 @@ final class YandexGeoV2RegionEnrichmentRunner {
 		$state['session_id'] = sha1( uniqid( 'yandex-geo-v2-region-enrichment-', true ) );
 		$state['started_at'] = $this->now();
 		$state['updated_at'] = $state['started_at'];
-		$state['empty_regions_remaining'] = $this->geo_repository->count_empty_active_regions();
+		$state['empty_regions_remaining'] = $this->geo_repository->count_pending_empty_region_rows_for_enrichment();
+		$state['pending_empty_regions_remaining'] = $state['empty_regions_remaining'];
 		$state['message'] = 'Обогащаем пустые регионы geo_v2.';
 		$this->save_state( $state );
 
@@ -44,8 +45,9 @@ final class YandexGeoV2RegionEnrichmentRunner {
 			$state['updated_at'] = $this->now();
 			$state['memory_peak_mb'] = $this->memory_peak_mb();
 			$state['last_items'] = array_slice( $result['items'], -10 );
-			$remaining = $this->geo_repository->count_empty_active_regions();
+			$remaining = $this->geo_repository->count_pending_empty_region_rows_for_enrichment();
 			$state['empty_regions_remaining'] = $remaining;
+			$state['pending_empty_regions_remaining'] = $remaining;
 			if ( ! empty( $result['done'] ) || 0 === (int) $result['processed'] || 0 === $remaining ) {
 				$state['status'] = 'done';
 				$state['message'] = 'Обогащение пустых регионов geo_v2 завершено.';
@@ -105,9 +107,9 @@ final class YandexGeoV2RegionEnrichmentRunner {
 			'skipped' => 0,
 			'errors' => 0,
 			'batch_size' => self::BATCH_SIZE,
-			'empty_regions_remaining' => $this->geo_repository->count_empty_active_regions(),
+			'empty_regions_remaining' => $this->geo_repository->count_pending_empty_region_rows_for_enrichment(),
+			'pending_empty_regions_remaining' => $this->geo_repository->count_pending_empty_region_rows_for_enrichment(),
 			'memory_peak_mb' => $this->memory_peak_mb(),
-			'updated_at' => $this->now(),
 			'message' => '',
 			'last_items' => array(),
 		);

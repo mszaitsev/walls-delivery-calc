@@ -25,10 +25,9 @@ final class YandexGeoV2RegionEnrichmentService {
 
 	/** @return array{processed:int,updated:int,needs_review:int,not_found:int,skipped:int,errors:int,next_offset:int,done:bool,items:array<int,array<string,mixed>>} */
 	public function enrich_batch( int $offset, int $limit ): array {
-		$offset = max( 0, $offset );
 		$limit = max( 1, min( 500, $limit ) );
-		$rows = $this->fetch_empty_region_geo_rows( $offset, $limit );
-		$result = array( 'processed' => 0, 'updated' => 0, 'needs_review' => 0, 'not_found' => 0, 'skipped' => 0, 'errors' => 0, 'next_offset' => $offset + count( $rows ), 'done' => count( $rows ) < $limit, 'items' => array() );
+		$rows = $this->geo_repository->find_pending_empty_region_rows_for_enrichment( $limit );
+		$result = array( 'processed' => 0, 'updated' => 0, 'needs_review' => 0, 'not_found' => 0, 'skipped' => 0, 'errors' => 0, 'next_offset' => max( 0, $offset ), 'done' => count( $rows ) < $limit, 'items' => array() );
 		foreach ( $rows as $geo ) {
 			try {
 				$item = $this->enrich_one( $geo );
@@ -39,17 +38,21 @@ final class YandexGeoV2RegionEnrichmentService {
 				}
 				$result['items'][] = $item;
 			} catch ( \Throwable $exception ) {
-				++$result['processed'];
-				++$result['errors'];
-				$result['items'][] = array(
-					'yandex_geo_id' => (int) ( $geo['yandex_geo_id'] ?? 0 ),
-					'locality' => (string) ( $geo['locality'] ?? '' ),
-					'status' => 'errors',
-					'region' => '',
-					'distance' => null,
+				$audit = array(
+					'locality_terms' => $this->normalizer->search_terms_for_locality( (string) ( $geo['locality'] ?? '' ) ),
+					'matched_location_id' => 0,
+					'matched_region' => '',
+					'distance_km' => null,
 					'candidate_count' => 0,
 					'reason' => $exception->getMessage(),
+					'matched_wdc_region' => '',
+					'resolved_yandex_region' => '',
+					'region_mapping_source' => 'region_mapping_v2',
 				);
+				$this->geo_repository->mark_region_enrichment_attempt( (int) ( $geo['yandex_geo_id'] ?? 0 ), 'errors', $audit );
+				++$result['processed'];
+				++$result['errors'];
+				$result['items'][] = $this->result( $geo, 'errors', '', null, 0, $exception->getMessage() );
 			}
 		}
 
@@ -74,10 +77,10 @@ final class YandexGeoV2RegionEnrichmentService {
 			'region_mapping_source' => 'region_mapping_v2',
 		);
 		if ( $geo_id <= 0 || '' === $base ) {
-			return $this->result( $geo, 'skipped', '', null, 0, 'invalid_locality' );
+			return $this->attempt_result( $geo, 'skipped', '', null, 0, 'invalid_locality', $audit_base );
 		}
 		if ( ! $this->has_valid_geo_coordinates( $geo ) ) {
-			return $this->result( $geo, 'skipped', '', null, 0, 'invalid_coords' );
+			return $this->attempt_result( $geo, 'skipped', '', null, 0, 'invalid_coords', $audit_base );
 		}
 		$lat = (float) $geo['centroid_lat'];
 		$lon = (float) $geo['centroid_lon'];
@@ -85,7 +88,7 @@ final class YandexGeoV2RegionEnrichmentService {
 		$threshold = max( 5.0, $radius + 2.0 );
 		$candidates = $this->candidate_rows( $this->fetch_wdc_candidates( $terms ), $base, $lat, $lon, $threshold );
 		if ( array() === $candidates ) {
-			return $this->result( $geo, 'not_found', '', null, 0, 'no_candidates' );
+			return $this->attempt_result( $geo, 'not_found', '', null, 0, 'no_candidates', $audit_base );
 		}
 		$this->sort_candidates( $candidates );
 		$chosen = null;
@@ -103,7 +106,7 @@ final class YandexGeoV2RegionEnrichmentService {
 			}
 		}
 		if ( null === $chosen ) {
-			return $this->result( $geo, 'needs_review', '', $candidates[0]['distance_km'], count( $candidates ), $reason );
+			return $this->attempt_result( $geo, 'needs_review', '', $candidates[0]['distance_km'], count( $candidates ), $reason, array_merge( $audit_base, $this->candidate_audit( $candidates[0], count( $candidates ), $reason, '' ) ) );
 		}
 		$location = $chosen['location'];
 		$wdc_region = trim( (string) ( $location['region_name'] ?? '' ) );
@@ -122,28 +125,14 @@ final class YandexGeoV2RegionEnrichmentService {
 			)
 		);
 		if ( '' === $resolved_yandex_region ) {
-			return $this->result( $geo, 'needs_review', '', $chosen['distance_km'], count( $candidates ), 'region_mapping_missing' );
+			return $this->attempt_result( $geo, 'needs_review', '', $chosen['distance_km'], count( $candidates ), 'region_mapping_missing', array_merge( $audit, array( 'resolved_yandex_region' => '' ) ) );
 		}
 		$updated = $this->geo_repository->update_region_from_location( $geo_id, $resolved_yandex_region, $audit );
 		if ( ! $updated ) {
-			return $this->result( $geo, 'needs_review', '', $chosen['distance_km'], count( $candidates ), 'update_failed' );
+			return $this->attempt_result( $geo, 'needs_review', '', $chosen['distance_km'], count( $candidates ), 'update_failed', $audit );
 		}
 
 		return $this->result( $geo, 'updated', $resolved_yandex_region, $chosen['distance_km'], count( $candidates ), $reason );
-	}
-
-	/** @return array<int,array<string,mixed>> */
-	private function fetch_empty_region_geo_rows( int $offset, int $limit ): array {
-		if ( $this->has_test_geo_rows() ) {
-			$rows = array_values( array_filter( $this->wpdb->yandex_delivery_geo_v2, static fn( array $row ): bool => ! empty( $row['active'] ) && '' === trim( (string) ( $row['region'] ?? '' ) ) ) );
-			usort( $rows, static fn( array $a, array $b ): int => (int) ( $b['points_count'] ?? 0 ) <=> (int) ( $a['points_count'] ?? 0 ) ?: (int) ( $a['yandex_geo_id'] ?? 0 ) <=> (int) ( $b['yandex_geo_id'] ?? 0 ) );
-
-			return array_slice( $rows, $offset, $limit );
-		}
-		$sql = 'SELECT * FROM ' . $this->geo_table_name() . " WHERE active = 1 AND (region IS NULL OR region = '') ORDER BY points_count DESC, yandex_geo_id ASC LIMIT %d OFFSET %d";
-		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $limit, $offset ), ARRAY_A );
-
-		return is_array( $rows ) ? $rows : array();
 	}
 
 	/** @param array<int,string> $terms @return array<int,array<string,mixed>> */
@@ -218,6 +207,38 @@ final class YandexGeoV2RegionEnrichmentService {
 	/** @param array<int,array<string,mixed>> $candidates */
 	private function sort_candidates( array &$candidates ): void {
 		usort( $candidates, static fn( array $a, array $b ): int => (float) ( $a['distance_km'] ?? 999999 ) <=> (float) ( $b['distance_km'] ?? 999999 ) ?: (int) ( $a['location']['id'] ?? 0 ) <=> (int) ( $b['location']['id'] ?? 0 ) );
+	}
+
+	/** @param array<string,mixed> $geo @param array<string,mixed> $audit @return array<string,mixed> */
+	private function attempt_result( array $geo, string $status, string $region, mixed $distance, int $candidate_count, string $reason, array $audit ): array {
+		$audit = array_merge(
+			$audit,
+			array(
+				'distance_km' => is_numeric( $distance ) ? round( (float) $distance, 3 ) : ( $audit['distance_km'] ?? null ),
+				'candidate_count' => $candidate_count,
+				'reason' => $reason,
+			)
+		);
+		$this->geo_repository->mark_region_enrichment_attempt( (int) ( $geo['yandex_geo_id'] ?? 0 ), $status, $audit );
+
+		return $this->result( $geo, $status, $region, $distance, $candidate_count, $reason );
+	}
+
+	/** @param array{location:array<string,mixed>,distance_km:float|int|string} $candidate @return array<string,mixed> */
+	private function candidate_audit( array $candidate, int $candidate_count, string $reason, string $resolved_yandex_region ): array {
+		$location = $candidate['location'];
+		$wdc_region = trim( (string) ( $location['region_name'] ?? '' ) );
+
+		return array(
+			'matched_location_id' => (int) ( $location['id'] ?? 0 ),
+			'matched_region' => $wdc_region,
+			'distance_km' => is_numeric( $candidate['distance_km'] ?? null ) ? round( (float) $candidate['distance_km'], 3 ) : null,
+			'candidate_count' => $candidate_count,
+			'reason' => $reason,
+			'matched_wdc_region' => $wdc_region,
+			'resolved_yandex_region' => $resolved_yandex_region,
+			'region_mapping_source' => 'region_mapping_v2',
+		);
 	}
 
 	/** @param array<string,mixed> $geo @return array<string,mixed> */
