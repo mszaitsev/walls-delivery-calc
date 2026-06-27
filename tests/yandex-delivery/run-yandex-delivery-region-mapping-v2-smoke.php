@@ -93,7 +93,7 @@ $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/C
 yd_region_mapping_v2_assert( str_contains( $admin_source, 'Сопоставление регионов Яндекса' ) && str_contains( $admin_source, 'Обновить список регионов' ) && str_contains( $admin_source, 'Не выбран' ), 'Admin UI must render Yandex region mapping v2 block.' );
 yd_region_mapping_v2_assert( str_contains( $admin_source, 'sync_yandex_region_mapping_v2' ) && str_contains( $admin_source, 'save_yandex_region_mapping_v2' ), 'Admin must handle region mapping sync/save POST actions.' );
 yd_region_mapping_v2_assert( str_contains( $plugin_source, 'YandexRegionMappingV2Repository::class' ), 'Plugin DI must register region mapping v2 repository.' );
-yd_region_mapping_v2_assert( ! str_contains( $mapper_source, 'YandexRegionMappingV2Repository' ) && ! str_contains( $mapper_source, 'yandex_region_mapping_v2' ), 'Mapper v2 must not use region mapping v2 yet.' );
+yd_region_mapping_v2_assert( str_contains( $mapper_source, 'YandexRegionMappingV2Repository' ) && str_contains( $mapper_source, 'find_wdc_regions_for_yandex' ), 'Mapper v2 must use region mapping v2 repository as the WDC region source.' );
 yd_region_mapping_v2_assert( str_contains( $repository_source, 'sync_from_sources' ) && str_contains( $repository_source, 'save_mapping' ), 'New region mapping repository must exist.' );
 yd_region_mapping_v2_assert( file_exists( dirname( __DIR__, 2 ) . '/database/migrations/0039_create_yandex_region_mapping_v2.php' ), 'Migration 0039 must exist.' );
 

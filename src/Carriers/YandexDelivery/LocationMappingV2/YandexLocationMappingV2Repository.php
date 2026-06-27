@@ -135,6 +135,9 @@ final class YandexLocationMappingV2Repository {
 				'error' => $this->count_status_rows( $rows, 'error' ),
 				'avg_confidence' => $this->avg_numeric( $rows, 'confidence' ),
 				'avg_distance' => $this->avg_numeric( $rows, 'distance_km' ),
+				'no_match_region_not_mapped' => $this->count_no_match_reason_rows( $rows, 'region_not_mapped' ),
+				'no_match_no_locality_match' => $this->count_no_match_reason_rows( $rows, 'no_locality_match' ),
+				'territory_fallback' => $this->count_raw_flag_rows( $rows, 'territory_fallback' ),
 			);
 		}
 		$this->create_schema_if_needed();
@@ -148,6 +151,9 @@ final class YandexLocationMappingV2Repository {
 			'error' => $this->count_status( 'error' ),
 			'avg_confidence' => $this->nullable_float_var( 'SELECT AVG(confidence) FROM ' . $this->table_name() ),
 			'avg_distance' => $this->nullable_float_var( 'SELECT AVG(distance_km) FROM ' . $this->table_name() ),
+			'no_match_region_not_mapped' => $this->count_no_match_reason( 'region_not_mapped' ),
+			'no_match_no_locality_match' => $this->count_no_match_reason( 'no_locality_match' ),
+			'territory_fallback' => $this->count_raw_flag( 'territory_fallback' ),
 		);
 	}
 
@@ -267,6 +273,39 @@ final class YandexLocationMappingV2Repository {
 	}
 
 	/** @param array<int,array<string,mixed>> $rows */
+	private function count_no_match_reason_rows( array $rows, string $reason ): int {
+		return count(
+			array_filter(
+				$rows,
+				fn( array $row ): bool => 'no_match' === (string) ( $row['status'] ?? '' )
+					&& $reason === (string) ( $this->decoded_raw_json( $row )['reason'] ?? '' )
+			)
+		);
+	}
+
+	/** @param array<int,array<string,mixed>> $rows */
+	private function count_raw_flag_rows( array $rows, string $flag ): int {
+		return count(
+			array_filter(
+				$rows,
+				fn( array $row ): bool => true === ( $this->decoded_raw_json( $row )[ $flag ] ?? false )
+			)
+		);
+	}
+
+	private function count_no_match_reason( string $reason ): int {
+		$needle = '%"reason":"' . $this->escape_like( $reason ) . '"%';
+
+		return (int) $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE status = %s AND raw_json LIKE %s', 'no_match', $needle ) );
+	}
+
+	private function count_raw_flag( string $flag ): int {
+		$needle = '%"' . $this->escape_like( $flag ) . '":true%';
+
+		return (int) $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE raw_json LIKE %s', $needle ) );
+	}
+
+	/** @param array<int,array<string,mixed>> $rows */
 	private function avg_numeric( array $rows, string $column ): ?float {
 		$values = array_values( array_map( 'floatval', array_filter( array_column( $rows, $column ), 'is_numeric' ) ) );
 
@@ -277,6 +316,17 @@ final class YandexLocationMappingV2Repository {
 		$value = $this->wpdb->get_var( $sql );
 
 		return is_numeric( $value ) ? round( (float) $value, 3 ) : null;
+	}
+
+	/** @param array<string,mixed> $row @return array<string,mixed> */
+	private function decoded_raw_json( array $row ): array {
+		$raw = json_decode( (string) ( $row['raw_json'] ?? '' ), true );
+
+		return is_array( $raw ) ? $raw : array();
+	}
+
+	private function escape_like( string $value ): string {
+		return method_exists( $this->wpdb, 'esc_like' ) ? $this->wpdb->esc_like( $value ) : addcslashes( $value, '_%\\' );
 	}
 
 	private function column_type( string $column ): string {

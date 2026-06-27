@@ -44,6 +44,9 @@ final class YandexLocationMappingV2Runner {
 			$stats = $this->repository->statistics();
 			$state['avg_confidence'] = $stats['avg_confidence'] ?? null;
 			$state['avg_distance'] = $stats['avg_distance'] ?? null;
+			$state['region_not_mapped'] = $stats['no_match_region_not_mapped'] ?? 0;
+			$state['no_locality_match'] = $stats['no_match_no_locality_match'] ?? 0;
+			$state['territory_fallback'] = $stats['territory_fallback'] ?? 0;
 			if ( ! empty( $result['done'] ) ) {
 				$state['status'] = 'done';
 				$state['message'] = 'Offline сопоставление geoId v2 завершено.';
@@ -105,6 +108,9 @@ final class YandexLocationMappingV2Runner {
 			'batch_size' => self::BATCH_SIZE,
 			'avg_confidence' => null,
 			'avg_distance' => null,
+			'region_not_mapped' => 0,
+			'no_locality_match' => 0,
+			'territory_fallback' => 0,
 			'message' => '',
 			'errors_count' => 0,
 			'errors_last' => array(),
