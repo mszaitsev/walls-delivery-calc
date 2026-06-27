@@ -8,7 +8,7 @@ use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 defined( 'ABSPATH' ) || exit;
 
 final class YandexLocationMappingV2NameNormalizer {
-	private const MAX_SEARCH_TERMS = 8;
+	private const MAX_SEARCH_TERMS = 30;
 
 	private LocationDisplayNameFormatter $formatter;
 
@@ -59,6 +59,8 @@ final class YandexLocationMappingV2NameNormalizer {
 			}
 		}
 
+		$this->add_semantic_terms( $terms, $raw );
+
 		foreach ( $bases as $base_term ) {
 			foreach ( $this->preferred_type_aliases( $raw ) as $type ) {
 				$this->add_term( $terms, $type . ' ' . $base_term );
@@ -74,6 +76,57 @@ final class YandexLocationMappingV2NameNormalizer {
 		}
 
 		return array_slice( array_values( $terms ), 0, self::MAX_SEARCH_TERMS );
+	}
+
+
+	/** @param array<string,string> $terms */
+	private function add_semantic_terms( array &$terms, string $raw ): void {
+		$normalized = $this->normalize_text( $raw );
+		$base = $this->base_search_term( $raw, $this->normalize_place( $raw ) );
+		$base = '' !== $base ? $base : $this->normalize_place( $raw );
+		if ( '' !== $base ) {
+			if ( preg_match( '/(^|\s)(станица|ст ца|стца)(\s|$)/u', $normalized ) ) {
+				$this->add_term( $terms, 'станица ' . $base );
+				$this->add_term( $terms, 'ст-ца ' . $base );
+			}
+			if ( preg_match( '/(^|\s)(г|город)(\s|$)/u', $normalized ) ) {
+				$this->add_term( $terms, 'г ' . $base );
+				$this->add_term( $terms, 'город ' . $base );
+			}
+			if ( preg_match( '/городской поселок/u', $normalized ) ) {
+				$this->add_term( $terms, 'городской поселок ' . $base );
+				$this->add_term( $terms, 'гп ' . $base );
+			}
+			if ( preg_match( '/дачный поселок/u', $normalized ) ) {
+				$this->add_term( $terms, 'дачный поселок ' . $base );
+				$this->add_term( $terms, 'дп ' . $base );
+			}
+			if ( preg_match( '/коттеджный поселок/u', $normalized ) ) {
+				$this->add_term( $terms, 'коттеджный поселок ' . $base );
+				$this->add_term( $terms, 'кп ' . $base );
+			}
+			if ( preg_match( '/(поселок при железнодорожной станции|поселок станции|железнодорожная станция|ж д ст|п ст|станция|ст)/u', $normalized ) ) {
+				$this->add_term( $terms, 'станция ' . $base );
+				$this->add_term( $terms, 'ж/д станция ' . $base );
+				$this->add_term( $terms, 'поселок станции ' . $base );
+			}
+		}
+		if ( preg_match( '/(?:^|\s)(совхоза|санатория|фабрики|опытного хозяйства)\s+(.+)$/u', $normalized, $matches ) ) {
+			$name = mb_convert_case( trim( $matches[2] ), MB_CASE_TITLE, 'UTF-8' );
+			$prefix = mb_convert_case( trim( $matches[1] ), MB_CASE_TITLE, 'UTF-8' );
+			$this->add_term( $terms, str_replace( 'Имени', 'имени', $prefix . ' ' . $name ) );
+			$this->add_term( $terms, $prefix . ' ' . $name );
+			$this->add_term( $terms, str_replace( 'Имени', 'имени', $name ) );
+			$this->add_term( $terms, $name );
+		}
+		if ( preg_match( '/(?:^|\s)(?:им|имени)\s+(.+)$/u', $normalized, $matches ) ) {
+			$name = mb_convert_case( trim( $matches[1] ), MB_CASE_TITLE, 'UTF-8' );
+			$this->add_term( $terms, 'им. ' . $name );
+			$this->add_term( $terms, 'имени ' . $name );
+			$this->add_term( $terms, 'пгт имени ' . $name );
+			$this->add_term( $terms, 'поселок городского типа имени ' . $name );
+			$this->add_term( $terms, $name );
+		}
 	}
 
 	public function base_name_for_locality( string $value ): string {
@@ -128,10 +181,15 @@ final class YandexLocationMappingV2NameNormalizer {
 	public function detect_locality_type( string $value ): string {
 		$value = $this->normalize_text( $value );
 		foreach ( array(
+			'поселок при железнодорожной станции' => 'station',
+			'поселок станции' => 'station',
 			'железнодорожная станция' => 'station',
+			'ж д станция' => 'station',
+			'ж д ст' => 'station',
 			'поселок городского типа' => 'urban',
 			'городской поселок' => 'urban',
 			'рабочий поселок' => 'urban',
+			'коттеджный поселок' => 'settlement',
 			'дачный поселок' => 'urban',
 			'сельский поселок' => 'village',
 			'станица' => 'village',
@@ -175,8 +233,8 @@ final class YandexLocationMappingV2NameNormalizer {
 			'пгт', 'рп', 'гп', 'дп', 'рабочий поселок', 'городской поселок', 'дачный поселок', 'поселок городского типа' => 'urban',
 			'с', 'село', 'сельский поселок', 'станица', 'ст ца', 'стца' => 'village',
 			'д', 'деревня' => 'hamlet',
-			'п', 'пос', 'поселок', 'местечко' => 'settlement',
-			'п ст', 'ж д ст', 'железнодорожная станция', 'ст' => 'station',
+			'п', 'пос', 'поселок', 'местечко', 'кп', 'коттеджный поселок' => 'settlement',
+			'п ст', 'ж д ст', 'ж д станция', 'железнодорожная станция', 'поселок станции', 'поселок при железнодорожной станции', 'станция', 'ст' => 'station',
 			'х', 'хутор' => 'farm',
 			'м в', 'массив' => 'area',
 			default => '',
@@ -300,17 +358,17 @@ final class YandexLocationMappingV2NameNormalizer {
 	/** @param array<string,array<string,array{display?:string,position?:string}>> $type_rules @return array<int,string> */
 	private function build_type_aliases( array $type_rules ): array {
 		$aliases = array(
-			'железнодорожная станция', 'ж/д_ст', 'п/ст',
+			'поселок при железнодорожной станции', 'посёлок при железнодорожной станции', 'поселок станции', 'посёлок станции', 'железнодорожная станция', 'ж/д станция', 'ж/д ст', 'ж/д_ст', 'п/ст', 'станция',
 			'поселок городского типа', 'посёлок городского типа', 'пгт',
 			'городской поселок', 'городской посёлок', 'гп',
-			'дачный поселок', 'дачный посёлок', 'дп',
+			'коттеджный поселок', 'коттеджный посёлок', 'кп', 'дачный поселок', 'дачный посёлок', 'дп',
 			'рабочий поселок', 'рабочий посёлок', 'рп',
 			'сельский поселок', 'сельский посёлок',
 			'город', 'г', 'г.',
 			'деревня', 'д', 'д.',
 			'село', 'с', 'с.',
 			'поселок', 'посёлок', 'пос', 'пос.', 'п', 'п.',
-			'хутор', 'х', 'х.', 'станица', 'ст-ца', 'стца', 'ст', 'ст.', 'местечко', 'м-в', 'массив', 'аул', 'снт', 'кп',
+			'имени', 'им', 'им.', 'совхоза', 'санатория', 'фабрики', 'опытного хозяйства', 'хутор', 'х', 'х.', 'станица', 'ст-ца', 'стца', 'ст', 'ст.', 'местечко', 'м-в', 'массив', 'аул', 'снт', 'кп',
 		);
 		foreach ( array( 'city', 'place' ) as $scope ) {
 			foreach ( is_array( $type_rules[ $scope ] ?? null ) ? $type_rules[ $scope ] : array() as $source => $rule ) {
@@ -354,7 +412,7 @@ final class YandexLocationMappingV2NameNormalizer {
 
 	private function normalize_text( string $value ): string {
 		$value = str_replace( 'ё', 'е', mb_strtolower( trim( $value ), 'UTF-8' ) );
-		$value = str_replace( array( 'ж/д_ст', 'п/ст', 'ст-ца', 'м-в' ), array( 'ж д ст', 'п ст', 'ст ца', 'м в' ), $value );
+		$value = str_replace( array( 'ж/д_ст', 'ж/д ст', 'п/ст', 'ст-ца', 'м-в' ), array( 'ж д ст', 'ж д ст', 'п ст', 'ст ца', 'м в' ), $value );
 		$value = preg_replace( '/[«»"\'`.,()\/_]+/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
 

@@ -86,9 +86,24 @@ final class YandexLocationMapperV2Service {
 			return array();
 		}
 
-		$sql_candidates = $this->fetch_locations_by_regions( $mapped_regions );
+		$exact_rows = $this->fetch_exact_locations_by_regions( $mapped_regions, $search_terms );
+		$diagnostics['exact_region_rows'] = count( $exact_rows );
+		$candidates = array();
+		if ( array() !== $exact_rows ) {
+			$candidates = $this->build_candidate_rows( $exact_rows, $geo, $locality, $search_terms, $diagnostics );
+		}
+		$diagnostics['exact_candidates'] = count( $candidates );
+		$sql_candidates = $exact_rows;
+		if ( array() === $candidates ) {
+			$diagnostics['candidate_search_mode'] = 'region_mapping_regional_scan_fallback';
+			$sql_candidates = $this->fetch_locations_by_regions( $mapped_regions );
+			$diagnostics['regional_scan_rows'] = count( $sql_candidates );
+			$candidates = $this->build_candidate_rows( $sql_candidates, $geo, $locality, $search_terms, $diagnostics );
+			$diagnostics['regional_scan_candidates'] = count( $candidates );
+		} else {
+			$diagnostics['candidate_search_mode'] = 'region_mapping_exact_first';
+		}
 		$diagnostics['region_before_filters'] = count( $sql_candidates );
-		$candidates = $this->build_candidate_rows( $sql_candidates, $geo, $locality, $search_terms, $diagnostics );
 		$diagnostics['region_after_filters'] = count( $candidates );
 		$diagnostics['candidate_count_before_filters'] = $diagnostics['region_before_filters'];
 		$diagnostics['candidate_count_after_filters'] = count( $candidates );
@@ -230,7 +245,7 @@ final class YandexLocationMapperV2Service {
 	private function default_diagnostics( array $search_terms, array $mapped_regions = array(), string $yandex_region = '' ): array {
 		return array(
 			'sql_search_terms' => $search_terms,
-			'candidate_search_mode' => 'region_mapping',
+			'candidate_search_mode' => 'region_mapping_exact_first',
 			'yandex_region' => $yandex_region,
 			'mapped_regions' => array_values( $mapped_regions ),
 			'reason' => '',
@@ -241,6 +256,10 @@ final class YandexLocationMapperV2Service {
 			'dedupe_before' => 0,
 			'dedupe_after' => 0,
 			'territory_fallback' => false,
+			'exact_region_rows' => 0,
+			'exact_candidates' => 0,
+			'regional_scan_rows' => 0,
+			'regional_scan_candidates' => 0,
 		);
 	}
 
@@ -431,7 +450,7 @@ final class YandexLocationMapperV2Service {
 	/** @param array<string,mixed> $geo @param array<string,mixed> $diagnostics @return array<string,mixed>|null */
 	private function territory_coordinate_fallback( array $geo, array $diagnostics ): ?array {
 		$locality_raw = (string) ( $geo['locality'] ?? '' );
-		if ( ! $this->normalizer->is_territorial_like( $locality_raw ) ) {
+		if ( ! $this->is_territory_like_geo( $geo ) ) {
 			return null;
 		}
 		if ( ! is_numeric( $geo['centroid_lat'] ?? null ) || ! is_numeric( $geo['centroid_lon'] ?? null ) ) {
@@ -439,14 +458,20 @@ final class YandexLocationMapperV2Service {
 		}
 		$centroid_lat = (float) $geo['centroid_lat'];
 		$centroid_lon = (float) $geo['centroid_lon'];
-		$locations = $this->fetch_nearby_locations_for_territory( $centroid_lat, $centroid_lon, is_array( $diagnostics['mapped_regions'] ?? null ) ? $diagnostics['mapped_regions'] : array() );
+		$mapped_regions = is_array( $diagnostics['mapped_regions'] ?? null ) ? $diagnostics['mapped_regions'] : array();
+		if ( array() === $mapped_regions ) {
+			return null;
+		}
+		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
+		$territory_radius = min( 25.0, max( 10.0, $safe_radius + 5.0 ) );
+		$locations = $this->fetch_nearby_locations_for_territory( $centroid_lat, $centroid_lon, $mapped_regions, $territory_radius );
 		$nearest = null;
 		foreach ( $locations as $location ) {
 			if ( ! $this->has_valid_location_coordinates( $location ) ) {
 				continue;
 			}
 			$distance = round( $this->distance_km( $centroid_lat, $centroid_lon, (float) $location['latitude'], (float) $location['longitude'] ), 3 );
-			if ( $distance > 15.0 ) {
+			if ( $distance > $territory_radius ) {
 				continue;
 			}
 			if ( null === $nearest || $distance < (float) $nearest['distance_km'] ) {
@@ -463,11 +488,13 @@ final class YandexLocationMapperV2Service {
 			array(
 				'distance' => $nearest['distance_km'],
 				'radius' => is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : null,
-				'threshold' => 15.0,
+				'threshold' => $territory_radius,
 				'candidate_count' => 1,
 				'territory_fallback' => true,
 				'reason' => 'territory_fallback',
-				'territory_fallback_reason' => 'territorial_like_coordinates',
+				'territory_fallback_reason' => 'territory_like_coordinate_match',
+				'territory_radius_km' => round( $territory_radius, 3 ),
+				'territory_candidates_checked' => count( $locations ),
 				'locality_source' => (string) ( $effective['source'] ?? '' ),
 				'locality_raw' => (string) ( $effective['raw'] ?? '' ),
 				'effective_locality' => (string) ( $effective['value'] ?? '' ),
@@ -482,11 +509,65 @@ final class YandexLocationMapperV2Service {
 			'location' => $location,
 			'distance_km' => (float) $nearest['distance_km'],
 			'type_score' => 0,
-			'confidence' => 60,
-			'matched_by' => array( 'region', 'territory_coordinates' ),
+			'confidence' => $this->territory_confidence( (float) $nearest['distance_km'], $geo, $location, $effective ),
+			'matched_by' => $this->territory_matched_by( $geo, $location, $effective ),
 			'raw' => $raw,
 		);
 	}
+
+
+	/** @param array<string,mixed> $geo */
+	private function is_territory_like_geo( array $geo ): bool {
+		$value = mb_strtolower( str_replace( 'ё', 'е', (string) ( $geo['locality'] ?? '' ) . ' ' . (string) ( $geo['first_full_address'] ?? '' ) ), 'UTF-8' );
+		$value = preg_replace( '/[.,()]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+		foreach ( array( 'садоводческое товарищество', 'садовое товарищество', 'товарищество собственников', 'коттеджный поселок', 'муниципальный округ', 'городской округ', 'производственно административная зона', 'промышленная зона', 'садоводство', 'поселение', 'промзона', 'территория', 'район', 'снт', 'днп', 'тлпх', 'кп', 'тер ', 'массив', 'м в' ) as $needle ) {
+			if ( str_contains( $value, $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** @param array<string,mixed> $geo @param array<string,mixed> $location @param array{source:string,value:string,raw:string}|null $effective @return array<int,string> */
+	private function territory_matched_by( array $geo, array $location, ?array $effective ): array {
+		$matched_by = array( 'territory_coordinates' );
+		if ( $this->territory_address_clue( $geo, $location, $effective ) ) {
+			$matched_by[] = 'address_clue';
+		}
+
+		return $matched_by;
+	}
+
+	/** @param array<string,mixed> $geo @param array<string,mixed> $location @param array{source:string,value:string,raw:string}|null $effective */
+	private function territory_confidence( float $distance, array $geo, array $location, ?array $effective ): int {
+		$confidence = 60;
+		if ( $distance <= 5.0 ) {
+			$confidence += 20;
+		}
+		if ( $this->territory_address_clue( $geo, $location, $effective ) ) {
+			$confidence += 10;
+		}
+
+		return min( 90, $confidence );
+	}
+
+	/** @param array<string,mixed> $geo @param array<string,mixed> $location @param array{source:string,value:string,raw:string}|null $effective */
+	private function territory_address_clue( array $geo, array $location, ?array $effective ): bool {
+		$address = $this->normalizer->normalize_place( (string) ( $geo['first_full_address'] ?? '' ) );
+		if ( '' === $address ) {
+			return false;
+		}
+		foreach ( array( (string) ( $effective['value'] ?? '' ), $this->normalizer->normalize_place( (string) ( $location['place_name'] ?? '' ) ), $this->normalizer->normalize_place( (string) ( $location['settlement_name'] ?? '' ) ) ) as $needle ) {
+			if ( mb_strlen( $needle, 'UTF-8' ) >= 3 && str_contains( $address, $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 
 	/** @param array<string,mixed> $geo @param array<string,mixed> $location @param array<int,string> $matched_by @param array<string,mixed> $raw */
 	private function mapping_row( array $geo, array $location, string $status, int $confidence, ?float $distance, array $matched_by, array $raw, bool $primary = true ): array {
@@ -524,6 +605,41 @@ final class YandexLocationMapperV2Service {
 	}
 
 
+	/** @param array<int,string> $regions @param array<int,string> $terms @return array<int,array<string,mixed>> */
+	private function fetch_exact_locations_by_regions( array $regions, array $terms ): array {
+		$regions = array_values( array_unique( array_filter( array_map( 'strval', $regions ), static fn( string $region ): bool => '' !== trim( $region ) ) ) );
+		$terms = array_values( array_unique( array_filter( array_map( 'strval', $terms ), static fn( string $term ): bool => '' !== trim( $term ) ) ) );
+		if ( array() === $regions || array() === $terms ) {
+			return array();
+		}
+		if ( $this->has_test_locations() ) {
+			$allowed_regions = array_fill_keys( $regions, true );
+			$allowed_terms = array_fill_keys( $terms, true );
+			$normalized_terms = array_fill_keys( array_map( fn( string $term ): string => $this->normalizer->normalize_place( $term ), $terms ), true );
+			return array_values( array_filter( $this->wpdb->wdc_locations, function ( array $row ) use ( $allowed_regions, $allowed_terms, $normalized_terms ): bool {
+				if ( ( isset( $row['active'] ) && empty( $row['active'] ) ) || ! isset( $allowed_regions[ (string) ( $row['region_name'] ?? '' ) ] ) ) {
+					return false;
+				}
+				foreach ( array( 'city_name', 'settlement_name', 'place_name' ) as $field ) {
+					$value = (string) ( $row[ $field ] ?? '' );
+					if ( isset( $allowed_terms[ $value ] ) || isset( $normalized_terms[ $this->normalizer->normalize_place( $value ) ] ) ) {
+						return true;
+					}
+				}
+
+				return false;
+			} ) );
+		}
+		$region_placeholders = implode( ',', array_fill( 0, count( $regions ), '%s' ) );
+		$term_placeholders = implode( ',', array_fill( 0, count( $terms ), '%s' ) );
+		$sql = 'SELECT * FROM ' . $this->locations_table_name() . ' WHERE active = 1 AND region_name IN (' . $region_placeholders . ') AND (city_name IN (' . $term_placeholders . ') OR settlement_name IN (' . $term_placeholders . ') OR place_name IN (' . $term_placeholders . '))';
+		$params = array_merge( $regions, $terms, $terms, $terms );
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$params ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+
 	/** @param array<int,string> $regions @return array<int,array<string,mixed>> */
 	private function fetch_locations_by_regions( array $regions ): array {
 		$regions = array_values( array_unique( array_filter( array_map( 'strval', $regions ), static fn( string $region ): bool => '' !== trim( $region ) ) ) );
@@ -548,7 +664,7 @@ final class YandexLocationMapperV2Service {
 
 
 	/** @return array<int,array<string,mixed>> */
-	private function fetch_nearby_locations_for_territory( float $lat, float $lon, array $regions ): array {
+	private function fetch_nearby_locations_for_territory( float $lat, float $lon, array $regions, float $radius_km ): array {
 		if ( array() === $regions ) {
 			return array();
 		}
@@ -557,7 +673,7 @@ final class YandexLocationMapperV2Service {
 			return array_values(
 				array_filter(
 					$this->wpdb->wdc_locations,
-					static fn( array $row ): bool => ( ! isset( $row['active'] ) || ! empty( $row['active'] ) ) && isset( $allowed[ (string) ( $row['region_name'] ?? '' ) ] ) && is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null )
+					fn( array $row ): bool => ( ! isset( $row['active'] ) || ! empty( $row['active'] ) ) && isset( $allowed[ (string) ( $row['region_name'] ?? '' ) ] ) && is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null ) && $this->distance_km( $lat, $lon, (float) $row['latitude'], (float) $row['longitude'] ) <= $radius_km
 				)
 			);
 		}
