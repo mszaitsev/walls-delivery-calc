@@ -106,6 +106,12 @@ $GLOBALS['wpdb']->yandex_delivery_geo_v2 = array(
 	$geo( 1070, 'Москва', 'район Внуково', 55.6110, 37.2960, 5.0 ),
 	$geo( 1080, 'Тестовая область', 'городской округ Далеко', 10.0000, 10.0000, 5.0 ),
 	$geo( 1090, 'Регион без выбора', 'Любой', 55.0000, 38.0000, 5.0 ),
+	$geo( 1100, 'Курганская область', 'Куртамыш г', 54.9000, 64.4300, 3.0 ),
+	$geo( 1110, 'Тестовая область', 'Семенково п', 52.2000, 39.2000, 3.0 ),
+	$geo( 1120, 'Липецкая область', 'Волово рп', 52.0300, 37.8800, 3.0 ),
+	$geo( 1130, 'Тестовая область', 'Дубовка', 52.3000, 39.3000, 3.0 ),
+	$geo( 1140, 'Тестовая область', 'Камышеваха с', 52.4000, 39.4000, 3.0 ),
+	$geo( 1150, 'Москва и Московская область', 'Заречье', 55.6800, 37.3900, 3.0 ),
 );
 $GLOBALS['wpdb']->wdc_locations = array(
 	$location( 10, 'Новосибирская область', 'Новосибирск', '', 55.0302, 82.9204 ),
@@ -134,6 +140,19 @@ $GLOBALS['wpdb']->wdc_locations = array(
 	$location( 1060, 'Тестовая область', '', 'Павловка', 52.1000, 39.1000, 'Павловка', '', 'с', 'с', 'Район' ),
 	$location( 1061, 'Тестовая область', '', 'Павловка', 52.1000, 39.1000, 'Павловка', '', 'с', 'с', 'Район' ),
 	$location( 1070, 'Москва', 'Москва', 'Внуково', 55.6110, 37.2960, 'Внуково' ),
+	$location( 1100, 'Курганская область', 'Куртамыш', '', 54.9000, 64.4300, '', 'г' ),
+	$location( 1101, 'Курганская область', '', 'Куртамыш', 55.0000, 64.4300, 'Куртамыш', '', 'д', 'д' ),
+	$location( 1110, 'Тестовая область', '', 'Семенково', 52.2000, 39.2000, 'Семенково', '', 'п', 'п' ),
+	$location( 1111, 'Тестовая область', '', 'Семенково', 52.2010, 39.2000, 'Семенково', '', 'д', 'д' ),
+	$location( 1120, 'Липецкая область', '', 'Волово', 52.0300, 37.8800, 'Волово', '', 'рп', 'рп' ),
+	$location( 1121, 'Липецкая область', '', 'Волово', 52.0310, 37.8800, 'Волово', '', 'с', 'с' ),
+	$location( 1130, 'Тестовая область', '', 'Дубовка', 52.3000, 39.3000, 'Дубовка', '', 'п', 'п' ),
+	$location( 1131, 'Тестовая область', '', 'Дубовка', 52.3010, 39.3000, 'Дубовка (квартал 4)', '', 'п', 'п' ),
+	$location( 1132, 'Тестовая область', '', 'Дубовка', 52.3020, 39.3000, 'Дубовка (квартал 5/15)', '', 'п', 'п' ),
+	$location( 1140, 'Тестовая область', '', 'Камышеваха', 52.4000, 39.4000, 'Камышеваха', '', 'с', 'с' ),
+	$location( 1141, 'Тестовая область', '', 'Камышеваха', 52.4000, 39.4000, 'Камышеваха', '', 'д', 'д' ),
+	$location( 1150, 'Москва', '', 'Заречье', 55.6800, 37.3900, 'Заречье', '', 'д', 'д' ),
+	$location( 1151, 'Московская область', '', 'Заречье', 55.6810, 37.3910, 'Заречье', '', 'д', 'д' ),
 );
 $GLOBALS['wpdb']->yandex_region_mapping_v2 = array();
 $region_repository = new YandexRegionMappingV2Repository( $GLOBALS['wpdb'] );
@@ -148,14 +167,16 @@ foreach ( array(
 	'Московская область' => array( 'Московская область' ),
 	'Омская область' => array( 'Омская область' ),
 	'Тверская область' => array( 'Тверская область' ),
+	'Курганская область' => array( 'Курганская область' ),
+	'Липецкая область' => array( 'Липецкая область' ),
 	'Регион без выбора' => array( '' ),
 ) as $yandex_region => $wdc_regions ) {
 	$region_repository->save_mapping( $yandex_region, $wdc_regions );
 }
 
 $mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'], null, $region_repository );
-$result = $mapper->build_all( 20, 0 );
-yd_location_mapping_v2_assert( 19 === $result['processed_geo_ids'] && 12 === $result['mapped'] && 2 === $result['needs_review'] && 5 === $result['no_match'] && true === $result['done'], 'Mapper batch must classify mapped, needs_review, and no_match geo ids.' );
+$result = $mapper->build_all( 30, 0 );
+yd_location_mapping_v2_assert( 25 === $result['processed_geo_ids'] && 17 === $result['mapped'] && 3 === $result['needs_review'] && 5 === $result['no_match'] && true === $result['done'], 'Mapper batch must classify mapped, needs_review, and no_match geo ids.' );
 $geo100 = $repository->find_by_geo( 100 );
 yd_location_mapping_v2_assert( 1 === count( $geo100 ) && 'mapped' === $geo100[0]['status'] && 100.0 === (float) $geo100[0]['confidence'] && 1 === (int) $geo100[0]['is_primary'], 'Single candidate must be mapped with full confidence.' );
 $matched_by100 = json_decode( (string) $geo100[0]['matched_by_json'], true );
@@ -191,7 +212,7 @@ $raw1010 = json_decode( (string) $geo1010[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 1 === count( $geo1010 ) && 1010 === (int) $geo1010[0]['location_id'] && true === $raw1010['dominance_auto_pick'] && 'distance_gap' === $raw1010['dominance_reason'], 'Ertil must auto-map to city by distance dominance.' );
 $geo1020 = $repository->find_by_geo( 1020 );
 $raw1020 = json_decode( (string) $geo1020[0]['raw_json'], true );
-yd_location_mapping_v2_assert( 1 === count( $geo1020 ) && 1020 === (int) $geo1020[0]['location_id'] && true === $raw1020['dominance_auto_pick'] && 'type_score' === $raw1020['dominance_reason'] && 'urban' === $raw1020['yandex_type'] && 'urban' === $raw1020['wdc_type'], 'Bykovo must auto-map to urban settlement by type dominance.' );
+yd_location_mapping_v2_assert( 1 === count( $geo1020 ) && 1020 === (int) $geo1020[0]['location_id'] && true === $raw1020['dominance_auto_pick'] && 'type_priority' === $raw1020['dominance_rule'] && 'urban' === $raw1020['yandex_type'] && 'urban' === $raw1020['wdc_type'], 'Bykovo must auto-map to urban settlement by type dominance.' );
 $geo1030 = $repository->find_by_geo( 1030 );
 yd_location_mapping_v2_assert( 2 === count( $geo1030 ) && 'needs_review' === $geo1030[0]['status'], 'Equal nearby same-type candidates must stay needs_review.' );
 $geo1040 = $repository->find_by_geo( 1040 );
@@ -213,10 +234,30 @@ yd_location_mapping_v2_assert( 1 === count( $geo1080 ) && 'no_match' === $geo108
 $geo1090 = $repository->find_by_geo( 1090 );
 $raw1090 = json_decode( (string) $geo1090[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 1 === count( $geo1090 ) && 'no_match' === $geo1090[0]['status'] && 'region_not_mapped' === $raw1090['reason'] && 'region_mapping' === $raw1090['candidate_search_mode'] && array() === $raw1090['mapped_regions'], 'Unselected region mapping must skip search and become region_not_mapped.' );
+
+$geo1100 = $repository->find_by_geo( 1100 );
+$raw1100 = json_decode( (string) $geo1100[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $geo1100 ) && 'mapped' === $geo1100[0]['status'] && 1100 === (int) $geo1100[0]['location_id'] && true === $raw1100['dominance_auto_pick'], 'Kurtamysh city must auto-map over hamlet.' );
+$geo1110 = $repository->find_by_geo( 1110 );
+$raw1110 = json_decode( (string) $geo1110[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $geo1110 ) && 'mapped' === $geo1110[0]['status'] && 1110 === (int) $geo1110[0]['location_id'] && 'type_priority' === $raw1110['dominance_rule'], 'Semenkovo settlement must auto-map over hamlet by type priority.' );
+$geo1120 = $repository->find_by_geo( 1120 );
+$raw1120 = json_decode( (string) $geo1120[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $geo1120 ) && 'mapped' === $geo1120[0]['status'] && 1120 === (int) $geo1120[0]['location_id'] && 'type_priority' === $raw1120['dominance_rule'], 'Volovo urban settlement must auto-map over village by type priority.' );
+$geo1130 = $repository->find_by_geo( 1130 );
+$raw1130 = json_decode( (string) $geo1130[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $geo1130 ) && 'mapped' === $geo1130[0]['status'] && 1130 === (int) $geo1130[0]['location_id'] && 'base_place' === $raw1130['dominance_rule'], 'Dubovka base place must auto-map over quarter variants.' );
+$geo1140 = $repository->find_by_geo( 1140 );
+$raw1140 = json_decode( (string) $geo1140[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $geo1140 ) && 'mapped' === $geo1140[0]['status'] && 1140 === (int) $geo1140[0]['location_id'] && isset( $raw1140['deduped_location_ids'] ) && in_array( 1141, $raw1140['deduped_location_ids'], true ), 'Kamyshivakha duplicate FIAS-like rows must map to smaller location id.' );
+$geo1150 = $repository->find_by_geo( 1150 );
+$raw1150 = json_decode( (string) $geo1150[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 2 === count( $geo1150 ) && 'needs_review' === $geo1150[0]['status'] && false === $raw1150['dominance_auto_pick'] && 'ambiguous' === $raw1150['dominance_reason'], 'Zarechye across Moscow and Moscow region must stay needs_review.' );
+
 $recent_no_match = $repository->find_recent_no_match( 20 );
 yd_location_mapping_v2_assert( count( $recent_no_match ) >= 5 && isset( $recent_no_match[0]['sql_search_terms'] ), 'Repository must return recent no_match diagnostics with sql_search_terms.' );
 $stats = $repository->statistics();
-yd_location_mapping_v2_assert( 21 === $stats['total'] && 12 === $stats['mapped'] && 4 === $stats['needs_review'] && 5 === $stats['no_match'] && 1 === $stats['no_match_region_not_mapped'] && 4 === $stats['no_match_no_locality_match'] && 1 === $stats['territory_fallback'] && null !== $stats['avg_confidence'] && null !== $stats['avg_distance'], 'Repository statistics must count statuses and averages.' );
+yd_location_mapping_v2_assert( 28 === $stats['total'] && 17 === $stats['mapped'] && 6 === $stats['needs_review'] && 5 === $stats['no_match'] && 1 === $stats['no_match_region_not_mapped'] && 4 === $stats['no_match_no_locality_match'] && 1 === $stats['territory_fallback'] && null !== $stats['avg_confidence'] && null !== $stats['avg_distance'] && isset( $stats['mapped_by_dominance']['type_priority'] ), 'Repository statistics must count statuses and averages.' );
 
 $runner_repository = new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] );
 $runner = new YandexLocationMappingV2Runner( new YandexLocationMapperV2Service( $runner_repository, $GLOBALS['wpdb'], null, $region_repository ), $runner_repository );
@@ -225,7 +266,9 @@ yd_location_mapping_v2_assert( 'mapping' === $state['status'] && 0 === count( $G
 $state = $runner->run_step();
 yd_location_mapping_v2_assert( 'mapping' === $state['status'] && 10 === $state['processed'] && 7 === $state['mapped'] && 1 === $state['needs_review'] && 2 === $state['no_match'], 'Runner first step must process one batch.' );
 $state = $runner->run_step();
-yd_location_mapping_v2_assert( 'done' === $state['status'] && 19 === $state['processed'] && 12 === $state['mapped'] && 2 === $state['needs_review'] && 5 === $state['no_match'] && 1 === $state['region_not_mapped'] && 4 === $state['no_locality_match'] && 1 === $state['territory_fallback'] && null !== $state['avg_confidence'] && null !== $state['avg_distance'], 'Runner step must update mapping counters and averages.' );
+yd_location_mapping_v2_assert( 'mapping' === $state['status'] && 20 === $state['processed'] && 13 === $state['mapped'] && 2 === $state['needs_review'] && 5 === $state['no_match'], 'Runner second step must keep processing mapping batches.' );
+$state = $runner->run_step();
+yd_location_mapping_v2_assert( 'done' === $state['status'] && 25 === $state['processed'] && 17 === $state['mapped'] && 3 === $state['needs_review'] && 5 === $state['no_match'] && 1 === $state['region_not_mapped'] && 4 === $state['no_locality_match'] && 1 === $state['territory_fallback'] && null !== $state['avg_confidence'] && null !== $state['avg_distance'], 'Runner step must update mapping counters and averages.' );
 $runner->start();
 $paused = $runner->pause();
 $after_pause = $runner->run_step();
@@ -243,7 +286,7 @@ yd_location_mapping_v2_assert( str_contains( $admin_source, 'wdc_yandex_location
 yd_location_mapping_v2_assert( str_contains( $js_source, 'data-wdc-yandex-location-mapping-v2' ) && str_contains( $js_source, 'wdc_yandex_location_mapping_v2_step' ) && str_contains( $js_source, "runningStatus: 'mapping'" ), 'JS must contain independent location mapping v2 loop.' );
 yd_location_mapping_v2_assert( str_contains( $plugin_source, 'YandexLocationMappingV2Repository::class' ) && str_contains( $plugin_source, 'YandexLocationMapperV2Service::class' ) && str_contains( $plugin_source, 'YandexLocationMappingV2Runner::class' ) && str_contains( $plugin_source, 'YandexRegionMappingV2Repository::class' ), 'Plugin DI must register location mapping v2 services.' );
 yd_location_mapping_v2_assert( ! str_contains( $mapper_source, 'locationDetect' ) && ! str_contains( $mapper_source, 'YandexDeliveryApiClient' ) && ! str_contains( $mapper_source, '/api/' ), 'Location mapping v2 mapper must stay offline and not call Yandex API.' );
-yd_location_mapping_v2_assert( str_contains( $mapper_source, 'find_wdc_regions_for_yandex' ) && str_contains( $mapper_source, 'fetch_locations_by_regions' ) && str_contains( $mapper_source, 'region_name IN' ) && str_contains( $mapper_source, 'candidate_search_mode' ) && str_contains( $mapper_source, 'region_mapping' ) && ! str_contains( $mapper_source, 'region_name LIKE' ) && ! str_contains( $mapper_source, 'normalize_region' ) && ! str_contains( $mapper_source, 'regions_compatible' ) && ! str_contains( $mapper_source, 'fetch_exact_location_candidates' ) && ! str_contains( $mapper_source, 'fetch_location_candidates' ) && ! str_contains( $mapper_source, 'exact_first' ) && ! str_contains( $mapper_source, 'broad_fallback' ) && str_contains( $mapper_source, 'effective_location_locality' ) && ! str_contains( $mapper_source, 'location_locality_variants' ) && ! str_contains( $mapper_source, 'matching_location_locality' ) && str_contains( $mapper_source, 'dedupe_candidates' ) && str_contains( $mapper_source, 'territory_coordinate_fallback' ) && str_contains( $mapper_source, 'detect_locality_type' ) && str_contains( $mapper_source, 'type_match_score' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'rejected_candidates' ) && str_contains( $mapper_source, 'locality_source' ) && str_contains( $mapper_source, 'locality_raw' ) && str_contains( $mapper_source, 'effective_locality' ), 'Mapper source must use region mapping, dedupe, territorial fallback, and must not use old region heuristics.' );
+yd_location_mapping_v2_assert( str_contains( $mapper_source, 'find_wdc_regions_for_yandex' ) && str_contains( $mapper_source, 'fetch_locations_by_regions' ) && str_contains( $mapper_source, 'region_name IN' ) && str_contains( $mapper_source, 'candidate_search_mode' ) && str_contains( $mapper_source, 'region_mapping' ) && ! str_contains( $mapper_source, 'region_name LIKE' ) && ! str_contains( $mapper_source, 'normalize_region' ) && ! str_contains( $mapper_source, 'regions_compatible' ) && ! str_contains( $mapper_source, 'fetch_exact_location_candidates' ) && ! str_contains( $mapper_source, 'fetch_location_candidates' ) && ! str_contains( $mapper_source, 'exact_first' ) && ! str_contains( $mapper_source, 'broad_fallback' ) && str_contains( $mapper_source, 'effective_location_locality' ) && ! str_contains( $mapper_source, 'location_locality_variants' ) && ! str_contains( $mapper_source, 'matching_location_locality' ) && str_contains( $mapper_source, 'choose_dominant_candidate' ) && str_contains( $mapper_source, 'dominance_rule' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'dedupe_candidates' ) && str_contains( $mapper_source, 'territory_coordinate_fallback' ) && str_contains( $mapper_source, 'detect_locality_type' ) && str_contains( $mapper_source, 'type_match_score' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'rejected_candidates' ) && str_contains( $mapper_source, 'locality_source' ) && str_contains( $mapper_source, 'locality_raw' ) && str_contains( $mapper_source, 'effective_locality' ), 'Mapper source must use region mapping, dedupe, territorial fallback, and must not use old region heuristics.' );
 yd_location_mapping_v2_assert( str_contains( $normalizer_source, 'is_territorial_like' ) && str_contains( $normalizer_source, 'городской поселок' ) && str_contains( $normalizer_source, 'железнодорожная станция' ) && str_contains( $normalizer_source, 'without_parentheses' ), 'Normalizer source must contain new locality type and territorial helpers.' );
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Последние no_match' ) && str_contains( $admin_source, 'sql_search_terms' ), 'Admin UI must render recent no_match diagnostics.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_no_match' ), 'Repository must expose find_recent_no_match.' );

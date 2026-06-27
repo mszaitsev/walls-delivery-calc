@@ -60,7 +60,7 @@ final class YandexLocationMapperV2Service {
 
 			return array( $this->mapping_row( $geo, array(), 'no_match', 0, null, array(), array_merge( array( 'candidate_count' => 0 ), $diagnostics ) ) );
 		}
-		$candidates = $this->apply_dominance_rule( $candidates, $geo );
+		$candidates = $this->choose_dominant_candidate( $candidates, $geo );
 		$status = 1 === count( $candidates ) ? 'mapped' : 'needs_review';
 		$rows = array();
 		foreach ( $candidates as $index => $candidate ) {
@@ -246,39 +246,168 @@ final class YandexLocationMapperV2Service {
 
 
 	/** @param array<int,array<string,mixed>> $candidates @param array<string,mixed> $geo @return array<int,array<string,mixed>> */
-	private function apply_dominance_rule( array $candidates, array $geo ): array {
+	private function choose_dominant_candidate( array $candidates, array $geo ): array {
 		if ( count( $candidates ) <= 1 ) {
 			return $candidates;
 		}
+		$regions = array_values( array_unique( array_map( static fn( array $candidate ): string => (string) ( $candidate['location']['region_name'] ?? '' ), $candidates ) ) );
+		if ( count( $regions ) > 1 ) {
+			return $this->mark_ambiguous_dominance( $candidates );
+		}
+		$candidates = $this->dedupe_equivalent_candidates( $candidates );
+		if ( 1 === count( $candidates ) ) {
+			return $candidates;
+		}
+		$this->sort_candidates( $candidates );
 		$primary = $candidates[0];
 		$second = $candidates[1];
-		$primary_distance = is_numeric( $primary['distance_km'] ?? null ) ? (float) $primary['distance_km'] : 999999.0;
-		$second_distance = is_numeric( $second['distance_km'] ?? null ) ? (float) $second['distance_km'] : 999999.0;
+		$primary_distance = $this->candidate_distance( $primary );
+		$second_distance = $this->candidate_distance( $second );
 		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
-		$local_accept_distance = max( 3.0, $safe_radius + 2.0 );
-		$primary_type_score = (int) ( $primary['type_score'] ?? 0 );
-		$second_type_score = (int) ( $second['type_score'] ?? 0 );
-		$primary_confidence = (int) ( $primary['confidence'] ?? 0 );
-		$second_confidence = (int) ( $second['confidence'] ?? 0 );
-		if ( $primary_distance > $local_accept_distance || $primary_type_score < 0 ) {
-			return $candidates;
-		}
 		$reason = '';
-		if ( $second_distance - $primary_distance >= 3.0 ) {
+		if ( $second_distance - $primary_distance >= 5.0 ) {
 			$reason = 'distance_gap';
-		} elseif ( $primary_type_score > $second_type_score ) {
-			$reason = 'type_score';
-		} elseif ( $primary_confidence - $second_confidence >= 20 ) {
-			$reason = 'confidence_gap';
+		} elseif ( $safe_radius > 0.0 && $second_distance >= $safe_radius * 2.0 ) {
+			$reason = 'safe_radius_x2';
+		} elseif ( $this->type_priority( $primary ) - $this->type_priority( $second ) >= 10 ) {
+			$reason = 'type_priority';
+		} elseif ( $primary_distance <= 1.0 && $second_distance - $primary_distance >= 2.0 ) {
+			$reason = 'near_distance_gap';
+		} elseif ( 2 === count( $candidates ) && $this->same_region_and_locality( $primary, $second ) && $this->type_priority( $primary ) - $this->type_priority( $second ) >= 10 ) {
+			$reason = 'same_locality_type_priority';
+		} else {
+			$base_candidate = $this->base_place_candidate( $candidates );
+			if ( null !== $base_candidate ) {
+				return $this->dominance_pick( $base_candidate, $candidates, 'base_place' );
+			}
+			$place_candidate = $this->place_name_candidate( $candidates );
+			if ( null !== $place_candidate ) {
+				return $this->dominance_pick( $place_candidate, $candidates, 'place_name_source' );
+			}
+			if ( $safe_radius > 0.0 && $primary_distance <= $safe_radius && $this->all_other_candidates_outside_safe_radius( array_slice( $candidates, 1 ), $safe_radius ) ) {
+				$reason = 'safe_radius';
+			}
 		}
 		if ( '' === $reason ) {
-			return $candidates;
+			return $this->mark_ambiguous_dominance( $candidates );
 		}
+
+		return $this->dominance_pick( $primary, $candidates, $reason );
+	}
+
+	/** @param array<int,array<string,mixed>> $candidates @return array<int,array<string,mixed>> */
+	private function mark_ambiguous_dominance( array $candidates ): array {
+		foreach ( $candidates as &$candidate ) {
+			$candidate['raw']['dominance_auto_pick'] = false;
+			$candidate['raw']['dominance_reason'] = 'ambiguous';
+		}
+		unset( $candidate );
+
+		return $candidates;
+	}
+
+	/** @param array<string,mixed> $primary @param array<int,array<string,mixed>> $candidates @return array<int,array<string,mixed>> */
+	private function dominance_pick( array $primary, array $candidates, string $rule ): array {
+		$primary_id = (int) ( $primary['location']['id'] ?? 0 );
 		$primary['raw']['dominance_auto_pick'] = true;
-		$primary['raw']['dominance_reason'] = $reason;
-		$primary['raw']['rejected_candidates'] = $this->dominance_rejected_candidates( array_slice( $candidates, 1, 10 ) );
+		$primary['raw']['dominance_rule'] = $rule;
+		$primary['raw']['dominance_reason'] = $rule;
+		$primary['raw']['rejected_candidates'] = $this->dominance_rejected_candidates( array_values( array_filter( $candidates, static fn( array $candidate ): bool => (int) ( $candidate['location']['id'] ?? 0 ) !== $primary_id ) ) );
 
 		return array( $primary );
+	}
+
+	/** @param array<int,array<string,mixed>> $candidates @return array<int,array<string,mixed>> */
+	private function dedupe_equivalent_candidates( array $candidates ): array {
+		$groups = array();
+		foreach ( $candidates as $candidate ) {
+			$location = is_array( $candidate['location'] ?? null ) ? $candidate['location'] : array();
+			$raw = is_array( $candidate['raw'] ?? null ) ? $candidate['raw'] : array();
+			$lat = is_numeric( $location['latitude'] ?? null ) ? number_format( (float) $location['latitude'], 5, '.', '' ) : '';
+			$lon = is_numeric( $location['longitude'] ?? null ) ? number_format( (float) $location['longitude'], 5, '.', '' ) : '';
+			$key = implode( '|', array( $this->dedupe_text( (string) ( $location['region_name'] ?? '' ) ), (string) ( $raw['effective_locality'] ?? '' ), $lat, $lon, $this->normalizer->normalize_place( (string) ( $location['display_name'] ?? '' ) ) ) );
+			$groups[ $key ][] = $candidate;
+		}
+		$result = array();
+		foreach ( $groups as $group ) {
+			usort( $group, static fn( array $a, array $b ): int => (int) ( $a['location']['id'] ?? 0 ) <=> (int) ( $b['location']['id'] ?? 0 ) );
+			$primary = $group[0];
+			$ids = array_values( array_unique( array_map( static fn( array $candidate ): int => (int) ( $candidate['location']['id'] ?? 0 ), $group ) ) );
+			if ( count( $ids ) > 1 ) {
+				$primary['raw']['deduped_location_ids'] = array_slice( $ids, 0, 20 );
+			}
+			$result[] = $primary;
+		}
+
+		return $result;
+	}
+
+	/** @param array<string,mixed> $candidate */
+	private function candidate_distance( array $candidate ): float {
+		return is_numeric( $candidate['distance_km'] ?? null ) ? (float) $candidate['distance_km'] : 999999.0;
+	}
+
+	/** @param array<string,mixed> $candidate */
+	private function type_priority( array $candidate ): int {
+		$type = (string) ( $candidate['raw']['wdc_type'] ?? '' );
+		return match ( $type ) {
+			'city' => 100,
+			'urban' => 90,
+			'settlement' => 80,
+			'village' => 70,
+			'hamlet' => 60,
+			'station' => 55,
+			'farm' => 50,
+			'area' => 40,
+			default => 30,
+		};
+	}
+
+	/** @param array<string,mixed> $a @param array<string,mixed> $b */
+	private function same_region_and_locality( array $a, array $b ): bool {
+		return (string) ( $a['location']['region_name'] ?? '' ) === (string) ( $b['location']['region_name'] ?? '' )
+			&& (string) ( $a['raw']['effective_locality'] ?? '' ) === (string) ( $b['raw']['effective_locality'] ?? '' );
+	}
+
+	/** @param array<int,array<string,mixed>> $candidates @return array<string,mixed>|null */
+	private function base_place_candidate( array $candidates ): ?array {
+		$base = array_values( array_filter( $candidates, fn( array $candidate ): bool => ! $this->has_place_qualifier( (string) ( $candidate['raw']['locality_raw'] ?? '' ) ) ) );
+		if ( 1 !== count( $base ) ) {
+			return null;
+		}
+		$qualified = array_values( array_filter( $candidates, fn( array $candidate ): bool => $this->has_place_qualifier( (string) ( $candidate['raw']['locality_raw'] ?? '' ) ) ) );
+
+		return array() !== $qualified ? $base[0] : null;
+	}
+
+	private function has_place_qualifier( string $value ): bool {
+		$value = mb_strtolower( $value, 'UTF-8' );
+		foreach ( array( 'квартал', 'торфопредприятие' ) as $needle ) {
+			if ( str_contains( $value, $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** @param array<int,array<string,mixed>> $candidates @return array<string,mixed>|null */
+	private function place_name_candidate( array $candidates ): ?array {
+		$place = array_values( array_filter( $candidates, static fn( array $candidate ): bool => 'place_name' === (string) ( $candidate['raw']['locality_source'] ?? '' ) ) );
+		$city = array_values( array_filter( $candidates, static fn( array $candidate ): bool => 'city_name' === (string) ( $candidate['raw']['locality_source'] ?? '' ) ) );
+
+		return 1 === count( $place ) && array() !== $city ? $place[0] : null;
+	}
+
+	/** @param array<int,array<string,mixed>> $candidates */
+	private function all_other_candidates_outside_safe_radius( array $candidates, float $safe_radius ): bool {
+		foreach ( $candidates as $candidate ) {
+			if ( $this->candidate_distance( $candidate ) <= $safe_radius ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/** @param array<int,array<string,mixed>> $candidates @return array<int,array<string,mixed>> */

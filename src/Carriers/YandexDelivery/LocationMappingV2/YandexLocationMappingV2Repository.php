@@ -138,6 +138,7 @@ final class YandexLocationMappingV2Repository {
 				'no_match_region_not_mapped' => $this->count_no_match_reason_rows( $rows, 'region_not_mapped' ),
 				'no_match_no_locality_match' => $this->count_no_match_reason_rows( $rows, 'no_locality_match' ),
 				'territory_fallback' => $this->count_raw_flag_rows( $rows, 'territory_fallback' ),
+				'mapped_by_dominance' => $this->mapped_by_dominance_rows( $rows ),
 			);
 		}
 		$this->create_schema_if_needed();
@@ -154,6 +155,7 @@ final class YandexLocationMappingV2Repository {
 			'no_match_region_not_mapped' => $this->count_no_match_reason( 'region_not_mapped' ),
 			'no_match_no_locality_match' => $this->count_no_match_reason( 'no_locality_match' ),
 			'territory_fallback' => $this->count_raw_flag( 'territory_fallback' ),
+			'mapped_by_dominance' => $this->mapped_by_dominance(),
 		);
 	}
 
@@ -261,6 +263,44 @@ final class YandexLocationMappingV2Repository {
 		}
 
 		return true;
+	}
+
+
+	/** @param array<int,array<string,mixed>> $rows @return array<string,int> */
+	private function mapped_by_dominance_rows( array $rows ): array {
+		$counts = array();
+		foreach ( $rows as $row ) {
+			if ( 'mapped' !== (string) ( $row['status'] ?? '' ) ) {
+				continue;
+			}
+			$raw = $this->decoded_raw_json( $row );
+			if ( true !== ( $raw['dominance_auto_pick'] ?? false ) ) {
+				continue;
+			}
+			$rule = (string) ( $raw['dominance_rule'] ?? ( $raw['dominance_reason'] ?? '' ) );
+			if ( '' !== $rule ) {
+				$counts[ $rule ] = ( $counts[ $rule ] ?? 0 ) + 1;
+			}
+		}
+		ksort( $counts );
+
+		return $counts;
+	}
+
+	/** @return array<string,int> */
+	private function mapped_by_dominance(): array {
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( 'SELECT raw_json FROM ' . $this->table_name() . ' WHERE status = %s AND raw_json LIKE %s', 'mapped', '%"dominance_auto_pick":true%' ), ARRAY_A );
+		$counts = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$raw = $this->decoded_raw_json( $row );
+			$rule = (string) ( $raw['dominance_rule'] ?? ( $raw['dominance_reason'] ?? '' ) );
+			if ( '' !== $rule ) {
+				$counts[ $rule ] = ( $counts[ $rule ] ?? 0 ) + 1;
+			}
+		}
+		ksort( $counts );
+
+		return $counts;
 	}
 
 	/** @param array<int,array<string,mixed>> $rows */
