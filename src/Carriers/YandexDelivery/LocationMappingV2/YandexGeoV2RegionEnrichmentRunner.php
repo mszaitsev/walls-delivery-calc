@@ -77,7 +77,9 @@ final class YandexGeoV2RegionEnrichmentRunner {
 
 	/** @return array<string,mixed> */
 	public function reset(): array {
+		$reset_count = $this->geo_repository->reset_region_enrichment_attempts_for_empty_regions();
 		$state = $this->base_state( 'idle' );
+		$state['message'] = 'Сброшено попыток обогащения пустых регионов: ' . $reset_count;
 		$this->save_state( $state );
 
 		return $state;

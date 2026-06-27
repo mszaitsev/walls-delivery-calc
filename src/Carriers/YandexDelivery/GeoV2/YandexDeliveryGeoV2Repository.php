@@ -295,6 +295,50 @@ final class YandexDeliveryGeoV2Repository {
 		return (int) $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT COUNT(*) FROM ' . $this->table_name() . " WHERE active = 1 AND (region IS NULL OR region = '') AND (raw_stats_json IS NULL OR raw_stats_json NOT LIKE %s)", '%"region_enrichment"%' ) );
 	}
 
+
+	public function reset_region_enrichment_attempts_for_empty_regions(): int {
+		$count = 0;
+		$now = $this->now();
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->yandex_delivery_geo_v2 as $index => $row ) {
+				if ( empty( $row['active'] ) || '' !== trim( (string) ( $row['region'] ?? '' ) ) || ! $this->has_region_enrichment_audit( $row ) ) {
+					continue;
+				}
+				$raw = json_decode( (string) ( $row['raw_stats_json'] ?? '' ), true );
+				if ( ! is_array( $raw ) ) {
+					$raw = array();
+				}
+				unset( $raw['region_enrichment'] );
+				$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $raw, JSON_UNESCAPED_UNICODE ) : json_encode( $raw, JSON_UNESCAPED_UNICODE );
+				$row['raw_stats_json'] = is_string( $json ) ? $json : '{}';
+				$row['updated_at'] = $now;
+				$this->wpdb->yandex_delivery_geo_v2[ $index ] = $row;
+				++$count;
+			}
+
+			return $count;
+		}
+		$this->create_schema_if_needed();
+		$rows = $this->wpdb->get_results( 'SELECT yandex_geo_id, raw_stats_json FROM ' . $this->table_name() . " WHERE active = 1 AND (region IS NULL OR region = '') AND raw_stats_json LIKE '%\"region_enrichment\"%'", ARRAY_A );
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$raw = json_decode( (string) ( $row['raw_stats_json'] ?? '' ), true );
+			if ( ! is_array( $raw ) || ! array_key_exists( 'region_enrichment', $raw ) ) {
+				continue;
+			}
+			unset( $raw['region_enrichment'] );
+			$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $raw, JSON_UNESCAPED_UNICODE ) : json_encode( $raw, JSON_UNESCAPED_UNICODE );
+			if ( ! is_string( $json ) ) {
+				$json = '{}';
+			}
+			$sql = 'UPDATE ' . $this->table_name() . ' SET raw_stats_json = %s, updated_at = %s WHERE yandex_geo_id = %d';
+			if ( false !== $this->wpdb->query( $this->wpdb->prepare( $sql, $json, $now, (int) ( $row['yandex_geo_id'] ?? 0 ) ) ) ) {
+				++$count;
+			}
+		}
+
+		return $count;
+	}
+
 	public function truncate(): void {
 		if ( $this->has_test_rows() ) {
 			$this->wpdb->yandex_delivery_geo_v2 = array();
