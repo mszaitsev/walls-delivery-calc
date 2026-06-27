@@ -180,6 +180,49 @@ final class YandexDeliveryGeoV2Repository {
 		);
 	}
 
+
+	public function count_empty_active_regions(): int {
+		if ( $this->has_test_rows() ) {
+			return count( array_filter( $this->wpdb->yandex_delivery_geo_v2, static fn( array $row ): bool => ! empty( $row['active'] ) && '' === trim( (string) ( $row['region'] ?? '' ) ) ) );
+		}
+		$this->create_schema_if_needed();
+
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() . " WHERE active = 1 AND (region IS NULL OR region = '')" );
+	}
+
+	/** @param array<string,mixed> $audit */
+	public function update_region_from_location( int $yandex_geo_id, string $region, array $audit = array() ): bool {
+		$yandex_geo_id = max( 0, $yandex_geo_id );
+		$region = trim( $region );
+		if ( $yandex_geo_id <= 0 || '' === $region ) {
+			return false;
+		}
+		$now = $this->now();
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->yandex_delivery_geo_v2 as $index => $row ) {
+				if ( (int) ( $row['yandex_geo_id'] ?? 0 ) !== $yandex_geo_id ) {
+					continue;
+				}
+				$row['region'] = $region;
+				$row['raw_stats_json'] = $this->raw_stats_with_region_enrichment( (string) ( $row['raw_stats_json'] ?? '' ), $region, $audit, $now );
+				$row['updated_at'] = $now;
+				$this->wpdb->yandex_delivery_geo_v2[ $index ] = $row;
+				return true;
+			}
+
+			return false;
+		}
+		$this->create_schema_if_needed();
+		$current = $this->find_by_geo_id( $yandex_geo_id );
+		if ( null === $current ) {
+			return false;
+		}
+		$raw_stats_json = $this->raw_stats_with_region_enrichment( (string) ( $current['raw_stats_json'] ?? '' ), $region, $audit, $now );
+		$sql = 'UPDATE ' . $this->table_name() . ' SET region = %s, raw_stats_json = %s, updated_at = %s WHERE yandex_geo_id = %d';
+
+		return false !== $this->wpdb->query( $this->wpdb->prepare( $sql, $region, $raw_stats_json, $now, $yandex_geo_id ) );
+	}
+
 	public function truncate(): void {
 		if ( $this->has_test_rows() ) {
 			$this->wpdb->yandex_delivery_geo_v2 = array();
@@ -385,6 +428,24 @@ final class YandexDeliveryGeoV2Repository {
 		}
 
 		return $max_length > 0 ? substr( $value, 0, $max_length ) : $value;
+	}
+
+
+	/** @param array<string,mixed> $audit */
+	private function raw_stats_with_region_enrichment( string $raw_stats_json, string $region, array $audit, string $updated_at ): string {
+		$raw = json_decode( $raw_stats_json, true );
+		if ( ! is_array( $raw ) ) {
+			$raw = array();
+		}
+		$raw['region_enrichment'] = array(
+			'source' => 'wdc_location_coordinates',
+			'region' => $region,
+			'updated_at' => $updated_at,
+			'audit' => $audit,
+		);
+		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $raw, JSON_UNESCAPED_UNICODE ) : json_encode( $raw, JSON_UNESCAPED_UNICODE );
+
+		return is_string( $json ) ? $json : '{}';
 	}
 
 	private function can_create_schema(): bool {

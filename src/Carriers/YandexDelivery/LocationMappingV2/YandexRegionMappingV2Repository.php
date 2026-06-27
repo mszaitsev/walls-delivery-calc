@@ -128,6 +128,33 @@ final class YandexRegionMappingV2Repository {
 		return array_values( $regions );
 	}
 
+
+	/** @return array<int,string> */
+	public function find_yandex_regions_for_wdc( string $wdc_region_name ): array {
+		$wdc_region_name = trim( $wdc_region_name );
+		if ( '' === $wdc_region_name ) {
+			return array();
+		}
+		$regions = array();
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->yandex_region_mapping_v2 as $row ) {
+				if ( $wdc_region_name === trim( (string) ( $row['wdc_region_name'] ?? '' ) ) ) {
+					$yandex_region = trim( (string) ( $row['yandex_region'] ?? '' ) );
+					if ( '' !== $yandex_region ) {
+						$regions[ $yandex_region ] = $yandex_region;
+					}
+				}
+			}
+			ksort( $regions );
+
+			return array_values( $regions );
+		}
+		$this->create_schema_if_needed();
+		$rows = $this->wpdb->get_col( $this->wpdb->prepare( 'SELECT yandex_region FROM ' . $this->table_name() . ' WHERE wdc_region_name = %s ORDER BY yandex_region ASC', $wdc_region_name ) );
+
+		return is_array( $rows ) ? $this->unique_non_empty( array_map( 'strval', $rows ) ) : array();
+	}
+
 	/** @param array<int,string> $wdc_region_names @return array{saved:int,needs_review:int} */
 	public function save_mapping( string $yandex_region, array $wdc_region_names ): array {
 		$this->create_schema_if_needed();

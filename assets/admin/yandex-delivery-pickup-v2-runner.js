@@ -165,6 +165,23 @@
 		runningStatus: 'building',
 		initialState: config.geoBuilderInitialState || {}
 	});
+
+	runner({
+		root: '[data-wdc-yandex-geo-v2-region-enrichment]',
+		fieldSelector: '[data-wdc-yandex-geo-v2-region-enrichment-field]',
+		fieldAttribute: 'data-wdc-yandex-geo-v2-region-enrichment-field',
+		summarySelector: '[data-wdc-yandex-geo-v2-region-enrichment-summary]',
+		statusAttribute: 'data-wdc-yandex-geo-v2-region-enrichment-status',
+		startSelector: '[data-wdc-yandex-geo-v2-region-enrichment-start]',
+		pauseSelector: '[data-wdc-yandex-geo-v2-region-enrichment-pause]',
+		resetSelector: '[data-wdc-yandex-geo-v2-region-enrichment-reset]',
+		startAction: 'wdc_yandex_geo_v2_region_enrichment_start',
+		stepAction: 'wdc_yandex_geo_v2_region_enrichment_step',
+		pauseAction: 'wdc_yandex_geo_v2_region_enrichment_pause',
+		resetAction: 'wdc_yandex_geo_v2_region_enrichment_reset',
+		runningStatus: 'enriching_regions',
+		initialState: config.geoRegionEnrichmentInitialState || {}
+	});
 	runner({
 		root: '[data-wdc-yandex-location-mapping-v2]',
 		fieldSelector: '[data-wdc-yandex-location-mapping-v2-field]',
