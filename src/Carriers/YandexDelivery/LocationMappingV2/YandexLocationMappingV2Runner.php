@@ -7,7 +7,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class YandexLocationMappingV2Runner {
 	private const STATE_OPTION = 'wdc_yandex_location_mapping_v2_runner_state';
-	private const BATCH_SIZE = 100;
+	private const BATCH_SIZE = 10;
 
 	public function __construct( private YandexLocationMapperV2Service $mapper, private YandexLocationMappingV2Repository $repository ) {
 	}

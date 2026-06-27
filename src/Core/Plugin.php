@@ -70,6 +70,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMapperV2Service;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointImportService;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointNormalizer;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointRepository;
@@ -322,6 +323,7 @@ final class Plugin {
 		$this->container->register( YandexLocationMappingV2Repository::class, fn(): YandexLocationMappingV2Repository => new YandexLocationMappingV2Repository() );
 		$this->container->register( YandexLocationMapperV2Service::class, fn(): YandexLocationMapperV2Service => new YandexLocationMapperV2Service( $this->container->get( YandexLocationMappingV2Repository::class ) ) );
 		$this->container->register( YandexLocationMappingV2Runner::class, fn(): YandexLocationMappingV2Runner => new YandexLocationMappingV2Runner( $this->container->get( YandexLocationMapperV2Service::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
+		$this->container->register( YandexRegionMappingV2Repository::class, fn(): YandexRegionMappingV2Repository => new YandexRegionMappingV2Repository() );
 		$this->container->register( YandexDeliveryGeoMappingRepository::class, fn(): YandexDeliveryGeoMappingRepository => new YandexDeliveryGeoMappingRepository() );
 		$this->container->register( YandexDeliveryGeoAnalysisService::class, fn(): YandexDeliveryGeoAnalysisService => new YandexDeliveryGeoAnalysisService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( YandexDeliveryGeoCoverageRepository::class, fn(): YandexDeliveryGeoCoverageRepository => new YandexDeliveryGeoCoverageRepository() );
@@ -688,6 +690,7 @@ final class Plugin {
 				$this->container->get( YandexDeliveryGeoV2BuilderRunnerService::class ),
 				$this->container->get( YandexLocationMappingV2Repository::class ),
 				$this->container->get( YandexLocationMappingV2Runner::class ),
+				$this->container->get( YandexRegionMappingV2Repository::class ),
 				$this->container->get( YandexDeliveryGeoMappingRepository::class ),
 				$this->container->get( YandexDeliveryGeoMappingService::class ),
 				$this->container->get( YandexDeliveryGeoMappingBatchService::class ),

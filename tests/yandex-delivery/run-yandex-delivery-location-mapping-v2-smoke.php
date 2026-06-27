@@ -200,6 +200,8 @@ $runner = new YandexLocationMappingV2Runner( new YandexLocationMapperV2Service( 
 $state = $runner->start();
 yd_location_mapping_v2_assert( 'mapping' === $state['status'] && 0 === count( $GLOBALS['wpdb']->yandex_location_mapping_v2 ), 'Runner start must truncate and switch to mapping.' );
 $state = $runner->run_step();
+yd_location_mapping_v2_assert( 'mapping' === $state['status'] && 10 === $state['processed'] && 7 === $state['mapped'] && 1 === $state['needs_review'] && 2 === $state['no_match'], 'Runner first step must process one batch.' );
+$state = $runner->run_step();
 yd_location_mapping_v2_assert( 'done' === $state['status'] && 18 === $state['processed'] && 12 === $state['mapped'] && 2 === $state['needs_review'] && 4 === $state['no_match'] && null !== $state['avg_confidence'] && null !== $state['avg_distance'], 'Runner step must update mapping counters and averages.' );
 $runner->start();
 $paused = $runner->pause();

@@ -34,6 +34,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunner
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointImportService;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointService;
@@ -139,6 +140,7 @@ final class DeliveryServicesAdminPage {
 		private ?YandexDeliveryGeoV2BuilderRunnerService $yandex_delivery_geo_v2_builder_runner = null,
 		private ?YandexLocationMappingV2Repository $yandex_location_mapping_v2_repository = null,
 		private ?YandexLocationMappingV2Runner $yandex_location_mapping_v2_runner = null,
+		private ?YandexRegionMappingV2Repository $yandex_region_mapping_v2_repository = null,
 		private ?YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings = null,
 		private ?YandexDeliveryGeoMappingService $yandex_delivery_geo_mapping_service = null,
 		private ?YandexDeliveryGeoMappingBatchService $yandex_delivery_geo_batch = null,
@@ -644,6 +646,10 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
+		if ( in_array( $action, array( 'sync_yandex_region_mapping_v2', 'save_yandex_region_mapping_v2' ), true ) ) {
+			$this->handle_yandex_region_mapping_v2_action( $action );
+			return;
+		}
 		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection', 'reset_yandex_delivery_pickup_result', 'run_yandex_delivery_geo_detect', 'set_yandex_delivery_geo_primary', 'start_yandex_delivery_geo_batch', 'run_yandex_delivery_geo_batch_step', 'pause_yandex_delivery_geo_batch', 'reset_yandex_delivery_geo_batch', 'check_yandex_delivery_geo_coverage', 'approve_yandex_delivery_geo_mapping', 'reject_yandex_delivery_geo_mapping', 'bulk_reject_yandex_delivery_geo_mapping', 'cleanup_yandex_delivery_geo_needs_review_by_region' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
@@ -1748,6 +1754,77 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 
+
+	private function handle_yandex_region_mapping_v2_action( string $action ): void {
+		if ( ! $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ) {
+			return;
+		}
+		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? YandexDeliverySettings::SERVICE_KEY ) );
+		if ( 'sync_yandex_region_mapping_v2' === $action ) {
+			$report = $this->yandex_region_mapping_v2_repository->sync_from_sources();
+			$this->save_yandex_region_mapping_v2_result( 'success', 'Сопоставление регионов Яндекса', 'Список регионов обновлен.', $report );
+		} elseif ( 'save_yandex_region_mapping_v2' === $action ) {
+			$yandex_region = sanitize_text_field( wp_unslash( $_POST['yandex_region'] ?? '' ) );
+			$selected = isset( $_POST['wdc_region_names'] ) && is_array( $_POST['wdc_region_names'] ) ? array_map( static fn( mixed $value ): string => sanitize_text_field( wp_unslash( $value ) ), $_POST['wdc_region_names'] ) : array( sanitize_text_field( wp_unslash( $_POST['wdc_region_name'] ?? '' ) ) );
+			$report = $this->yandex_region_mapping_v2_repository->save_mapping( $yandex_region, $selected );
+			$this->save_yandex_region_mapping_v2_result( 'success', 'Сопоставление регионов Яндекса', 'Сопоставление сохранено.', array_merge( array( 'yandex_region' => $yandex_region ), $report ) );
+		}
+		wp_safe_redirect( add_query_arg( array( 'page' => self::MENU_SLUG, 'service' => $service_key, 'tab' => 'yandex_delivery_pickup_v2' ), admin_url( 'admin.php' ) ) );
+		exit;
+	}
+
+	private function save_yandex_region_mapping_v2_result( string $type, string $title, string $message, array $details ): void {
+		if ( $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
+			$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => $type, 'title' => $title, 'message' => $message, 'details' => $details ) );
+		}
+	}
+
+	/** @param array<int,array<string,mixed>> $rows @param array<int,string> $wdc_regions */
+	private function render_yandex_region_mapping_v2_section( DeliveryService $service, array $rows, array $wdc_regions ): void {
+		$grouped = array();
+		foreach ( $rows as $row ) {
+			$grouped[ (string) ( $row['yandex_region'] ?? '' ) ][] = $row;
+		}
+		?>
+		<h3><?php echo esc_html__( 'Сопоставление регионов Яндекса', 'walls-delivery-calc' ); ?></h3>
+		<form method="post" style="margin-bottom: 12px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="sync_yandex_region_mapping_v2" />
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>" />
+			<button type="submit" class="button button-primary"><?php echo esc_html__( 'Обновить список регионов', 'walls-delivery-calc' ); ?></button>
+		</form>
+		<table class="widefat striped" style="max-width: 1120px;">
+			<thead><tr><th><?php echo esc_html__( 'Регион Яндекса', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Регион WDC', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Требует проверки', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Действие', 'walls-delivery-calc' ); ?></th></tr></thead>
+			<tbody>
+				<?php foreach ( $grouped as $yandex_region => $region_rows ) : ?>
+					<?php $selected_regions = array_values( array_filter( array_map( static fn( array $row ): string => (string) ( $row['wdc_region_name'] ?? '' ), $region_rows ), static fn( string $value ): bool => '' !== $value ) ); ?>
+					<tr>
+						<td><?php echo esc_html( $yandex_region ); ?></td>
+						<td>
+							<form method="post">
+								<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+								<input type="hidden" name="wdc_delivery_services_action" value="save_yandex_region_mapping_v2" />
+								<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>" />
+								<input type="hidden" name="yandex_region" value="<?php echo esc_attr( $yandex_region ); ?>" />
+								<select name="wdc_region_names[]" multiple size="4" style="min-width: 320px;">
+									<option value="" <?php selected( array() === $selected_regions ); ?>><?php echo esc_html__( 'Не выбран', 'walls-delivery-calc' ); ?></option>
+									<?php foreach ( $wdc_regions as $wdc_region ) : ?>
+										<option value="<?php echo esc_attr( $wdc_region ); ?>" <?php selected( in_array( $wdc_region, $selected_regions, true ) ); ?>><?php echo esc_html( $wdc_region ); ?></option>
+									<?php endforeach; ?>
+								</select>
+						</td>
+						<td><?php echo esc_html( in_array( 1, array_map( static fn( array $row ): int => (int) ( $row['needs_review'] ?? 0 ), $region_rows ), true ) ? 'Да' : 'Нет' ); ?></td>
+						<td><button type="submit" class="button"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
+					</tr>
+				<?php endforeach; ?>
+				<?php if ( array() === $grouped ) : ?>
+					<tr><td colspan="4"><?php echo esc_html__( 'Нет данных. Нажмите «Обновить список регионов».', 'walls-delivery-calc' ); ?></td></tr>
+				<?php endif; ?>
+			</tbody>
+		</table>
+		<?php
+	}
+
 	private function render_yandex_delivery_pickup_v2_tab( DeliveryService $service ): void {
 		if ( ! $this->is_yandex_delivery_service( $service ) ) {
 			return;
@@ -1765,6 +1842,8 @@ final class DeliveryServicesAdminPage {
 		$location_mapping_v2_state = $this->yandex_location_mapping_v2_runner instanceof YandexLocationMappingV2Runner ? $this->yandex_location_mapping_v2_runner->current_state() : array();
 		$location_mapping_v2_stats = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->statistics() : array();
 		$location_mapping_v2_no_match = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->find_recent_no_match( 20 ) : array();
+		$region_mapping_v2_rows = $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ? $this->yandex_region_mapping_v2_repository->list_rows() : array();
+		$region_mapping_v2_wdc_regions = $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ? $this->yandex_region_mapping_v2_repository->list_wdc_regions() : array();
 		?>
 		<h3><?php echo esc_html__( 'Яндекс ПВЗ v2', 'walls-delivery-calc' ); ?></h3>
 		<p class="description" style="max-width: 960px;"><?php echo esc_html__( 'Запрос выполняется без type и geo_id, чтобы получить все точки, которые отдаёт Яндекс. Сырой JSON сохраняется во временный файл и не удаляется после импорта.', 'walls-delivery-calc' ); ?></p>
@@ -1831,6 +1910,7 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row"><?php echo esc_html__( 'Топ населённых пунктов', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( wp_json_encode( $geo_v2_stats['top_localities'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></td></tr>
 			</tbody>
 		</table>
+		<?php $this->render_yandex_region_mapping_v2_section( $service, $region_mapping_v2_rows, $region_mapping_v2_wdc_regions ); ?>
 		<h3><?php echo esc_html__( 'Маппинг geoId → населённые пункты', 'walls-delivery-calc' ); ?></h3>
 		<div data-wdc-yandex-location-mapping-v2 data-wdc-yandex-location-mapping-v2-status="<?php echo esc_attr( (string) ( $location_mapping_v2_state['status'] ?? 'idle' ) ); ?>">
 			<p>
