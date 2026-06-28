@@ -1853,32 +1853,13 @@ final class DeliveryServicesAdminPage {
 			</tbody>
 		</table>
 		</details>
-		<?php $this->render_yandex_location_manual_overrides_v2_section( $service, $location_mapping_v2_review_items, $location_manual_overrides_v2 ); ?>
-		<h3><?php echo esc_html__( 'Последние no_match', 'walls-delivery-calc' ); ?></h3>
-		<table class="widefat striped" style="max-width: 1120px;">
-			<thead><tr><th>geo_id</th><th>region</th><th>locality</th><th>coordinates</th><th>first_full_address</th><th>updated_at</th></tr></thead>
-			<tbody>
-				<?php foreach ( $location_mapping_v2_no_match as $item ) : ?>
-					<tr>
-						<td><?php echo esc_html( (string) ( $item['yandex_geo_id'] ?? '' ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $item['region'] ?? '' ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $item['locality'] ?? '' ) ); ?></td>
-						<td><code><?php echo esc_html( $this->yandex_location_mapping_v2_coordinates( $item['centroid_lat'] ?? null, $item['centroid_lon'] ?? null ) ); ?></code></td>
-						<td><?php echo esc_html( (string) ( $item['first_full_address'] ?? '' ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $item['updated_at'] ?? '' ) ); ?></td>
-					</tr>
-				<?php endforeach; ?>
-				<?php if ( array() === $location_mapping_v2_no_match ) : ?>
-					<tr><td colspan="6"><?php echo esc_html__( 'Нет данных.', 'walls-delivery-calc' ); ?></td></tr>
-				<?php endif; ?>
-			</tbody>
-		</table>
+		<?php $this->render_yandex_location_manual_overrides_v2_section( $service, $location_mapping_v2_review_items, $location_mapping_v2_no_match, $location_manual_overrides_v2 ); ?>
 		<?php
 	}
 
 
-	/** @param array<int,array<string,mixed>> $review_items @param array<int,array<string,mixed>> $overrides */
-	private function render_yandex_location_manual_overrides_v2_section( DeliveryService $service, array $review_items, array $overrides ): void {
+	/** @param array<int,array<string,mixed>> $review_items @param array<int,array<string,mixed>> $no_match_items @param array<int,array<string,mixed>> $overrides */
+	private function render_yandex_location_manual_overrides_v2_section( DeliveryService $service, array $review_items, array $no_match_items, array $overrides ): void {
 		?>
 		<details class="wdc-yandex-stage"><summary><?php echo esc_html__( 'Ручная проверка', 'walls-delivery-calc' ); ?></summary>
 		<h3><?php echo esc_html__( 'Ручные override маппинга Яндекс v2', 'walls-delivery-calc' ); ?></h3>
@@ -1912,8 +1893,25 @@ final class DeliveryServicesAdminPage {
 				<?php endif; ?>
 			</tbody>
 		</table>
-		</details>
-		<details class="wdc-yandex-stage"><summary><?php echo esc_html__( 'Активные overrides', 'walls-delivery-calc' ); ?></summary>
+		<h3><?php echo esc_html__( 'Последние no_match', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 1120px;">
+			<thead><tr><th>geo_id</th><th>region</th><th>locality</th><th>coordinates</th><th>first_full_address</th><th>updated_at</th></tr></thead>
+			<tbody>
+				<?php foreach ( $no_match_items as $item ) : ?>
+					<tr>
+						<td><?php echo esc_html( (string) ( $item['yandex_geo_id'] ?? '' ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $item['region'] ?? '' ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $item['locality'] ?? '' ) ); ?></td>
+						<td><code><?php echo esc_html( $this->yandex_location_mapping_v2_coordinates( $item['centroid_lat'] ?? null, $item['centroid_lon'] ?? null ) ); ?></code></td>
+						<td><?php echo esc_html( (string) ( $item['first_full_address'] ?? '' ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $item['updated_at'] ?? '' ) ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+				<?php if ( array() === $no_match_items ) : ?>
+					<tr><td colspan="6"><?php echo esc_html__( 'Нет данных.', 'walls-delivery-calc' ); ?></td></tr>
+				<?php endif; ?>
+			</tbody>
+		</table>
 		<h4><?php echo esc_html__( 'Активные override', 'walls-delivery-calc' ); ?></h4>
 		<table class="widefat striped" style="max-width: 1180px;">
 			<thead><tr><th>ID</th><th>Yandex</th><th>WDC</th><th></th></tr></thead>

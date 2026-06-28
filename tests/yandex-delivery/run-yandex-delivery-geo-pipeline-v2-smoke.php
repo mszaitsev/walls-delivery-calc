@@ -59,9 +59,10 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\Pickup {
 		private array $state = array( 'status' => 'idle', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => '' );
 		private int $steps = 0;
 		public int $truncate_count_at_step = 0;
+		public int $start_full_api_sync_count = 0;
 
 		public function reset(): array { $this->state = array( 'status' => 'idle', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => '' ); $this->steps = 0; return $this->state; }
-		public function start_full_api_sync(): array { $this->state = array( 'status' => 'ready_to_import', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => 'downloaded', 'saved' => 0 ); return $this->state; }
+		public function start_full_api_sync(): array { ++$this->start_full_api_sync_count; $this->state = array( 'status' => 'ready_to_import', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => 'downloaded', 'saved' => 0 ); return $this->state; }
 		public function current_state(): array { return $this->state; }
 		public function start_import(): array {
 			$repository = $GLOBALS['yd_pipeline_fake_pickup_repository'] ?? null;
@@ -206,7 +207,7 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipel
 	yd_geo_pipeline_v2_assert( str_contains( $geo_builder_source, "'sample_points_json' => \$this->json( array( 'addresses'" ) && str_contains( $geo_builder_source, 'sample_addresses' ), 'Geo builder must persist compact address-only sample JSON.' );
 	yd_geo_pipeline_v2_assert( str_contains( $geo_repository_source, 'compact_region_enrichment_audit' ) && str_contains( $geo_repository_source, 'wdc_yandex_geo_v2_region_enrichment_debug_raw' ), 'Geo repository must compact region enrichment audit by default.' );
 	yd_geo_pipeline_v2_assert( str_contains( $mapping_repository_source, 'find_recent_no_match' ) && ! str_contains( $mapping_repository_source, "'sql_search_terms' =>" ), 'Review/no_match repository output must not depend on heavy sql_search_terms.' );
-	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.4' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.4' )" ), 'Plugin version must be 0.99.4.' );
+	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.5' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.5' )" ), 'Plugin version must be 0.99.5.' );
 
 	$pickup_runner = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService();
 	$pickup_repository = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository();
@@ -226,7 +227,12 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipel
 	);
 
 	$runner->start();
-yd_geo_pipeline_v2_assert( isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] ), 'Pipeline start must schedule the next server-side step.' );
+	yd_geo_pipeline_v2_assert( isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] ), 'Pipeline start must schedule the next server-side step.' );
+	yd_geo_pipeline_v2_assert( 0 === $pickup_runner->start_full_api_sync_count && 'idle' === $pickup_runner->current_state()['status'], 'Pipeline start must not download JSON synchronously.' );
+	$state = $runner->run_step();
+	yd_geo_pipeline_v2_assert( 'import_pvz' === $state['stage'] && 'ready_to_import' === $pickup_runner->current_state()['status'] && 1 === $pickup_runner->start_full_api_sync_count, 'First server step must download JSON for import_pvz.' );
+	yd_geo_pipeline_v2_assert( 0 === $pickup_repository->truncate_count && 1 === $pickup_repository->count_all(), 'Download step must not truncate pickup_points_v2 before import starts.' );
+
 	$state = $runner->run_step();
 	yd_geo_pipeline_v2_assert( 'import_pvz' === $state['stage'] && 'importing' === $pickup_runner->current_state()['status'], 'Pipeline must start pickup import before first batch.' );
 	yd_geo_pipeline_v2_assert( 1 === $pickup_repository->truncate_count && 0 === $pickup_repository->count_all(), 'Pipeline pickup import must truncate pickup_points_v2 exactly once before first batch.' );

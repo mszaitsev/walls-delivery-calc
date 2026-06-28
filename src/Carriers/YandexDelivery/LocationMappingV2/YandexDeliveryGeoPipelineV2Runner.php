@@ -39,13 +39,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		$state['started_at'] = $this->now();
 		$state['updated_at'] = $state['started_at'];
 		$state['message'] = 'Запускаем полное обновление Яндекс ПВЗ/географии.';
-		$this->save_state( $state );
-
 		$this->pickup_runner->reset();
-		$pickup_state = $this->pickup_runner->start_full_api_sync();
-		$state = $this->with_stage_progress( $state, $pickup_state );
-		$state['message'] = (string) ( $pickup_state['message'] ?? $state['message'] );
-		$state['summary']['import_pvz'] = $this->pickup_summary( $pickup_state );
 		$this->save_state( $state );
 		$this->schedule_next_step( $state );
 
