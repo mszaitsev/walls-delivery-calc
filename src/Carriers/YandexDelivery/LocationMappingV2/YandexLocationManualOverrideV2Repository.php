@@ -82,6 +82,28 @@ final class YandexLocationManualOverrideV2Repository {
 		}
 		return $this->find_active_rows( array( 'yandex_geo_id' => $yandex_geo_id ) );
 	}
+	/** @return array{by_geo_id:array<int,array<int,array<string,mixed>>>,by_identity:array<string,array<int,array<string,mixed>>>,ambiguous_identity_keys:array<string,bool>,rows:array<int,array<string,mixed>>} */
+	public function load_active_overrides_cache(): array {
+		$rows = $this->active_rows_for_cache();
+		$cache = array( 'by_geo_id' => array(), 'by_identity' => array(), 'ambiguous_identity_keys' => array(), 'rows' => $rows );
+		foreach ( $rows as $row ) {
+			$geo_id = (int) ( $row['yandex_geo_id'] ?? 0 );
+			if ( $geo_id > 0 ) {
+				$cache['by_geo_id'][ $geo_id ][] = $row;
+			}
+			$key = $this->identity_key_from_norms( (string) ( $row['yandex_region_norm'] ?? '' ), (string) ( $row['yandex_locality_norm'] ?? '' ) );
+			if ( '' !== $key ) {
+				$cache['by_identity'][ $key ][] = $row;
+			}
+		}
+		foreach ( $cache['by_identity'] as $key => $identity_rows ) {
+			if ( count( $identity_rows ) > 1 ) {
+				$cache['ambiguous_identity_keys'][ $key ] = true;
+			}
+		}
+		return $cache;
+	}
+
 
 	/** @return array{saved:int,id:int} */
 	public function upsert_active_override( int $yandex_geo_id, string $yandex_region, string $yandex_locality, int $location_id, string $note = '' ): array {
@@ -169,6 +191,27 @@ final class YandexLocationManualOverrideV2Repository {
 
 	public function normalize_locality( string $locality ): string {
 		return $this->normalizer->normalize_place( $locality );
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	private function active_rows_for_cache(): array {
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->yandex_location_manual_overrides_v2, static fn( array $row ): bool => 'active' === (string) ( $row['status'] ?? '' ) ) );
+			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $b['updated_at'] ?? '' ), (string) ( $a['updated_at'] ?? '' ) ) ?: (int) ( $b['id'] ?? 0 ) <=> (int) ( $a['id'] ?? 0 ) );
+			return $rows;
+		}
+		$this->create_schema_if_needed();
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name() . ' WHERE status = %s ORDER BY updated_at DESC, id DESC', 'active' ), ARRAY_A );
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	private function identity_key_from_norms( string $region_norm, string $locality_norm ): string {
+		$region_norm = trim( $region_norm );
+		$locality_norm = trim( $locality_norm );
+		if ( '' === $region_norm || '' === $locality_norm ) {
+			return '';
+		}
+		return $region_norm . '|' . $locality_norm;
 	}
 
 	/** @param array<string,mixed> $filters @return array<int,array<string,mixed>> */

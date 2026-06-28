@@ -10,6 +10,8 @@ final class YandexLocationMapperV2Service {
 	private YandexLocationMappingV2NameNormalizer $normalizer;
 	private YandexRegionMappingV2Repository $region_mapping;
 	private ?YandexLocationManualOverrideV2Repository $manual_overrides;
+	/** @var array{by_geo_id:array<int,array<int,array<string,mixed>>>,by_identity:array<string,array<int,array<string,mixed>>>,ambiguous_identity_keys:array<string,bool>,rows:array<int,array<string,mixed>>}|null */
+	private ?array $manual_override_cache = null;
 
 	public function __construct( private YandexLocationMappingV2Repository $repository, ?object $wpdb = null, ?YandexLocationMappingV2NameNormalizer $normalizer = null, ?YandexRegionMappingV2Repository $region_mapping = null, ?YandexLocationManualOverrideV2Repository $manual_overrides = null ) {
 		$db = $wpdb;
@@ -29,6 +31,7 @@ final class YandexLocationMapperV2Service {
 		$offset = max( 0, $offset );
 		$geo_rows = $this->fetch_geo_rows( $limit, $offset );
 		$result = array( 'processed_geo_ids' => count( $geo_rows ), 'mapped' => 0, 'needs_review' => 0, 'no_match' => 0, 'saved' => 0, 'errors' => 0, 'next_offset' => $offset + count( $geo_rows ), 'done' => count( $geo_rows ) < $limit );
+		$this->manual_override_cache = $this->load_manual_override_cache();
 		foreach ( $geo_rows as $geo ) {
 			try {
 				$rows = $this->map_geo_row( $geo );
@@ -86,19 +89,22 @@ final class YandexLocationMapperV2Service {
 		if ( ! $this->manual_overrides instanceof YandexLocationManualOverrideV2Repository ) {
 			return array( 'diagnostics' => array() );
 		}
+		$cache = $this->manual_override_cache ?? $this->load_manual_override_cache();
+		$this->manual_override_cache = $cache;
 		$geo_id = (int) ( $geo['yandex_geo_id'] ?? 0 );
-		$region = (string) ( $geo['region'] ?? '' );
-		$locality = (string) ( $geo['locality'] ?? '' );
+		$region_norm = $this->manual_overrides->normalize_region( (string) ( $geo['region'] ?? '' ) );
+		$locality_norm = $this->manual_overrides->normalize_locality( (string) ( $geo['locality'] ?? '' ) );
+		$identity_key = $this->manual_override_identity_key( $region_norm, $locality_norm );
 		$diagnostics = array();
-		$geo_identity = $this->manual_overrides->find_active_for_geo_identity( $geo_id, $region, $locality );
+		$same_geo = $cache['by_geo_id'][ $geo_id ] ?? array();
+		$geo_identity = array_values( array_filter( $same_geo, static fn( array $row ): bool => (string) ( $row['yandex_region_norm'] ?? '' ) === $region_norm && (string) ( $row['yandex_locality_norm'] ?? '' ) === $locality_norm ) );
 		if ( 1 === count( $geo_identity ) ) {
-			return $this->manual_override_rows( $geo, $geo_identity[0], 'geo_identity', false, null );
+			return $this->manual_override_rows( $geo, $geo_identity[0], 'geo_identity', 'exact_geo_id', false, null );
 		}
 		if ( count( $geo_identity ) > 1 ) {
-			return array( 'rows' => array( $this->mapping_row( $geo, array(), 'needs_review', 0, null, array(), array( 'manual_override' => false, 'mapping_source' => 'manual_override', 'reason' => 'manual_override_identity_ambiguous', 'manual_override_match' => 'geo_identity', 'manual_override_count' => count( $geo_identity ) ) ) ) );
+			return array( 'rows' => array( $this->mapping_row( $geo, array(), 'needs_review', 0, null, array(), array( 'manual_override' => false, 'mapping_source' => 'manual_override', 'reason' => 'manual_override_identity_ambiguous', 'manual_override_match' => 'geo_identity', 'manual_override_match_mode' => 'exact_geo_id', 'manual_override_count' => count( $geo_identity ) ) ) ) );
 		}
 
-		$same_geo = $this->manual_overrides->find_active_for_geo_id( $geo_id );
 		if ( array() !== $same_geo ) {
 			$candidate = $same_geo[0];
 			$diagnostics['manual_override_identity_mismatch'] = true;
@@ -107,21 +113,35 @@ final class YandexLocationMapperV2Service {
 			$diagnostics['manual_override_expected_locality'] = (string) ( $candidate['yandex_locality'] ?? '' );
 		}
 
-		$logical_identity = $this->manual_overrides->find_active_for_identity( $region, $locality );
+		$logical_identity = '' === $identity_key ? array() : ( $cache['by_identity'][ $identity_key ] ?? array() );
 		if ( 1 === count( $logical_identity ) ) {
 			$override = $logical_identity[0];
 			$previous_geo_id = (int) ( $override['yandex_geo_id'] ?? 0 );
-			return $this->manual_override_rows( $geo, $override, 'region_locality_identity', $previous_geo_id !== $geo_id, $previous_geo_id );
+			return $this->manual_override_rows( $geo, $override, 'region_locality_identity', 'logical_identity', $previous_geo_id !== $geo_id, $previous_geo_id );
 		}
-		if ( count( $logical_identity ) > 1 ) {
-			return array( 'rows' => array( $this->mapping_row( $geo, array(), 'needs_review', 0, null, array(), array_merge( $diagnostics, array( 'manual_override' => false, 'mapping_source' => 'manual_override', 'reason' => 'manual_override_identity_ambiguous', 'manual_override_match' => 'region_locality_identity', 'manual_override_count' => count( $logical_identity ) ) ) ) ) );
+		if ( count( $logical_identity ) > 1 || ( '' !== $identity_key && isset( $cache['ambiguous_identity_keys'][ $identity_key ] ) ) ) {
+			return array( 'rows' => array( $this->mapping_row( $geo, array(), 'needs_review', 0, null, array(), array_merge( $diagnostics, array( 'manual_override' => false, 'mapping_source' => 'manual_override', 'reason' => 'manual_override_identity_ambiguous', 'manual_override_match' => 'region_locality_identity', 'manual_override_match_mode' => 'logical_identity', 'manual_override_count' => count( $logical_identity ) ) ) ) ) );
 		}
 
 		return array( 'diagnostics' => $diagnostics );
 	}
 
+	/** @return array{by_geo_id:array<int,array<int,array<string,mixed>>>,by_identity:array<string,array<int,array<string,mixed>>>,ambiguous_identity_keys:array<string,bool>,rows:array<int,array<string,mixed>>} */
+	private function load_manual_override_cache(): array {
+		if ( ! $this->manual_overrides instanceof YandexLocationManualOverrideV2Repository ) {
+			return array( 'by_geo_id' => array(), 'by_identity' => array(), 'ambiguous_identity_keys' => array(), 'rows' => array() );
+		}
+		return $this->manual_overrides->load_active_overrides_cache();
+	}
+
+	private function manual_override_identity_key( string $region_norm, string $locality_norm ): string {
+		$region_norm = trim( $region_norm );
+		$locality_norm = trim( $locality_norm );
+		return '' === $region_norm || '' === $locality_norm ? '' : $region_norm . '|' . $locality_norm;
+	}
+
 	/** @param array<string,mixed> $geo @param array<string,mixed> $override @return array{rows:array<int,array<string,mixed>>} */
-	private function manual_override_rows( array $geo, array $override, string $match, bool $geo_id_changed, ?int $previous_geo_id ): array {
+	private function manual_override_rows( array $geo, array $override, string $match, string $match_mode, bool $geo_id_changed, ?int $previous_geo_id ): array {
 		$location_id = (int) ( $override['location_id'] ?? 0 );
 		$location = $this->fetch_location_by_id( $location_id );
 		$raw = array(
@@ -129,6 +149,7 @@ final class YandexLocationMapperV2Service {
 			'mapping_source' => 'manual_override',
 			'manual_override_id' => (int) ( $override['id'] ?? 0 ),
 			'manual_override_match' => $match,
+			'manual_override_match_mode' => $match_mode,
 			'manual_override_geo_id_changed' => $geo_id_changed,
 			'previous_yandex_geo_id' => $previous_geo_id,
 			'manual_override_can_review' => true,
