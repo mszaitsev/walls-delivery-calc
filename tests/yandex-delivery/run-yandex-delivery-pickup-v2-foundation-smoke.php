@@ -60,7 +60,7 @@ foreach ( array( 'schema()', 'upsert(', 'find(', 'search(', 'count(' ) as $metho
 foreach ( array( 'normalizePickupPoint', 'import_from_json_file', 'array_chunk( $rows, self::BATCH_SIZE )', 'repository->upsert' ) as $fragment ) {
 	yd_pickup_v2_assert( str_contains( $import_source, $fragment ), 'V2 import service must contain ' . $fragment . '.' );
 }
-yd_pickup_v2_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_pickup_v2'] = 'Яндекс ПВЗ v2';" ), 'Admin page must register the Yandex pickup v2 tab.' );
+yd_pickup_v2_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_pickup_v2'] = 'Яндекс ПВЗ/география';" ), 'Admin page must register the renamed Yandex pickup/geography tab.' );
 yd_pickup_v2_assert( str_contains( $admin_source, 'Скачать и импортировать полный список' ) && ! str_contains( $admin_source, 'Текущий импорт пока недоступен' ), 'V2 tab must render runner UI instead of the old placeholder.' );
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );

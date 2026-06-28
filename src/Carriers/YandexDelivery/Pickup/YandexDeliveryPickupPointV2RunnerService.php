@@ -42,7 +42,7 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			if ( function_exists( 'wp_mkdir_p' ) ) {
 				wp_mkdir_p( $dir );
 			} elseif ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) && ! is_dir( $dir ) ) {
-				throw new \RuntimeException( 'Не удалось создать директорию для JSON файла Яндекс ПВЗ v2.' );
+				throw new \RuntimeException( 'Не удалось создать директорию для JSON файла Яндекс ПВЗ/география.' );
 			}
 			$result = $this->api->pickupPointsListDownloadToFile( array(), $file );
 			$this->validate_json_file_container( $file );
@@ -219,15 +219,15 @@ final class YandexDeliveryPickupPointV2RunnerService {
 	}
 	private function validate_json_file_container( string $file ): void {
 		if ( ! is_file( $file ) || ! is_readable( $file ) ) {
-			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ v2 недоступен для чтения.' );
+			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ/география недоступен для чтения.' );
 		}
 		$size = (int) filesize( $file );
 		if ( $size <= 0 ) {
-			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ v2 пустой.' );
+			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ/география пустой.' );
 		}
 		$handle = fopen( $file, 'rb' );
 		if ( false === $handle ) {
-			throw new \RuntimeException( 'Не удалось открыть JSON файл Яндекс ПВЗ v2.' );
+			throw new \RuntimeException( 'Не удалось открыть JSON файл Яндекс ПВЗ/география.' );
 		}
 		try {
 			$first = $this->first_non_whitespace_byte( $handle );
@@ -236,7 +236,7 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			fclose( $handle );
 		}
 		if ( null === $first || null === $last ) {
-			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ v2 не содержит данных.' );
+			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ/география не содержит данных.' );
 		}
 		if ( ( '{' === $first && '}' === $last ) || ( '[' === $first && ']' === $last ) ) {
 			return;
