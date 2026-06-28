@@ -404,6 +404,15 @@ $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
 $manual_matched = json_decode( (string) $manual_rows[0]['matched_by_json'], true );
 yd_location_mapping_v2_assert( 1 === count( $manual_rows ) && 'mapped' === $manual_rows[0]['status'] && 10 === (int) $manual_rows[0]['location_id'] && true === $manual_raw['manual_override'] && 'geo_identity' === $manual_raw['manual_override_match'] && in_array( 'manual_override', $manual_matched, true ), 'Manual override must map exact geo identity before normal search.' );
 
+$first_shifted = $manual_override_repository->upsert_active_override( 9010, 'Новосибирская область', 'Сменный город', 10, 'old shifted identity' );
+$second_shifted = $manual_override_repository->upsert_active_override( 9011, 'Новосибирская область', 'Сменный город', 21, 'new shifted identity' );
+$active_shifted = $manual_override_repository->find_active_for_identity( 'Новосибирская область', 'Сменный город' );
+$old_shifted_rows = array_values( array_filter( $GLOBALS['wpdb']->yandex_location_manual_overrides_v2, static fn( array $row ): bool => (int) ( $row['id'] ?? 0 ) === (int) $first_shifted['id'] ) );
+yd_location_mapping_v2_assert( (int) $first_shifted['id'] > 0 && (int) $second_shifted['id'] > 0 && 1 === count( $active_shifted ) && 21 === (int) $active_shifted[0]['location_id'] && 'inactive' === (string) ( $old_shifted_rows[0]['status'] ?? '' ), 'Saving a new override for the same region/locality identity must deactivate the old geo_id override.' );
+$manual_rows = $manual_mapper->map_geo_row( $geo( 9012, 'Новосибирская область', 'Сменный город', 54.7600, 83.1100 ) );
+$manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'mapped' === $manual_rows[0]['status'] && 21 === (int) $manual_rows[0]['location_id'] && 'manual_override_identity_ambiguous' !== (string) ( $manual_raw['reason'] ?? '' ) && true === $manual_raw['manual_override_geo_id_changed'], 'Mapper must apply the newest active logical override without ambiguity after geo_id changes.' );
+
 $manual_override_repository->upsert_active_override( 9001, 'Новосибирская область', 'Логический город', 20, 'logical identity' );
 $manual_rows = $manual_mapper->map_geo_row( $geo( 9002, 'Новосибирская область', 'Логический город', 54.7582, 83.1072 ) );
 $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
@@ -414,8 +423,10 @@ $manual_rows = $manual_mapper->map_geo_row( $geo( 9003, 'Новосибирск�
 $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 'mapped' !== $manual_rows[0]['status'] && true === $manual_raw['manual_override_identity_mismatch'] && 'Старый город' === $manual_raw['manual_override_expected_locality'], 'Manual override must not apply when same geo_id has different locality identity.' );
 
-$manual_override_repository->upsert_active_override( 9004, 'Новосибирская область', 'Двойной город', 10, 'first duplicate' );
-$manual_override_repository->upsert_active_override( 9005, 'Новосибирская область', 'Двойной город', 20, 'second duplicate' );
+$double_region_norm = $manual_override_repository->normalize_region( 'Новосибирская область' );
+$double_locality_norm = $manual_override_repository->normalize_locality( 'Двойной город' );
+$GLOBALS['wpdb']->yandex_location_manual_overrides_v2[] = array( 'id' => 9904, 'yandex_geo_id' => 9004, 'yandex_region' => 'Новосибирская область', 'yandex_region_norm' => $double_region_norm, 'yandex_locality' => 'Двойной город', 'yandex_locality_norm' => $double_locality_norm, 'location_id' => 10, 'status' => 'active', 'updated_at' => '2026-06-26 12:00:00' );
+$GLOBALS['wpdb']->yandex_location_manual_overrides_v2[] = array( 'id' => 9905, 'yandex_geo_id' => 9005, 'yandex_region' => 'Новосибирская область', 'yandex_region_norm' => $double_region_norm, 'yandex_locality' => 'Двойной город', 'yandex_locality_norm' => $double_locality_norm, 'location_id' => 20, 'status' => 'active', 'updated_at' => '2026-06-26 12:00:00' );
 $manual_rows = $manual_mapper->map_geo_row( $geo( 9006, 'Новосибирская область', 'Двойной город', 55.0302, 82.9204 ) );
 $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 'needs_review' === $manual_rows[0]['status'] && 'manual_override_identity_ambiguous' === $manual_raw['reason'], 'Ambiguous logical manual override identity must not auto-apply.' );
@@ -458,7 +469,7 @@ yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( __FILE_
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Ручные override маппинга Яндекс v2' ) && str_contains( $admin_source, 'save_yandex_location_manual_override_v2' ) && str_contains( $admin_source, 'deactivate_yandex_location_manual_override_v2' ), 'Admin UI must render manual override controls.' );
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Последние no_match' ) && str_contains( $admin_source, 'sql_search_terms' ), 'Admin UI must render recent no_match diagnostics.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_no_match' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_review_items' ), 'Repository must expose recent no_match and review diagnostics.' );
-yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'find_active_for_geo_identity' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0040_create_yandex_location_manual_overrides_v2.php' ), 'YandexLocationManualOverrideV2Repository' ), 'Manual override repository and migration must exist.' );
+yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'find_active_for_geo_identity' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'deactivate_active_identity' ) && ! str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'deactivate_active_identity_for_geo' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0040_create_yandex_location_manual_overrides_v2.php' ), 'YandexLocationManualOverrideV2Repository' ), 'Manual override repository and migration must exist.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0038_create_yandex_location_mapping_v2.php' ), 'YandexLocationMappingV2Repository' ), 'Migration 0038 must create mapping v2 schema via repository.' );
 
 echo "Yandex Delivery location mapping v2 smoke OK\n";
