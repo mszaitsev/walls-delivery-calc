@@ -11,6 +11,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Runn
 defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryGeoPipelineV2Runner {
+	public const CRON_HOOK = 'wdc_yandex_delivery_geo_pipeline_v2_run_step';
 	private const STATE_OPTION = 'wdc_yandex_delivery_geo_pipeline_v2_state';
 	private const STAGE_IMPORT_PVZ = 'import_pvz';
 	private const STAGE_BUILD_GEO_V2 = 'build_geo_v2';
@@ -46,6 +47,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		$state['message'] = (string) ( $pickup_state['message'] ?? $state['message'] );
 		$state['summary']['import_pvz'] = $this->pickup_summary( $pickup_state );
 		$this->save_state( $state );
+		$this->schedule_next_step( $state );
 
 		return $state;
 	}
@@ -58,6 +60,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 			$state['updated_at'] = $this->now();
 			$state['message'] = 'Продолжаем полное обновление Яндекс ПВЗ/географии.';
 			$this->save_state( $state );
+			$this->schedule_next_step( $state );
 		}
 
 		return $state;
@@ -84,8 +87,13 @@ final class YandexDeliveryGeoPipelineV2Runner {
 			$state = $this->fail( $state, $exception );
 		}
 		$this->save_state( $state );
+		$this->schedule_next_step( $state );
 
 		return $state;
+	}
+
+	public function run_scheduled_step(): void {
+		$this->run_step();
 	}
 
 	/** @return array<string,mixed> */
@@ -102,6 +110,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 			default => null,
 		};
 		$state['status'] = 'paused';
+		$this->clear_scheduled_step();
 		$state['updated_at'] = $this->now();
 		$state['message'] = 'Полное обновление Яндекс ПВЗ/географии поставлено на паузу.';
 		$this->save_state( $state );
@@ -113,6 +122,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 	public function reset(): array {
 		$state = $this->base_state( 'idle', self::STAGE_IMPORT_PVZ );
 		$state['message'] = 'Состояние полного обновления сброшено.';
+		$this->clear_scheduled_step();
 		$this->save_state( $state );
 
 		return $state;
@@ -331,6 +341,23 @@ final class YandexDeliveryGeoPipelineV2Runner {
 	private function save_state( array $state ): void {
 		if ( function_exists( 'update_option' ) ) {
 			update_option( self::STATE_OPTION, $state, false );
+		}
+	}
+
+	/** @param array<string,mixed> $state */
+	private function schedule_next_step( array $state ): void {
+		if ( 'running' !== (string) ( $state['status'] ?? '' ) || ! function_exists( 'wp_schedule_single_event' ) ) {
+			return;
+		}
+		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( self::CRON_HOOK ) ) {
+			return;
+		}
+		wp_schedule_single_event( time() + 1, self::CRON_HOOK );
+	}
+
+	private function clear_scheduled_step(): void {
+		if ( function_exists( 'wp_clear_scheduled_hook' ) ) {
+			wp_clear_scheduled_hook( self::CRON_HOOK );
 		}
 	}
 

@@ -109,6 +109,7 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			$state['memory_peak_mb'] = (string) $result['memory_peak_mb'];
 			$state['updated_at'] = $this->now();
 			if ( ! empty( $result['done'] ) ) {
+				$this->cleanup_successful_import_files( $state );
 				$state['status'] = 'done';
 				$state['message'] = 'Импорт полного списка ПВЗ v2 завершен.';
 			} else {
@@ -299,6 +300,36 @@ final class YandexDeliveryPickupPointV2RunnerService {
 		return rtrim( $base, '/\\' ) . DIRECTORY_SEPARATOR . 'wdc-yandex-delivery' . DIRECTORY_SEPARATOR . 'pickup-v2' . DIRECTORY_SEPARATOR . 'yandex-pickup-points-v2-' . gmdate( 'Ymd-His' ) . '.json';
 	}
 
+	/** @param array<string,mixed> $state */
+	private function cleanup_successful_import_files( array $state ): void {
+		$file = (string) ( $state['json_file_path'] ?? '' );
+		if ( '' === $file || ! is_file( $file ) ) {
+			return;
+		}
+		$dir = dirname( $file );
+		@unlink( $file );
+		$this->remove_empty_temp_dirs( $dir );
+	}
+
+	private function remove_empty_temp_dirs( string $dir ): void {
+		$uploads = function_exists( 'wp_upload_dir' ) ? wp_upload_dir() : array();
+		$base = is_array( $uploads ) && ! empty( $uploads['basedir'] ) ? (string) $uploads['basedir'] : sys_get_temp_dir();
+		$base = rtrim( $base, '/\\' );
+		$root = $base . DIRECTORY_SEPARATOR . 'wdc-yandex-delivery';
+		$dir = rtrim( $dir, '/\\' );
+		while ( '' !== $dir && str_starts_with( $dir, $root ) && $dir !== $base ) {
+			$items = is_dir( $dir ) ? scandir( $dir ) : false;
+			if ( ! is_array( $items ) || count( array_diff( $items, array( '.', '..' ) ) ) > 0 ) {
+				break;
+			}
+			@rmdir( $dir );
+			$parent = dirname( $dir );
+			if ( $parent === $dir ) {
+				break;
+			}
+			$dir = rtrim( $parent, '/\\' );
+		}
+	}
 	private function memory_peak_mb(): string {
 		return function_exists( 'memory_get_peak_usage' ) ? (string) round( memory_get_peak_usage( true ) / 1048576, 1 ) : '0';
 	}

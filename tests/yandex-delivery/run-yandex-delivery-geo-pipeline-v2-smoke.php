@@ -5,6 +5,7 @@ namespace {
 	define( 'ABSPATH', __DIR__ . '/../../' );
 
 	$GLOBALS['yd_geo_pipeline_v2_options'] = array();
+	$GLOBALS['yd_geo_pipeline_v2_scheduled'] = array();
 
 	function get_option( string $name, mixed $default = false ): mixed {
 		return $GLOBALS['yd_geo_pipeline_v2_options'][ $name ] ?? $default;
@@ -19,6 +20,20 @@ namespace {
 		return '2026-06-29 12:00:00';
 	}
 
+	function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
+		$GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] = compact( 'timestamp', 'hook', 'args' );
+		return true;
+	}
+
+	function wp_next_scheduled( string $hook ): int|false {
+		return isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] ) ? (int) $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ]['timestamp'] : false;
+	}
+
+	function wp_clear_scheduled_hook( string $hook ): int {
+		$removed = isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] ) ? 1 : 0;
+		unset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ $hook ] );
+		return $removed;
+	}
 	function yd_geo_pipeline_v2_assert( bool $condition, string $message ): void {
 		if ( ! $condition ) {
 			throw new \RuntimeException( $message );
@@ -179,8 +194,9 @@ namespace {
 	yd_geo_pipeline_v2_assert( ! str_contains( $pipeline_source, "'mapped', 'manual', 'needs_review'" ), 'Pipeline location mapping summary must not expose unused manual status.' );
 
 	yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipelineV2Runner::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoPipelineV2Runner' ), 'Plugin DI must register pipeline runner.' );
+yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipelineV2Runner::CRON_HOOK' ) && str_contains( $plugin_source, 'run_scheduled_step' ), 'Plugin must register pipeline cron hook.' );
 	yd_geo_pipeline_v2_assert( str_contains( $admin_source, 'Полное обновление Яндекс ПВЗ/географии' ) && str_contains( $admin_source, 'wdc_yandex_delivery_geo_pipeline_v2_start' ) && str_contains( $admin_source, 'geoPipelineInitialState' ), 'Admin must expose one-button pipeline block and AJAX actions.' );
-	yd_geo_pipeline_v2_assert( str_contains( $js_source, 'data-wdc-yandex-geo-pipeline-v2' ) && str_contains( $js_source, 'wdc_yandex_delivery_geo_pipeline_v2_step' ) && str_contains( $js_source, "runningStatus: 'running'" ), 'JS must contain pipeline loop.' );
+	yd_geo_pipeline_v2_assert( str_contains( $js_source, 'data-wdc-yandex-geo-pipeline-v2' ) && str_contains( $js_source, 'wdc_yandex_delivery_geo_pipeline_v2_status' ) && str_contains( $js_source, 'pollOnly: true' ), 'JS must poll pipeline status without driving server steps.' );
 
 	yd_geo_pipeline_v2_assert( str_contains( $mapper_source, 'load_active_overrides_cache' ) && str_contains( $mapper_source, 'manual_override_decision' ), 'Manual overrides must still be applied inside location mapping.' );
 	yd_geo_pipeline_v2_assert( str_contains( $mapper_source, 'compact_raw_json' ) && str_contains( $mapper_source, 'wdc_yandex_location_mapping_v2_debug_raw' ), 'Location mapping raw_json must be compact by default with debug opt-in.' );
@@ -190,7 +206,7 @@ namespace {
 	yd_geo_pipeline_v2_assert( str_contains( $geo_builder_source, "'sample_points_json' => \$this->json( array( 'addresses'" ) && str_contains( $geo_builder_source, 'sample_addresses' ), 'Geo builder must persist compact address-only sample JSON.' );
 	yd_geo_pipeline_v2_assert( str_contains( $geo_repository_source, 'compact_region_enrichment_audit' ) && str_contains( $geo_repository_source, 'wdc_yandex_geo_v2_region_enrichment_debug_raw' ), 'Geo repository must compact region enrichment audit by default.' );
 	yd_geo_pipeline_v2_assert( str_contains( $mapping_repository_source, 'find_recent_no_match' ) && ! str_contains( $mapping_repository_source, "'sql_search_terms' =>" ), 'Review/no_match repository output must not depend on heavy sql_search_terms.' );
-	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.3' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.3' )" ), 'Plugin version must be 0.99.3.' );
+	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.4' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.4' )" ), 'Plugin version must be 0.99.4.' );
 
 	$pickup_runner = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService();
 	$pickup_repository = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository();
@@ -210,6 +226,7 @@ namespace {
 	);
 
 	$runner->start();
+yd_geo_pipeline_v2_assert( isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::CRON_HOOK ] ), 'Pipeline start must schedule the next server-side step.' );
 	$state = $runner->run_step();
 	yd_geo_pipeline_v2_assert( 'import_pvz' === $state['stage'] && 'importing' === $pickup_runner->current_state()['status'], 'Pipeline must start pickup import before first batch.' );
 	yd_geo_pipeline_v2_assert( 1 === $pickup_repository->truncate_count && 0 === $pickup_repository->count_all(), 'Pipeline pickup import must truncate pickup_points_v2 exactly once before first batch.' );

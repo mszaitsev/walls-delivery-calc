@@ -96,6 +96,10 @@
 			if (state.status !== options.runningStatus || looping === false) {
 				return;
 			}
+			if (options.pollOnly) {
+				window.setTimeout(function () { post(options.stepAction).then(loop).catch(showError); }, options.pollInterval || 2000);
+				return;
+			}
 			post(options.stepAction).then(function (nextState) {
 				window.setTimeout(function () { loop(nextState); }, 50);
 			}).catch(showError);
@@ -146,10 +150,12 @@
 		resetSelector: '[data-wdc-yandex-geo-pipeline-v2-reset]',
 		startAction: 'wdc_yandex_delivery_geo_pipeline_v2_start',
 		continueAction: 'wdc_yandex_delivery_geo_pipeline_v2_resume',
-		stepAction: 'wdc_yandex_delivery_geo_pipeline_v2_step',
+		stepAction: 'wdc_yandex_delivery_geo_pipeline_v2_status',
 		pauseAction: 'wdc_yandex_delivery_geo_pipeline_v2_pause',
 		resetAction: 'wdc_yandex_delivery_geo_pipeline_v2_reset',
 		runningStatus: 'running',
+		pollOnly: true,
+		pollInterval: 2000,
 		initialState: config.geoPipelineInitialState || {}
 	});
 	runner({
