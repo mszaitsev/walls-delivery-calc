@@ -392,7 +392,54 @@ $ids1340 = array_map( static fn( array $row ): int => (int) $row['location_id'],
 $raw1340 = json_decode( (string) $geo1340[0]['raw_json'], true );
 yd_location_mapping_v2_assert( array() !== $geo1340 && ! in_array( 1340, $ids1340, true ) && in_array( 1341, $ids1340, true ) && true === (bool) ( $raw1340['address_locality_used'] ?? false ), 'Shcherbinka address fallback must not include parent Moscow candidate when specific Shcherbinka terms exist.' );
 $recent_no_match = $repository->find_recent_no_match( 20 );
-yd_location_mapping_v2_assert( count( $recent_no_match ) >= 5 && isset( $recent_no_match[0]['sql_search_terms'] ), 'Repository must return recent no_match diagnostics with sql_search_terms.' );
+yd_location_mapping_v2_assert( count( $recent_no_match ) >= 5 && isset( $recent_no_match[0]['sql_search_terms'] ) && array_key_exists( 'centroid_lat', $recent_no_match[0] ) && array_key_exists( 'centroid_lon', $recent_no_match[0] ), 'Repository must return recent no_match diagnostics with sql_search_terms and Yandex coordinates.' );
+$review_items_before_override = $repository->find_recent_review_items( 50 );
+$review_with_candidate_coordinates = null;
+foreach ( $review_items_before_override as $review_item ) {
+	if ( (int) ( $review_item['location_id'] ?? 0 ) > 0 ) {
+		$review_with_candidate_coordinates = $review_item;
+		break;
+	}
+}
+yd_location_mapping_v2_assert( null !== $review_with_candidate_coordinates && array_key_exists( 'centroid_lat', $review_with_candidate_coordinates ) && array_key_exists( 'centroid_lon', $review_with_candidate_coordinates ) && array_key_exists( 'candidate_latitude', $review_with_candidate_coordinates ) && array_key_exists( 'candidate_longitude', $review_with_candidate_coordinates ), 'Review queue rows must expose Yandex and WDC candidate coordinates.' );
+$no_match_override_item = null;
+foreach ( $recent_no_match as $recent_no_match_item ) {
+	if ( '' !== trim( (string) ( $recent_no_match_item['region'] ?? '' ) ) && '' !== trim( (string) ( $recent_no_match_item['locality'] ?? '' ) ) ) {
+		$no_match_override_item = $recent_no_match_item;
+		break;
+	}
+}
+yd_location_mapping_v2_assert( null !== $no_match_override_item, 'Smoke fixture must include a no_match row with region and locality for manual override.' );
+$no_match_override_geo_id = (int) ( $no_match_override_item['yandex_geo_id'] ?? 0 );
+$no_match_override_report = $manual_override_repository->upsert_active_override( $no_match_override_geo_id, (string) ( $no_match_override_item['region'] ?? '' ), (string) ( $no_match_override_item['locality'] ?? '' ), 10 );
+yd_location_mapping_v2_assert( 1 === (int) ( $no_match_override_report['saved'] ?? 0 ), 'Manual override for no_match queue fixture must be saved.' );
+$recent_no_match_after_override = $repository->find_recent_no_match( 20 );
+yd_location_mapping_v2_assert( $no_match_override_geo_id > 0 && ! in_array( $no_match_override_geo_id, array_map( static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ), $recent_no_match_after_override ), true ), 'Recent no_match queue must hide rows with active manual override.' );
+$needs_review_counts = array();
+$needs_review_first = array();
+foreach ( $review_items_before_override as $review_item ) {
+	if ( 'needs_review' !== (string) ( $review_item['status'] ?? '' ) || (int) ( $review_item['location_id'] ?? 0 ) <= 0 ) {
+		continue;
+	}
+	$geo_id = (int) ( $review_item['yandex_geo_id'] ?? 0 );
+	$needs_review_counts[ $geo_id ] = ( $needs_review_counts[ $geo_id ] ?? 0 ) + 1;
+	$needs_review_first[ $geo_id ] = $needs_review_first[ $geo_id ] ?? $review_item;
+}
+$needs_review_override_item = null;
+foreach ( $needs_review_counts as $geo_id => $count ) {
+	if ( $count > 1 ) {
+		$needs_review_override_item = $needs_review_first[ $geo_id ];
+		break;
+	}
+}
+yd_location_mapping_v2_assert( null !== $needs_review_override_item, 'Smoke fixture must include a multi-candidate needs_review row.' );
+$needs_review_override_geo_id = (int) ( $needs_review_override_item['yandex_geo_id'] ?? 0 );
+$manual_override_repository->upsert_active_override( $needs_review_override_geo_id, (string) ( $needs_review_override_item['region'] ?? '' ), (string) ( $needs_review_override_item['locality'] ?? '' ), (int) ( $needs_review_override_item['location_id'] ?? 0 ) );
+$review_items_after_override = $repository->find_recent_review_items( 50 );
+yd_location_mapping_v2_assert( ! in_array( $needs_review_override_geo_id, array_map( static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ), $review_items_after_override ), true ), 'Review queue must hide all needs_review variants for a geo_id after manual override is saved.' );
+$active_queue_overrides = $manual_override_repository->list_active( 50 );
+$active_queue_override_ids = array_map( static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ), $active_queue_overrides );
+yd_location_mapping_v2_assert( in_array( $no_match_override_geo_id, $active_queue_override_ids, true ) && in_array( $needs_review_override_geo_id, $active_queue_override_ids, true ), 'Active manual overrides must remain visible in active override list after queues hide them.' );
 $stats = $repository->statistics();
 yd_location_mapping_v2_assert( 48 === $stats['total'] && 33 === $stats['mapped'] && 8 === $stats['needs_review'] && 7 === $stats['no_match'] && 1 === $stats['no_match_region_not_mapped'] && 6 === $stats['no_match_no_locality_match'] && 4 === $stats['territory_fallback'] && null !== $stats['avg_confidence'] && null !== $stats['avg_distance'] && isset( $stats['mapped_by_dominance']['near_exact_type_dominates'] ) && isset( $stats['mapped_by_dominance']['same_type_nearest_dominates'] ), 'Repository statistics must count statuses and averages.' );
 
@@ -466,7 +513,7 @@ yd_location_mapping_v2_assert( str_contains( $plugin_source, 'YandexLocationMapp
 yd_location_mapping_v2_assert( ! str_contains( $mapper_source, 'locationDetect' ) && ! str_contains( $mapper_source, 'YandexDeliveryApiClient' ) && ! str_contains( $mapper_source, '/api/' ), 'Location mapping v2 mapper must stay offline and not call Yandex API.' );
 yd_location_mapping_v2_assert( str_contains( $mapper_source, 'manual_override_decision' ) && str_contains( $mapper_source, 'manual_override_identity_mismatch' ) && str_contains( $mapper_source, 'manual_override_applied' ) && str_contains( $mapper_source, 'is_territory_like_geo' ) && str_contains( $mapper_source, 'region_mapping_exact_first' ) && str_contains( $mapper_source, 'territory_fallback_reason' ) && str_contains( $mapper_source, 'territory_bbox' ) && str_contains( $mapper_source, 'address_locality_terms' ) && str_contains( $mapper_source, 'coordinate_fallback_strict' ) && str_contains( $mapper_source, 'ambiguous_reason' ) && str_contains( $mapper_source, 'find_wdc_regions_for_yandex' ) && str_contains( $mapper_source, 'fetch_locations_by_regions' ) && str_contains( $mapper_source, 'region_name IN' ) && str_contains( $mapper_source, 'candidate_search_mode' ) && str_contains( $mapper_source, 'region_mapping' ) && ! str_contains( $mapper_source, 'region_name LIKE' ) && ! str_contains( $mapper_source, 'normalize_region' ) && ! str_contains( $mapper_source, 'regions_compatible' ) && ! str_contains( $mapper_source, 'fetch_exact_location_candidates' ) && ! str_contains( $mapper_source, 'fetch_location_candidates' ) && ! str_contains( $mapper_source, 'broad_fallback' ) && str_contains( $mapper_source, 'effective_location_locality' ) && ! str_contains( $mapper_source, 'location_locality_variants' ) && ! str_contains( $mapper_source, 'matching_location_locality' ) && str_contains( $mapper_source, 'choose_dominant_candidate' ) && str_contains( $mapper_source, 'dominance_rule' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'dedupe_candidates' ) && str_contains( $mapper_source, 'territory_coordinate_fallback' ) && str_contains( $mapper_source, 'detect_locality_type' ) && str_contains( $mapper_source, 'type_match_score' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'rejected_candidates' ) && str_contains( $mapper_source, 'locality_source' ) && str_contains( $mapper_source, 'locality_raw' ) && str_contains( $mapper_source, 'effective_locality' ), 'Mapper source must use region mapping, manual overrides, dedupe, territorial fallback, and must not use old region heuristics.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( __FILE__ ), 'станица Выселки' ) && str_contains( $normalizer_source, 'поселок при железнодорожной станции' ) && str_contains( $normalizer_source, 'is_territorial_like' ) && str_contains( $normalizer_source, 'городской поселок' ) && str_contains( $normalizer_source, 'железнодорожная станция' ) && str_contains( $normalizer_source, 'without_parentheses' ), 'Normalizer source must contain new locality type and territorial helpers.' );
-yd_location_mapping_v2_assert( str_contains( $admin_source, 'Ручные override маппинга Яндекс v2' ) && str_contains( $admin_source, 'save_yandex_location_manual_override_v2' ) && str_contains( $admin_source, 'deactivate_yandex_location_manual_override_v2' ), 'Admin UI must render manual override controls.' );
+yd_location_mapping_v2_assert( str_contains( $admin_source, 'Ручные override маппинга Яндекс v2' ) && str_contains( $admin_source, 'save_yandex_location_manual_override_v2' ) && str_contains( $admin_source, 'deactivate_yandex_location_manual_override_v2' ) && str_contains( $admin_source, 'centroid_lat' ) && str_contains( $admin_source, 'centroid_lon' ) && str_contains( $admin_source, 'candidate_latitude' ) && str_contains( $admin_source, 'candidate_longitude' ) && str_contains( $admin_source, 'yandex_location_mapping_v2_coordinates' ) && ! str_contains( $admin_source, 'name="note"' ), 'Admin UI must render manual override controls with coordinates and without note field.' );
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Последние no_match' ) && str_contains( $admin_source, 'sql_search_terms' ), 'Admin UI must render recent no_match diagnostics.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_no_match' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_review_items' ), 'Repository must expose recent no_match and review diagnostics.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'find_active_for_geo_identity' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'deactivate_active_identity' ) && ! str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'deactivate_active_identity_for_geo' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0040_create_yandex_location_manual_overrides_v2.php' ), 'YandexLocationManualOverrideV2Repository' ), 'Manual override repository and migration must exist.' );

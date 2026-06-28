@@ -1842,8 +1842,7 @@ final class DeliveryServicesAdminPage {
 			$region = sanitize_text_field( wp_unslash( $_POST['yandex_region'] ?? '' ) );
 			$locality = sanitize_text_field( wp_unslash( $_POST['yandex_locality'] ?? '' ) );
 			$location_id = isset( $_POST['location_id'] ) ? (int) $_POST['location_id'] : 0;
-			$note = sanitize_textarea_field( wp_unslash( $_POST['note'] ?? '' ) );
-			$report = $this->yandex_location_manual_override_v2_repository->upsert_active_override( $geo_id, $region, $locality, $location_id, $note );
+			$report = $this->yandex_location_manual_override_v2_repository->upsert_active_override( $geo_id, $region, $locality, $location_id );
 			$this->save_yandex_region_mapping_v2_result( 1 === (int) ( $report['saved'] ?? 0 ) ? 'success' : 'error', 'Ручной override Яндекс mapping v2', 1 === (int) ( $report['saved'] ?? 0 ) ? 'Override сохранен.' : 'Override не сохранен.', array_merge( array( 'yandex_geo_id' => $geo_id, 'location_id' => $location_id ), $report ) );
 		} elseif ( 'deactivate_yandex_location_manual_override_v2' === $action ) {
 			$id = isset( $_POST['override_id'] ) ? (int) $_POST['override_id'] : 0;
@@ -2072,9 +2071,9 @@ final class DeliveryServicesAdminPage {
 					<?php $raw = is_array( $item['raw'] ?? null ) ? $item['raw'] : array(); ?>
 					<tr>
 						<td><?php echo esc_html( (string) ( $item['yandex_geo_id'] ?? '' ) ); ?><br><code><?php echo esc_html( (string) ( $item['status'] ?? '' ) ); ?></code></td>
-						<td><?php echo esc_html( (string) ( $item['region'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $item['locality'] ?? '' ) ); ?><br><small><?php echo esc_html( (string) ( $item['first_full_address'] ?? '' ) ); ?></small></td>
+						<td><?php echo esc_html( (string) ( $item['region'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $item['locality'] ?? '' ) ); ?><br><code><?php echo esc_html( $this->yandex_location_mapping_v2_coordinates( $item['centroid_lat'] ?? null, $item['centroid_lon'] ?? null ) ); ?></code><br><small><?php echo esc_html( (string) ( $item['first_full_address'] ?? '' ) ); ?></small></td>
 						<td><?php echo esc_html( 'points=' . (string) ( $item['points_count'] ?? 0 ) . ', dropoff=' . (string) ( $item['dropoff_count'] ?? 0 ) ); ?><br><?php echo esc_html( 'safe=' . (string) ( $item['coverage_radius_safe_km'] ?? '' ) ); ?></td>
-						<td><?php echo esc_html( 'location_id=' . (string) ( $item['location_id'] ?? 0 ) ); ?><br><?php echo esc_html( 'distance=' . (string) ( $item['distance_km'] ?? '' ) . ', confidence=' . (string) ( $item['confidence'] ?? '' ) ); ?><br><code><?php echo esc_html( wp_json_encode( array_intersect_key( $raw, array_flip( array( 'locality_raw', 'effective_locality', 'dominance_reason', 'reason' ) ) ), JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></code></td>
+						<td><?php echo esc_html( 'location_id=' . (string) ( $item['location_id'] ?? 0 ) ); ?><br><?php echo esc_html( $this->yandex_location_mapping_v2_coordinates( $item['candidate_latitude'] ?? null, $item['candidate_longitude'] ?? null ) ); ?><br><?php echo esc_html( 'distance=' . (string) ( $item['distance_km'] ?? '' ) . ', confidence=' . (string) ( $item['confidence'] ?? '' ) ); ?><br><code><?php echo esc_html( wp_json_encode( array_intersect_key( $raw, array_flip( array( 'locality_raw', 'effective_locality', 'dominance_reason', 'reason' ) ) ), JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></code></td>
 						<td>
 							<form method="post" style="margin-bottom: 6px;">
 								<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -2084,7 +2083,6 @@ final class DeliveryServicesAdminPage {
 								<input type="hidden" name="yandex_region" value="<?php echo esc_attr( (string) ( $item['region'] ?? '' ) ); ?>" />
 								<input type="hidden" name="yandex_locality" value="<?php echo esc_attr( (string) ( $item['locality'] ?? '' ) ); ?>" />
 								<input type="number" name="location_id" value="<?php echo esc_attr( (string) max( 0, (int) ( $item['location_id'] ?? 0 ) ) ); ?>" min="1" style="width: 120px;" />
-								<input type="text" name="note" value="" placeholder="<?php echo esc_attr__( 'Комментарий', 'walls-delivery-calc' ); ?>" />
 								<button type="submit" class="button"><?php echo esc_html__( 'Сохранить override', 'walls-delivery-calc' ); ?></button>
 							</form>
 						</td>
@@ -2097,23 +2095,31 @@ final class DeliveryServicesAdminPage {
 		</table>
 		<h4><?php echo esc_html__( 'Активные override', 'walls-delivery-calc' ); ?></h4>
 		<table class="widefat striped" style="max-width: 1180px;">
-			<thead><tr><th>ID</th><th>Yandex</th><th>WDC</th><th>note</th><th></th></tr></thead>
+			<thead><tr><th>ID</th><th>Yandex</th><th>WDC</th><th></th></tr></thead>
 			<tbody>
 				<?php foreach ( $overrides as $override ) : ?>
 					<tr>
 						<td><?php echo esc_html( (string) ( $override['id'] ?? '' ) ); ?></td>
 						<td><?php echo esc_html( (string) ( $override['yandex_geo_id'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['yandex_region'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['yandex_locality'] ?? '' ) ); ?></td>
 						<td><?php echo esc_html( (string) ( $override['location_id'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['wdc_region_name'] ?? '' ) ); ?><br><?php echo esc_html( (string) ( $override['wdc_display_name'] ?? '' ) ); ?></td>
-						<td><?php echo esc_html( (string) ( $override['note'] ?? '' ) ); ?></td>
 						<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="deactivate_yandex_location_manual_override_v2" /><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>" /><input type="hidden" name="override_id" value="<?php echo esc_attr( (string) ( $override['id'] ?? '' ) ); ?>" /><button type="submit" class="button button-secondary"><?php echo esc_html__( 'Отключить', 'walls-delivery-calc' ); ?></button></form></td>
 					</tr>
 				<?php endforeach; ?>
 				<?php if ( array() === $overrides ) : ?>
-					<tr><td colspan="5"><?php echo esc_html__( 'Активных override нет.', 'walls-delivery-calc' ); ?></td></tr>
+					<tr><td colspan="4"><?php echo esc_html__( 'Активных override нет.', 'walls-delivery-calc' ); ?></td></tr>
 				<?php endif; ?>
 			</tbody>
 		</table>
 		<?php
+	}
+	private function yandex_location_mapping_v2_coordinates( mixed $lat, mixed $lon ): string {
+		if ( ! is_numeric( $lat ) || ! is_numeric( $lon ) ) {
+			return '—';
+		}
+		$format = static function ( float $value ): string {
+			return rtrim( rtrim( number_format( $value, 6, '.', '' ), '0' ), '.' );
+		};
+		return $format( (float) $lat ) . ', ' . $format( (float) $lon );
 	}
 	/** @return array<string,string> */
 	private function yandex_delivery_pickup_v2_state_rows(): array {
