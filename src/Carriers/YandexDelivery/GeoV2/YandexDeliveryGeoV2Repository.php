@@ -180,6 +180,165 @@ final class YandexDeliveryGeoV2Repository {
 		);
 	}
 
+
+	public function count_empty_active_regions(): int {
+		if ( $this->has_test_rows() ) {
+			return count( array_filter( $this->wpdb->yandex_delivery_geo_v2, static fn( array $row ): bool => ! empty( $row['active'] ) && '' === trim( (string) ( $row['region'] ?? '' ) ) ) );
+		}
+		$this->create_schema_if_needed();
+
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() . " WHERE active = 1 AND (region IS NULL OR region = '')" );
+	}
+
+	/** @param array<string,mixed> $audit */
+	public function update_region_from_location( int $yandex_geo_id, string $region, array $audit = array() ): bool {
+		$yandex_geo_id = max( 0, $yandex_geo_id );
+		$region = trim( $region );
+		if ( $yandex_geo_id <= 0 || '' === $region ) {
+			return false;
+		}
+		$now = $this->now();
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->yandex_delivery_geo_v2 as $index => $row ) {
+				if ( (int) ( $row['yandex_geo_id'] ?? 0 ) !== $yandex_geo_id ) {
+					continue;
+				}
+				$row['region'] = $region;
+				$row['raw_stats_json'] = $this->raw_stats_with_region_enrichment( (string) ( $row['raw_stats_json'] ?? '' ), $region, 'updated', $audit, $now );
+				$row['updated_at'] = $now;
+				$this->wpdb->yandex_delivery_geo_v2[ $index ] = $row;
+				return true;
+			}
+
+			return false;
+		}
+		$this->create_schema_if_needed();
+		$current = $this->find_by_geo_id( $yandex_geo_id );
+		if ( null === $current ) {
+			return false;
+		}
+		$raw_stats_json = $this->raw_stats_with_region_enrichment( (string) ( $current['raw_stats_json'] ?? '' ), $region, 'updated', $audit, $now );
+		$sql = 'UPDATE ' . $this->table_name() . ' SET region = %s, raw_stats_json = %s, updated_at = %s WHERE yandex_geo_id = %d';
+
+		return false !== $this->wpdb->query( $this->wpdb->prepare( $sql, $region, $raw_stats_json, $now, $yandex_geo_id ) );
+	}
+
+
+	/** @param array<string,mixed> $audit */
+	public function mark_region_enrichment_attempt( int $yandex_geo_id, string $status, array $audit = array() ): bool {
+		$yandex_geo_id = max( 0, $yandex_geo_id );
+		$status = trim( $status );
+		if ( $yandex_geo_id <= 0 || '' === $status ) {
+			return false;
+		}
+		$now = $this->now();
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->yandex_delivery_geo_v2 as $index => $row ) {
+				if ( (int) ( $row['yandex_geo_id'] ?? 0 ) !== $yandex_geo_id ) {
+					continue;
+				}
+				$row['raw_stats_json'] = $this->raw_stats_with_region_enrichment( (string) ( $row['raw_stats_json'] ?? '' ), (string) ( $row['region'] ?? '' ), $status, $audit, $now );
+				$row['updated_at'] = $now;
+				$this->wpdb->yandex_delivery_geo_v2[ $index ] = $row;
+				return true;
+			}
+
+			return false;
+		}
+		$this->create_schema_if_needed();
+		$current = $this->find_by_geo_id( $yandex_geo_id );
+		if ( null === $current ) {
+			return false;
+		}
+		$raw_stats_json = $this->raw_stats_with_region_enrichment( (string) ( $current['raw_stats_json'] ?? '' ), (string) ( $current['region'] ?? '' ), $status, $audit, $now );
+		$sql = 'UPDATE ' . $this->table_name() . ' SET raw_stats_json = %s, updated_at = %s WHERE yandex_geo_id = %d';
+
+		return false !== $this->wpdb->query( $this->wpdb->prepare( $sql, $raw_stats_json, $now, $yandex_geo_id ) );
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function find_pending_empty_region_rows_for_enrichment( int $limit ): array {
+		$limit = max( 1, min( 500, $limit ) );
+		if ( $this->has_test_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->yandex_delivery_geo_v2,
+					fn( array $row ): bool => ! empty( $row['active'] )
+						&& '' === trim( (string) ( $row['region'] ?? '' ) )
+						&& ! $this->has_region_enrichment_audit( $row )
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => (int) ( $b['points_count'] ?? 0 ) <=> (int) ( $a['points_count'] ?? 0 ) ?: (int) ( $a['yandex_geo_id'] ?? 0 ) <=> (int) ( $b['yandex_geo_id'] ?? 0 ) );
+
+			return array_slice( $rows, 0, $limit );
+		}
+		$this->create_schema_if_needed();
+		$sql = 'SELECT * FROM ' . $this->table_name() . " WHERE active = 1 AND (region IS NULL OR region = '') AND (raw_stats_json IS NULL OR raw_stats_json NOT LIKE %s) ORDER BY points_count DESC, yandex_geo_id ASC LIMIT %d";
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, '%"region_enrichment"%', $limit ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	public function count_pending_empty_region_rows_for_enrichment(): int {
+		if ( $this->has_test_rows() ) {
+			return count(
+				array_filter(
+					$this->wpdb->yandex_delivery_geo_v2,
+					fn( array $row ): bool => ! empty( $row['active'] )
+						&& '' === trim( (string) ( $row['region'] ?? '' ) )
+						&& ! $this->has_region_enrichment_audit( $row )
+				)
+			);
+		}
+		$this->create_schema_if_needed();
+
+		return (int) $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT COUNT(*) FROM ' . $this->table_name() . " WHERE active = 1 AND (region IS NULL OR region = '') AND (raw_stats_json IS NULL OR raw_stats_json NOT LIKE %s)", '%"region_enrichment"%' ) );
+	}
+
+
+	public function reset_region_enrichment_attempts_for_empty_regions(): int {
+		$count = 0;
+		$now = $this->now();
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->yandex_delivery_geo_v2 as $index => $row ) {
+				if ( empty( $row['active'] ) || '' !== trim( (string) ( $row['region'] ?? '' ) ) || ! $this->has_region_enrichment_audit( $row ) ) {
+					continue;
+				}
+				$raw = json_decode( (string) ( $row['raw_stats_json'] ?? '' ), true );
+				if ( ! is_array( $raw ) ) {
+					$raw = array();
+				}
+				unset( $raw['region_enrichment'] );
+				$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $raw, JSON_UNESCAPED_UNICODE ) : json_encode( $raw, JSON_UNESCAPED_UNICODE );
+				$row['raw_stats_json'] = is_string( $json ) ? $json : '{}';
+				$row['updated_at'] = $now;
+				$this->wpdb->yandex_delivery_geo_v2[ $index ] = $row;
+				++$count;
+			}
+
+			return $count;
+		}
+		$this->create_schema_if_needed();
+		$rows = $this->wpdb->get_results( 'SELECT yandex_geo_id, raw_stats_json FROM ' . $this->table_name() . " WHERE active = 1 AND (region IS NULL OR region = '') AND raw_stats_json LIKE '%\"region_enrichment\"%'", ARRAY_A );
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$raw = json_decode( (string) ( $row['raw_stats_json'] ?? '' ), true );
+			if ( ! is_array( $raw ) || ! array_key_exists( 'region_enrichment', $raw ) ) {
+				continue;
+			}
+			unset( $raw['region_enrichment'] );
+			$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $raw, JSON_UNESCAPED_UNICODE ) : json_encode( $raw, JSON_UNESCAPED_UNICODE );
+			if ( ! is_string( $json ) ) {
+				$json = '{}';
+			}
+			$sql = 'UPDATE ' . $this->table_name() . ' SET raw_stats_json = %s, updated_at = %s WHERE yandex_geo_id = %d';
+			if ( false !== $this->wpdb->query( $this->wpdb->prepare( $sql, $json, $now, (int) ( $row['yandex_geo_id'] ?? 0 ) ) ) ) {
+				++$count;
+			}
+		}
+
+		return $count;
+	}
+
 	public function truncate(): void {
 		if ( $this->has_test_rows() ) {
 			$this->wpdb->yandex_delivery_geo_v2 = array();
@@ -385,6 +544,33 @@ final class YandexDeliveryGeoV2Repository {
 		}
 
 		return $max_length > 0 ? substr( $value, 0, $max_length ) : $value;
+	}
+
+
+
+	/** @param array<string,mixed> $row */
+	private function has_region_enrichment_audit( array $row ): bool {
+		$raw = json_decode( (string) ( $row['raw_stats_json'] ?? '' ), true );
+
+		return is_array( $raw ) && array_key_exists( 'region_enrichment', $raw );
+	}
+
+	/** @param array<string,mixed> $audit */
+	private function raw_stats_with_region_enrichment( string $raw_stats_json, string $region, string $status, array $audit, string $updated_at ): string {
+		$raw = json_decode( $raw_stats_json, true );
+		if ( ! is_array( $raw ) ) {
+			$raw = array();
+		}
+		$raw['region_enrichment'] = array(
+			'source' => 'wdc_location_coordinates',
+			'status' => $status,
+			'region' => $region,
+			'updated_at' => $updated_at,
+			'audit' => $audit,
+		);
+		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $raw, JSON_UNESCAPED_UNICODE ) : json_encode( $raw, JSON_UNESCAPED_UNICODE );
+
+		return is_string( $json ) ? $json : '{}';
 	}
 
 	private function can_create_schema(): bool {
