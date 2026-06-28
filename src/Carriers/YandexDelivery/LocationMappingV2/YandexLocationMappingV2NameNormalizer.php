@@ -62,6 +62,7 @@ final class YandexLocationMappingV2NameNormalizer {
 		}
 
 		$this->add_semantic_terms( $terms, $raw );
+		$this->add_suffix_type_terms( $terms, $raw );
 
 		foreach ( $bases as $base_term ) {
 			foreach ( $this->preferred_type_aliases( $raw ) as $type ) {
@@ -137,21 +138,73 @@ final class YandexLocationMappingV2NameNormalizer {
 		if ( '' === $address ) {
 			return array();
 		}
+		$street_start = '(?:улица|ул\.?|проспект|пр-кт|переулок|пер\.?|шоссе|дом|д\.?|строение|стр\.?|б\/у|\S+\s+(?:улица|ул\.?|проспект|пр-кт|переулок|пер\.?|шоссе))';
 		$patterns = array(
-			'/^\s*(производственно[-\s]+административная\s+зона)\s+(.+?)(?:\s+(?:улица|ул\.?|дом|д\.?|строение|стр\.?|участок|территория|тер\.?|квартал|шоссе|проспект|переулок)\b|,|$)/iu',
-			'/^\s*(садоводческое\s+некоммерческое\s+товарищество|садоводческое\s+товарищество|садовое\s+товарищество)\s+(.+?)(?:\s+(?:улица|ул\.?|дом|д\.?|строение|стр\.?|участок|территория|тер\.?|квартал|шоссе|проспект|переулок)\b|,|$)/iu',
-			'/^\s*(деревня|село|пос[её]лок|станица|слобода|СНТ|ДНП|КП|район|поселение|массив)\s+(.+?)(?:\s+(?:улица|ул\.?|дом|д\.?|строение|стр\.?|участок|территория|тер\.?|квартал|шоссе|проспект|переулок)\b|,|$)/iu',
+			array(
+				'kind' => 'suffix',
+				'pattern' => '/^\s*(.+?)\s+(г|г\.|д|д\.|с|с\.|п|п\.|рп|рп\.|гп|гп\.|пгт|ст|ст\.|ж\/д\s*ст|ж\/д_ст)\s+' . $street_start . '\b/iu',
+			),
+			array(
+				'kind' => 'prefix',
+				'pattern' => '/^\s*(производственно[-\s]+административная\s+зона)\s+(.+?)(?:\s+' . $street_start . '\b|,|$)/iu',
+			),
+			array(
+				'kind' => 'prefix',
+				'pattern' => '/^\s*(садоводческое\s+некоммерческое\s+товарищество|садоводческое\s+товарищество|садовое\s+товарищество)\s+(.+?)(?:\s+' . $street_start . '\b|,|$)/iu',
+			),
+			array(
+				'kind' => 'prefix',
+				'pattern' => '/^\s*(деревня|село|пос[её]лок|станица|слобода|СНТ|ДНП|КП|район|поселение|массив)\s+(.+?)(?:\s+' . $street_start . '\b|,|$)/iu',
+			),
 		);
-		foreach ( $patterns as $pattern ) {
-			if ( preg_match( $pattern, $address, $matches ) ) {
-				$type = trim( (string) $matches[1] );
-				$name = trim( (string) $matches[2] );
+		foreach ( $patterns as $entry ) {
+			if ( preg_match( $entry['pattern'], $address, $matches ) ) {
+				if ( 'suffix' === $entry['kind'] ) {
+					$name = trim( (string) $matches[1] );
+					$type = trim( (string) $matches[2] );
+				} else {
+					$type = trim( (string) $matches[1] );
+					$name = trim( (string) $matches[2] );
+				}
 				$this->add_address_candidate_terms( $terms, $type, $name );
 				break;
 			}
 		}
 
 		return array_slice( array_values( $terms ), 0, 12 );
+	}
+
+	/** @param array<string,string> $terms */
+	private function add_suffix_type_terms( array &$terms, string $raw ): void {
+		$normalized = $this->normalize_text( $raw );
+		if ( ! preg_match( '/^(.+?)\s+(г|д|с|п|рп|гп|пгт|ст|ж д ст)$/u', $normalized, $matches ) ) {
+			return;
+		}
+		$base = trim( (string) $matches[1] );
+		$type = trim( (string) $matches[2] );
+		if ( '' === $base ) {
+			return;
+		}
+		$base = mb_convert_case( $base, MB_CASE_TITLE, 'UTF-8' );
+		$this->add_term( $terms, $base );
+		foreach ( $this->suffix_type_variants( $type, $base ) as $term ) {
+			$this->add_term( $terms, $term );
+		}
+	}
+
+	/** @return array<int,string> */
+	private function suffix_type_variants( string $type, string $base ): array {
+		return match ( $type ) {
+			'г' => array( 'г ' . $base, 'город ' . $base, $base . ' г', $base . ' город' ),
+			'д' => array( 'д ' . $base, 'деревня ' . $base, $base . ' д', $base . ' деревня' ),
+			'с' => array( 'с ' . $base, 'село ' . $base, $base . ' с', $base . ' село' ),
+			'п' => array( 'п ' . $base, 'поселок ' . $base, $base . ' п', $base . ' поселок' ),
+			'рп' => array( 'рп ' . $base, 'рабочий поселок ' . $base, $base . ' рп', $base . ' рабочий поселок' ),
+			'гп' => array( 'гп ' . $base, 'городской поселок ' . $base, $base . ' гп', $base . ' городской поселок' ),
+			'пгт' => array( 'пгт ' . $base, 'поселок городского типа ' . $base, $base . ' пгт' ),
+			'ст', 'ж д ст' => array( 'ст ' . $base, 'станция ' . $base, 'ж/д станция ' . $base, $base . ' ст' ),
+			default => array(),
+		};
 	}
 
 	public function base_name_for_locality( string $value ): string {

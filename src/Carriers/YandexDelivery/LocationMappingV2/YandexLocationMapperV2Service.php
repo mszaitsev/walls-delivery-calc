@@ -58,6 +58,10 @@ final class YandexLocationMapperV2Service {
 				return array( $this->mapping_row( $geo, $territory_candidate['location'], 'mapped', $territory_candidate['confidence'], $territory_candidate['distance_km'], $territory_candidate['matched_by'], $territory_candidate['raw'] ) );
 			}
 
+			$strict_candidate = $this->coordinate_fallback_strict( $geo, $diagnostics );
+			if ( null !== $strict_candidate ) {
+				return array( $this->mapping_row( $geo, $strict_candidate['location'], 'mapped', $strict_candidate['confidence'], $strict_candidate['distance_km'], $strict_candidate['matched_by'], $strict_candidate['raw'] ) );
+			}
 			return array( $this->mapping_row( $geo, array(), 'no_match', 0, null, array(), array_merge( array( 'candidate_count' => 0 ), $diagnostics ) ) );
 		}
 		$candidates = $this->choose_dominant_candidate( $candidates, $geo );
@@ -531,6 +535,131 @@ final class YandexLocationMapperV2Service {
 		}
 
 		return true;
+	}
+	/** @param array<int,array<string,mixed>> $candidates */
+	private function near_exact_type_dominates( array $candidates, float $safe_radius ): bool {
+		if ( count( $candidates ) < 2 ) {
+			return false;
+		}
+		$primary = $candidates[0];
+		$primary_score = (int) ( $primary['type_score'] ?? 0 );
+		$primary_distance = $this->candidate_distance( $primary );
+		if ( $primary_score < 20 || $primary_distance > max( 1.5, $safe_radius + 0.5 ) || $this->has_close_cross_region_tie( $candidates ) ) {
+			return false;
+		}
+		foreach ( array_slice( $candidates, 1 ) as $candidate ) {
+			$score = (int) ( $candidate['type_score'] ?? 0 );
+			$distance = $this->candidate_distance( $candidate );
+			if ( ! ( $score < $primary_score || $distance >= $primary_distance + 5.0 || ( $safe_radius > 0.0 && $distance >= $safe_radius * 2.0 ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/** @param array<string,mixed> $primary @param array<string,mixed> $second */
+	private function same_type_nearest_dominates( array $primary, array $second ): bool {
+		return (int) ( $primary['type_score'] ?? 0 ) === (int) ( $second['type_score'] ?? 0 )
+			&& $this->candidate_distance( $primary ) <= 1.0
+			&& $this->candidate_distance( $second ) >= $this->candidate_distance( $primary ) + 5.0;
+	}
+
+	/** @param array<int,array<string,mixed>> $candidates */
+	private function has_close_cross_region_tie( array $candidates ): bool {
+		$primary = $candidates[0] ?? null;
+		if ( ! is_array( $primary ) ) {
+			return false;
+		}
+		$primary_region = (string) ( $primary['location']['region_name'] ?? '' );
+		$primary_score = (int) ( $primary['type_score'] ?? 0 );
+		foreach ( array_slice( $candidates, 1 ) as $candidate ) {
+			if ( (string) ( $candidate['location']['region_name'] ?? '' ) !== $primary_region && (int) ( $candidate['type_score'] ?? 0 ) === $primary_score && $this->candidate_distance( $candidate ) < 2.0 ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** @param array<string,mixed> $geo @param array<string,mixed> $diagnostics @return array<string,mixed>|null */
+	private function coordinate_fallback_strict( array $geo, array $diagnostics ): ?array {
+		$mapped_regions = is_array( $diagnostics['mapped_regions'] ?? null ) ? $diagnostics['mapped_regions'] : array();
+		if ( array() === $mapped_regions || 'region_not_mapped' === (string) ( $diagnostics['reason'] ?? '' ) || ! is_numeric( $geo['centroid_lat'] ?? null ) || ! is_numeric( $geo['centroid_lon'] ?? null ) ) {
+			return null;
+		}
+		if ( $this->is_unsafe_city_coordinate_fallback( $geo ) ) {
+			return null;
+		}
+		$lat = (float) $geo['centroid_lat'];
+		$lon = (float) $geo['centroid_lon'];
+		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
+		$radius = min( 10.0, max( 3.0, $safe_radius + 2.0 ) );
+		$locations = $this->fetch_nearby_locations_for_territory( $lat, $lon, $mapped_regions, $radius );
+		$nearby = array();
+		foreach ( $locations as $location ) {
+			if ( ! $this->has_valid_location_coordinates( $location ) ) {
+				continue;
+			}
+			$distance = round( $this->distance_km( $lat, $lon, (float) $location['latitude'], (float) $location['longitude'] ), 3 );
+			if ( $distance <= $radius ) {
+				$nearby[] = array( 'location' => $location, 'distance_km' => $distance );
+			}
+		}
+		usort( $nearby, static fn( array $a, array $b ): int => ( (float) $a['distance_km'] <=> (float) $b['distance_km'] ) ?: ( (int) ( $a['location']['id'] ?? 0 ) <=> (int) ( $b['location']['id'] ?? 0 ) ) );
+		$primary = $nearby[0] ?? null;
+		if ( ! is_array( $primary ) || (float) $primary['distance_km'] > 3.0 ) {
+			return null;
+		}
+		$second = $nearby[1] ?? null;
+		$dominant = ! is_array( $second ) || (float) $second['distance_km'] >= (float) $primary['distance_km'] + 5.0 || $this->same_wdc_context( $nearby ) || ( $this->normalizer->detect_locality_type( (string) ( $geo['locality'] ?? '' ) ) === 'station' || $this->is_territory_like_geo( $geo ) );
+		if ( ! $dominant ) {
+			return null;
+		}
+		$effective = $this->normalizer->effective_location_locality( $primary['location'] );
+		$bbox = $this->territory_bounding_box( $lat, $radius );
+		$raw = array_merge( $diagnostics, array(
+			'distance' => (float) $primary['distance_km'],
+			'radius' => $safe_radius,
+			'threshold' => $radius,
+			'candidate_count' => 1,
+			'coordinate_fallback_strict' => true,
+			'coordinate_fallback_radius' => round( $radius, 3 ),
+			'coordinate_fallback_checked' => count( $locations ),
+			'coordinate_fallback_candidates' => count( $nearby ),
+			'coordinate_fallback_reason' => 'strict_nearest_dominates',
+			'territory_fallback' => false,
+			'locality_source' => (string) ( $effective['source'] ?? '' ),
+			'locality_raw' => (string) ( $effective['raw'] ?? '' ),
+			'effective_locality' => (string) ( $effective['value'] ?? '' ),
+			'territory_bbox' => $bbox,
+		) );
+
+		return array(
+			'location' => $primary['location'],
+			'distance_km' => (float) $primary['distance_km'],
+			'confidence' => 70,
+			'matched_by' => array( 'coordinates_strict' ),
+			'raw' => $raw,
+		);
+	}
+
+	/** @param array<string,mixed> $geo */
+	private function is_unsafe_city_coordinate_fallback( array $geo ): bool {
+		$type = $this->normalizer->detect_locality_type( (string) ( $geo['locality'] ?? '' ) );
+		$locality = $this->normalizer->normalize_place( (string) ( $geo['locality'] ?? '' ) );
+		$points = (int) ( $geo['points_count'] ?? 0 );
+		return in_array( $locality, array( 'москва', 'санкт петербург' ), true ) || 'city' === $type || ( 'city' === $type && $points > 3 );
+	}
+
+	/** @param array<int,array{location:array<string,mixed>,distance_km:float}> $nearby */
+	private function same_wdc_context( array $nearby ): bool {
+		$contexts = array();
+		foreach ( $nearby as $item ) {
+			$location = $item['location'];
+			$contexts[] = implode( '|', array( (string) ( $location['region_name'] ?? '' ), (string) ( $location['district_name'] ?? '' ), (string) ( $location['city_name'] ?? '' ) ) );
+		}
+		return 1 === count( array_unique( $contexts ) );
 	}
 
 	/** @param array<int,array<string,mixed>> $candidates @return array<int,array<string,mixed>> */
