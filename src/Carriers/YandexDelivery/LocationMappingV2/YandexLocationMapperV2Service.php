@@ -108,6 +108,27 @@ final class YandexLocationMapperV2Service {
 		$diagnostics['candidate_count_before_filters'] = $diagnostics['region_before_filters'];
 		$diagnostics['candidate_count_after_filters'] = count( $candidates );
 		if ( array() === $candidates ) {
+			$address_terms = $this->address_locality_terms( $geo );
+			$diagnostics['address_locality_terms'] = $address_terms;
+			if ( array() !== $address_terms ) {
+				$diagnostics['address_locality_used'] = true;
+				$diagnostics['candidate_search_mode'] = 'address_locality_fallback';
+				$address_rows = $this->fetch_exact_locations_by_regions( $mapped_regions, $address_terms );
+				$diagnostics['exact_region_rows'] = max( (int) $diagnostics['exact_region_rows'], count( $address_rows ) );
+				$candidates = $this->build_address_candidate_rows( $address_rows, $geo, $address_terms, $diagnostics );
+				if ( array() === $candidates ) {
+					$address_rows = array() !== $sql_candidates ? $sql_candidates : $this->fetch_locations_by_regions( $mapped_regions );
+					$diagnostics['regional_scan_rows'] = max( (int) $diagnostics['regional_scan_rows'], count( $address_rows ) );
+					$candidates = $this->build_address_candidate_rows( $address_rows, $geo, $address_terms, $diagnostics );
+				}
+				$diagnostics['regional_scan_candidates'] = max( (int) $diagnostics['regional_scan_candidates'], count( $candidates ) );
+			}
+		}
+		if ( array() !== $candidates ) {
+			$diagnostics['region_after_filters'] = count( $candidates );
+			$diagnostics['candidate_count_after_filters'] = count( $candidates );
+		}
+		if ( array() === $candidates ) {
 			$diagnostics['reason'] = 'no_locality_match';
 		}
 		$diagnostics['dedupe_before'] = count( $candidates );
@@ -120,8 +141,8 @@ final class YandexLocationMapperV2Service {
 	}
 
 	/** @param array<int,array<string,mixed>> $locations @param array<string,mixed> $geo @param array<int,string> $search_terms @param array<string,mixed> $diagnostics @return array<int,array<string,mixed>> */
-	private function build_candidate_rows( array $locations, array $geo, string $locality, array $search_terms, array $diagnostics ): array {
-		$locality_raw = (string) ( $geo['locality'] ?? '' );
+	private function build_candidate_rows( array $locations, array $geo, string $locality, array $search_terms, array $diagnostics, ?string $locality_raw_override = null ): array {
+		$locality_raw = null !== $locality_raw_override ? $locality_raw_override : (string) ( $geo['locality'] ?? '' );
 		$centroid_lat = is_numeric( $geo['centroid_lat'] ?? null ) ? (float) $geo['centroid_lat'] : null;
 		$centroid_lon = is_numeric( $geo['centroid_lon'] ?? null ) ? (float) $geo['centroid_lon'] : null;
 		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
@@ -173,6 +194,74 @@ final class YandexLocationMapperV2Service {
 		}
 
 		return $candidates;
+	}
+	/** @param array<int,array<string,mixed>> $locations @param array<string,mixed> $geo @param array<int,string> $address_terms @param array<string,mixed> $diagnostics @return array<int,array<string,mixed>> */
+	private function build_address_candidate_rows( array $locations, array $geo, array $address_terms, array $diagnostics ): array {
+		$candidates = array();
+		$seen = array();
+		foreach ( $address_terms as $term ) {
+			$locality = $this->normalizer->normalize_place( $term );
+			if ( '' === $locality ) {
+				continue;
+			}
+			$rows = $this->build_candidate_rows( $locations, $geo, $locality, $address_terms, $diagnostics, $term );
+			foreach ( $rows as $row ) {
+				$id = (int) ( $row['location']['id'] ?? 0 );
+				if ( $id > 0 && isset( $seen[ $id ] ) ) {
+					continue;
+				}
+				$row['raw']['address_locality_used'] = true;
+				$row['raw']['address_locality_term'] = $term;
+				$seen[ $id ] = true;
+				$candidates[] = $row;
+			}
+		}
+
+		return $candidates;
+	}
+
+	/** @param array<string,mixed> $geo @return array<int,string> */
+	private function address_locality_terms( array $geo ): array {
+		$terms = array();
+		$addresses = array();
+		$first = trim( (string) ( $geo['first_full_address'] ?? '' ) );
+		if ( '' !== $first ) {
+			$addresses[] = $first;
+		}
+		foreach ( $this->sample_point_addresses( $geo ) as $address ) {
+			$addresses[] = $address;
+		}
+		foreach ( array_slice( array_values( array_unique( $addresses ) ), 0, 6 ) as $address ) {
+			foreach ( $this->normalizer->extract_locality_candidates_from_full_address( $address ) as $term ) {
+				$key = mb_strtolower( $term, 'UTF-8' );
+				$terms[ $key ] = $term;
+			}
+		}
+
+		return array_values( $terms );
+	}
+
+	/** @param array<string,mixed> $geo @return array<int,string> */
+	private function sample_point_addresses( array $geo ): array {
+		$json = (string) ( $geo['sample_points_json'] ?? '' );
+		if ( '' === trim( $json ) ) {
+			return array();
+		}
+		$decoded = json_decode( $json, true );
+		if ( ! is_array( $decoded ) ) {
+			return array();
+		}
+		$addresses = array();
+		foreach ( $decoded as $item ) {
+			if ( is_array( $item ) && '' !== trim( (string) ( $item['full_address'] ?? '' ) ) ) {
+				$addresses[] = trim( (string) $item['full_address'] );
+			}
+			if ( count( $addresses ) >= 5 ) {
+				break;
+			}
+		}
+
+		return $addresses;
 	}
 
 	/** @param array<int,array<string,mixed>> $candidates @return array<int,array<string,mixed>> */
@@ -258,6 +347,8 @@ final class YandexLocationMapperV2Service {
 			'territory_fallback' => false,
 			'exact_region_rows' => 0,
 			'exact_candidates' => 0,
+			'address_locality_terms' => array(),
+			'address_locality_used' => false,
 			'regional_scan_rows' => 0,
 			'regional_scan_candidates' => 0,
 		);
@@ -284,7 +375,19 @@ final class YandexLocationMapperV2Service {
 		$second_distance = $this->candidate_distance( $second );
 		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
 		$reason = '';
-		if ( $second_distance - $primary_distance >= 5.0 ) {
+		$local_accept_distance = max( $safe_radius + 1.0, 2.0 );
+		$threshold = max( 50.0, $safe_radius + 10.0 );
+		$primary_type_score = (int) ( $primary['type_score'] ?? 0 );
+		$second_type_score = (int) ( $second['type_score'] ?? 0 );
+		if ( $primary_type_score > $second_type_score && $primary_distance <= $local_accept_distance && $second_distance < $primary_distance ) {
+			$reason = 'near_exact_type_beats_closer_wrong_type';
+		} elseif ( $primary_type_score > $second_type_score && $primary_distance <= $local_accept_distance && $second_distance <= $threshold ) {
+			$reason = 'type_score_priority_close';
+		} elseif ( $safe_radius > 0.0 && $primary_distance <= $local_accept_distance && $second_distance > $safe_radius * 2.0 ) {
+			$reason = 'far_second_same_type';
+		} elseif ( $safe_radius > 0.0 && $primary_type_score > $second_type_score && $primary_distance <= $safe_radius ) {
+			$reason = 'large_radius_type_priority';
+		} elseif ( $second_distance - $primary_distance >= 5.0 ) {
 			$reason = 'distance_gap';
 		} elseif ( $safe_radius > 0.0 && $second_distance >= $safe_radius * 2.0 ) {
 			$reason = 'safe_radius_x2';
@@ -319,6 +422,7 @@ final class YandexLocationMapperV2Service {
 		foreach ( $candidates as &$candidate ) {
 			$candidate['raw']['dominance_auto_pick'] = false;
 			$candidate['raw']['dominance_reason'] = 'ambiguous';
+			$candidate['raw']['ambiguous_reason'] = 'similar_candidates';
 		}
 		unset( $candidate );
 
@@ -497,6 +601,7 @@ final class YandexLocationMapperV2Service {
 				'territory_radius_km' => round( $territory_radius, 3 ),
 				'territory_bbox' => $territory_bbox,
 				'territory_candidates_checked' => count( $locations ),
+				'territory_checked_candidates' => count( $locations ),
 				'locality_source' => (string) ( $effective['source'] ?? '' ),
 				'locality_raw' => (string) ( $effective['raw'] ?? '' ),
 				'effective_locality' => (string) ( $effective['value'] ?? '' ),
@@ -520,10 +625,10 @@ final class YandexLocationMapperV2Service {
 
 	/** @param array<string,mixed> $geo */
 	private function is_territory_like_geo( array $geo ): bool {
-		$value = mb_strtolower( str_replace( 'ё', 'е', (string) ( $geo['locality'] ?? '' ) . ' ' . (string) ( $geo['first_full_address'] ?? '' ) ), 'UTF-8' );
+		$value = mb_strtolower( str_replace( 'ё', 'е', (string) ( $geo['locality'] ?? '' ) . ' ' . (string) ( $geo['first_full_address'] ?? '' ) . ' ' . implode( ' ', $this->sample_point_addresses( $geo ) ) ), 'UTF-8' );
 		$value = preg_replace( '/[.,()]+/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
-		foreach ( array( 'садоводческое товарищество', 'садовое товарищество', 'товарищество собственников', 'коттеджный поселок', 'муниципальный округ', 'городской округ', 'производственно административная зона', 'промышленная зона', 'садоводство', 'поселение', 'промзона', 'территория', 'район', 'снт', 'днп', 'тлпх', 'кп', 'тер ', 'массив', 'м в' ) as $needle ) {
+		foreach ( array( 'садоводческое некоммерческое товарищество', 'садоводческое товарищество', 'садовое товарищество', 'товарищество собственников', 'коттеджный поселок', 'муниципальный округ', 'городской округ', 'производственно административная зона', 'промышленная зона', 'садоводство', 'поселение', 'горбольницы', 'фабрики', 'санатория', 'совхоза', 'опытного хозяйства', 'промзона', 'территория', 'район', 'снт', 'днп', 'тлпх', 'кп', 'тер ', 'массив', 'м в' ) as $needle ) {
 			if ( str_contains( $value, $needle ) ) {
 				return true;
 			}
