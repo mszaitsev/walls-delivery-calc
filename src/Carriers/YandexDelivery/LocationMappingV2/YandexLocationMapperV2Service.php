@@ -9,8 +9,9 @@ final class YandexLocationMapperV2Service {
 	private object $wpdb;
 	private YandexLocationMappingV2NameNormalizer $normalizer;
 	private YandexRegionMappingV2Repository $region_mapping;
+	private ?YandexLocationManualOverrideV2Repository $manual_overrides;
 
-	public function __construct( private YandexLocationMappingV2Repository $repository, ?object $wpdb = null, ?YandexLocationMappingV2NameNormalizer $normalizer = null, ?YandexRegionMappingV2Repository $region_mapping = null ) {
+	public function __construct( private YandexLocationMappingV2Repository $repository, ?object $wpdb = null, ?YandexLocationMappingV2NameNormalizer $normalizer = null, ?YandexRegionMappingV2Repository $region_mapping = null, ?YandexLocationManualOverrideV2Repository $manual_overrides = null ) {
 		$db = $wpdb;
 		if ( null === $db ) {
 			global $wpdb;
@@ -19,6 +20,7 @@ final class YandexLocationMapperV2Service {
 		$this->wpdb = $db;
 		$this->normalizer = $normalizer ?? new YandexLocationMappingV2NameNormalizer();
 		$this->region_mapping = $region_mapping ?? new YandexRegionMappingV2Repository( $this->wpdb );
+		$this->manual_overrides = $manual_overrides;
 	}
 
 	/** @return array{processed_geo_ids:int,mapped:int,needs_review:int,no_match:int,saved:int,errors:int,next_offset:int,done:bool} */
@@ -50,7 +52,11 @@ final class YandexLocationMapperV2Service {
 		if ( $geo_id <= 0 ) {
 			return array();
 		}
-		$diagnostics = array();
+		$manual_decision = $this->manual_override_decision( $geo );
+		if ( isset( $manual_decision['rows'] ) && is_array( $manual_decision['rows'] ) ) {
+			return $manual_decision['rows'];
+		}
+		$diagnostics = is_array( $manual_decision['diagnostics'] ?? null ) ? $manual_decision['diagnostics'] : array();
 		$candidates = $this->find_candidates( $geo, $diagnostics );
 		if ( array() === $candidates ) {
 			$territory_candidate = $this->territory_coordinate_fallback( $geo, $diagnostics );
@@ -74,13 +80,88 @@ final class YandexLocationMapperV2Service {
 		return $rows;
 	}
 
+
+	/** @param array<string,mixed> $geo @return array{rows?:array<int,array<string,mixed>>,diagnostics?:array<string,mixed>} */
+	private function manual_override_decision( array $geo ): array {
+		if ( ! $this->manual_overrides instanceof YandexLocationManualOverrideV2Repository ) {
+			return array( 'diagnostics' => array() );
+		}
+		$geo_id = (int) ( $geo['yandex_geo_id'] ?? 0 );
+		$region = (string) ( $geo['region'] ?? '' );
+		$locality = (string) ( $geo['locality'] ?? '' );
+		$diagnostics = array();
+		$geo_identity = $this->manual_overrides->find_active_for_geo_identity( $geo_id, $region, $locality );
+		if ( 1 === count( $geo_identity ) ) {
+			return $this->manual_override_rows( $geo, $geo_identity[0], 'geo_identity', false, null );
+		}
+		if ( count( $geo_identity ) > 1 ) {
+			return array( 'rows' => array( $this->mapping_row( $geo, array(), 'needs_review', 0, null, array(), array( 'manual_override' => false, 'mapping_source' => 'manual_override', 'reason' => 'manual_override_identity_ambiguous', 'manual_override_match' => 'geo_identity', 'manual_override_count' => count( $geo_identity ) ) ) ) );
+		}
+
+		$same_geo = $this->manual_overrides->find_active_for_geo_id( $geo_id );
+		if ( array() !== $same_geo ) {
+			$candidate = $same_geo[0];
+			$diagnostics['manual_override_identity_mismatch'] = true;
+			$diagnostics['manual_override_candidate_id'] = (int) ( $candidate['id'] ?? 0 );
+			$diagnostics['manual_override_expected_region'] = (string) ( $candidate['yandex_region'] ?? '' );
+			$diagnostics['manual_override_expected_locality'] = (string) ( $candidate['yandex_locality'] ?? '' );
+		}
+
+		$logical_identity = $this->manual_overrides->find_active_for_identity( $region, $locality );
+		if ( 1 === count( $logical_identity ) ) {
+			$override = $logical_identity[0];
+			$previous_geo_id = (int) ( $override['yandex_geo_id'] ?? 0 );
+			return $this->manual_override_rows( $geo, $override, 'region_locality_identity', $previous_geo_id !== $geo_id, $previous_geo_id );
+		}
+		if ( count( $logical_identity ) > 1 ) {
+			return array( 'rows' => array( $this->mapping_row( $geo, array(), 'needs_review', 0, null, array(), array_merge( $diagnostics, array( 'manual_override' => false, 'mapping_source' => 'manual_override', 'reason' => 'manual_override_identity_ambiguous', 'manual_override_match' => 'region_locality_identity', 'manual_override_count' => count( $logical_identity ) ) ) ) ) );
+		}
+
+		return array( 'diagnostics' => $diagnostics );
+	}
+
+	/** @param array<string,mixed> $geo @param array<string,mixed> $override @return array{rows:array<int,array<string,mixed>>} */
+	private function manual_override_rows( array $geo, array $override, string $match, bool $geo_id_changed, ?int $previous_geo_id ): array {
+		$location_id = (int) ( $override['location_id'] ?? 0 );
+		$location = $this->fetch_location_by_id( $location_id );
+		$raw = array(
+			'manual_override' => true,
+			'mapping_source' => 'manual_override',
+			'manual_override_id' => (int) ( $override['id'] ?? 0 ),
+			'manual_override_match' => $match,
+			'manual_override_geo_id_changed' => $geo_id_changed,
+			'previous_yandex_geo_id' => $previous_geo_id,
+			'manual_override_can_review' => true,
+			'reason' => 'manual_override_applied',
+			'matched_by' => array( 'manual_override' ),
+		);
+		if ( array() === $location ) {
+			$raw['manual_override'] = false;
+			$raw['reason'] = 'manual_override_location_missing';
+			$raw['manual_override_location_id'] = $location_id;
+			return array( 'rows' => array( $this->mapping_row( $geo, array(), 'no_match', 0, null, array(), $raw ) ) );
+		}
+		$distance = null;
+		if ( is_numeric( $geo['centroid_lat'] ?? null ) && is_numeric( $geo['centroid_lon'] ?? null ) && $this->has_valid_location_coordinates( $location ) ) {
+			$distance = round( $this->distance_km( (float) $geo['centroid_lat'], (float) $geo['centroid_lon'], (float) $location['latitude'], (float) $location['longitude'] ), 3 );
+		}
+		$effective = $this->normalizer->effective_location_locality( $location );
+		$raw['distance'] = $distance;
+		$raw['locality_source'] = (string) ( $effective['source'] ?? '' );
+		$raw['locality_raw'] = (string) ( $effective['raw'] ?? '' );
+		$raw['effective_locality'] = (string) ( $effective['value'] ?? '' );
+		$raw['wdc_region_name'] = (string) ( $location['region_name'] ?? '' );
+
+		return array( 'rows' => array( $this->mapping_row( $geo, $location, 'mapped', 120, $distance, array( 'manual_override' ), $raw, true ) ) );
+	}
 	/** @param array<string,mixed> $geo @param array<string,mixed> $diagnostics @return array<int,array<string,mixed>> */
 	private function find_candidates( array $geo, array &$diagnostics = array() ): array {
+		$incoming_diagnostics = $diagnostics;
 		$locality_raw = (string) ( $geo['locality'] ?? '' );
 		$locality = $this->normalizer->normalize_place( $locality_raw );
 		$search_terms = $this->normalizer->search_terms_for_locality( $locality_raw );
 		$mapped_regions = $this->region_mapping->find_wdc_regions_for_yandex( (string) ( $geo['region'] ?? '' ) );
-		$diagnostics = $this->default_diagnostics( $search_terms, $mapped_regions, (string) ( $geo['region'] ?? '' ) );
+		$diagnostics = array_merge( $this->default_diagnostics( $search_terms, $mapped_regions, (string) ( $geo['region'] ?? '' ) ), $incoming_diagnostics );
 		if ( array() === $mapped_regions ) {
 			$diagnostics['reason'] = 'region_not_mapped';
 			return array();
@@ -883,6 +964,23 @@ final class YandexLocationMapperV2Service {
 		);
 	}
 
+
+	/** @return array<string,mixed> */
+	private function fetch_location_by_id( int $location_id ): array {
+		if ( $location_id <= 0 ) {
+			return array();
+		}
+		if ( $this->has_test_locations() ) {
+			foreach ( $this->wpdb->wdc_locations as $location ) {
+				if ( (int) ( $location['id'] ?? 0 ) === $location_id ) {
+					return $location;
+				}
+			}
+			return array();
+		}
+		$row = $this->wpdb->get_row( $this->wpdb->prepare( 'SELECT * FROM ' . $this->locations_table_name() . ' WHERE id = %d AND active = 1 LIMIT 1', $location_id ), ARRAY_A );
+		return is_array( $row ) ? $row : array();
+	}
 	/** @return array<int,array<string,mixed>> */
 	private function fetch_geo_rows( int $limit, int $offset ): array {
 		if ( $this->has_test_geo_rows() ) {

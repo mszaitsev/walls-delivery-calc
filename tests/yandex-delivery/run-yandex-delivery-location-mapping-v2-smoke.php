@@ -12,6 +12,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMapper
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2NameNormalizer;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationManualOverrideV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository;
 
 function yd_location_mapping_v2_assert( bool $condition, string $message ): void { if ( ! $condition ) { throw new RuntimeException( $message ); } }
@@ -25,6 +26,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $prefix = 'wp_';
 		public array $yandex_delivery_geo_v2 = array();
 		public array $yandex_location_mapping_v2 = array();
+		public array $yandex_location_manual_overrides_v2 = array();
 		public array $yandex_region_mapping_v2 = array();
 		public array $wdc_locations = array();
 		public function prepare( string $query, mixed ...$args ): string { foreach ( $args as $arg ) { $query = preg_replace( '/%[sdf]/', is_numeric( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query; } return $query; }
@@ -220,6 +222,11 @@ $GLOBALS['wpdb']->wdc_locations = array(
 );
 $GLOBALS['wpdb']->yandex_region_mapping_v2 = array();
 $region_repository = new YandexRegionMappingV2Repository( $GLOBALS['wpdb'] );
+$manual_override_repository = new YandexLocationManualOverrideV2Repository( $GLOBALS['wpdb'], $normalizer );
+$manual_schema = $manual_override_repository->schema();
+foreach ( array( 'wp_wdc_yandex_location_manual_overrides_v2', 'yandex_geo_id bigint(20) unsigned NOT NULL', 'yandex_region_norm varchar(255) NOT NULL', 'yandex_locality_norm varchar(255) NOT NULL', 'location_id bigint(20) unsigned NOT NULL', 'KEY yandex_identity (yandex_region_norm, yandex_locality_norm)', 'KEY status (status)' ) as $needle ) {
+	yd_location_mapping_v2_assert( str_contains( $manual_schema, $needle ), 'Manual override schema must contain: ' . $needle );
+}
 foreach ( array(
 	'Новосибирская область' => array( 'Новосибирская область' ),
 	'Москва' => array( 'Москва' ),
@@ -389,6 +396,34 @@ yd_location_mapping_v2_assert( count( $recent_no_match ) >= 5 && isset( $recent_
 $stats = $repository->statistics();
 yd_location_mapping_v2_assert( 48 === $stats['total'] && 33 === $stats['mapped'] && 8 === $stats['needs_review'] && 7 === $stats['no_match'] && 1 === $stats['no_match_region_not_mapped'] && 6 === $stats['no_match_no_locality_match'] && 4 === $stats['territory_fallback'] && null !== $stats['avg_confidence'] && null !== $stats['avg_distance'] && isset( $stats['mapped_by_dominance']['near_exact_type_dominates'] ) && isset( $stats['mapped_by_dominance']['same_type_nearest_dominates'] ), 'Repository statistics must count statuses and averages.' );
 
+$manual_mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'], null, $region_repository, $manual_override_repository );
+$GLOBALS['wpdb']->yandex_location_manual_overrides_v2 = array();
+$manual_override_repository->upsert_active_override( 9000, 'Новосибирская область', 'Ручной город', 10, 'geo identity' );
+$manual_rows = $manual_mapper->map_geo_row( $geo( 9000, 'Новосибирская область', 'Ручной город', 55.0302, 82.9204 ) );
+$manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
+$manual_matched = json_decode( (string) $manual_rows[0]['matched_by_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $manual_rows ) && 'mapped' === $manual_rows[0]['status'] && 10 === (int) $manual_rows[0]['location_id'] && true === $manual_raw['manual_override'] && 'geo_identity' === $manual_raw['manual_override_match'] && in_array( 'manual_override', $manual_matched, true ), 'Manual override must map exact geo identity before normal search.' );
+
+$manual_override_repository->upsert_active_override( 9001, 'Новосибирская область', 'Логический город', 20, 'logical identity' );
+$manual_rows = $manual_mapper->map_geo_row( $geo( 9002, 'Новосибирская область', 'Логический город', 54.7582, 83.1072 ) );
+$manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'mapped' === $manual_rows[0]['status'] && 20 === (int) $manual_rows[0]['location_id'] && 'region_locality_identity' === $manual_raw['manual_override_match'] && true === $manual_raw['manual_override_geo_id_changed'] && 9001 === (int) $manual_raw['previous_yandex_geo_id'], 'Manual override must survive geo_id changes when region/locality identity is the same.' );
+
+$manual_override_repository->upsert_active_override( 9003, 'Новосибирская область', 'Старый город', 10, 'identity mismatch' );
+$manual_rows = $manual_mapper->map_geo_row( $geo( 9003, 'Новосибирская область', 'Новый город', 55.0302, 82.9204 ) );
+$manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'mapped' !== $manual_rows[0]['status'] && true === $manual_raw['manual_override_identity_mismatch'] && 'Старый город' === $manual_raw['manual_override_expected_locality'], 'Manual override must not apply when same geo_id has different locality identity.' );
+
+$manual_override_repository->upsert_active_override( 9004, 'Новосибирская область', 'Двойной город', 10, 'first duplicate' );
+$manual_override_repository->upsert_active_override( 9005, 'Новосибирская область', 'Двойной город', 20, 'second duplicate' );
+$manual_rows = $manual_mapper->map_geo_row( $geo( 9006, 'Новосибирская область', 'Двойной город', 55.0302, 82.9204 ) );
+$manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'needs_review' === $manual_rows[0]['status'] && 'manual_override_identity_ambiguous' === $manual_raw['reason'], 'Ambiguous logical manual override identity must not auto-apply.' );
+
+$manual_override_repository->upsert_active_override( 9007, 'Новосибирская область', 'Битый город', 999999, 'missing location' );
+$manual_rows = $manual_mapper->map_geo_row( $geo( 9007, 'Новосибирская область', 'Битый город', 55.0302, 82.9204 ) );
+$manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 'no_match' === $manual_rows[0]['status'] && 'manual_override_location_missing' === $manual_raw['reason'], 'Manual override with missing WDC location must not apply.' );
 $runner_repository = new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] );
 $runner = new YandexLocationMappingV2Runner( new YandexLocationMapperV2Service( $runner_repository, $GLOBALS['wpdb'], null, $region_repository ), $runner_repository );
 $state = $runner->start();
@@ -416,12 +451,14 @@ $normalizer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/C
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Маппинг geoId → населённые пункты' ) && str_contains( $admin_source, 'Построить сопоставление' ), 'Admin v2 tab must contain location mapping v2 UI.' );
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'wdc_yandex_location_mapping_v2_start' ) && str_contains( $admin_source, 'wdc_yandex_location_mapping_v2_step' ), 'Admin must register location mapping v2 AJAX actions.' );
 yd_location_mapping_v2_assert( str_contains( $js_source, 'data-wdc-yandex-location-mapping-v2' ) && str_contains( $js_source, 'wdc_yandex_location_mapping_v2_step' ) && str_contains( $js_source, "runningStatus: 'mapping'" ), 'JS must contain independent location mapping v2 loop.' );
-yd_location_mapping_v2_assert( str_contains( $plugin_source, 'YandexLocationMappingV2Repository::class' ) && str_contains( $plugin_source, 'YandexLocationMapperV2Service::class' ) && str_contains( $plugin_source, 'YandexLocationMappingV2Runner::class' ) && str_contains( $plugin_source, 'YandexRegionMappingV2Repository::class' ), 'Plugin DI must register location mapping v2 services.' );
+yd_location_mapping_v2_assert( str_contains( $plugin_source, 'YandexLocationMappingV2Repository::class' ) && str_contains( $plugin_source, 'YandexLocationMapperV2Service::class' ) && str_contains( $plugin_source, 'YandexLocationMappingV2Runner::class' ) && str_contains( $plugin_source, 'YandexLocationManualOverrideV2Repository::class' ) && str_contains( $plugin_source, 'YandexRegionMappingV2Repository::class' ), 'Plugin DI must register location mapping v2 services.' );
 yd_location_mapping_v2_assert( ! str_contains( $mapper_source, 'locationDetect' ) && ! str_contains( $mapper_source, 'YandexDeliveryApiClient' ) && ! str_contains( $mapper_source, '/api/' ), 'Location mapping v2 mapper must stay offline and not call Yandex API.' );
-yd_location_mapping_v2_assert( str_contains( $mapper_source, 'is_territory_like_geo' ) && str_contains( $mapper_source, 'region_mapping_exact_first' ) && str_contains( $mapper_source, 'territory_fallback_reason' ) && str_contains( $mapper_source, 'territory_bbox' ) && str_contains( $mapper_source, 'address_locality_terms' ) && str_contains( $mapper_source, 'coordinate_fallback_strict' ) && str_contains( $mapper_source, 'ambiguous_reason' ) && str_contains( $mapper_source, 'find_wdc_regions_for_yandex' ) && str_contains( $mapper_source, 'fetch_locations_by_regions' ) && str_contains( $mapper_source, 'region_name IN' ) && str_contains( $mapper_source, 'candidate_search_mode' ) && str_contains( $mapper_source, 'region_mapping' ) && ! str_contains( $mapper_source, 'region_name LIKE' ) && ! str_contains( $mapper_source, 'normalize_region' ) && ! str_contains( $mapper_source, 'regions_compatible' ) && ! str_contains( $mapper_source, 'fetch_exact_location_candidates' ) && ! str_contains( $mapper_source, 'fetch_location_candidates' ) && ! str_contains( $mapper_source, 'broad_fallback' ) && str_contains( $mapper_source, 'effective_location_locality' ) && ! str_contains( $mapper_source, 'location_locality_variants' ) && ! str_contains( $mapper_source, 'matching_location_locality' ) && str_contains( $mapper_source, 'choose_dominant_candidate' ) && str_contains( $mapper_source, 'dominance_rule' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'dedupe_candidates' ) && str_contains( $mapper_source, 'territory_coordinate_fallback' ) && str_contains( $mapper_source, 'detect_locality_type' ) && str_contains( $mapper_source, 'type_match_score' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'rejected_candidates' ) && str_contains( $mapper_source, 'locality_source' ) && str_contains( $mapper_source, 'locality_raw' ) && str_contains( $mapper_source, 'effective_locality' ), 'Mapper source must use region mapping, dedupe, territorial fallback, and must not use old region heuristics.' );
+yd_location_mapping_v2_assert( str_contains( $mapper_source, 'manual_override_decision' ) && str_contains( $mapper_source, 'manual_override_identity_mismatch' ) && str_contains( $mapper_source, 'manual_override_applied' ) && str_contains( $mapper_source, 'is_territory_like_geo' ) && str_contains( $mapper_source, 'region_mapping_exact_first' ) && str_contains( $mapper_source, 'territory_fallback_reason' ) && str_contains( $mapper_source, 'territory_bbox' ) && str_contains( $mapper_source, 'address_locality_terms' ) && str_contains( $mapper_source, 'coordinate_fallback_strict' ) && str_contains( $mapper_source, 'ambiguous_reason' ) && str_contains( $mapper_source, 'find_wdc_regions_for_yandex' ) && str_contains( $mapper_source, 'fetch_locations_by_regions' ) && str_contains( $mapper_source, 'region_name IN' ) && str_contains( $mapper_source, 'candidate_search_mode' ) && str_contains( $mapper_source, 'region_mapping' ) && ! str_contains( $mapper_source, 'region_name LIKE' ) && ! str_contains( $mapper_source, 'normalize_region' ) && ! str_contains( $mapper_source, 'regions_compatible' ) && ! str_contains( $mapper_source, 'fetch_exact_location_candidates' ) && ! str_contains( $mapper_source, 'fetch_location_candidates' ) && ! str_contains( $mapper_source, 'broad_fallback' ) && str_contains( $mapper_source, 'effective_location_locality' ) && ! str_contains( $mapper_source, 'location_locality_variants' ) && ! str_contains( $mapper_source, 'matching_location_locality' ) && str_contains( $mapper_source, 'choose_dominant_candidate' ) && str_contains( $mapper_source, 'dominance_rule' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'dedupe_candidates' ) && str_contains( $mapper_source, 'territory_coordinate_fallback' ) && str_contains( $mapper_source, 'detect_locality_type' ) && str_contains( $mapper_source, 'type_match_score' ) && str_contains( $mapper_source, 'dominance_auto_pick' ) && str_contains( $mapper_source, 'rejected_candidates' ) && str_contains( $mapper_source, 'locality_source' ) && str_contains( $mapper_source, 'locality_raw' ) && str_contains( $mapper_source, 'effective_locality' ), 'Mapper source must use region mapping, manual overrides, dedupe, territorial fallback, and must not use old region heuristics.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( __FILE__ ), 'станица Выселки' ) && str_contains( $normalizer_source, 'поселок при железнодорожной станции' ) && str_contains( $normalizer_source, 'is_territorial_like' ) && str_contains( $normalizer_source, 'городской поселок' ) && str_contains( $normalizer_source, 'железнодорожная станция' ) && str_contains( $normalizer_source, 'without_parentheses' ), 'Normalizer source must contain new locality type and territorial helpers.' );
+yd_location_mapping_v2_assert( str_contains( $admin_source, 'Ручные override маппинга Яндекс v2' ) && str_contains( $admin_source, 'save_yandex_location_manual_override_v2' ) && str_contains( $admin_source, 'deactivate_yandex_location_manual_override_v2' ), 'Admin UI must render manual override controls.' );
 yd_location_mapping_v2_assert( str_contains( $admin_source, 'Последние no_match' ) && str_contains( $admin_source, 'sql_search_terms' ), 'Admin UI must render recent no_match diagnostics.' );
-yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_no_match' ), 'Repository must expose find_recent_no_match.' );
+yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_no_match' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMappingV2Repository.php' ), 'find_recent_review_items' ), 'Repository must expose recent no_match and review diagnostics.' );
+yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationManualOverrideV2Repository.php' ), 'find_active_for_geo_identity' ) && str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0040_create_yandex_location_manual_overrides_v2.php' ), 'YandexLocationManualOverrideV2Repository' ), 'Manual override repository and migration must exist.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0038_create_yandex_location_mapping_v2.php' ), 'YandexLocationMappingV2Repository' ), 'Migration 0038 must create mapping v2 schema via repository.' );
 
 echo "Yandex Delivery location mapping v2 smoke OK\n";

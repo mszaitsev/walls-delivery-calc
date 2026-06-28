@@ -70,6 +70,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnrichmentRunner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnrichmentService;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMapperV2Service;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationManualOverrideV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository;
@@ -323,10 +324,11 @@ final class Plugin {
 		$this->container->register( YandexDeliveryGeoV2BuilderService::class, fn(): YandexDeliveryGeoV2BuilderService => new YandexDeliveryGeoV2BuilderService( $this->container->get( YandexDeliveryGeoV2Repository::class ) ) );
 		$this->container->register( YandexDeliveryGeoV2BuilderRunnerService::class, fn(): YandexDeliveryGeoV2BuilderRunnerService => new YandexDeliveryGeoV2BuilderRunnerService( $this->container->get( YandexDeliveryGeoV2BuilderService::class ) ) );
 		$this->container->register( YandexLocationMappingV2Repository::class, fn(): YandexLocationMappingV2Repository => new YandexLocationMappingV2Repository() );
+		$this->container->register( YandexLocationManualOverrideV2Repository::class, fn(): YandexLocationManualOverrideV2Repository => new YandexLocationManualOverrideV2Repository() );
 		$this->container->register( YandexRegionMappingV2Repository::class, fn(): YandexRegionMappingV2Repository => new YandexRegionMappingV2Repository() );
 		$this->container->register( YandexGeoV2RegionEnrichmentService::class, fn(): YandexGeoV2RegionEnrichmentService => new YandexGeoV2RegionEnrichmentService( $this->container->get( YandexDeliveryGeoV2Repository::class ), null, null, $this->container->get( YandexRegionMappingV2Repository::class ) ) );
 		$this->container->register( YandexGeoV2RegionEnrichmentRunner::class, fn(): YandexGeoV2RegionEnrichmentRunner => new YandexGeoV2RegionEnrichmentRunner( $this->container->get( YandexGeoV2RegionEnrichmentService::class ), $this->container->get( YandexDeliveryGeoV2Repository::class ) ) );
-		$this->container->register( YandexLocationMapperV2Service::class, fn(): YandexLocationMapperV2Service => new YandexLocationMapperV2Service( $this->container->get( YandexLocationMappingV2Repository::class ), null, null, $this->container->get( YandexRegionMappingV2Repository::class ) ) );
+		$this->container->register( YandexLocationMapperV2Service::class, fn(): YandexLocationMapperV2Service => new YandexLocationMapperV2Service( $this->container->get( YandexLocationMappingV2Repository::class ), null, null, $this->container->get( YandexRegionMappingV2Repository::class ), $this->container->get( YandexLocationManualOverrideV2Repository::class ) ) );
 		$this->container->register( YandexLocationMappingV2Runner::class, fn(): YandexLocationMappingV2Runner => new YandexLocationMappingV2Runner( $this->container->get( YandexLocationMapperV2Service::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
 		$this->container->register( YandexDeliveryGeoMappingRepository::class, fn(): YandexDeliveryGeoMappingRepository => new YandexDeliveryGeoMappingRepository() );
 		$this->container->register( YandexDeliveryGeoAnalysisService::class, fn(): YandexDeliveryGeoAnalysisService => new YandexDeliveryGeoAnalysisService( $this->container->get( LocationRepository::class ) ) );
@@ -694,6 +696,7 @@ final class Plugin {
 				$this->container->get( YandexDeliveryGeoV2BuilderRunnerService::class ),
 				$this->container->get( YandexLocationMappingV2Repository::class ),
 				$this->container->get( YandexLocationMappingV2Runner::class ),
+				$this->container->get( YandexLocationManualOverrideV2Repository::class ),
 				$this->container->get( YandexRegionMappingV2Repository::class ),
 				$this->container->get( YandexGeoV2RegionEnrichmentRunner::class ),
 				$this->container->get( YandexDeliveryGeoMappingRepository::class ),

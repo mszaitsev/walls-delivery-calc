@@ -178,6 +178,25 @@ final class YandexLocationMappingV2Repository {
 		return array_map( fn( array $row ): array => $this->no_match_row( $row, $row ), is_array( $rows ) ? $rows : array() );
 	}
 
+
+	/** @return array<int,array<string,mixed>> */
+	public function find_recent_review_items( int $limit = 20 ): array {
+		$limit = max( 1, min( 100, $limit ) );
+		if ( $this->has_test_rows() ) {
+			$geo_rows = property_exists( $this->wpdb, 'yandex_delivery_geo_v2' ) && is_array( $this->wpdb->yandex_delivery_geo_v2 ) ? $this->wpdb->yandex_delivery_geo_v2 : array();
+			$geo_by_id = array();
+			foreach ( $geo_rows as $geo ) {
+				$geo_by_id[ (int) ( $geo['yandex_geo_id'] ?? 0 ) ] = $geo;
+			}
+			$rows = array_values( array_filter( $this->wpdb->yandex_location_mapping_v2, static fn( array $row ): bool => in_array( (string) ( $row['status'] ?? '' ), array( 'needs_review', 'no_match' ), true ) ) );
+			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $b['updated_at'] ?? '' ), (string) ( $a['updated_at'] ?? '' ) ) ?: (int) ( $b['yandex_geo_id'] ?? 0 ) <=> (int) ( $a['yandex_geo_id'] ?? 0 ) );
+			return array_map( fn( array $row ): array => $this->review_item_row( $row, $geo_by_id[ (int) ( $row['yandex_geo_id'] ?? 0 ) ] ?? array() ), array_slice( $rows, 0, $limit ) );
+		}
+		$this->create_schema_if_needed();
+		$sql = 'SELECT m.*, g.region, g.locality, g.points_count, g.dropoff_count, g.coverage_radius_safe_km, g.first_full_address FROM ' . $this->table_name() . ' m LEFT JOIN ' . $this->geo_table_name() . ' g ON g.yandex_geo_id = m.yandex_geo_id WHERE m.status IN (%s, %s) ORDER BY m.updated_at DESC, m.yandex_geo_id DESC, m.is_primary DESC LIMIT %d';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, 'needs_review', 'no_match', $limit ), ARRAY_A );
+		return array_map( fn( array $row ): array => $this->review_item_row( $row, $row ), is_array( $rows ) ? $rows : array() );
+	}
 	public function truncate(): void {
 		if ( $this->has_test_rows() ) {
 			$this->wpdb->yandex_location_mapping_v2 = array();
@@ -403,6 +422,26 @@ final class YandexLocationMappingV2Repository {
 		return '' === $value ? null : $value;
 	}
 
+
+	/** @param array<string,mixed> $mapping @param array<string,mixed> $geo @return array<string,mixed> */
+	private function review_item_row( array $mapping, array $geo ): array {
+		$raw = json_decode( (string) ( $mapping['raw_json'] ?? '' ), true );
+		return array(
+			'yandex_geo_id' => (int) ( $mapping['yandex_geo_id'] ?? 0 ),
+			'location_id' => (int) ( $mapping['location_id'] ?? 0 ),
+			'status' => (string) ( $mapping['status'] ?? '' ),
+			'confidence' => $mapping['confidence'] ?? null,
+			'distance_km' => $mapping['distance_km'] ?? null,
+			'is_primary' => (int) ( $mapping['is_primary'] ?? 0 ),
+			'region' => (string) ( $geo['region'] ?? '' ),
+			'locality' => (string) ( $geo['locality'] ?? '' ),
+			'points_count' => (int) ( $geo['points_count'] ?? 0 ),
+			'dropoff_count' => (int) ( $geo['dropoff_count'] ?? 0 ),
+			'coverage_radius_safe_km' => $geo['coverage_radius_safe_km'] ?? null,
+			'first_full_address' => (string) ( $geo['first_full_address'] ?? '' ),
+			'raw' => is_array( $raw ) ? $raw : array(),
+		);
+	}
 	/** @param array<string,mixed> $mapping @param array<string,mixed> $geo @return array<string,mixed> */
 	private function no_match_row( array $mapping, array $geo ): array {
 		$raw = json_decode( (string) ( $mapping['raw_json'] ?? '' ), true );
