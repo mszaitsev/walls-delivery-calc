@@ -74,6 +74,16 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			$this->save_state( $state );
 			return $state;
 		}
+		if ( 0 === (int) ( $state['offset'] ?? 0 ) && empty( $state['pickup_points_truncated'] ) ) {
+			try {
+				$this->importer->truncate_repository();
+				$state['pickup_points_truncated'] = true;
+			} catch ( \Throwable $exception ) {
+				$state = $this->fail( $state, $exception->getMessage(), array_merge( array( 'action' => 'truncate_pickup_points_v2' ), $this->exception_context( $exception ) ) );
+				$this->save_state( $state );
+				return $state;
+			}
+		}
 		$state['status'] = 'importing';
 		$state['updated_at'] = $this->now();
 		$state['message'] = 'Импортируем ПВЗ v2 батчами.';
@@ -171,6 +181,7 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			'json_file_size_bytes' => 0,
 			'downloaded_at' => '',
 			'offset' => 0,
+			'pickup_points_truncated' => false,
 			'processed' => 0,
 			'normalized' => 0,
 			'saved' => 0,

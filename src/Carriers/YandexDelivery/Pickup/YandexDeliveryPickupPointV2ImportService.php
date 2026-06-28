@@ -17,6 +17,10 @@ final class YandexDeliveryPickupPointV2ImportService {
 		$this->stream_reader ??= new YandexDeliveryPickupPointV2JsonStreamReader();
 	}
 
+	public function truncate_repository(): void {
+		$this->repository->truncate();
+	}
+
 	/**
 	 * @return array{received:int,normalized:int,saved:int,skipped_invalid:int,batches:int,progress:array<int,array<string,int>>}
 	 */

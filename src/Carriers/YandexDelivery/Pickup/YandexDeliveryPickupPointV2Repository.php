@@ -81,6 +81,19 @@ final class YandexDeliveryPickupPointV2Repository {
 		dbDelta( $this->schema() );
 	}
 
+	public function truncate(): void {
+		if ( $this->has_test_rows() ) {
+			$this->wpdb->yandex_delivery_pickup_points_v2 = array();
+			if ( property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2_truncate_count' ) ) {
+				++$this->wpdb->yandex_delivery_pickup_points_v2_truncate_count;
+			}
+			return;
+		}
+
+		$this->create_schema_if_needed();
+		$this->wpdb->query( 'TRUNCATE TABLE ' . $this->table_name() );
+	}
+
 	/**
 	 * @param array<int,array<string,mixed>>|array<string,mixed> $rows
 	 * @return array{received:int,saved:int,skipped_invalid:int}

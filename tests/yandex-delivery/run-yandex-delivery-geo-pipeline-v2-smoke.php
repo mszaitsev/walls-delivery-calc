@@ -27,23 +27,52 @@ namespace {
 }
 
 namespace WallsShop\WDC\Carriers\YandexDelivery\Pickup {
-	final class YandexDeliveryPickupPointV2RunnerService {
-		/** @var array<string,mixed> */
-		private array $state = array( 'status' => 'done', 'processed' => 3, 'total' => 3, 'message' => 'pickup done', 'saved' => 3 );
+	final class YandexDeliveryPickupPointV2Repository {
+		/** @var array<int,array<string,mixed>> */
+		public array $rows = array( array( 'platform_station_id' => 'stale', 'active' => 1, 'yandex_geo_id' => 999 ) );
+		public int $truncate_count = 0;
 
-		public function reset(): array { $this->state['status'] = 'idle'; return $this->state; }
-		public function start_full_api_sync(): array { $this->state = array( 'status' => 'done', 'processed' => 3, 'total' => 3, 'message' => 'pickup done', 'saved' => 3 ); return $this->state; }
-		public function current_state(): array { return $this->state; }
-		public function start_import(): array { return $this->state; }
-		public function run_import_step(): array { return $this->state; }
-		public function pause(): array { $this->state['status'] = 'paused'; return $this->state; }
+		public function truncate(): void { ++$this->truncate_count; $this->rows = array(); }
+		public function count_all(): int { return count( $this->rows ); }
+		public function count_active(): int { return count( array_filter( $this->rows, static fn( array $row ): bool => ! empty( $row['active'] ) ) ); }
+		public function count_unique_geo_ids(): int { return count( array_unique( array_map( static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ), $this->rows ) ) ); }
+		public function count_active_unique_geo_ids(): int { return count( array_unique( array_map( static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ), array_filter( $this->rows, static fn( array $row ): bool => ! empty( $row['active'] ) ) ) ) ); }
 	}
 
-	final class YandexDeliveryPickupPointV2Repository {
-		public function count_all(): int { return 4; }
-		public function count_active(): int { return 3; }
-		public function count_unique_geo_ids(): int { return 3; }
-		public function count_active_unique_geo_ids(): int { return 2; }
+	final class YandexDeliveryPickupPointV2RunnerService {
+		/** @var array<string,mixed> */
+		private array $state = array( 'status' => 'idle', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => '' );
+		private int $steps = 0;
+		public int $truncate_count_at_step = 0;
+
+		public function reset(): array { $this->state = array( 'status' => 'idle', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => '' ); $this->steps = 0; return $this->state; }
+		public function start_full_api_sync(): array { $this->state = array( 'status' => 'ready_to_import', 'processed' => 0, 'total' => 3, 'offset' => 0, 'message' => 'downloaded', 'saved' => 0 ); return $this->state; }
+		public function current_state(): array { return $this->state; }
+		public function start_import(): array {
+			$repository = $GLOBALS['yd_pipeline_fake_pickup_repository'] ?? null;
+			if ( empty( $this->state['pickup_points_truncated'] ) && $repository instanceof YandexDeliveryPickupPointV2Repository ) {
+				$repository->truncate();
+				$this->state['pickup_points_truncated'] = true;
+			}
+			$this->state['status'] = 'importing';
+			$this->state['message'] = 'importing';
+			return $this->state;
+		}
+		public function run_import_step(): array {
+			$repository = $GLOBALS['yd_pipeline_fake_pickup_repository'] ?? null;
+			++$this->steps;
+			if ( $repository instanceof YandexDeliveryPickupPointV2Repository ) {
+				$this->truncate_count_at_step = $repository->truncate_count;
+				$repository->rows[] = 1 === $this->steps ? array( 'platform_station_id' => 'new-10', 'active' => 1, 'yandex_geo_id' => 10 ) : array( 'platform_station_id' => 'new-20', 'active' => 1, 'yandex_geo_id' => 20 );
+			}
+			$this->state['processed'] = $this->steps;
+			$this->state['saved'] = $this->steps;
+			$this->state['offset'] = $this->steps;
+			$this->state['status'] = $this->steps >= 2 ? 'done' : 'importing';
+			$this->state['message'] = $this->steps >= 2 ? 'pickup done' : 'pickup batch';
+			return $this->state;
+		}
+		public function pause(): array { $this->state['status'] = 'paused'; return $this->state; }
 	}
 }
 
@@ -64,11 +93,14 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\GeoV2 {
 		private array $state = array( 'status' => 'idle', 'processed_geo_ids' => 0, 'message' => '' );
 		private int $steps = 0;
 		public bool $started_after_truncate = false;
+		public bool $started_with_only_new_pickups = false;
 
 		public function reset(): array { $this->state = array( 'status' => 'idle', 'processed_geo_ids' => 0, 'message' => '' ); $this->steps = 0; return $this->state; }
 		public function start(): array {
 			$geo_repository = $GLOBALS['yd_pipeline_fake_geo_repository'] ?? null;
+			$pickup_repository = $GLOBALS['yd_pipeline_fake_pickup_repository'] ?? null;
 			$this->started_after_truncate = $geo_repository instanceof YandexDeliveryGeoV2Repository && $geo_repository->truncated && array() === $geo_repository->rows;
+			$this->started_with_only_new_pickups = $pickup_repository instanceof \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository && array( 10, 20 ) === array_values( array_map( static fn( array $row ): int => (int) $row['yandex_geo_id'], $pickup_repository->rows ) );
 			$this->state = array( 'status' => 'building', 'processed_geo_ids' => 0, 'message' => 'geo building' );
 			return $this->state;
 		}
@@ -123,6 +155,8 @@ namespace {
 	$root = dirname( __DIR__, 2 );
 	$pipeline_file = $root . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexDeliveryGeoPipelineV2Runner.php';
 	$pipeline_source = (string) file_get_contents( $pipeline_file );
+	$pickup_repository_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php' );
+	$pickup_runner_source = (string) file_get_contents( $root . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2RunnerService.php' );
 	$admin_source = (string) file_get_contents( $root . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 	$plugin_source = (string) file_get_contents( $root . '/src/Core/Plugin.php' );
 	$js_source = (string) file_get_contents( $root . '/assets/admin/yandex-delivery-pickup-v2-runner.js' );
@@ -137,6 +171,8 @@ namespace {
 	foreach ( array( 'import_pvz', 'build_geo_v2', 'region_enrichment', 'region_mapping', 'location_mapping', 'done' ) as $stage ) {
 		yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, $stage ), 'Pipeline runner must contain stage: ' . $stage );
 	}
+	yd_geo_pipeline_v2_assert( str_contains( $pickup_repository_source, 'public function truncate(): void' ) && str_contains( $pickup_repository_source, 'TRUNCATE TABLE' ), 'Pickup v2 repository must expose truncate().' );
+	yd_geo_pipeline_v2_assert( str_contains( $pickup_runner_source, 'pickup_points_truncated' ) && str_contains( $pickup_runner_source, 'truncate_repository' ), 'Pickup v2 runner must truncate pickup table once before the first import batch.' );
 	yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, '$this->geo_repository->truncate();' ), 'Pipeline must truncate geo_v2 before build_geo_v2 after fresh PVZ import.' );
 	yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, 'count_active_unique_geo_ids' ), 'Pipeline must use active unique pickup geoId total for geo_v2 build progress.' );
 	yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, '$this->geo_repository->count_active()' ), 'Pipeline must use active geo_v2 total for location mapping progress.' );
@@ -154,10 +190,11 @@ namespace {
 	yd_geo_pipeline_v2_assert( str_contains( $geo_builder_source, "'sample_points_json' => \$this->json( array( 'addresses'" ) && str_contains( $geo_builder_source, 'sample_addresses' ), 'Geo builder must persist compact address-only sample JSON.' );
 	yd_geo_pipeline_v2_assert( str_contains( $geo_repository_source, 'compact_region_enrichment_audit' ) && str_contains( $geo_repository_source, 'wdc_yandex_geo_v2_region_enrichment_debug_raw' ), 'Geo repository must compact region enrichment audit by default.' );
 	yd_geo_pipeline_v2_assert( str_contains( $mapping_repository_source, 'find_recent_no_match' ) && ! str_contains( $mapping_repository_source, "'sql_search_terms' =>" ), 'Review/no_match repository output must not depend on heavy sql_search_terms.' );
-	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.2' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.2' )" ), 'Plugin version must be 0.99.2.' );
+	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.3' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.3' )" ), 'Plugin version must be 0.99.3.' );
 
 	$pickup_runner = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService();
 	$pickup_repository = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository();
+	$GLOBALS['yd_pipeline_fake_pickup_repository'] = $pickup_repository;
 	$geo_builder_runner = new \WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunnerService();
 	$geo_repository = new \WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository();
 	$GLOBALS['yd_pipeline_fake_geo_repository'] = $geo_repository;
@@ -174,9 +211,18 @@ namespace {
 
 	$runner->start();
 	$state = $runner->run_step();
-	yd_geo_pipeline_v2_assert( 'build_geo_v2' === $state['stage'], 'Pipeline must advance to build_geo_v2 after PVZ import.' );
+	yd_geo_pipeline_v2_assert( 'import_pvz' === $state['stage'] && 'importing' === $pickup_runner->current_state()['status'], 'Pipeline must start pickup import before first batch.' );
+	yd_geo_pipeline_v2_assert( 1 === $pickup_repository->truncate_count && 0 === $pickup_repository->count_all(), 'Pipeline pickup import must truncate pickup_points_v2 exactly once before first batch.' );
+
+	$state = $runner->run_step();
+	yd_geo_pipeline_v2_assert( 'import_pvz' === $state['stage'] && 1 === $pickup_repository->count_all() && 1 === $pickup_repository->truncate_count && 1 === $pickup_runner->truncate_count_at_step, 'First pickup import batch must run after truncate without repeating truncate.' );
+
+	$state = $runner->run_step();
+	yd_geo_pipeline_v2_assert( 'build_geo_v2' === $state['stage'], 'Pipeline must advance to build_geo_v2 after pickup batches finish.' );
+	yd_geo_pipeline_v2_assert( 1 === $pickup_repository->truncate_count && 2 === $pickup_repository->count_all(), 'Second pickup import batch must not truncate again.' );
+	yd_geo_pipeline_v2_assert( array( 10, 20 ) === array_values( array_map( static fn( array $row ): int => (int) $row['yandex_geo_id'], $pickup_repository->rows ) ), 'Pickup repository must contain only fresh imported rows after one-time truncate.' );
 	yd_geo_pipeline_v2_assert( $geo_repository->truncated, 'Pipeline must truncate geo_v2 after import_pvz before geo_v2 build.' );
-	yd_geo_pipeline_v2_assert( $geo_builder_runner->started_after_truncate, 'Geo builder must start only after geo_v2 was truncated.' );
+	yd_geo_pipeline_v2_assert( $geo_builder_runner->started_after_truncate && $geo_builder_runner->started_with_only_new_pickups, 'Geo builder must start after geo_v2 truncate and see only fresh pickup rows.' );
 
 	$state = $runner->run_step();
 	yd_geo_pipeline_v2_assert( 'build_geo_v2' === $state['stage'], 'Pipeline must stay on build_geo_v2 while builder is running.' );
