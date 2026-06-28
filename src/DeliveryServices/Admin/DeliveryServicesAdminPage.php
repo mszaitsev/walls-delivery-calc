@@ -516,11 +516,57 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'sync_yandex_region_mapping_v2', 'save_yandex_region_mapping_v2', 'save_yandex_location_manual_override_v2', 'deactivate_yandex_location_manual_override_v2' ), true ) ) {
+		if ( in_array( $action, array(
+			'sync_yandex_region_mapping_v2',
+			'save_yandex_region_mapping_v2',
+			'save_yandex_location_manual_override_v2',
+			'deactivate_yandex_location_manual_override_v2'
+		), true ) ) {
 			$this->handle_yandex_region_mapping_v2_action( $action );
 			return;
 		}
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection',  ), true ) ) {
+		if ( in_array( $action, array(
+				'save',
+				'save_main',
+				'save_availability',
+				'save_calculation',
+				'save_tariffs',
+				'save_cdek_tariffs',
+				'bulk_cdek_tariffs',
+				'preview_cdek_tariffs_sync',
+				'confirm_cdek_tariffs_sync',
+				'save_dpd_runtime_tariffs',
+				'save_russian_post_pickup',
+				'run_russian_post_pickup_import',
+				'upload_russian_post_pickup_file_import',
+				'upload_russian_post_pickup_zip_import',
+				'reset_russian_post_pickup_import',
+				'save_api_credentials',
+				'save_shipments',
+				'save_status_mapping',
+				'save_cdek_statuses',
+				'save_dpd_statuses',
+				'save_cdek_settings',
+				'save_cdek_calculation',
+				'check_cdek_connection',
+				'save_dpd_settings',
+				'check_dpd_connection',
+				'save_dpd_geography_settings',
+				'run_dpd_geography_ftp_import',
+				'upload_dpd_geography_csv_import',
+				'reset_dpd_geography_import',
+				'check_dpd_geography',
+				'save_dpd_city_mapping',
+				'test_dpd_dadata_fallback',
+				'save_dpd_tariff_settings',
+				'save_dpd_pickup_autosync',
+				'run_dpd_pickup_parcel_shops_import',
+				'run_dpd_pickup_terminals_import',
+				'run_dpd_pickup_all_import',
+				'reset_dpd_pickup_result',
+				'save_yandex_delivery_settings',
+				'check_yandex_delivery_connection'
+			), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -531,7 +577,43 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection',  ), true ) ) {
+			if ( in_array( $action, array(
+					'save_cdek_tariffs',
+					'bulk_cdek_tariffs',
+					'preview_cdek_tariffs_sync',
+					'confirm_cdek_tariffs_sync',
+					'save_dpd_runtime_tariffs',
+					'save_russian_post_pickup',
+					'run_russian_post_pickup_import',
+					'upload_russian_post_pickup_file_import',
+					'upload_russian_post_pickup_zip_import',
+					'reset_russian_post_pickup_import',
+					'save_api_credentials',
+					'save_shipments',
+					'save_status_mapping',
+					'save_cdek_statuses',
+					'save_dpd_statuses',
+					'save_cdek_settings',
+					'save_cdek_calculation',
+					'check_cdek_connection',
+					'save_dpd_settings',
+					'check_dpd_connection',
+					'save_dpd_geography_settings',
+					'run_dpd_geography_ftp_import',
+					'upload_dpd_geography_csv_import',
+					'reset_dpd_geography_import',
+					'check_dpd_geography',
+					'save_dpd_city_mapping',
+					'test_dpd_dadata_fallback',
+					'save_dpd_tariff_settings',
+					'save_dpd_pickup_autosync',
+					'run_dpd_pickup_parcel_shops_import',
+					'run_dpd_pickup_terminals_import',
+					'run_dpd_pickup_all_import',
+					'reset_dpd_pickup_result',
+					'save_yandex_delivery_settings',
+					'check_yandex_delivery_connection'
+				), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -851,7 +933,47 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection',  ), true ) ) {
+		if ( in_array( $action, array(
+			'save_main',
+			'save_availability',
+			'save_calculation',
+			'save_tariffs',
+			'save_cdek_tariffs',
+			'bulk_cdek_tariffs',
+			'preview_cdek_tariffs_sync',
+			'confirm_cdek_tariffs_sync',
+			'save_dpd_runtime_tariffs',
+			'save_russian_post_pickup',
+			'run_russian_post_pickup_import',
+			'upload_russian_post_pickup_file_import',
+			'upload_russian_post_pickup_zip_import',
+			'reset_russian_post_pickup_import',
+			'save_api_credentials',
+			'save_shipments',
+			'save_status_mapping',
+			'save_cdek_statuses',
+			'save_dpd_statuses',
+			'save_cdek_settings',
+			'save_cdek_calculation',
+			'check_cdek_connection',
+			'save_dpd_settings',
+			'check_dpd_connection',
+			'save_dpd_geography_settings',
+			'run_dpd_geography_ftp_import',
+			'upload_dpd_geography_csv_import',
+			'reset_dpd_geography_import',
+			'check_dpd_geography',
+			'save_dpd_city_mapping',
+			'test_dpd_dadata_fallback',
+			'save_dpd_tariff_settings',
+			'save_dpd_pickup_autosync',
+			'run_dpd_pickup_parcel_shops_import',
+			'run_dpd_pickup_terminals_import',
+			'run_dpd_pickup_all_import',
+			'reset_dpd_pickup_result',
+			'save_yandex_delivery_settings',
+			'check_yandex_delivery_connection'
+		), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
