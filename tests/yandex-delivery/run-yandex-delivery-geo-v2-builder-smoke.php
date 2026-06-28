@@ -131,18 +131,17 @@ $constructor_order = array(
 	strpos( $constructor_block, 'YandexDeliveryPickupPointV2RunnerService $yandex_delivery_pickup_v2_runner' ),
 	strpos( $constructor_block, 'YandexDeliveryGeoV2Repository $yandex_delivery_geo_v2_repository' ),
 	strpos( $constructor_block, 'YandexDeliveryGeoV2BuilderRunnerService $yandex_delivery_geo_v2_builder_runner' ),
-	strpos( $constructor_block, 'YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings' ),
 );
 $plugin_order = array(
 	strpos( $plugin_block, 'YandexDeliveryPickupPointV2Repository::class' ),
 	strpos( $plugin_block, 'YandexDeliveryPickupPointV2RunnerService::class' ),
 	strpos( $plugin_block, 'YandexDeliveryGeoV2Repository::class' ),
 	strpos( $plugin_block, 'YandexDeliveryGeoV2BuilderRunnerService::class' ),
-	strpos( $plugin_block, 'YandexDeliveryGeoMappingRepository::class' ),
 );
-yd_geo_v2_assert( ! in_array( false, $constructor_order, true ) && $constructor_order === array_values( array_filter( $constructor_order, 'is_int' ) ) && $constructor_order === array_values( $constructor_order ) && $constructor_order[0] < $constructor_order[1] && $constructor_order[1] < $constructor_order[2] && $constructor_order[2] < $constructor_order[3] && $constructor_order[3] < $constructor_order[4], 'Admin constructor must keep pickup v2, geo v2, then old mapping dependency order.' );
+yd_geo_v2_assert( ! in_array( false, $constructor_order, true ) && $constructor_order === array_values( array_filter( $constructor_order, 'is_int' ) ) && $constructor_order === array_values( $constructor_order ) && $constructor_order[0] < $constructor_order[1] && $constructor_order[1] < $constructor_order[2] && $constructor_order[2] < $constructor_order[3], 'Admin constructor must keep pickup v2 and geo v2 dependency order.' );
 yd_geo_v2_assert( str_contains( $admin_source, 'use WallsShop\\WDC\\Carriers\\YandexDelivery\\GeoV2\\YandexDeliveryGeoV2Repository;' ) && str_contains( $admin_source, 'use WallsShop\\WDC\\Carriers\\YandexDelivery\\GeoV2\\YandexDeliveryGeoV2BuilderRunnerService;' ) && ! str_contains( $admin_source, 'WallsShop\\WDC\\DeliveryServices\\Admin\\YandexDeliveryGeoV2Repository' ), 'Admin page must import GeoV2 constructor types from carrier namespace.' );
-yd_geo_v2_assert( ! in_array( false, $plugin_order, true ) && $plugin_order[0] < $plugin_order[1] && $plugin_order[1] < $plugin_order[2] && $plugin_order[2] < $plugin_order[3] && $plugin_order[3] < $plugin_order[4], 'Plugin DI arguments must match constructor order and keep old mapping after geo v2 args.' );
+yd_geo_v2_assert( ! in_array( false, $plugin_order, true ) && $plugin_order[0] < $plugin_order[1] && $plugin_order[1] < $plugin_order[2] && $plugin_order[2] < $plugin_order[3], 'Plugin DI arguments must match constructor order for pickup v2 and geo v2 deps.' );
+yd_geo_v2_assert( ! str_contains( $admin_source, 'YandexDeliveryGeoMappingRepository' ) && ! str_contains( $plugin_source, 'YandexDeliveryGeoMappingRepository' ), 'Legacy Yandex geo mapping DI must stay removed.' );
 yd_geo_v2_assert( str_contains( $admin_source, 'Агрегация geoId v2' ) && str_contains( $admin_source, 'Построить geoId v2' ), 'Admin v2 tab must contain geo v2 builder UI.' );
 foreach ( array( 'geoId без региона', 'geoId без dropoff', 'Макс. coverage radius', 'Средний coverage radius', 'Макс. safe radius', 'Средний safe radius' ) as $needle ) {
 	yd_geo_v2_assert( str_contains( $admin_source, $needle ), 'Admin geo v2 statistics must contain: ' . $needle );
