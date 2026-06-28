@@ -145,7 +145,7 @@ final class YandexLocationMapperV2Service {
 	}
 
 	/** @param array<int,array<string,mixed>> $locations @param array<string,mixed> $geo @param array<int,string> $search_terms @param array<string,mixed> $diagnostics @return array<int,array<string,mixed>> */
-	private function build_candidate_rows( array $locations, array $geo, string $locality, array $search_terms, array $diagnostics, ?string $locality_raw_override = null ): array {
+	private function build_candidate_rows( array $locations, array $geo, string $locality, array $search_terms, array &$diagnostics, ?string $locality_raw_override = null ): array {
 		$locality_raw = null !== $locality_raw_override ? $locality_raw_override : (string) ( $geo['locality'] ?? '' );
 		$centroid_lat = is_numeric( $geo['centroid_lat'] ?? null ) ? (float) $geo['centroid_lat'] : null;
 		$centroid_lon = is_numeric( $geo['centroid_lon'] ?? null ) ? (float) $geo['centroid_lon'] : null;
@@ -156,6 +156,7 @@ final class YandexLocationMapperV2Service {
 		foreach ( $locations as $location ) {
 			$effective_locality = $this->normalizer->effective_location_locality( $location );
 			if ( null === $effective_locality || $effective_locality['value'] !== $locality ) {
+				$this->record_candidate_reject( $diagnostics, $location, $effective_locality, null, 'locality_mismatch' );
 				continue;
 			}
 			$distance = null;
@@ -165,6 +166,7 @@ final class YandexLocationMapperV2Service {
 				$coordinate_match = $distance <= $threshold;
 			}
 			if ( ! $coordinate_match ) {
+				$this->record_candidate_reject( $diagnostics, $location, $effective_locality, $distance, null === $distance ? 'invalid_coords' : 'distance_too_far' );
 				continue;
 			}
 			$matched_by = array( 'locality', 'region', 'coordinates' );
@@ -227,6 +229,14 @@ final class YandexLocationMapperV2Service {
 	/** @param array<string,mixed> $geo @return array<int,string> */
 	private function address_locality_terms( array $geo ): array {
 		$terms = array();
+		if ( $this->is_admin_like_locality( (string) ( $geo['locality'] ?? '' ) ) ) {
+			foreach ( $this->admin_specific_locality_terms( (string) $geo['locality'] ) as $term ) {
+				$key = mb_strtolower( $term, 'UTF-8' );
+				$terms[ $key ] = $term;
+			}
+
+			return array_values( $terms );
+		}
 		$addresses = array();
 		$first = trim( (string) ( $geo['first_full_address'] ?? '' ) );
 		if ( '' !== $first ) {
@@ -289,6 +299,49 @@ final class YandexLocationMapperV2Service {
 		return $result;
 	}
 
+	/** @param array<string,mixed> $location @param array{source:string,value:string,raw:string}|null $effective */
+	private function record_candidate_reject( array &$diagnostics, array $location, ?array $effective, ?float $distance, string $reason ): void {
+		$samples = is_array( $diagnostics['rejected_samples'] ?? null ) ? $diagnostics['rejected_samples'] : array();
+		if ( count( $samples ) >= 20 ) {
+			$diagnostics['rejected_samples'] = $samples;
+			return;
+		}
+		$samples[] = array(
+			'id' => (int) ( $location['id'] ?? 0 ),
+			'region_name' => (string) ( $location['region_name'] ?? '' ),
+			'display_name' => (string) ( $location['display_name'] ?? '' ),
+			'city_name' => (string) ( $location['city_name'] ?? '' ),
+			'settlement_name' => (string) ( $location['settlement_name'] ?? '' ),
+			'place_name' => (string) ( $location['place_name'] ?? '' ),
+			'effective_locality' => (string) ( $effective['value'] ?? '' ),
+			'distance_km' => $distance,
+			'reject_reason' => $reason,
+		);
+		$diagnostics['rejected_samples'] = $samples;
+	}
+
+	/** @return array<int,string> */
+	private function admin_specific_locality_terms( string $locality ): array {
+		$terms = array();
+		foreach ( $this->normalizer->search_terms_for_locality( $locality ) as $term ) {
+			$key = mb_strtolower( $term, 'UTF-8' );
+			$terms[ $key ] = $term;
+		}
+		$normalized = mb_strtolower( str_replace( 'ё', 'е', trim( $locality ) ), 'UTF-8' );
+		if ( preg_match( '/^(?:район|округ|муниципальный округ|городской округ|поселение)\s+(.+)$/u', $normalized, $matches ) ) {
+			$specific = mb_convert_case( trim( (string) $matches[1] ), MB_CASE_TITLE, 'UTF-8' );
+			foreach ( $this->normalizer->search_terms_for_locality( $specific ) as $term ) {
+				$key = mb_strtolower( $term, 'UTF-8' );
+				$terms[ $key ] = $term;
+			}
+		}
+
+		return array_values( $terms );
+	}
+	private function is_admin_like_locality( string $locality ): bool {
+		$value = mb_strtolower( str_replace( 'ё', 'е', $locality ), 'UTF-8' );
+		return (bool) preg_match( '/(^|\s)(район|округ|муниципальный округ|городской округ|поселение)\s+/u', $value );
+	}
 	/** @param array<string,mixed> $candidate */
 	private function dedupe_key( array $candidate ): string {
 		$location = is_array( $candidate['location'] ?? null ) ? $candidate['location'] : array();
@@ -474,12 +527,10 @@ final class YandexLocationMapperV2Service {
 
 		return $result;
 	}
-
 	/** @param array<string,mixed> $candidate */
 	private function candidate_distance( array $candidate ): float {
 		return is_numeric( $candidate['distance_km'] ?? null ) ? (float) $candidate['distance_km'] : 999999.0;
 	}
-
 	/** @param array<string,mixed> $candidate */
 	private function type_priority( array $candidate ): int {
 		$type = (string) ( $candidate['raw']['wdc_type'] ?? '' );
