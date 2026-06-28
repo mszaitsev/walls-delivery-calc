@@ -383,6 +383,12 @@ final class YandexLocationMapperV2Service {
 		$threshold = max( 50.0, $safe_radius + 10.0 );
 		$primary_type_score = (int) ( $primary['type_score'] ?? 0 );
 		$second_type_score = (int) ( $second['type_score'] ?? 0 );
+		if ( $this->near_exact_type_dominates( $candidates, $safe_radius ) ) {
+			return $this->dominance_pick( $primary, $candidates, 'near_exact_type_dominates' );
+		}
+		if ( $this->same_type_nearest_dominates( $primary, $second ) ) {
+			return $this->dominance_pick( $primary, $candidates, 'same_type_nearest_dominates' );
+		}
 		if ( $primary_type_score > $second_type_score && $primary_distance <= $local_accept_distance && $second_distance < $primary_distance ) {
 			$reason = 'near_exact_type_beats_closer_wrong_type';
 		} elseif ( $primary_type_score > $second_type_score && $primary_distance <= $local_accept_distance && $second_distance <= $threshold ) {
@@ -819,7 +825,7 @@ final class YandexLocationMapperV2Service {
 			'distance_km' => $distance,
 			'region_match' => in_array( 'region', $matched_by, true ) ? 1 : 0,
 			'locality_match' => in_array( 'locality', $matched_by, true ) ? 1 : 0,
-			'coordinate_match' => in_array( 'coordinates', $matched_by, true ) || in_array( 'territory_coordinates', $matched_by, true ) ? 1 : 0,
+			'coordinate_match' => in_array( 'coordinates', $matched_by, true ) || in_array( 'territory_coordinates', $matched_by, true ) || in_array( 'coordinates_strict', $matched_by, true ) ? 1 : 0,
 			'matched_by_json' => $this->json( $matched_by ),
 			'raw_json' => $this->json( $raw ),
 			'is_primary' => $primary ? 1 : 0,
