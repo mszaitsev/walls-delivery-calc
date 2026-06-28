@@ -59,6 +59,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderServic
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnrichmentRunner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnrichmentService;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMapperV2Service;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationManualOverrideV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
@@ -312,6 +313,7 @@ final class Plugin {
 		$this->container->register( YandexGeoV2RegionEnrichmentRunner::class, fn(): YandexGeoV2RegionEnrichmentRunner => new YandexGeoV2RegionEnrichmentRunner( $this->container->get( YandexGeoV2RegionEnrichmentService::class ), $this->container->get( YandexDeliveryGeoV2Repository::class ) ) );
 		$this->container->register( YandexLocationMapperV2Service::class, fn(): YandexLocationMapperV2Service => new YandexLocationMapperV2Service( $this->container->get( YandexLocationMappingV2Repository::class ), null, null, $this->container->get( YandexRegionMappingV2Repository::class ), $this->container->get( YandexLocationManualOverrideV2Repository::class ) ) );
 		$this->container->register( YandexLocationMappingV2Runner::class, fn(): YandexLocationMappingV2Runner => new YandexLocationMappingV2Runner( $this->container->get( YandexLocationMapperV2Service::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
+		$this->container->register( YandexDeliveryGeoPipelineV2Runner::class, fn(): YandexDeliveryGeoPipelineV2Runner => new YandexDeliveryGeoPipelineV2Runner( $this->container->get( YandexDeliveryPickupPointV2RunnerService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( YandexDeliveryGeoV2BuilderRunnerService::class ), $this->container->get( YandexDeliveryGeoV2Repository::class ), $this->container->get( YandexGeoV2RegionEnrichmentRunner::class ), $this->container->get( YandexRegionMappingV2Repository::class ), $this->container->get( YandexLocationMappingV2Runner::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
 		$this->container->register( DpdSoapClientInterface::class, fn(): DpdSoapClientInterface => new DpdSoapClient( $this->container->get( DpdSettings::class )->request_timeout() ) );
 		$this->container->register( DpdApiClient::class, fn(): DpdApiClient => new DpdApiClient( $this->container->get( DpdSettings::class ), $this->container->get( DpdSoapClientInterface::class ) ) );
 		$this->container->register( DpdDuplicateCityResolver::class, fn(): DpdDuplicateCityResolver => new DpdDuplicateCityResolver() );
@@ -668,6 +670,7 @@ final class Plugin {
 				$this->container->get( YandexLocationManualOverrideV2Repository::class ),
 				$this->container->get( YandexRegionMappingV2Repository::class ),
 				$this->container->get( YandexGeoV2RegionEnrichmentRunner::class ),
+				$this->container->get( YandexDeliveryGeoPipelineV2Runner::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );

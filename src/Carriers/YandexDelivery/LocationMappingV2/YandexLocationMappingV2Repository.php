@@ -492,8 +492,6 @@ final class YandexLocationMappingV2Repository {
 	}
 	/** @param array<string,mixed> $mapping @param array<string,mixed> $geo @return array<string,mixed> */
 	private function no_match_row( array $mapping, array $geo ): array {
-		$raw = json_decode( (string) ( $mapping['raw_json'] ?? '' ), true );
-		$terms = is_array( $raw ) && is_array( $raw['sql_search_terms'] ?? null ) ? array_values( array_map( 'strval', $raw['sql_search_terms'] ) ) : array();
 		return array(
 			'yandex_geo_id' => (int) ( $mapping['yandex_geo_id'] ?? 0 ),
 			'region' => (string) ( $geo['region'] ?? '' ),
@@ -501,7 +499,6 @@ final class YandexLocationMappingV2Repository {
 			'first_full_address' => (string) ( $geo['first_full_address'] ?? '' ),
 			'centroid_lat' => $geo['centroid_lat'] ?? null,
 			'centroid_lon' => $geo['centroid_lon'] ?? null,
-			'sql_search_terms' => $terms,
 			'updated_at' => (string) ( $mapping['updated_at'] ?? '' ),
 		);
 	}

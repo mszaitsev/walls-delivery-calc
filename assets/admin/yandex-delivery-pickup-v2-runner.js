@@ -61,6 +61,7 @@
 		var looping = false;
 		var fields = root.querySelectorAll(options.fieldSelector);
 		var summary = root.querySelector(options.summarySelector);
+		var summaryJson = options.summaryJsonSelector ? root.querySelector(options.summaryJsonSelector) : null;
 		var startButton = root.querySelector(options.startSelector);
 		var continueButton = options.continueSelector ? root.querySelector(options.continueSelector) : null;
 		var pauseButton = root.querySelector(options.pauseSelector);
@@ -70,6 +71,9 @@
 			root.setAttribute(options.statusAttribute, value(state, 'status'));
 			if (summary) {
 				summary.textContent = value(state, 'status') + ': ' + value(state, 'message');
+			}
+			if (summaryJson) {
+				summaryJson.textContent = JSON.stringify(state.summary || {}, null, 2);
 			}
 			fields.forEach(function (field) {
 				field.textContent = value(state, field.getAttribute(options.fieldAttribute) || '');
@@ -129,6 +133,25 @@
 		}
 	}
 
+	runner({
+		root: '[data-wdc-yandex-geo-pipeline-v2]',
+		fieldSelector: '[data-wdc-yandex-geo-pipeline-v2-field]',
+		fieldAttribute: 'data-wdc-yandex-geo-pipeline-v2-field',
+		summarySelector: '[data-wdc-yandex-geo-pipeline-v2-summary]',
+		summaryJsonSelector: '[data-wdc-yandex-geo-pipeline-v2-summary-json]',
+		statusAttribute: 'data-wdc-yandex-geo-pipeline-v2-status',
+		startSelector: '[data-wdc-yandex-geo-pipeline-v2-start]',
+		continueSelector: '[data-wdc-yandex-geo-pipeline-v2-resume]',
+		pauseSelector: '[data-wdc-yandex-geo-pipeline-v2-pause]',
+		resetSelector: '[data-wdc-yandex-geo-pipeline-v2-reset]',
+		startAction: 'wdc_yandex_delivery_geo_pipeline_v2_start',
+		continueAction: 'wdc_yandex_delivery_geo_pipeline_v2_resume',
+		stepAction: 'wdc_yandex_delivery_geo_pipeline_v2_step',
+		pauseAction: 'wdc_yandex_delivery_geo_pipeline_v2_pause',
+		resetAction: 'wdc_yandex_delivery_geo_pipeline_v2_reset',
+		runningStatus: 'running',
+		initialState: config.geoPipelineInitialState || {}
+	});
 	runner({
 		root: '[data-wdc-yandex-pickup-v2-runner]',
 		fieldSelector: '[data-wdc-yandex-v2-field]',

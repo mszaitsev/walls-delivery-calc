@@ -367,10 +367,12 @@ final class YandexLocationMapperV2Service {
 		if ( ! is_array( $decoded ) ) {
 			return array();
 		}
+		$items = is_array( $decoded['addresses'] ?? null ) ? $decoded['addresses'] : $decoded;
 		$addresses = array();
-		foreach ( $decoded as $item ) {
-			if ( is_array( $item ) && '' !== trim( (string) ( $item['full_address'] ?? '' ) ) ) {
-				$addresses[] = trim( (string) $item['full_address'] );
+		foreach ( $items as $item ) {
+			$address = is_array( $item ) ? trim( (string) ( $item['full_address'] ?? '' ) ) : trim( (string) $item );
+			if ( '' !== $address ) {
+				$addresses[] = $address;
 			}
 			if ( count( $addresses ) >= 5 ) {
 				break;
@@ -980,12 +982,36 @@ final class YandexLocationMapperV2Service {
 			'locality_match' => in_array( 'locality', $matched_by, true ) ? 1 : 0,
 			'coordinate_match' => in_array( 'coordinates', $matched_by, true ) || in_array( 'territory_coordinates', $matched_by, true ) || in_array( 'coordinates_strict', $matched_by, true ) ? 1 : 0,
 			'matched_by_json' => $this->json( $matched_by ),
-			'raw_json' => $this->json( $raw ),
+			'raw_json' => $this->json( $this->compact_raw_json( $raw ) ),
 			'is_primary' => $primary ? 1 : 0,
 		);
 	}
 
+	/** @param array<string,mixed> $raw @return array<string,mixed> */
+	private function compact_raw_json( array $raw ): array {
+		if ( $this->keep_extended_raw_debug() ) {
+			return $raw;
+		}
+		foreach ( array( 'sql_search_terms', 'address_locality_terms', 'rejected_samples', 'rejected_candidates', 'diagnostics', 'deduped_location_ids', 'duplicate_location_ids', 'coordinate_fallback_candidates' ) as $key ) {
+			unset( $raw[ $key ] );
+		}
+		foreach ( $raw as $key => $value ) {
+			if ( is_array( $value ) && count( $value ) > 20 ) {
+				unset( $raw[ $key ] );
+			}
+		}
 
+		return $raw;
+	}
+
+	private function keep_extended_raw_debug(): bool {
+		$enabled = defined( 'WDC_YANDEX_LOCATION_MAPPING_V2_DEBUG_RAW' ) && WDC_YANDEX_LOCATION_MAPPING_V2_DEBUG_RAW;
+		if ( function_exists( 'apply_filters' ) ) {
+			$enabled = (bool) apply_filters( 'wdc_yandex_location_mapping_v2_debug_raw', $enabled );
+		}
+
+		return $enabled;
+	}
 	/** @return array<string,mixed> */
 	private function fetch_location_by_id( int $location_id ): array {
 		if ( $location_id <= 0 ) {

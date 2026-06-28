@@ -87,12 +87,12 @@ $sample100 = json_decode( (string) $geo100['sample_points_json'], true );
 $raw100 = json_decode( (string) $geo100['raw_stats_json'], true );
 yd_geo_v2_assert( 2 === (int) $types100['pickup_point'] && 1 === (int) $types100['terminal'], 'types_json must count point types.' );
 yd_geo_v2_assert( 2 === (int) $operators100['op-a'] && 1 === (int) $operators100['op-b'], 'operators_json must count operator ids.' );
-yd_geo_v2_assert( 3 === count( $sample100 ) && 3 === (int) $raw100['valid_coordinate_points'] && 0 === (int) $raw100['invalid_coordinate_points'], 'Sample and raw stats must match geo 100.' );
+yd_geo_v2_assert( 3 === count( $sample100['addresses'] ?? array() ) && 3 === (int) $raw100['valid_coordinate_points'] && 0 === (int) $raw100['invalid_coordinate_points'], 'Compact sample addresses and raw stats must match geo 100.' );
 
 $geo200 = $repository->find_by_geo_id( 200 );
 $sample200 = json_decode( (string) ( $geo200['sample_points_json'] ?? '[]' ), true );
-yd_geo_v2_assert( 31 === (int) ( $geo200['points_count'] ?? 0 ) && 3 === count( $sample200 ), 'Geo 200 must sample first, every 30th, and last.' );
-yd_geo_v2_assert( 'g200-1' === $sample200[0]['platform_station_id'] && 'g200-30' === $sample200[1]['platform_station_id'] && 'g200-31' === $sample200[2]['platform_station_id'], 'Geo 200 sample ids must be first/every 30th/last.' );
+yd_geo_v2_assert( 31 === (int) ( $geo200['points_count'] ?? 0 ) && 3 === count( $sample200['addresses'] ?? array() ), 'Geo 200 must keep compact first/every 30th/last addresses.' );
+yd_geo_v2_assert( 'g200-1 full address' === $sample200['addresses'][0] && 'g200-30 full address' === $sample200['addresses'][1] && 'g200-31 full address' === $sample200['addresses'][2], 'Geo 200 compact sample addresses must be first/every 30th/last.' );
 yd_geo_v2_assert( (float) ( $geo100['coverage_radius_km'] ?? 0 ) > 0.0 && (float) ( $geo100['coverage_radius_safe_km'] ?? 0 ) > (float) ( $geo100['coverage_radius_km'] ?? 0 ), 'Geo 100 coverage radius must be positive and safe radius must be larger.' );
 yd_geo_v2_assert( array_key_exists( 'coverage_radius_km', $raw100 ) && array_key_exists( 'coverage_radius_safe_km', $raw100 ), 'raw_stats_json must contain coverage radius fields.' );
 $geo300 = $repository->find_by_geo_id( 300 );

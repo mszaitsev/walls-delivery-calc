@@ -566,13 +566,38 @@ final class YandexDeliveryGeoV2Repository {
 			'status' => $status,
 			'region' => $region,
 			'updated_at' => $updated_at,
-			'audit' => $audit,
+			'audit' => $this->compact_region_enrichment_audit( $audit ),
 		);
 		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $raw, JSON_UNESCAPED_UNICODE ) : json_encode( $raw, JSON_UNESCAPED_UNICODE );
 
 		return is_string( $json ) ? $json : '{}';
 	}
 
+	/** @param array<string,mixed> $audit @return array<string,mixed> */
+	private function compact_region_enrichment_audit( array $audit ): array {
+		if ( $this->keep_extended_region_enrichment_debug() ) {
+			return $audit;
+		}
+		foreach ( array( 'diagnostics', 'rejected_samples', 'locality_terms' ) as $key ) {
+			unset( $audit[ $key ] );
+		}
+		foreach ( $audit as $key => $value ) {
+			if ( is_array( $value ) && count( $value ) > 20 ) {
+				unset( $audit[ $key ] );
+			}
+		}
+
+		return $audit;
+	}
+
+	private function keep_extended_region_enrichment_debug(): bool {
+		$enabled = defined( 'WDC_YANDEX_GEO_V2_REGION_ENRICHMENT_DEBUG_RAW' ) && WDC_YANDEX_GEO_V2_REGION_ENRICHMENT_DEBUG_RAW;
+		if ( function_exists( 'apply_filters' ) ) {
+			$enabled = (bool) apply_filters( 'wdc_yandex_geo_v2_region_enrichment_debug_raw', $enabled );
+		}
+
+		return $enabled;
+	}
 	private function can_create_schema(): bool {
 		return defined( 'ABSPATH' ) && is_string( ABSPATH ) && '' !== ABSPATH && method_exists( $this->wpdb, 'get_charset_collate' ) && file_exists( ABSPATH . 'wp-admin/includes/upgrade.php' );
 	}

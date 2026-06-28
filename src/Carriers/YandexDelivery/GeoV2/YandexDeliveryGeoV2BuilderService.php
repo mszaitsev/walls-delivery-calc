@@ -100,11 +100,11 @@ final class YandexDeliveryGeoV2BuilderService {
 			}
 		}
 		$coordinate_stats = $this->coordinate_stats( $coords );
-		$sample = $this->sample_points( $points );
+		$sample_addresses = $this->sample_addresses( $points );
 		$raw_stats = array(
 			'valid_coordinate_points' => count( $coords ),
 			'invalid_coordinate_points' => count( $points ) - count( $coords ),
-			'sample_points_count' => count( $sample ),
+			'sample_points_count' => count( $sample_addresses ),
 			'coverage_radius_km' => $coordinate_stats['coverage_radius_km'],
 			'coverage_radius_safe_km' => $coordinate_stats['coverage_radius_safe_km'],
 		);
@@ -121,7 +121,7 @@ final class YandexDeliveryGeoV2BuilderService {
 				'operators_json' => $this->json( $operators ),
 				'first_point_id' => $first_point_id,
 				'first_full_address' => $first_full_address,
-				'sample_points_json' => $this->json( $sample ),
+				'sample_points_json' => $this->json( array( 'addresses' => $sample_addresses ) ),
 				'raw_stats_json' => $this->json( $raw_stats ),
 				'active' => 1,
 				'built_at' => $this->now(),
@@ -130,6 +130,21 @@ final class YandexDeliveryGeoV2BuilderService {
 		);
 	}
 
+	/** @param array<int,array<string,mixed>> $points @return array<int,string> */
+	private function sample_addresses( array $points ): array {
+		$addresses = array();
+		foreach ( $this->sample_points( $points ) as $point ) {
+			$address = trim( (string) ( $point['full_address'] ?? '' ) );
+			if ( '' !== $address ) {
+				$addresses[ $address ] = $address;
+			}
+			if ( count( $addresses ) >= 5 ) {
+				break;
+			}
+		}
+
+		return array_values( $addresses );
+	}
 	/** @return array<int,array<string,mixed>> */
 	private function fetch_points( int $geo_id ): array {
 		if ( $this->has_test_pickups() ) {
