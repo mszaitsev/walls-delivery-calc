@@ -206,6 +206,23 @@ final class YandexDeliveryPickupPointV2Repository {
 		return (int) $this->wpdb->get_var( 'SELECT COUNT(DISTINCT yandex_geo_id) FROM ' . $this->table_name() . ' WHERE yandex_geo_id IS NOT NULL AND yandex_geo_id > 0' );
 	}
 
+	public function count_active_unique_geo_ids(): int {
+		if ( $this->has_test_rows() ) {
+			$ids = array();
+			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $row ) {
+				if ( empty( $row['active'] ) ) {
+					continue;
+				}
+				$id = (string) ( $row['yandex_geo_id'] ?? '' );
+				if ( '' !== $id && '0' !== $id ) {
+					$ids[ $id ] = true;
+				}
+			}
+			return count( $ids );
+		}
+		$this->create_schema_if_needed();
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(DISTINCT yandex_geo_id) FROM ' . $this->table_name() . ' WHERE active = 1 AND yandex_geo_id IS NOT NULL AND yandex_geo_id > 0' );
+	}
 	public function latest_seen_at(): string {
 		if ( $this->has_test_rows() ) {
 			$latest = '';

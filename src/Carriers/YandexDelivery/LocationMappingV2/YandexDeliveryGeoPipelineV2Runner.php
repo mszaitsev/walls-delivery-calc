@@ -146,6 +146,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 			return $this->stage_error( $state, $state['message'] );
 		}
 		if ( 'done' === (string) ( $pickup_state['status'] ?? '' ) ) {
+			$this->geo_repository->truncate();
 			$this->geo_builder_runner->reset();
 			$this->geo_builder_runner->start();
 			return $this->advance( $state, self::STAGE_BUILD_GEO_V2, 'Импорт ПВЗ завершен. Переходим к построению geo_v2.' );
@@ -163,6 +164,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 			$geo_state = $this->geo_builder_runner->run_step();
 		}
 		$state = $this->with_stage_progress( $state, $geo_state, 'processed_geo_ids' );
+		$state = $this->with_total( $state, $this->pickup_repository->count_active_unique_geo_ids() );
 		$state['message'] = (string) ( $geo_state['message'] ?? '' );
 		$state['summary']['build_geo_v2'] = $this->geo_summary();
 		if ( 'error' === (string) ( $geo_state['status'] ?? '' ) ) {
@@ -221,6 +223,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 			$mapping_state = $this->location_mapping_runner->run_step();
 		}
 		$state = $this->with_stage_progress( $state, $mapping_state );
+		$state = $this->with_total( $state, $this->geo_repository->count_active() );
 		$state['message'] = (string) ( $mapping_state['message'] ?? '' );
 		$state['summary']['location_mapping'] = $this->location_mapping_summary();
 		if ( 'error' === (string) ( $mapping_state['status'] ?? '' ) ) {
@@ -268,6 +271,14 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		$state['total'] = isset( $stage_state['total'] ) ? (int) $stage_state['total'] : null;
 		$state['percent'] = is_int( $state['total'] ) ? $this->percent( (int) $state['processed'], (int) $state['total'] ) : null;
 		$state['updated_at'] = $this->now();
+
+		return $state;
+	}
+
+	/** @param array<string,mixed> $state @return array<string,mixed> */
+	private function with_total( array $state, int $total ): array {
+		$state['total'] = $total;
+		$state['percent'] = $this->percent( (int) $state['processed'], $total );
 
 		return $state;
 	}
@@ -358,7 +369,7 @@ final class YandexDeliveryGeoPipelineV2Runner {
 	private function location_mapping_summary(): array {
 		$stats = $this->location_mapping_repository->statistics();
 
-		return $this->only_keys( $stats, array( 'mapped', 'manual', 'needs_review', 'no_match', 'error', 'avg_confidence', 'avg_distance', 'territory_fallback', 'mapped_by_dominance' ) );
+		return $this->only_keys( $stats, array( 'mapped', 'needs_review', 'no_match', 'error', 'avg_confidence', 'avg_distance', 'territory_fallback', 'mapped_by_dominance' ) );
 	}
 
 	/** @param array<string,mixed> $source @param array<int,string> $keys @return array<string,mixed> */
