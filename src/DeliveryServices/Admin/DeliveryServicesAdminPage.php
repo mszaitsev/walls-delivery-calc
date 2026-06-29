@@ -164,6 +164,7 @@ final class DeliveryServicesAdminPage {
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_pipeline_v2_pause', array( $this, 'ajax_yandex_delivery_geo_pipeline_v2_pause' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_pipeline_v2_resume', array( $this, 'ajax_yandex_delivery_geo_pipeline_v2_resume' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_pipeline_v2_reset', array( $this, 'ajax_yandex_delivery_geo_pipeline_v2_reset' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_source_station', array( $this, 'ajax_yandex_delivery_source_station' ) );
 	}
 
 	public function enqueue_assets(): void {
@@ -461,6 +462,47 @@ final class DeliveryServicesAdminPage {
 		$this->handle_yandex_delivery_geo_pipeline_v2_ajax( fn(): array => $this->yandex_delivery_geo_pipeline_v2_runner->reset() );
 	}
 
+	public function ajax_yandex_delivery_source_station(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! check_ajax_referer( 'wdc_yandex_delivery_source_station', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Сессия истекла. Обновите страницу.', 'walls-delivery-calc' ) ), 403 );
+		}
+		$mode = sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) );
+		if ( 'locations' === $mode ) {
+			$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
+			if ( ! $this->locations instanceof LocationRepository ) {
+				wp_send_json_error( array( 'message' => __( 'Справочник населенных пунктов недоступен.', 'walls-delivery-calc' ) ), 500 );
+			}
+			$locations = strlen( trim( $query ) ) >= 2 ? $this->locations->search( $query, 20, 'RU' ) : array();
+			wp_send_json_success(
+				array(
+					'locations' => array_map(
+						fn( $location ): array => array(
+							'id' => (int) ( $location->id ?? 0 ),
+							'label' => $this->yandex_delivery_location_label( $location ),
+						),
+						array_values( array_filter( $locations, static fn( $location ): bool => null !== ( $location->id ?? null ) ) )
+					),
+					'message' => array() === $locations ? __( 'Населенные пункты не найдены.', 'walls-delivery-calc' ) : __( 'Выберите населенный пункт из списка.', 'walls-delivery-calc' ),
+				)
+			);
+		}
+		if ( 'points' === $mode ) {
+			$data = $this->yandex_delivery_source_points_for_location( max( 0, (int) ( $_POST['location_id'] ?? 0 ) ) );
+			wp_send_json_success(
+				array(
+					'yandex_geo_id' => $data['yandex_geo_id'],
+					'points' => $this->yandex_delivery_source_point_ajax_rows( $data['points'] ),
+					'message' => $this->yandex_delivery_source_points_message( (int) $data['location_id'], (int) $data['yandex_geo_id'], $data['points'] ),
+				)
+			);
+		}
+
+		wp_send_json_error( array( 'message' => __( 'Неизвестное действие выбора ПВЗ.', 'walls-delivery-calc' ) ), 400 );
+	}
+
 	/** @param callable():array<string,mixed> $callback */
 	private function handle_yandex_delivery_geo_pipeline_v2_ajax( callable $callback ): void {
 		$this->register_yandex_pickup_v2_ajax_shutdown_guard();
@@ -561,6 +603,68 @@ final class DeliveryServicesAdminPage {
 
 		return true;
 	}
+
+	/** @return array{location_id:int,yandex_geo_id:int,points:array<int,array<string,mixed>>} */
+	private function yandex_delivery_source_points_for_location( int $location_id ): array {
+		$location_id = max( 0, $location_id );
+		$geo_id = $location_id > 0 && $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository
+			? $this->yandex_location_mapping_v2_repository->primary_geo_id_for_location( $location_id )
+			: 0;
+		$points = $geo_id > 0 && $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository
+			? $this->yandex_delivery_pickup_v2_repository->source_dropoff_points_by_geo_id( $geo_id )
+			: array();
+
+		return array( 'location_id' => $location_id, 'yandex_geo_id' => $geo_id, 'points' => $points );
+	}
+
+	private function yandex_delivery_location_label( object $location ): string {
+		$label = method_exists( $location, 'resolved_display_name' ) ? (string) $location->resolved_display_name() : (string) ( $location->display_name ?? '' );
+		$id = (int) ( $location->id ?? 0 );
+
+		return trim( $label ) . ( $id > 0 ? ' (location_id: ' . $id . ')' : '' );
+	}
+
+	private function yandex_delivery_source_point_label( array $point ): string {
+		$station_id = $this->sanitize_yandex_platform_station_id( (string) ( $point['platform_station_id'] ?? '' ) );
+		$name = trim( (string) ( $point['name'] ?? '' ) );
+		$address = trim( (string) ( $point['full_address'] ?? '' ) );
+
+		return trim( ( '' !== $name ? $name . ' — ' : '' ) . ( '' !== $address ? $address : $station_id ) );
+	}
+
+	/** @param array<int,array<string,mixed>> $points @return array<int,array<string,string>> */
+	private function yandex_delivery_source_point_ajax_rows( array $points ): array {
+		$rows = array();
+		foreach ( $points as $point ) {
+			$station_id = $this->sanitize_yandex_platform_station_id( (string) ( $point['platform_station_id'] ?? '' ) );
+			if ( '' === $station_id ) {
+				continue;
+			}
+			$rows[] = array(
+				'platform_station_id' => $station_id,
+				'label' => $this->yandex_delivery_source_point_label( $point ),
+				'address' => trim( (string) ( $point['full_address'] ?? '' ) ),
+			);
+		}
+
+		return $rows;
+	}
+
+	/** @param array<int,array<string,mixed>> $points */
+	private function yandex_delivery_source_points_message( int $location_id, int $yandex_geo_id, array $points ): string {
+		if ( $location_id <= 0 ) {
+			return __( 'Выберите населенный пункт, чтобы загрузить ПВЗ сдачи.', 'walls-delivery-calc' );
+		}
+		if ( $yandex_geo_id <= 0 ) {
+			return __( 'Для выбранного населенного пункта нет рабочего yandex_geo_id в location mapping.', 'walls-delivery-calc' );
+		}
+		if ( array() === $points ) {
+			return sprintf( __( 'Для yandex_geo_id %d нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' ), $yandex_geo_id );
+		}
+
+		return sprintf( __( 'Найдено ПВЗ сдачи: %d; yandex_geo_id: %d.', 'walls-delivery-calc' ), count( $points ), $yandex_geo_id );
+	}
+
 	private function asset_url( string $path ): string {
 		if ( $this->environment instanceof PluginEnvironment ) {
 			return $this->environment->plugin_url() . ltrim( $path, '/' );
@@ -1444,32 +1548,37 @@ final class DeliveryServicesAdminPage {
 
 	private function render_yandex_delivery_source_station_rows( array $values ): void {
 		$selected_station_id = $this->sanitize_yandex_platform_station_id( (string) ( $values[ YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ] ?? '' ) );
+		$selected_location_id = max( 0, (int) ( $values[ YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ] ?? 0 ) );
 		$selected_point = '' !== $selected_station_id && $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository
 			? $this->yandex_delivery_pickup_v2_repository->find( $selected_station_id )
 			: null;
-		$selected_city = is_array( $selected_point ) ? trim( (string) ( $selected_point['locality'] ?? '' ) ) : '';
 		$selected_address = is_array( $selected_point ) ? trim( (string) ( $selected_point['full_address'] ?? '' ) ) : '';
-		$cities = $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ? $this->yandex_delivery_pickup_v2_repository->source_dropoff_cities() : array();
-		$points = $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ? $this->yandex_delivery_pickup_v2_repository->source_dropoff_points() : array();
-		if ( '' !== $selected_city && ! in_array( $selected_city, $cities, true ) ) {
-			$cities[] = $selected_city;
-			sort( $cities, SORT_NATURAL | SORT_FLAG_CASE );
-		}
+		$selected_location = $selected_location_id > 0 && $this->locations instanceof LocationRepository ? $this->locations->find_by_id( $selected_location_id ) : null;
+		$source_data = $this->yandex_delivery_source_points_for_location( $selected_location_id );
+		$points = $source_data['points'];
+		$yandex_geo_id = (int) $source_data['yandex_geo_id'];
+		$point_found = is_array( $selected_point );
+		$point_available = $point_found && ! empty( $selected_point['active'] ) && ! empty( $selected_point['available_for_dropoff'] );
+		$ajax_nonce = function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wdc_yandex_delivery_source_station' ) : '';
 		?>
 		<tr><th colspan="2"><h3><?php echo esc_html__( 'Точка сдачи отправлений Яндекс.Доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
-		<?php if ( ! $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ) : ?>
-			<tr><th scope="row"><?php echo esc_html__( 'ПВЗ сдачи', 'walls-delivery-calc' ); ?></th><td><div class="notice notice-warning inline"><p><?php echo esc_html__( 'Локальная база ПВЗ Яндекс.Доставки недоступна.', 'walls-delivery-calc' ); ?></p></div></td></tr>
+		<?php if ( ! $this->locations instanceof LocationRepository || ! $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository || ! $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ) : ?>
+			<tr><th scope="row"><?php echo esc_html__( 'ПВЗ сдачи', 'walls-delivery-calc' ); ?></th><td><div class="notice notice-warning inline"><p><?php echo esc_html__( 'Локальные справочники населенных пунктов, маппинга или ПВЗ Яндекс.Доставки недоступны.', 'walls-delivery-calc' ); ?></p></div></td></tr>
 		<?php else : ?>
 			<tr>
-				<th scope="row"><label for="yandex_delivery_source_city"><?php echo esc_html__( 'Город сдачи', 'walls-delivery-calc' ); ?></label></th>
+				<th scope="row"><label for="yandex_delivery_source_location_search"><?php echo esc_html__( 'Город / населенный пункт сдачи', 'walls-delivery-calc' ); ?></label></th>
 				<td>
-					<select id="yandex_delivery_source_city" name="yandex_delivery_source_city">
-						<option value=""><?php echo esc_html__( 'Выберите город', 'walls-delivery-calc' ); ?></option>
-						<?php foreach ( $cities as $city ) : ?>
-							<option value="<?php echo esc_attr( $city ); ?>" <?php selected( $selected_city, $city ); ?>><?php echo esc_html( $city ); ?></option>
-						<?php endforeach; ?>
+					<input id="yandex_delivery_source_location_search" class="regular-text" type="text" placeholder="<?php echo esc_attr__( 'Начните вводить город', 'walls-delivery-calc' ); ?>">
+					<button type="button" class="button" data-wdc-yandex-source-location-search><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
+					<span class="spinner" data-wdc-yandex-source-spinner></span>
+					<p class="description"><?php echo esc_html__( 'Населенный пункт выбирается из локального справочника WDC. По нему берется yandex_geo_id из завершенного location mapping.', 'walls-delivery-calc' ); ?></p>
+					<select id="<?php echo esc_attr( YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ); ?>" name="<?php echo esc_attr( YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ); ?>" style="width:100%;max-width:720px;margin-top:8px;">
+						<option value="0"><?php echo esc_html__( 'Не выбран', 'walls-delivery-calc' ); ?></option>
+						<?php if ( null !== $selected_location ) : ?>
+							<option value="<?php echo esc_attr( (string) $selected_location_id ); ?>" selected><?php echo esc_html( $this->yandex_delivery_location_label( $selected_location ) ); ?></option>
+						<?php endif; ?>
 					</select>
-					<p class="description"><?php echo esc_html__( 'В списке только активные ПВЗ Яндекс.Доставки, доступные для сдачи отправлений.', 'walls-delivery-calc' ); ?></p>
+					<p class="description" data-wdc-yandex-source-status><?php echo esc_html( $selected_location_id > 0 ? sprintf( __( 'Выбран location_id: %d; yandex_geo_id: %s.', 'walls-delivery-calc' ), $selected_location_id, $yandex_geo_id > 0 ? (string) $yandex_geo_id : __( 'не найден', 'walls-delivery-calc' ) ) : __( 'Выберите населенный пункт, чтобы загрузить ПВЗ сдачи.', 'walls-delivery-calc' ) ); ?></p>
 				</td>
 			</tr>
 			<tr>
@@ -1480,18 +1589,17 @@ final class DeliveryServicesAdminPage {
 						<?php foreach ( $points as $point ) : ?>
 							<?php
 							$station_id = $this->sanitize_yandex_platform_station_id( (string) ( $point['platform_station_id'] ?? '' ) );
-							$city = trim( (string) ( $point['locality'] ?? '' ) );
 							$address = trim( (string) ( $point['full_address'] ?? '' ) );
-							$name = trim( (string) ( $point['name'] ?? '' ) );
-							$label = trim( ( '' !== $name ? $name . ' — ' : '' ) . ( '' !== $address ? $address : $station_id ) );
 							?>
 							<?php if ( '' !== $station_id ) : ?>
-								<option value="<?php echo esc_attr( $station_id ); ?>" data-city="<?php echo esc_attr( $city ); ?>" <?php selected( $selected_station_id, $station_id ); ?>><?php echo esc_html( $label ); ?></option>
+								<option value="<?php echo esc_attr( $station_id ); ?>" data-address="<?php echo esc_attr( $address ); ?>" <?php selected( $selected_station_id, $station_id ); ?>><?php echo esc_html( $this->yandex_delivery_source_point_label( $point ) ); ?></option>
 							<?php endif; ?>
 						<?php endforeach; ?>
 					</select>
-					<?php if ( array() === $points ) : ?>
-						<p class="description"><?php echo esc_html__( 'В локальной базе пока нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' ); ?></p>
+					<?php if ( $selected_location_id > 0 && $yandex_geo_id <= 0 ) : ?>
+						<p class="description"><?php echo esc_html__( 'Для выбранного населенного пункта нет рабочего yandex_geo_id в location mapping.', 'walls-delivery-calc' ); ?></p>
+					<?php elseif ( $selected_location_id > 0 && array() === $points ) : ?>
+						<p class="description"><?php echo esc_html__( 'Для выбранного yandex_geo_id нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' ); ?></p>
 					<?php endif; ?>
 				</td>
 			</tr>
@@ -1501,36 +1609,88 @@ final class DeliveryServicesAdminPage {
 			<th scope="row"><label for="yandex_delivery_source_station_address"><?php echo esc_html__( 'Адрес выбранного ПВЗ', 'walls-delivery-calc' ); ?></label></th>
 			<td><input id="yandex_delivery_source_station_address" class="large-text" type="text" readonly value="<?php echo esc_attr( '' !== $selected_address ? $selected_address : __( 'не выбран', 'walls-delivery-calc' ) ); ?>"></td>
 		</tr>
-		<?php if ( '' !== $selected_station_id && ! is_array( $selected_point ) ) : ?>
+		<?php if ( '' !== $selected_station_id && ! $point_found ) : ?>
 			<tr><th scope="row"><?php echo esc_html__( 'Предупреждение', 'walls-delivery-calc' ); ?></th><td><div class="notice notice-warning inline"><p><?php echo esc_html__( 'Сохраненный platform_station_id не найден в локальной базе ПВЗ после последнего импорта. Настройка сохранена, но адрес сейчас недоступен.', 'walls-delivery-calc' ); ?></p></div></td></tr>
+		<?php elseif ( '' !== $selected_station_id && ! $point_available ) : ?>
+			<tr><th scope="row"><?php echo esc_html__( 'Предупреждение', 'walls-delivery-calc' ); ?></th><td><div class="notice notice-warning inline"><p><?php echo esc_html__( 'Сохраненный ПВЗ сдачи найден, но сейчас не активен или недоступен для сдачи отправлений. Выберите другой ПВЗ.', 'walls-delivery-calc' ); ?></p></div></td></tr>
 		<?php endif; ?>
 		<script>
 		(function () {
-			var city = document.getElementById('yandex_delivery_source_city');
-			var point = document.getElementById('<?php echo esc_js( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>');
-			if (!city || !point) {
+			var ajaxUrl = window.ajaxurl || '';
+			var nonce = '<?php echo esc_js( $ajax_nonce ); ?>';
+			var search = document.getElementById('yandex_delivery_source_location_search');
+			var searchButton = document.querySelector('[data-wdc-yandex-source-location-search]');
+			var locationSelect = document.getElementById('<?php echo esc_js( YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ); ?>');
+			var pointSelect = document.getElementById('<?php echo esc_js( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>');
+			var status = document.querySelector('[data-wdc-yandex-source-status]');
+			var spinner = document.querySelector('[data-wdc-yandex-source-spinner]');
+			var address = document.getElementById('yandex_delivery_source_station_address');
+			if (!ajaxUrl || !nonce || !search || !searchButton || !locationSelect || !pointSelect) {
 				return;
 			}
-			function syncYandexSourceStations() {
-				var selectedCity = city.value;
-				var selectedVisible = false;
-				Array.prototype.forEach.call(point.options, function (option) {
-					if (option.value === '') {
-						option.hidden = false;
-						return;
-					}
-					var visible = !selectedCity || option.getAttribute('data-city') === selectedCity;
-					option.hidden = !visible;
-					if (visible && option.selected) {
-						selectedVisible = true;
-					}
-				});
-				if (selectedCity && !selectedVisible) {
-					point.value = '';
+			function setBusy(busy) {
+				if (spinner) {
+					spinner.classList.toggle('is-active', !!busy);
 				}
 			}
-			city.addEventListener('change', syncYandexSourceStations);
-			syncYandexSourceStations();
+			function post(data) {
+				data.append('action', 'wdc_yandex_delivery_source_station');
+				data.append('nonce', nonce);
+				setBusy(true);
+				return fetch(ajaxUrl, { method: 'POST', credentials: 'same-origin', body: data }).then(function (response) { return response.json(); }).finally(function () { setBusy(false); });
+			}
+			function option(value, text) {
+				var item = document.createElement('option');
+				item.value = value;
+				item.textContent = text;
+				return item;
+			}
+			function loadPoints(locationId) {
+				var data = new FormData();
+				data.append('mode', 'points');
+				data.append('location_id', locationId);
+				return post(data).then(function (resp) {
+					var payload = resp && resp.success ? resp.data : {};
+					pointSelect.innerHTML = '';
+					pointSelect.appendChild(option('', '<?php echo esc_js( __( 'Не выбран', 'walls-delivery-calc' ) ); ?>'));
+					(payload.points || []).forEach(function (point) {
+						var item = option(point.platform_station_id, point.label);
+						item.setAttribute('data-address', point.address || '');
+						pointSelect.appendChild(item);
+					});
+					if (address) {
+						address.value = '<?php echo esc_js( __( 'не выбран', 'walls-delivery-calc' ) ); ?>';
+					}
+					if (status) {
+						status.textContent = payload.message || '';
+					}
+				});
+			}
+			searchButton.addEventListener('click', function () {
+				var data = new FormData();
+				data.append('mode', 'locations');
+				data.append('query', search.value || '');
+				post(data).then(function (resp) {
+					var payload = resp && resp.success ? resp.data : {};
+					locationSelect.innerHTML = '';
+					locationSelect.appendChild(option('0', '<?php echo esc_js( __( 'Не выбран', 'walls-delivery-calc' ) ); ?>'));
+					(payload.locations || []).forEach(function (location) {
+						locationSelect.appendChild(option(String(location.id), location.label));
+					});
+					if (status) {
+						status.textContent = payload.message || '';
+					}
+				});
+			});
+			locationSelect.addEventListener('change', function () {
+				loadPoints(locationSelect.value || '0');
+			});
+			pointSelect.addEventListener('change', function () {
+				var selected = pointSelect.options[pointSelect.selectedIndex];
+				if (address) {
+					address.value = selected && selected.getAttribute('data-address') ? selected.getAttribute('data-address') : '<?php echo esc_js( __( 'не выбран', 'walls-delivery-calc' ) ); ?>';
+				}
+			});
 		}());
 		</script>
 		<?php
@@ -4296,6 +4456,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	private function sanitize_yandex_delivery_calculation_settings_from_post(): array {
 		return array(
 			YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY => array( 'value' => $this->sanitize_yandex_platform_station_id( (string) wp_unslash( $_POST[ YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ] ?? '' ) ), 'format' => 'string' ),
+			YandexDeliverySettings::SOURCE_LOCATION_ID_KEY => array( 'value' => max( 0, (int) ( $_POST[ YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ] ?? 0 ) ), 'format' => 'number' ),
 		);
 	}
 
@@ -4396,6 +4557,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	private function yandex_delivery_calculation_values( DeliveryService $service ): array {
 		$defaults = array(
 			YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY => '',
+			YandexDeliverySettings::SOURCE_LOCATION_ID_KEY => 0,
 		);
 		$saved = $this->settings instanceof DeliveryServiceSettingsRepository && null !== $service->id ? $this->settings->all_settings( (int) $service->id ) : array();
 

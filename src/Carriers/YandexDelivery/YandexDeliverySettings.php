@@ -20,6 +20,7 @@ final class YandexDeliverySettings {
 	public const PICKUP_METHOD_TITLE_KEY = 'pickup_method_title';
 	public const COURIER_METHOD_TITLE_KEY = 'courier_method_title';
 	public const SOURCE_PLATFORM_STATION_ID_KEY = 'source_platform_station_id';
+	public const SOURCE_LOCATION_ID_KEY = 'source_location_id';
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
@@ -60,6 +61,7 @@ final class YandexDeliverySettings {
 			self::PICKUP_METHOD_TITLE_KEY => self::DEFAULT_PICKUP_METHOD_TITLE,
 			self::COURIER_METHOD_TITLE_KEY => self::DEFAULT_COURIER_METHOD_TITLE,
 			self::SOURCE_PLATFORM_STATION_ID_KEY => '',
+			self::SOURCE_LOCATION_ID_KEY => 0,
 		);
 	}
 
@@ -89,6 +91,10 @@ final class YandexDeliverySettings {
 
 	public function source_platform_station_id(): string {
 		return $this->service_station_id( self::SOURCE_PLATFORM_STATION_ID_KEY );
+	}
+
+	public function source_location_id(): int {
+		return $this->service_positive_int( self::SOURCE_LOCATION_ID_KEY );
 	}
 
 	/** @param array<string,mixed> $input */
@@ -214,6 +220,15 @@ final class YandexDeliverySettings {
 		}
 
 		return $value;
+	}
+
+	private function service_positive_int( string $key ): int {
+		$service = $this->services instanceof DeliveryServiceRepository ? $this->services->find_by_service_key( self::SERVICE_KEY ) : null;
+		if ( ! $service instanceof DeliveryService || null === $service->id || ! $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
+			return max( 0, $this->settings->get_int( $key, 0 ) );
+		}
+
+		return max( 0, (int) $this->service_settings->get_setting( (int) $service->id, $key, 0 ) );
 	}
 
 	private function service_station_id( string $key ): string {

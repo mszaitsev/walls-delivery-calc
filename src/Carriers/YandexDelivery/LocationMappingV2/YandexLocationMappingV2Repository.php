@@ -122,6 +122,24 @@ final class YandexLocationMappingV2Repository {
 		return $report;
 	}
 
+	public function primary_geo_id_for_location( int $location_id ): int {
+		$location_id = max( 0, $location_id );
+		if ( $location_id <= 0 ) {
+			return 0;
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) === $location_id && ! empty( $row['is_primary'] ) && in_array( (string) ( $row['status'] ?? '' ), array( 'mapped', 'manual' ), true ) && (int) ( $row['yandex_geo_id'] ?? 0 ) > 0 ) );
+			usort( $rows, static fn( array $a, array $b ): int => (float) ( $b['confidence'] ?? 0 ) <=> (float) ( $a['confidence'] ?? 0 ) );
+
+			return (int) ( $rows[0]['yandex_geo_id'] ?? 0 );
+		}
+
+		$this->create_schema_if_needed();
+		$sql = 'SELECT yandex_geo_id FROM ' . $this->table_name() . ' WHERE location_id = %d AND is_primary = 1 AND status IN (%s, %s) AND yandex_geo_id > 0 ORDER BY confidence DESC LIMIT 1';
+
+		return (int) $this->wpdb->get_var( $this->wpdb->prepare( $sql, $location_id, 'mapped', 'manual' ) );
+	}
+
 	/** @return array<int,array<string,mixed>> */
 	public function find_by_geo( int $geo_id ): array {
 		return $this->search( array( 'yandex_geo_id' => $geo_id, 'limit' => 500, 'active' => null ) );

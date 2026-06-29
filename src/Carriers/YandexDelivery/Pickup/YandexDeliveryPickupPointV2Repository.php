@@ -202,47 +202,26 @@ final class YandexDeliveryPickupPointV2Repository {
 	}
 
 
-	/** @return array<int,string> */
-	public function source_dropoff_cities(): array {
-		if ( $this->has_test_rows() ) {
-			$cities = array();
-			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
-				if ( $this->is_source_dropoff_row( $row ) ) {
-					$city = trim( (string) ( $row['locality'] ?? '' ) );
-					if ( '' !== $city ) {
-						$cities[ $city ] = true;
-					}
-				}
-			}
-			$cities = array_keys( $cities );
-			sort( $cities, SORT_NATURAL | SORT_FLAG_CASE );
-
-			return $cities;
-		}
-
-		$this->create_schema_if_needed();
-		$sql = 'SELECT DISTINCT locality FROM ' . $this->table_name() . " WHERE active = 1 AND available_for_dropoff = 1 AND locality IS NOT NULL AND locality <> '' ORDER BY locality ASC";
-		$rows = $this->wpdb->get_col( $sql );
-
-		return array_values( array_filter( array_map( 'strval', is_array( $rows ) ? $rows : array() ), static fn( string $city ): bool => '' !== trim( $city ) ) );
-	}
-
 	/** @return array<int,array<string,mixed>> */
-	public function source_dropoff_points( int $limit = 5000 ): array {
-		$limit = max( 1, min( 5000, $limit ) );
+	public function source_dropoff_points_by_geo_id( int $yandex_geo_id, int $limit = 500 ): array {
+		$yandex_geo_id = max( 0, $yandex_geo_id );
+		$limit = max( 1, min( 1000, $limit ) );
+		if ( $yandex_geo_id <= 0 ) {
+			return array();
+		}
 		if ( $this->has_test_rows() ) {
-			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->is_source_dropoff_row( $row ) ) );
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->is_source_dropoff_row( $row ) && (int) ( $row['yandex_geo_id'] ?? 0 ) === $yandex_geo_id ) );
 			usort(
 				$rows,
-				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
 			);
 
 			return array_slice( $rows, 0, $limit );
 		}
 
 		$this->create_schema_if_needed();
-		$sql = 'SELECT platform_station_id, name, locality, full_address, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 ORDER BY locality ASC, name ASC, platform_station_id ASC LIMIT %d';
-		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $limit ), ARRAY_A );
+		$sql = 'SELECT platform_station_id, name, locality, full_address, yandex_geo_id, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND yandex_geo_id = %d AND platform_station_id <> %s ORDER BY name ASC, platform_station_id ASC LIMIT %d';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $yandex_geo_id, '', $limit ), ARRAY_A );
 
 		return is_array( $rows ) ? $rows : array();
 	}
