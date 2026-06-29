@@ -122,7 +122,7 @@ function dpd_terminal_runtime_carrier( DpdTerminalRuntimeFakeSoapClient $soap, D
 		new DpdTerminalCodeTariffRequestBuilder()
 	);
 
-	return new DpdQuoteCarrier( $settings, $tariffs, new PackagingBuilder( new PackagingBuilderConfig( $settings->tariff_default_weight_g(), $settings->tariff_default_length_cm(), $settings->tariff_default_width_cm(), $settings->tariff_default_height_cm(), $settings->tariff_default_declared_value_rub() ) ), new Logger() );
+	return new DpdQuoteCarrier( $settings, $tariffs, new PackagingBuilder( new PackagingBuilderConfig( 1000, 20.0, 20.0, 20.0, 1000.0 ) ), new Logger() );
 }
 
 $GLOBALS['wdc_dpd_terminal_runtime_options'] = array();

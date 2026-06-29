@@ -285,7 +285,7 @@ function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSetting
 	$pickup_service = new DpdPickupPointService( new DpdPickupPointRepository( $GLOBALS['wpdb'] ), $delivery_codes );
 	$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, new DpdTariffRequestBuilder(), new DpdTariffOptionNormalizer(), $pickup_service, new DpdTerminalCodeTariffRequestBuilder() );
 
-	return new DpdQuoteCarrier( $settings, $service, new PackagingBuilder( new PackagingBuilderConfig( $settings->tariff_default_weight_g(), $settings->tariff_default_length_cm(), $settings->tariff_default_width_cm(), $settings->tariff_default_height_cm(), $settings->tariff_default_declared_value_rub() ) ), new Logger() );
+	return new DpdQuoteCarrier( $settings, $service, new PackagingBuilder( new PackagingBuilderConfig( 1000, 20.0, 20.0, 20.0, 1000.0 ) ), new Logger() );
 }
 
 function dpd_checkout_orchestrator( CarrierRegistry $registry, DeliveryServiceRepository $services, DeliveryServiceCountryRepository $countries, DpdSettings $settings ): CheckoutOrchestrator {
@@ -467,7 +467,7 @@ dpd_checkout_assert( 1 === count( $items_payload['parcel'] ?? array() ) && in_ar
 $fallback_package = new Package( array(), Money::from_rubles( 0 ), Money::from_rubles( 0 ), 0, 0, 0, null, null, null, null, 'cart' );
 $fallback_quote = $carrier->quote( dpd_checkout_request_with_package( $fallback_package ) );
 $fallback_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
-dpd_checkout_assert( 1.0 === (float) ( $fallback_payload['parcel'][0]['weight'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['length'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['width'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['height'] ?? 0 ) && 'defaults' === (string) ( $fallback_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must fallback to DPD default parcel dimensions and weight.' );
+dpd_checkout_assert( 1.0 === (float) ( $fallback_payload['parcel'][0]['weight'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['length'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['width'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['height'] ?? 0 ) && 'defaults' === (string) ( $fallback_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must fallback to DPD legacy fallback parcel dimensions and weight while Packaging defaults remain carrier-neutral.' );
 
 $regular_4_quote = $carrier->quote( dpd_checkout_request_with_package( dpd_checkout_regular_items_package( 4 ) ) );
 $regular_4_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();

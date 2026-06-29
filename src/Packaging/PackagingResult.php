@@ -11,15 +11,30 @@ final class PackagingResult {
 	 * @param array<string,mixed>        $diagnostics
 	 */
 	public function __construct(
-		public readonly array $parcels,
+		private readonly array $parcels,
 		public readonly array $diagnostics
 	) {
+	}
+
+	/**
+	 * @return array<int,PackagingParcel>
+	 */
+	public function parcels(): array {
+		return $this->parcels;
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
 	public function to_array(): array {
-		return array_merge( $this->diagnostics, array( 'parcels' => $this->parcels ) );
+		return array_merge(
+			$this->diagnostics,
+			array(
+				'parcels' => array_map(
+					static fn( PackagingParcel $parcel ): array => $parcel->to_array(),
+					$this->parcels
+				),
+			)
+		);
 	}
 }

@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.103.0; shared packaging is available for a future Yandex multi-place stage, while buyer PVZ selection, order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.103.1; shared packaging is available for a future Yandex multi-place stage, while buyer PVZ selection, order recalculation and shipments remain planned.
 
 Date: 2026-06-22.
 
@@ -31,9 +31,9 @@ The Yandex Delivery admin surface now follows the intended working model:
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
-## 0.103.0 Shared packaging readiness
+## 0.103.1 Shared packaging readiness
 
-The DPD parcel packing engine has been extracted to `src/Packaging/PackagingBuilder.php` with neutral `PackagingResult` and `PackagingParcel` DTOs. Yandex can use this builder in a later stage without depending on `Carriers/Dpd`. This stage deliberately does not change Yandex pricing payloads: checkout pricing-calculator requests still use the aggregate single-place model documented below, so Yandex prices, places count and buyer PVZ behavior remain unchanged.
+The DPD parcel packing engine has been extracted to `src/Packaging/PackagingBuilder.php` with neutral `PackagingResult` and `PackagingParcel` DTOs. `PackagingBuilderConfig::defaults()` is defined inside Packaging, so Yandex can use this builder in a later stage without depending on `Carriers/Dpd` or DPD settings. This stage deliberately does not change Yandex pricing payloads: checkout pricing-calculator requests still use the aggregate single-place model documented below, so Yandex prices, places count and buyer PVZ behavior remain unchanged.
 ## 0.102.1 Checkout pricing-calculator
 
 Yandex checkout now calls `POST /api/b2b/platform/pricing-calculator` for both rates. Pickup uses `tariff=self_pickup`, `source.platform_station_id` from `YandexDeliverySettings::source_platform_station_id()`, and a representative destination `platform_station_id` selected locally from imported PVZ rows across every mapped/manual `yandex_geo_id` for the destination WDC `location_id`. Courier uses `tariff=time_interval` and `destination.address` assembled from checkout fields. The request builder sends `total_weight`, `total_assessed_price`, `client_price=0`, `payment_method=already_paid`, and currently uses an aggregate single-place model: `places` has one item, `places[0].physical_dims.weight_gross` equals `total_weight`, and dimensions come from the package or fallback `20x15x10` when checkout data is incomplete.

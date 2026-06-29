@@ -67,6 +67,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 
 		$packaging_result = $this->parcels->build( $request );
 		$parcel_build = $packaging_result->to_array();
+		$parcel_build['parcels'] = $packaging_result->parcels();
 		$params = $this->tariff_params( $parcel_build, $delivery_type, $request );
 		$result = $this->tariffs->calculate( $receiver_location_id, $params );
 		if ( ! $result->success ) {

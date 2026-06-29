@@ -14,4 +14,8 @@ final class PackagingBuilderConfig {
 		public readonly float $default_declared_value_rub
 	) {
 	}
+
+	public static function defaults(): self {
+		return new self( 500, 20.0, 15.0, 10.0, 1.0 );
+	}
 }
