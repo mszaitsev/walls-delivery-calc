@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.103.3; shared packaging is available for a future Yandex multi-place stage, while buyer PVZ selection, order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.103.6. Yandex pricing-calculator now uses the shared generic PackagingBuilder for multi-place request payloads, while buyer PVZ selection, order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -32,15 +32,19 @@ The Yandex Delivery admin surface now follows the intended working model:
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
 
+## 0.103.6 Shared packaging for pricing-calculator
+
+Yandex pricing-calculator requests now use src/Packaging/PackagingBuilder with generic PackagingBuilderConfig::defaults(). YandexDeliveryPricingRequestBuilder converts every PackagingParcel to a Yandex places[] entry with physical_dims.weight_gross, dx, dy and dz; PackagingParcel::quantity is expanded into repeated places. Request 	otal_weight is the sum of all sent weight_gross values. If the packaging result is empty or invalid, the builder falls back to the previous single-place model with generic 500 g and 20x15x10 cm defaults. Yandex rate meta records safe diagnostics: package_builder_source, packing_strategy, parcels_count, 	otal_weight_g, places_count and sanitized package dimensions/weights, without addresses or tokens. DPD legacy packaging config is not used by Yandex.
+
 ## 0.103.3 Checkout sorting
 
 Yandex Delivery checkout rates use the shared deterministic checkout sorter together with every other carrier. Sorting reads neutral original carrier values from `DeliveryRate::original_cost` and `DeliveryRate::original_delivery_days`; pricing-calculator payloads, parsed prices, delivery-day labels, source station selection and representative destination PVZ logic are unchanged.
 ## 0.103.2 Shared packaging readiness
 
-The DPD parcel packing engine has been extracted to `src/Packaging/PackagingBuilder.php` with neutral `PackagingResult` and `PackagingParcel` DTOs. `PackagingBuilderConfig::defaults()` is defined inside Packaging, so Yandex can use this builder in a later stage without depending on `Carriers/Dpd` or DPD settings. DPD now wires a separate legacy-configured builder for its runtime fallback payload, while the shared Packaging defaults remain generic. This stage deliberately does not change Yandex pricing payloads: checkout pricing-calculator requests still use the aggregate single-place model documented below, so Yandex prices, places count and buyer PVZ behavior remain unchanged.
+The DPD parcel packing engine has been extracted to `src/Packaging/PackagingBuilder.php` with neutral `PackagingResult` and `PackagingParcel` DTOs. `PackagingBuilderConfig::defaults()` is defined inside Packaging, so Yandex uses this builder without depending on `Carriers/Dpd` or DPD settings. DPD wires a separate legacy-configured builder for its runtime fallback payload, while the shared Packaging defaults remain generic.
 ## 0.102.1 Checkout pricing-calculator
 
-Yandex checkout now calls `POST /api/b2b/platform/pricing-calculator` for both rates. Pickup uses `tariff=self_pickup`, `source.platform_station_id` from `YandexDeliverySettings::source_platform_station_id()`, and a representative destination `platform_station_id` selected locally from imported PVZ rows across every mapped/manual `yandex_geo_id` for the destination WDC `location_id`. Courier uses `tariff=time_interval` and `destination.address` assembled from checkout fields. The request builder sends `total_weight`, `total_assessed_price`, `client_price=0`, `payment_method=already_paid`, and currently uses an aggregate single-place model: `places` has one item, `places[0].physical_dims.weight_gross` equals `total_weight`, and dimensions come from the package or fallback `20x15x10` when checkout data is incomplete.
+Yandex checkout now calls `POST /api/b2b/platform/pricing-calculator` for both rates. Pickup uses `tariff=self_pickup`, `source.platform_station_id` from `YandexDeliverySettings::source_platform_station_id()`, and a representative destination `platform_station_id` selected locally from imported PVZ rows across every mapped/manual `yandex_geo_id` for the destination WDC `location_id`. Courier uses `tariff=time_interval` and `destination.address` assembled from checkout fields. The request builder sends `total_weight`, `total_assessed_price`, `client_price=0`, `payment_method=already_paid`, and shared packaging `places[]`. Each `PackagingParcel` becomes a place with gross weight and dimensions; parcel quantity is expanded into repeated places. `total_weight` equals the sum of sent `weight_gross` values. Empty or invalid packaging falls back to the previous single-place payload with generic `500 g` and `20x15x10 cm` defaults.
 
 `pricing_total` is parsed to kopecks (`237.9 RUB` -> `23790`), and `delivery_days` becomes the checkout title suffix through the shared Russian formatter (`1 день`, `2 дня`, `5 дней`). A failure in one Yandex rate returns a disabled reason and does not break the other rate. Buyer PVZ selection/map, shipment offers, order recalculation, import and geo pipeline code were not changed.
 
@@ -48,7 +52,7 @@ Yandex checkout now calls `POST /api/b2b/platform/pricing-calculator` for both r
 
 The first checkout-preparation setting for Yandex Delivery is available on `Службы доставки -> Яндекс Доставка -> Расчет`. Admins search/select a WDC local `location_id`, WDC resolves it through location mapping v2 to all mapped/manual `yandex_geo_id` values, and then shows all locally imported Yandex PVZ rows that are active, `available_for_dropoff=true`, have any matching `yandex_geo_id`, and have a non-empty `platform_station_id`, without limiting the list inside that geo id set. The PVZ selector has a client-side `full_address` filter that starts from 3 characters and shows an empty-result message when nothing matches. WDC stores the selected `platform_station_id` as `source_platform_station_id`; `source_location_id` is stored only to restore the admin selector. The full address is restored from the local PVZ table and shown as a read-only verification field.
 
-If a later import removes the saved station from the local database, marks it inactive, or marks it unavailable for dropoff, the setting remains saved, the `platform_station_id` is still displayed, and the admin page shows a warning. Checkout remains tolerant of an empty source station and does not read this setting until the future Yandex pricing/payload stage.
+If a later import removes the saved station from the local database, marks it inactive, or marks it unavailable for dropoff, the setting remains saved, the `platform_station_id` is still displayed, and the admin page shows a warning. Checkout remains tolerant of an empty source station by returning disabled Yandex rates with a readable reason instead of sending pricing requests.
 ## 1. Scope
 
 This document covers only Yandex Delivery API for `Доставка по России` / delivery in another day.

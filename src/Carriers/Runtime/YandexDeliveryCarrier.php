@@ -27,6 +27,8 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 	public const PICKUP_RATE_ID = 'yandex_pickup';
 	public const COURIER_RATE_ID = 'yandex_courier';
 	private const DEFAULT_DELIVERY_TIME = 'без указания срока';
+	/** @var array<string,mixed> */
+	private array $last_pricing_request_diagnostics = array();
 
 	public function __construct(
 		private YandexDeliverySettings $settings,
@@ -91,7 +93,7 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 
 		try {
 			$result = $this->pricing_result( $request, $delivery_type );
-			return $this->build_rate( $delivery_type, $method_title, $result->delivery_time_label(), Money::from_kopecks( $result->price_kopecks ), false, '', array( 'pricing_total_kopecks' => $result->price_kopecks, 'delivery_days' => $result->delivery_days ) );
+			return $this->build_rate( $delivery_type, $method_title, $result->delivery_time_label(), Money::from_kopecks( $result->price_kopecks ), false, '', array_merge( array( 'pricing_total_kopecks' => $result->price_kopecks, 'delivery_days' => $result->delivery_days ), $this->last_pricing_request_diagnostics ) );
 		} catch ( Throwable $exception ) {
 			$reason = $this->disabled_reason( $exception, $delivery_type );
 			$this->log_pricing_error( $delivery_type, $exception, $request );
@@ -155,6 +157,7 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 			$destination_station_id = $this->representative_destination_station_id( $request );
 			$payload = $this->request_builder->pickup( $request, $source_station_id, $destination_station_id );
 		}
+		$this->last_pricing_request_diagnostics = $this->request_builder->last_diagnostics();
 
 		return $this->response_parser->parse( $this->api->pricingCalculator( $payload ) );
 	}

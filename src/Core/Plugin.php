@@ -303,7 +303,7 @@ final class Plugin {
 		$this->container->register( YandexDeliveryHttpClientInterface::class, fn(): YandexDeliveryHttpClientInterface => new WpYandexDeliveryHttpClient( $this->container->get( YandexDeliverySettings::class )->request_timeout() ) );
 		$this->container->register( YandexDeliveryApiClient::class, fn(): YandexDeliveryApiClient => new YandexDeliveryApiClient( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryHttpClientInterface::class ) ) );
 		$this->container->register( YandexDeliveryConnectionDiagnosticService::class, fn(): YandexDeliveryConnectionDiagnosticService => new YandexDeliveryConnectionDiagnosticService( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryApiClient::class ) ) );
-		$this->container->register( YandexDeliveryPricingRequestBuilder::class, fn(): YandexDeliveryPricingRequestBuilder => new YandexDeliveryPricingRequestBuilder() );
+		$this->container->register( YandexDeliveryPricingRequestBuilder::class, fn(): YandexDeliveryPricingRequestBuilder => new YandexDeliveryPricingRequestBuilder( $this->container->get( PackagingBuilder::class ) ) );
 		$this->container->register( YandexDeliveryPricingResponseParser::class, fn(): YandexDeliveryPricingResponseParser => new YandexDeliveryPricingResponseParser() );
 		$this->container->register( YandexDeliveryPickupPointV2Repository::class, fn(): YandexDeliveryPickupPointV2Repository => new YandexDeliveryPickupPointV2Repository() );
 		$this->container->register( YandexDeliveryPickupPointV2JsonStreamReader::class, fn(): YandexDeliveryPickupPointV2JsonStreamReader => new YandexDeliveryPickupPointV2JsonStreamReader() );
