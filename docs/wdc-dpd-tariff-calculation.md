@@ -1,10 +1,10 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.103.1.
+Version: 0.103.2.
 
 This document covers the DPD tariff calculation foundation used by checkout runtime. As of 0.62.0, checkout runtime uses
 `calculator2/getServiceCostByParcels3` with terminalCode. As of 0.62.1, the remaining admin test calculator UI was
-removed from `DPD Расчет`; that tab is settings-only. As of 0.103.1, package-place building is provided by the shared `src/Packaging/PackagingBuilder.php` layer. The shared default config comes from `PackagingBuilderConfig::defaults()` instead of `DpdSettings`; DPD passes a separate legacy `PackagingBuilderConfig(1000, 20, 20, 20, 1000)` so its fallback payload remains unchanged, and adapts neutral `PackagingParcel` objects from `PackagingResult::parcels()` to `DpdTariffParcel` before payload creation.
+removed from `DPD Расчет`; that tab is settings-only. As of 0.103.1, package-place building is provided by the shared `src/Packaging/PackagingBuilder.php` layer. As of 0.103.2, the shared default config comes from `PackagingBuilderConfig::defaults()` and stays carrier-neutral; DPD checkout receives its builder from `DpdPackagingBuilderFactory`, which creates `PackagingBuilderConfig(1000, 20, 20, 20, 1000)` so the pre-refactor fallback payload remains unchanged. DPD adapts neutral `PackagingParcel` objects from `PackagingResult::parcels()` to `DpdTariffParcel` before payload creation.
 
 ## Scope
 

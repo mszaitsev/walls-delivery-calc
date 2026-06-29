@@ -17,9 +17,9 @@ use WallsShop\WDC\Carriers\Dpd\DpdSoapRequest;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdPackagingBuilderFactory;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
-use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
@@ -48,6 +48,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Packaging\PackagingBuilderConfig;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -285,7 +286,9 @@ function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSetting
 	$pickup_service = new DpdPickupPointService( new DpdPickupPointRepository( $GLOBALS['wpdb'] ), $delivery_codes );
 	$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, new DpdTariffRequestBuilder(), new DpdTariffOptionNormalizer(), $pickup_service, new DpdTerminalCodeTariffRequestBuilder() );
 
-	return new DpdQuoteCarrier( $settings, $service, new PackagingBuilder( new PackagingBuilderConfig( 1000, 20.0, 20.0, 20.0, 1000.0 ) ), new Logger() );
+	$dpd_packaging = new DpdPackagingBuilderFactory( new PackagingWeightCalculator( new SettingsRepository() ) );
+
+	return new DpdQuoteCarrier( $settings, $service, $dpd_packaging->create(), new Logger() );
 }
 
 function dpd_checkout_orchestrator( CarrierRegistry $registry, DeliveryServiceRepository $services, DeliveryServiceCountryRepository $countries, DpdSettings $settings ): CheckoutOrchestrator {
@@ -328,6 +331,11 @@ $GLOBALS['wpdb']->dpd_pickup_points = array(
 	array( 'id' => 3, 'terminal_code' => 'MSK-SELECTED', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD Москва selected', 'address' => 'ул Арбат, 1', 'source' => 'getParcelShops', 'is_active' => 1 ),
 	array( 'id' => 4, 'terminal_code' => 'MSK-SELECTED', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD duplicate terminal', 'address' => 'ул Арбат, 1', 'source' => 'getTerminalsSelfDelivery2', 'is_active' => 1 ),
 );
+
+$dpd_config = ( new DpdPackagingBuilderFactory( new PackagingWeightCalculator( new SettingsRepository() ) ) )->config();
+dpd_checkout_assert( 1000 === $dpd_config->default_weight_g && 20.0 === $dpd_config->default_length_cm && 20.0 === $dpd_config->default_width_cm && 20.0 === $dpd_config->default_height_cm && 1000.0 === $dpd_config->default_declared_value_rub, 'DPD packaging builder must use legacy DPD fallback config.' );
+$generic_config = PackagingBuilderConfig::defaults();
+dpd_checkout_assert( 500 === $generic_config->default_weight_g && 20.0 === $generic_config->default_length_cm && 15.0 === $generic_config->default_width_cm && 10.0 === $generic_config->default_height_cm && 1.0 === $generic_config->default_declared_value_rub, 'Shared Packaging defaults must stay carrier-neutral.' );
 
 $settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
 $default_settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
@@ -388,6 +396,7 @@ dpd_checkout_assert( isset( $soap->calls[0]['soap_payload']['request']['auth'] )
 dpd_checkout_assert( 'getServiceCostByParcels3' === $soap->calls[0]['method'], 'DPD checkout runtime must use getServiceCostByParcels3.' );
 dpd_checkout_assert( 'NSK-SENDER' === (string) ( $soap->calls[0]['payload']['pickup']['terminalCode'] ?? '' ) && 'MSK-AUTO' === (string) ( $soap->calls[0]['payload']['delivery']['terminalCode'] ?? '' ), 'DPD pickup payload must include sender and auto-selected delivery terminalCode.' );
 dpd_checkout_assert( 1.5 === $soap->calls[0]['payload']['parcel'][0]['weight'] && 2500.0 === $soap->calls[0]['payload']['declaredValue'], 'DPD checkout payload must use cart weight and declared value.' );
+dpd_checkout_assert( '49455627' === (string) ( $soap->calls[0]['payload']['pickup']['cityId'] ?? '' ) && '49694102' === (string) ( $soap->calls[0]['payload']['delivery']['cityId'] ?? '' ), 'DPD checkout payload must keep sender and receiver cityId.' );
 dpd_checkout_assert( true === ( $soap->calls[0]['payload']['selfPickup'] ?? null ) && true === ( $soap->calls[0]['payload']['selfDelivery'] ?? null ), 'DPD pickup payload must always use selfPickup=true and selfDelivery=true.' );
 dpd_checkout_assert( 1 === count( $soap->calls[0]['payload']['parcel'] ?? array() ) && 1 === (int) ( $soap->calls[0]['payload']['parcel'][0]['quantity'] ?? 0 ), 'DPD checkout payload must send one packaging parcel, not cart items.' );
 $base_quote_id = $quote->quote_id;
@@ -442,6 +451,7 @@ $package_box = new Package( array(), Money::from_rubles( 5000 ), Money::from_rub
 $box_quote = $carrier->quote( dpd_checkout_request_with_package( $package_box ) );
 $box_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
 dpd_checkout_assert( 4.5 === (float) ( $box_payload['parcel'][0]['weight'] ?? 0 ) && 38.0 === (float) ( $box_payload['parcel'][0]['length'] ?? 0 ) && 24.0 === (float) ( $box_payload['parcel'][0]['width'] ?? 0 ) && 21.0 === (float) ( $box_payload['parcel'][0]['height'] ?? 0 ) && 1 === (int) ( $box_payload['parcel'][0]['quantity'] ?? 0 ), 'DPD parcel builder must use package-level dimensions as one 4.5kg 38x24x21 box.' );
+dpd_checkout_assert( 5000.0 === (float) ( $box_payload['declaredValue'] ?? 0 ) && true === ( $box_payload['selfPickup'] ?? null ) && true === ( $box_payload['selfDelivery'] ?? null ) && '49455627' === (string) ( $box_payload['pickup']['cityId'] ?? '' ) && '49694102' === (string) ( $box_payload['delivery']['cityId'] ?? '' ), 'DPD full-dimension payload must match legacy sender, receiver, flags and declared value.' );
 dpd_checkout_assert( 'package_dimensions' === (string) ( $box_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD quote diagnostics must expose package builder source.' );
 
 $items_package = new Package(
@@ -467,7 +477,7 @@ dpd_checkout_assert( 1 === count( $items_payload['parcel'] ?? array() ) && in_ar
 $fallback_package = new Package( array(), Money::from_rubles( 0 ), Money::from_rubles( 0 ), 0, 0, 0, null, null, null, null, 'cart' );
 $fallback_quote = $carrier->quote( dpd_checkout_request_with_package( $fallback_package ) );
 $fallback_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
-dpd_checkout_assert( 1.0 === (float) ( $fallback_payload['parcel'][0]['weight'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['length'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['width'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['height'] ?? 0 ) && 'defaults' === (string) ( $fallback_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must fallback to DPD legacy fallback parcel dimensions and weight while Packaging defaults remain carrier-neutral.' );
+dpd_checkout_assert( 1.0 === (float) ( $fallback_payload['parcel'][0]['weight'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['length'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['width'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['height'] ?? 0 ) && 1000.0 === (float) ( $fallback_payload['declaredValue'] ?? 0 ) && 'defaults' === (string) ( $fallback_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must fallback to DPD legacy parcel dimensions, weight and declared value while Packaging defaults remain carrier-neutral.' );
 
 $regular_4_quote = $carrier->quote( dpd_checkout_request_with_package( dpd_checkout_regular_items_package( 4 ) ) );
 $regular_4_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
@@ -653,5 +663,6 @@ dpd_checkout_assert( ! ( new CarrierShipmentAdapterRegistry() )->has( DpdSetting
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 dpd_checkout_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $plugin_source, 'array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ) ), $this->container->get( Logger::class )' ), 'Plugin must register DPD checkout carrier and manual live-create adapter without adding auto-create.' );
+dpd_checkout_assert( str_contains( $plugin_source, 'DpdPackagingBuilderFactory::class' ) && str_contains( $plugin_source, '->create()' ), 'DPD runtime must receive the DPD-configured PackagingBuilder factory.' );
 
 echo "DPD checkout runtime smoke test passed.\n";
