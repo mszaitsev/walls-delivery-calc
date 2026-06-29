@@ -186,7 +186,7 @@ final class YandexDeliveryPickupPointV2Repository {
 				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) )
 			);
 
-			return array_slice( $rows, 0, $limit );
+			return $rows;
 		}
 
 		$this->create_schema_if_needed();
@@ -203,9 +203,8 @@ final class YandexDeliveryPickupPointV2Repository {
 
 
 	/** @return array<int,array<string,mixed>> */
-	public function source_dropoff_points_by_geo_id( int $yandex_geo_id, int $limit = 500 ): array {
+	public function source_dropoff_points_by_geo_id( int $yandex_geo_id ): array {
 		$yandex_geo_id = max( 0, $yandex_geo_id );
-		$limit = max( 1, min( 1000, $limit ) );
 		if ( $yandex_geo_id <= 0 ) {
 			return array();
 		}
@@ -216,12 +215,12 @@ final class YandexDeliveryPickupPointV2Repository {
 				static fn( array $a, array $b ): int => strcmp( (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
 			);
 
-			return array_slice( $rows, 0, $limit );
+			return $rows;
 		}
 
 		$this->create_schema_if_needed();
-		$sql = 'SELECT platform_station_id, name, locality, full_address, yandex_geo_id, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND yandex_geo_id = %d AND platform_station_id <> %s ORDER BY name ASC, platform_station_id ASC LIMIT %d';
-		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $yandex_geo_id, '', $limit ), ARRAY_A );
+		$sql = 'SELECT platform_station_id, name, locality, full_address, yandex_geo_id, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND yandex_geo_id = %d AND platform_station_id <> %s ORDER BY name ASC, platform_station_id ASC';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $yandex_geo_id, '' ), ARRAY_A );
 
 		return is_array( $rows ) ? $rows : array();
 	}

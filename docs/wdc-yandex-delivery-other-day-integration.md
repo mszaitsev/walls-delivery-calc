@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout placeholder rates and the admin source platform station selector are implemented through 0.101.1; pricing, delivery time calculation, buyer PVZ selection, order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout placeholder rates and the admin source platform station selector are implemented through 0.101.2; pricing, delivery time calculation, buyer PVZ selection, order recalculation and shipments remain planned.
 
 Date: 2026-06-22.
 
@@ -31,9 +31,9 @@ The Yandex Delivery admin surface now follows the intended working model:
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
-## 0.101.1 Source platform station admin setting
+## 0.101.2 Source platform station admin setting
 
-The first checkout-preparation setting for Yandex Delivery is available on `Службы доставки -> Яндекс Доставка -> Расчет`. Admins search/select a WDC local `location_id`, WDC resolves it through location mapping v2 to primary `yandex_geo_id`, and then shows only locally imported Yandex PVZ rows that are active, `available_for_dropoff=true`, have matching `yandex_geo_id`, and have a non-empty `platform_station_id`. WDC stores the selected `platform_station_id` as `source_platform_station_id`; `source_location_id` is stored only to restore the admin selector. The full address is restored from the local PVZ table and shown as a read-only verification field.
+The first checkout-preparation setting for Yandex Delivery is available on `Службы доставки -> Яндекс Доставка -> Расчет`. Admins search/select a WDC local `location_id`, WDC resolves it through location mapping v2 to primary `yandex_geo_id`, and then shows all locally imported Yandex PVZ rows that are active, `available_for_dropoff=true`, have matching `yandex_geo_id`, and have a non-empty `platform_station_id`, without limiting the list inside that geo id. The PVZ selector has a client-side `full_address` filter that starts from 3 characters and shows an empty-result message when nothing matches. WDC stores the selected `platform_station_id` as `source_platform_station_id`; `source_location_id` is stored only to restore the admin selector. The full address is restored from the local PVZ table and shown as a read-only verification field.
 
 If a later import removes the saved station from the local database, marks it inactive, or marks it unavailable for dropoff, the setting remains saved, the `platform_station_id` is still displayed, and the admin page shows a warning. Checkout remains tolerant of an empty source station and does not read this setting until the future Yandex pricing/payload stage.
 ## 1. Scope

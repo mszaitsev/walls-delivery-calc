@@ -1584,6 +1584,9 @@ final class DeliveryServicesAdminPage {
 			<tr>
 				<th scope="row"><label for="<?php echo esc_attr( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>"><?php echo esc_html__( 'ПВЗ сдачи', 'walls-delivery-calc' ); ?></label></th>
 				<td>
+					<label for="yandex_delivery_source_point_filter"><?php echo esc_html__( 'Фильтр ПВЗ по адресу', 'walls-delivery-calc' ); ?></label><br>
+					<input id="yandex_delivery_source_point_filter" class="regular-text" type="text" placeholder="<?php echo esc_attr__( 'Введите минимум 3 символа адреса', 'walls-delivery-calc' ); ?>" style="width:100%;max-width:720px;margin-bottom:8px;">
+					<p class="description" data-wdc-yandex-source-point-filter-message style="display:none;"><?php echo esc_html__( 'По фильтру ПВЗ не найдены.', 'walls-delivery-calc' ); ?></p>
 					<select id="<?php echo esc_attr( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>" name="<?php echo esc_attr( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>" style="width:100%;max-width:720px;">
 						<option value=""><?php echo esc_html__( 'Не выбран', 'walls-delivery-calc' ); ?></option>
 						<?php foreach ( $points as $point ) : ?>
@@ -1622,6 +1625,8 @@ final class DeliveryServicesAdminPage {
 			var searchButton = document.querySelector('[data-wdc-yandex-source-location-search]');
 			var locationSelect = document.getElementById('<?php echo esc_js( YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ); ?>');
 			var pointSelect = document.getElementById('<?php echo esc_js( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>');
+			var pointFilter = document.getElementById('yandex_delivery_source_point_filter');
+			var pointFilterMessage = document.querySelector('[data-wdc-yandex-source-point-filter-message]');
 			var status = document.querySelector('[data-wdc-yandex-source-status]');
 			var spinner = document.querySelector('[data-wdc-yandex-source-spinner]');
 			var address = document.getElementById('yandex_delivery_source_station_address');
@@ -1645,6 +1650,29 @@ final class DeliveryServicesAdminPage {
 				item.textContent = text;
 				return item;
 			}
+			function applyPointFilter() {
+				if (!pointFilter) {
+					return;
+				}
+				var query = (pointFilter.value || '').toLocaleLowerCase();
+				var useFilter = query.length >= 3;
+				var found = 0;
+				Array.prototype.forEach.call(pointSelect.options, function (item) {
+					if (item.value === '') {
+						item.hidden = false;
+						return;
+					}
+					var addressText = (item.getAttribute('data-address') || '').toLocaleLowerCase();
+					var visible = !useFilter || addressText.indexOf(query) !== -1;
+					item.hidden = !visible;
+					if (visible) {
+						found += 1;
+					}
+				});
+				if (pointFilterMessage) {
+					pointFilterMessage.style.display = useFilter && found === 0 ? '' : 'none';
+				}
+			}
 			function loadPoints(locationId) {
 				var data = new FormData();
 				data.append('mode', 'points');
@@ -1664,6 +1692,7 @@ final class DeliveryServicesAdminPage {
 					if (status) {
 						status.textContent = payload.message || '';
 					}
+					applyPointFilter();
 				});
 			}
 			searchButton.addEventListener('click', function () {
@@ -1685,6 +1714,10 @@ final class DeliveryServicesAdminPage {
 			locationSelect.addEventListener('change', function () {
 				loadPoints(locationSelect.value || '0');
 			});
+			if (pointFilter) {
+				pointFilter.addEventListener('input', applyPointFilter);
+				applyPointFilter();
+			}
 			pointSelect.addEventListener('change', function () {
 				var selected = pointSelect.options[pointSelect.selectedIndex];
 				if (address) {

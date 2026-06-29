@@ -61,6 +61,7 @@ $GLOBALS['wpdb']->yandex_location_mapping_v2 = array(
 );
 $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
 	array( 'platform_station_id' => 'NSK-1', 'name' => 'ПВЗ Березовая', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Березовая 1', 'yandex_geo_id' => 65, 'available_for_dropoff' => 1, 'active' => 1 ),
+	array( 'platform_station_id' => 'NSK-4', 'name' => 'ПВЗ Станционная', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Станционная 4', 'yandex_geo_id' => 65, 'available_for_dropoff' => 1, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-2', 'name' => 'ПВЗ без сдачи', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Красный 2', 'yandex_geo_id' => 65, 'available_for_dropoff' => 0, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-3', 'name' => 'Неактивный ПВЗ', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Ленина 3', 'yandex_geo_id' => 65, 'available_for_dropoff' => 1, 'active' => 0 ),
 	array( 'platform_station_id' => 'MSK-1', 'name' => 'ПВЗ Тверская', 'locality' => 'Москва', 'full_address' => 'Москва, Тверская 10', 'yandex_geo_id' => 213, 'available_for_dropoff' => 1, 'active' => 1 ),
@@ -74,11 +75,17 @@ yandex_source_assert( 1 === count( $found_locations ) && 10 === (int) $found_loc
 $mapping = new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] );
 yandex_source_assert( 65 === $mapping->primary_geo_id_for_location( 10 ), 'Source station lookup must resolve yandex_geo_id through location mapping v2 by location_id.' );
 yandex_source_assert( 0 === $mapping->primary_geo_id_for_location( 999 ), 'Missing source location mapping must return no yandex_geo_id.' );
+$repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php' );
+$source_dropoff_start = strpos( $repository_source, 'public function source_dropoff_points_by_geo_id' );
+$source_dropoff_end = strpos( $repository_source, '/** @param array<string,mixed> $filters */', false === $source_dropoff_start ? 0 : $source_dropoff_start );
+$source_dropoff_method = false !== $source_dropoff_start && false !== $source_dropoff_end ? substr( $repository_source, $source_dropoff_start, $source_dropoff_end - $source_dropoff_start ) : '';
+yandex_source_assert( '' !== $source_dropoff_method, 'Source dropoff repository method must exist.' );
+yandex_source_assert( ! str_contains( $source_dropoff_method, '$limit' ) && ! str_contains( $source_dropoff_method, 'LIMIT' ) && ! str_contains( $source_dropoff_method, 'array_slice' ) && ! str_contains( $source_dropoff_method, 'min( 1000' ), 'Source dropoff repository method must not limit points inside one yandex_geo_id.' );
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
 $points = $repository->source_dropoff_points_by_geo_id( 65 );
-yandex_source_assert( 1 === count( $points ), 'Source station point list must not load first 5000 PVZ globally and must include only matching active dropoff points.' );
-yandex_source_assert( 'NSK-1' === (string) ( $points[0]['platform_station_id'] ?? '' ), 'Source station point list must include the matching yandex_geo_id dropoff point.' );
+yandex_source_assert( 2 === count( $points ), 'Source station point list must return all matching active dropoff points for the selected yandex_geo_id.' );
+yandex_source_assert( array( 'NSK-1', 'NSK-4' ) === array_column( $points, 'platform_station_id' ), 'Source station points must keep stable name/platform_station_id sorting.' );
 yandex_source_assert( ! in_array( 'MSK-1', array_column( $points, 'platform_station_id' ), true ), 'PVZ with another yandex_geo_id must not be shown.' );
 yandex_source_assert( ! in_array( 'NSK-2', array_column( $points, 'platform_station_id' ), true ), 'available_for_dropoff=0 PVZ must not be shown.' );
 yandex_source_assert( ! in_array( 'NSK-3', array_column( $points, 'platform_station_id' ), true ), 'inactive PVZ must not be shown.' );
@@ -102,6 +109,8 @@ yandex_source_assert( str_contains( $admin_source, 'YandexDeliverySettings::SOUR
 yandex_source_assert( str_contains( $admin_source, 'primary_geo_id_for_location' ) && str_contains( $admin_source, 'source_dropoff_points_by_geo_id' ), 'Admin source station must resolve PVZ through location_id -> yandex_geo_id.' );
 yandex_source_assert( ! str_contains( $admin_source, 'source_dropoff_points()' ) && ! str_contains( $admin_source, 'source_dropoff_cities()' ), 'Admin source station must not load a global first-5000 PVZ list.' );
 yandex_source_assert( str_contains( $admin_source, 'Точка сдачи отправлений Яндекс.Доставки' ) && str_contains( $admin_source, 'Город / населенный пункт сдачи' ) && str_contains( $admin_source, 'ПВЗ сдачи' ), 'Admin calculation tab must render Russian source station controls.' );
+yandex_source_assert( str_contains( $admin_source, 'Фильтр ПВЗ по адресу' ) && str_contains( $admin_source, 'Введите минимум 3 символа адреса' ) && str_contains( $admin_source, 'По фильтру ПВЗ не найдены.' ), 'Admin source station UI must render the address filter and empty-filter message.' );
+yandex_source_assert( str_contains( $admin_source, 'data-address' ) && str_contains( $admin_source, 'query.length >= 3' ) && str_contains( $admin_source, 'toLocaleLowerCase' ) && str_contains( $admin_source, 'addressText.indexOf(query)' ), 'Admin source station filter must use client-side case-insensitive data-address search from 3 characters.' );
 yandex_source_assert( str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_source_station' ) && str_contains( $admin_source, 'check_ajax_referer' ) && str_contains( $admin_source, 'current_user_can' ), 'Admin AJAX source station endpoint must have nonce and capability checks.' );
 yandex_source_assert( str_contains( $admin_source, 'Сохраненный platform_station_id' ) && str_contains( $admin_source, 'Адрес выбранного ПВЗ' ) && str_contains( $admin_source, 'readonly' ), 'Admin source station UI must display readonly saved station id and address.' );
 yandex_source_assert( str_contains( $admin_source, 'не найден в локальной базе ПВЗ после последнего импорта' ) && str_contains( $admin_source, 'сейчас не активен или недоступен для сдачи отправлений' ), 'Admin source station UI must warn for missing, inactive, or non-dropoff saved PVZ.' );
