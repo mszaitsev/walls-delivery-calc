@@ -70,6 +70,8 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Json
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2ScheduleFormatter;
+use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingRequestBuilder;
+use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingResponseParser;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
@@ -299,6 +301,8 @@ final class Plugin {
 		$this->container->register( YandexDeliveryHttpClientInterface::class, fn(): YandexDeliveryHttpClientInterface => new WpYandexDeliveryHttpClient( $this->container->get( YandexDeliverySettings::class )->request_timeout() ) );
 		$this->container->register( YandexDeliveryApiClient::class, fn(): YandexDeliveryApiClient => new YandexDeliveryApiClient( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryHttpClientInterface::class ) ) );
 		$this->container->register( YandexDeliveryConnectionDiagnosticService::class, fn(): YandexDeliveryConnectionDiagnosticService => new YandexDeliveryConnectionDiagnosticService( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryApiClient::class ) ) );
+		$this->container->register( YandexDeliveryPricingRequestBuilder::class, fn(): YandexDeliveryPricingRequestBuilder => new YandexDeliveryPricingRequestBuilder() );
+		$this->container->register( YandexDeliveryPricingResponseParser::class, fn(): YandexDeliveryPricingResponseParser => new YandexDeliveryPricingResponseParser() );
 		$this->container->register( YandexDeliveryPickupPointV2Repository::class, fn(): YandexDeliveryPickupPointV2Repository => new YandexDeliveryPickupPointV2Repository() );
 		$this->container->register( YandexDeliveryPickupPointV2JsonStreamReader::class, fn(): YandexDeliveryPickupPointV2JsonStreamReader => new YandexDeliveryPickupPointV2JsonStreamReader() );
 		$this->container->register( YandexDeliveryPickupPointV2ScheduleFormatter::class, fn(): YandexDeliveryPickupPointV2ScheduleFormatter => new YandexDeliveryPickupPointV2ScheduleFormatter() );
@@ -386,7 +390,7 @@ final class Plugin {
 		$this->container->register( RussianPostDomesticCarrier::class, fn(): RussianPostDomesticCarrier => new RussianPostDomesticCarrier( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostDomesticApiClient::class ), $this->container->get( RussianPostDomesticTariffVariantResolver::class ), $this->container->get( Logger::class ), $this->container->get( DaDataPostcodeClient::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( CdekCarrier::class, fn(): CdekCarrier => new CdekCarrier( $this->container->get( CdekSettings::class ), $this->container->get( CdekApiClient::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ), $this->container->get( CdekTariffRepository::class ) ) );
 		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( DpdParcelBuilder::class ), $this->container->get( Logger::class ), $this->container->get( CheckoutSessionManager::class ) ) );
-		$this->container->register( YandexDeliveryCarrier::class, fn(): YandexDeliveryCarrier => new YandexDeliveryCarrier( $this->container->get( YandexDeliverySettings::class ) ) );
+		$this->container->register( YandexDeliveryCarrier::class, fn(): YandexDeliveryCarrier => new YandexDeliveryCarrier( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexLocationMappingV2Repository::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( Logger::class ), $this->container->get( YandexDeliveryPricingRequestBuilder::class ), $this->container->get( YandexDeliveryPricingResponseParser::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {

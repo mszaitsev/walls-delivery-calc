@@ -202,6 +202,29 @@ final class YandexDeliveryPickupPointV2Repository {
 	}
 
 
+	/** @param array<int,mixed> $yandex_geo_ids @return array<string,mixed>|null */
+	public function representative_destination_pickup_point_by_geo_ids( array $yandex_geo_ids ): ?array {
+		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		sort( $yandex_geo_ids, SORT_NUMERIC );
+		if ( array() === $yandex_geo_ids ) {
+			return null;
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->is_destination_candidate_row( $row ) && in_array( (int) ( $row['yandex_geo_id'] ?? 0 ), $yandex_geo_ids, true ) ) );
+			usort( $rows, fn( array $a, array $b ): int => $this->destination_candidate_priority( $a ) <=> $this->destination_candidate_priority( $b ) ?: strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) ) );
+
+			return $rows[0] ?? null;
+		}
+
+		$this->create_schema_if_needed();
+		$placeholders = implode( ', ', array_fill( 0, count( $yandex_geo_ids ), '%d' ) );
+		$priority = "CASE WHEN type = 'pickup_point' AND operator_id = 'market_l4g' THEN 1 WHEN type = 'pickup_point' AND operator_id = '5post' THEN 2 WHEN type = 'terminal' AND operator_id = 'market_l4g' THEN 3 WHEN type = 'terminal' AND operator_id = '5post' THEN 4 WHEN type = 'terminal' THEN 5 ELSE 99 END";
+		$sql = 'SELECT platform_station_id, name, locality, full_address, yandex_geo_id, operator_id, type, active FROM ' . $this->table_name() . ' WHERE active = 1 AND yandex_geo_id IN (' . $placeholders . ") AND platform_station_id <> %s AND type IN ('pickup_point', 'terminal') ORDER BY " . $priority . ' ASC, locality ASC, name ASC, platform_station_id ASC LIMIT 1';
+		$args = array_merge( $yandex_geo_ids, array( '' ) );
+		$row = $this->wpdb->get_row( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $row ) ? $row : null;
+	}
 	/** @param array<int,mixed> $yandex_geo_ids @return array<int,array<string,mixed>> */
 	public function source_dropoff_points_by_geo_ids( array $yandex_geo_ids ): array {
 		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
@@ -471,6 +494,33 @@ final class YandexDeliveryPickupPointV2Repository {
 		return ! empty( $row['active'] ) && ! empty( $row['available_for_dropoff'] ) && '' !== trim( (string) ( $row['platform_station_id'] ?? '' ) );
 	}
 
+	private function is_destination_candidate_row( array $row ): bool {
+		return ! empty( $row['active'] )
+			&& '' !== trim( (string) ( $row['platform_station_id'] ?? '' ) )
+			&& in_array( (string) ( $row['type'] ?? '' ), array( 'pickup_point', 'terminal' ), true );
+	}
+
+	private function destination_candidate_priority( array $row ): int {
+		$type = (string) ( $row['type'] ?? '' );
+		$operator = (string) ( $row['operator_id'] ?? '' );
+		if ( 'pickup_point' === $type && 'market_l4g' === $operator ) {
+			return 1;
+		}
+		if ( 'pickup_point' === $type && '5post' === $operator ) {
+			return 2;
+		}
+		if ( 'terminal' === $type && 'market_l4g' === $operator ) {
+			return 3;
+		}
+		if ( 'terminal' === $type && '5post' === $operator ) {
+			return 4;
+		}
+		if ( 'terminal' === $type ) {
+			return 5;
+		}
+
+		return 99;
+	}
 	/** @param array<string,mixed> $row @param array<string,mixed> $filters */
 	private function matches_filters( array $row, array $filters ): bool {
 		if ( ( ! array_key_exists( 'active', $filters ) || null !== $filters['active'] ) && ( ! empty( $row['active'] ) ? 1 : 0 ) !== ( empty( $filters['active'] ?? 1 ) ? 0 : 1 ) ) {

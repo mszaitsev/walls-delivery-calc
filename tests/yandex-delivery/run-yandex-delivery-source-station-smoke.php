@@ -132,7 +132,7 @@ yandex_source_assert( str_contains( $settings_source, 'public const SOURCE_PLATF
 yandex_source_assert( str_contains( $settings_source, 'public const SOURCE_LOCATION_ID_KEY' ) && str_contains( $settings_source, 'source_location_id()' ), 'Yandex settings must expose optional source location id for UI restoration.' );
 
 $checkout_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Runtime/YandexDeliveryCarrier.php' );
-yandex_source_assert( str_contains( $checkout_source, 'yandex_pickup' ) && str_contains( $checkout_source, 'yandex_courier' ) && str_contains( $checkout_source, 'без указания срока' ), 'Existing Yandex checkout pickup/courier rates must remain available with the temporary delivery time.' );
-yandex_source_assert( ! str_contains( $checkout_source, 'SOURCE_PLATFORM_STATION_ID_KEY' ) && ! str_contains( $checkout_source, 'source_platform_station_id' ), 'Current checkout must not depend on the source station setting yet.' );
+yandex_source_assert( str_contains( $checkout_source, 'yandex_pickup' ) && str_contains( $checkout_source, 'yandex_courier' ) && str_contains( $checkout_source, 'source_platform_station_id' ), 'Yandex checkout pickup/courier pricing must use the saved source station setting.' );
+yandex_source_assert( ! str_contains( $checkout_source, 'pickup map' ) && ! str_contains( $checkout_source, 'selected_yandex_pickup' ), 'Current Yandex checkout must not implement buyer PVZ map selection yet.' );
 
 echo "Yandex Delivery source station smoke OK\n";

@@ -4,6 +4,13 @@ declare(strict_types=1);
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\YandexDeliveryCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiResponse;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryHttpClientInterface;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingRequestBuilder;
+use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingResponseParser;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
@@ -30,6 +37,7 @@ use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'WDC_SECRET_KEY' ) || define( 'WDC_SECRET_KEY', 'yandex-checkout-rates-smoke-key' );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
@@ -47,6 +55,19 @@ function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return j
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
 
+final class YandexCheckoutRatesFakeHttp implements YandexDeliveryHttpClientInterface {
+	/** @var array<int,array{method:string,url:string,args:array<string,mixed>}> */
+	public array $requests = array();
+	/** @param array<int,YandexDeliveryApiResponse> $responses */
+	public function __construct( private array $responses ) {}
+	public function request( string $method, string $url, array $args = array() ): YandexDeliveryApiResponse {
+		$this->requests[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
+
+		return array_shift( $this->responses ) ?? new YandexDeliveryApiResponse( 200, '{"pricing_total":"100 RUB","delivery_days":1}' );
+	}
+}
+
+
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
@@ -55,6 +76,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $settings = array();
 		public array $countries = array();
 		public array $rules = array();
+		public array $yandex_location_mapping_v2 = array();
+		public array $yandex_delivery_pickup_points_v2 = array();
 
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
@@ -186,7 +209,8 @@ function yandex_checkout_request(): QuoteRequest {
 		Package::from_items( array( $item ), 0, $total, $total ),
 		'card',
 		$total,
-		'2026-06-29'
+		'2026-06-29',
+		array( 'selected_location_id' => 10 )
 	);
 }
 
@@ -201,8 +225,26 @@ $services->update_service( (int) $service->id, array( 'enabled' => 1 ) );
 $countries->replace_countries( (int) $service->id, array( 'RU' ) );
 
 $yandex_settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService(), $services, $settings );
+$yandex_settings->save_from_admin( array(
+	YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST,
+	'yandex_delivery_test_bearer_token' => 'checkout-token',
+	YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'diagnostic-station',
+) );
+$settings->set_setting( (int) $service->id, YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY, 'SRC-1', 'string' );
+$GLOBALS['wpdb']->yandex_location_mapping_v2 = array(
+	array( 'location_id' => 10, 'yandex_geo_id' => 65, 'status' => 'mapped', 'is_primary' => 1 ),
+);
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'DST-1', 'name' => 'ПВЗ', 'locality' => 'Москва', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$pricing_http = new YandexCheckoutRatesFakeHttp( array(
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"237.9 RUB","delivery_days":7}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"463.6 RUB","delivery_days":9}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"300 RUB","delivery_days":5}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"500 RUB","delivery_days":6}' ),
+) );
 $registry = new CarrierRegistry();
-$registry->register( new YandexDeliveryCarrier( $yandex_settings ) );
+$registry->register( new YandexDeliveryCarrier( $yandex_settings, new YandexDeliveryApiClient( $yandex_settings, $pricing_http ), new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] ), new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, new YandexDeliveryPricingRequestBuilder(), new YandexDeliveryPricingResponseParser() ) );
 $manager = new DeliveryServiceManager( $services, $countries, $rules, ( new ReflectionClass( RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor() );
 $orchestrator = new CheckoutOrchestrator(
 	$registry,
@@ -223,11 +265,12 @@ $ids = array_map( static fn ( $rate ): string => $rate->rate_id, $rates );
 yandex_checkout_assert( in_array( YandexDeliveryCarrier::PICKUP_RATE_ID, $ids, true ) && in_array( YandexDeliveryCarrier::COURIER_RATE_ID, $ids, true ), 'Yandex Delivery rates must have separate pickup and courier ids.' );
 yandex_checkout_assert( count( array_unique( $ids ) ) === count( $ids ), 'Yandex Delivery rate ids must be unique.' );
 $by_id = array_combine( $ids, $rates );
-yandex_checkout_assert( 'Яндекс до ПВЗ — без указания срока' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Yandex pickup title must use settings title and delivery time.' );
-yandex_checkout_assert( 'Яндекс до двери — без указания срока' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier title must use settings title and delivery time.' );
-yandex_checkout_assert( 0 === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 0 === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks(), 'Yandex temporary checkout rates must be zero cost.' );
+yandex_checkout_assert( 'Яндекс до ПВЗ — 7 дн.' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Yandex pickup title must use settings title and pricing delivery time.' );
+yandex_checkout_assert( 'Яндекс до двери — 9 дн.' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier title must use settings title and pricing delivery time.' );
+yandex_checkout_assert( 23790 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ) && 46360 === (int) ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ), 'Yandex checkout rates must keep pricing-calculator prices in rate meta.' );
+yandex_checkout_assert( 23800 === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 46400 === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks(), 'Yandex checkout final prices must use regular delivery-service post-processing.' );
 foreach ( $rates as $rate ) {
-	yandex_checkout_assert( str_contains( $rate->title, ' — ' ) && str_ends_with( $rate->title, 'без указания срока' ), 'Yandex rate title must always use "Название — срок" format.' );
+	yandex_checkout_assert( str_contains( $rate->title, ' — ' ) && 1 === preg_match( '/— [0-9]+ дн\.$/', $rate->title ), 'Yandex rate title must always use "Название — срок" format with pricing delivery days.' );
 }
 
 $settings->set_setting( (int) $service->id, YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY, 'Самовывоз Яндекс', 'string' );
@@ -235,7 +278,7 @@ $settings->set_setting( (int) $service->id, YandexDeliverySettings::COURIER_METH
 $result = $orchestrator->calculate( yandex_checkout_request(), array(), RateSorter::CHEAPEST, false );
 $ids = array_map( static fn ( $rate ): string => $rate->rate_id, $result->rates );
 $by_id = array_combine( $ids, $result->rates );
-yandex_checkout_assert( 'Самовывоз Яндекс — без указания срока' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Changed pickup title in settings must affect checkout.' );
-yandex_checkout_assert( 'Курьер Яндекс — без указания срока' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Changed courier title in settings must affect checkout.' );
+yandex_checkout_assert( 'Самовывоз Яндекс — 5 дн.' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Changed pickup title in settings must affect checkout.' );
+yandex_checkout_assert( 'Курьер Яндекс — 6 дн.' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Changed courier title in settings must affect checkout.' );
 
 echo "Yandex Delivery checkout rates smoke test passed.\n";

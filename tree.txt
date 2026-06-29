@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000A2 A0AC:74BD
+Volume serial number is 000000CA A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -326,12 +326,17 @@ C:.
 |   |       |       YandexLocationMappingV2Runner.php
 |   |       |       YandexRegionMappingV2Repository.php
 |   |       |
-|   |       \---Pickup
-|   |               YandexDeliveryPickupPointV2ImportService.php
-|   |               YandexDeliveryPickupPointV2JsonStreamReader.php
-|   |               YandexDeliveryPickupPointV2Repository.php
-|   |               YandexDeliveryPickupPointV2RunnerService.php
-|   |               YandexDeliveryPickupPointV2ScheduleFormatter.php
+|   |       +---Pickup
+|   |       |       YandexDeliveryPickupPointV2ImportService.php
+|   |       |       YandexDeliveryPickupPointV2JsonStreamReader.php
+|   |       |       YandexDeliveryPickupPointV2Repository.php
+|   |       |       YandexDeliveryPickupPointV2RunnerService.php
+|   |       |       YandexDeliveryPickupPointV2ScheduleFormatter.php
+|   |       |
+|   |       \---Pricing
+|   |               YandexDeliveryPricingRequestBuilder.php
+|   |               YandexDeliveryPricingResponseParser.php
+|   |               YandexDeliveryPricingResult.php
 |   |
 |   +---Checkout
 |   |   +---Address
@@ -803,5 +808,6 @@ C:.
             run-yandex-delivery-location-mapping-v2-smoke.php
             run-yandex-delivery-pickup-v2-foundation-smoke.php
             run-yandex-delivery-pickup-v2-runner-smoke.php
+            run-yandex-delivery-pricing-calculator-smoke.php
             run-yandex-delivery-region-mapping-v2-smoke.php
             run-yandex-delivery-source-station-smoke.php
