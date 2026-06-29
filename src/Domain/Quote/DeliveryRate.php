@@ -32,7 +32,9 @@ final class DeliveryRate {
 		public readonly string $disabled_reason = '',
 		public readonly bool $requires_pickup_point = false,
 		public readonly bool $requires_courier_address = false,
-		public readonly array $meta = array()
+		public readonly array $meta = array(),
+		public readonly ?Money $original_cost = null,
+		public readonly ?DateRange $original_delivery_days = null
 	) {
 	}
 
@@ -43,6 +45,14 @@ final class DeliveryRate {
 	public function has_discount(): bool {
 		return ( null !== $this->crossed_price && $this->crossed_price->get_kopecks() > $this->price->get_kopecks() )
 			|| ( null !== $this->original_price && $this->original_price->get_kopecks() > $this->price->get_kopecks() );
+	}
+
+	public function sorting_cost(): Money {
+		return $this->original_cost ?? $this->price;
+	}
+
+	public function sorting_delivery_days(): DateRange {
+		return $this->original_delivery_days ?? $this->delivery_days;
 	}
 
 	/**
@@ -71,6 +81,8 @@ final class DeliveryRate {
 			'requires_pickup_point'    => $this->requires_pickup_point,
 			'requires_courier_address' => $this->requires_courier_address,
 			'meta'                     => $this->meta,
+			'original_cost'            => $this->original_cost?->to_array(),
+			'original_delivery_days'   => $this->original_delivery_days?->to_array(),
 		);
 	}
 
@@ -99,7 +111,9 @@ final class DeliveryRate {
 			(string) ( $data['disabled_reason'] ?? '' ),
 			(bool) ( $data['requires_pickup_point'] ?? false ),
 			(bool) ( $data['requires_courier_address'] ?? false ),
-			is_array( $data['meta'] ?? null ) ? $data['meta'] : array()
+			is_array( $data['meta'] ?? null ) ? $data['meta'] : array(),
+			is_array( $data['original_cost'] ?? null ) ? Money::from_array( $data['original_cost'] ) : null,
+			is_array( $data['original_delivery_days'] ?? null ) ? DateRange::from_array( $data['original_delivery_days'] ) : null
 		);
 	}
 

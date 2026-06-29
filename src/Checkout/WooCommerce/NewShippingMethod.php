@@ -263,7 +263,9 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					'selected_tariff_rate_id' => $active->rate_id,
 					'final_price_rub' => $active->price->get_rubles(),
 				)
-			)
+			),
+			$active->original_cost,
+			$active->original_delivery_days
 		);
 	}
 

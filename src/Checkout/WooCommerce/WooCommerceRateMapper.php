@@ -43,6 +43,8 @@ final class WooCommerceRateMapper {
 				'tariff_key'      => $rate->tariff_key,
 				'tariff_title'    => $rate->tariff_name,
 				'delivery_days'   => $rate->delivery_days->to_array(),
+				'original_cost'   => $rate->original_cost?->to_array(),
+				'original_delivery_days' => $rate->original_delivery_days?->to_array(),
 				'domestic_tariff_grouped' => ! empty( $rate->meta['domestic_tariff_grouped'] ),
 				'tariff_variants' => is_array( $rate->meta['tariff_variants'] ?? null ) ? $rate->meta['tariff_variants'] : array(),
 				'selected_tariff_object' => $rate->meta['selected_tariff_object'] ?? $rate->tariff_key,

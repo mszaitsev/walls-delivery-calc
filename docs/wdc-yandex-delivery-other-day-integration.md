@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.103.2; shared packaging is available for a future Yandex multi-place stage, while buyer PVZ selection, order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.103.3; shared packaging is available for a future Yandex multi-place stage, while buyer PVZ selection, order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -31,6 +31,10 @@ The Yandex Delivery admin surface now follows the intended working model:
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
+
+## 0.103.3 Checkout sorting
+
+Yandex Delivery checkout rates use the shared deterministic checkout sorter together with every other carrier. Sorting reads neutral original carrier values from `DeliveryRate::original_cost` and `DeliveryRate::original_delivery_days`; pricing-calculator payloads, parsed prices, delivery-day labels, source station selection and representative destination PVZ logic are unchanged.
 ## 0.103.2 Shared packaging readiness
 
 The DPD parcel packing engine has been extracted to `src/Packaging/PackagingBuilder.php` with neutral `PackagingResult` and `PackagingParcel` DTOs. `PackagingBuilderConfig::defaults()` is defined inside Packaging, so Yandex can use this builder in a later stage without depending on `Carriers/Dpd` or DPD settings. DPD now wires a separate legacy-configured builder for its runtime fallback payload, while the shared Packaging defaults remain generic. This stage deliberately does not change Yandex pricing payloads: checkout pricing-calculator requests still use the aggregate single-place model documented below, so Yandex prices, places count and buyer PVZ behavior remain unchanged.

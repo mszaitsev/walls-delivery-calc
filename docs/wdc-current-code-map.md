@@ -57,6 +57,14 @@
 - `tests/yandex-delivery/run-yandex-delivery-geo-mapping-smoke.php` covers repository CRUD, multiple candidate rows per location, primary switching, smart scorer examples for Moscow/Saint Petersburg/Novosibirsk/Kazan/Ekaterinburg, auto-primary, raw scoring diagnostics, location/detect normalization, status constants, migration schema and admin wiring.
 # Карта текущего кода
 
+
+## Checkout Sorting 0.103.3
+
+- `src/Checkout/Sorting/RateSorter.php` owns deterministic checkout ordering for all carriers. It groups rates by `service_key` when available, otherwise by `carrier_key`, sorts rates inside each group, then orders groups by the best original carrier rate.
+- `src/Domain/Quote/DeliveryRate.php` carries neutral `original_cost` and `original_delivery_days` fields. `sorting_cost()` and `sorting_delivery_days()` fall back to current `price`/`delivery_days` for older/direct rates.
+- Price sorting uses original carrier cost, then original minimum days, title, `tariff_key`, `rate_id` and input index. Fastest sorting uses original minimum days, then original carrier cost, title, `tariff_key`, `rate_id` and input index.
+- `RuleAppliedRateBuilder`, `DeliveryServiceManager`, `CheckoutOrchestrator`, `WooCommerceRateMapper` and `NewShippingMethod` preserve these source values while rules and service post-processing keep changing only final checkout display values.
+- `tests/checkout/run-checkout-smoke.php` covers inside-carrier price/day sorting, carrier group ordering, discount-independent price sorting and stable tie-breakers.
 ## Shared Packaging Builder 0.103.2
 
 - `src/Packaging/PackagingBuilder.php` is the shared package-place builder extracted from the former DPD tariff layer. It expands product quantities, splits long items over 49 cm into separate parcels, aggregates <=50 cm3 small items into one synthetic block, optimizes identical groups into grid blocks, runs the deterministic 3D shelf/bin packer with `box_50_50_30` and `box_40_40_40`, attempts one box and then two boxes, falls back to stacked rows, adds packaging weight through `PackagingWeightCalculator`, and returns diagnostics without DPD-specific namespaces.

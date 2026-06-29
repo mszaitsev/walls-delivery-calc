@@ -56,6 +56,14 @@ The order admin metabox `Калькулятор доставок` prefers `_wdc_
 
 As of version 0.20.0, `CarrierRegistry` registers the real Russian Post international carrier only. The previous demo carrier toggle and demo pickup provider are test fixtures only and are not registered by `Plugin`.
 
+
+## Deterministic Sorting
+
+As of 0.103.3, checkout sorting is centralized in `src/Checkout/Sorting/RateSorter.php` for all carriers. Sorting has two levels: rates are sorted inside one checkout method group, and method groups are then sorted against each other by the best rate in that group. The method group key is `service_key` when present, otherwise `carrier_key`.
+
+Price mode uses original carrier cost, not the price after Rule Engine or WooCommerce mapping. Ties use original minimum delivery days, title, `tariff_key`, `rate_id`, then original input index. Fastest mode uses original minimum delivery days, then original carrier cost, title, `tariff_key`, `rate_id`, then original input index. `DeliveryRate::original_cost` and `DeliveryRate::original_delivery_days` are neutral carrier-agnostic fields; when they are absent, the sorter falls back to `price` and `delivery_days`.
+
+`RuleAppliedRateBuilder`, `DeliveryServiceManager`, `CheckoutOrchestrator` and grouped WooCommerce rate mapping preserve these original values while final prices, crossed prices, comments and delivery-day display continue to reflect rules and service post-processing. Carrier payloads, Rule Engine behavior, checkout UI and pickup selection are unchanged.
 ## Session persistence
 
 `CheckoutSessionManager` stores selected `delivery_type`, selected sort mode, last mapped rates, selected tariffs, pickup selections, city context and debug data in the WooCommerce session abstraction. Checkout order creation persists the selected pickup point into WDC order meta/calculation data and writes pickup shipping address fields when the selected rate requires a pickup point.

@@ -81,6 +81,36 @@ function checkout_promo_rule(): Rule {
 	return new Rule( null, 'Demo promo -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false );
 }
 
+function checkout_sort_rate( string $carrier, int $original_price_rub, int $min_days, string $title, string $tariff_key, ?int $final_price_rub = null, ?int $final_min_days = null ): DeliveryRate {
+	$final_price_rub ??= $original_price_rub;
+	$final_min_days ??= $min_days;
+
+	return new DeliveryRate(
+		$carrier . ':' . $tariff_key,
+		$carrier,
+		$carrier,
+		$carrier,
+		$carrier,
+		$tariff_key,
+		$title,
+		DeliveryType::PICKUP,
+		$title,
+		Money::from_rubles( $final_price_rub ),
+		null,
+		null,
+		DateRange::single( $final_min_days ),
+		'',
+		$final_min_days . ' дн.',
+		array(),
+		false,
+		'',
+		false,
+		false,
+		array(),
+		Money::from_rubles( $original_price_rub ),
+		DateRange::single( $min_days )
+	);
+}
 function checkout_increase_rule(): Rule {
 	return new Rule( null, 'Demo +200', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 200, RuleOperationBases::RUBLES, false, false );
 }
@@ -182,4 +212,80 @@ $second       = $orchestrator->calculate( checkout_request(), array(), RateSorte
 checkout_smoke_assert( 0 === $first->cache_hits, 'First cached calculation must miss cache.' );
 checkout_smoke_assert( $second->cache_hits > 0, 'Second cached calculation must hit cache.' );
 
+
+$sorter = new RateSorter();
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'carrier_a', 300, 5, 'A 300', '300' ),
+		checkout_sort_rate( 'carrier_a', 100, 5, 'A 100', '100' ),
+		checkout_sort_rate( 'carrier_a', 200, 5, 'A 200', '200' ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( '100', '200', '300' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Price sorting inside one carrier must use original cost ascending.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'carrier_a', 100, 5, 'A 100', '100', 95 ),
+		checkout_sort_rate( 'carrier_a', 200, 5, 'A 200', '200', 170 ),
+		checkout_sort_rate( 'carrier_a', 350, 5, 'A 350', '350', 150 ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( '100', '200', '350' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Price sorting must ignore final discounted prices.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'carrier_a', 300, 4, 'A 300', '300' ),
+		checkout_sort_rate( 'carrier_a', 100, 4, 'A 100', '100' ),
+		checkout_sort_rate( 'carrier_a', 200, 4, 'A 200', '200' ),
+		checkout_sort_rate( 'carrier_b', 120, 4, 'B 120', '120' ),
+		checkout_sort_rate( 'carrier_c', 90, 4, 'C 90', '090' ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( 'carrier_c', 'carrier_a', 'carrier_a', 'carrier_a', 'carrier_b' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $sorted ), 'Carrier ordering by price must use each carrier minimum original cost.' );
+checkout_smoke_assert( array( '090', '100', '200', '300', '120' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Carrier price ordering must keep rates sorted inside each carrier group.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'carrier_a', 100, 5, 'A 5', '5' ),
+		checkout_sort_rate( 'carrier_a', 100, 2, 'A 2', '2' ),
+		checkout_sort_rate( 'carrier_a', 100, 7, 'A 7', '7' ),
+	),
+	RateSorter::FASTEST
+);
+checkout_smoke_assert( array( '2', '5', '7' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Delivery-days sorting inside one carrier must use original min days ascending.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'carrier_a', 100, 4, 'A 4', '4' ),
+		checkout_sort_rate( 'carrier_b', 100, 1, 'B 1', '1' ),
+		checkout_sort_rate( 'carrier_c', 100, 3, 'C 3', '3' ),
+	),
+	RateSorter::FASTEST
+);
+checkout_smoke_assert( array( 'carrier_b', 'carrier_c', 'carrier_a' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $sorted ), 'Carrier ordering by delivery days must use each carrier fastest original tariff.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'carrier_a', 100, 5, 'Beta', 'b' ),
+		checkout_sort_rate( 'carrier_a', 100, 2, 'Zulu', 'z' ),
+		checkout_sort_rate( 'carrier_a', 100, 2, 'Alpha', 'c' ),
+		checkout_sort_rate( 'carrier_a', 100, 2, 'Alpha', 'a' ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( 'a', 'c', 'z', 'b' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Equal-price sorting must use days, title and tariff_key as stable tie-breakers.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'carrier_a', 300, 2, 'Beta', 'b' ),
+		checkout_sort_rate( 'carrier_a', 100, 2, 'Zulu', 'z' ),
+		checkout_sort_rate( 'carrier_a', 100, 2, 'Alpha', 'c' ),
+		checkout_sort_rate( 'carrier_a', 100, 2, 'Alpha', 'a' ),
+	),
+	RateSorter::FASTEST
+);
+checkout_smoke_assert( array( 'a', 'c', 'z', 'b' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Equal-delivery-days sorting must use cost, title and tariff_key as stable tie-breakers.' );
 echo "Checkout smoke test passed.\n";
