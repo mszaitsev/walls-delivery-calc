@@ -214,7 +214,8 @@ namespace {
 	yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipelineV2Runner::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoPipelineV2Runner' ), 'Plugin DI must register pipeline runner.' );
 yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipelineV2Runner::CRON_HOOK' ) && str_contains( $plugin_source, 'run_scheduled_step' ), 'Plugin must register pipeline step cron hook.' );
 	 yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK' ) && str_contains( $plugin_source, 'run_scheduled_start' ), 'Plugin must register pipeline scheduled start hook.' );
-	yd_geo_pipeline_v2_assert( str_contains( $admin_source, 'Расписание полного обновления' ) && str_contains( $admin_source, 'save_yandex_geo_pipeline_v2_schedule' ), 'Admin must expose pipeline schedule settings.' );
+	yd_geo_pipeline_v2_assert( str_contains( $admin_source, 'Расписание полного обновления' ) && str_contains( $admin_source, 'save_yandex_geo_pipeline_v2_schedule' ) && str_contains( $admin_source, 'Все время указывается по Москве (GMT+3)' ), 'Admin must expose pipeline schedule settings with Moscow time explanation.' );
+	yd_geo_pipeline_v2_assert( str_contains( $pipeline_source, "DateTimeZone( 'Europe/Moscow' )" ) && str_contains( $pipeline_source, " . ' MSK'" ), 'Pipeline schedule must calculate and display runs in Moscow time.' );
 	 yd_geo_pipeline_v2_assert( str_contains( $admin_source, 'Полное обновление Яндекс ПВЗ/географии' ) && str_contains( $admin_source, 'wdc_yandex_delivery_geo_pipeline_v2_start' ) && str_contains( $admin_source, 'geoPipelineInitialState' ), 'Admin must expose one-button pipeline block and AJAX actions.' );
 	yd_geo_pipeline_v2_assert( str_contains( $js_source, 'data-wdc-yandex-geo-pipeline-v2' ) && str_contains( $js_source, 'wdc_yandex_delivery_geo_pipeline_v2_status' ) && str_contains( $js_source, 'pollOnly: true' ), 'JS must poll pipeline status without driving server steps.' );
 
@@ -226,7 +227,7 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipel
 	yd_geo_pipeline_v2_assert( str_contains( $geo_builder_source, "'sample_points_json' => \$this->json( array( 'addresses'" ) && str_contains( $geo_builder_source, 'sample_addresses' ), 'Geo builder must persist compact address-only sample JSON.' );
 	yd_geo_pipeline_v2_assert( str_contains( $geo_repository_source, 'compact_region_enrichment_audit' ) && str_contains( $geo_repository_source, 'wdc_yandex_geo_v2_region_enrichment_debug_raw' ), 'Geo repository must compact region enrichment audit by default.' );
 	yd_geo_pipeline_v2_assert( str_contains( $mapping_repository_source, 'find_recent_no_match' ) && ! str_contains( $mapping_repository_source, "'sql_search_terms' =>" ), 'Review/no_match repository output must not depend on heavy sql_search_terms.' );
-	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.6' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.6' )" ), 'Plugin version must be 0.99.6.' );
+	yd_geo_pipeline_v2_assert( str_contains( $plugin_main, 'Version: 0.99.7' ) && str_contains( $plugin_main, "define( 'WDC_VERSION', '0.99.7' )" ), 'Plugin version must be 0.99.7.' );
 
 	$pickup_runner = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService();
 	$pickup_repository = new \WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository();
@@ -250,6 +251,19 @@ yd_geo_pipeline_v2_assert( str_contains( $plugin_source, 'YandexDeliveryGeoPipel
 	$schedule = $runner->save_schedule_settings( true, array( 1, 3 ), '04:30' );
 	yd_geo_pipeline_v2_assert( ! empty( $schedule['enabled'] ) && array( 1, 3 ) === $schedule['days'] && '04:30' === $schedule['time'], 'Pipeline schedule settings must be saved.' );
 	yd_geo_pipeline_v2_assert( isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK ] ), 'Pipeline schedule must create WP-Cron start event.' );
+	$scheduled_timestamp = (int) $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK ]['timestamp'];
+	$scheduled_msk = ( new \DateTimeImmutable( '@' . $scheduled_timestamp ) )->setTimezone( new \DateTimeZone( 'Europe/Moscow' ) );
+	yd_geo_pipeline_v2_assert( '04:30' === $scheduled_msk->format( 'H:i' ) && in_array( (int) $scheduled_msk->format( 'N' ), array( 1, 3 ), true ), 'Pipeline schedule timestamp must represent selected Moscow time and day.' );
+	yd_geo_pipeline_v2_assert( str_contains( (string) $schedule['next_run'], $scheduled_msk->format( 'Y-m-d H:i' ) ) && str_contains( (string) $schedule['next_run'], 'MSK' ), 'Pipeline next_run must be displayed in Moscow time.' );
+	$previous_timezone = date_default_timezone_get();
+	date_default_timezone_set( 'Pacific/Honolulu' );
+	$schedule_honolulu = $runner->save_schedule_settings( true, array( 1, 3 ), '04:30' );
+	$timestamp_honolulu = (int) $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK ]['timestamp'];
+	date_default_timezone_set( 'Asia/Novosibirsk' );
+	$schedule_novosibirsk = $runner->save_schedule_settings( true, array( 1, 3 ), '04:30' );
+	$timestamp_novosibirsk = (int) $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK ]['timestamp'];
+	date_default_timezone_set( $previous_timezone );
+	yd_geo_pipeline_v2_assert( $timestamp_honolulu === $timestamp_novosibirsk && $schedule_honolulu['next_run'] === $schedule_novosibirsk['next_run'], 'Pipeline schedule must not change when PHP or WordPress timezone changes.' );
 	$runner->save_schedule_settings( false, array(), '04:30' );
 	yd_geo_pipeline_v2_assert( ! isset( $GLOBALS['yd_geo_pipeline_v2_scheduled'][ \WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK ] ), 'Disabling pipeline schedule must clear WP-Cron start event.' );
 	$started = $runner->start();

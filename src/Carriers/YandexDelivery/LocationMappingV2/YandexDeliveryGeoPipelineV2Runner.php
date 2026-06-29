@@ -421,16 +421,16 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		if ( empty( $settings['enabled'] ) || array() === $settings['days'] ) {
 			return 0;
 		}
-		$now = time();
+		$timezone = $this->schedule_timezone();
+		$now = new \DateTimeImmutable( 'now', $timezone );
 		[$hour, $minute] = array_map( 'intval', explode( ':', $settings['time'] ) );
 		for ( $offset = 0; $offset < 14; ++$offset ) {
-			$day_ts = strtotime( '+' . $offset . ' days', $now );
-			if ( false === $day_ts || ! in_array( (int) date( 'N', $day_ts ), $settings['days'], true ) ) {
+			$candidate = $now->modify( '+' . $offset . ' days' )->setTime( $hour, $minute, 0 );
+			if ( ! in_array( (int) $candidate->format( 'N' ), $settings['days'], true ) ) {
 				continue;
 			}
-			$candidate = mktime( $hour, $minute, 0, (int) date( 'n', $day_ts ), (int) date( 'j', $day_ts ), (int) date( 'Y', $day_ts ) );
-			if ( $candidate > $now ) {
-				return $candidate;
+			if ( $candidate->getTimestamp() > $now->getTimestamp() ) {
+				return $candidate->getTimestamp();
 			}
 		}
 		return 0;
@@ -438,7 +438,14 @@ final class YandexDeliveryGeoPipelineV2Runner {
 
 	private function next_scheduled_run(): string {
 		$timestamp = function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( self::SCHEDULE_HOOK ) : false;
-		return $timestamp ? gmdate( 'Y-m-d H:i:s', (int) $timestamp ) : '';
+		if ( ! $timestamp ) {
+			return '';
+		}
+		return ( new \DateTimeImmutable( '@' . (int) $timestamp ) )->setTimezone( $this->schedule_timezone() )->format( 'Y-m-d H:i' ) . ' MSK';
+	}
+
+	private function schedule_timezone(): \DateTimeZone {
+		return new \DateTimeZone( 'Europe/Moscow' );
 	}
 	private function stage_label( string $stage ): string {
 		return match ( $stage ) {

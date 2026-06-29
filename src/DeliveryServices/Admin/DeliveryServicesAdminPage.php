@@ -1743,6 +1743,7 @@ final class DeliveryServicesAdminPage {
 				<?php endforeach; ?>
 			</p>
 			<p><label><?php echo esc_html__( 'Время запуска', 'walls-delivery-calc' ); ?> <input type="time" name="yandex_geo_pipeline_schedule_time" value="<?php echo esc_attr( (string) ( $geo_pipeline_v2_schedule['time'] ?? '03:00' ) ); ?>" /></label></p>
+			<p class="description"><?php echo esc_html__( 'Все время указывается по Москве (GMT+3), независимо от часового пояса сайта и сервера.', 'walls-delivery-calc' ); ?></p>
 			<p class="description"><?php echo esc_html__( 'Текущий статус расписания', 'walls-delivery-calc' ); ?>: <?php echo ! empty( $geo_pipeline_v2_schedule['enabled'] ) ? esc_html__( 'включено', 'walls-delivery-calc' ) : esc_html__( 'выключено', 'walls-delivery-calc' ); ?>; <?php echo esc_html__( 'следующий запуск', 'walls-delivery-calc' ); ?>: <code><?php echo esc_html( (string) ( $geo_pipeline_v2_schedule['next_run'] ?? '' ) ?: '—' ); ?></code></p>
 			<?php submit_button( __( 'Сохранить расписание', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
 		</form>		<div id="wdc-yandex-delivery-geo-pipeline-v2" data-wdc-yandex-geo-pipeline-v2 data-wdc-yandex-geo-pipeline-v2-status="<?php echo esc_attr( (string) ( $geo_pipeline_v2_state['status'] ?? 'idle' ) ); ?>">
