@@ -493,9 +493,9 @@ final class DeliveryServicesAdminPage {
 			$data = $this->yandex_delivery_source_points_for_location( max( 0, (int) ( $_POST['location_id'] ?? 0 ) ) );
 			wp_send_json_success(
 				array(
-					'yandex_geo_id' => $data['yandex_geo_id'],
+					'yandex_geo_ids' => $data['yandex_geo_ids'],
 					'points' => $this->yandex_delivery_source_point_ajax_rows( $data['points'] ),
-					'message' => $this->yandex_delivery_source_points_message( (int) $data['location_id'], (int) $data['yandex_geo_id'], $data['points'] ),
+					'message' => $this->yandex_delivery_source_points_message( (int) $data['location_id'], $data['yandex_geo_ids'], $data['points'] ),
 				)
 			);
 		}
@@ -604,17 +604,17 @@ final class DeliveryServicesAdminPage {
 		return true;
 	}
 
-	/** @return array{location_id:int,yandex_geo_id:int,points:array<int,array<string,mixed>>} */
+	/** @return array{location_id:int,yandex_geo_ids:array<int,int>,points:array<int,array<string,mixed>>} */
 	private function yandex_delivery_source_points_for_location( int $location_id ): array {
 		$location_id = max( 0, $location_id );
-		$geo_id = $location_id > 0 && $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository
-			? $this->yandex_location_mapping_v2_repository->primary_geo_id_for_location( $location_id )
-			: 0;
-		$points = $geo_id > 0 && $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository
-			? $this->yandex_delivery_pickup_v2_repository->source_dropoff_points_by_geo_id( $geo_id )
+		$geo_ids = $location_id > 0 && $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository
+			? $this->yandex_location_mapping_v2_repository->geo_ids_for_location( $location_id )
+			: array();
+		$points = array() !== $geo_ids && $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository
+			? $this->yandex_delivery_pickup_v2_repository->source_dropoff_points_by_geo_ids( $geo_ids )
 			: array();
 
-		return array( 'location_id' => $location_id, 'yandex_geo_id' => $geo_id, 'points' => $points );
+		return array( 'location_id' => $location_id, 'yandex_geo_ids' => $geo_ids, 'points' => $points );
 	}
 
 	private function yandex_delivery_location_label( object $location ): string {
@@ -650,19 +650,20 @@ final class DeliveryServicesAdminPage {
 		return $rows;
 	}
 
-	/** @param array<int,array<string,mixed>> $points */
-	private function yandex_delivery_source_points_message( int $location_id, int $yandex_geo_id, array $points ): string {
+	/** @param array<int,int> $yandex_geo_ids @param array<int,array<string,mixed>> $points */
+	private function yandex_delivery_source_points_message( int $location_id, array $yandex_geo_ids, array $points ): string {
 		if ( $location_id <= 0 ) {
 			return __( 'Выберите населенный пункт, чтобы загрузить ПВЗ сдачи.', 'walls-delivery-calc' );
 		}
-		if ( $yandex_geo_id <= 0 ) {
-			return __( 'Для выбранного населенного пункта нет рабочего yandex_geo_id в location mapping.', 'walls-delivery-calc' );
+		if ( array() === $yandex_geo_ids ) {
+			return __( 'Для выбранного населенного пункта нет связанных yandex_geo_id в location mapping.', 'walls-delivery-calc' );
 		}
+		$geo_ids_text = implode( ', ', array_map( 'strval', $yandex_geo_ids ) );
 		if ( array() === $points ) {
-			return sprintf( __( 'Для yandex_geo_id %d нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' ), $yandex_geo_id );
+			return __( 'Для связанных yandex_geo_id нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' );
 		}
 
-		return sprintf( __( 'Найдено ПВЗ сдачи: %d; yandex_geo_id: %d.', 'walls-delivery-calc' ), count( $points ), $yandex_geo_id );
+		return sprintf( __( 'Найдено ПВЗ сдачи: %1$d; yandex_geo_id: %2$s.', 'walls-delivery-calc' ), count( $points ), $geo_ids_text );
 	}
 
 	private function asset_url( string $path ): string {
@@ -1556,7 +1557,7 @@ final class DeliveryServicesAdminPage {
 		$selected_location = $selected_location_id > 0 && $this->locations instanceof LocationRepository ? $this->locations->find_by_id( $selected_location_id ) : null;
 		$source_data = $this->yandex_delivery_source_points_for_location( $selected_location_id );
 		$points = $source_data['points'];
-		$yandex_geo_id = (int) $source_data['yandex_geo_id'];
+		$yandex_geo_ids = $source_data['yandex_geo_ids'];
 		$point_found = is_array( $selected_point );
 		$point_available = $point_found && ! empty( $selected_point['active'] ) && ! empty( $selected_point['available_for_dropoff'] );
 		$ajax_nonce = function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wdc_yandex_delivery_source_station' ) : '';
@@ -1571,14 +1572,14 @@ final class DeliveryServicesAdminPage {
 					<input id="yandex_delivery_source_location_search" class="regular-text" type="text" placeholder="<?php echo esc_attr__( 'Начните вводить город', 'walls-delivery-calc' ); ?>">
 					<button type="button" class="button" data-wdc-yandex-source-location-search><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
 					<span class="spinner" data-wdc-yandex-source-spinner></span>
-					<p class="description"><?php echo esc_html__( 'Населенный пункт выбирается из локального справочника WDC. По нему берется yandex_geo_id из завершенного location mapping.', 'walls-delivery-calc' ); ?></p>
+					<p class="description"><?php echo esc_html__( 'Населенный пункт выбирается из локального справочника WDC. По нему берутся связанные yandex_geo_id из завершенного location mapping.', 'walls-delivery-calc' ); ?></p>
 					<select id="<?php echo esc_attr( YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ); ?>" name="<?php echo esc_attr( YandexDeliverySettings::SOURCE_LOCATION_ID_KEY ); ?>" style="width:100%;max-width:720px;margin-top:8px;">
 						<option value="0"><?php echo esc_html__( 'Не выбран', 'walls-delivery-calc' ); ?></option>
 						<?php if ( null !== $selected_location ) : ?>
 							<option value="<?php echo esc_attr( (string) $selected_location_id ); ?>" selected><?php echo esc_html( $this->yandex_delivery_location_label( $selected_location ) ); ?></option>
 						<?php endif; ?>
 					</select>
-					<p class="description" data-wdc-yandex-source-status><?php echo esc_html( $selected_location_id > 0 ? sprintf( __( 'Выбран location_id: %d; yandex_geo_id: %s.', 'walls-delivery-calc' ), $selected_location_id, $yandex_geo_id > 0 ? (string) $yandex_geo_id : __( 'не найден', 'walls-delivery-calc' ) ) : __( 'Выберите населенный пункт, чтобы загрузить ПВЗ сдачи.', 'walls-delivery-calc' ) ); ?></p>
+					<p class="description" data-wdc-yandex-source-status><?php echo esc_html( $selected_location_id > 0 ? $this->yandex_delivery_source_points_message( $selected_location_id, $yandex_geo_ids, $points ) : __( 'Выберите населенный пункт, чтобы загрузить ПВЗ сдачи.', 'walls-delivery-calc' ) ); ?></p>
 				</td>
 			</tr>
 			<tr>
@@ -1599,10 +1600,10 @@ final class DeliveryServicesAdminPage {
 							<?php endif; ?>
 						<?php endforeach; ?>
 					</select>
-					<?php if ( $selected_location_id > 0 && $yandex_geo_id <= 0 ) : ?>
-						<p class="description"><?php echo esc_html__( 'Для выбранного населенного пункта нет рабочего yandex_geo_id в location mapping.', 'walls-delivery-calc' ); ?></p>
+					<?php if ( $selected_location_id > 0 && array() === $yandex_geo_ids ) : ?>
+						<p class="description"><?php echo esc_html__( 'Для выбранного населенного пункта нет связанных yandex_geo_id в location mapping.', 'walls-delivery-calc' ); ?></p>
 					<?php elseif ( $selected_location_id > 0 && array() === $points ) : ?>
-						<p class="description"><?php echo esc_html__( 'Для выбранного yandex_geo_id нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' ); ?></p>
+						<p class="description"><?php echo esc_html__( 'Для связанных yandex_geo_id нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' ); ?></p>
 					<?php endif; ?>
 				</td>
 			</tr>

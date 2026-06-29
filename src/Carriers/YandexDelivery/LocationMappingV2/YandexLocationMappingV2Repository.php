@@ -140,6 +140,31 @@ final class YandexLocationMappingV2Repository {
 		return (int) $this->wpdb->get_var( $this->wpdb->prepare( $sql, $location_id, 'mapped', 'manual' ) );
 	}
 
+	/** @return array<int,int> */
+	public function geo_ids_for_location( int $location_id ): array {
+		$location_id = max( 0, $location_id );
+		if ( $location_id <= 0 ) {
+			return array();
+		}
+		if ( $this->has_test_rows() ) {
+			$geo_ids = array_map(
+				static fn( array $row ): int => (int) ( $row['yandex_geo_id'] ?? 0 ),
+				array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) === $location_id && in_array( (string) ( $row['status'] ?? '' ), array( 'mapped', 'manual' ), true ) && (int) ( $row['yandex_geo_id'] ?? 0 ) > 0 ) )
+			);
+			$geo_ids = array_values( array_unique( array_filter( $geo_ids, static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+			sort( $geo_ids, SORT_NUMERIC );
+
+			return $geo_ids;
+		}
+
+		$this->create_schema_if_needed();
+		$sql = 'SELECT DISTINCT yandex_geo_id FROM ' . $this->table_name() . ' WHERE location_id = %d AND status IN (%s, %s) AND yandex_geo_id > 0 ORDER BY yandex_geo_id ASC';
+		$rows = $this->wpdb->get_col( $this->wpdb->prepare( $sql, $location_id, 'mapped', 'manual' ) );
+		$geo_ids = array_map( 'intval', is_array( $rows ) ? $rows : array() );
+
+		return array_values( array_filter( $geo_ids, static fn( int $geo_id ): bool => $geo_id > 0 ) );
+	}
+
 	/** @return array<int,array<string,mixed>> */
 	public function find_by_geo( int $geo_id ): array {
 		return $this->search( array( 'yandex_geo_id' => $geo_id, 'limit' => 500, 'active' => null ) );
