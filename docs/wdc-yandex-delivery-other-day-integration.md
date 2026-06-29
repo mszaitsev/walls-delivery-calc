@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_id mapping, coverage discovery, admin UX consolidation and full geo mapping runner are implemented through 0.87.0; checkout, pricing, order recalculation, shipments and full Russia PVZ import remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.102.1; buyer PVZ selection, order recalculation and shipments remain planned.
 
 Date: 2026-06-22.
 
@@ -30,6 +30,18 @@ The Yandex Delivery admin surface now follows the intended working model:
 `Маппинг geo_id` contains manual geo_id search, the browser-driven full runner, mapping analytics and a working manual `needs_review` queue for approving a candidate geo_id or rejecting a WDC location as `not_found`. `Покрытие Яндекса` stays a selective/manual coverage check, not a mass import. `Яндекс ПВЗ` is the future pickup-point workspace; the current Moscow `geo_id=213` import remains a test diagnostic.
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
+
+## 0.102.1 Checkout pricing-calculator
+
+Yandex checkout now calls `POST /api/b2b/platform/pricing-calculator` for both rates. Pickup uses `tariff=self_pickup`, `source.platform_station_id` from `YandexDeliverySettings::source_platform_station_id()`, and a representative destination `platform_station_id` selected locally from imported PVZ rows across every mapped/manual `yandex_geo_id` for the destination WDC `location_id`. Courier uses `tariff=time_interval` and `destination.address` assembled from checkout fields. The request builder sends `total_weight`, `total_assessed_price`, `client_price=0`, `payment_method=already_paid`, and currently uses an aggregate single-place model: `places` has one item, `places[0].physical_dims.weight_gross` equals `total_weight`, and dimensions come from the package or fallback `20x15x10` when checkout data is incomplete.
+
+`pricing_total` is parsed to kopecks (`237.9 RUB` -> `23790`), and `delivery_days` becomes the checkout title suffix through the shared Russian formatter (`1 день`, `2 дня`, `5 дней`). A failure in one Yandex rate returns a disabled reason and does not break the other rate. Buyer PVZ selection/map, shipment offers, order recalculation, import and geo pipeline code were not changed.
+
+## 0.101.3 Source platform station admin setting
+
+The first checkout-preparation setting for Yandex Delivery is available on `Службы доставки -> Яндекс Доставка -> Расчет`. Admins search/select a WDC local `location_id`, WDC resolves it through location mapping v2 to all mapped/manual `yandex_geo_id` values, and then shows all locally imported Yandex PVZ rows that are active, `available_for_dropoff=true`, have any matching `yandex_geo_id`, and have a non-empty `platform_station_id`, without limiting the list inside that geo id set. The PVZ selector has a client-side `full_address` filter that starts from 3 characters and shows an empty-result message when nothing matches. WDC stores the selected `platform_station_id` as `source_platform_station_id`; `source_location_id` is stored only to restore the admin selector. The full address is restored from the local PVZ table and shown as a read-only verification field.
+
+If a later import removes the saved station from the local database, marks it inactive, or marks it unavailable for dropoff, the setting remains saved, the `platform_station_id` is still displayed, and the admin page shows a warning. Checkout remains tolerant of an empty source station and does not read this setting until the future Yandex pricing/payload stage.
 ## 1. Scope
 
 This document covers only Yandex Delivery API for `Доставка по России` / delivery in another day.

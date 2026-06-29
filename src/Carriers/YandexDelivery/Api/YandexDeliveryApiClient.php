@@ -133,6 +133,14 @@ final class YandexDeliveryApiClient {
 	 * @param array<string,mixed> $payload
 	 * @return array<string,mixed>
 	 */
+	public function pricingCalculator( array $payload ): array {
+		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::PRICING_CALCULATOR_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
 	private function authorizedJsonRequest( string $method, string $path, array $payload = array() ): array {
 		$credentials = $this->settings->credentials();
 		if ( ! $credentials->is_complete() ) {

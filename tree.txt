@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 0000004F A0AC:74BD
+Volume serial number is 000000CA A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -22,8 +22,7 @@ C:.
 |   |       russian-post-pickup-import.js
 |   |       shipments-admin.css
 |   |       shipments-admin.js
-|   |       yandex-delivery-geo-mapping-runner.js
-|   |       yandex-delivery-pickup-import.js
+|   |       yandex-delivery-pickup-v2-runner.js
 |   |
 |   +---frontend
 |   |   |   .gitkeep
@@ -94,9 +93,12 @@ C:.
 |           0029_add_cdek_tariff_delivery_mode.php
 |           0030_create_location_delivery_codes.php
 |           0031_create_dpd_pickup_points_table.php
-|           0032_create_yandex_delivery_pickup_points_table.php
-|           0033_create_yandex_delivery_geo_mappings_table.php
-|           0034_create_yandex_delivery_geo_coverage_table.php
+|           0035_create_yandex_delivery_pickups_v2.php
+|           0036_create_yandex_delivery_geo_v2_table.php
+|           0037_add_coverage_radius_to_yandex_delivery_geo_v2.php
+|           0038_create_yandex_location_mapping_v2.php
+|           0039_create_yandex_region_mapping_v2.php
+|           0040_create_yandex_location_manual_overrides_v2.php
 |
 +---docs
 |   |   development-workflow.md
@@ -270,6 +272,7 @@ C:.
 |   |   |       DpdQuoteCarrier.php
 |   |   |       RussianPostDomesticCarrier.php
 |   |   |       RussianPostInternationalCarrier.php
+|   |   |       YandexDeliveryCarrier.php
 |   |   |
 |   |   +---RussianPost
 |   |   |   |   DomesticTariffVariant.php
@@ -307,25 +310,33 @@ C:.
 |   |       |       YandexDeliveryConnectionDiagnosticService.php
 |   |       |       YandexDeliveryHttpClientInterface.php
 |   |       |
-|   |       +---Geo
-|   |       |       YandexDeliveryGeoAnalysisService.php
-|   |       |       YandexDeliveryGeoCoverageRepository.php
-|   |       |       YandexDeliveryGeoCoverageService.php
-|   |       |       YandexDeliveryGeoCoverageStatus.php
-|   |       |       YandexDeliveryGeoDistance.php
-|   |       |       YandexDeliveryGeoMappingBatchService.php
-|   |       |       YandexDeliveryGeoMappingRepository.php
-|   |       |       YandexDeliveryGeoMappingRunnerService.php
-|   |       |       YandexDeliveryGeoMappingService.php
-|   |       |       YandexDeliveryGeoMappingStatus.php
-|   |       |       YandexDeliveryGeoMatchScorer.php
-|   |       |       YandexDeliveryGeoResolutionPolicy.php
+|   |       +---GeoV2
+|   |       |       YandexDeliveryGeoV2BuilderRunnerService.php
+|   |       |       YandexDeliveryGeoV2BuilderService.php
+|   |       |       YandexDeliveryGeoV2Repository.php
 |   |       |
-|   |       \---Pickup
-|   |               YandexDeliveryPickupPointImportService.php
-|   |               YandexDeliveryPickupPointNormalizer.php
-|   |               YandexDeliveryPickupPointRepository.php
-|   |               YandexDeliveryPickupPointService.php
+|   |       +---LocationMappingV2
+|   |       |       YandexDeliveryGeoPipelineV2Runner.php
+|   |       |       YandexGeoV2RegionEnrichmentRunner.php
+|   |       |       YandexGeoV2RegionEnrichmentService.php
+|   |       |       YandexLocationManualOverrideV2Repository.php
+|   |       |       YandexLocationMapperV2Service.php
+|   |       |       YandexLocationMappingV2NameNormalizer.php
+|   |       |       YandexLocationMappingV2Repository.php
+|   |       |       YandexLocationMappingV2Runner.php
+|   |       |       YandexRegionMappingV2Repository.php
+|   |       |
+|   |       +---Pickup
+|   |       |       YandexDeliveryPickupPointV2ImportService.php
+|   |       |       YandexDeliveryPickupPointV2JsonStreamReader.php
+|   |       |       YandexDeliveryPickupPointV2Repository.php
+|   |       |       YandexDeliveryPickupPointV2RunnerService.php
+|   |       |       YandexDeliveryPickupPointV2ScheduleFormatter.php
+|   |       |
+|   |       \---Pricing
+|   |               YandexDeliveryPricingRequestBuilder.php
+|   |               YandexDeliveryPricingResponseParser.php
+|   |               YandexDeliveryPricingResult.php
 |   |
 |   +---Checkout
 |   |   +---Address
@@ -570,6 +581,9 @@ C:.
 |   |   |       RussianPostPickupPointTypeSettings.php
 |   |   |       RussianPostWorkTimeFormatter.php
 |   |   |
+|   |   +---Schedule
+|   |   |       CompactWeeklyScheduleFormatter.php
+|   |   |
 |   |   +---Search
 |   |   |       PickupAddressSearchService.php
 |   |   |
@@ -786,12 +800,14 @@ C:.
     |       run-status-autosync-smoke.php
     |
     \---yandex-delivery
+            run-yandex-delivery-checkout-rates-smoke.php
             run-yandex-delivery-foundation-smoke.php
-            run-yandex-delivery-geo-analysis-smoke.php
-            run-yandex-delivery-geo-batch-smoke.php
-            run-yandex-delivery-geo-coverage-smoke.php
-            run-yandex-delivery-geo-manual-review-smoke.php
-            run-yandex-delivery-geo-mapping-smoke.php
-            run-yandex-delivery-geo-resolution-smoke.php
-            run-yandex-delivery-geo-runner-smoke.php
-            run-yandex-delivery-pickup-smoke.php
+            run-yandex-delivery-geo-pipeline-v2-smoke.php
+            run-yandex-delivery-geo-v2-builder-smoke.php
+            run-yandex-delivery-geo-v2-region-enrichment-smoke.php
+            run-yandex-delivery-location-mapping-v2-smoke.php
+            run-yandex-delivery-pickup-v2-foundation-smoke.php
+            run-yandex-delivery-pickup-v2-runner-smoke.php
+            run-yandex-delivery-pricing-calculator-smoke.php
+            run-yandex-delivery-region-mapping-v2-smoke.php
+            run-yandex-delivery-source-station-smoke.php

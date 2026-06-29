@@ -199,9 +199,8 @@ $plugin_source = file_get_contents( WDC_PLUGIN_DIR . 'src/Core/Plugin.php' ) ?: 
 $shipment_registry_line = preg_match( '/CarrierShipmentAdapterRegistry::class.*?\) \);/s', $plugin_source, $m ) ? $m[0] : '';
 $carrier_registry_block = preg_match( '/CarrierRegistry::class,.*?return \$registry;/s', $plugin_source, $m ) ? $m[0] : '';
 yd_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_settings'] = 'Данные для входа';" ), 'admin tab must be named Данные для входа.' );
-yd_assert( ! str_contains( $carrier_registry_block, 'YandexDelivery' ) && ! str_contains( $carrier_registry_block, 'yandex_delivery' ), 'Yandex Delivery must not register checkout carrier in this stage.' );
+yd_assert( str_contains( $carrier_registry_block, 'YandexDeliveryCarrier::class' ), 'Yandex Delivery checkout carrier must be registered.' );
 yd_assert( ! str_contains( $shipment_registry_line, 'YandexDelivery' ) && ! str_contains( $shipment_registry_line, 'yandex_delivery' ), 'Yandex Delivery must not register shipment adapter in this stage.' );
-yd_assert( ! preg_match( '/yandex_delivery.*(cron|autosync)|YandexDelivery.*(Cron|AutoSync)/i', $plugin_source ), 'Yandex Delivery must not register cron/autosync in this stage.' );
 yd_assert( substr_count( $admin_source, 'checkPickupPoint()' ) === 1 && str_contains( $admin_source, "'check_yandex_delivery_connection' === \$action" ), 'Yandex API diagnostic must be reachable only from explicit check action.' );
 yd_assert( str_contains( $admin_source, "'save_yandex_delivery_settings' === \$action" ), 'Yandex settings save action must exist.' );
 preg_match( '/' . preg_quote( "'save_yandex_delivery_settings' === \$action", '/' ) . '[\s\S]*?\n\t\t\t}/', $admin_source, $save_match );

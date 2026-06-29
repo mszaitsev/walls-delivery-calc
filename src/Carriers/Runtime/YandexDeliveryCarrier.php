@@ -1,0 +1,277 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Carriers\Runtime;
+
+use Throwable;
+use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiException;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingRequestBuilder;
+use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingResponseParser;
+use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingResult;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
+use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Quote\DeliveryQuote;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
+
+final class YandexDeliveryCarrier implements CarrierAdapterInterface {
+	public const PICKUP_RATE_ID = 'yandex_pickup';
+	public const COURIER_RATE_ID = 'yandex_courier';
+	private const DEFAULT_DELIVERY_TIME = 'без указания срока';
+
+	public function __construct(
+		private YandexDeliverySettings $settings,
+		private ?YandexDeliveryApiClient $api = null,
+		private ?YandexLocationMappingV2Repository $location_mapping = null,
+		private ?YandexDeliveryPickupPointV2Repository $pickup_points = null,
+		private ?Logger $logger = null,
+		private ?YandexDeliveryPricingRequestBuilder $request_builder = null,
+		private ?YandexDeliveryPricingResponseParser $response_parser = null
+	) {
+		$this->request_builder ??= new YandexDeliveryPricingRequestBuilder();
+		$this->response_parser ??= new YandexDeliveryPricingResponseParser();
+	}
+
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( YandexDeliverySettings::CARRIER_KEY, YandexDeliverySettings::TITLE, 'api', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities(
+			supports_quotes: true,
+			supports_courier_delivery: true,
+			supports_pickup_delivery: true
+		);
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return 'RU' === strtoupper( trim( $countryCode ) );
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		if ( ! $this->supports_country( $request->country_code ?: $request->destination->country_code ) ) {
+			return new DeliveryQuote( $this->quote_id( $request, 'unsupported_country' ), YandexDeliverySettings::CARRIER_KEY, $request->destination, $request->package, array(), true, '', '', false, 'manual' );
+		}
+
+		$delivery_type = $this->normalize_delivery_type( (string) ( $request->customer_context['delivery_type'] ?? '' ) );
+		$rates = '' !== $delivery_type
+			? array( $this->rate( $request, $delivery_type ) )
+			: array(
+				$this->rate( $request, DeliveryType::PICKUP ),
+				$this->rate( $request, DeliveryType::COURIER ),
+			);
+
+		return new DeliveryQuote(
+			$this->quote_id( $request, '' !== $delivery_type ? $delivery_type : 'all' ),
+			YandexDeliverySettings::CARRIER_KEY,
+			$request->destination,
+			$request->package,
+			$rates,
+			true,
+			'',
+			'',
+			false,
+			'api',
+			array( 'pricing_calculator' => true )
+		);
+	}
+
+	private function rate( QuoteRequest $request, string $delivery_type ): DeliveryRate {
+		$delivery_type = $this->normalize_delivery_type( $delivery_type ) ?: DeliveryType::PICKUP;
+		$method_title = DeliveryType::COURIER === $delivery_type ? $this->settings->courier_method_title() : $this->settings->pickup_method_title();
+
+		try {
+			$result = $this->pricing_result( $request, $delivery_type );
+			return $this->build_rate( $delivery_type, $method_title, $result->delivery_time_label(), Money::from_kopecks( $result->price_kopecks ), false, '', array( 'pricing_total_kopecks' => $result->price_kopecks, 'delivery_days' => $result->delivery_days ) );
+		} catch ( Throwable $exception ) {
+			$reason = $this->disabled_reason( $exception, $delivery_type );
+			$this->log_pricing_error( $delivery_type, $exception, $request );
+
+			return $this->build_rate( $delivery_type, $method_title, self::DEFAULT_DELIVERY_TIME, Money::from_kopecks( 0 ), true, $reason, array( 'pricing_error' => $this->error_code( $exception ) ) );
+		}
+	}
+
+	/** @param array<string,mixed> $meta */
+	private function build_rate( string $delivery_type, string $method_title, string $delivery_time, Money $price, bool $disabled, string $disabled_reason, array $meta ): DeliveryRate {
+		$title = $method_title . ' — ' . $delivery_time;
+
+		return new DeliveryRate(
+			DeliveryType::COURIER === $delivery_type ? self::COURIER_RATE_ID : self::PICKUP_RATE_ID,
+			YandexDeliverySettings::CARRIER_KEY,
+			YandexDeliverySettings::TITLE,
+			YandexDeliverySettings::SERVICE_KEY,
+			YandexDeliverySettings::TITLE,
+			$delivery_type,
+			$method_title,
+			$delivery_type,
+			$title,
+			$price,
+			null,
+			null,
+			is_numeric( $meta['delivery_days'] ?? null ) ? DateRange::single( (int) $meta['delivery_days'] ) : new DateRange(),
+			'',
+			$delivery_time,
+			array(),
+			$disabled,
+			$disabled_reason,
+			DeliveryType::PICKUP === $delivery_type,
+			DeliveryType::COURIER === $delivery_type,
+			array_merge(
+				array(
+					'preserve_rate_title' => true,
+					'delivery_time' => $delivery_time,
+					'yandex_delivery_rate_type' => $delivery_type,
+					'pricing_calculator' => true,
+				),
+				$meta
+			)
+		);
+	}
+
+	private function pricing_result( QuoteRequest $request, string $delivery_type ): YandexDeliveryPricingResult {
+		if ( ! $this->api instanceof YandexDeliveryApiClient || ! $this->request_builder instanceof YandexDeliveryPricingRequestBuilder || ! $this->response_parser instanceof YandexDeliveryPricingResponseParser ) {
+			throw new YandexDeliveryApiException( 'Pricing-calculator Яндекс.Доставки недоступен.', array( 'error_code' => 'pricing_dependencies_missing' ) );
+		}
+		$source_station_id = $this->settings->source_platform_station_id();
+		if ( '' === $source_station_id ) {
+			throw new YandexDeliveryApiException( 'Не выбран ПВЗ сдачи Яндекс.Доставки.', array( 'error_code' => 'source_platform_station_missing' ) );
+		}
+		if ( DeliveryType::COURIER === $delivery_type ) {
+			$address = $this->courier_address( $request );
+			if ( '' === $address ) {
+				throw new YandexDeliveryApiException( 'Недостаточно адреса для расчета курьера Яндекс.Доставки.', array( 'error_code' => 'courier_address_missing' ) );
+			}
+			$payload = $this->request_builder->courier( $request, $source_station_id, $address );
+		} else {
+			$destination_station_id = $this->representative_destination_station_id( $request );
+			$payload = $this->request_builder->pickup( $request, $source_station_id, $destination_station_id );
+		}
+
+		return $this->response_parser->parse( $this->api->pricingCalculator( $payload ) );
+	}
+
+	private function representative_destination_station_id( QuoteRequest $request ): string {
+		if ( ! $this->location_mapping instanceof YandexLocationMappingV2Repository || ! $this->pickup_points instanceof YandexDeliveryPickupPointV2Repository ) {
+			throw new YandexDeliveryApiException( 'Локальная база ПВЗ Яндекс.Доставки недоступна.', array( 'error_code' => 'pickup_repository_missing' ) );
+		}
+		$location_id = $this->destination_location_id( $request );
+		if ( $location_id <= 0 ) {
+			throw new YandexDeliveryApiException( 'Не выбран населенный пункт назначения для предварительного расчета Яндекс.Доставки.', array( 'error_code' => 'destination_location_missing' ) );
+		}
+		$geo_ids = $this->location_mapping->geo_ids_for_location( $location_id );
+		if ( array() === $geo_ids ) {
+			throw new YandexDeliveryApiException( 'Для населенного пункта назначения нет связанных yandex_geo_id.', array( 'error_code' => 'destination_geo_ids_missing', 'location_id' => $location_id ) );
+		}
+		$point = $this->pickup_points->representative_destination_pickup_point_by_geo_ids( $geo_ids );
+		$station_id = is_array( $point ) ? $this->sanitize_station_id( (string) ( $point['platform_station_id'] ?? '' ) ) : '';
+		if ( '' === $station_id ) {
+			throw new YandexDeliveryApiException( 'Нет подходящего ПВЗ Яндекс.Доставки для предварительного расчета.', array( 'error_code' => 'representative_destination_pickup_missing', 'location_id' => $location_id, 'yandex_geo_ids' => $geo_ids ) );
+		}
+
+		return $station_id;
+	}
+
+	private function destination_location_id( QuoteRequest $request ): int {
+		foreach ( array( 'selected_location_id', 'location_id', 'destination_location_id' ) as $key ) {
+			$value = (int) ( $request->customer_context[ $key ] ?? 0 );
+			if ( $value > 0 ) {
+				return $value;
+			}
+		}
+
+		return 0;
+	}
+
+	private function courier_address( QuoteRequest $request ): string {
+		$address = $request->destination;
+		$city = trim( '' !== trim( $address->city ) ? $address->city : $address->settlement );
+		$raw = trim( $address->raw_address );
+		if ( '' !== $raw ) {
+			if ( '' === $city || 1 === preg_match( '/' . preg_quote( $city, '/' ) . '/iu', $raw ) ) {
+				return $raw;
+			}
+
+			return $this->compact_address( array( $city, $raw ) );
+		}
+		$street = trim( $address->street );
+		$house = trim( $address->house );
+		if ( '' === $city || '' === $street || '' === $house ) {
+			return '';
+		}
+
+		return $this->compact_address( array( $city, $street, $house, $address->apartment ) );
+	}
+
+	/** @param array<int,string> $parts */
+	private function compact_address( array $parts ): string {
+		$parts = array_values( array_filter( array_map( static fn( string $part ): string => trim( preg_replace( '/\s+/', ' ', $part ) ?? $part ), $parts ), static fn( string $part ): bool => '' !== $part ) );
+
+		return implode( ', ', $parts );
+	}
+
+	private function disabled_reason( Throwable $exception, string $delivery_type ): string {
+		$message = trim( $exception->getMessage() );
+		if ( '' !== $message ) {
+			return $message;
+		}
+
+		return DeliveryType::COURIER === $delivery_type ? 'Не удалось рассчитать курьерскую доставку Яндекс.Доставки.' : 'Не удалось рассчитать доставку Яндекс.Доставки до ПВЗ.';
+	}
+
+	private function log_pricing_error( string $delivery_type, Throwable $exception, QuoteRequest $request ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+		$details = $exception instanceof YandexDeliveryApiException ? $exception->details() : array();
+		$this->logger->warning(
+			'Yandex Delivery pricing-calculator failed.',
+			$this->settings->sanitize_for_diagnostics(
+				array(
+					'delivery_type' => $delivery_type,
+					'error' => $exception->getMessage(),
+					'error_code' => $this->error_code( $exception ),
+					'location_id' => $this->destination_location_id( $request ),
+					'details' => $details,
+				)
+			)
+		);
+	}
+
+	private function error_code( Throwable $exception ): string {
+		if ( $exception instanceof YandexDeliveryApiException ) {
+			return (string) ( $exception->details()['error_code'] ?? $exception->details()['yandex_error_code'] ?? 'pricing_error' );
+		}
+
+		return 'pricing_error';
+	}
+
+	private function sanitize_station_id( string $value ): string {
+		return substr( preg_replace( '/[^A-Za-z0-9_-]+/', '', trim( $value ) ) ?? '', 0, 80 );
+	}
+
+	private function normalize_delivery_type( string $delivery_type ): string {
+		if ( DeliveryType::COURIER === $delivery_type ) {
+			return DeliveryType::COURIER;
+		}
+		if ( DeliveryType::PICKUP === $delivery_type ) {
+			return DeliveryType::PICKUP;
+		}
+
+		return '';
+	}
+
+	private function quote_id( QuoteRequest $request, string $suffix ): string {
+		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $request->to_array() ) : json_encode( $request->to_array() );
+
+		return 'yandex-delivery-' . $suffix . '-' . substr( sha1( is_string( $json ) ? $json : '' ), 0, 12 );
+	}
+}
