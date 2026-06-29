@@ -89,6 +89,7 @@ use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Carriers\Runtime\YandexDeliveryCarrier;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
@@ -385,6 +386,7 @@ final class Plugin {
 		$this->container->register( RussianPostDomesticCarrier::class, fn(): RussianPostDomesticCarrier => new RussianPostDomesticCarrier( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostDomesticApiClient::class ), $this->container->get( RussianPostDomesticTariffVariantResolver::class ), $this->container->get( Logger::class ), $this->container->get( DaDataPostcodeClient::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( CdekCarrier::class, fn(): CdekCarrier => new CdekCarrier( $this->container->get( CdekSettings::class ), $this->container->get( CdekApiClient::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ), $this->container->get( CdekTariffRepository::class ) ) );
 		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( DpdParcelBuilder::class ), $this->container->get( Logger::class ), $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( YandexDeliveryCarrier::class, fn(): YandexDeliveryCarrier => new YandexDeliveryCarrier( $this->container->get( YandexDeliverySettings::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -393,6 +395,7 @@ final class Plugin {
 				$registry->register( $this->container->get( RussianPostDomesticCarrier::class ) );
 				$registry->register( $this->container->get( CdekCarrier::class ) );
 				$registry->register( $this->container->get( DpdQuoteCarrier::class ) );
+				$registry->register( $this->container->get( YandexDeliveryCarrier::class ) );
 
 				return $registry;
 			}

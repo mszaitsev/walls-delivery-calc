@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Checkout\Runtime;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
@@ -184,7 +185,7 @@ final class CheckoutOrchestrator {
 			}
 			$carrier = $this->service_registry->carrier_for( $service );
 			if ( null !== $carrier ) {
-				if ( in_array( $service->service_key, array( RussianPostDomesticSettings::SERVICE_KEY, CdekCarrier::KEY ), true ) ) {
+				if ( in_array( $service->service_key, array( RussianPostDomesticSettings::SERVICE_KEY, CdekCarrier::KEY, YandexDeliverySettings::SERVICE_KEY ), true ) ) {
 					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::PICKUP );
 					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::COURIER );
 					continue;
