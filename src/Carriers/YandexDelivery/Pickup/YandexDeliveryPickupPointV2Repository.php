@@ -7,6 +7,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryPickupPointV2Repository {
 	private object $wpdb;
+	private bool $use_staging_table = false;
 
 	public function __construct( ?object $wpdb = null ) {
 		$db = $wpdb;
@@ -81,6 +82,62 @@ final class YandexDeliveryPickupPointV2Repository {
 		dbDelta( $this->schema() );
 	}
 
+	public function truncate(): void {
+		if ( $this->has_test_rows() ) {
+			$this->wpdb->{$this->test_rows_property()} = array();
+			if ( ! $this->use_staging_table && property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2_truncate_count' ) ) {
+				++$this->wpdb->yandex_delivery_pickup_points_v2_truncate_count;
+			}
+			return;
+		}
+
+		$this->create_schema_if_needed();
+		$this->wpdb->query( 'TRUNCATE TABLE ' . $this->table_name() );
+	}
+
+	public function use_staging_table(): void {
+		$this->use_staging_table = true;
+	}
+
+	public function use_live_table(): void {
+		$this->use_staging_table = false;
+	}
+
+	public function prepare_staging_table(): void {
+		$this->use_staging_table();
+		$this->create_schema_if_needed();
+		$this->truncate();
+	}
+
+	public function drop_staging_table(): void {
+		if ( $this->is_test_environment() ) {
+			$this->wpdb->yandex_delivery_pickup_points_v2_staging = array();
+			$this->use_live_table();
+			return;
+		}
+		if ( method_exists( $this->wpdb, 'query' ) ) {
+			$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $this->staging_table_name() ) );
+		}
+		$this->use_live_table();
+	}
+
+	public function promote_staging_to_live(): void {
+		if ( $this->is_test_environment() ) {
+			$this->wpdb->yandex_delivery_pickup_points_v2 = $this->wpdb->yandex_delivery_pickup_points_v2_staging ?? array();
+			$this->wpdb->yandex_delivery_pickup_points_v2_staging = array();
+			$this->use_live_table();
+			return;
+		}
+		$this->create_schema_if_needed();
+		$live = $this->live_table_name();
+		$staging = $this->staging_table_name();
+		$backup = $live . '_old_' . gmdate( 'YmdHis' );
+		$this->wpdb->query( 'CREATE TABLE IF NOT EXISTS ' . $this->quote_identifier( $live ) . ' LIKE ' . $this->quote_identifier( $staging ) );
+		$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $backup ) );
+		$this->wpdb->query( 'RENAME TABLE ' . $this->quote_identifier( $live ) . ' TO ' . $this->quote_identifier( $backup ) . ', ' . $this->quote_identifier( $staging ) . ' TO ' . $this->quote_identifier( $live ) );
+		$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $backup ) );
+		$this->use_live_table();
+	}
 	/**
 	 * @param array<int,array<string,mixed>>|array<string,mixed> $rows
 	 * @return array{received:int,saved:int,skipped_invalid:int}
@@ -123,7 +180,7 @@ final class YandexDeliveryPickupPointV2Repository {
 	public function search( array $filters = array() ): array {
 		$limit = max( 1, min( 500, (int) ( $filters['limit'] ?? 20 ) ) );
 		if ( $this->has_test_rows() ) {
-			$rows = array_values( array_filter( $this->wpdb->yandex_delivery_pickup_points_v2, fn( array $row ): bool => $this->matches_filters( $row, $filters ) ) );
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->matches_filters( $row, $filters ) ) );
 			usort(
 				$rows,
 				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) )
@@ -147,7 +204,7 @@ final class YandexDeliveryPickupPointV2Repository {
 	/** @param array<string,mixed> $filters */
 	public function count( array $filters = array() ): int {
 		if ( $this->has_test_rows() ) {
-			return count( array_filter( $this->wpdb->yandex_delivery_pickup_points_v2, fn( array $row ): bool => $this->matches_filters( $row, $filters ) ) );
+			return count( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->matches_filters( $row, $filters ) ) );
 		}
 
 		$this->create_schema_if_needed();
@@ -175,7 +232,7 @@ final class YandexDeliveryPickupPointV2Repository {
 	public function count_by_type(): array {
 		if ( $this->has_test_rows() ) {
 			$counts = array();
-			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $row ) {
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
 				$type = trim( (string) ( $row['type'] ?? '' ) );
 				if ( '' !== $type ) {
 					$counts[ $type ] = ( $counts[ $type ] ?? 0 ) + 1;
@@ -194,7 +251,7 @@ final class YandexDeliveryPickupPointV2Repository {
 	public function count_unique_geo_ids(): int {
 		if ( $this->has_test_rows() ) {
 			$ids = array();
-			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $row ) {
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
 				$id = (string) ( $row['yandex_geo_id'] ?? '' );
 				if ( '' !== $id && '0' !== $id ) {
 					$ids[ $id ] = true;
@@ -206,10 +263,27 @@ final class YandexDeliveryPickupPointV2Repository {
 		return (int) $this->wpdb->get_var( 'SELECT COUNT(DISTINCT yandex_geo_id) FROM ' . $this->table_name() . ' WHERE yandex_geo_id IS NOT NULL AND yandex_geo_id > 0' );
 	}
 
+	public function count_active_unique_geo_ids(): int {
+		if ( $this->has_test_rows() ) {
+			$ids = array();
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
+				if ( empty( $row['active'] ) ) {
+					continue;
+				}
+				$id = (string) ( $row['yandex_geo_id'] ?? '' );
+				if ( '' !== $id && '0' !== $id ) {
+					$ids[ $id ] = true;
+				}
+			}
+			return count( $ids );
+		}
+		$this->create_schema_if_needed();
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(DISTINCT yandex_geo_id) FROM ' . $this->table_name() . ' WHERE active = 1 AND yandex_geo_id IS NOT NULL AND yandex_geo_id > 0' );
+	}
 	public function latest_seen_at(): string {
 		if ( $this->has_test_rows() ) {
 			$latest = '';
-			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $row ) {
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $row ) {
 				$value = (string) ( $row['last_seen_at'] ?? '' );
 				if ( $value > $latest ) {
 					$latest = $value;
@@ -248,16 +322,16 @@ final class YandexDeliveryPickupPointV2Repository {
 	/** @param array<string,mixed> $row */
 	private function upsert_one( array $row ): bool {
 		if ( $this->has_test_rows() ) {
-			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $index => $existing ) {
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $index => $existing ) {
 				if ( (string) ( $existing['platform_station_id'] ?? '' ) === $row['platform_station_id'] ) {
 					$row['id'] = $existing['id'] ?? $index + 1;
 					$row['created_at'] = $existing['created_at'] ?? $row['created_at'];
-					$this->wpdb->yandex_delivery_pickup_points_v2[ $index ] = $row;
+					$this->wpdb->{$this->test_rows_property()}[ $index ] = $row;
 					return true;
 				}
 			}
-			$row['id'] = count( $this->wpdb->yandex_delivery_pickup_points_v2 ) + 1;
-			$this->wpdb->yandex_delivery_pickup_points_v2[] = $row;
+			$row['id'] = count( $this->wpdb->{$this->test_rows_property()} ) + 1;
+			$this->wpdb->{$this->test_rows_property()}[] = $row;
 			return true;
 		}
 
@@ -384,11 +458,36 @@ final class YandexDeliveryPickupPointV2Repository {
 	}
 
 	private function table_name(): string {
+		return $this->use_staging_table ? $this->staging_table_name() : $this->live_table_name();
+	}
+
+	private function live_table_name(): string {
 		return $this->wpdb->prefix . 'wdc_yandex_delivery_pickup_points_v2';
 	}
 
+	private function staging_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_yandex_delivery_pickup_points_v2_staging';
+	}
+
 	private function has_test_rows(): bool {
-		return property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2' ) && is_array( $this->wpdb->yandex_delivery_pickup_points_v2 );
+		$property = $this->test_rows_property();
+		if ( $this->use_staging_table && ! property_exists( $this->wpdb, $property ) && property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2' ) ) {
+			$this->wpdb->{$property} = array();
+		}
+		return property_exists( $this->wpdb, $property ) && is_array( $this->wpdb->{$property} );
+	}
+
+	private function is_test_environment(): bool {
+		return property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2' ) || property_exists( $this->wpdb, 'yandex_delivery_pickup_points_v2_staging' );
+	}
+
+	private function test_rows_property(): string {
+		return $this->use_staging_table ? 'yandex_delivery_pickup_points_v2_staging' : 'yandex_delivery_pickup_points_v2';
+	}
+
+	private function quote_identifier( string $identifier ): string {
+		$quote = chr( 96 );
+		return $quote . str_replace( $quote, $quote . $quote, $identifier ) . $quote;
 	}
 
 	private function can_create_schema(): bool {

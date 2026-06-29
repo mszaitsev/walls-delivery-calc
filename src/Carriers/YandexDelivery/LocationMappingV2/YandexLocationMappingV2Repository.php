@@ -7,6 +7,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class YandexLocationMappingV2Repository {
 	private object $wpdb;
+	private bool $use_staging_table = false;
 
 	public function __construct( ?object $wpdb = null ) {
 		$db = $wpdb;
@@ -53,6 +54,49 @@ final class YandexLocationMappingV2Repository {
 		dbDelta( $this->schema() );
 	}
 
+	public function use_staging_table(): void {
+		$this->use_staging_table = true;
+	}
+
+	public function use_live_table(): void {
+		$this->use_staging_table = false;
+	}
+
+	public function prepare_staging_table(): void {
+		$this->use_staging_table();
+		$this->create_schema_if_needed();
+		$this->truncate();
+	}
+
+	public function drop_staging_table(): void {
+		if ( $this->is_test_environment() ) {
+			$this->wpdb->yandex_location_mapping_v2_staging = array();
+			$this->use_live_table();
+			return;
+		}
+		if ( method_exists( $this->wpdb, 'query' ) ) {
+			$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $this->staging_table_name() ) );
+		}
+		$this->use_live_table();
+	}
+
+	public function promote_staging_to_live(): void {
+		if ( $this->is_test_environment() ) {
+			$this->wpdb->yandex_location_mapping_v2 = $this->wpdb->yandex_location_mapping_v2_staging ?? array();
+			$this->wpdb->yandex_location_mapping_v2_staging = array();
+			$this->use_live_table();
+			return;
+		}
+		$this->create_schema_if_needed();
+		$live = $this->live_table_name();
+		$staging = $this->staging_table_name();
+		$backup = $live . '_old_' . gmdate( 'YmdHis' );
+		$this->wpdb->query( 'CREATE TABLE IF NOT EXISTS ' . $this->quote_identifier( $live ) . ' LIKE ' . $this->quote_identifier( $staging ) );
+		$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $backup ) );
+		$this->wpdb->query( 'RENAME TABLE ' . $this->quote_identifier( $live ) . ' TO ' . $this->quote_identifier( $backup ) . ', ' . $this->quote_identifier( $staging ) . ' TO ' . $this->quote_identifier( $live ) );
+		$this->wpdb->query( 'DROP TABLE IF EXISTS ' . $this->quote_identifier( $backup ) );
+		$this->use_live_table();
+	}
 	/** @param array<int,array<string,mixed>>|array<string,mixed> $rows @return array{received:int,saved:int,skipped_invalid:int} */
 	public function upsert( array $rows ): array {
 		$this->create_schema_if_needed();
@@ -93,7 +137,7 @@ final class YandexLocationMappingV2Repository {
 		$limit = max( 1, min( 500, (int) ( $args['limit'] ?? 50 ) ) );
 		$offset = max( 0, (int) ( $args['offset'] ?? 0 ) );
 		if ( $this->has_test_rows() ) {
-			$rows = array_values( array_filter( $this->wpdb->yandex_location_mapping_v2, fn( array $row ): bool => $this->matches_filters( $row, $args ) ) );
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->matches_filters( $row, $args ) ) );
 			usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['yandex_geo_id'] ?? 0 ) <=> (int) ( $b['yandex_geo_id'] ?? 0 ) ?: (int) ( $a['location_id'] ?? 0 ) <=> (int) ( $b['location_id'] ?? 0 ) );
 
 			return array_slice( $rows, $offset, $limit );
@@ -124,7 +168,7 @@ final class YandexLocationMappingV2Repository {
 
 	/** @return array<string,mixed> */
 	public function statistics(): array {
-		$rows = $this->has_test_rows() ? $this->wpdb->yandex_location_mapping_v2 : null;
+		$rows = $this->has_test_rows() ? $this->wpdb->{$this->test_rows_property()} : null;
 		if ( is_array( $rows ) ) {
 			return array(
 				'total' => count( $rows ),
@@ -168,7 +212,7 @@ final class YandexLocationMappingV2Repository {
 			foreach ( $geo_rows as $geo ) {
 				$geo_by_id[ (int) ( $geo['yandex_geo_id'] ?? 0 ) ] = $geo;
 			}
-			$rows = array_values( array_filter( $this->wpdb->yandex_location_mapping_v2, static fn( array $row ): bool => 'no_match' === (string) ( $row['status'] ?? '' ) ) );
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, static fn( array $row ): bool => 'no_match' === (string) ( $row['status'] ?? '' ) ) );
 			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $b['updated_at'] ?? '' ), (string) ( $a['updated_at'] ?? '' ) ) ?: (int) ( $b['yandex_geo_id'] ?? 0 ) <=> (int) ( $a['yandex_geo_id'] ?? 0 ) );
 			$items = array();
 			foreach ( $rows as $row ) {
@@ -210,7 +254,7 @@ final class YandexLocationMappingV2Repository {
 			foreach ( $geo_rows as $geo ) {
 				$geo_by_id[ (int) ( $geo['yandex_geo_id'] ?? 0 ) ] = $geo;
 			}
-			$rows = array_values( array_filter( $this->wpdb->yandex_location_mapping_v2, static fn( array $row ): bool => in_array( (string) ( $row['status'] ?? '' ), array( 'needs_review', 'no_match' ), true ) ) );
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, static fn( array $row ): bool => in_array( (string) ( $row['status'] ?? '' ), array( 'needs_review', 'no_match' ), true ) ) );
 			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $b['updated_at'] ?? '' ), (string) ( $a['updated_at'] ?? '' ) ) ?: (int) ( $b['yandex_geo_id'] ?? 0 ) <=> (int) ( $a['yandex_geo_id'] ?? 0 ) ?: (int) ( $b['is_primary'] ?? 0 ) <=> (int) ( $a['is_primary'] ?? 0 ) );
 			$items = array();
 			foreach ( $rows as $row ) {
@@ -243,7 +287,7 @@ final class YandexLocationMappingV2Repository {
 	}
 	public function truncate(): void {
 		if ( $this->has_test_rows() ) {
-			$this->wpdb->yandex_location_mapping_v2 = array();
+			$this->wpdb->{$this->test_rows_property()} = array();
 			return;
 		}
 		$this->create_schema_if_needed();
@@ -290,16 +334,16 @@ final class YandexLocationMappingV2Repository {
 	/** @param array<string,mixed> $row */
 	private function upsert_one( array $row ): bool {
 		if ( $this->has_test_rows() ) {
-			foreach ( $this->wpdb->yandex_location_mapping_v2 as $index => $existing ) {
+			foreach ( $this->wpdb->{$this->test_rows_property()} as $index => $existing ) {
 				if ( (int) ( $existing['yandex_geo_id'] ?? 0 ) === (int) $row['yandex_geo_id'] && (int) ( $existing['location_id'] ?? -1 ) === (int) $row['location_id'] ) {
 					$row['id'] = $existing['id'] ?? $index + 1;
 					$row['created_at'] = $existing['created_at'] ?? $row['created_at'];
-					$this->wpdb->yandex_location_mapping_v2[ $index ] = $row;
+					$this->wpdb->{$this->test_rows_property()}[ $index ] = $row;
 					return true;
 				}
 			}
-			$row['id'] = count( $this->wpdb->yandex_location_mapping_v2 ) + 1;
-			$this->wpdb->yandex_location_mapping_v2[] = $row;
+			$row['id'] = count( $this->wpdb->{$this->test_rows_property()} ) + 1;
+			$this->wpdb->{$this->test_rows_property()}[] = $row;
 			return true;
 		}
 		$columns = $this->columns();
@@ -492,8 +536,6 @@ final class YandexLocationMappingV2Repository {
 	}
 	/** @param array<string,mixed> $mapping @param array<string,mixed> $geo @return array<string,mixed> */
 	private function no_match_row( array $mapping, array $geo ): array {
-		$raw = json_decode( (string) ( $mapping['raw_json'] ?? '' ), true );
-		$terms = is_array( $raw ) && is_array( $raw['sql_search_terms'] ?? null ) ? array_values( array_map( 'strval', $raw['sql_search_terms'] ) ) : array();
 		return array(
 			'yandex_geo_id' => (int) ( $mapping['yandex_geo_id'] ?? 0 ),
 			'region' => (string) ( $geo['region'] ?? '' ),
@@ -501,7 +543,6 @@ final class YandexLocationMappingV2Repository {
 			'first_full_address' => (string) ( $geo['first_full_address'] ?? '' ),
 			'centroid_lat' => $geo['centroid_lat'] ?? null,
 			'centroid_lon' => $geo['centroid_lon'] ?? null,
-			'sql_search_terms' => $terms,
 			'updated_at' => (string) ( $mapping['updated_at'] ?? '' ),
 		);
 	}
@@ -549,7 +590,15 @@ final class YandexLocationMappingV2Repository {
 		return is_array( $row ) ? $row : array();
 	}
 	private function table_name(): string {
+		return $this->use_staging_table ? $this->staging_table_name() : $this->live_table_name();
+	}
+
+	private function live_table_name(): string {
 		return $this->wpdb->prefix . 'wdc_yandex_location_mapping_v2';
+	}
+
+	private function staging_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_yandex_location_mapping_v2_staging';
 	}
 
 	private function geo_table_name(): string {
@@ -561,7 +610,24 @@ final class YandexLocationMappingV2Repository {
 	}
 
 	private function has_test_rows(): bool {
-		return property_exists( $this->wpdb, 'yandex_location_mapping_v2' ) && is_array( $this->wpdb->yandex_location_mapping_v2 );
+		$property = $this->test_rows_property();
+		if ( $this->use_staging_table && ! property_exists( $this->wpdb, $property ) && property_exists( $this->wpdb, 'yandex_location_mapping_v2' ) ) {
+			$this->wpdb->{$property} = array();
+		}
+		return property_exists( $this->wpdb, $property ) && is_array( $this->wpdb->{$property} );
+	}
+
+	private function is_test_environment(): bool {
+		return property_exists( $this->wpdb, 'yandex_location_mapping_v2' ) || property_exists( $this->wpdb, 'yandex_location_mapping_v2_staging' );
+	}
+
+	private function test_rows_property(): string {
+		return $this->use_staging_table ? 'yandex_location_mapping_v2_staging' : 'yandex_location_mapping_v2';
+	}
+
+	private function quote_identifier( string $identifier ): string {
+		$quote = chr( 96 );
+		return $quote . str_replace( $quote, $quote . $quote, $identifier ) . $quote;
 	}
 
 	private function can_create_schema(): bool {

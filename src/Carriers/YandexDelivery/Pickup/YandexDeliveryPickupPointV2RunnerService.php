@@ -74,6 +74,16 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			$this->save_state( $state );
 			return $state;
 		}
+		if ( 0 === (int) ( $state['offset'] ?? 0 ) && empty( $state['pickup_points_staging'] ) ) {
+			try {
+				$this->importer->prepare_staging_repository();
+				$state['pickup_points_staging'] = true;
+			} catch ( \Throwable $exception ) {
+				$state = $this->fail( $state, $exception->getMessage(), array_merge( array( 'action' => 'prepare_pickup_points_v2_staging' ), $this->exception_context( $exception ) ) );
+				$this->save_state( $state );
+				return $state;
+			}
+		}
 		$state['status'] = 'importing';
 		$state['updated_at'] = $this->now();
 		$state['message'] = 'Импортируем ПВЗ v2 батчами.';
@@ -90,6 +100,9 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			return $state;
 		}
 		try {
+			if ( ! empty( $state['pickup_points_staging'] ) ) {
+				$this->importer->use_staging_repository();
+			}
 			$result = $this->importer->import_from_json_file_streamed( (string) $state['json_file_path'], (int) $state['offset'], (int) $state['batch_size'] );
 			$state['offset'] = (int) $result['next_offset'];
 			$state['processed'] = (int) $state['processed'] + (int) $result['processed'];
@@ -99,6 +112,9 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			$state['memory_peak_mb'] = (string) $result['memory_peak_mb'];
 			$state['updated_at'] = $this->now();
 			if ( ! empty( $result['done'] ) ) {
+				$this->importer->promote_staging_repository();
+				$state['pickup_points_staging_promoted'] = true;
+				$this->cleanup_successful_import_files( $state );
 				$state['status'] = 'done';
 				$state['message'] = 'Импорт полного списка ПВЗ v2 завершен.';
 			} else {
@@ -128,6 +144,7 @@ final class YandexDeliveryPickupPointV2RunnerService {
 
 	/** @return array<string,mixed> */
 	public function reset(): array {
+		$this->importer->reset_staging_repository();
 		$state = $this->idle_state();
 		$state['last_action'] = 'reset';
 		$this->save_state( $state );
@@ -171,6 +188,7 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			'json_file_size_bytes' => 0,
 			'downloaded_at' => '',
 			'offset' => 0,
+			'pickup_points_truncated' => false,
 			'processed' => 0,
 			'normalized' => 0,
 			'saved' => 0,
@@ -288,6 +306,36 @@ final class YandexDeliveryPickupPointV2RunnerService {
 		return rtrim( $base, '/\\' ) . DIRECTORY_SEPARATOR . 'wdc-yandex-delivery' . DIRECTORY_SEPARATOR . 'pickup-v2' . DIRECTORY_SEPARATOR . 'yandex-pickup-points-v2-' . gmdate( 'Ymd-His' ) . '.json';
 	}
 
+	/** @param array<string,mixed> $state */
+	private function cleanup_successful_import_files( array $state ): void {
+		$file = (string) ( $state['json_file_path'] ?? '' );
+		if ( '' === $file || ! is_file( $file ) ) {
+			return;
+		}
+		$dir = dirname( $file );
+		@unlink( $file );
+		$this->remove_empty_temp_dirs( $dir );
+	}
+
+	private function remove_empty_temp_dirs( string $dir ): void {
+		$uploads = function_exists( 'wp_upload_dir' ) ? wp_upload_dir() : array();
+		$base = is_array( $uploads ) && ! empty( $uploads['basedir'] ) ? (string) $uploads['basedir'] : sys_get_temp_dir();
+		$base = rtrim( $base, '/\\' );
+		$root = $base . DIRECTORY_SEPARATOR . 'wdc-yandex-delivery';
+		$dir = rtrim( $dir, '/\\' );
+		while ( '' !== $dir && str_starts_with( $dir, $root ) && $dir !== $base ) {
+			$items = is_dir( $dir ) ? scandir( $dir ) : false;
+			if ( ! is_array( $items ) || count( array_diff( $items, array( '.', '..' ) ) ) > 0 ) {
+				break;
+			}
+			@rmdir( $dir );
+			$parent = dirname( $dir );
+			if ( $parent === $dir ) {
+				break;
+			}
+			$dir = rtrim( $parent, '/\\' );
+		}
+	}
 	private function memory_peak_mb(): string {
 		return function_exists( 'memory_get_peak_usage' ) ? (string) round( memory_get_peak_usage( true ) / 1048576, 1 ) : '0';
 	}

@@ -36,6 +36,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		public array $yandex_delivery_pickup_points_v2 = array();
+		public array $yandex_delivery_pickup_points_v2_staging = array();
+		public int $yandex_delivery_pickup_points_v2_truncate_count = 0;
 		public function prepare( string $query, mixed ...$args ): string { foreach ( $args as $arg ) { $query = preg_replace( '/%[sdf]/', is_numeric( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query; } return $query; }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
 	}
@@ -112,7 +114,8 @@ yd_v2_runner_assert( '{}' === (string) $download_http->calls[0]['args']['body'] 
 @unlink( $download_file );
 $http = new YdV2RunnerHttp( (string) file_get_contents( $file ) );
 $api = new YandexDeliveryApiClient( $settings, $http );
-$runner = new YandexDeliveryPickupPointV2RunnerService( $api, new YandexDeliveryPickupPointV2ImportService( new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, $reader ) );
+$runner_repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
+$runner = new YandexDeliveryPickupPointV2RunnerService( $api, new YandexDeliveryPickupPointV2ImportService( $runner_repository, null, $reader ) );
 $state = $runner->start_full_api_sync();
 yd_v2_runner_assert( in_array( $state['status'], array( 'ready_to_import', 'importing' ), true ) && is_file( (string) $state['json_file_path'] ), 'Runner start must download JSON file and prepare import.' );
 yd_v2_runner_assert( 'start' === (string) ( $state['last_action'] ?? '' ) && array_key_exists( 'last_http_status', $state ) && array_key_exists( 'last_error_context', $state ), 'Runner state must expose debug fields.' );
@@ -146,10 +149,11 @@ $state = $runner->start_import();
 yd_v2_runner_assert( 'importing' === $state['status'], 'Runner start_import must switch to importing.' );
 $state = $runner->run_import_step();
 yd_v2_runner_assert( $state['offset'] > 0 && $state['processed'] > 0 && $state['saved'] > 0 && isset( $state['memory_peak_mb'] ), 'Runner step must update counters and memory peak.' );
+yd_v2_runner_assert( in_array( $state['status'], array( 'importing', 'done' ), true ) && $runner_repository->count_all() > 0 && null === $runner_repository->find( 'stale-before-runner-import' ), 'Runner import step must write through staging and keep stale pickup rows out of the promoted live table.' );
 $paused = $runner->pause();
 yd_v2_runner_assert( 'paused' !== $paused['status'] || $paused['offset'] === $state['offset'], 'Runner pause must not advance import.' );
 $reset = $runner->reset();
-yd_v2_runner_assert( 'idle' === $reset['status'] && is_file( $path_before_reset ), 'Runner reset must not delete downloaded JSON file.' );
+yd_v2_runner_assert( 'idle' === $reset['status'] && ! is_file( $path_before_reset ), 'Runner must delete downloaded JSON file only after successful import completion.' );
 @unlink( $file );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
@@ -158,9 +162,9 @@ $import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carri
 $runner_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2RunnerService.php' );
 yd_v2_runner_assert( str_contains( $admin_source, 'Скачать и импортировать полный список' ), 'V2 tab must render full sync button.' );
 yd_v2_runner_assert( str_contains( $admin_source, 'без type и geo_id' ), 'V2 tab must explain empty API filter payload.' );
-yd_v2_runner_assert( str_contains( $admin_source, "'yandex_delivery_pickup_v2' ===" ) && str_contains( $admin_source, 'yandex-delivery-pickup-v2-runner.js' ), 'V2 runner JS must be enqueued only on Yandex pickup v2 tab.' );
+yd_v2_runner_assert( str_contains( $admin_source, "'yandex_delivery_pickup' ===" ) && str_contains( $admin_source, 'yandex-delivery-pickup-v2-runner.js' ), 'V2 runner JS must be enqueued only on Yandex pickup v2 tab.' );
 yd_v2_runner_assert( ! str_contains( $admin_source, 'Текущий импорт пока недоступен' ), 'V2 tab placeholder must be removed.' );
-yd_v2_runner_assert( ! str_contains( $admin_source, 'yandex_delivery_geo_mapping_runner' ) && ! str_contains( $admin_source, '$tabs[\'yandex_delivery_pickup\']' ) && ! str_contains( $admin_source, '$tabs[\'yandex_delivery_geo\']' ) && ! str_contains( $admin_source, '$tabs[\'yandex_delivery_geo_coverage\']' ), 'Legacy Yandex geo/pickup tabs and runner AJAX must stay removed.' );
+yd_v2_runner_assert( ! str_contains( $admin_source, 'yandex_delivery_geo_mapping_runner' ) && ! str_contains( $admin_source, '$tabs[\'yandex_delivery_geo\']' ) && ! str_contains( $admin_source, '$tabs[\'yandex_delivery_geo_coverage\']' ), 'Legacy Yandex geo/pickup tabs and runner AJAX must stay removed.' );
 yd_v2_runner_assert( str_contains( $js_source, 'wdc_yandex_delivery_pickup_v2_runner_start' ) && str_contains( $js_source, 'wdc_yandex_delivery_pickup_v2_runner_step' ), 'V2 JS must call runner AJAX actions.' );
 yd_v2_runner_assert( str_contains( $js_source, 'response.text()' ) && str_contains( $js_source, 'JSON.parse' ) && str_contains( $js_source, 'Сервер вернул не JSON' ), 'V2 JS must safely diagnose non-JSON AJAX responses.' );
 $v2_ajax_start = strpos( $admin_source, 'public function ajax_yandex_delivery_pickup_v2_runner_start' );
@@ -174,6 +178,8 @@ $download_method_end = false === $download_method_start ? false : strpos( $runne
 $runner_download_block = false !== $download_method_start && false !== $download_method_end ? substr( $runner_source, $download_method_start, $download_method_end - $download_method_start ) : '';
 yd_v2_runner_assert( '' !== $runner_download_block && ! str_contains( $runner_download_block, 'pickupPointsListRawJson' ) && str_contains( $runner_download_block, 'pickupPointsListDownloadToFile' ), 'Runner download must use download-to-file API method, not raw JSON string method.' );
 yd_v2_runner_assert( '' !== $runner_download_block && ! str_contains( $runner_download_block, 'file_put_contents( $file, $json' ), 'Runner download must not write a full in-memory JSON string to file.' );
+yd_v2_runner_assert( str_contains( $runner_source, 'prepare_staging_repository' ) && str_contains( $runner_source, 'promote_staging_repository' ) && ! str_contains( $runner_source, 'truncate_repository' ), 'Runner must import pickup_points_v2 into staging and promote only after success.' );
+yd_v2_runner_assert( str_contains( $runner_source, 'cleanup_successful_import_files' ) && str_contains( $runner_source, 'remove_empty_temp_dirs' ), 'Runner must clean temporary JSON files after successful import.' );
 yd_v2_runner_assert( str_contains( $runner_source, 'validate_json_file_container' ) && str_contains( $runner_source, 'first_non_whitespace_byte' ) && str_contains( $runner_source, 'last_non_whitespace_byte' ) && str_contains( $runner_source, 'fseek' ), 'Runner must validate downloaded JSON container from first/last bytes.' );
 yd_v2_runner_assert( str_contains( $runner_source, 'import_from_json_file_streamed' ) && ! str_contains( $runner_source, 'import_from_json_file(' ), 'Runner must use streamed import, not whole-file import.' );
 yd_v2_runner_assert( str_contains( $import_source, 'file_get_contents' ) && str_contains( $import_source, 'import_from_json_file_streamed' ), 'Old small-file import may remain while streamed import exists.' );

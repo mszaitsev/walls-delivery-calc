@@ -123,7 +123,7 @@ yd_geo_v2_region_enrichment_assert( 'updated' === $coordinate_address['status'] 
 $low_score = $coordinate_service->enrich_one( $GLOBALS['wpdb']->yandex_delivery_geo_v2[3] );
 $row840 = $geo_repository->find_by_geo_id( 840 );
 $raw840 = json_decode( (string) ( $row840['raw_stats_json'] ?? '' ), true );
-yd_geo_v2_region_enrichment_assert( 'not_found' === $low_score['status'] && 'coordinate_fallback_low_score' === $low_score['reason'] && ! empty( $raw840['region_enrichment']['audit']['diagnostics']['coordinate_search']['rejected_samples'] ), 'Low-score coordinate fallback candidates must be rejected with diagnostics.' );
+yd_geo_v2_region_enrichment_assert( 'not_found' === $low_score['status'] && 'coordinate_fallback_low_score' === $low_score['reason'] && ! isset( $raw840['region_enrichment']['audit']['diagnostics'] ), 'Low-score coordinate fallback must persist compact audit without diagnostics.' );
 $GLOBALS['wpdb']->yandex_delivery_geo_v2 = array(
 	$geo( 845, '', 'Качалино ст', 48.59, 44.06, 3.0, 10 ),
 );

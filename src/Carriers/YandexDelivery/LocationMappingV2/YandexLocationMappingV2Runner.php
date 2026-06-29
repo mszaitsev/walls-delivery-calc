@@ -14,7 +14,7 @@ final class YandexLocationMappingV2Runner {
 
 	/** @return array<string,mixed> */
 	public function start(): array {
-		$this->repository->truncate();
+		$this->repository->prepare_staging_table();
 		$state = $this->base_state( 'mapping' );
 		$state['session_id'] = sha1( uniqid( 'yandex-location-mapping-v2-', true ) );
 		$state['started_at'] = $this->now();
@@ -32,6 +32,7 @@ final class YandexLocationMappingV2Runner {
 			return $state;
 		}
 		try {
+			$this->repository->use_staging_table();
 			$result = $this->mapper->build_all( (int) $state['batch_size'], (int) $state['offset'] );
 			$state['offset'] = (int) $result['next_offset'];
 			$state['processed'] = (int) $state['processed'] + (int) $result['processed_geo_ids'];
@@ -41,6 +42,9 @@ final class YandexLocationMappingV2Runner {
 			$state['errors'] = (int) $state['errors'] + (int) $result['errors'];
 			$state['updated_at'] = $this->now();
 			$state['memory_peak_mb'] = $this->memory_peak_mb();
+			if ( ! empty( $result['done'] ) ) {
+				$this->repository->promote_staging_to_live();
+			}
 			$stats = $this->repository->statistics();
 			$state['avg_confidence'] = $stats['avg_confidence'] ?? null;
 			$state['avg_distance'] = $stats['avg_distance'] ?? null;
@@ -76,6 +80,7 @@ final class YandexLocationMappingV2Runner {
 
 	/** @return array<string,mixed> */
 	public function reset(): array {
+		$this->repository->drop_staging_table();
 		$state = $this->base_state( 'idle' );
 		$this->save_state( $state );
 
