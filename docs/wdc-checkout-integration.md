@@ -177,3 +177,9 @@ Domestic method labels use the actual service title, selected tariff title, and 
 The frontend selector is implemented in `assets/frontend/domestic-tariff-selector.js` and posts the selected `object_code` to the checkout session. After selection it triggers `update_checkout`, so WooCommerce totals refresh and the selected tariff survives checkout recalculation.
 
 For pickup domestic tariffs, `no_pickup_selection=true` skips the pickup point selector because delivery is to the post office associated with the destination postcode.
+
+## Yandex Delivery Checkout Preparation
+
+As of version 0.101.0, Yandex Delivery has an admin-only source platform station selector on `WDC -> Службы доставки -> Яндекс Доставка -> Расчет`. It reads active locally imported Yandex PVZ rows with `available_for_dropoff=true`, filters them by city in the admin UI, and stores only the selected `platform_station_id` in delivery service settings. The saved address is displayed read-only by looking it up from the local PVZ table.
+
+This setting is preparation for later Yandex pricing/shipment payloads. Current WooCommerce checkout behavior is intentionally unchanged: `yandex_pickup` and `yandex_courier` are still emitted by the existing Yandex checkout carrier with temporary cost `0` and delivery time `без указания срока`; buyer PVZ selection and Yandex pricing are not implemented in this step.

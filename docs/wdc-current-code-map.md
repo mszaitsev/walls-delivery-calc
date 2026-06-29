@@ -57,6 +57,13 @@
 - `tests/yandex-delivery/run-yandex-delivery-geo-mapping-smoke.php` covers repository CRUD, multiple candidate rows per location, primary switching, smart scorer examples for Moscow/Saint Petersburg/Novosibirsk/Kazan/Ekaterinburg, auto-primary, raw scoring diagnostics, location/detect normalization, status constants, migration schema and admin wiring.
 # Карта текущего кода
 
+## Yandex Delivery Source Station Admin 0.101.0
+
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders a `Точка сдачи отправлений Яндекс.Доставки` block on the Yandex Delivery `Расчет` tab. The block lets an admin choose a city, filters locally imported active `available_for_dropoff` Yandex PVZ options by city, saves only `YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY`, and displays the saved `platform_station_id` plus read-only full address.
+- `src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php` exposes read-only admin selectors `source_dropoff_cities()` and `source_dropoff_points()` over the existing live PVZ table; import/staging/swap logic is unchanged.
+- `src/Carriers/YandexDelivery/YandexDeliverySettings.php` exposes `source_platform_station_id()` for the next checkout/pricing stages. Current checkout does not read this setting yet, so `yandex_pickup` and `yandex_courier` keep zero temporary cost and `без указания срока`.
+- `tests/yandex-delivery/run-yandex-delivery-source-station-smoke.php` covers the local source-station selectors, saved station id sanitization, admin UI contracts, missing-station warning, and checkout non-dependence on the setting.
+
 ## Yandex Delivery Pickup Points AJAX Import 0.74.0
 
 - `src/Carriers/YandexDelivery/YandexDeliverySettings.php` stores active environment, encrypted test/production Bearer tokens, test/production source `platform_station_id`, request timeout, debug flag, explicit connection-check result and last manual pickup import/action result, pickup import page size and AJAX import state/report support. Empty token fields preserve the old encrypted token; explicit clear checkboxes remove it.

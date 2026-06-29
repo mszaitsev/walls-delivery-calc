@@ -722,6 +722,9 @@ final class DeliveryServicesAdminPage {
 				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
 					$this->save_russian_post_domestic_settings( (int) $service->id );
 				}
+				if ( $service instanceof DeliveryService && $this->is_yandex_delivery_service( $service ) && null !== $service->id ) {
+					$this->save_yandex_delivery_calculation_settings( (int) $service->id );
+				}
 			}
 			if ( 'save_shipments' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
@@ -1375,6 +1378,7 @@ final class DeliveryServicesAdminPage {
 	private function render_calculation_tab( DeliveryService $service ): void {
 		$rp = RussianPostSettings::SERVICE_KEY === $service->service_key ? $this->russian_post_values( $service ) : array();
 		$domestic = $this->is_domestic_service( $service ) ? $this->russian_post_domestic_values( $service ) : array();
+		$yandex_delivery = $this->is_yandex_delivery_service( $service ) ? $this->yandex_delivery_calculation_values( $service ) : array();
 		?>
 		<form method="post" style="max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -1416,6 +1420,9 @@ final class DeliveryServicesAdminPage {
 					<?php $this->checkbox_row( 'rp_auto_refresh_countries_if_empty', __( 'Автообновление стран, если пусто', 'walls-delivery-calc' ), ! empty( $rp['auto_refresh_countries_if_empty'] ) ); ?>
 					<?php $this->checkbox_row( 'rp_debug', __( 'Debug Почты России', 'walls-delivery-calc' ), ! empty( $rp['debug'] ) ); ?>
 				<?php endif; ?>
+				<?php if ( $this->is_yandex_delivery_service( $service ) ) : ?>
+					<?php $this->render_yandex_delivery_source_station_rows( $yandex_delivery ); ?>
+				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить расчет', 'walls-delivery-calc' ) ); ?>
 		</form>
@@ -1431,6 +1438,101 @@ final class DeliveryServicesAdminPage {
 			<?php submit_button( __( 'Сохранить расчет СДЭК', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<?php endif; ?>
+		<?php
+	}
+
+
+	private function render_yandex_delivery_source_station_rows( array $values ): void {
+		$selected_station_id = $this->sanitize_yandex_platform_station_id( (string) ( $values[ YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ] ?? '' ) );
+		$selected_point = '' !== $selected_station_id && $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository
+			? $this->yandex_delivery_pickup_v2_repository->find( $selected_station_id )
+			: null;
+		$selected_city = is_array( $selected_point ) ? trim( (string) ( $selected_point['locality'] ?? '' ) ) : '';
+		$selected_address = is_array( $selected_point ) ? trim( (string) ( $selected_point['full_address'] ?? '' ) ) : '';
+		$cities = $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ? $this->yandex_delivery_pickup_v2_repository->source_dropoff_cities() : array();
+		$points = $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ? $this->yandex_delivery_pickup_v2_repository->source_dropoff_points() : array();
+		if ( '' !== $selected_city && ! in_array( $selected_city, $cities, true ) ) {
+			$cities[] = $selected_city;
+			sort( $cities, SORT_NATURAL | SORT_FLAG_CASE );
+		}
+		?>
+		<tr><th colspan="2"><h3><?php echo esc_html__( 'Точка сдачи отправлений Яндекс.Доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<?php if ( ! $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ) : ?>
+			<tr><th scope="row"><?php echo esc_html__( 'ПВЗ сдачи', 'walls-delivery-calc' ); ?></th><td><div class="notice notice-warning inline"><p><?php echo esc_html__( 'Локальная база ПВЗ Яндекс.Доставки недоступна.', 'walls-delivery-calc' ); ?></p></div></td></tr>
+		<?php else : ?>
+			<tr>
+				<th scope="row"><label for="yandex_delivery_source_city"><?php echo esc_html__( 'Город сдачи', 'walls-delivery-calc' ); ?></label></th>
+				<td>
+					<select id="yandex_delivery_source_city" name="yandex_delivery_source_city">
+						<option value=""><?php echo esc_html__( 'Выберите город', 'walls-delivery-calc' ); ?></option>
+						<?php foreach ( $cities as $city ) : ?>
+							<option value="<?php echo esc_attr( $city ); ?>" <?php selected( $selected_city, $city ); ?>><?php echo esc_html( $city ); ?></option>
+						<?php endforeach; ?>
+					</select>
+					<p class="description"><?php echo esc_html__( 'В списке только активные ПВЗ Яндекс.Доставки, доступные для сдачи отправлений.', 'walls-delivery-calc' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><label for="<?php echo esc_attr( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>"><?php echo esc_html__( 'ПВЗ сдачи', 'walls-delivery-calc' ); ?></label></th>
+				<td>
+					<select id="<?php echo esc_attr( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>" name="<?php echo esc_attr( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>" style="width:100%;max-width:720px;">
+						<option value=""><?php echo esc_html__( 'Не выбран', 'walls-delivery-calc' ); ?></option>
+						<?php foreach ( $points as $point ) : ?>
+							<?php
+							$station_id = $this->sanitize_yandex_platform_station_id( (string) ( $point['platform_station_id'] ?? '' ) );
+							$city = trim( (string) ( $point['locality'] ?? '' ) );
+							$address = trim( (string) ( $point['full_address'] ?? '' ) );
+							$name = trim( (string) ( $point['name'] ?? '' ) );
+							$label = trim( ( '' !== $name ? $name . ' — ' : '' ) . ( '' !== $address ? $address : $station_id ) );
+							?>
+							<?php if ( '' !== $station_id ) : ?>
+								<option value="<?php echo esc_attr( $station_id ); ?>" data-city="<?php echo esc_attr( $city ); ?>" <?php selected( $selected_station_id, $station_id ); ?>><?php echo esc_html( $label ); ?></option>
+							<?php endif; ?>
+						<?php endforeach; ?>
+					</select>
+					<?php if ( array() === $points ) : ?>
+						<p class="description"><?php echo esc_html__( 'В локальной базе пока нет активных ПВЗ, доступных для сдачи отправлений.', 'walls-delivery-calc' ); ?></p>
+					<?php endif; ?>
+				</td>
+			</tr>
+		<?php endif; ?>
+		<tr><th scope="row"><?php echo esc_html__( 'Сохраненный platform_station_id', 'walls-delivery-calc' ); ?></th><td><code><?php echo esc_html( '' !== $selected_station_id ? $selected_station_id : __( 'не выбран', 'walls-delivery-calc' ) ); ?></code></td></tr>
+		<tr>
+			<th scope="row"><label for="yandex_delivery_source_station_address"><?php echo esc_html__( 'Адрес выбранного ПВЗ', 'walls-delivery-calc' ); ?></label></th>
+			<td><input id="yandex_delivery_source_station_address" class="large-text" type="text" readonly value="<?php echo esc_attr( '' !== $selected_address ? $selected_address : __( 'не выбран', 'walls-delivery-calc' ) ); ?>"></td>
+		</tr>
+		<?php if ( '' !== $selected_station_id && ! is_array( $selected_point ) ) : ?>
+			<tr><th scope="row"><?php echo esc_html__( 'Предупреждение', 'walls-delivery-calc' ); ?></th><td><div class="notice notice-warning inline"><p><?php echo esc_html__( 'Сохраненный platform_station_id не найден в локальной базе ПВЗ после последнего импорта. Настройка сохранена, но адрес сейчас недоступен.', 'walls-delivery-calc' ); ?></p></div></td></tr>
+		<?php endif; ?>
+		<script>
+		(function () {
+			var city = document.getElementById('yandex_delivery_source_city');
+			var point = document.getElementById('<?php echo esc_js( YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ); ?>');
+			if (!city || !point) {
+				return;
+			}
+			function syncYandexSourceStations() {
+				var selectedCity = city.value;
+				var selectedVisible = false;
+				Array.prototype.forEach.call(point.options, function (option) {
+					if (option.value === '') {
+						option.hidden = false;
+						return;
+					}
+					var visible = !selectedCity || option.getAttribute('data-city') === selectedCity;
+					option.hidden = !visible;
+					if (visible && option.selected) {
+						selectedVisible = true;
+					}
+				});
+				if (selectedCity && !selectedVisible) {
+					point.value = '';
+				}
+			}
+			city.addEventListener('change', syncYandexSourceStations);
+			syncYandexSourceStations();
+		}());
+		</script>
 		<?php
 	}
 
@@ -3985,6 +4087,10 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		return function_exists( 'sanitize_textarea_field' ) ? sanitize_textarea_field( $value ) : trim( strip_tags( (string) $value ) );
 	}
 
+	private function sanitize_yandex_platform_station_id( string $value ): string {
+		return substr( preg_replace( '/[^A-Za-z0-9_-]+/', '', trim( $value ) ) ?? '', 0, 80 );
+	}
+
 	private function save_russian_post_settings( int $service_id ): void {
 		if ( ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
 			return;
@@ -4031,6 +4137,16 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 
 		foreach ( $this->sanitize_yandex_delivery_main_settings_from_post() as $key => $data ) {
+			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
+		}
+	}
+
+	private function save_yandex_delivery_calculation_settings( int $service_id ): void {
+		if ( ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
+			return;
+		}
+
+		foreach ( $this->sanitize_yandex_delivery_calculation_settings_from_post() as $key => $data ) {
 			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
 		}
 	}
@@ -4177,6 +4293,15 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	/**
 	 * @return array<string,array{value:mixed,format:string}>
 	 */
+	private function sanitize_yandex_delivery_calculation_settings_from_post(): array {
+		return array(
+			YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY => array( 'value' => $this->sanitize_yandex_platform_station_id( (string) wp_unslash( $_POST[ YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ] ?? '' ) ), 'format' => 'string' ),
+		);
+	}
+
+	/**
+	 * @return array<string,array{value:mixed,format:string}>
+	 */
 	private function sanitize_russian_post_domestic_api_settings_from_post(): array {
 		$string = static fn ( string $key, string $default = '' ): string => sanitize_text_field( wp_unslash( $_POST[ $key ] ?? $default ) );
 		$url = static fn ( string $key, string $default = '' ): string => function_exists( 'esc_url_raw' ) ? esc_url_raw( (string) wp_unslash( $_POST[ $key ] ?? $default ) ) : filter_var( (string) wp_unslash( $_POST[ $key ] ?? $default ), FILTER_SANITIZE_URL );
@@ -4259,6 +4384,18 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$defaults = array(
 			'pickup_method_title' => CdekSettings::DEFAULT_PICKUP_METHOD_TITLE,
 			'courier_method_title' => CdekSettings::DEFAULT_COURIER_METHOD_TITLE,
+		);
+		$saved = $this->settings instanceof DeliveryServiceSettingsRepository && null !== $service->id ? $this->settings->all_settings( (int) $service->id ) : array();
+
+		return array_merge( $defaults, $saved );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function yandex_delivery_calculation_values( DeliveryService $service ): array {
+		$defaults = array(
+			YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY => '',
 		);
 		$saved = $this->settings instanceof DeliveryServiceSettingsRepository && null !== $service->id ? $this->settings->all_settings( (int) $service->id ) : array();
 

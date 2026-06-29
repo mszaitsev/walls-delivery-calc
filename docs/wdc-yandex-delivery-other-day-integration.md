@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_id mapping, coverage discovery, admin UX consolidation and full geo mapping runner are implemented through 0.87.0; checkout, pricing, order recalculation, shipments and full Russia PVZ import remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout placeholder rates and the admin source platform station selector are implemented through 0.101.0; pricing, delivery time calculation, buyer PVZ selection, order recalculation and shipments remain planned.
 
 Date: 2026-06-22.
 
@@ -30,6 +30,12 @@ The Yandex Delivery admin surface now follows the intended working model:
 `Маппинг geo_id` contains manual geo_id search, the browser-driven full runner, mapping analytics and a working manual `needs_review` queue for approving a candidate geo_id or rejecting a WDC location as `not_found`. `Покрытие Яндекса` stays a selective/manual coverage check, not a mass import. `Яндекс ПВЗ` is the future pickup-point workspace; the current Moscow `geo_id=213` import remains a test diagnostic.
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
+
+## 0.101.0 Source platform station admin setting
+
+The first checkout-preparation setting for Yandex Delivery is available on `Службы доставки -> Яндекс Доставка -> Расчет`. Admins choose a city and then a locally imported Yandex PVZ that is active and `available_for_dropoff=true`. WDC stores only the selected `platform_station_id` as `source_platform_station_id`; the city and full address are restored from the local PVZ table and shown as read-only verification fields.
+
+If a later import removes the saved station from the local database, the setting remains saved, the `platform_station_id` is still displayed, and the admin page shows a warning that the address is unavailable. Checkout remains tolerant of an empty source station and does not read this setting until the future Yandex pricing/payload stage.
 ## 1. Scope
 
 This document covers only Yandex Delivery API for `Доставка по России` / delivery in another day.
