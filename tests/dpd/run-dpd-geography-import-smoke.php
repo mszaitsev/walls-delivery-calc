@@ -29,6 +29,7 @@ function wp_salt( string $scheme = '' ): string { return 'wdc-test-salt-' . $sch
 
 require_once __DIR__ . '/../../src/Domain/Status/DeliveryStatus.php';
 require_once __DIR__ . '/../../src/Shipments/Cdek/CdekStatusMappingService.php';
+require_once __DIR__ . '/../../src/Shipments/Dpd/DpdStatusMapping.php';
 require_once __DIR__ . '/../../src/Carriers/Cdek/CdekSettings.php';
 require_once __DIR__ . '/../../src/Infrastructure/Settings/SettingsRepository.php';
 require_once __DIR__ . '/../../src/Infrastructure/Security/EncryptionService.php';
@@ -36,6 +37,7 @@ require_once __DIR__ . '/../../src/Locations/ValueObjects/Location.php';
 require_once __DIR__ . '/../../src/Locations/Storage/LocationRepository.php';
 require_once __DIR__ . '/../../src/Locations/Storage/LocationDeliveryCodeRepository.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSettings.php';
+require_once __DIR__ . '/../../src/Carriers/YandexDelivery/YandexDeliverySettings.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportReport.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyCsvParser.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdLocationIndex.php';

@@ -68,7 +68,7 @@ Current pricing mode is terminalCode-aware:
 - pickup group: `selfPickup=true`, `selfDelivery=true`, sender `pickup.terminalCode`, receiver `delivery.terminalCode`;
 - courier group: `selfPickup=true`, `selfDelivery=false`, sender `pickup.terminalCode`; `delivery.terminalCode` is not sent.
 
-`DpdParcelBuilder` builds runtime `parcel[]` as packaging places with fast deterministic 3D shelf/bin packing:
+The shared `PackagingBuilder` builds runtime `parcel[]` as packaging places with fast deterministic 3D shelf/bin packing; DPD then adapts neutral `PackagingParcel` values to `DpdTariffParcel`:
 
 - product quantities are expanded before packaging;
 - items with any side over 49 cm are long items and become separate DPD parcels with quantity `1`;

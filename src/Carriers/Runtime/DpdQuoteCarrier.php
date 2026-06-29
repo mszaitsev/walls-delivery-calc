@@ -5,7 +5,7 @@ namespace WallsShop\WDC\Carriers\Runtime;
 
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
-use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffParcel;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
@@ -18,6 +18,8 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Packaging\PackagingBuilder;
+use WallsShop\WDC\Packaging\PackagingParcel;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -27,7 +29,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	public function __construct(
 		private DpdSettings $settings,
 		private DpdTariffCalculationService $tariffs,
-		private DpdParcelBuilder $parcels,
+		private PackagingBuilder $parcels,
 		private Logger $logger,
 		private ?CheckoutSessionManager $session_manager = null
 	) {
@@ -63,7 +65,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			return $this->empty_quote( $request, 'receiver_location_id_required', array(), array(), array(), $delivery_type );
 		}
 
-		$parcel_build = $this->parcels->build( $request );
+		$packaging_result = $this->parcels->build( $request );
+		$parcel_build = $packaging_result->to_array();
 		$params = $this->tariff_params( $parcel_build, $delivery_type, $request );
 		$result = $this->tariffs->calculate( $receiver_location_id, $params );
 		if ( ! $result->success ) {
@@ -221,7 +224,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	 */
 	private function tariff_params( array $parcel_build, string $delivery_type, QuoteRequest $request ): array {
 		$params = array(
-			'parcels' => is_array( $parcel_build['parcels'] ?? null ) ? $parcel_build['parcels'] : array(),
+			'parcels' => $this->dpd_tariff_parcels( is_array( $parcel_build['parcels'] ?? null ) ? $parcel_build['parcels'] : array() ),
 			'declared_value_rub' => (float) ( $parcel_build['declared_value_rub'] ?? $this->settings->tariff_default_declared_value_rub() ),
 			'self_pickup' => true,
 			'self_delivery' => DeliveryType::PICKUP === $delivery_type,
@@ -255,6 +258,35 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		}
 
 		return $params;
+	}
+
+	/**
+	 * @param array<int,mixed> $parcels
+	 * @return array<int,DpdTariffParcel>
+	 */
+	private function dpd_tariff_parcels( array $parcels ): array {
+		$dpd_parcels = array();
+		foreach ( $parcels as $parcel ) {
+			if ( $parcel instanceof DpdTariffParcel ) {
+				$dpd_parcels[] = $parcel;
+				continue;
+			}
+			if ( $parcel instanceof PackagingParcel ) {
+				$dpd_parcels[] = new DpdTariffParcel( $parcel->weight_g, $parcel->length_cm, $parcel->width_cm, $parcel->height_cm, $parcel->quantity );
+				continue;
+			}
+			if ( is_array( $parcel ) ) {
+				$weight = $parcel['weight_g'] ?? $parcel['weight'] ?? 0;
+				$length = $parcel['length_cm'] ?? $parcel['length'] ?? 0;
+				$width = $parcel['width_cm'] ?? $parcel['width'] ?? 0;
+				$height = $parcel['height_cm'] ?? $parcel['height'] ?? 0;
+				if ( is_numeric( $weight ) && is_numeric( $length ) && is_numeric( $width ) && is_numeric( $height ) ) {
+					$dpd_parcels[] = new DpdTariffParcel( max( 1, (int) $weight ), max( 0.1, (float) $length ), max( 0.1, (float) $width ), max( 0.1, (float) $height ), max( 1, (int) ( $parcel['quantity'] ?? 1 ) ) );
+				}
+			}
+		}
+
+		return $dpd_parcels;
 	}
 
 	private function receiver_location_id( QuoteRequest $request ): int {

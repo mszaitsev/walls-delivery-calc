@@ -19,7 +19,7 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
-use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
+use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
@@ -47,6 +47,7 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingBuilderConfig;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -284,7 +285,7 @@ function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSetting
 	$pickup_service = new DpdPickupPointService( new DpdPickupPointRepository( $GLOBALS['wpdb'] ), $delivery_codes );
 	$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, new DpdTariffRequestBuilder(), new DpdTariffOptionNormalizer(), $pickup_service, new DpdTerminalCodeTariffRequestBuilder() );
 
-	return new DpdQuoteCarrier( $settings, $service, new DpdParcelBuilder( $settings ), new Logger() );
+	return new DpdQuoteCarrier( $settings, $service, new PackagingBuilder( new PackagingBuilderConfig( $settings->tariff_default_weight_g(), $settings->tariff_default_length_cm(), $settings->tariff_default_width_cm(), $settings->tariff_default_height_cm(), $settings->tariff_default_declared_value_rub() ) ), new Logger() );
 }
 
 function dpd_checkout_orchestrator( CarrierRegistry $registry, DeliveryServiceRepository $services, DeliveryServiceCountryRepository $countries, DpdSettings $settings ): CheckoutOrchestrator {

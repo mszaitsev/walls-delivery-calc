@@ -32,8 +32,10 @@ function wp_remote_post( string $url, array $args = array() ): array {
 
 require_once __DIR__ . '/../../src/Domain/Status/DeliveryStatus.php';
 require_once __DIR__ . '/../../src/Shipments/Cdek/CdekStatusMappingService.php';
+require_once __DIR__ . '/../../src/Shipments/Dpd/DpdStatusMapping.php';
 require_once __DIR__ . '/../../src/Carriers/Cdek/CdekSettings.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSettings.php';
+require_once __DIR__ . '/../../src/Carriers/YandexDelivery/YandexDeliverySettings.php';
 require_once __DIR__ . '/../../src/Infrastructure/Settings/SettingsRepository.php';
 require_once __DIR__ . '/../../src/Infrastructure/Security/EncryptionService.php';
 require_once __DIR__ . '/../../src/Infrastructure/Logging/LogRedactor.php';

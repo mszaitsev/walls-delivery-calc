@@ -1,17 +1,15 @@
 <?php
 declare(strict_types=1);
 
-namespace WallsShop\WDC\Carriers\Dpd\Tariff;
+namespace WallsShop\WDC\Packaging;
 
-use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
-use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 
 defined( 'ABSPATH' ) || exit;
 
-final class DpdParcelBuilder {
+final class PackagingBuilder {
 	private const BOX_FORMATS = array(
 		'box_50_50_30' => array( 'length' => 50, 'width' => 50, 'height' => 30 ),
 		'box_40_40_40' => array( 'length' => 40, 'width' => 40, 'height' => 40 ),
@@ -26,15 +24,12 @@ final class DpdParcelBuilder {
 	private array $parcel_meta_by_id = array();
 
 	public function __construct(
-		private DpdSettings $settings,
+		private PackagingBuilderConfig $config,
 		private ?PackagingWeightCalculator $packaging_weight_calculator = null
 	) {
 	}
 
-	/**
-	 * @return array<string,mixed>
-	 */
-	public function build( QuoteRequest $request ): array {
+	public function build( QuoteRequest $request ): PackagingResult {
 		$this->parcel_meta_by_id = array();
 		$package = $request->package;
 		$declared_value = $this->declared_value_rub( $request );
@@ -61,7 +56,7 @@ final class DpdParcelBuilder {
 		}
 
 		if ( array() === $parcels ) {
-			$fallback = $this->fallback_parcel( $package, max( 1, $package->get_total_weight_g(), $this->settings->tariff_default_weight_g() ) );
+			$fallback = $this->fallback_parcel( $package, max( 1, $package->get_total_weight_g(), $this->config->default_weight_g ) );
 			$parcels[] = $fallback['parcel'];
 			$regular_result['source'] = $fallback['source'];
 			$regular_result['packing_strategy'] = $fallback['source'];
@@ -74,8 +69,9 @@ final class DpdParcelBuilder {
 		$source = $this->source( count( $long_items ), (string) $regular_result['source'] );
 		$parcel_dimensions = $this->parcel_dimensions( $parcels );
 
-		return array(
-			'parcels' => $parcels,
+		return new PackagingResult(
+			$parcels,
+			array(
 			'declared_value_rub' => $declared_value,
 			'package_builder_source' => $source,
 			'packing_strategy' => (string) $regular_result['packing_strategy'],
@@ -96,7 +92,7 @@ final class DpdParcelBuilder {
 			'goods_weight_g' => array_sum( array_map( static fn( array $meta ): int => $meta['goods_weight_g'], $parcel_meta ) ),
 			'packaging_weight_g' => array_sum( array_map( static fn( array $meta ): int => $meta['packaging_weight_g'], $parcel_meta ) ),
 			'final_weight_g' => array_sum( array_map( static fn( array $meta ): int => $meta['final_weight_g'], $parcel_meta ) ),
-			'total_weight_g' => array_sum( array_map( static fn( DpdTariffParcel $parcel ): int => $parcel->weight_g * max( 1, $parcel->quantity ), $parcels ) ),
+			'total_weight_g' => array_sum( array_map( static fn( PackagingParcel $parcel ): int => $parcel->weight_g * max( 1, $parcel->quantity ), $parcels ) ),
 			'dimensions' => $this->aggregate_dimensions( $parcel_dimensions ),
 			'box_limit' => array(
 				'formats' => self::BOX_FORMATS,
@@ -106,6 +102,7 @@ final class DpdParcelBuilder {
 				'max_expanded_items_for_3d_packer' => self::MAX_EXPANDED_ITEMS_FOR_3D_PACKER,
 			),
 			'packing_limit_reason' => (string) ( $regular_result['packing_limit_reason'] ?? '' ),
+			)
 		);
 	}
 
@@ -119,7 +116,7 @@ final class DpdParcelBuilder {
 			return $total;
 		}
 
-		return $this->settings->tariff_default_declared_value_rub();
+		return $this->config->default_declared_value_rub;
 	}
 
 	private function has_package_dimensions( Package $package ): bool {
@@ -189,7 +186,7 @@ final class DpdParcelBuilder {
 		$two_boxes = $this->best_two_boxes( $units );
 		if ( is_array( $two_boxes ) ) {
 			$base['parcels'] = array_map(
-				fn( array $box ): DpdTariffParcel => $this->parcel_from_box( (float) $box['length'], (float) $box['width'], (float) $box['height'], (int) $box['goods_weight_g'], 'two_boxes_3d', (string) $box['format'] ),
+				fn( array $box ): PackagingParcel => $this->parcel_from_box( (float) $box['length'], (float) $box['width'], (float) $box['height'], (int) $box['goods_weight_g'], 'two_boxes_3d', (string) $box['format'] ),
 				$two_boxes['boxes']
 			);
 			$base['source'] = 1 === count( $base['parcels'] ) ? 'one_box_3d' : 'two_boxes_3d';
@@ -479,9 +476,9 @@ final class DpdParcelBuilder {
 		return $next;
 	}
 
-	private function parcel_from_box( float $length, float $width, float $height, int $goods_weight_g, string $source, string $format ): DpdTariffParcel {
+	private function parcel_from_box( float $length, float $width, float $height, int $goods_weight_g, string $source, string $format ): PackagingParcel {
 		$packaging_weight = $this->packaging_weight_for_goods_weight( $goods_weight_g );
-		$parcel = new DpdTariffParcel( max( 1, $goods_weight_g + $packaging_weight ), max( 0.1, $length ), max( 0.1, $width ), max( 0.1, $height ), 1 );
+		$parcel = new PackagingParcel( max( 1, $goods_weight_g + $packaging_weight ), max( 0.1, $length ), max( 0.1, $width ), max( 0.1, $height ), 1 );
 		$this->parcel_meta_by_id[ spl_object_id( $parcel ) ] = array(
 			'goods_weight_g' => max( 1, $goods_weight_g ),
 			'packaging_weight_g' => $packaging_weight,
@@ -502,7 +499,7 @@ final class DpdParcelBuilder {
 	}
 
 	/**
-	 * @return array{parcel:DpdTariffParcel,source:string}
+	 * @return array{parcel:PackagingParcel,source:string}
 	 */
 	private function fallback_parcel( Package $package, int $weight_g ): array {
 		if ( $this->has_package_dimensions( $package ) ) {
@@ -521,9 +518,9 @@ final class DpdParcelBuilder {
 	 */
 	private function default_dimensions(): array {
 		return array(
-			'length' => max( 0.1, $this->settings->tariff_default_length_cm() ),
-			'width' => max( 0.1, $this->settings->tariff_default_width_cm() ),
-			'height' => max( 0.1, $this->settings->tariff_default_height_cm() ),
+			'length' => max( 0.1, $this->config->default_length_cm ),
+			'width' => max( 0.1, $this->config->default_width_cm ),
+			'height' => max( 0.1, $this->config->default_height_cm ),
 		);
 	}
 
@@ -928,7 +925,7 @@ final class DpdParcelBuilder {
 	/**
 	 * @return array{weight_g:int,length:float,width:float,height:float,quantity:int,goods_weight_g:int,packaging_weight_g:int,final_weight_g:int,source:string,box_format:string}
 	 */
-	private function parcel_meta( DpdTariffParcel $parcel): array {
+	private function parcel_meta( PackagingParcel $parcel): array {
 		$meta = $this->parcel_meta_by_id[ spl_object_id( $parcel ) ] ?? array();
 
 		return array(
@@ -962,11 +959,11 @@ final class DpdParcelBuilder {
 	}
 
 	/**
-	 * @param array<int,DpdTariffParcel> $parcels
+	 * @param array<int,PackagingParcel> $parcels
 	 * @return array<int,array{weight_g:int,length:float,width:float,height:float,quantity:int,goods_weight_g:int,packaging_weight_g:int,final_weight_g:int,source:string,box_format:string}>
 	 */
 	private function parcel_dimensions( array $parcels ): array {
-		return array_values( array_map( fn( DpdTariffParcel $parcel ): array => $this->parcel_meta( $parcel ), $parcels ) );
+		return array_values( array_map( fn( PackagingParcel $parcel ): array => $this->parcel_meta( $parcel ), $parcels ) );
 	}
 
 	/**

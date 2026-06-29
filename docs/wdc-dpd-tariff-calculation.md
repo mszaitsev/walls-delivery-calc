@@ -1,10 +1,10 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.62.1.
+Version: 0.103.0.
 
 This document covers the DPD tariff calculation foundation used by checkout runtime. As of 0.62.0, checkout runtime uses
 `calculator2/getServiceCostByParcels3` with terminalCode. As of 0.62.1, the remaining admin test calculator UI was
-removed from `DPD Расчет`; that tab is settings-only.
+removed from `DPD Расчет`; that tab is settings-only. As of 0.103.0, package-place building is provided by the shared `src/Packaging/PackagingBuilder.php` layer and DPD adapts its neutral parcels to `DpdTariffParcel` before payload creation.
 
 ## Scope
 
@@ -31,7 +31,7 @@ removed from `DPD Расчет`; that tab is settings-only.
 - `declaredValue`
 - `parcel[]` with `weight` in kg, `length`, `width`, `height` in cm, and `quantity`
 
-`parcel[]` represents packaging places, not cart items. The checkout runtime uses `DpdParcelBuilder` to expand product quantities, split long items with any side over 49 cm into separate parcels, aggregate <=50 cm3 small items into one synthetic volume block, optimize identical groups into grid blocks, and pack regular units with a bounded deterministic 3D shelf/bin packer. The packer supports `box_50_50_30` and `box_40_40_40`, sends actual occupied dimensions, attempts one box and then two boxes, and falls back to stacked rows. Package-level dimensions are used only when item dimensions are missing, and DPD default dimensions are the final fallback. `DpdTariffCalculationService` can accept explicit `params['parcels']` for smoke tests/future admin tooling.
+`parcel[]` represents packaging places, not cart items. The checkout runtime uses the shared `PackagingBuilder::build(QuoteRequest): PackagingResult` API to expand product quantities, split long items with any side over 49 cm into separate parcels, aggregate <=50 cm3 small items into one synthetic volume block, optimize identical groups into grid blocks, and pack regular units with a bounded deterministic 3D shelf/bin packer. The packer supports `box_50_50_30` and `box_40_40_40`, sends actual occupied dimensions, attempts one box and then two boxes, and falls back to stacked rows. Package-level dimensions are used only when item dimensions are missing, and configured default dimensions are the final fallback. DPD converts each neutral `PackagingParcel` to `DpdTariffParcel`; `DpdTariffCalculationService` can still accept explicit DPD parcels/array parcels for smoke tests/future admin tooling.
 
 `DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels3` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
 
