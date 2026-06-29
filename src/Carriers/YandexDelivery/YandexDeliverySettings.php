@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\YandexDelivery;
 
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
@@ -14,6 +17,8 @@ final class YandexDeliverySettings {
 	public const TITLE = 'Яндекс Доставка';
 	public const DEFAULT_PICKUP_METHOD_TITLE = 'Яндекс до ПВЗ';
 	public const DEFAULT_COURIER_METHOD_TITLE = 'Яндекс до двери';
+	public const PICKUP_METHOD_TITLE_KEY = 'pickup_method_title';
+	public const COURIER_METHOD_TITLE_KEY = 'courier_method_title';
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
@@ -26,10 +31,14 @@ final class YandexDeliverySettings {
 	public const DEBUG_KEY = 'yandex_delivery_debug';
 	public const LAST_CONNECTION_CHECK_KEY = 'yandex_delivery_last_connection_check';
 	public const LAST_CONNECTION_STATUS_KEY = 'yandex_delivery_last_connection_status';
-	public const LAST_CONNECTION_MESSAGE_KEY = 'yandex_delivery_last_connection_message';	public const PICKUP_ACTION_RESULT_KEY = 'yandex_delivery_pickup_action_result';
+	public const LAST_CONNECTION_MESSAGE_KEY = 'yandex_delivery_last_connection_message';
+	public const PICKUP_ACTION_RESULT_KEY = 'yandex_delivery_pickup_action_result';
+
 	public function __construct(
 		private SettingsRepository $settings,
-		private EncryptionService $encryption
+		private EncryptionService $encryption,
+		private ?DeliveryServiceRepository $services = null,
+		private ?DeliveryServiceSettingsRepository $service_settings = null
 	) {
 	}
 
@@ -45,7 +54,11 @@ final class YandexDeliverySettings {
 			self::DEBUG_KEY => false,
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
-			self::LAST_CONNECTION_MESSAGE_KEY => '',			self::PICKUP_ACTION_RESULT_KEY => array(),		);
+			self::LAST_CONNECTION_MESSAGE_KEY => '',
+			self::PICKUP_ACTION_RESULT_KEY => array(),
+			self::PICKUP_METHOD_TITLE_KEY => self::DEFAULT_PICKUP_METHOD_TITLE,
+			self::COURIER_METHOD_TITLE_KEY => self::DEFAULT_COURIER_METHOD_TITLE,
+		);
 	}
 
 	public function environment(): string {
@@ -63,6 +76,15 @@ final class YandexDeliverySettings {
 	public function debug_enabled(): bool {
 		return $this->settings->get_bool( self::DEBUG_KEY, false );
 	}
+
+	public function pickup_method_title(): string {
+		return $this->service_method_title( self::PICKUP_METHOD_TITLE_KEY, self::DEFAULT_PICKUP_METHOD_TITLE );
+	}
+
+	public function courier_method_title(): string {
+		return $this->service_method_title( self::COURIER_METHOD_TITLE_KEY, self::DEFAULT_COURIER_METHOD_TITLE );
+	}
+
 	/** @param array<string,mixed> $input */
 	public function credentials(): YandexDeliveryCredentials {
 		return $this->credentials_for_environment( $this->environment() );
@@ -100,8 +122,6 @@ final class YandexDeliverySettings {
 		return $this->settings->get_string( self::LAST_CONNECTION_MESSAGE_KEY, '' );
 	}
 
-	/** @return array<string,mixed> */
-	/** @param array<string,mixed> $report */
 	/** @return array<string,mixed> */
 	public function get_pickup_action_result(): array {
 		$value = $this->settings->get_array( self::PICKUP_ACTION_RESULT_KEY, array() );
@@ -190,6 +210,18 @@ final class YandexDeliverySettings {
 		return $value;
 	}
 
+	private function service_method_title( string $key, string $default ): string {
+		$service = $this->services instanceof DeliveryServiceRepository ? $this->services->find_by_service_key( self::SERVICE_KEY ) : null;
+		if ( ! $service instanceof DeliveryService || null === $service->id || ! $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
+			$title = trim( $this->settings->get_string( $key, $default ) );
+
+			return '' !== $title ? $title : $default;
+		}
+		$title = trim( (string) $this->service_settings->get_setting( (int) $service->id, $key, $default ) );
+
+		return '' !== $title ? $title : $default;
+	}
+
 	private function bearer_token( string $environment ): string {
 		$key = self::ENV_PRODUCTION === $environment ? self::PRODUCTION_TOKEN_ENCRYPTED_KEY : self::TEST_TOKEN_ENCRYPTED_KEY;
 		$encrypted = $this->settings->get_string( $key, '' );
@@ -224,6 +256,7 @@ final class YandexDeliverySettings {
 			$this->settings->set( $token_storage_key, $this->encryption->encrypt( $token ) );
 		}
 	}
+
 	private function sanitize_station_id( string $value ): string {
 		return substr( preg_replace( '/[^A-Za-z0-9_-]+/', '', trim( $this->unslash( $value ) ) ) ?? '', 0, 80 );
 	}

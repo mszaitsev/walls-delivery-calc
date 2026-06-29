@@ -1354,8 +1354,8 @@ final class DeliveryServicesAdminPage {
 				<?php elseif ( $this->is_yandex_delivery_service( $service ) ) : ?>
 					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'Яндекс Доставка на текущем этапе доступна только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
-					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до пункта выдачи', 'walls-delivery-calc' ), (string) ( $yandex_delivery['pickup_method_title'] ?? YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE ) ); ?>
-					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $yandex_delivery['courier_method_title'] ?? YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE ) ); ?>
+					<?php $this->text_row( YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY, __( 'Название варианта до пункта выдачи', 'walls-delivery-calc' ), (string) ( $yandex_delivery[YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY] ?? YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE ) ); ?>
+					<?php $this->text_row( YandexDeliverySettings::COURIER_METHOD_TITLE_KEY, __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $yandex_delivery[YandexDeliverySettings::COURIER_METHOD_TITLE_KEY] ?? YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE ) ); ?>
 				<?php elseif ( $this->is_dpd_service( $service ) && $this->dpd_settings instanceof DpdSettings ) : ?>
 					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'DPD на текущем этапе доступен только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
@@ -4165,12 +4165,12 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 */
 	private function sanitize_yandex_delivery_main_settings_from_post(): array {
 		$string = static fn ( string $key, string $default = '' ): string => sanitize_text_field( wp_unslash( $_POST[ $key ] ?? $default ) );
-		$pickup_title = trim( $string( 'pickup_method_title', YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE ) );
-		$courier_title = trim( $string( 'courier_method_title', YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE ) );
+		$pickup_title = trim( $string( YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY, YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE ) );
+		$courier_title = trim( $string( YandexDeliverySettings::COURIER_METHOD_TITLE_KEY, YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE ) );
 
 		return array(
-			'pickup_method_title' => array( 'value' => '' !== $pickup_title ? $pickup_title : YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE, 'format' => 'string' ),
-			'courier_method_title' => array( 'value' => '' !== $courier_title ? $courier_title : YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE, 'format' => 'string' ),
+			YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY => array( 'value' => '' !== $pickup_title ? $pickup_title : YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE, 'format' => 'string' ),
+			YandexDeliverySettings::COURIER_METHOD_TITLE_KEY => array( 'value' => '' !== $courier_title ? $courier_title : YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE, 'format' => 'string' ),
 		);
 	}
 
@@ -4270,8 +4270,8 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 */
 	private function yandex_delivery_main_values( DeliveryService $service ): array {
 		$defaults = array(
-			'pickup_method_title' => YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE,
-			'courier_method_title' => YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE,
+			YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY => YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE,
+			YandexDeliverySettings::COURIER_METHOD_TITLE_KEY => YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE,
 		);
 		$saved = $this->settings instanceof DeliveryServiceSettingsRepository && null !== $service->id ? $this->settings->all_settings( (int) $service->id ) : array();
 
