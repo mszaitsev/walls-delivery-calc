@@ -164,6 +164,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	private function rates_for_wc( array $rates ): array {
 		$grouped = array();
 		$output = array();
+		$sorter = new RateSorter();
+		$sort = $this->sort_mode();
 		foreach ( $rates as $rate ) {
 			if ( $rate instanceof DeliveryRate && ! empty( $rate->meta['tariff_selector_group'] ) ) {
 				$group_id = (string) ( $rate->meta['checkout_group_id'] ?? '' );
@@ -172,16 +174,21 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 						? RussianPostDomesticSettings::checkout_group_id( $rate->delivery_type )
 						: $rate->service_key . ':' . $rate->delivery_type;
 				}
-				$grouped[ $group_id ][] = $rate;
+				if ( ! isset( $grouped[ $group_id ] ) ) {
+					$grouped[ $group_id ] = array( 'placeholder' => count( $output ), 'rates' => array() );
+					$output[] = null;
+				}
+				$grouped[ $group_id ]['rates'][] = $rate;
 				continue;
 			}
 			$output[] = $rate;
 		}
-		foreach ( $grouped as $group_id => $items ) {
-			$output[] = $this->tariff_selector_rate( $group_id, $items );
+		foreach ( $grouped as $group_id => $group ) {
+			$items = $sorter->sort_group_rates( $group['rates'], $sort );
+			$output[ (int) $group['placeholder'] ] = $this->tariff_selector_rate( $group_id, $items );
 		}
 
-		return $output;
+		return $sorter->sort_methods( array_values( array_filter( $output, static fn( mixed $rate ): bool => $rate instanceof DeliveryRate ) ), $sort );
 	}
 
 	/**
@@ -263,7 +270,9 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					'selected_tariff_rate_id' => $active->rate_id,
 					'final_price_rub' => $active->price->get_rubles(),
 				)
-			)
+			),
+			$active->original_cost,
+			$active->original_delivery_days
 		);
 	}
 

@@ -23,6 +23,8 @@ runtime. Order preview goes through `CheckoutOrchestrator` and `DpdQuoteCarrier`
 selected receiver `terminal_code` into a fresh preview before save, so DPD quote IDs/cache keys vary by selected point just
 like checkout. No separate DPD order calculator was added.
 
+
+0.103.3 update: DPD checkout rates now participate in the shared deterministic `RateSorter` order. DPD still returns its original tariff costs and delivery periods; sorting uses those source values through neutral `DeliveryRate::original_cost` / `original_delivery_days` and does not change Parcels3 payloads, terminalCode selection, filtering, quote IDs or pickup selection behavior.
 ## Runtime Registration
 
 - `src/Carriers/Runtime/DpdQuoteCarrier.php` implements `CarrierAdapterInterface`.
@@ -68,7 +70,7 @@ Current pricing mode is terminalCode-aware:
 - pickup group: `selfPickup=true`, `selfDelivery=true`, sender `pickup.terminalCode`, receiver `delivery.terminalCode`;
 - courier group: `selfPickup=true`, `selfDelivery=false`, sender `pickup.terminalCode`; `delivery.terminalCode` is not sent.
 
-`DpdParcelBuilder` builds runtime `parcel[]` as packaging places with fast deterministic 3D shelf/bin packing:
+The shared `PackagingBuilder` builds runtime `parcel[]` as packaging places with fast deterministic 3D shelf/bin packing; DPD then adapts neutral `PackagingParcel` values to `DpdTariffParcel`:
 
 - product quantities are expanded before packaging;
 - items with any side over 49 cm are long items and become separate DPD parcels with quantity `1`;

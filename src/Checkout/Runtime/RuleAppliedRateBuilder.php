@@ -51,7 +51,9 @@ final class RuleAppliedRateBuilder {
 			$result->disabled_reason ?: $rate->disabled_reason,
 			$rate->requires_pickup_point,
 			$rate->requires_courier_address,
-			array_merge( $rate->meta, array( 'rules_applied' => array() !== $result->audit ) )
+			array_merge( $rate->meta, array( 'rules_applied' => array() !== $result->audit ) ),
+			$rate->original_cost ?? $rate->price,
+			$rate->original_delivery_days ?? $rate->delivery_days
 		);
 
 		return array(

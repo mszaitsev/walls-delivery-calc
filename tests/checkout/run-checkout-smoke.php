@@ -81,6 +81,36 @@ function checkout_promo_rule(): Rule {
 	return new Rule( null, 'Demo promo -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false );
 }
 
+function checkout_sort_rate( string $carrier, int $original_price_rub, int $min_days, string $title, string $tariff_key, ?int $final_price_rub = null, ?int $final_min_days = null ): DeliveryRate {
+	$final_price_rub ??= $original_price_rub;
+	$final_min_days ??= $min_days;
+
+	return new DeliveryRate(
+		$carrier . ':' . $tariff_key,
+		$carrier,
+		$carrier,
+		$carrier,
+		$carrier,
+		$tariff_key,
+		$title,
+		DeliveryType::PICKUP,
+		$title,
+		Money::from_rubles( $final_price_rub ),
+		null,
+		null,
+		DateRange::single( $final_min_days ),
+		'',
+		$final_min_days . ' дн.',
+		array(),
+		false,
+		'',
+		false,
+		false,
+		array(),
+		Money::from_rubles( $original_price_rub ),
+		DateRange::single( $min_days )
+	);
+}
 function checkout_increase_rule(): Rule {
 	return new Rule( null, 'Demo +200', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 200, RuleOperationBases::RUBLES, false, false );
 }
@@ -182,4 +212,88 @@ $second       = $orchestrator->calculate( checkout_request(), array(), RateSorte
 checkout_smoke_assert( 0 === $first->cache_hits, 'First cached calculation must miss cache.' );
 checkout_smoke_assert( $second->cache_hits > 0, 'Second cached calculation must hit cache.' );
 
+
+$sorter = new RateSorter();
+$dpd_group = static fn( DeliveryRate $rate ): DeliveryRate => DeliveryRate::from_array(
+	array_merge(
+		$rate->to_array(),
+		array( 'meta' => array_merge( $rate->meta, array( 'tariff_selector_group' => true, 'checkout_group_id' => 'dpd:pickup' ) ) )
+	)
+);
+$yandex_pickup = checkout_sort_rate( 'yandex', 100, 3, 'Yandex pickup', 'pickup', 100, 3 );
+$yandex_courier = checkout_sort_rate( 'yandex', 120, 2, 'Yandex courier', 'courier', 120, 2 );
+$sorted = $sorter->sort( array( $yandex_pickup, $yandex_courier ), RateSorter::CHEAPEST );
+checkout_smoke_assert( array( 'yandex:pickup', 'yandex:courier' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->rate_id, $sorted ), 'Rates with the same service_key but no tariff_selector_group must stay separate checkout methods.' );
+
+$sorted = $sorter->sort(
+	array(
+		$dpd_group( checkout_sort_rate( 'dpd', 300, 5, 'DPD 300', '300' ) ),
+		$dpd_group( checkout_sort_rate( 'dpd', 100, 5, 'DPD 100', '100' ) ),
+		$dpd_group( checkout_sort_rate( 'dpd', 200, 5, 'DPD 200', '200' ) ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( '100', '200', '300' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Tariff selector rates must group by checkout_group_id and sort by original cost ascending.' );
+
+$sorted = $sorter->sort(
+	array(
+		$dpd_group( checkout_sort_rate( 'dpd', 100, 5, 'DPD 100', '100', 95 ) ),
+		$dpd_group( checkout_sort_rate( 'dpd', 200, 5, 'DPD 200', '200', 170 ) ),
+		$dpd_group( checkout_sort_rate( 'dpd', 350, 5, 'DPD 350', '350', 150 ) ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( '100', '200', '350' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Selector price sorting must ignore final discounted prices.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'yandex', 100, 3, 'Yandex pickup', 'pickup', 100, 3 ),
+		$dpd_group( checkout_sort_rate( 'dpd', 100, 4, 'DPD A', 'A', 110, 4 ) ),
+		$dpd_group( checkout_sort_rate( 'dpd', 200, 5, 'DPD B', 'B', 50, 5 ) ),
+		checkout_sort_rate( 'yandex', 120, 2, 'Yandex courier', 'courier', 120, 2 ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( 'yandex:pickup', 'dpd:A', 'dpd:B', 'yandex:courier' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->rate_id, $sorted ), 'Only selector rates must be grouped; ordinary Yandex pickup/courier rates must remain separate methods.' );
+
+$sorted = $sorter->sort(
+	array(
+		$dpd_group( checkout_sort_rate( 'dpd', 100, 5, 'DPD 5', '5' ) ),
+		$dpd_group( checkout_sort_rate( 'dpd', 100, 2, 'DPD 2', '2' ) ),
+		$dpd_group( checkout_sort_rate( 'dpd', 100, 7, 'DPD 7', '7' ) ),
+	),
+	RateSorter::FASTEST
+);
+checkout_smoke_assert( array( '2', '5', '7' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Tariff selector delivery-days sorting must use original min days ascending.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'dpd', 100, 2, 'DPD method', 'dpd-method', 100, 5 ),
+		checkout_sort_rate( 'yandex', 100, 4, 'Yandex method', 'yandex-method', 100, 2 ),
+	),
+	RateSorter::FASTEST
+);
+checkout_smoke_assert( array( 'yandex', 'dpd' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $sorted ), 'Method ordering by delivery days must use active final delivery days, not original carrier days.' );
+
+$sorted = $sorter->sort_group_rates(
+	array(
+		checkout_sort_rate( 'dpd', 100, 5, 'Beta', 'b' ),
+		checkout_sort_rate( 'dpd', 100, 2, 'Zulu', 'z' ),
+		checkout_sort_rate( 'dpd', 100, 2, 'Alpha', 'c' ),
+		checkout_sort_rate( 'dpd', 100, 2, 'Alpha', 'a' ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( 'a', 'c', 'z', 'b' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Equal selector price sorting must use days, title and tariff_key as stable tie-breakers.' );
+
+$sorted = $sorter->sort_group_rates(
+	array(
+		checkout_sort_rate( 'dpd', 300, 2, 'Beta', 'b' ),
+		checkout_sort_rate( 'dpd', 100, 2, 'Zulu', 'z' ),
+		checkout_sort_rate( 'dpd', 100, 2, 'Alpha', 'c' ),
+		checkout_sort_rate( 'dpd', 100, 2, 'Alpha', 'a' ),
+	),
+	RateSorter::FASTEST
+);
+checkout_smoke_assert( array( 'a', 'c', 'z', 'b' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $sorted ), 'Equal selector delivery-days sorting must use cost, title and tariff_key as stable tie-breakers.' );
 echo "Checkout smoke test passed.\n";

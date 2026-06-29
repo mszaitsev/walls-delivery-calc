@@ -104,7 +104,9 @@ final class DeliveryServiceManager {
 			$rate->disabled_reason,
 			$rate->requires_pickup_point,
 			$rate->requires_courier_address,
-			array_merge( $rate->meta, array( 'round_up_applied' => $round_applied, 'minimum_price_applied' => $minimum_applied ) )
+			array_merge( $rate->meta, array( 'round_up_applied' => $round_applied, 'minimum_price_applied' => $minimum_applied ) ),
+			$rate->original_cost ?? $rate->price,
+			$rate->original_delivery_days ?? $rate->delivery_days
 		);
 	}
 
@@ -148,7 +150,9 @@ final class DeliveryServiceManager {
 			$rate->disabled_reason,
 			$rate->requires_pickup_point,
 			$rate->requires_courier_address,
-			array_merge( $rate->meta, $meta )
+			array_merge( $rate->meta, $meta ),
+			$rate->original_cost ?? $rate->price,
+			$rate->original_delivery_days ?? $rate->delivery_days
 		);
 	}
 }

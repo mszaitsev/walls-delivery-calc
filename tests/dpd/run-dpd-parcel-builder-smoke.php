@@ -7,15 +7,15 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
-use WallsShop\WDC\Carriers\Dpd\DpdSettings;
-use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
+use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
-use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingBuilderConfig;
+use WallsShop\WDC\Packaging\PackagingParcel;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 
 function dpd_parcel_assert( bool $condition, string $message ): void {
@@ -67,15 +67,15 @@ function dpd_parcel_item( string $sku, int $quantity, int $weight_g, int $length
 	return new PackageItem( $sku, $sku, $quantity, Money::from_rubles( 100 ), Money::from_rubles( 100 * $quantity ), $weight_g, $length, $width, $height );
 }
 
-function dpd_parcel_build( DpdParcelBuilder $builder, Package $package ): array {
-	return $builder->build( dpd_parcel_request( $package ) );
+function dpd_parcel_build( PackagingBuilder $builder, Package $package ): array {
+	return $builder->build( dpd_parcel_request( $package ) )->to_array();
 }
 
 /**
  * @param array<int,array<string,mixed>> $units
  * @return array<string,mixed>|null
  */
-function dpd_parcel_pack_units_in_box( DpdParcelBuilder $builder, array $units ): ?array {
+function dpd_parcel_pack_units_in_box( PackagingBuilder $builder, array $units ): ?array {
 	$method = new ReflectionMethod( $builder, 'pack_units_in_box' );
 	$method->setAccessible( true );
 	return $method->invoke( $builder, $units, array( 'length' => 50, 'width' => 50, 'height' => 30 ), 'box_50_50_30' );
@@ -91,8 +91,15 @@ $GLOBALS['wdc_dpd_parcel_builder_options'] = array(
 	),
 );
 
-$settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
-$builder = new DpdParcelBuilder( $settings, new PackagingWeightCalculator( new SettingsRepository() ) );
+$config = PackagingBuilderConfig::defaults();
+dpd_parcel_assert( 500 === $config->default_weight_g && 20.0 === $config->default_length_cm && 15.0 === $config->default_width_cm && 10.0 === $config->default_height_cm && 1.0 === $config->default_declared_value_rub, 'Packaging defaults must be provided by the shared Packaging layer.' );
+$builder_without_dpd_settings = new PackagingBuilder( $config );
+$generic_result = $builder_without_dpd_settings->build( dpd_parcel_request( new Package( array(), Money::from_rubles( 0 ), Money::from_rubles( 0 ), 0, 0, 0, null, null, null, null, 'cart' ) ) );
+$generic_array = $generic_result->to_array();
+dpd_parcel_assert( isset( $generic_array['parcels'][0] ) && is_array( $generic_array['parcels'][0] ) && ! is_object( $generic_array['parcels'][0] ), 'PackagingResult::to_array() must expose parcel arrays.' );
+dpd_parcel_assert( isset( $generic_array['parcels'][0]['weight_g'], $generic_array['parcels'][0]['length_cm'], $generic_array['parcels'][0]['width_cm'], $generic_array['parcels'][0]['height_cm'], $generic_array['parcels'][0]['quantity'] ), 'PackagingResult parcel array must expose shared parcel fields.' );
+dpd_parcel_assert( isset( $generic_result->parcels()[0] ) && $generic_result->parcels()[0] instanceof PackagingParcel, 'PackagingResult::parcels() must expose PackagingParcel objects.' );
+$builder = new PackagingBuilder( PackagingBuilderConfig::defaults(), new PackagingWeightCalculator( new SettingsRepository() ) );
 
 $regular_4 = dpd_parcel_build( $builder, dpd_parcel_package( array( dpd_parcel_item( '36x11x11', 4, 1000, 36, 11, 11 ) ) ) );
 dpd_parcel_assert( 1 === (int) $regular_4['parcels_count'], '4 regular items must fit one parcel.' );

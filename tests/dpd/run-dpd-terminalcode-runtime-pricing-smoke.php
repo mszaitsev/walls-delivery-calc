@@ -17,7 +17,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSoapRequest;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
-use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdPackagingBuilderFactory;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
@@ -31,6 +31,7 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 
@@ -121,7 +122,9 @@ function dpd_terminal_runtime_carrier( DpdTerminalRuntimeFakeSoapClient $soap, D
 		new DpdTerminalCodeTariffRequestBuilder()
 	);
 
-	return new DpdQuoteCarrier( $settings, $tariffs, new DpdParcelBuilder( $settings ), new Logger() );
+	$dpd_packaging = new DpdPackagingBuilderFactory( new PackagingWeightCalculator( new SettingsRepository() ) );
+
+	return new DpdQuoteCarrier( $settings, $tariffs, $dpd_packaging->create(), new Logger() );
 }
 
 $GLOBALS['wdc_dpd_terminal_runtime_options'] = array();

@@ -245,7 +245,9 @@ final class CheckoutOrchestrator {
 					'service_customer_comment_applied' => $apply_service_comment ? 'yes' : 'no',
 					'service_customer_comment_type' => in_array( $comment_type, array( DeliveryType::PICKUP, DeliveryType::COURIER ), true ) ? $comment_type : '',
 				)
-			)
+			),
+			$rate->original_cost,
+			$rate->original_delivery_days
 		);
 	}
 
@@ -274,7 +276,9 @@ final class CheckoutOrchestrator {
 			$rate->disabled_reason,
 			$rate->requires_pickup_point,
 			$rate->requires_courier_address,
-			array_merge( $rate->meta, $meta )
+			array_merge( $rate->meta, $meta ),
+			$rate->original_cost,
+			$rate->original_delivery_days
 		);
 	}
 

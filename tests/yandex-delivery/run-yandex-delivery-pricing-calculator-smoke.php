@@ -26,6 +26,10 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingBuilder;
+use WallsShop\WDC\Packaging\PackagingBuilderConfig;
+use WallsShop\WDC\Packaging\PackagingParcel;
+use WallsShop\WDC\Packaging\PackagingResult;
 
 function yandex_pricing_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -97,13 +101,40 @@ $settings->save_from_admin( array(
 ) );
 $GLOBALS['wdc_options']['wdc_core_settings'][ YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY ] = 'SRC-1';
 
-$builder = new YandexDeliveryPricingRequestBuilder();
+$builder = new YandexDeliveryPricingRequestBuilder( new PackagingBuilder( PackagingBuilderConfig::defaults() ) );
 $package = new Package( array(), Money::from_kopecks( 0 ), Money::from_kopecks( 0 ), 0, 0, 0, null, null, null, null, 'manual' );
 $pickup_payload = $builder->pickup( yandex_pricing_request( array(), $package, Money::from_kopecks( 100000 ) ), 'SRC-1', 'DST-1' );
 yandex_pricing_assert( 'self_pickup' === $pickup_payload['tariff'] && 'SRC-1' === $pickup_payload['source']['platform_station_id'] && 'DST-1' === $pickup_payload['destination']['platform_station_id'], 'Pickup request must include self_pickup source and destination station ids.' );
 yandex_pricing_assert( 500 === $pickup_payload['total_weight'] && 100000 === $pickup_payload['total_assessed_price'] && 0 === $pickup_payload['client_price'] && 'already_paid' === $pickup_payload['payment_method'], 'Pickup request must include default weight, assessed price, client price and payment method.' );
-yandex_pricing_assert( 1 === count( $pickup_payload['places'] ) && array( 'weight_gross' => 500, 'dx' => 20, 'dy' => 15, 'dz' => 10 ) === $pickup_payload['places'][0]['physical_dims'], 'Pickup request must include one aggregate place with default physical dims.' );
-yandex_pricing_assert( $pickup_payload['total_weight'] === $pickup_payload['places'][0]['physical_dims']['weight_gross'], 'Request total_weight must match aggregate place gross weight.' );
+yandex_pricing_assert( 1 === count( $pickup_payload['places'] ) && array( 'weight_gross' => 500, 'dx' => 20.0, 'dy' => 15.0, 'dz' => 10.0 ) === $pickup_payload['places'][0]['physical_dims'], 'Pickup request must include one PackagingResult place with generic default physical dims.' );
+yandex_pricing_assert( $pickup_payload['total_weight'] === $pickup_payload['places'][0]['physical_dims']['weight_gross'], 'Request total_weight must match place gross weight.' );
+yandex_pricing_assert( 'defaults' === (string) ( $builder->last_diagnostics()['package_builder_source'] ?? '' ) && 1 === (int) ( $builder->last_diagnostics()['places_count'] ?? 0 ), 'Request builder must expose safe PackagingResult diagnostics.' );
+
+$multi_total = Money::from_rubles( 1500 );
+$multi_package = Package::from_items(
+	array(
+		new PackageItem( 'LONG-1', 'Long item 1', 1, Money::from_rubles( 700 ), Money::from_rubles( 700 ), 300, 60, 5, 5 ),
+		new PackageItem( 'LONG-2', 'Long item 2', 1, Money::from_rubles( 800 ), Money::from_rubles( 800 ), 400, 70, 6, 6 ),
+	),
+	0,
+	$multi_total,
+	$multi_total
+);
+$multi_payload = $builder->pickup( yandex_pricing_request( array(), $multi_package, $multi_total ), 'SRC-1', 'DST-1' );
+yandex_pricing_assert( 2 === count( $multi_payload['places'] ), 'Multiple PackagingParcel objects must become multiple Yandex places.' );
+yandex_pricing_assert( 700 === $multi_payload['total_weight'] && 700 === array_sum( array_map( static fn( array $place ): int => (int) $place['physical_dims']['weight_gross'], $multi_payload['places'] ) ), 'Yandex total_weight must equal the sum of all place weight_gross values.' );
+yandex_pricing_assert( array( 'weight_gross' => 300, 'dx' => 60.0, 'dy' => 5.0, 'dz' => 5.0 ) === $multi_payload['places'][0]['physical_dims'], 'Yandex places must use PackagingParcel dimensions without DPD defaults.' );
+yandex_pricing_assert( 'long_items_only' === (string) ( $builder->last_diagnostics()['package_builder_source'] ?? '' ) && 2 === (int) ( $builder->last_diagnostics()['parcels_count'] ?? 0 ), 'Yandex diagnostics must expose packaging source and parcels count.' );
+
+$places_method = new ReflectionMethod( YandexDeliveryPricingRequestBuilder::class, 'places_from_packaging_result' );
+$places_method->setAccessible( true );
+$quantity_places = $places_method->invoke( $builder, new PackagingResult( array( new PackagingParcel( 250, 12.0, 11.0, 10.0, 3 ) ), array( 'package_builder_source' => 'test', 'packing_strategy' => 'test', 'parcels_count' => 1 ) ) );
+yandex_pricing_assert( is_array( $quantity_places ) && 3 === count( $quantity_places ) && 750 === array_sum( array_map( static fn( array $place ): int => (int) $place['physical_dims']['weight_gross'], $quantity_places ) ), 'PackagingParcel quantity must be expanded into repeated Yandex places.' );
+yandex_pricing_assert( array() === $places_method->invoke( $builder, new PackagingResult( array(), array() ) ), 'Empty PackagingResult must be treated as invalid for public Yandex places.' );
+$fallback_method = new ReflectionMethod( YandexDeliveryPricingRequestBuilder::class, 'fallback_package_payload' );
+$fallback_method->setAccessible( true );
+$fallback_payload = $fallback_method->invoke( $builder, yandex_pricing_request( array(), new Package( array(), Money::from_kopecks( 0 ), Money::from_kopecks( 0 ), 0, 0, 0, null, null, null, null, 'manual' ), Money::from_kopecks( 100000 ) ) );
+yandex_pricing_assert( 500 === (int) $fallback_payload['total_weight'] && array( 'weight_gross' => 500, 'dx' => 20.0, 'dy' => 15.0, 'dz' => 10.0 ) === $fallback_payload['places'][0]['physical_dims'], 'Legacy single-place fallback must keep generic PackagingBuilder defaults for Yandex.' );
 $courier_payload = $builder->courier( yandex_pricing_request(), 'SRC-1', 'Москва, Волжский бульвар, д 1 к1' );
 yandex_pricing_assert( 'time_interval' === $courier_payload['tariff'] && 'Москва, Волжский бульвар, д 1 к1' === $courier_payload['destination']['address'], 'Courier request must include time_interval and destination address.' );
 
@@ -151,6 +182,7 @@ $quote = $carrier->quote( yandex_pricing_request() );
 $rates = array_combine( array_map( static fn( $rate ): string => $rate->rate_id, $quote->rates ), $quote->rates );
 yandex_pricing_assert( 23790 === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 'Яндекс до ПВЗ — 7 дней' === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Pickup checkout rate must use pricing response price and delivery days.' );
 yandex_pricing_assert( 46360 === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks() && 'Яндекс до двери — 9 дней' === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Courier checkout rate must use pricing response price and delivery days.' );
+yandex_pricing_assert( isset( $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['package'], $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['package_builder_source'] ) && (int) $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['places_count'] >= 1, 'Yandex checkout rate meta must include safe package diagnostics.' );
 yandex_pricing_assert( isset( $http->requests[0], $http->requests[1] ), 'Pricing client must call API once per Yandex tariff.' );
 $first_payload = json_decode( (string) $http->requests[0]['args']['body'], true );
 yandex_pricing_assert( 'self_pickup' === (string) ( $first_payload['tariff'] ?? '' ) && 'MSK-MARKET' === (string) ( $first_payload['destination']['platform_station_id'] ?? '' ), 'Pickup checkout pricing payload must use representative destination platform station id.' );
@@ -178,6 +210,8 @@ yandex_pricing_assert( YandexDeliveryCarrier::PICKUP_RATE_ID === $quote->rates[0
 $checkout_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Runtime/YandexDeliveryCarrier.php' );
 yandex_pricing_assert( ! str_contains( $checkout_source, 'temporary_zero_price' ) && ! str_contains( $checkout_source, 'temporary_checkout_rates' ), 'Yandex checkout must not keep temporary zero-price flags.' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-yandex_pricing_assert( str_contains( $plugin_source, 'YandexDeliveryPricingRequestBuilder::class' ) && str_contains( $plugin_source, 'YandexDeliveryPricingResponseParser::class' ), 'Yandex pricing services must be registered in DI.' );
+yandex_pricing_assert( str_contains( $plugin_source, 'YandexDeliveryPricingRequestBuilder::class' ) && str_contains( $plugin_source, 'new YandexDeliveryPricingRequestBuilder( $this->container->get( PackagingBuilder::class ) )' ) && str_contains( $plugin_source, 'YandexDeliveryPricingResponseParser::class' ), 'Yandex pricing services must be registered in DI with the generic PackagingBuilder.' );
+$pricing_builder_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pricing/YandexDeliveryPricingRequestBuilder.php' );
+yandex_pricing_assert( ! str_contains( $pricing_builder_source, 'DpdPackagingBuilderFactory' ) && ! str_contains( $pricing_builder_source, 'DpdSettings' ) && ! str_contains( $pricing_builder_source, 'Carriers\\Dpd' ), 'Yandex pricing request builder must not depend on DPD legacy packaging.' );
 
 echo "Yandex Delivery pricing calculator smoke OK\n";
