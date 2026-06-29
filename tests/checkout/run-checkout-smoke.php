@@ -266,6 +266,23 @@ $sorted = $sorter->sort(
 	RateSorter::FASTEST
 );
 checkout_smoke_assert( array( 'carrier_b', 'carrier_c', 'carrier_a' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $sorted ), 'Carrier ordering by delivery days must use each carrier fastest original tariff.' );
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'dpd', 100, 4, 'DPD active', 'dpd-a', 200 ),
+		checkout_sort_rate( 'yandex', 300, 4, 'Yandex', 'ya', 150 ),
+	),
+	RateSorter::CHEAPEST
+);
+checkout_smoke_assert( array( 'yandex', 'dpd' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $sorted ), 'Carrier ordering by price must use active final prices, not original carrier costs.' );
+
+$sorted = $sorter->sort(
+	array(
+		checkout_sort_rate( 'dpd', 100, 2, 'DPD active', 'dpd-a', 100, 5 ),
+		checkout_sort_rate( 'yandex', 100, 4, 'Yandex', 'ya', 100, 2 ),
+	),
+	RateSorter::FASTEST
+);
+checkout_smoke_assert( array( 'yandex', 'dpd' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $sorted ), 'Carrier ordering by delivery days must use active final delivery days, not original carrier days.' );
 
 $sorted = $sorter->sort(
 	array(
