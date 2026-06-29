@@ -102,7 +102,8 @@ $package = new Package( array(), Money::from_kopecks( 0 ), Money::from_kopecks( 
 $pickup_payload = $builder->pickup( yandex_pricing_request( array(), $package, Money::from_kopecks( 100000 ) ), 'SRC-1', 'DST-1' );
 yandex_pricing_assert( 'self_pickup' === $pickup_payload['tariff'] && 'SRC-1' === $pickup_payload['source']['platform_station_id'] && 'DST-1' === $pickup_payload['destination']['platform_station_id'], 'Pickup request must include self_pickup source and destination station ids.' );
 yandex_pricing_assert( 500 === $pickup_payload['total_weight'] && 100000 === $pickup_payload['total_assessed_price'] && 0 === $pickup_payload['client_price'] && 'already_paid' === $pickup_payload['payment_method'], 'Pickup request must include default weight, assessed price, client price and payment method.' );
-yandex_pricing_assert( array( 'weight_gross' => 500, 'dx' => 20, 'dy' => 15, 'dz' => 10 ) === $pickup_payload['places'][0]['physical_dims'], 'Pickup request must include default physical dims.' );
+yandex_pricing_assert( 1 === count( $pickup_payload['places'] ) && array( 'weight_gross' => 500, 'dx' => 20, 'dy' => 15, 'dz' => 10 ) === $pickup_payload['places'][0]['physical_dims'], 'Pickup request must include one aggregate place with default physical dims.' );
+yandex_pricing_assert( $pickup_payload['total_weight'] === $pickup_payload['places'][0]['physical_dims']['weight_gross'], 'Request total_weight must match aggregate place gross weight.' );
 $courier_payload = $builder->courier( yandex_pricing_request(), 'SRC-1', 'Москва, Волжский бульвар, д 1 к1' );
 yandex_pricing_assert( 'time_interval' === $courier_payload['tariff'] && 'Москва, Волжский бульвар, д 1 к1' === $courier_payload['destination']['address'], 'Courier request must include time_interval and destination address.' );
 
@@ -128,8 +129,14 @@ yandex_pricing_assert( 'T-OTHER' === (string) ( $pickup_repo->representative_des
 
 $parser = new YandexDeliveryPricingResponseParser();
 $parsed = $parser->parse( array( 'body' => array( 'pricing_total' => '237.9 RUB', 'delivery_days' => 7 ) ) );
-yandex_pricing_assert( 23790 === $parsed->price_kopecks && '7 дн.' === $parsed->delivery_time_label(), 'Parser must parse decimal RUB and delivery_days.' );
+yandex_pricing_assert( 23790 === $parsed->price_kopecks && '7 дней' === $parsed->delivery_time_label(), 'Parser must parse decimal RUB and delivery_days.' );
 yandex_pricing_assert( 23700 === $parser->parse( array( 'pricing_total' => '237 RUB' ) )->price_kopecks, 'Parser must parse integer RUB.' );
+yandex_pricing_assert( '1 день' === $parser->parse( array( 'pricing_total' => '237 RUB', 'delivery_days' => 1 ) )->delivery_time_label(), 'Parser must format 1 day.' );
+yandex_pricing_assert( '2 дня' === $parser->parse( array( 'pricing_total' => '237 RUB', 'delivery_days' => 2 ) )->delivery_time_label(), 'Parser must format 2 days.' );
+yandex_pricing_assert( '5 дней' === $parser->parse( array( 'pricing_total' => '237 RUB', 'delivery_days' => 5 ) )->delivery_time_label(), 'Parser must format 5 days.' );
+yandex_pricing_assert( '21 день' === $parser->parse( array( 'pricing_total' => '237 RUB', 'delivery_days' => 21 ) )->delivery_time_label(), 'Parser must format 21 days.' );
+yandex_pricing_assert( '22 дня' === $parser->parse( array( 'pricing_total' => '237 RUB', 'delivery_days' => 22 ) )->delivery_time_label(), 'Parser must format 22 days.' );
+yandex_pricing_assert( '25 дней' === $parser->parse( array( 'pricing_total' => '237 RUB', 'delivery_days' => 25 ) )->delivery_time_label(), 'Parser must format 25 days.' );
 yandex_pricing_assert( 'без указания срока' === $parser->parse( array( 'pricing_total' => '237,5 RUB' ) )->delivery_time_label(), 'Parser must fallback missing delivery_days.' );
 
 $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
@@ -142,8 +149,8 @@ $http = new YandexPricingFakeHttp( array(
 $carrier = new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $http ), $mapping, $pickup_repo, null, $builder, $parser );
 $quote = $carrier->quote( yandex_pricing_request() );
 $rates = array_combine( array_map( static fn( $rate ): string => $rate->rate_id, $quote->rates ), $quote->rates );
-yandex_pricing_assert( 23790 === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 'Яндекс до ПВЗ — 7 дн.' === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Pickup checkout rate must use pricing response price and delivery days.' );
-yandex_pricing_assert( 46360 === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks() && 'Яндекс до двери — 9 дн.' === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Courier checkout rate must use pricing response price and delivery days.' );
+yandex_pricing_assert( 23790 === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 'Яндекс до ПВЗ — 7 дней' === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Pickup checkout rate must use pricing response price and delivery days.' );
+yandex_pricing_assert( 46360 === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks() && 'Яндекс до двери — 9 дней' === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Courier checkout rate must use pricing response price and delivery days.' );
 yandex_pricing_assert( isset( $http->requests[0], $http->requests[1] ), 'Pricing client must call API once per Yandex tariff.' );
 $first_payload = json_decode( (string) $http->requests[0]['args']['body'], true );
 yandex_pricing_assert( 'self_pickup' === (string) ( $first_payload['tariff'] ?? '' ) && 'MSK-MARKET' === (string) ( $first_payload['destination']['platform_station_id'] ?? '' ), 'Pickup checkout pricing payload must use representative destination platform station id.' );

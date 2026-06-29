@@ -265,12 +265,12 @@ $ids = array_map( static fn ( $rate ): string => $rate->rate_id, $rates );
 yandex_checkout_assert( in_array( YandexDeliveryCarrier::PICKUP_RATE_ID, $ids, true ) && in_array( YandexDeliveryCarrier::COURIER_RATE_ID, $ids, true ), 'Yandex Delivery rates must have separate pickup and courier ids.' );
 yandex_checkout_assert( count( array_unique( $ids ) ) === count( $ids ), 'Yandex Delivery rate ids must be unique.' );
 $by_id = array_combine( $ids, $rates );
-yandex_checkout_assert( 'Яндекс до ПВЗ — 7 дн.' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Yandex pickup title must use settings title and pricing delivery time.' );
-yandex_checkout_assert( 'Яндекс до двери — 9 дн.' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier title must use settings title and pricing delivery time.' );
+yandex_checkout_assert( 'Яндекс до ПВЗ — 7 дней' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Yandex pickup title must use settings title and pricing delivery time.' );
+yandex_checkout_assert( 'Яндекс до двери — 9 дней' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier title must use settings title and pricing delivery time.' );
 yandex_checkout_assert( 23790 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ) && 46360 === (int) ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ), 'Yandex checkout rates must keep pricing-calculator prices in rate meta.' );
 yandex_checkout_assert( 23800 === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 46400 === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks(), 'Yandex checkout final prices must use regular delivery-service post-processing.' );
 foreach ( $rates as $rate ) {
-	yandex_checkout_assert( str_contains( $rate->title, ' — ' ) && 1 === preg_match( '/— [0-9]+ дн\.$/', $rate->title ), 'Yandex rate title must always use "Название — срок" format with pricing delivery days.' );
+	yandex_checkout_assert( str_contains( $rate->title, ' — ' ) && 1 === preg_match( '/— [0-9]+ (день|дня|дней)$/u', $rate->title ), 'Yandex rate title must always use "Название — срок" format with pricing delivery days.' );
 }
 
 $settings->set_setting( (int) $service->id, YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY, 'Самовывоз Яндекс', 'string' );
@@ -278,7 +278,7 @@ $settings->set_setting( (int) $service->id, YandexDeliverySettings::COURIER_METH
 $result = $orchestrator->calculate( yandex_checkout_request(), array(), RateSorter::CHEAPEST, false );
 $ids = array_map( static fn ( $rate ): string => $rate->rate_id, $result->rates );
 $by_id = array_combine( $ids, $result->rates );
-yandex_checkout_assert( 'Самовывоз Яндекс — 5 дн.' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Changed pickup title in settings must affect checkout.' );
-yandex_checkout_assert( 'Курьер Яндекс — 6 дн.' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Changed courier title in settings must affect checkout.' );
+yandex_checkout_assert( 'Самовывоз Яндекс — 5 дней' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Changed pickup title in settings must affect checkout.' );
+yandex_checkout_assert( 'Курьер Яндекс — 6 дней' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Changed courier title in settings must affect checkout.' );
 
 echo "Yandex Delivery checkout rates smoke test passed.\n";

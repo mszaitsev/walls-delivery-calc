@@ -57,12 +57,12 @@
 - `tests/yandex-delivery/run-yandex-delivery-geo-mapping-smoke.php` covers repository CRUD, multiple candidate rows per location, primary switching, smart scorer examples for Moscow/Saint Petersburg/Novosibirsk/Kazan/Ekaterinburg, auto-primary, raw scoring diagnostics, location/detect normalization, status constants, migration schema and admin wiring.
 # Карта текущего кода
 
-## Yandex Delivery Checkout Pricing 0.102.0
+## Yandex Delivery Checkout Pricing 0.102.1
 
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders a `Точка сдачи отправлений Яндекс.Доставки` block on the Yandex Delivery `Расчет` tab. The block lets an admin choose a city, searches the local WDC locations directory, saves `YandexDeliverySettings::SOURCE_LOCATION_ID_KEY` only to restore the admin selector, resolves all mapped/manual `yandex_geo_id` values through location mapping v2, then lists all active `available_for_dropoff` Yandex PVZ rows for that geo id set without an in-geo limit and provides a client-side `full_address` filter from 3 characters. It saves `YandexDeliverySettings::SOURCE_PLATFORM_STATION_ID_KEY` as the sender PVZ id and displays the saved `platform_station_id` plus read-only full address.
 - `src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php` exposes the read-only admin selector `source_dropoff_points_by_geo_id()` over the existing live PVZ table and returns all matching source dropoff rows for the selected geo id set; import/staging/swap logic is unchanged.
 - `src/Carriers/YandexDelivery/YandexDeliverySettings.php` exposes `source_platform_station_id()` and `source_location_id()`. `YandexDeliveryCarrier` now reads the saved source station for pricing-calculator requests and keeps the existing `yandex_pickup` / `yandex_courier` rate ids.
-- `src/Carriers/YandexDelivery/Pricing/` contains the local pricing request builder, response parser and parsed result value object for checkout pricing.
+- `src/Carriers/YandexDelivery/Pricing/` contains the local pricing request builder, response parser and parsed result value object for checkout pricing. Delivery day labels reuse `DeliveryDaysFormatter`, and the request builder currently sends the cart as one aggregate `places` item.
 - `src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2Repository.php` exposes `representative_destination_pickup_point_by_geo_ids()` for temporary pickup pricing before buyer PVZ selection is implemented. It uses all destination geo ids and does not require `available_for_dropoff` for buyer destination PVZ candidates.
 - `src/Carriers/YandexDelivery/Api/YandexDeliveryApiClient.php` posts to `/api/b2b/platform/pricing-calculator`; tokens are still taken from existing Yandex settings/credentials.
 - Buyer PVZ map/selection, shipment creation, offers/confirm, import and geo pipeline code remain out of scope for this stage.

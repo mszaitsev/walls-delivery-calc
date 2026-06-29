@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.102.0; buyer PVZ selection, order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.102.1; buyer PVZ selection, order recalculation and shipments remain planned.
 
 Date: 2026-06-22.
 
@@ -31,11 +31,11 @@ The Yandex Delivery admin surface now follows the intended working model:
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
-## 0.102.0 Checkout pricing-calculator
+## 0.102.1 Checkout pricing-calculator
 
-Yandex checkout now calls `POST /api/b2b/platform/pricing-calculator` for both rates. Pickup uses `tariff=self_pickup`, `source.platform_station_id` from `YandexDeliverySettings::source_platform_station_id()`, and a representative destination `platform_station_id` selected locally from imported PVZ rows across every mapped/manual `yandex_geo_id` for the destination WDC `location_id`. Courier uses `tariff=time_interval` and `destination.address` assembled from checkout fields. The request builder sends `total_weight`, `total_assessed_price`, `client_price=0`, `payment_method=already_paid`, and one place with safe default dimensions when checkout data is incomplete.
+Yandex checkout now calls `POST /api/b2b/platform/pricing-calculator` for both rates. Pickup uses `tariff=self_pickup`, `source.platform_station_id` from `YandexDeliverySettings::source_platform_station_id()`, and a representative destination `platform_station_id` selected locally from imported PVZ rows across every mapped/manual `yandex_geo_id` for the destination WDC `location_id`. Courier uses `tariff=time_interval` and `destination.address` assembled from checkout fields. The request builder sends `total_weight`, `total_assessed_price`, `client_price=0`, `payment_method=already_paid`, and currently uses an aggregate single-place model: `places` has one item, `places[0].physical_dims.weight_gross` equals `total_weight`, and dimensions come from the package or fallback `20x15x10` when checkout data is incomplete.
 
-`pricing_total` is parsed to kopecks (`237.9 RUB` -> `23790`), and `delivery_days` becomes the checkout title suffix (`7 дн.`). A failure in one Yandex rate returns a disabled reason and does not break the other rate. Buyer PVZ selection/map, shipment offers, order recalculation, import and geo pipeline code were not changed.
+`pricing_total` is parsed to kopecks (`237.9 RUB` -> `23790`), and `delivery_days` becomes the checkout title suffix through the shared Russian formatter (`1 день`, `2 дня`, `5 дней`). A failure in one Yandex rate returns a disabled reason and does not break the other rate. Buyer PVZ selection/map, shipment offers, order recalculation, import and geo pipeline code were not changed.
 
 ## 0.101.3 Source platform station admin setting
 
