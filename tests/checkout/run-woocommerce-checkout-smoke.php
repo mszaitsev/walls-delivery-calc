@@ -493,16 +493,17 @@ $grouped_rates = array(
 	wc_checkout_sort_rate( 'yandex', 'ya', 300, 150, 3, 3 ),
 	wc_checkout_sort_rate( 'dpd', 'A', 100, 200, 2, 2, true, 'dpd:pickup' ),
 	wc_checkout_sort_rate( 'dpd', 'B', 200, 50, 4, 4, true, 'dpd:pickup' ),
+	wc_checkout_sort_rate( 'yandex', 'courier', 300, 250, 2, 2 ),
 	wc_checkout_sort_rate( 'russian_post', 'rp', 300, 300, 5, 5 ),
 );
 $wc_rates = $reflection->invoke( $method, $grouped_rates );
-wc_checkout_smoke_assert( array( 'yandex', 'dpd', 'russian_post' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $wc_rates ), 'WC grouped selector must be sorted among methods by active final price.' );
+wc_checkout_smoke_assert( array( 'yandex', 'dpd', 'yandex', 'russian_post' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $wc_rates ), 'WC grouped selector must be sorted among methods by active final price.' );
 wc_checkout_smoke_assert( 'dpd:pickup' === $wc_rates[1]->rate_id && 'A' === (string) ( $wc_rates[1]->meta['selected_tariff_object'] ?? '' ), 'WC grouped selector must use first original-price variant as active when no selected tariff exists.' );
 wc_checkout_smoke_assert( array( 'A', 'B' ) === array_map( static fn( array $variant ): string => (string) $variant['object_code'], $wc_rates[1]->meta['tariff_variants'] ?? array() ), 'WC grouped selector variants must keep original-price order.' );
 
 $session->save_selected_tariff( 'dpd:pickup', array( 'object_code' => 'B' ) );
 $wc_rates = $reflection->invoke( $method, $grouped_rates );
-wc_checkout_smoke_assert( array( 'dpd', 'yandex', 'russian_post' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $wc_rates ), 'WC grouped selector method ordering must use selected tariff final price.' );
+wc_checkout_smoke_assert( array( 'dpd', 'yandex', 'yandex', 'russian_post' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $wc_rates ), 'WC grouped selector method ordering must use selected tariff final price.' );
 wc_checkout_smoke_assert( 'B' === (string) ( $wc_rates[0]->meta['selected_tariff_object'] ?? '' ) && 50.0 === (float) $wc_rates[0]->price->get_rubles(), 'WC grouped selector active method must use the selected tariff values.' );
 wc_checkout_smoke_assert( array( 'A', 'B' ) === array_map( static fn( array $variant ): string => (string) $variant['object_code'], $wc_rates[0]->meta['tariff_variants'] ?? array() ), 'WC selected grouped selector variants must still keep original-price order.' );
 $stored_rates = $session->rates();

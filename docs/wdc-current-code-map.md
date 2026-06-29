@@ -58,14 +58,14 @@
 # Карта текущего кода
 
 
-## Checkout Sorting 0.103.4
+## Checkout Sorting 0.103.5
 
-- `src/Checkout/Sorting/RateSorter.php` owns deterministic checkout ordering for all carriers, with separate strategies for selector variants and checkout methods. `sort_group_rates()` uses original carrier values inside one method/selector; `sort_methods()` uses final active rate values between methods.
+- `src/Checkout/Sorting/RateSorter.php` owns deterministic checkout ordering for all carriers, with separate strategies for selector variants and checkout methods. Only rates with `meta['tariff_selector_group']` are grouped, using `meta['checkout_group_id']`; ordinary rates are standalone checkout methods keyed by `rate_id`, so `service_key` never merges pickup/courier methods. `sort_group_rates()` uses original carrier values inside one selector; `sort_methods()` uses final active rate values between methods.
 - `src/Domain/Quote/DeliveryRate.php` carries neutral `original_cost` and `original_delivery_days` fields. `sorting_cost()` and `sorting_delivery_days()` fall back to current `price`/`delivery_days` for older/direct rates.
 - Inside a group, price sorting uses original carrier cost and fastest sorting uses original minimum days. Between methods, price sorting uses final `price` and fastest sorting uses final `delivery_days.min_days`; ties use the secondary value, title, `tariff_key`, `rate_id` and input index.
 - `NewShippingMethod::rates_for_wc()` replaces the first rate of a tariff selector group with the selector method, preserves original-value variant order, applies any selected session tariff as active, then sorts methods by the active final value.
 - `RuleAppliedRateBuilder`, `DeliveryServiceManager`, `CheckoutOrchestrator`, `WooCommerceRateMapper` and `NewShippingMethod` preserve source values while rules and service post-processing keep changing final checkout display values.
-- `tests/checkout/run-checkout-smoke.php` covers original-value sorting inside groups, final-value sorting between methods and stable tie-breakers. `tests/checkout/run-woocommerce-checkout-smoke.php` covers selector insertion, variant order and selected active tariff ordering.
+- `tests/checkout/run-checkout-smoke.php` covers standalone same-service rates, selector-only grouping by `checkout_group_id`, original-value sorting inside groups, final-value sorting between methods and stable tie-breakers. `tests/checkout/run-woocommerce-checkout-smoke.php` covers selector insertion, separate same-service methods, variant order and selected active tariff ordering.
 ## Shared Packaging Builder 0.103.2
 
 - `src/Packaging/PackagingBuilder.php` is the shared package-place builder extracted from the former DPD tariff layer. It expands product quantities, splits long items over 49 cm into separate parcels, aggregates <=50 cm3 small items into one synthetic block, optimizes identical groups into grid blocks, runs the deterministic 3D shelf/bin packer with `box_50_50_30` and `box_40_40_40`, attempts one box and then two boxes, falls back to stacked rows, adds packaging weight through `PackagingWeightCalculator`, and returns diagnostics without DPD-specific namespaces.

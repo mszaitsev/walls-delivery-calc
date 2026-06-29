@@ -127,9 +127,16 @@ final class RateSorter {
 	}
 
 	private function method_key( DeliveryRate $rate ): string {
-		$key = trim( $rate->service_key );
+		if ( ! empty( $rate->meta['tariff_selector_group'] ) ) {
+			$key = trim( (string) ( $rate->meta['checkout_group_id'] ?? '' ) );
+			if ( '' !== $key ) {
+				return 'selector:' . $key;
+			}
+		}
 
-		return '' !== $key ? $key : $rate->carrier_key;
+		$key = trim( $rate->rate_id );
+
+		return '' !== $key ? 'rate:' . $key : 'rate:' . spl_object_id( $rate );
 	}
 
 	private function original_cost_kopecks( DeliveryRate $rate ): int {
