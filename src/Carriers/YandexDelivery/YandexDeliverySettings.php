@@ -12,6 +12,8 @@ final class YandexDeliverySettings {
 	public const SERVICE_KEY = 'yandex_delivery';
 	public const CARRIER_KEY = 'yandex_delivery';
 	public const TITLE = 'Яндекс Доставка';
+	public const DEFAULT_PICKUP_METHOD_TITLE = 'Яндекс до ПВЗ';
+	public const DEFAULT_COURIER_METHOD_TITLE = 'Яндекс до двери';
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
