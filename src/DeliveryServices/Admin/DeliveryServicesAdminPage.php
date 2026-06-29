@@ -584,6 +584,10 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
+		if ( 'save_yandex_geo_pipeline_v2_schedule' === $action ) {
+			$this->handle_yandex_geo_pipeline_v2_schedule_action();
+			return;
+		}
 		if ( in_array( $action, array(
 			'sync_yandex_region_mapping_v2',
 			'save_yandex_region_mapping_v2',
@@ -1595,6 +1599,17 @@ final class DeliveryServicesAdminPage {
 		</form>
 		<?php
 	}
+	private function handle_yandex_geo_pipeline_v2_schedule_action(): void {
+		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? YandexDeliverySettings::SERVICE_KEY ) );
+		if ( $this->yandex_delivery_geo_pipeline_v2_runner instanceof YandexDeliveryGeoPipelineV2Runner ) {
+			$enabled = ! empty( $_POST['yandex_geo_pipeline_schedule_enabled'] );
+			$days = isset( $_POST['yandex_geo_pipeline_schedule_days'] ) && is_array( $_POST['yandex_geo_pipeline_schedule_days'] ) ? array_map( static fn( mixed $value ): int => (int) $value, $_POST['yandex_geo_pipeline_schedule_days'] ) : array();
+			$time = sanitize_text_field( wp_unslash( $_POST['yandex_geo_pipeline_schedule_time'] ?? '03:00' ) );
+			$this->yandex_delivery_geo_pipeline_v2_runner->save_schedule_settings( $enabled, $days, $time );
+		}
+		wp_safe_redirect( add_query_arg( array( 'page' => self::MENU_SLUG, 'service' => $service_key, 'tab' => 'yandex_delivery_pickup' ), admin_url( 'admin.php' ) ) );
+		exit;
+	}
 	private function handle_yandex_region_mapping_v2_action( string $action ): void {
 		if ( ! $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ) {
 			return;
@@ -1712,10 +1727,25 @@ final class DeliveryServicesAdminPage {
 		$region_mapping_v2_rows = $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ? $this->yandex_region_mapping_v2_repository->list_rows() : array();
 		$region_mapping_v2_wdc_regions = $this->yandex_region_mapping_v2_repository instanceof YandexRegionMappingV2Repository ? $this->yandex_region_mapping_v2_repository->list_wdc_regions() : array();
 		$geo_pipeline_v2_state = $this->yandex_delivery_geo_pipeline_v2_runner instanceof YandexDeliveryGeoPipelineV2Runner ? $this->yandex_delivery_geo_pipeline_v2_runner->current_state() : array();
+		$geo_pipeline_v2_schedule = $this->yandex_delivery_geo_pipeline_v2_runner instanceof YandexDeliveryGeoPipelineV2Runner ? $this->yandex_delivery_geo_pipeline_v2_runner->schedule_settings() : array( 'enabled' => false, 'days' => array(), 'time' => '03:00', 'next_run' => '' );
 		?>
 		<h3><?php echo esc_html__( 'Яндекс ПВЗ/география', 'walls-delivery-calc' ); ?></h3>
 		<p class="description" style="max-width: 960px;"><?php echo esc_html__( 'Запрос выполняется без type и geo_id, чтобы получить все точки, которые отдаёт Яндекс. Сырой JSON сохраняется во временный файл и удаляется после успешного импорта.', 'walls-delivery-calc' ); ?></p>
-		<div id="wdc-yandex-delivery-geo-pipeline-v2" data-wdc-yandex-geo-pipeline-v2 data-wdc-yandex-geo-pipeline-v2-status="<?php echo esc_attr( (string) ( $geo_pipeline_v2_state['status'] ?? 'idle' ) ); ?>">
+		<form method="post" style="max-width: 1120px; margin: 16px 0; padding: 12px; border: 1px solid #dcdcde; background: #fff;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_yandex_geo_pipeline_v2_schedule" />
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>" />
+			<h3><?php echo esc_html__( 'Расписание полного обновления', 'walls-delivery-calc' ); ?></h3>
+			<p><label><input type="checkbox" name="yandex_geo_pipeline_schedule_enabled" value="1" <?php checked( ! empty( $geo_pipeline_v2_schedule['enabled'] ) ); ?> /> <?php echo esc_html__( 'Включить автоматическое обновление', 'walls-delivery-calc' ); ?></label></p>
+			<p><?php echo esc_html__( 'Дни запуска', 'walls-delivery-calc' ); ?>:<br>
+				<?php foreach ( $this->yandex_geo_pipeline_schedule_days() as $day => $label ) : ?>
+					<label style="display:inline-block;margin-right:12px;"><input type="checkbox" name="yandex_geo_pipeline_schedule_days[]" value="<?php echo esc_attr( (string) $day ); ?>" <?php checked( in_array( $day, (array) ( $geo_pipeline_v2_schedule['days'] ?? array() ), true ) ); ?> /> <?php echo esc_html( $label ); ?></label>
+				<?php endforeach; ?>
+			</p>
+			<p><label><?php echo esc_html__( 'Время запуска', 'walls-delivery-calc' ); ?> <input type="time" name="yandex_geo_pipeline_schedule_time" value="<?php echo esc_attr( (string) ( $geo_pipeline_v2_schedule['time'] ?? '03:00' ) ); ?>" /></label></p>
+			<p class="description"><?php echo esc_html__( 'Текущий статус расписания', 'walls-delivery-calc' ); ?>: <?php echo ! empty( $geo_pipeline_v2_schedule['enabled'] ) ? esc_html__( 'включено', 'walls-delivery-calc' ) : esc_html__( 'выключено', 'walls-delivery-calc' ); ?>; <?php echo esc_html__( 'следующий запуск', 'walls-delivery-calc' ); ?>: <code><?php echo esc_html( (string) ( $geo_pipeline_v2_schedule['next_run'] ?? '' ) ?: '—' ); ?></code></p>
+			<?php submit_button( __( 'Сохранить расписание', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+		</form>		<div id="wdc-yandex-delivery-geo-pipeline-v2" data-wdc-yandex-geo-pipeline-v2 data-wdc-yandex-geo-pipeline-v2-status="<?php echo esc_attr( (string) ( $geo_pipeline_v2_state['status'] ?? 'idle' ) ); ?>">
 			<h3><?php echo esc_html__( 'Полное обновление Яндекс ПВЗ/географии', 'walls-delivery-calc' ); ?></h3>
 			<p>
 				<button type="button" class="button button-primary" data-wdc-yandex-geo-pipeline-v2-start><?php echo esc_html__( 'Запустить полное обновление', 'walls-delivery-calc' ); ?></button>
@@ -1940,6 +1970,18 @@ final class DeliveryServicesAdminPage {
 			return rtrim( rtrim( number_format( $value, 6, '.', '' ), '0' ), '.' );
 		};
 		return $format( (float) $lat ) . ', ' . $format( (float) $lon );
+	}
+	/** @return array<int,string> */
+	private function yandex_geo_pipeline_schedule_days(): array {
+		return array(
+			1 => 'Пн',
+			2 => 'Вт',
+			3 => 'Ср',
+			4 => 'Чт',
+			5 => 'Пт',
+			6 => 'Сб',
+			7 => 'Вс',
+		);
 	}
 	/** @return array<string,string> */
 	private function yandex_delivery_geo_pipeline_v2_state_rows(): array {

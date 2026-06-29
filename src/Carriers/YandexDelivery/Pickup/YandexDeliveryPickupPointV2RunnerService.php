@@ -74,12 +74,12 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			$this->save_state( $state );
 			return $state;
 		}
-		if ( 0 === (int) ( $state['offset'] ?? 0 ) && empty( $state['pickup_points_truncated'] ) ) {
+		if ( 0 === (int) ( $state['offset'] ?? 0 ) && empty( $state['pickup_points_staging'] ) ) {
 			try {
-				$this->importer->truncate_repository();
-				$state['pickup_points_truncated'] = true;
+				$this->importer->prepare_staging_repository();
+				$state['pickup_points_staging'] = true;
 			} catch ( \Throwable $exception ) {
-				$state = $this->fail( $state, $exception->getMessage(), array_merge( array( 'action' => 'truncate_pickup_points_v2' ), $this->exception_context( $exception ) ) );
+				$state = $this->fail( $state, $exception->getMessage(), array_merge( array( 'action' => 'prepare_pickup_points_v2_staging' ), $this->exception_context( $exception ) ) );
 				$this->save_state( $state );
 				return $state;
 			}
@@ -100,6 +100,9 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			return $state;
 		}
 		try {
+			if ( ! empty( $state['pickup_points_staging'] ) ) {
+				$this->importer->use_staging_repository();
+			}
 			$result = $this->importer->import_from_json_file_streamed( (string) $state['json_file_path'], (int) $state['offset'], (int) $state['batch_size'] );
 			$state['offset'] = (int) $result['next_offset'];
 			$state['processed'] = (int) $state['processed'] + (int) $result['processed'];
@@ -109,6 +112,8 @@ final class YandexDeliveryPickupPointV2RunnerService {
 			$state['memory_peak_mb'] = (string) $result['memory_peak_mb'];
 			$state['updated_at'] = $this->now();
 			if ( ! empty( $result['done'] ) ) {
+				$this->importer->promote_staging_repository();
+				$state['pickup_points_staging_promoted'] = true;
 				$this->cleanup_successful_import_files( $state );
 				$state['status'] = 'done';
 				$state['message'] = 'Импорт полного списка ПВЗ v2 завершен.';
@@ -139,6 +144,7 @@ final class YandexDeliveryPickupPointV2RunnerService {
 
 	/** @return array<string,mixed> */
 	public function reset(): array {
+		$this->importer->reset_staging_repository();
 		$state = $this->idle_state();
 		$state['last_action'] = 'reset';
 		$this->save_state( $state );

@@ -26,6 +26,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $prefix = 'wp_';
 		public array $yandex_delivery_geo_v2 = array();
 		public array $yandex_location_mapping_v2 = array();
+	public array $yandex_location_mapping_v2_staging = array();
 		public array $yandex_location_manual_overrides_v2 = array();
 		public array $yandex_region_mapping_v2 = array();
 		public array $wdc_locations = array();
@@ -492,8 +493,9 @@ $manual_raw = json_decode( (string) $manual_rows[0]['raw_json'], true );
 yd_location_mapping_v2_assert( 'no_match' === $manual_rows[0]['status'] && 'manual_override_location_missing' === $manual_raw['reason'], 'Manual override with missing WDC location must not apply.' );
 $runner_repository = new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] );
 $runner = new YandexLocationMappingV2Runner( new YandexLocationMapperV2Service( $runner_repository, $GLOBALS['wpdb'], null, $region_repository ), $runner_repository );
+$live_mapping_count_before_start = count( $GLOBALS['wpdb']->yandex_location_mapping_v2 );
 $state = $runner->start();
-yd_location_mapping_v2_assert( 'mapping' === $state['status'] && 0 === count( $GLOBALS['wpdb']->yandex_location_mapping_v2 ), 'Runner start must truncate and switch to mapping.' );
+yd_location_mapping_v2_assert( 'mapping' === $state['status'] && $live_mapping_count_before_start === count( $GLOBALS['wpdb']->yandex_location_mapping_v2 ) && 0 === count( $GLOBALS['wpdb']->yandex_location_mapping_v2_staging ), 'Runner start must prepare staging without changing live mapping.' );
 $state = $runner->run_step();
 yd_location_mapping_v2_assert( 'done' === $state['status'] && 44 === $state['processed'] && 33 === $state['mapped'] && 4 === $state['needs_review'] && 7 === $state['no_match'], 'Runner first step must process the mapping batch.' );
 $state = $runner->run_step();

@@ -726,6 +726,8 @@ final class Plugin {
 		$this->container->get( ShipmentStatusAutoSyncCron::class )->register();
 		$this->container->get( DpdPickupPointAutoSync::class )->register();
 		add_action( YandexDeliveryGeoPipelineV2Runner::CRON_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_step' ) );
+		add_action( YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_start' ) );
+		$this->container->get( YandexDeliveryGeoPipelineV2Runner::class )->ensure_schedule();
 		add_action( 'rest_api_init', array( $this->container->get( PickupPointsRestController::class ), 'register' ) );
 		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
 	}

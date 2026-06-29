@@ -12,7 +12,9 @@ defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryGeoPipelineV2Runner {
 	public const CRON_HOOK = 'wdc_yandex_delivery_geo_pipeline_v2_run_step';
+	public const SCHEDULE_HOOK = 'wdc_yandex_delivery_geo_pipeline_v2_scheduled_start';
 	private const STATE_OPTION = 'wdc_yandex_delivery_geo_pipeline_v2_state';
+	private const SCHEDULE_OPTION = 'wdc_yandex_delivery_geo_pipeline_v2_schedule';
 	private const STAGE_IMPORT_PVZ = 'import_pvz';
 	private const STAGE_BUILD_GEO_V2 = 'build_geo_v2';
 	private const STAGE_REGION_ENRICHMENT = 'region_enrichment';
@@ -34,6 +36,10 @@ final class YandexDeliveryGeoPipelineV2Runner {
 
 	/** @return array<string,mixed> */
 	public function start(): array {
+		$current = $this->current_state();
+		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'running', 'paused' ), true ) ) {
+			return $current;
+		}
 		$state = $this->base_state( 'running', self::STAGE_IMPORT_PVZ );
 		$state['session_id'] = sha1( uniqid( 'yandex-geo-pipeline-v2-', true ) );
 		$state['started_at'] = $this->now();
@@ -88,6 +94,14 @@ final class YandexDeliveryGeoPipelineV2Runner {
 
 	public function run_scheduled_step(): void {
 		$this->run_step();
+	}
+
+	public function run_scheduled_start(): void {
+		$state = $this->current_state();
+		if ( ! in_array( (string) ( $state['status'] ?? '' ), array( 'running', 'paused' ), true ) ) {
+			$this->start();
+		}
+		$this->ensure_schedule();
 	}
 
 	/** @return array<string,mixed> */
@@ -355,6 +369,77 @@ final class YandexDeliveryGeoPipelineV2Runner {
 		}
 	}
 
+	/** @return array{enabled:bool,days:array<int,int>,time:string,next_run:string} */
+	public function schedule_settings(): array {
+		$settings = function_exists( 'get_option' ) ? get_option( self::SCHEDULE_OPTION, array() ) : array();
+		$days = is_array( $settings['days'] ?? null ) ? array_values( array_map( 'intval', $settings['days'] ) ) : array();
+		$days = array_values( array_filter( array_unique( $days ), static fn( int $day ): bool => $day >= 1 && $day <= 7 ) );
+		$time = preg_match( '/^\d{2}:\d{2}$/', (string) ( $settings['time'] ?? '' ) ) ? (string) $settings['time'] : '03:00';
+		return array(
+			'enabled' => ! empty( $settings['enabled'] ),
+			'days' => $days,
+			'time' => $time,
+			'next_run' => $this->next_scheduled_run(),
+		);
+	}
+
+	/** @param array<int,int|string> $days */
+	public function save_schedule_settings( bool $enabled, array $days, string $time ): array {
+		$days = array_values( array_filter( array_unique( array_map( 'intval', $days ) ), static fn( int $day ): bool => $day >= 1 && $day <= 7 ) );
+		$time = preg_match( '/^\d{2}:\d{2}$/', $time ) ? $time : '03:00';
+		$settings = array( 'enabled' => $enabled && array() !== $days, 'days' => $days, 'time' => $time );
+		if ( function_exists( 'update_option' ) ) {
+			update_option( self::SCHEDULE_OPTION, $settings, false );
+		}
+		$this->clear_scheduled_start();
+		$this->ensure_schedule();
+		return $this->schedule_settings();
+	}
+
+	public function ensure_schedule(): void {
+		$settings = $this->schedule_settings();
+		if ( empty( $settings['enabled'] ) || ! function_exists( 'wp_schedule_single_event' ) ) {
+			return;
+		}
+		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( self::SCHEDULE_HOOK ) ) {
+			return;
+		}
+		$timestamp = $this->next_schedule_timestamp( $settings );
+		if ( $timestamp > 0 ) {
+			wp_schedule_single_event( $timestamp, self::SCHEDULE_HOOK );
+		}
+	}
+
+	private function clear_scheduled_start(): void {
+		if ( function_exists( 'wp_clear_scheduled_hook' ) ) {
+			wp_clear_scheduled_hook( self::SCHEDULE_HOOK );
+		}
+	}
+
+	/** @param array{enabled:bool,days:array<int,int>,time:string,next_run:string} $settings */
+	private function next_schedule_timestamp( array $settings ): int {
+		if ( empty( $settings['enabled'] ) || array() === $settings['days'] ) {
+			return 0;
+		}
+		$now = time();
+		[$hour, $minute] = array_map( 'intval', explode( ':', $settings['time'] ) );
+		for ( $offset = 0; $offset < 14; ++$offset ) {
+			$day_ts = strtotime( '+' . $offset . ' days', $now );
+			if ( false === $day_ts || ! in_array( (int) date( 'N', $day_ts ), $settings['days'], true ) ) {
+				continue;
+			}
+			$candidate = mktime( $hour, $minute, 0, (int) date( 'n', $day_ts ), (int) date( 'j', $day_ts ), (int) date( 'Y', $day_ts ) );
+			if ( $candidate > $now ) {
+				return $candidate;
+			}
+		}
+		return 0;
+	}
+
+	private function next_scheduled_run(): string {
+		$timestamp = function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( self::SCHEDULE_HOOK ) : false;
+		return $timestamp ? gmdate( 'Y-m-d H:i:s', (int) $timestamp ) : '';
+	}
 	private function stage_label( string $stage ): string {
 		return match ( $stage ) {
 			self::STAGE_IMPORT_PVZ => 'Импорт ПВЗ',

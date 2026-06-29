@@ -36,6 +36,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		public array $yandex_delivery_pickup_points_v2 = array();
+		public array $yandex_delivery_pickup_points_v2_staging = array();
 		public int $yandex_delivery_pickup_points_v2_truncate_count = 0;
 		public function prepare( string $query, mixed ...$args ): string { foreach ( $args as $arg ) { $query = preg_replace( '/%[sdf]/', is_numeric( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query; } return $query; }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
@@ -148,7 +149,7 @@ $state = $runner->start_import();
 yd_v2_runner_assert( 'importing' === $state['status'], 'Runner start_import must switch to importing.' );
 $state = $runner->run_import_step();
 yd_v2_runner_assert( $state['offset'] > 0 && $state['processed'] > 0 && $state['saved'] > 0 && isset( $state['memory_peak_mb'] ), 'Runner step must update counters and memory peak.' );
-yd_v2_runner_assert( 1 === $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2_truncate_count && $runner_repository->count_all() > 0 && null === $runner_repository->find( 'stale-before-runner-import' ), 'Runner import steps must continue without repeated truncate and stale pickup rows must stay removed.' );
+yd_v2_runner_assert( in_array( $state['status'], array( 'importing', 'done' ), true ) && $runner_repository->count_all() > 0 && null === $runner_repository->find( 'stale-before-runner-import' ), 'Runner import step must write through staging and keep stale pickup rows out of the promoted live table.' );
 $paused = $runner->pause();
 yd_v2_runner_assert( 'paused' !== $paused['status'] || $paused['offset'] === $state['offset'], 'Runner pause must not advance import.' );
 $reset = $runner->reset();
@@ -177,7 +178,7 @@ $download_method_end = false === $download_method_start ? false : strpos( $runne
 $runner_download_block = false !== $download_method_start && false !== $download_method_end ? substr( $runner_source, $download_method_start, $download_method_end - $download_method_start ) : '';
 yd_v2_runner_assert( '' !== $runner_download_block && ! str_contains( $runner_download_block, 'pickupPointsListRawJson' ) && str_contains( $runner_download_block, 'pickupPointsListDownloadToFile' ), 'Runner download must use download-to-file API method, not raw JSON string method.' );
 yd_v2_runner_assert( '' !== $runner_download_block && ! str_contains( $runner_download_block, 'file_put_contents( $file, $json' ), 'Runner download must not write a full in-memory JSON string to file.' );
-yd_v2_runner_assert( str_contains( $runner_source, 'pickup_points_truncated' ) && str_contains( $runner_source, 'truncate_repository' ), 'Runner must truncate pickup_points_v2 once before first import batch.' );
+yd_v2_runner_assert( str_contains( $runner_source, 'prepare_staging_repository' ) && str_contains( $runner_source, 'promote_staging_repository' ) && ! str_contains( $runner_source, 'truncate_repository' ), 'Runner must import pickup_points_v2 into staging and promote only after success.' );
 yd_v2_runner_assert( str_contains( $runner_source, 'cleanup_successful_import_files' ) && str_contains( $runner_source, 'remove_empty_temp_dirs' ), 'Runner must clean temporary JSON files after successful import.' );
 yd_v2_runner_assert( str_contains( $runner_source, 'validate_json_file_container' ) && str_contains( $runner_source, 'first_non_whitespace_byte' ) && str_contains( $runner_source, 'last_non_whitespace_byte' ) && str_contains( $runner_source, 'fseek' ), 'Runner must validate downloaded JSON container from first/last bytes.' );
 yd_v2_runner_assert( str_contains( $runner_source, 'import_from_json_file_streamed' ) && ! str_contains( $runner_source, 'import_from_json_file(' ), 'Runner must use streamed import, not whole-file import.' );

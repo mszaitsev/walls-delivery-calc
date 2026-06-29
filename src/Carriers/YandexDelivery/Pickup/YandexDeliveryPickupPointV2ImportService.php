@@ -21,6 +21,22 @@ final class YandexDeliveryPickupPointV2ImportService {
 		$this->repository->truncate();
 	}
 
+	public function prepare_staging_repository(): void {
+		$this->repository->prepare_staging_table();
+	}
+
+	public function use_staging_repository(): void {
+		$this->repository->use_staging_table();
+	}
+
+	public function promote_staging_repository(): void {
+		$this->repository->promote_staging_to_live();
+	}
+
+	public function reset_staging_repository(): void {
+		$this->repository->drop_staging_table();
+	}
+
 	/**
 	 * @return array{received:int,normalized:int,saved:int,skipped_invalid:int,batches:int,progress:array<int,array<string,int>>}
 	 */
