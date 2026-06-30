@@ -181,6 +181,7 @@ use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+use WallsShop\WDC\Pickup\Presentation\PickupPointPresentationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
@@ -496,7 +497,8 @@ final class Plugin {
 		);
 		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod() );
 		$this->container->register( PickupPointRenderer::class, fn(): PickupPointRenderer => new PickupPointRenderer() );
-		$this->container->register( PickupPointCardRenderer::class, fn(): PickupPointCardRenderer => new PickupPointCardRenderer() );
+		$this->container->register( PickupPointPresentationResolver::class, fn(): PickupPointPresentationResolver => new PickupPointPresentationResolver() );
+		$this->container->register( PickupPointCardRenderer::class, fn(): PickupPointCardRenderer => new PickupPointCardRenderer( $this->container->get( PickupPointPresentationResolver::class ) ) );
 		$this->container->register( CheckoutRateRenderer::class, fn(): CheckoutRateRenderer => new CheckoutRateRenderer( $this->container->get( CheckoutSessionManager::class ), $this->container->get( PickupPointCardRenderer::class ) ) );
 		$this->container->register(
 			CheckoutDeliveryTypeSelector::class,

@@ -18,6 +18,7 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
@@ -279,6 +280,10 @@ yandex_checkout_assert( count( array_unique( $ids ) ) === count( $ids ), 'Yandex
 $by_id = array_combine( $ids, $rates );
 yandex_checkout_assert( 'Яндекс до ПВЗ — 7 дней' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Yandex pickup title must use settings title and pricing delivery time.' );
 yandex_checkout_assert( 'Яндекс до двери — 9 дней' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier title must use settings title and pricing delivery time.' );
+$pickup_delivery_rate = $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID];
+yandex_checkout_assert( DeliveryType::PICKUP === $pickup_delivery_rate->delivery_type && true === $pickup_delivery_rate->requires_pickup_point && YandexDeliverySettings::CARRIER_KEY === $pickup_delivery_rate->carrier_key && YandexDeliveryCarrier::PICKUP_RATE_ID === $pickup_delivery_rate->rate_id, 'Yandex pickup DeliveryRate must carry pickup type, pickup requirement, carrier key and rate id before WooCommerce mapping.' );
+$mapped_yandex_pickup = ( new WooCommerceRateMapper() )->map( $pickup_delivery_rate );
+yandex_checkout_assert( true === ( $mapped_yandex_pickup['meta_data']['requires_pickup_point'] ?? null ) && YandexDeliverySettings::CARRIER_KEY . ':pickup' === (string) ( $mapped_yandex_pickup['meta_data']['pickup_family'] ?? '' ) && DeliveryType::PICKUP === (string) ( $mapped_yandex_pickup['meta_data']['delivery_type'] ?? '' ) && YandexDeliverySettings::CARRIER_KEY === (string) ( $mapped_yandex_pickup['meta_data']['carrier_key'] ?? '' ) && YandexDeliveryCarrier::PICKUP_RATE_ID === (string) ( $mapped_yandex_pickup['meta_data']['rate_id'] ?? '' ), 'WooCommerceRateMapper must preserve Yandex pickup point meta for checkout rendering.' );
 yandex_checkout_assert( 23790 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ) && 46360 === (int) ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ), 'Yandex checkout rates must keep pricing-calculator prices in rate meta.' );
 yandex_checkout_assert( 23800 === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 46400 === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks(), 'Yandex checkout final prices must use regular delivery-service post-processing.' );
 yandex_checkout_assert( 'representative' === (string) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pickup_source'] ?? '' ), 'Yandex pickup pricing must mark representative fallback before buyer selection.' );

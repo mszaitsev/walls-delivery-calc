@@ -25,6 +25,7 @@ final class WooCommerceRateMapper {
 				'carrier_key'     => $rate->carrier_key,
 				'rate_id'         => $rate->rate_id,
 				'delivery_type'   => $rate->delivery_type,
+				'pickup_family'   => $this->pickup_family( $rate ),
 				'crossed_price'   => $rate->crossed_price?->to_array(),
 				'planned_delivery_comment' => $rate->planned_delivery_comment,
 				'comments'        => $rate->comments,
@@ -55,5 +56,24 @@ final class WooCommerceRateMapper {
 				'fallback_used'   => $fallback_used || 'fallback' === $rate->carrier_key,
 			),
 		);
+	}
+
+	private function pickup_family( DeliveryRate $rate ): string {
+		$explicit = trim( (string) ( $rate->meta['pickup_family'] ?? '' ) );
+		if ( '' !== $explicit ) {
+			return $explicit;
+		}
+
+		if ( ! $rate->requires_pickup_point || 'pickup' !== $rate->delivery_type ) {
+			return '';
+		}
+
+		$parts = explode( ':', $rate->rate_id );
+		$pickup_index = array_search( 'pickup', $parts, true );
+		if ( false !== $pickup_index && $pickup_index > 0 ) {
+			return (string) $parts[0] . ':pickup';
+		}
+
+		return '' !== trim( $rate->carrier_key ) ? trim( $rate->carrier_key ) . ':pickup' : '';
 	}
 }

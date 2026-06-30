@@ -84,7 +84,8 @@ final class CheckoutRateRenderer {
 		}
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
-		$family = $this->session_manager->shipping_method_family( $rate_id );
+		$family = trim( (string) ( $meta['pickup_family'] ?? '' ) );
+		$family = '' !== $family ? $this->session_manager->normalize_pickup_family( $family ) : $this->session_manager->shipping_method_family( $rate_id );
 		$selection = $this->session_manager->checkout_pickup_point_for_family( $family );
 		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id );
 		$has_selection = $matches
@@ -156,15 +157,53 @@ final class CheckoutRateRenderer {
 	private function meta( mixed $method ): array {
 		if ( is_object( $method ) && method_exists( $method, 'get_meta_data' ) ) {
 			$meta = $method->get_meta_data();
-
-			return is_array( $meta ) ? $meta : array();
+			return is_array( $meta ) ? $this->normalize_meta_data( $meta ) : array();
 		}
 
 		if ( is_object( $method ) && isset( $method->meta_data ) && is_array( $method->meta_data ) ) {
-			return $method->meta_data;
+			return $this->normalize_meta_data( $method->meta_data );
 		}
 
 		return array();
+	}
+
+	/**
+	 * @param array<mixed> $meta
+	 * @return array<string,mixed>
+	 */
+	private function normalize_meta_data( array $meta ): array {
+		if ( $this->is_assoc( $meta ) ) {
+			return $meta;
+		}
+
+		$normalized = array();
+		foreach ( $meta as $entry ) {
+			if ( is_object( $entry ) && method_exists( $entry, 'get_data' ) ) {
+				$entry = $entry->get_data();
+			}
+			if ( is_array( $entry ) && array_key_exists( 'key', $entry ) ) {
+				$key = trim( (string) $entry['key'] );
+				if ( '' !== $key ) {
+					$normalized[ $key ] = $entry['value'] ?? null;
+				}
+				continue;
+			}
+			if ( is_object( $entry ) && isset( $entry->key ) ) {
+				$key = trim( (string) $entry->key );
+				if ( '' !== $key ) {
+					$normalized[ $key ] = $entry->value ?? null;
+				}
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * @param array<mixed> $array
+	 */
+	private function is_assoc( array $array ): bool {
+		return array_keys( $array ) !== range( 0, count( $array ) - 1 );
 	}
 
 	private function format_money( int $kopecks ): string {

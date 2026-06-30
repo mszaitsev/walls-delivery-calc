@@ -398,6 +398,33 @@ final class WdcRuntimeSmokeRate {
 	}
 }
 
+final class WdcRuntimeSmokeMetaData {
+	public function __construct( private string $key, private mixed $value ) {}
+
+	/** @return array{key:string,value:mixed} */
+	public function get_data(): array {
+		return array(
+			'key'   => $this->key,
+			'value' => $this->value,
+		);
+	}
+}
+
+final class WdcRuntimeSmokeWooRate {
+	public string $id = 'wdc_platform:yandex_pickup';
+
+	/** @param array<string,mixed> $meta */
+	public function __construct( private array $meta ) {}
+
+	/** @return array<int,WdcRuntimeSmokeMetaData> */
+	public function get_meta_data(): array {
+		return array_map(
+			static fn ( string $key, mixed $value ): WdcRuntimeSmokeMetaData => new WdcRuntimeSmokeMetaData( $key, $value ),
+			array_keys( $this->meta ),
+			array_values( $this->meta )
+		);
+	}
+}
 if ( ! function_exists( 'WC' ) ) {
 	function WC(): WdcRuntimeSmokeWooCommerce {
 		static $wc = null;
@@ -674,6 +701,8 @@ $new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) 
 $checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'render_pickup_selector( $meta, $method )' ) && str_contains( $rate_renderer_source, 'data-wdc-pickup-checkout' ), 'Rate renderer must render checkout pickup UI for pickup-point rates.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'normalize_meta_data' ) && str_contains( $rate_renderer_source, "array_key_exists( 'key', \$entry )" ), 'Rate renderer must normalize real WooCommerce meta-data entries before checking pickup flags.' );
+runtime_smoke_assert( str_contains( $rate_mapper_source, "'pickup_family'" ) && str_contains( $rate_mapper_source, 'function pickup_family' ), 'WooCommerce rate mapper must expose pickup_family in top-level WC rate meta.' );
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, "woocommerce_after_shipping_rate', array( \$this, 'render'" ), 'Delivery type selector must not register a duplicate checkout pickup UI renderer.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['tariff_variants'] )" ), 'Domestic tariff selector rates must not duplicate planned_delivery_comment below the selector.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['domestic_tariff_grouped'] )" ), 'Domestic single-tariff grouped rates must keep planned_delivery_comment in the label only.' );
@@ -751,6 +780,7 @@ runtime_smoke_assert( DeliveryType::COURIER === ( $mapped_courier['meta_data']['
 runtime_smoke_assert( ! array_key_exists( 'is_courier', $mapped_courier['meta_data'] ) && ! array_key_exists( 'wdc_delivery_kind', $mapped_courier['meta_data'] ) && ! array_key_exists( 'delivery_kind', $mapped_courier['meta_data'] ), 'WDC courier rate must not expose visible courier helper meta.' );
 $mapped_pickup = ( new WooCommerceRateMapper() )->map( $cheap_rates[0] );
 runtime_smoke_assert( DeliveryType::PICKUP === ( $mapped_pickup['meta_data']['delivery_type'] ?? '' ) && ! array_key_exists( 'is_courier', $mapped_pickup['meta_data'] ), 'Pickup rate must keep delivery_type without visible courier helper meta.' );
+runtime_smoke_assert( true === ( $mapped_pickup['meta_data']['requires_pickup_point'] ?? null ) && 'demo:pickup' === (string) ( $mapped_pickup['meta_data']['pickup_family'] ?? '' ) && 'demo' === (string) ( $mapped_pickup['meta_data']['carrier_key'] ?? '' ), 'Pickup DeliveryRate meta must reach WooCommerce mapper with pickup requirement, family, and carrier.' );
 
 $explicit_meta_courier_rate = new DeliveryRate(
 	'demo:meta-courier',
@@ -850,6 +880,10 @@ runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup
 runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-shipping-method-id="yandex_pickup"' ), 'Yandex pickup checkout container must expose the rate id as data-shipping-method-id.' );
 runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'name="wdc_pickup_family"' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-family' ) && str_contains( $yandex_rate_pickup_output, 'value="yandex_delivery:pickup"' ), 'Yandex pickup checkout container must expose yandex_delivery:pickup family.' );
 runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-card' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-title-text' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-address' ), 'Yandex pickup checkout container must include JS-updated card placeholders.' );
+ob_start();
+$renderer->render( new WdcRuntimeSmokeWooRate( $yandex_pickup_meta + array( 'pickup_family' => 'yandex_delivery:pickup' ) ) );
+$yandex_wc_rate_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $yandex_wc_rate_pickup_output, 'data-wdc-pickup-checkout' ) && str_contains( $yandex_wc_rate_pickup_output, 'data-wdc-pickup-open' ) && str_contains( $yandex_wc_rate_pickup_output, 'data-wdc-pickup-family' ) && str_contains( $yandex_wc_rate_pickup_output, 'data-shipping-method-id="yandex_pickup"' ), 'CheckoutRateRenderer must render Yandex pickup UI when WooCommerce supplies meta as WC meta-data objects.' );
 
 $yandex_courier_meta = array(
 	'carrier_key'           => 'yandex_delivery',
@@ -1184,7 +1218,7 @@ foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 
         runtime_smoke_assert( str_contains( $courier_address_js, $needle ), 'Courier address summary JS must contain ' . $needle . '.' );
 }
 $pickup_checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' );
-foreach ( array( 'updated_checkout', 'boot();', "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init)", "event.target.closest ? event.target.closest('[data-wdc-pickup-open]')", 'openModal(container, containerMethod(container) || activeMethod || currentShippingMethod())', "family === 'dpd:pickup' || family === 'yandex_delivery:pickup'" ) as $needle ) {
+foreach ( array( 'updated_checkout', 'boot();', "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init)", "event.target.closest ? event.target.closest('[data-wdc-pickup-open]')", 'openModal(container, containerMethod(container) || activeMethod || currentShippingMethod())', "method === 'yandex_pickup'", "value === 'yandex_pickup'", "family === 'dpd:pickup' || family === 'yandex_delivery:pickup'" ) as $needle ) {
 	runtime_smoke_assert( str_contains( $pickup_checkout_js, $needle ), 'Pickup checkout JS must contain ' . $needle . '.' );
 }
 runtime_smoke_assert( ! str_contains( $pickup_checkout_js, "openButton.addEventListener('click'" ), 'Pickup checkout open button must use delegated click handling after updated_checkout DOM replacement.' );

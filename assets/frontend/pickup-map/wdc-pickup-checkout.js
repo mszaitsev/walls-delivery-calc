@@ -522,6 +522,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function shippingMethodFamily(value) {
 		var method = normalizeShippingMethod(value);
+		if (method === 'yandex_pickup') {
+			return 'yandex_delivery:pickup';
+		}
 		for (var i = 0; i < pickupFamilies.length; i++) {
 			if (method.indexOf(pickupFamilies[i]) === 0) {
 				return pickupFamilies[i];
@@ -1568,6 +1571,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function isPickupRateValue(value) {
 		value = normalizeShippingMethodValue(value);
+		if (value === 'yandex_pickup') {
+			return true;
+		}
 		if (/:pickup(?::|$)/.test(value)) {
 			return true;
 		}
