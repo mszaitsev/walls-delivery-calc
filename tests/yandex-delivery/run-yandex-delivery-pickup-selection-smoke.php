@@ -105,6 +105,19 @@ $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
 	array( 'platform_station_id' => 'DST-INACTIVE', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Закрытый', 'yandex_geo_id' => 65, 'active' => 0 ),
 	array( 'platform_station_id' => 'DST-DROPOFF', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Без dropoff', 'yandex_geo_id' => 66, 'active' => 1, 'available_for_dropoff' => 0 ),
 );
+for ( $i = 1; $i <= 1005; ++$i ) {
+	$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = array(
+		'platform_station_id' => 'DST-BULK-' . str_pad( (string) $i, 4, '0', STR_PAD_LEFT ),
+		'operator_id' => 0 === $i % 2 ? 'market_l4g' : '5post',
+		'type' => 0 === $i % 3 ? 'terminal' : 'pickup_point',
+		'name' => 'Массовый ПВЗ ' . $i,
+		'yandex_geo_id' => 0 === $i % 2 ? 65 : 66,
+		'locality' => 'Новосибирск',
+		'full_address' => 'Новосибирск, тестовая ' . $i,
+		'available_for_dropoff' => 0,
+		'active' => 1,
+	);
+}
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
 $mapping = new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] );
@@ -112,7 +125,7 @@ $formatter = new YandexDeliveryCheckoutPickupPointFormatter();
 $geo_ids = $mapping->geo_ids_for_location( 10 );
 $rows = $repository->destination_pickup_points_by_geo_ids( $geo_ids, 10 );
 yandex_pickup_selection_assert( array( 65, 66 ) === $geo_ids, 'Yandex mapping must return all mapped/manual geo ids for location_id.' );
-yandex_pickup_selection_assert( 3 === count( $rows ), 'Yandex destination repository must return active pickup/terminal rows from all geo ids.' );
+yandex_pickup_selection_assert( 1008 === count( $rows ), 'Yandex destination repository must return all active pickup/terminal rows from all geo ids without applying the legacy limit.' );
 yandex_pickup_selection_assert( in_array( (string) ( $rows[0]['platform_station_id'] ?? '' ), array( 'DST-A', 'DST-DROPOFF' ), true ) && 'pickup_point' === (string) ( $rows[0]['type'] ?? '' ), 'Yandex destination repository must sort pickup_point before terminal and keep market_l4g priority.' );
 yandex_pickup_selection_assert( null !== $repository->destination_pickup_point_by_platform_station_id( 'DST-DROPOFF' ), 'Yandex destination lookup must not require available_for_dropoff.' );
 yandex_pickup_selection_assert( null === $repository->destination_pickup_point_by_platform_station_id( 'DST-INACTIVE' ), 'Yandex destination lookup must reject inactive rows.' );
@@ -122,7 +135,7 @@ yandex_pickup_selection_assert( ! array_key_exists( 'raw_json', $formatted ) && 
 
 $points_controller = new PickupPointsRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), null, null, null, null, $repository, $mapping, $formatter );
 $points = $points_controller->points( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'location_id' => '10', 'limit' => '10' ) );
-yandex_pickup_selection_assert( 3 === count( $points ) && 'yandex_delivery:pickup' === (string) ( $points[0]['pickup_family'] ?? '' ), 'Pickup REST endpoint must return Yandex points in common map/list shape.' );
+yandex_pickup_selection_assert( 1008 === count( $points ) && 'yandex_delivery:pickup' === (string) ( $points[0]['pickup_family'] ?? '' ), 'Pickup REST endpoint must ignore REST limit and return all Yandex points in common map/list shape.' );
 $searched = $points_controller->search( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'location_id' => '10', 'q' => 'Красный' ) );
 yandex_pickup_selection_assert( 1 === count( $searched ) && 'DST-B' === (string) ( $searched[0]['platform_station_id'] ?? '' ), 'Pickup REST endpoint must search Yandex points by address/name.' );
 
@@ -143,6 +156,8 @@ yandex_pickup_selection_assert( 'DST-A' === (string) ( $save_response['pickup_po
 yandex_pickup_selection_assert( 'yandex_delivery:pickup' === (string) ( $save_response['active_pickup_family'] ?? '' ), 'Checkout save endpoint must store Yandex selection in yandex_delivery:pickup bucket.' );
 $resolve = $checkout_rest->resolve_location( new YandexPickupSelectionRequest( array( 'point' => array( 'carrier_key' => YandexDeliverySettings::CARRIER_KEY, 'point_code' => 'DST-A' ) ) ) );
 yandex_pickup_selection_assert( false === (bool) ( $resolve['requires_location_change'] ?? true ) && null === ( $resolve['location'] ?? null ), 'Yandex resolve_location must skip Russian Post location resolver path.' );
+$shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
+yandex_pickup_selection_assert( str_contains( $shipping_method_source, "'pickup_selections' => \$this->session_manager->pickup_selections()" ), 'NewShippingMethod must pass family-specific pickup_selections into QuoteRequest customer context.' );
 
 $validation = new CheckoutValidation( $session, new CheckoutAddressValidation( $session ), null, null, $repository, $formatter );
 $errors = new YandexPickupSelectionErrors();

@@ -260,8 +260,7 @@ final class PickupPointsRestController {
 		if ( array() === $geo_ids ) {
 			return array();
 		}
-		$limit = $this->limit( $request, 500, 1000 );
-		$rows = $this->yandex_points->destination_pickup_points_by_geo_ids( $geo_ids, $limit );
+		$rows = $this->yandex_points->destination_pickup_points_by_geo_ids( $geo_ids );
 
 		return array_map( fn( array $row ): array => $this->yandex_formatter->format( $row ), $rows );
 	}

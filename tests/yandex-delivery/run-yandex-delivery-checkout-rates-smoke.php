@@ -251,6 +251,9 @@ $pricing_http = new YandexCheckoutRatesFakeHttp( array(
 	new YandexDeliveryApiResponse( 200, '{"pricing_total":"300 RUB","delivery_days":5}' ),
 	new YandexDeliveryApiResponse( 200, '{"pricing_total":"500 RUB","delivery_days":6}' ),
 	new YandexDeliveryApiResponse( 200, '{"pricing_total":"199 RUB","delivery_days":4}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"410 RUB","delivery_days":8}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"188 RUB","delivery_days":3}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"420 RUB","delivery_days":8}' ),
 ) );
 $registry = new CarrierRegistry();
 $registry->register( new YandexDeliveryCarrier( $yandex_settings, new YandexDeliveryApiClient( $yandex_settings, $pricing_http ), new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] ), new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, new YandexDeliveryPricingRequestBuilder(), new YandexDeliveryPricingResponseParser() ) );
@@ -310,5 +313,31 @@ yandex_checkout_assert( null !== $selected_rate, 'Selected Yandex pickup calcula
 yandex_checkout_assert( 'selected' === (string) ( $selected_rate->meta['pickup_source'] ?? '' ) && 'DST-SELECTED' === (string) ( $selected_rate->meta['destination_platform_station_id'] ?? '' ), 'Selected Yandex PVZ must have priority over representative station.' );
 $selected_payload = yandex_checkout_pricing_payload( $pricing_http->requests[4] ?? array() );
 yandex_checkout_assert( 'DST-SELECTED' === (string) ( $selected_payload['destination']['platform_station_id'] ?? '' ), 'Yandex pricing payload must send selected platform_station_id.' );
+
+
+$family_selected_request = yandex_checkout_request( array(
+	'delivery_type' => DeliveryType::PICKUP,
+	'pickup_selection' => array(
+		'carrier_key' => 'dpd',
+		'pickup_family' => 'dpd:pickup',
+		'point_code' => 'DPD-OTHER',
+	),
+	'pickup_selections' => array(
+		YandexDeliverySettings::CARRIER_KEY . ':pickup' => array(
+			'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+			'pickup_family' => YandexDeliverySettings::CARRIER_KEY . ':pickup',
+			'snapshot' => array(
+				'platform_station_id' => 'DST-FAMILY',
+			),
+		),
+	),
+) );
+$family_selected_result = $orchestrator->calculate( $family_selected_request, array(), RateSorter::CHEAPEST, false );
+$family_rates_by_id = array_combine( array_map( static fn ( $rate ): string => $rate->rate_id, $family_selected_result->rates ), $family_selected_result->rates );
+$family_rate = $family_rates_by_id[YandexDeliveryCarrier::PICKUP_RATE_ID] ?? null;
+yandex_checkout_assert( null !== $family_rate, 'Family-specific Yandex pickup calculation must return pickup rate.' );
+yandex_checkout_assert( 'selected' === (string) ( $family_rate->meta['pickup_source'] ?? '' ) && 'DST-FAMILY' === (string) ( $family_rate->meta['destination_platform_station_id'] ?? '' ), 'Family-specific Yandex PVZ must win over global selection from another carrier.' );
+$family_payload = yandex_checkout_pricing_payload( $pricing_http->requests[6] ?? array() );
+yandex_checkout_assert( 'DST-FAMILY' === (string) ( $family_payload['destination']['platform_station_id'] ?? '' ), 'Yandex pricing payload must send family-specific selected platform_station_id.' );
 
 echo "Yandex Delivery checkout rates smoke test passed.\n";

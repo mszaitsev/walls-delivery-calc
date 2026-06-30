@@ -176,7 +176,21 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 	}
 
 	private function selected_destination_station_id( QuoteRequest $request ): string {
+		$family = YandexDeliverySettings::CARRIER_KEY . ':pickup';
+		$selections = is_array( $request->customer_context['pickup_selections'] ?? null ) ? $request->customer_context['pickup_selections'] : array();
+		$family_selection = is_array( $selections[ $family ] ?? null ) ? $selections[ $family ] : array();
+		$station_id = $this->station_id_from_pickup_selection( $family_selection );
+		if ( '' !== $station_id ) {
+			return $station_id;
+		}
+
 		$selection = is_array( $request->customer_context['pickup_selection'] ?? null ) ? $request->customer_context['pickup_selection'] : array();
+
+		return $this->station_id_from_pickup_selection( $selection );
+	}
+
+	/** @param array<string,mixed> $selection */
+	private function station_id_from_pickup_selection( array $selection ): string {
 		if ( array() === $selection ) {
 			return '';
 		}

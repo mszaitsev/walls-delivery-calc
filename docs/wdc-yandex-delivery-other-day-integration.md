@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.0. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.1. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -33,6 +33,11 @@ Architecture decision: coverage batch as a separate mass stage is not needed. Th
 
 
 
+## 0.104.1 Checkout PVZ review fixes
+
+For buyer checkout selection, Yandex destination PVZ loading now returns all points for the selected city instead of truncating at the REST limit. The endpoint still starts from checkout location_id, resolves all mapped/manual yandex_geo_id values, filters active rows with non-empty platform_station_id and type pickup_point or terminal, and does not require available_for_dropoff. The repository query used by the checkout picker has no SQL LIMIT and the test path no longer slices the result.
+
+Checkout pricing now receives the full family-scoped pickup_selections dictionary in QuoteRequest customer_context. yandex_pickup restores pickup_selections['yandex_delivery:pickup'] before considering the global pickup_selection, so switching to another carrier and back keeps the saved Yandex platform_station_id for pricing-calculator. Representative PVZ remains the fallback when no selected Yandex point exists.
 ## 0.104.0 Checkout buyer PVZ selection
 
 yandex_pickup now uses the common checkout pickup picker instead of only the representative destination PVZ. The endpoint reads active destination candidates from wp_wdc_yandex_delivery_pickup_points_v2 by all mapped/manual yandex_geo_id values for checkout location_id, requires non-empty platform_station_id, accepts 	ype=pickup_point and 	ype=terminal, and does not require vailable_for_dropoff because that flag describes sender dropoff availability. The frontend receives the shared pickup point format with carrier_key=yandex_delivery, point_code/platform_station_id, display address/name and safe snapshot.
