@@ -3,12 +3,18 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutRateRenderer {
 	public function __construct(
-		private ?CheckoutSessionManager $session_manager = null
+		private ?CheckoutSessionManager $session_manager = null,
+		private ?PickupPointCardRenderer $card_renderer = null
 	) {
+		$this->session_manager ??= new CheckoutSessionManager();
+		$this->card_renderer ??= new PickupPointCardRenderer();
 	}
 
 	public function register(): void {
@@ -43,6 +49,7 @@ final class CheckoutRateRenderer {
 		echo '<div class="' . esc_attr( implode( ' ', $classes ) ) . '">';
 
 		$this->render_tariff_selector( $meta );
+		$this->render_pickup_selector( $meta, $method );
 		$this->render_courier_address_summary( $meta );
 
 		if ( empty( $meta['domestic_tariff_grouped'] ) && empty( $meta['tariff_variants'] ) && '' !== trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) ) ) {
@@ -58,6 +65,89 @@ final class CheckoutRateRenderer {
 		}
 
 		echo '</div>';
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_pickup_selector( array $meta, mixed $method ): void {
+		if ( empty( $meta['requires_pickup_point'] ) || DeliveryType::PICKUP !== (string) ( $meta['delivery_type'] ?? '' ) ) {
+			return;
+		}
+		if ( $this->skip_pickup_selection( $meta ) ) {
+			return;
+		}
+
+		$carrier_key = (string) ( $meta['carrier_key'] ?? '' );
+		if ( '' === $carrier_key ) {
+			return;
+		}
+
+		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
+		$family = $this->session_manager->shipping_method_family( $rate_id );
+		$selection = $this->session_manager->checkout_pickup_point_for_family( $family );
+		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id );
+		$has_selection = $matches
+			&& array() !== $selection
+			&& '' !== trim( (string) ( $selection['point_code'] ?? '' ) )
+			&& '' !== trim( (string) ( $selection['point_address'] ?? $selection['address'] ?? '' ) );
+
+		echo '<div class="wdc-rp-pickup-checkout" data-wdc-pickup-checkout data-shipping-method-id="' . esc_attr( $rate_id ) . '" data-carrier-key="' . esc_attr( $carrier_key ) . '">';
+		echo '<input type="hidden" name="wdc_platform_pickup_rate_id" value="' . esc_attr( $rate_id ) . '">';
+		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( $carrier_key ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_id" data-wdc-pickup-point-id value="' . esc_attr( (string) ( $selection['id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_code" data-wdc-pickup-point-code value="' . esc_attr( (string) ( $selection['point_code'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_carrier_key" data-wdc-pickup-carrier-key value="' . esc_attr( (string) ( $selection['carrier_key'] ?? $carrier_key ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_service_key" data-wdc-pickup-service-key value="' . esc_attr( (string) ( $selection['service_key'] ?? $carrier_key ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_family" data-wdc-pickup-family value="' . esc_attr( (string) ( $selection['pickup_family'] ?? $family ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_type" data-wdc-pickup-point-type value="' . esc_attr( (string) ( $selection['point_type'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_type_label" data-wdc-pickup-point-type-label value="' . esc_attr( (string) ( $selection['point_type_label'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_title" data-wdc-pickup-point-title value="' . esc_attr( (string) ( $selection['point_title'] ?? $selection['card_title'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_name" data-wdc-pickup-point-name value="' . esc_attr( (string) ( $selection['point_name'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_address" data-wdc-pickup-point-address value="' . esc_attr( (string) ( $selection['point_address'] ?? $selection['address'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_postcode" data-wdc-pickup-point-postcode value="' . esc_attr( (string) ( $selection['point_postcode'] ?? $selection['postcode'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_city_name" data-wdc-pickup-city-name value="' . esc_attr( (string) ( $selection['city_name'] ?? $selection['city'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_region_name" data-wdc-pickup-region-name value="' . esc_attr( (string) ( $selection['region_name'] ?? $selection['region'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_work_time" data-wdc-pickup-work-time-field value="' . esc_attr( (string) ( $selection['point_work_time'] ?? $selection['work_time'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_description" data-wdc-pickup-description-field value="' . esc_attr( (string) ( $selection['description'] ?? $selection['point_comment'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_storage_notice" data-wdc-pickup-storage-notice-field value="' . esc_attr( (string) ( $selection['storage_notice'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_marker_type" data-wdc-pickup-marker-type value="' . esc_attr( (string) ( $selection['marker_type'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_cdek_code" data-wdc-pickup-cdek-code value="' . esc_attr( (string) ( $selection['cdek_code'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_location_id" data-wdc-pickup-location-id value="' . esc_attr( (string) ( $selection['location_id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_fias_id" data-wdc-pickup-fias-id value="' . esc_attr( (string) ( $selection['fias_id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_gar_object_id" data-wdc-pickup-gar-object-id value="' . esc_attr( (string) ( $selection['gar_object_id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_destination_fingerprint" data-wdc-pickup-destination-fingerprint value="' . esc_attr( (string) ( $selection['destination_fingerprint'] ?? '' ) ) . '">';
+		$empty_button_class = 'button wdc-rp-pickup-checkout__button' . ( $has_selection ? ' wdc-is-hidden' : '' );
+		echo '<button type="button" class="' . esc_attr( $empty_button_class ) . '" data-wdc-pickup-open data-wdc-pickup-empty-open aria-hidden="' . esc_attr( $has_selection ? 'true' : 'false' ) . '"' . ( $has_selection ? ' hidden style="display:none;"' : '' ) . '>' . esc_html( __( 'Выбрать пункт выдачи', 'walls-delivery-calc' ) ) . '</button>';
+		echo $this->card_renderer->render(
+			array_merge(
+				$selection,
+				array(
+					'carrier_key' => $carrier_key,
+					'rate_id'     => $rate_id,
+				)
+			),
+			true,
+			! $has_selection,
+			false
+		);
+		echo '</div>';
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function skip_pickup_selection( array $meta ): bool {
+		if ( ! empty( $meta['no_pickup_selection'] ) ) {
+			return true;
+		}
+
+		$rate_meta = $meta['rate_meta'] ?? array();
+		return is_array( $rate_meta ) && ! empty( $rate_meta['no_pickup_selection'] );
+	}
+
+	private function method_id( mixed $method ): string {
+		return is_object( $method ) && isset( $method->id ) ? (string) $method->id : '';
 	}
 
 	/**

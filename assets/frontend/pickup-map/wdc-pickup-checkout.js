@@ -1783,7 +1783,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function requiresRateRefreshAfterPickupSave(point) {
-		return pickupFamily(point) === 'dpd:pickup';
+		var family = pickupFamily(point);
+		return family === 'dpd:pickup' || family === 'yandex_delivery:pickup';
 	}
 
 	function boot() {

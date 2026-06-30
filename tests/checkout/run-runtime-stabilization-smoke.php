@@ -673,6 +673,8 @@ $rate_mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/
 $new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
 $checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'render_pickup_selector( $meta, $method )' ) && str_contains( $rate_renderer_source, 'data-wdc-pickup-checkout' ), 'Rate renderer must render checkout pickup UI for pickup-point rates.' );
+runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, "woocommerce_after_shipping_rate', array( \$this, 'render'" ), 'Delivery type selector must not register a duplicate checkout pickup UI renderer.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['tariff_variants'] )" ), 'Domestic tariff selector rates must not duplicate planned_delivery_comment below the selector.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['domestic_tariff_grouped'] )" ), 'Domestic single-tariff grouped rates must keep planned_delivery_comment in the label only.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'count( $variants ) < 2' ), 'Domestic tariff selector must not render radio list for a single tariff.' );
@@ -833,6 +835,33 @@ ob_start();
 $renderer->render( new WdcRuntimeSmokeRate( $mapped_pickup['meta_data'] ) );
 $pickup_summary_output = (string) ob_get_clean();
 runtime_smoke_assert( ! str_contains( $pickup_summary_output, 'wdc-courier-address-summary' ), 'Courier summary block must not render inside pickup rate.' );
+$yandex_pickup_meta = array(
+	'carrier_key'           => 'yandex_delivery',
+	'service_key'           => 'yandex_delivery',
+	'rate_id'               => 'yandex_pickup',
+	'delivery_type'         => DeliveryType::PICKUP,
+	'requires_pickup_point' => true,
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $yandex_pickup_meta ) );
+$yandex_rate_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-checkout' ), 'CheckoutRateRenderer must render pickup checkout container for Yandex pickup.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-open' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-empty-open' ), 'CheckoutRateRenderer must render pickup open buttons for Yandex pickup.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-shipping-method-id="yandex_pickup"' ), 'Yandex pickup checkout container must expose the rate id as data-shipping-method-id.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'name="wdc_pickup_family"' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-family' ) && str_contains( $yandex_rate_pickup_output, 'value="yandex_delivery:pickup"' ), 'Yandex pickup checkout container must expose yandex_delivery:pickup family.' );
+runtime_smoke_assert( str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-card' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-title-text' ) && str_contains( $yandex_rate_pickup_output, 'data-wdc-pickup-address' ), 'Yandex pickup checkout container must include JS-updated card placeholders.' );
+
+$yandex_courier_meta = array(
+	'carrier_key'           => 'yandex_delivery',
+	'service_key'           => 'yandex_delivery',
+	'rate_id'               => 'yandex_courier',
+	'delivery_type'         => DeliveryType::COURIER,
+	'requires_pickup_point' => false,
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $yandex_courier_meta ) );
+$yandex_rate_courier_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $yandex_rate_courier_output, 'data-wdc-pickup-checkout' ) && ! str_contains( $yandex_rate_courier_output, 'data-wdc-pickup-open' ), 'CheckoutRateRenderer must not render pickup UI for Yandex courier.' );
 
 $quote_cache = new QuoteCache();
 $service_cache_key_a = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' );
@@ -1155,7 +1184,7 @@ foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 
         runtime_smoke_assert( str_contains( $courier_address_js, $needle ), 'Courier address summary JS must contain ' . $needle . '.' );
 }
 $pickup_checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' );
-foreach ( array( 'updated_checkout', 'boot();', "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init)", "event.target.closest ? event.target.closest('[data-wdc-pickup-open]')", 'openModal(container, containerMethod(container) || activeMethod || currentShippingMethod())' ) as $needle ) {
+foreach ( array( 'updated_checkout', 'boot();', "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init)", "event.target.closest ? event.target.closest('[data-wdc-pickup-open]')", 'openModal(container, containerMethod(container) || activeMethod || currentShippingMethod())', "family === 'dpd:pickup' || family === 'yandex_delivery:pickup'" ) as $needle ) {
 	runtime_smoke_assert( str_contains( $pickup_checkout_js, $needle ), 'Pickup checkout JS must contain ' . $needle . '.' );
 }
 runtime_smoke_assert( ! str_contains( $pickup_checkout_js, "openButton.addEventListener('click'" ), 'Pickup checkout open button must use delegated click handling after updated_checkout DOM replacement.' );

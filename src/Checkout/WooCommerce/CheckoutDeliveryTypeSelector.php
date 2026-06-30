@@ -23,7 +23,6 @@ final class CheckoutDeliveryTypeSelector {
 	}
 
 	public function register(): void {
-		add_action( 'woocommerce_after_shipping_rate', array( $this, 'render' ), 20, 2 );
 		add_action( 'woocommerce_checkout_update_order_review', array( $this, 'capture_update_order_review' ), 10, 1 );
 		add_action( 'wp_loaded', array( $this, 'capture_posted_selection' ) );
 	}

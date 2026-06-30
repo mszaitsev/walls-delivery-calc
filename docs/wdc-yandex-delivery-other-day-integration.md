@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.2. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.3. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -33,6 +33,11 @@ Architecture decision: coverage batch as a separate mass stage is not needed. Th
 
 
 
+## 0.104.3 Checkout pickup renderer fix
+
+The checkout pickup button is now rendered by CheckoutRateRenderer itself for rates with requires_pickup_point=true and delivery_type=pickup. yandex_pickup therefore receives the shared data-wdc-pickup-checkout container, data-shipping-method-id=yandex_pickup, the standard hidden fields and wdc_pickup_family=yandex_delivery:pickup in the same rate meta block that renders tariffs, courier address summaries and comments. yandex_courier remains without pickup UI.
+
+CheckoutDeliveryTypeSelector no longer registers a duplicate shipping-rate HTML renderer, while its session capture compatibility stays in place. wdc-pickup-checkout.js now treats yandex_delivery:pickup like DPD pickup for post-save recalculation and triggers update_checkout after a Yandex PVZ is saved, allowing the existing selected-station pricing flow to refresh the shown rate.
 ## 0.104.2 Checkout pickup button init fix
 
 The checkout picker assets are now loaded on checkout before pickup rates exist in session, so a later WooCommerce updated_checkout response that includes yandex_pickup has the required JS/CSS already present. The script still reboots on updated_checkout and now uses delegated clicks for data-wdc-pickup-open, keeping the Yandex pickup button clickable after WooCommerce replaces the shipping methods HTML.
