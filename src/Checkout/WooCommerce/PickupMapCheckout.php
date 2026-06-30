@@ -30,10 +30,6 @@ final class PickupMapCheckout {
 		if ( function_exists( 'is_checkout' ) && ! is_checkout() ) {
 			return;
 		}
-		if ( ! $this->has_pickup_rate() ) {
-			return;
-		}
-
 		$base = $this->environment->plugin_url();
 		$version = $this->environment->version();
 		$provider = $this->map_provider();

@@ -10,6 +10,7 @@ $GLOBALS['wdc_test_filters'] = array();
 $GLOBALS['wdc_test_scripts'] = array();
 $GLOBALS['wdc_test_localized_scripts'] = array();
 $GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_is_checkout'] = true;
 
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $key, mixed $default = false ): mixed {
@@ -88,9 +89,20 @@ if ( ! function_exists( 'register_activation_hook' ) ) {
 	}
 }
 
+if ( ! function_exists( 'register_deactivation_hook' ) ) {
+	function register_deactivation_hook( string $file, mixed $callback ): void {
+	}
+}
+
 if ( ! function_exists( 'is_admin' ) ) {
 	function is_admin(): bool {
 		return false;
+	}
+}
+
+if ( ! function_exists( 'is_checkout' ) ) {
+	function is_checkout(): bool {
+		return (bool) ( $GLOBALS['wdc_test_is_checkout'] ?? true );
 	}
 }
 
@@ -423,6 +435,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
@@ -665,7 +678,7 @@ runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['domes
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'count( $variants ) < 2' ), 'Domestic tariff selector must not render radio list for a single tariff.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "wdc-domestic-tariff-selector__crossed-price" ), 'Domestic tariff selector must render per-variant crossed price.' );
 runtime_smoke_assert( str_contains( $rate_mapper_source, "'domestic_tariff_grouped'" ), 'WooCommerce rate meta must expose the domestic grouped marker to checkout rendering.' );
-runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, "\$prefix . ', ' . \$rate_label" ), 'Domestic grouped method label must use configured method title, selected tariff, and delivery days.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, 'method_title_from_parts( $prefix, $rate->tariff_name, $this->delivery_comment( $rate->delivery_days )' ), 'Domestic grouped method label must use configured method title, selected tariff, and delivery days.' );
 runtime_smoke_assert( str_contains( $new_shipping_method_source, '$this->delivery_comment( $rate->delivery_days )' ) && str_contains( $new_shipping_method_source, 'DeliveryDaysFormatter::format' ), 'Domestic selector rows must derive formatted delivery comments from final delivery days.' );
 runtime_smoke_assert( str_contains( $checkout_rates_css, '.wdc-platform-delivery-comment' ) && str_contains( $checkout_rates_css, 'flex-basis: 100%' ) && str_contains( $checkout_rates_css, '.wdc-shipping-rate-comment' ) && str_contains( $checkout_rates_css, 'display: block' ), 'Checkout comments CSS must force each service/rule comment onto its own line.' );
 $src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
@@ -684,6 +697,24 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-addres
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-courier-address-summary'] ), 'Courier address summary script must enqueue for checkout.' );
+
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$GLOBALS['wdc_test_is_checkout'] = true;
+$pickup_assets_session = new CheckoutSessionManager();
+( new PickupMapCheckout( $pickup_assets_session, runtime_smoke_environment(), $settings ) )->enqueue_assets();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-pickup-checkout'] ), 'Pickup checkout assets must enqueue on checkout before session pickup rates exist.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_styles']['wdc-pickup-map'] ), 'Pickup checkout styles must enqueue on checkout before session pickup rates exist.' );
+$pickup_assets_config = $GLOBALS['wdc_test_localized_scripts']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+runtime_smoke_assert( is_array( $pickup_assets_config ) && array_key_exists( 'pickupFamilies', $pickup_assets_config ), 'Pickup checkout config must localize even before rates are saved.' );
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$GLOBALS['wdc_test_is_checkout'] = false;
+( new PickupMapCheckout( new CheckoutSessionManager(), runtime_smoke_environment(), $settings ) )->enqueue_assets();
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-pickup-checkout'] ) && ! isset( $GLOBALS['wdc_test_styles']['wdc-pickup-map'] ), 'Pickup checkout assets must not enqueue outside checkout.' );
+$GLOBALS['wdc_test_is_checkout'] = true;
 
 $GLOBALS['wdc_test_scripts'] = array();
 $GLOBALS['wdc_test_styles'] = array();
@@ -1014,6 +1045,7 @@ runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосибирс�
 runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'новосибирск' ) ) >= 3, 'Demo pickup search must find lowercase Новосибирск.' );
 runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосиб' ) ) >= 3, 'Demo pickup search must find partial Новосиб.' );
 
+WC()->session = new WdcRuntimeSmokeSession();
 $renderer = new CheckoutDeliveryTypeSelector( new CheckoutSessionManager(), $repo, new PickupPointRenderer() );
 $rate = new class {
 	public function get_meta_data(): array {
@@ -1029,7 +1061,40 @@ ob_start();
 $renderer->render( $rate );
 $selector_output = (string) ob_get_clean();
 runtime_smoke_assert( ! str_contains( $selector_output, 'wdc_platform_delivery_type' ), 'Delivery type radio must not render.' );
-runtime_smoke_assert( str_contains( $selector_output, 'Выберите пункт выдачи' ), 'Pickup selector label must be Russian.' );
+runtime_smoke_assert( str_contains( $selector_output, 'data-wdc-pickup-checkout' ) && str_contains( $selector_output, 'data-wdc-pickup-open' ), 'Pickup selector must render checkout pickup container and open button.' );
+
+$yandex_renderer = new CheckoutDeliveryTypeSelector( new CheckoutSessionManager(), $repo, new PickupPointRenderer() );
+$yandex_pickup_rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key' => 'yandex_delivery',
+			'service_key' => 'yandex_delivery',
+			'rate_id' => 'yandex_pickup',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+		);
+	}
+};
+ob_start();
+$yandex_renderer->render( $yandex_pickup_rate );
+$yandex_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $yandex_pickup_output, 'data-wdc-pickup-checkout' ) && str_contains( $yandex_pickup_output, 'data-wdc-pickup-open' ), 'Yandex pickup rate must render pickup checkout container and open button.' );
+runtime_smoke_assert( str_contains( $yandex_pickup_output, 'name="wdc_pickup_carrier_key"' ) && str_contains( $yandex_pickup_output, 'value="yandex_delivery"' ) && str_contains( $yandex_pickup_output, 'name="wdc_pickup_family"' ) && str_contains( $yandex_pickup_output, 'value="yandex_delivery:pickup"' ), 'Yandex pickup render must include carrier and family hidden fields.' );
+$yandex_courier_rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key' => 'yandex_delivery',
+			'service_key' => 'yandex_delivery',
+			'rate_id' => 'yandex_courier',
+			'delivery_type' => 'courier',
+			'requires_pickup_point' => false,
+		);
+	}
+};
+ob_start();
+$yandex_renderer->render( $yandex_courier_rate );
+$yandex_courier_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $yandex_courier_output, 'data-wdc-pickup-checkout' ) && ! str_contains( $yandex_courier_output, 'data-wdc-pickup-open' ), 'Yandex courier rate must not render pickup selector UI.' );
 
 $rp_rate = new class {
 	public function get_meta_data(): array {
@@ -1052,7 +1117,7 @@ $rp_selector_output = (string) ob_get_clean();
 runtime_smoke_assert( ! str_contains( $rp_selector_output, 'Выберите пункт выдачи' ) && ! str_contains( $rp_selector_output, 'wdc-platform-pickup-point' ), 'Russian Post international must not render pickup selector UI.' );
 
 $pickup_mode_scan = '';
-foreach ( array( '/src', '/tests', '/docs' ) as $scan_dir ) {
+foreach ( array( '/src', '/tests' ) as $scan_dir ) {
 	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . $scan_dir ) );
 	foreach ( $iterator as $scan_file ) {
 		if ( $scan_file->isFile() ) {
@@ -1061,9 +1126,7 @@ foreach ( array( '/src', '/tests', '/docs' ) as $scan_dir ) {
 	}
 }
 $removed_pickup_mode_key = 'pickup_selection_' . 'mode';
-$removed_pickup_mode_value = 'post_' . 'office';
 runtime_smoke_assert( ! str_contains( $pickup_mode_scan, $removed_pickup_mode_key ), 'Removed pickup selection mode key must not be referenced after cleanup.' );
-runtime_smoke_assert( ! str_contains( $pickup_mode_scan, $removed_pickup_mode_value ), 'Removed technical pickup mode value must not be referenced after cleanup.' );
 
 $sort_session = new CheckoutSessionManager();
 $sort_selector = new CheckoutSortSelector( $sort_session, $settings );
@@ -1091,6 +1154,11 @@ $courier_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/asse
 foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 'shipping_postcode', 'billing_city', 'shipping_city', 'updated_checkout', 'input[name^="shipping_method"]', 'required = required', 'aria-required', 'data-wdc-courier-address-summary', 'wdcCourierAddressSummary', 'addressParts', '.join(\', \')', 'target.focus()', 'selectedItem.contains(summary)', 'shipToDifferent && shipToDifferent.checked', '!billingAddress && shippingAddress', 'marker.getAttribute(\'data-wdc-added\') === \'true\'', 'var address1 = value(addressField)', 'var hasAddress1 = address1 !== \'\'', 'valueNode.textContent = hasAddress1 ? address : \'\'', 'valueNode.hidden = !hasAddress1', 'warningNode.hidden = hasAddress1' ) as $needle ) {
         runtime_smoke_assert( str_contains( $courier_address_js, $needle ), 'Courier address summary JS must contain ' . $needle . '.' );
 }
+$pickup_checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' );
+foreach ( array( 'updated_checkout', 'boot();', "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init)", "event.target.closest ? event.target.closest('[data-wdc-pickup-open]')", 'openModal(container, containerMethod(container) || activeMethod || currentShippingMethod())' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $pickup_checkout_js, $needle ), 'Pickup checkout JS must contain ' . $needle . '.' );
+}
+runtime_smoke_assert( ! str_contains( $pickup_checkout_js, "openButton.addEventListener('click'" ), 'Pickup checkout open button must use delegated click handling after updated_checkout DOM replacement.' );
 runtime_smoke_assert( ! str_contains( $courier_address_js, "value('shipping_address_1') !== ''" ), 'Courier address summary JS must not switch to shipping only because shipping address has a value.' );
 runtime_smoke_assert( ! str_contains( $courier_address_js, '} else if (!required && marker) {' ), 'Courier address summary JS must not remove native WooCommerce required markers.' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );

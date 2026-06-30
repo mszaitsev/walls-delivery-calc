@@ -50,9 +50,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		rememberDestinationFingerprint();
 		toggleForMethod(container);
 		schedulePrefetch();
-		container.querySelectorAll('[data-wdc-pickup-open]').forEach(function (openButton) {
-			openButton.addEventListener('click', function () { openModal(container, containerMethod(container) || activeMethod || method); });
-		});
 	}
 
 	function openModal(container, method) {
@@ -1973,6 +1970,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	});
 	document.addEventListener('DOMContentLoaded', boot);
 	document.addEventListener('click', function (event) {
+		var openButton = event.target && event.target.closest ? event.target.closest('[data-wdc-pickup-open]') : null;
+		if (openButton) {
+			var container = openButton.closest('[data-wdc-pickup-checkout]');
+			if (container && !openButton.disabled && !container.hidden) {
+				event.preventDefault();
+				openModal(container, containerMethod(container) || activeMethod || currentShippingMethod());
+			}
+			return;
+		}
 		if (event.target && event.target.matches('#place_order, [name="woocommerce_checkout_place_order"]')) {
 			beginPlaceOrder();
 		}
