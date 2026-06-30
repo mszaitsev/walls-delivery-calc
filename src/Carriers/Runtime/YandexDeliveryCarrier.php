@@ -154,14 +154,41 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 			}
 			$payload = $this->request_builder->courier( $request, $source_station_id, $address );
 		} else {
-			$destination_station_id = $this->representative_destination_station_id( $request );
-			$payload = $this->request_builder->pickup( $request, $source_station_id, $destination_station_id );
+			$pickup_destination = $this->pickup_destination_station_id( $request );
+			$payload = $this->request_builder->pickup( $request, $source_station_id, $pickup_destination['station_id'] );
 		}
 		$this->last_pricing_request_diagnostics = $this->request_builder->last_diagnostics();
+		if ( DeliveryType::PICKUP === $delivery_type && isset( $pickup_destination ) && is_array( $pickup_destination ) ) {
+			$this->last_pricing_request_diagnostics = array_merge( $this->last_pricing_request_diagnostics, array( 'pickup_source' => $pickup_destination['source'], 'destination_platform_station_id' => $pickup_destination['station_id'] ) );
+		}
 
 		return $this->response_parser->parse( $this->api->pricingCalculator( $payload ) );
 	}
 
+	/** @return array{station_id:string,source:string} */
+	private function pickup_destination_station_id( QuoteRequest $request ): array {
+		$selected = $this->selected_destination_station_id( $request );
+		if ( '' !== $selected ) {
+			return array( 'station_id' => $selected, 'source' => 'selected' );
+		}
+
+		return array( 'station_id' => $this->representative_destination_station_id( $request ), 'source' => 'representative' );
+	}
+
+	private function selected_destination_station_id( QuoteRequest $request ): string {
+		$selection = is_array( $request->customer_context['pickup_selection'] ?? null ) ? $request->customer_context['pickup_selection'] : array();
+		if ( array() === $selection ) {
+			return '';
+		}
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$carrier = (string) ( $selection['carrier_key'] ?? $selection['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+		$family = (string) ( $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		if ( YandexDeliverySettings::CARRIER_KEY !== $carrier && YandexDeliverySettings::CARRIER_KEY . ':pickup' !== $family ) {
+			return '';
+		}
+
+		return $this->sanitize_station_id( (string) ( $selection['platform_station_id'] ?? $selection['point_code'] ?? $snapshot['platform_station_id'] ?? $snapshot['point_code'] ?? '' ) );
+	}
 	private function representative_destination_station_id( QuoteRequest $request ): string {
 		if ( ! $this->location_mapping instanceof YandexLocationMappingV2Repository || ! $this->pickup_points instanceof YandexDeliveryPickupPointV2Repository ) {
 			throw new YandexDeliveryApiException( 'Локальная база ПВЗ Яндекс.Доставки недоступна.', array( 'error_code' => 'pickup_repository_missing' ) );

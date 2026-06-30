@@ -226,6 +226,39 @@ final class YandexDeliveryPickupPointV2Repository {
 		return is_array( $row ) ? $row : null;
 	}
 	/** @param array<int,mixed> $yandex_geo_ids @return array<int,array<string,mixed>> */
+	public function destination_pickup_points_by_geo_ids( array $yandex_geo_ids, int $limit = 500 ): array {
+		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		sort( $yandex_geo_ids, SORT_NUMERIC );
+		$limit = max( 1, min( 1000, $limit ) );
+		if ( array() === $yandex_geo_ids ) {
+			return array();
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values( array_filter( $this->wpdb->{$this->test_rows_property()}, fn( array $row ): bool => $this->is_destination_candidate_row( $row ) && in_array( (int) ( $row['yandex_geo_id'] ?? 0 ), $yandex_geo_ids, true ) ) );
+			usort( $rows, fn( array $a, array $b ): int => $this->destination_candidate_priority( $a ) <=> $this->destination_candidate_priority( $b ) ?: strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) ) );
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$this->create_schema_if_needed();
+		$placeholders = implode( ', ', array_fill( 0, count( $yandex_geo_ids ), '%d' ) );
+		$priority = "CASE WHEN type = 'pickup_point' THEN 1 WHEN type = 'terminal' THEN 2 ELSE 99 END, CASE WHEN operator_id = 'market_l4g' THEN 1 WHEN operator_id = '5post' THEN 2 ELSE 99 END";
+		$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, postal_code, full_address, latitude, longitude, instruction, schedule_text, active FROM ' . $this->table_name() . ' WHERE active = 1 AND yandex_geo_id IN (' . $placeholders . ") AND platform_station_id <> %s AND type IN ('pickup_point', 'terminal') ORDER BY " . $priority . ' ASC, locality ASC, name ASC, platform_station_id ASC LIMIT %d';
+		$args = array_merge( $yandex_geo_ids, array( '', $limit ) );
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	public function destination_pickup_point_by_platform_station_id( string $platform_station_id ): ?array {
+		$platform_station_id = trim( $platform_station_id );
+		if ( '' === $platform_station_id ) {
+			return null;
+		}
+		$row = $this->find( $platform_station_id );
+
+		return is_array( $row ) && $this->is_destination_candidate_row( $row ) ? $row : null;
+	}	/** @param array<int,mixed> $yandex_geo_ids @return array<int,array<string,mixed>> */
 	public function source_dropoff_points_by_geo_ids( array $yandex_geo_ids ): array {
 		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
 		sort( $yandex_geo_ids, SORT_NUMERIC );

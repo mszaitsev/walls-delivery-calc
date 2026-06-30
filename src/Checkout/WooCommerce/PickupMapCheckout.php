@@ -371,6 +371,12 @@ final class PickupMapCheckout {
 						'TERMINAL_SELF_DELIVERY' => array( 'card_title' => 'Терминал DPD', 'point_type_label' => 'Терминал', 'marker_type' => 'terminal' ),
 					),
 				),
+				'yandex_delivery:pickup' => array(
+					'types' => array(
+						'PICKUP_POINT' => array( 'card_title' => 'Пункт выдачи Яндекс.Доставки', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),
+						'TERMINAL' => array( 'card_title' => 'Терминал Яндекс.Доставки', 'point_type_label' => 'Терминал', 'marker_type' => 'terminal' ),
+					),
+				),
 				'russian_post_domestic:pickup' => array(
 					'types' => array(
 						'OPS' => array( 'card_title' => 'Отделение Почты России', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),

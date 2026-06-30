@@ -199,7 +199,14 @@ if ( ! class_exists( 'wpdb' ) ) {
 	}
 }
 
-function yandex_checkout_request(): QuoteRequest {
+function yandex_checkout_pricing_payload( array $request ): array {
+	$body = $request['args']['body'] ?? '{}';
+	$decoded = json_decode( (string) $body, true );
+
+	return is_array( $decoded ) ? $decoded : array();
+}
+
+function yandex_checkout_request( array $context = array() ): QuoteRequest {
 	$total = Money::from_rubles( 1000 );
 	$item = new PackageItem( 'SKU', 'Item', 1, $total, $total, 1000, 10, 10, 10 );
 
@@ -210,7 +217,7 @@ function yandex_checkout_request(): QuoteRequest {
 		'card',
 		$total,
 		'2026-06-29',
-		array( 'selected_location_id' => 10 )
+		array_merge( array( 'selected_location_id' => 10 ), $context )
 	);
 }
 
@@ -236,12 +243,14 @@ $GLOBALS['wpdb']->yandex_location_mapping_v2 = array(
 );
 $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
 	array( 'platform_station_id' => 'DST-1', 'name' => 'ПВЗ', 'locality' => 'Москва', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+	array( 'platform_station_id' => 'DST-SELECTED', 'name' => 'Выбранный ПВЗ', 'locality' => 'Москва', 'type' => 'terminal', 'operator_id' => '5post', 'yandex_geo_id' => 65, 'active' => 1 ),
 );
 $pricing_http = new YandexCheckoutRatesFakeHttp( array(
 	new YandexDeliveryApiResponse( 200, '{"pricing_total":"237.9 RUB","delivery_days":7}' ),
 	new YandexDeliveryApiResponse( 200, '{"pricing_total":"463.6 RUB","delivery_days":9}' ),
 	new YandexDeliveryApiResponse( 200, '{"pricing_total":"300 RUB","delivery_days":5}' ),
 	new YandexDeliveryApiResponse( 200, '{"pricing_total":"500 RUB","delivery_days":6}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"199 RUB","delivery_days":4}' ),
 ) );
 $registry = new CarrierRegistry();
 $registry->register( new YandexDeliveryCarrier( $yandex_settings, new YandexDeliveryApiClient( $yandex_settings, $pricing_http ), new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] ), new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, new YandexDeliveryPricingRequestBuilder(), new YandexDeliveryPricingResponseParser() ) );
@@ -269,6 +278,10 @@ yandex_checkout_assert( 'Яндекс до ПВЗ — 7 дней' === $by_id[Yan
 yandex_checkout_assert( 'Яндекс до двери — 9 дней' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier title must use settings title and pricing delivery time.' );
 yandex_checkout_assert( 23790 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ) && 46360 === (int) ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ), 'Yandex checkout rates must keep pricing-calculator prices in rate meta.' );
 yandex_checkout_assert( 23800 === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 46400 === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks(), 'Yandex checkout final prices must use regular delivery-service post-processing.' );
+yandex_checkout_assert( 'representative' === (string) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pickup_source'] ?? '' ), 'Yandex pickup pricing must mark representative fallback before buyer selection.' );
+yandex_checkout_assert( 'DST-1' === (string) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['destination_platform_station_id'] ?? '' ), 'Yandex pickup pricing must use representative destination station before buyer selection.' );
+$first_pickup_payload = yandex_checkout_pricing_payload( $pricing_http->requests[0] ?? array() );
+yandex_checkout_assert( 'DST-1' === (string) ( $first_pickup_payload['destination']['platform_station_id'] ?? '' ), 'Yandex pricing payload must send representative destination station before selection.' );
 foreach ( $rates as $rate ) {
 	yandex_checkout_assert( str_contains( $rate->title, ' — ' ) && 1 === preg_match( '/— [0-9]+ (день|дня|дней)$/u', $rate->title ), 'Yandex rate title must always use "Название — срок" format with pricing delivery days.' );
 }
@@ -280,5 +293,22 @@ $ids = array_map( static fn ( $rate ): string => $rate->rate_id, $result->rates 
 $by_id = array_combine( $ids, $result->rates );
 yandex_checkout_assert( 'Самовывоз Яндекс — 5 дней' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Changed pickup title in settings must affect checkout.' );
 yandex_checkout_assert( 'Курьер Яндекс — 6 дней' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Changed courier title in settings must affect checkout.' );
+
+$selected_request = yandex_checkout_request( array(
+	'delivery_type' => DeliveryType::PICKUP,
+	'pickup_selection' => array(
+		'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+		'pickup_family' => YandexDeliverySettings::CARRIER_KEY . ':pickup',
+		'point_code' => 'DST-SELECTED',
+		'platform_station_id' => 'DST-SELECTED',
+	),
+) );
+$selected_result = $orchestrator->calculate( $selected_request, array(), RateSorter::CHEAPEST, false );
+$selected_rates_by_id = array_combine( array_map( static fn ( $rate ): string => $rate->rate_id, $selected_result->rates ), $selected_result->rates );
+$selected_rate = $selected_rates_by_id[YandexDeliveryCarrier::PICKUP_RATE_ID] ?? null;
+yandex_checkout_assert( null !== $selected_rate, 'Selected Yandex pickup calculation must return pickup rate.' );
+yandex_checkout_assert( 'selected' === (string) ( $selected_rate->meta['pickup_source'] ?? '' ) && 'DST-SELECTED' === (string) ( $selected_rate->meta['destination_platform_station_id'] ?? '' ), 'Selected Yandex PVZ must have priority over representative station.' );
+$selected_payload = yandex_checkout_pricing_payload( $pricing_http->requests[4] ?? array() );
+yandex_checkout_assert( 'DST-SELECTED' === (string) ( $selected_payload['destination']['platform_station_id'] ?? '' ), 'Yandex pricing payload must send selected platform_station_id.' );
 
 echo "Yandex Delivery checkout rates smoke test passed.\n";

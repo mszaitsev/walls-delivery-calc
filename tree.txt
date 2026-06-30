@@ -1,5 +1,5 @@
-﻿Folder PATH listing
-Volume serial number is 000000AA A0AC:74BD
+Folder PATH listing
+Volume serial number is 000000FA A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -327,6 +327,7 @@ C:.
 |   |       |       YandexRegionMappingV2Repository.php
 |   |       |
 |   |       +---Pickup
+|   |       |       YandexDeliveryCheckoutPickupPointFormatter.php
 |   |       |       YandexDeliveryPickupPointV2ImportService.php
 |   |       |       YandexDeliveryPickupPointV2JsonStreamReader.php
 |   |       |       YandexDeliveryPickupPointV2Repository.php
@@ -810,6 +811,7 @@ C:.
             run-yandex-delivery-geo-v2-builder-smoke.php
             run-yandex-delivery-geo-v2-region-enrichment-smoke.php
             run-yandex-delivery-location-mapping-v2-smoke.php
+            run-yandex-delivery-pickup-selection-smoke.php
             run-yandex-delivery-pickup-v2-foundation-smoke.php
             run-yandex-delivery-pickup-v2-runner-smoke.php
             run-yandex-delivery-pricing-calculator-smoke.php

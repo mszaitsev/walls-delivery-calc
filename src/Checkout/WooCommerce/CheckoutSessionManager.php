@@ -5,6 +5,8 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
+use WallsShop\WDC\Carriers\Runtime\YandexDeliveryCarrier;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 
 defined( 'ABSPATH' ) || exit;
@@ -367,6 +369,9 @@ final class CheckoutSessionManager {
 			return $this->normalize_pickup_family( $parts[0] . ':pickup' );
 		}
 
+		if ( YandexDeliveryCarrier::PICKUP_RATE_ID === $rate_id ) {
+			return YandexDeliverySettings::CARRIER_KEY . ':pickup';
+		}
 		return $this->normalize_pickup_family( $rate_id );
 	}
 

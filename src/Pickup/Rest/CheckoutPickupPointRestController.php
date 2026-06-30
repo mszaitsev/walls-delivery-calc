@@ -7,6 +7,9 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
@@ -22,8 +25,11 @@ final class CheckoutPickupPointRestController {
 		private CheckoutSessionManager $session_manager,
 		private ?PickupPointLocationResolver $location_resolver = null,
 		private ?CdekDeliveryPointService $cdek_points = null,
-		private ?DpdPickupPointService $dpd_points = null
+		private ?DpdPickupPointService $dpd_points = null,
+		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
+		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null
 	) {
+		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 	}
 
 	public function register(): void {
@@ -108,6 +114,17 @@ final class CheckoutPickupPointRestController {
 			}
 			$selection = $this->dpd_selection( $point );
 			$this->save_selection( $selection, DpdSettings::CARRIER_KEY, $method_id );
+
+			return $this->selection_response( $selection, $method_id );
+		}
+
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
+			$point = $this->yandex_point_from_request( $request, $point_id_raw );
+			if ( array() === $point ) {
+				return $this->error( 'not_found', 'Pickup point not found.', 404 );
+			}
+			$selection = $this->yandex_selection( $point );
+			$this->save_selection( $selection, YandexDeliverySettings::CARRIER_KEY, $method_id );
 
 			return $this->selection_response( $selection, $method_id );
 		}
@@ -241,6 +258,14 @@ final class CheckoutPickupPointRestController {
 				)
 			);
 		}
+		if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $point['carrier_key'] ?? $point['carrier'] ?? '' ) ) {
+			return $this->response(
+				array(
+					'requires_location_change' => false,
+					'location' => null,
+				)
+			);
+		}
 
 		if ( ! $this->location_resolver instanceof PickupPointLocationResolver ) {
 			return $this->response(
@@ -280,6 +305,7 @@ final class CheckoutPickupPointRestController {
 			'point_id' => $selection['id'] ?? '',
 			'point_code' => $selection['point_code'] ?? '',
 			'terminal_code' => $selection['terminal_code'] ?? ( $selection['snapshot']['terminal_code'] ?? '' ),
+			'platform_station_id' => $selection['platform_station_id'] ?? ( $selection['snapshot']['platform_station_id'] ?? '' ),
 			'point_type' => $selection['point_type'] ?? '',
 			'point_type_label' => $selection['point_type_label'] ?? ( $selection['snapshot']['point_type_label'] ?? '' ),
 			'point_title' => $selection['point_title'] ?? ( $selection['snapshot']['point_title'] ?? '' ),
@@ -328,6 +354,9 @@ final class CheckoutPickupPointRestController {
 		}
 		if ( str_starts_with( $method_id, DpdSettings::CARRIER_KEY . ':' ) ) {
 			return DpdSettings::CARRIER_KEY;
+		}
+		if ( str_starts_with( $method_id, YandexDeliverySettings::CARRIER_KEY . ':' ) || 'yandex_pickup' === $method_id ) {
+			return YandexDeliverySettings::CARRIER_KEY;
 		}
 
 		return RussianPostDomesticSettings::CARRIER_KEY;
@@ -442,6 +471,46 @@ final class CheckoutPickupPointRestController {
 		);
 	}
 
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function yandex_point_from_request( mixed $request, string $point_id_raw ): array {
+		if ( ! $this->yandex_points instanceof YandexDeliveryPickupPointV2Repository ) {
+			return array();
+		}
+		$code = $this->param( $request, 'point_code' );
+		if ( '' === $code && str_starts_with( $point_id_raw, YandexDeliverySettings::CARRIER_KEY . ':' ) ) {
+			$code = substr( $point_id_raw, strlen( YandexDeliverySettings::CARRIER_KEY . ':' ) );
+		}
+		if ( '' === $code ) {
+			$point = $this->array_param( $request, 'point' );
+			$code = (string) ( $point['platform_station_id'] ?? $point['point_code'] ?? '' );
+		}
+		if ( '' === trim( $code ) ) {
+			return array();
+		}
+		$row = $this->yandex_points->destination_pickup_point_by_platform_station_id( $code );
+
+		return is_array( $row ) ? $row : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function yandex_selection( array $row ): array {
+		$point = $this->yandex_formatter->format( $row );
+		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
+
+		return array_merge(
+			$point,
+			array(
+				'point_id' => (string) $snapshot['id'],
+				'point_work_time' => (string) ( $point['work_time'] ?? '' ),
+				'snapshot' => $snapshot,
+			)
+		);
+	}
 	/**
 	 * @return array<string,mixed>
 	 */
