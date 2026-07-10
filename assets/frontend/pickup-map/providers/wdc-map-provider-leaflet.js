@@ -9,12 +9,15 @@
 		var markerById = {};
 		var pointById = {};
 		var activePointId = null;
+		var lastPoints = [];
+		var lastSearchMarker = null;
+		var popupState = null;
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
 		var popupCloseCallback = function () {};
 		var mapClickCallback = function () {};
 		var maxClusterZoom = 18;
-		var clusterCellSize = 64;
+		var clusterCellSize = 128;
 		var suppressPopupClose = false;
 
 		if (!window.L) {
@@ -40,6 +43,7 @@
 			settings.onBoundsChange([bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].join(','));
 		}
 
+		map.on('zoomend', rebuildClusters);
 		map.on('moveend zoomend', boundsChanged);
 		map.on('click', mapClicked);
 		map.on('popupclose', popupClosed);
@@ -61,42 +65,24 @@
 			},
 			renderMarkers: function (points, options) {
 				suppressPopupClose = true;
-				clearMarkers();
+				popupState = null;
+				clearRenderedMarkers();
+				lastPoints = Array.isArray(points) ? points.slice() : [];
+				if (options && Object.prototype.hasOwnProperty.call(options, 'searchMarker')) {
+					lastSearchMarker = options.searchMarker || null;
+				}
 				activePointId = options && Object.prototype.hasOwnProperty.call(options, 'activePointId') ? (options.activePointId ? String(options.activePointId) : null) : activePointId;
-				renderClustered(points || []);
-				renderSearchMarker(options && options.searchMarker);
+				renderClustered(lastPoints);
+				renderSearchMarker(lastSearchMarker);
 				suppressPopupClose = false;
 			},
 			openPointPopup: function (point, html, options) {
 				var id = pointId(point);
-				var marker = markerById[id];
-				if (marker && marker.bindPopup) {
-					activePointId = id;
-					updateActiveMarkers();
-					suppressPopupClose = true;
-					if (options && options.forceReopen) {
-						debugLog('leaflet popup force reopen');
-					}
-					if (marker.closePopup) {
-						marker.closePopup();
-					}
-					if (marker.unbindPopup) {
-						marker.unbindPopup();
-						debugLog('leaflet marker popup unbound/rebound');
-					}
-					marker.bindPopup(html, {
-						autoPan: true,
-						autoPanPadding: [24, 24],
-						className: 'wdc-pickup-map-popup',
-						keepInView: true,
-						maxWidth: 280,
-						offset: window.L.point(0, -5)
-					});
-					marker.openPopup();
-					window.setTimeout(function () { suppressPopupClose = false; }, 0);
-				}
+				popupState = { pointId: id, html: html, options: options || {} };
+				openStoredPopup();
 			},
 			closePopup: function () {
+				popupState = null;
 				map.closePopup();
 			},
 			clearMarkers: clearMarkers,
@@ -110,6 +96,7 @@
 			destroy: function () {
 				suppressPopupClose = true;
 				clearMarkers();
+				map.off('zoomend', rebuildClusters);
 				map.off('moveend zoomend', boundsChanged);
 				map.off('click', mapClicked);
 				map.off('popupclose', popupClosed);
@@ -132,6 +119,16 @@
 				map.invalidateSize();
 			}
 		};
+
+		function rebuildClusters() {
+			suppressPopupClose = true;
+			clearRenderedMarkers();
+			renderClustered(lastPoints);
+			renderSearchMarker(lastSearchMarker);
+			updateActiveMarkers();
+			openStoredPopup();
+			window.setTimeout(function () { suppressPopupClose = false; }, 0);
+		}
 
 		function renderClustered(points) {
 			var clusters = clusterPoints(points);
@@ -182,7 +179,7 @@
 			});
 		}
 
-		function clearMarkers() {
+		function clearRenderedMarkers() {
 			markers.forEach(function (marker) { marker.remove(); });
 			if (searchMarker) {
 				searchMarker.remove();
@@ -193,6 +190,45 @@
 			pointById = {};
 		}
 
+		function clearMarkers() {
+			lastPoints = [];
+			lastSearchMarker = null;
+			popupState = null;
+			clearRenderedMarkers();
+		}
+
+		function openStoredPopup() {
+			if (!popupState) {
+				return;
+			}
+			var marker = markerById[popupState.pointId];
+			if (!marker || !marker.bindPopup) {
+				return;
+			}
+			activePointId = popupState.pointId;
+			updateActiveMarkers();
+			suppressPopupClose = true;
+			if (popupState.options && popupState.options.forceReopen) {
+				debugLog('leaflet popup force reopen');
+			}
+			if (marker.closePopup) {
+				marker.closePopup();
+			}
+			if (marker.unbindPopup) {
+				marker.unbindPopup();
+				debugLog('leaflet marker popup unbound/rebound');
+			}
+			marker.bindPopup(popupState.html, {
+				autoPan: true,
+				autoPanPadding: [24, 24],
+				className: 'wdc-pickup-map-popup',
+				keepInView: true,
+				maxWidth: 280,
+				offset: window.L.point(0, -5)
+			});
+			marker.openPopup();
+			window.setTimeout(function () { suppressPopupClose = false; }, 0);
+		}
 		function renderSearchMarker(marker) {
 			if (!marker || marker.lat === null || marker.lng === null) {
 				return;
@@ -274,6 +310,7 @@
 		function popupClosed() {
 			debugLog('leaflet popup close');
 			if (!suppressPopupClose) {
+				popupState = null;
 				popupCloseCallback();
 				refreshActiveMarkerAfterPopupClose();
 			}

@@ -96,6 +96,20 @@
 	display: block;
 }
 
+.wdc-yandex-5post-warning {
+	box-sizing: border-box;
+	flex-basis: 100%;
+	width: 100%;
+	margin-top: 4px;
+	padding: 10px 12px;
+	border-left: 3px solid #d97706;
+	background: #fffbeb;
+	color: #92400e;
+	font-size: 12px;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
 .wdc-platform-rate-meta--fallback {
 	color: #92400e;
 }

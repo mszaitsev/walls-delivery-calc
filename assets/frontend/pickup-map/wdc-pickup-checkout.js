@@ -4,6 +4,9 @@
 	var checkoutConfig = window.wdcPickupCheckout || {};
 	var labels = checkoutConfig.labels || {};
 	var activeMethod = '';
+	var preferredShippingMethod = '';
+	var preferredShippingMethodPending = false;
+	var preferredShippingMethodRecoveryUpdateSent = false;
 	var activePickupFamily = String(checkoutConfig.activePickupFamily || checkoutConfig.active_pickup_family || '').trim();
 	var currentContext = checkoutConfig.currentContext || checkoutConfig.initialContext || {};
 	var prefetchTimer = 0;
@@ -50,9 +53,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		rememberDestinationFingerprint();
 		toggleForMethod(container);
 		schedulePrefetch();
-		container.querySelectorAll('[data-wdc-pickup-open]').forEach(function (openButton) {
-			openButton.addEventListener('click', function () { openModal(container, containerMethod(container) || activeMethod || method); });
-		});
 	}
 
 	function openModal(container, method) {
@@ -99,6 +99,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 					return Promise.resolve(false);
 				}
 				var payload = pointPayload(point);
+				payload.selection_intent = 'explicit';
 				if (!savingPoint) {
 					setLoading(options.message || 'Сохраняем пункт выдачи...');
 				}
@@ -107,6 +108,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 					applySelection(container, response.pickup_point || {});
 					close();
 					if (true === options.updateCheckoutAfterSave) {
+						rememberPreferredShippingMethod(shippingMethodId || method, response.pickup_point || point);
 						triggerCheckoutUpdate();
 					}
 					return true;
@@ -164,7 +166,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 						disableDestinationResetSuppression();
 						return;
 					}
-					window.WDCPickupApi.save(point.id, currentMethod, pointPayload(point)).then(function (response) {
+					var payload = pointPayload(point);
+					payload.selection_intent = 'explicit';
+					window.WDCPickupApi.save(point.id, currentMethod, payload).then(function (response) {
 						boot();
 						mergePickupSelectionsFromResponse(response);
 						var actualContainer = document.querySelector('[data-wdc-pickup-checkout]');
@@ -174,6 +178,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 						}
 						syncPickupContextAfterLocationChange(location, savedPoint);
 						if (requiresRateRefreshAfterPickupSave(savedPoint || point)) {
+							rememberPreferredShippingMethod(currentMethod, savedPoint || point);
 							triggerCheckoutUpdate();
 						}
 						disableDestinationResetSuppression();
@@ -525,6 +530,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function shippingMethodFamily(value) {
 		var method = normalizeShippingMethod(value);
+		if (method === 'yandex_pickup') {
+			return 'yandex_delivery:pickup';
+		}
 		for (var i = 0; i < pickupFamilies.length; i++) {
 			if (method.indexOf(pickupFamilies[i]) === 0) {
 				return pickupFamilies[i];
@@ -984,7 +992,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || snapshot.carrier || '',
 			service_key: point.service_key || snapshot.service_key || point.carrier_key || point.carrier || snapshot.carrier_key || '',
 			pickup_family: point.pickup_family || snapshot.pickup_family || pickupFamily(point),
-			point_code: point.point_code || point.cdek_code || point.delivery_point || point.display_code || point.postcode || point.postal_code || point.point_postcode || snapshot.point_code || snapshot.cdek_code || snapshot.delivery_point || snapshot.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || '',
+			point_code: point.point_code || point.platform_station_id || point.cdek_code || point.delivery_point || point.display_code || point.postcode || point.postal_code || point.point_postcode || snapshot.point_code || snapshot.platform_station_id || snapshot.cdek_code || snapshot.delivery_point || snapshot.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || '',
+			platform_station_id: point.platform_station_id || snapshot.platform_station_id || '',
 			point_type: point.point_type || snapshot.point_type || '',
 			point_type_label: point.point_type_label || snapshot.point_type_label || pickupPresentation(point).point_type_label || '',
 			point_title: point.point_title || point.card_title || snapshot.point_title || snapshot.card_title || pickupPresentation(point).card_title || '',
@@ -1001,6 +1010,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			point_work_time: point.point_work_time || point.work_time || snapshot.work_time || '',
 			description: point.description || point.point_comment || snapshot.description || '',
 			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
+			presentation_comment: point.presentation_comment || snapshot.presentation_comment || '',
 			marker_type: point.marker_type || snapshot.marker_type || pickupPresentation(point).marker_type || '',
 			cdek_code: point.cdek_code || point.delivery_point || snapshot.cdek_code || snapshot.delivery_point || '',
 			cdek_type: point.cdek_type || snapshot.cdek_type || point.point_type || snapshot.point_type || '',
@@ -1202,7 +1212,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || snapshot.carrier || '',
 			service_key: point.service_key || snapshot.service_key || point.carrier_key || point.carrier || snapshot.carrier_key || '',
 			pickup_family: point.pickup_family || pickupFamily(point),
-			point_code: point.point_code || point.cdek_code || point.delivery_point || point.display_code || point.postcode || point.postal_code || point.point_postcode || snapshot.point_code || snapshot.cdek_code || snapshot.delivery_point || snapshot.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || '',
+			point_code: point.point_code || point.platform_station_id || point.cdek_code || point.delivery_point || point.display_code || point.postcode || point.postal_code || point.point_postcode || snapshot.point_code || snapshot.platform_station_id || snapshot.cdek_code || snapshot.delivery_point || snapshot.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || '',
+			platform_station_id: point.platform_station_id || snapshot.platform_station_id || '',
 			point_type: point.point_type || snapshot.point_type || '',
 			point_type_label: point.point_type_label || snapshot.point_type_label || pickupPresentation(point).point_type_label || '',
 			point_title: point.point_title || point.card_title || snapshot.point_title || snapshot.card_title || pickupPresentation(point).card_title || '',
@@ -1218,6 +1229,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			work_time: point.work_time || snapshot.work_time || '',
 			description: point.description || snapshot.description || '',
 			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
+			presentation_comment: point.presentation_comment || snapshot.presentation_comment || '',
 			marker_type: point.marker_type || snapshot.marker_type || pickupPresentation(point).marker_type || '',
 			raw_sanitized: point.raw_sanitized || snapshot.raw_sanitized || point.raw || {},
 			cdek_code: point.cdek_code || snapshot.cdek_code || '',
@@ -1569,6 +1581,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function isPickupRateValue(value) {
 		value = normalizeShippingMethodValue(value);
+		if (value === 'yandex_pickup') {
+			return true;
+		}
 		if (/:pickup(?::|$)/.test(value)) {
 			return true;
 		}
@@ -1709,15 +1724,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			container.setAttribute('data-shipping-method-id', method);
 			ownMethod = method;
 		}
-		var visible = !method || (isPickupRateValue(method) && containerMatchesActivePickup(container, method, family));
+		var visible = !!method && isPickupRateValue(method) && containerMatchesActivePickup(container, method, family);
 		container.hidden = !visible;
 		container.classList.toggle('wdc-is-hidden', !visible);
 		container.setAttribute('aria-hidden', visible ? 'false' : 'true');
+		syncPickupPostFields(container, visible);
 		container.querySelectorAll('[data-wdc-pickup-open]').forEach(function (button) {
 			button.disabled = !visible;
 		});
 		if (!visible) {
-			clearContainerSelection(container);
 			return;
 		}
 		var hasSelection = isContainerSelectionComplete(container, family);
@@ -1727,6 +1742,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
 			setHidden(button, hasSelection);
 			button.disabled = false;
+		});
+	}
+
+	function syncPickupPostFields(container, active) {
+		if (!container) {
+			return;
+		}
+		container.querySelectorAll('input[name], select[name], textarea[name]').forEach(function (field) {
+			field.disabled = !active;
 		});
 	}
 
@@ -1783,13 +1807,67 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 	}
 
+	function shippingMethodInput(method) {
+		method = normalizeShippingMethod(method);
+		return Array.prototype.find.call(document.querySelectorAll('input[name^="shipping_method"]'), function (input) {
+			return normalizeShippingMethod(input.value) === method;
+		}) || null;
+	}
+
+	function rememberPreferredShippingMethod(method, point) {
+		method = normalizeShippingMethod(method);
+		if (pickupFamily(point) !== 'yandex_delivery:pickup' || shippingMethodFamily(method) !== 'yandex_delivery:pickup') {
+			return;
+		}
+		preferredShippingMethod = method;
+		preferredShippingMethodPending = true;
+		preferredShippingMethodRecoveryUpdateSent = false;
+		var input = shippingMethodInput(method);
+		if (input && !input.disabled) {
+			input.checked = true;
+			activeMethod = method;
+			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+		}
+	}
+
+	function clearPreferredShippingMethod() {
+		preferredShippingMethod = '';
+		preferredShippingMethodPending = false;
+		preferredShippingMethodRecoveryUpdateSent = false;
+	}
+
+	function restorePreferredShippingMethod() {
+		if (!preferredShippingMethodPending || !preferredShippingMethod) {
+			return false;
+		}
+		var input = shippingMethodInput(preferredShippingMethod);
+		if (!input || input.disabled) {
+			clearPreferredShippingMethod();
+			return false;
+		}
+		var needsRecovery = !input.checked;
+		if (needsRecovery) {
+			input.checked = true;
+			activeMethod = preferredShippingMethod;
+			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+			if (!preferredShippingMethodRecoveryUpdateSent) {
+				preferredShippingMethodRecoveryUpdateSent = true;
+				return true;
+			}
+		}
+		clearPreferredShippingMethod();
+		return false;
+	}
+
 	function requiresRateRefreshAfterPickupSave(point) {
-		return pickupFamily(point) === 'dpd:pickup';
+		var family = pickupFamily(point);
+		return family === 'dpd:pickup' || family === 'yandex_delivery:pickup';
 	}
 
 	function boot() {
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);
 		restoreSelectedPickupUi();
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 	}
 
 	function selectedPickupPointId() {
@@ -1810,7 +1888,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (!pointId || !window.WDCPickupApi || !window.WDCPickupApi.save) {
 			return;
 		}
-		window.WDCPickupApi.save(pointId, method, selected).catch(function () {});
+		var payload = Object.assign({}, selected, { selection_intent: 'technical' });
+		window.WDCPickupApi.save(pointId, method, payload).catch(function () {});
 	}
 
 	function beginPlaceOrder() {
@@ -1971,6 +2050,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	});
 	document.addEventListener('DOMContentLoaded', boot);
 	document.addEventListener('click', function (event) {
+		var openButton = event.target && event.target.closest ? event.target.closest('[data-wdc-pickup-open]') : null;
+		if (openButton) {
+			var container = openButton.closest('[data-wdc-pickup-checkout]');
+			if (container && !openButton.disabled && !container.hidden) {
+				event.preventDefault();
+				openModal(container, containerMethod(container) || activeMethod || currentShippingMethod());
+			}
+			return;
+		}
 		if (event.target && event.target.matches('#place_order, [name="woocommerce_checkout_place_order"]')) {
 			beginPlaceOrder();
 		}
@@ -1984,8 +2072,13 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		window.jQuery(document.body).on('checkout_place_order', beginPlaceOrder);
 		window.jQuery(document.body).on('checkout_error', releasePlaceOrderGuardSoon);
 		window.jQuery(document.body).on('updated_checkout', function () {
+			var runRecoveryUpdate = restorePreferredShippingMethod();
 			boot();
 			restoreSelectedPickupUi();
+			if (runRecoveryUpdate) {
+				triggerCheckoutUpdate();
+				return;
+			}
 			if (isPlacingOrder) {
 				releasePlaceOrderGuardSoon();
 				return;

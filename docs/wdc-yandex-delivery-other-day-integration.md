@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.103.6. Yandex pricing-calculator now uses the shared generic PackagingBuilder for multi-place request payloads, while buyer PVZ selection, order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.13. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -31,6 +31,63 @@ The Yandex Delivery admin surface now follows the intended working model:
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
+
+
+## 0.104.13 Explicit and technical pickup save intent
+
+The checkout frontend now labels real map/cross-location selection saves as `explicit` and automatic family rate synchronization as `technical`; the shared API client forwards the intent in the checkout pickup REST body. Missing/unknown intent remains explicit for backward compatibility.
+
+Explicit save always creates a fresh server UTC `selected_at` and ignores client time. Technical save preserves the existing family timestamp before incoming values, never substitutes current time, and omits an absent timestamp. Existing operator_id and platform_station_id are fallback identity sources during technical synchronization. This prevents AJAX rate synchronization from extending yesterday 5Post, while a real repeated buyer choice receives a new timestamp. Calendar-day expiration and the 5Post warning are unchanged.
+## 0.104.12 5Post calendar-day selection expiration and warning
+
+Yandex checkout save now copies `operator_id` to the family selection top level while preserving the formatter snapshot and UTC `selected_at`. The narrow session expiration operation compares the selected timestamp and `current_datetime()` as calendar dates in the WordPress timezone. A missing, invalid or previous-day timestamp clears only a selected `operator_id=5post` from `yandex_delivery:pickup`; market_l4g and every other family remain untouched.
+
+The check runs before quote context, pickup UI localization/rendering and validation. A validation request that performed expiration refuses to rebuild the same stale 5Post from posted hidden fields, so `yandex_pickup` receives the standard choose-point error and pricing falls back to the existing representative station. Current-day selected 5Post points keep their original timestamp across AJAX repricing and display a dedicated highlighted warning after ordinary method comments.
+## 0.104.11 Checkout pickup POST and selected-method stabilization
+
+Only the active pickup rate container now contributes named hidden fields to WooCommerce checkout POST; inactive carrier containers keep their values but their named fields are disabled. After a Yandex point is saved, `yandex_pickup` is remembered across the resulting rate repricing/re-sort and restored when still available, with a one-update recovery guard. This applies equally to 5Post points through the common `yandex_delivery:pickup` family flow. Visible shipping-item `pickup_family` is removed, while hidden family/session/calculation data remains stored.
+
+## 0.104.10 Courier pricing fallback through destination PVZ address
+
+Courier pricing first sends `tariff=time_interval` with the real checkout destination address. If that address is unavailable or the primary API/parser fails, `YandexDeliveryCarrier` makes one fallback request using the local address of the same destination PVZ selected by the existing pickup priority: family-specific `yandex_delivery:pickup` selection first, otherwise the representative PVZ for all mapped/manual geo ids of the checkout location. The row is loaded by `platform_station_id`; `full_address` is preferred and complete `locality/street/house` is the only assembly fallback.
+
+Diagnostics expose `courier_pricing_source`, `courier_fallback_used`, pickup source/station and primary/fallback error codes, but never the PVZ address. The fallback address is a local pricing argument only: QuoteRequest destination, checkout/session fields, shipping/billing address, order address/meta and mandatory courier validation remain based on the buyer's real address. The next checkout recalculation always retries that real address, so a successful primary quote replaces the preliminary fallback price. Pickup pricing, selected/representative priority, request places, source station, imports and mapping pipeline are unchanged.
+
+## 0.104.6 Leaflet zoom cluster rebuild
+
+The Leaflet provider now retains the complete currently rendered pickup dataset and search marker. Every `zoomend` clears only the existing Leaflet marker layers and reruns the local grid clustering against the new zoom, then reapplies the active marker, search marker and retained popup where an individual point marker exists. The rebuild does not call the pickup REST API, so the already loaded Yandex city dataset remains the source for both zoomed-out clusters and zoomed-in individual markers. The Yandex Maps provider, formatter, presentation comments, viewport side-list filtering, pricing and station selection are unchanged.
+
+## 0.104.5 Checkout pickup map presentation
+
+Yandex destination pickup rows are still loaded from `wp_wdc_yandex_delivery_pickup_points_v2` by selected checkout `location_id` and all mapped/manual `yandex_geo_id` values, without server-side limits for the Yandex checkout picker. The formatter now maps operator/type/name to buyer-facing titles: 5Post, Yandex.Market terminal, partner terminal, generic Yandex terminal and generic Yandex Delivery fallback. `platform_station_id` remains available only as `id`/`point_code`/`platform_station_id`/`snapshot.platform_station_id`; `display_code` is empty for Yandex points.
+
+Warnings such as the 5Post price note and terminal storage note are carried as `presentation_comment`, kept separate from pickup instructions in `description`, and rendered under the title in the map popup/list. The frontend keeps all loaded Yandex city points for map markers and clustering but filters the side list client-side by the current map bbox, preserving committed selection if the selected point leaves the viewport. Leaflet `clusterCellSize` and Yandex `gridSize` are now 128. Pricing-calculator requests, representative fallback, selected-station priority, source station, imports and geo/mapping pipelines were not changed.
+
+## 0.104.4 Checkout pickup chain fix
+
+The checkout PVZ button chain now covers real WooCommerce rate meta. WooCommerceRateMapper writes pickup_family next to requires_pickup_point, delivery_type, carrier_key and rate_id. CheckoutRateRenderer accepts both associative test meta and real WooCommerce meta-data entries with key/value payloads, then renders the shared pickup container for yandex_pickup.
+
+The JS aliases yandex_pickup to yandex_delivery:pickup in shippingMethodFamily() and marks yandex_pickup as a pickup rate in isPickupRateValue(). With those two checks aligned, containerMatchesActivePickup() succeeds and toggleForMethod() leaves the Yandex pickup container visible after boot and updated_checkout. Saving a Yandex pickup point still triggers update_checkout for selected-station repricing.
+## 0.104.3 Checkout pickup renderer fix
+
+The checkout pickup button is now rendered by CheckoutRateRenderer itself for rates with requires_pickup_point=true and delivery_type=pickup. yandex_pickup therefore receives the shared data-wdc-pickup-checkout container, data-shipping-method-id=yandex_pickup, the standard hidden fields and wdc_pickup_family=yandex_delivery:pickup in the same rate meta block that renders tariffs, courier address summaries and comments. yandex_courier remains without pickup UI.
+
+CheckoutDeliveryTypeSelector no longer registers a duplicate shipping-rate HTML renderer, while its session capture compatibility stays in place. wdc-pickup-checkout.js now treats yandex_delivery:pickup like DPD pickup for post-save recalculation and triggers update_checkout after a Yandex PVZ is saved, allowing the existing selected-station pricing flow to refresh the shown rate.
+## 0.104.2 Checkout pickup button init fix
+
+The checkout picker assets are now loaded on checkout before pickup rates exist in session, so a later WooCommerce updated_checkout response that includes yandex_pickup has the required JS/CSS already present. The script still reboots on updated_checkout and now uses delegated clicks for data-wdc-pickup-open, keeping the Yandex pickup button clickable after WooCommerce replaces the shipping methods HTML.
+
+The rendered yandex_pickup block uses the common pickup container and hidden fields with carrier_key=yandex_delivery and pickup_family=yandex_delivery:pickup. Pricing-calculator payloads, selected platform_station_id priority, representative PVZ fallback, source station, import and mapping pipelines are unchanged.
+## 0.104.1 Checkout PVZ review fixes
+
+For buyer checkout selection, Yandex destination PVZ loading now returns all points for the selected city instead of truncating at the REST limit. The endpoint still starts from checkout location_id, resolves all mapped/manual yandex_geo_id values, filters active rows with non-empty platform_station_id and type pickup_point or terminal, and does not require available_for_dropoff. The repository query used by the checkout picker has no SQL LIMIT and the test path no longer slices the result.
+
+Checkout pricing now receives the full family-scoped pickup_selections dictionary in QuoteRequest customer_context. yandex_pickup restores pickup_selections['yandex_delivery:pickup'] before considering the global pickup_selection, so switching to another carrier and back keeps the saved Yandex platform_station_id for pricing-calculator. Representative PVZ remains the fallback when no selected Yandex point exists.
+## 0.104.0 Checkout buyer PVZ selection
+
+yandex_pickup now uses the common checkout pickup picker instead of only the representative destination PVZ. The endpoint reads active destination candidates from wp_wdc_yandex_delivery_pickup_points_v2 by all mapped/manual yandex_geo_id values for checkout location_id, requires non-empty platform_station_id, accepts 	ype=pickup_point and 	ype=terminal, and does not require vailable_for_dropoff because that flag describes sender dropoff availability. The frontend receives the shared pickup point format with carrier_key=yandex_delivery, point_code/platform_station_id, display address/name and safe snapshot.
+
+When no Yandex PVZ is selected, pricing still uses the representative PVZ fallback and rate meta records pickup_source=representative. When a buyer selects a Yandex PVZ, YandexDeliveryCarrier reads the selected common pickup session payload, uses the selected destination platform_station_id in pricing-calculator, and records pickup_source=selected plus destination_platform_station_id. Validation requires a selected Yandex PVZ only for yandex_pickup; yandex_courier remains courier-address based. Order creation stores the common _wdc_pickup_* meta and Yandex aliases including _wdc_yandex_delivery_pickup_platform_station_id, without saving full raw Yandex JSON.
 
 ## 0.103.6 Shared packaging for pricing-calculator
 

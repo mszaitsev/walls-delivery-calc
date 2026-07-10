@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 
 defined( 'ABSPATH' ) || exit;
@@ -12,11 +13,7 @@ final class WooCommerceRateMapper {
 	 * @return array{id:string,label:string,cost:string,meta_data:array<string,mixed>}
 	 */
 	public function map( DeliveryRate $rate, bool $fallback_used = false ): array {
-		$label = $rate->title;
-		$planned_delivery_comment = trim( $rate->planned_delivery_comment );
-		if ( empty( $rate->meta['domestic_tariff_grouped'] ) && empty( $rate->meta['tariff_variants'] ) && '' !== $planned_delivery_comment && ! str_contains( $label, $planned_delivery_comment ) ) {
-			$label .= ' - ' . $planned_delivery_comment;
-		}
+		$label = $this->single_rate_label( $rate );
 		return array(
 			'id'        => $rate->rate_id,
 			'label'     => $label,
@@ -25,6 +22,7 @@ final class WooCommerceRateMapper {
 				'carrier_key'     => $rate->carrier_key,
 				'rate_id'         => $rate->rate_id,
 				'delivery_type'   => $rate->delivery_type,
+				'pickup_family'   => $this->pickup_family( $rate ),
 				'crossed_price'   => $rate->crossed_price?->to_array(),
 				'planned_delivery_comment' => $rate->planned_delivery_comment,
 				'comments'        => $rate->comments,
@@ -55,5 +53,45 @@ final class WooCommerceRateMapper {
 				'fallback_used'   => $fallback_used || 'fallback' === $rate->carrier_key,
 			),
 		);
+	}
+
+	private function single_rate_label( DeliveryRate $rate ): string {
+		$title = $rate->title;
+		if ( ! empty( $rate->meta['domestic_tariff_grouped'] ) || ! empty( $rate->meta['tariff_variants'] ) ) {
+			return $title;
+		}
+
+		$final_delivery_label = DeliveryDaysFormatter::format( $rate->delivery_days );
+		if ( '' === $final_delivery_label || str_ends_with( $title, $final_delivery_label ) ) {
+			return $title;
+		}
+
+		$original_delivery_label = null !== $rate->original_delivery_days
+			? DeliveryDaysFormatter::format( $rate->original_delivery_days )
+			: '';
+		if ( '' !== $original_delivery_label && str_ends_with( $title, $original_delivery_label ) ) {
+			return substr( $title, 0, -strlen( $original_delivery_label ) ) . $final_delivery_label;
+		}
+
+		return '' === trim( $title ) ? $final_delivery_label : rtrim( $title ) . ' - ' . $final_delivery_label;
+	}
+
+	private function pickup_family( DeliveryRate $rate ): string {
+		$explicit = trim( (string) ( $rate->meta['pickup_family'] ?? '' ) );
+		if ( '' !== $explicit ) {
+			return $explicit;
+		}
+
+		if ( ! $rate->requires_pickup_point || 'pickup' !== $rate->delivery_type ) {
+			return '';
+		}
+
+		$parts = explode( ':', $rate->rate_id );
+		$pickup_index = array_search( 'pickup', $parts, true );
+		if ( false !== $pickup_index && $pickup_index > 0 ) {
+			return (string) $parts[0] . ':pickup';
+		}
+
+		return '' !== trim( $rate->carrier_key ) ? trim( $rate->carrier_key ) . ':pickup' : '';
 	}
 }

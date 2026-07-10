@@ -44,7 +44,7 @@ Version 0.25.13 avoids duplicate popup close calls. Empty map clicks still mark 
 
 Version 0.25.12 adds an explicit manual-close state for the map balloon. The popup opens on first visible render for a committed point, on marker click, and on list-card click. If the customer closes it with the balloon control or clicks empty map space, `popupManuallyClosed` prevents bbox reloads from reopening it; the active marker and list row can remain highlighted until another marker/list action resets the flag.
 
-Clustering is wider so overlapping pins aggregate sooner. Leaflet now clusters through zoom 17 with a 64px grid and shows individual pins only at zoom 18+. Yandex uses `ymaps.Clusterer` through zoom 17 with `gridSize: 80`, then bypasses the Clusterer at zoom 18+.
+Clustering is wider so overlapping pins aggregate sooner. Leaflet now clusters through zoom 17 with a 128px grid and shows individual pins only at zoom 18+. Yandex uses `ymaps.Clusterer` through zoom 17 with `gridSize: 128`, then bypasses the Clusterer at zoom 18+.
 
 Version 0.25.11 makes marker color depend only on preview/active state. Normal single pins remain blue; the active preview pin is red in both Leaflet and Yandex. A previously saved checkout point is localized as `initialContext.selectedPoint`, then becomes `previewPoint` when it is present in the current visible point set, so reopening the map highlights the saved point without firing `wdc:point-selected`.
 

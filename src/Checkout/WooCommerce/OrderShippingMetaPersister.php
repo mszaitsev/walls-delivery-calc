@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
@@ -94,6 +95,7 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['point_work_time'] ?? '', $pickup['work_time'] ?? '' );
 			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? $pickup['id'] ?? $pickup['snapshot']['id'] ?? '';
 			$map['_wdc_pickup_point_code']         = $pickup['point_code'] ?? '';
+			$map['_wdc_pickup_platform_station_id'] = $this->first_meaningful( $pickup['platform_station_id'] ?? '', $pickup['snapshot']['platform_station_id'] ?? '' );
 			$map['_wdc_pickup_point_type']         = $pickup['point_type'] ?? '';
 			$map['_wdc_pickup_carrier_key']        = $pickup['carrier_key'] ?? '';
 			$map['_wdc_pickup_service_key']        = $pickup['service_key'] ?? '';
@@ -114,6 +116,18 @@ final class OrderShippingMetaPersister {
 				$map['_wdc_dpd_pickup_latitude']      = $this->first_meaningful( $pickup['lat'] ?? '', $snapshot['lat'] ?? '' );
 				$map['_wdc_dpd_pickup_longitude']     = $this->first_meaningful( $pickup['lng'] ?? '', $snapshot['lng'] ?? '' );
 				$map['_wdc_dpd_pickup_source']        = $this->first_meaningful( $pickup['dpd_source'] ?? '', $snapshot['dpd_source'] ?? '' );
+			}
+			if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' ) ) {
+				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+				$map['_wdc_yandex_delivery_pickup_platform_station_id'] = $this->first_meaningful( $pickup['platform_station_id'] ?? '', $pickup['point_code'] ?? '', $snapshot['platform_station_id'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_point_code']          = $this->first_meaningful( $pickup['point_code'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_type']                = $this->first_meaningful( $pickup['point_type'] ?? '', $snapshot['point_type'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_name']                = $this->first_meaningful( $pickup['point_name'] ?? '', $snapshot['point_name'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_address']             = $this->pickup_address( $pickup );
+				$map['_wdc_yandex_delivery_pickup_city_name']           = $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $snapshot['city_name'] ?? '', $snapshot['city'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_region_name']         = $this->first_meaningful( $pickup['region_name'] ?? '', $pickup['region'] ?? '', $snapshot['region_name'] ?? '', $snapshot['region'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_latitude']            = $this->first_meaningful( $pickup['lat'] ?? '', $snapshot['lat'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_longitude']           = $this->first_meaningful( $pickup['lng'] ?? '', $snapshot['lng'] ?? '' );
 			}
 			$this->set_pickup_shipping_address( $order, $pickup, $address );
 		}
@@ -212,6 +226,7 @@ final class OrderShippingMetaPersister {
 			'service_key'   => (string) ( $pickup['service_key'] ?? '' ),
 			'pickup_family' => (string) ( $pickup['pickup_family'] ?? '' ),
 			'point_code'    => (string) ( $pickup['point_code'] ?? '' ),
+			'platform_station_id' => (string) ( $pickup['platform_station_id'] ?? $pickup['snapshot']['platform_station_id'] ?? '' ),
 			'point_type'    => (string) ( $pickup['point_type'] ?? '' ),
 			'point_type_label' => (string) ( $pickup['point_type_label'] ?? $pickup['snapshot']['point_type_label'] ?? '' ),
 			'point_title'   => (string) ( $pickup['point_title'] ?? $pickup['snapshot']['point_title'] ?? '' ),
@@ -517,6 +532,7 @@ final class OrderShippingMetaPersister {
 			'carrier_key',
 			'rate_id',
 			'delivery_type',
+			'pickup_family',
 			'wdc_delivery_kind',
 			'delivery_kind',
 			'checkout_group_id',

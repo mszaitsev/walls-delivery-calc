@@ -42,6 +42,18 @@ if ( ! function_exists( '__' ) ) {
 	}
 }
 
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( mixed $value ): string {
+		return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( mixed $value ): string {
+		return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' );
+	}
+}
+
 if ( ! function_exists( 'trailingslashit' ) ) {
 	function trailingslashit( string $value ): string {
 		return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR;
@@ -155,6 +167,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
@@ -208,6 +221,38 @@ function wc_checkout_sort_rate( string $carrier, string $tariff_key, int $origin
 		DateRange::single( $original_days )
 	);
 }
+
+/**
+ * @param array<string,mixed> $meta
+ */
+function wc_checkout_label_rate( string $title, DateRange $delivery_days, ?DateRange $original_delivery_days = null, array $meta = array(), string $delivery_type = DeliveryType::PICKUP, string $carrier_key = 'yandex_delivery' ): DeliveryRate {
+	return new DeliveryRate(
+		$carrier_key . ':label-smoke:' . md5( $title . serialize( $delivery_days->to_array() ) ),
+		$carrier_key,
+		$carrier_key,
+		$carrier_key,
+		$carrier_key,
+		'label-smoke',
+		'Label smoke',
+		$delivery_type,
+		$title,
+		Money::from_rubles( 500 ),
+		null,
+		null,
+		$delivery_days,
+		'',
+		'diagnostic delivery comment',
+		array(),
+		false,
+		'',
+		false,
+		false,
+		$meta,
+		null,
+		$original_delivery_days
+	);
+}
+
 function wc_checkout_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
@@ -407,6 +452,37 @@ $mapped      = $rate_mapper->map( $result->rates[0] );
 wc_checkout_smoke_assert( isset( $mapped['id'], $mapped['label'], $mapped['cost'], $mapped['meta_data'] ), 'WooCommerceRateMapper output must be valid.' );
 wc_checkout_smoke_assert( is_array( $mapped['meta_data']['crossed_price'] ), 'WooCommerceRateMapper must expose crossed price rendering data.' );
 
+$yandex_pickup_label = $rate_mapper->map( wc_checkout_label_rate( 'Яндекс до ПВЗ - 2 дня', DateRange::single( 4 ), DateRange::single( 2 ) ) )['label'];
+wc_checkout_smoke_assert( 'Яндекс до ПВЗ - 4 дня' === $yandex_pickup_label && ! str_contains( $yandex_pickup_label, '—' ) && ! str_contains( $yandex_pickup_label, '2 дня' ) && 1 === substr_count( $yandex_pickup_label, '4 дня' ) && 1 === substr_count( $yandex_pickup_label, ' - ' ), 'Yandex pickup WC label must replace the original API delivery suffix with the final rule-adjusted delivery days and one shared separator.' );
+$yandex_courier_label = $rate_mapper->map( wc_checkout_label_rate( 'Яндекс курьером - 2 дня', DateRange::single( 4 ), DateRange::single( 2 ), array(), DeliveryType::COURIER ) )['label'];
+wc_checkout_smoke_assert( 'Яндекс курьером - 4 дня' === $yandex_courier_label && ! str_contains( $yandex_courier_label, '—' ) && ! str_contains( $yandex_courier_label, '2 дня' ) && 1 === substr_count( $yandex_courier_label, '4 дня' ) && 1 === substr_count( $yandex_courier_label, ' - ' ), 'Yandex courier WC label must use only final rule-adjusted delivery days and one shared separator.' );
+$other_carrier_label = $rate_mapper->map( wc_checkout_label_rate( 'Другая служба — 2-4 дня', DateRange::range( 4, 6 ), DateRange::range( 2, 4 ), carrier_key: 'other_carrier' ) )['label'];
+wc_checkout_smoke_assert( 'Другая служба — 4-6 дней' === $other_carrier_label && ! str_contains( $other_carrier_label, '2-4 дня' ), 'Another carrier single-rate WC label must replace only the original delivery range suffix.' );
+$title_without_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба доставки', DateRange::single( 5 ) ) )['label'];
+wc_checkout_smoke_assert( 'Служба доставки - 5 дней' === $title_without_days && ! str_contains( $title_without_days, '—' ) && ! str_ends_with( $title_without_days, ':' ), 'Single-rate title without delivery days must append the final label once with the shared separator and no manual colon.' );
+$title_with_final_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба доставки — 5 дней', DateRange::single( 5 ), DateRange::single( 5 ) ) )['label'];
+wc_checkout_smoke_assert( 'Служба доставки — 5 дней' === $title_with_final_days && 1 === substr_count( $title_with_final_days, '5 дней' ), 'Single-rate title that already ends with final delivery days must remain unchanged.' );
+$title_without_final_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба без срока', new DateRange() ) )['label'];
+wc_checkout_smoke_assert( 'Служба без срока' === $title_without_final_days, 'Single-rate title must remain unchanged when final delivery days are empty.' );
+$grouped_title = $rate_mapper->map( wc_checkout_label_rate( 'Сгруппированная служба', DateRange::single( 7 ), DateRange::single( 2 ), array( 'domestic_tariff_grouped' => true, 'tariff_variants' => array( array( 'object_code' => 'A' ), array( 'object_code' => 'B' ) ) ) ) )['label'];
+wc_checkout_smoke_assert( 'Сгруппированная служба' === $grouped_title, 'Grouped/tariff-selector WC label must keep its existing format without an appended common delivery term.' );
+
+$render_method = (object) array(
+	'id' => 'single:pickup',
+	'meta_data' => array(
+		'carrier_key' => 'demo',
+		'rate_id' => 'single:pickup',
+		'delivery_type' => DeliveryType::PICKUP,
+		'requires_pickup_point' => false,
+		'planned_delivery_comment' => '4 дня',
+		'comments' => array( 'Пользовательский комментарий' ),
+	),
+);
+ob_start();
+( new CheckoutRateRenderer() )->render( $render_method );
+$rendered_rate_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( ! str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must suppress planned_delivery_comment while preserving ordinary meta comments.' );
+
 $suggestion_settings_repo = new SettingsRepository();
 $suggestion_settings_repo->set( 'dadata_suggestions_enabled', true );
 $suggestion_settings_repo->set(
@@ -576,6 +652,7 @@ $cdek_item->meta = array(
 	'carrier_key' => 'cdek',
 	'rate_id' => 'cdek:courier',
 	'delivery_type' => 'courier',
+	'pickup_family' => 'technical:pickup',
 	'service_key' => 'cdek',
 	'api_base_price_rub' => 520,
 	'tariff_key' => '137',
@@ -590,7 +667,7 @@ $cdek_persister = new OrderShippingMetaPersister( $session );
 $cdek_persister->persist_shipping_item_meta( $cdek_item );
 wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
 wc_checkout_smoke_assert( array( 'Срок доставки' => '10-14 дней' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only delivery time.' );
-foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
+foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'pickup_family', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	wc_checkout_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
 }
 $cdek_order = new WdcSmokeOrder();

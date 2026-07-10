@@ -89,14 +89,16 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	 */
 	public function calculate_shipping( $package = array() ): void {
 		try {
+			$this->session_manager->expire_stale_yandex_5post_selection();
 			$sort = $this->sort_mode();
 			$this->session_manager->save_sort_mode( $sort );
 
 			$request = $this->package_mapper->map(
 				is_array( $package ) ? $package : array(),
 				array(
-					'pickup_selection' => $this->session_manager->pickup_selection(),
-					'sort_mode'     => $sort,
+					'pickup_selection'  => $this->session_manager->pickup_selection(),
+					'pickup_selections' => $this->session_manager->pickup_selections(),
+					'sort_mode'         => $sort,
 				)
 			);
 

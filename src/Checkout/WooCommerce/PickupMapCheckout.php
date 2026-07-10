@@ -30,10 +30,7 @@ final class PickupMapCheckout {
 		if ( function_exists( 'is_checkout' ) && ! is_checkout() ) {
 			return;
 		}
-		if ( ! $this->has_pickup_rate() ) {
-			return;
-		}
-
+		$this->session_manager->expire_stale_yandex_5post_selection();
 		$base = $this->environment->plugin_url();
 		$version = $this->environment->version();
 		$provider = $this->map_provider();
@@ -236,6 +233,7 @@ final class PickupMapCheckout {
 				'point_title' => $selection['point_title'] ?? $selection['card_title'] ?? $snapshot['point_title'] ?? $snapshot['card_title'] ?? null,
 				'display_code' => $selection['display_code'] ?? $snapshot['display_code'] ?? null,
 				'display_title' => $selection['display_title'] ?? $snapshot['display_title'] ?? null,
+				'presentation_comment' => $selection['presentation_comment'] ?? $snapshot['presentation_comment'] ?? null,
 				'point_name' => $selection['point_name'] ?? $snapshot['point_name'] ?? null,
 				'point_address' => $address ?: ( $selection['point_address'] ?? $selection['address'] ?? $snapshot['address'] ?? null ),
 				'point_postcode' => $selection['point_postcode'] ?? $selection['postcode'] ?? $snapshot['postcode'] ?? null,
@@ -369,6 +367,12 @@ final class PickupMapCheckout {
 					'types' => array(
 						'PARCEL_SHOP' => array( 'card_title' => 'Пункт выдачи DPD', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),
 						'TERMINAL_SELF_DELIVERY' => array( 'card_title' => 'Терминал DPD', 'point_type_label' => 'Терминал', 'marker_type' => 'terminal' ),
+					),
+				),
+				'yandex_delivery:pickup' => array(
+					'types' => array(
+						'PICKUP_POINT' => array( 'card_title' => 'Пункт выдачи Яндекс.Доставки', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),
+						'TERMINAL' => array( 'card_title' => 'Терминал Яндекс.Доставки', 'point_type_label' => 'Терминал', 'marker_type' => 'terminal' ),
 					),
 				),
 				'russian_post_domestic:pickup' => array(

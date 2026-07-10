@@ -735,6 +735,18 @@
 	font-weight: 700;
 }
 
+.wdc-pickup-popup__title-comment,
+.wdc-pickup-list__title-comment {
+	padding: 6px 8px;
+	border-left: 3px solid #f59e0b;
+	border-radius: 4px;
+	background: #fff7ed;
+	color: #92400e;
+	font-size: 12px;
+	font-weight: 700;
+	line-height: 1.35;
+}
+
 .wdc-pickup-popup__section {
 	display: grid;
 	gap: 3px;

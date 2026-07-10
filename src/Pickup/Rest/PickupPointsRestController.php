@@ -6,6 +6,10 @@ namespace WallsShop\WDC\Pickup\Rest;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
@@ -21,8 +25,12 @@ final class PickupPointsRestController {
 		private ?RussianPostPickupPointTypeSettings $type_settings = null,
 		private ?PickupAddressSearchService $address_search = null,
 		private ?CdekDeliveryPointService $cdek_points = null,
-		private ?DpdPickupPointService $dpd_points = null
+		private ?DpdPickupPointService $dpd_points = null,
+		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
+		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null,
+		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null
 	) {
+		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 	}
 
 	public function register(): void {
@@ -90,6 +98,9 @@ final class PickupPointsRestController {
 		}
 		if ( DpdSettings::CARRIER_KEY === $carrier ) {
 			return $this->response( $this->dpd_points( $request ) );
+		}
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->yandex_points( $request ) );
 		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
@@ -174,6 +185,9 @@ final class PickupPointsRestController {
 		if ( DpdSettings::CARRIER_KEY === $carrier ) {
 			return $this->response( $this->filter_generic_points( $this->dpd_points( $request ), $query ) );
 		}
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->filter_generic_points( $this->yandex_points( $request ), $query ) );
+		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
 		}
@@ -234,6 +248,31 @@ final class PickupPointsRestController {
 		return array_slice( array_map( array( $this, 'dpd_summary' ), $points ), 0, $limit );
 	}
 
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function yandex_points( mixed $request ): array {
+		if ( ! $this->yandex_points instanceof YandexDeliveryPickupPointV2Repository || ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
+			return array();
+		}
+		$location_id = (int) $this->param( $request, 'location_id' );
+		$geo_ids = $this->yandex_geo_ids_for_location( $location_id );
+		if ( array() === $geo_ids ) {
+			return array();
+		}
+		$rows = $this->yandex_points->destination_pickup_points_by_geo_ids( $geo_ids );
+
+		return array_map( fn( array $row ): array => $this->yandex_formatter->format( $row ), $rows );
+	}
+
+	/** @return array<int,int> */
+	private function yandex_geo_ids_for_location( int $location_id ): array {
+		if ( $location_id <= 0 || ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
+			return array();
+		}
+
+		return array_values( array_unique( array_filter( array_map( 'intval', $this->yandex_location_mapping->geo_ids_for_location( $location_id ) ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+	}
 	/**
 	 * @param array<int,array<string,mixed>> $points
 	 * @return array<int,array<string,mixed>>
