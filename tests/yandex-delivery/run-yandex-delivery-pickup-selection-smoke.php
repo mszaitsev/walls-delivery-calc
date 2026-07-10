@@ -141,14 +141,14 @@ $presentation_cases = array(
 		'comment' => 'Цена будет пересчитана, иногда сюда получается дороже!',
 	),
 	array(
-		'row' => array( 'platform_station_id' => 'TECH-MARKET', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Пункт выдачи заказов Яндекс Маркета', 'full_address' => 'Адрес Маркет', 'active' => 1 ),
+		'row' => array( 'platform_station_id' => 'TECH-MARKET', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов Яндекс Маркета', 'full_address' => 'Адрес Маркет', 'active' => 1 ),
 		'title' => 'Пункт выдачи Яндекс.Маркет',
-		'comment' => 'Срок хранения посылки - 2-3 дня!',
+		'comment' => '',
 	),
 	array(
-		'row' => array( 'platform_station_id' => 'TECH-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Пункт выдачи заказов партнёра', 'full_address' => 'Адрес партнера', 'active' => 1 ),
+		'row' => array( 'platform_station_id' => 'TECH-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов партнёра', 'full_address' => 'Адрес партнера', 'active' => 1 ),
 		'title' => 'Партнёрский пункт выдачи',
-		'comment' => 'Срок хранения посылки - 2-3 дня!',
+		'comment' => '',
 	),
 	array(
 		'row' => array( 'platform_station_id' => 'TECH-TERMINAL', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Другое имя', 'full_address' => 'Адрес терминал', 'active' => 1 ),

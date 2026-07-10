@@ -107,11 +107,11 @@ final class YandexDeliveryCheckoutPickupPointFormatter {
 		$name = trim( (string) ( $row['name'] ?? '' ) );
 		$terminal_warning = 'Срок хранения посылки - 2-3 дня!';
 
-		if ( 'market_l4g' === $operator_id && 'terminal' === $type && $this->name_matches( $name, 'Пункт выдачи заказов Яндекс Маркета' ) ) {
-			return array( 'title' => 'Пункт выдачи Яндекс.Маркет', 'comment' => $terminal_warning );
+		if ( 'market_l4g' === $operator_id && 'pickup_point' === $type && $this->name_matches( $name, 'Пункт выдачи заказов Яндекс Маркета' ) ) {
+			return array( 'title' => 'Пункт выдачи Яндекс.Маркет', 'comment' => '' );
 		}
-		if ( 'market_l4g' === $operator_id && 'terminal' === $type && $this->name_matches( $name, 'Пункт выдачи заказов партнёра' ) ) {
-			return array( 'title' => 'Партнёрский пункт выдачи', 'comment' => $terminal_warning );
+		if ( 'market_l4g' === $operator_id && 'pickup_point' === $type && $this->name_matches( $name, 'Пункт выдачи заказов партнёра' ) ) {
+			return array( 'title' => 'Партнёрский пункт выдачи', 'comment' => '' );
 		}
 		if ( '5post' === $operator_id ) {
 			return array( 'title' => '5 Post (Пятерочка)', 'comment' => 'Цена будет пересчитана, иногда сюда получается дороже!' );
