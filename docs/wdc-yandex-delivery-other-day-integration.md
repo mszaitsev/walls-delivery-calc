@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.5. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.6. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -32,6 +32,10 @@ The Yandex Delivery admin surface now follows the intended working model:
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
 
+
+## 0.104.6 Leaflet zoom cluster rebuild
+
+The Leaflet provider now retains the complete currently rendered pickup dataset and search marker. Every `zoomend` clears only the existing Leaflet marker layers and reruns the local grid clustering against the new zoom, then reapplies the active marker, search marker and retained popup where an individual point marker exists. The rebuild does not call the pickup REST API, so the already loaded Yandex city dataset remains the source for both zoomed-out clusters and zoomed-in individual markers. The Yandex Maps provider, formatter, presentation comments, viewport side-list filtering, pricing and station selection are unchanged.
 
 ## 0.104.5 Checkout pickup map presentation
 
