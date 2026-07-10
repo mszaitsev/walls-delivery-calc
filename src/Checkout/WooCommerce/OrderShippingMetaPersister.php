@@ -532,6 +532,7 @@ final class OrderShippingMetaPersister {
 			'carrier_key',
 			'rate_id',
 			'delivery_type',
+			'pickup_family',
 			'wdc_delivery_kind',
 			'delivery_kind',
 			'checkout_group_id',

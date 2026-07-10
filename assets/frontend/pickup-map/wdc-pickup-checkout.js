@@ -4,6 +4,9 @@
 	var checkoutConfig = window.wdcPickupCheckout || {};
 	var labels = checkoutConfig.labels || {};
 	var activeMethod = '';
+	var preferredShippingMethod = '';
+	var preferredShippingMethodPending = false;
+	var preferredShippingMethodRecoveryUpdateSent = false;
 	var activePickupFamily = String(checkoutConfig.activePickupFamily || checkoutConfig.active_pickup_family || '').trim();
 	var currentContext = checkoutConfig.currentContext || checkoutConfig.initialContext || {};
 	var prefetchTimer = 0;
@@ -104,6 +107,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 					applySelection(container, response.pickup_point || {});
 					close();
 					if (true === options.updateCheckoutAfterSave) {
+						rememberPreferredShippingMethod(shippingMethodId || method, response.pickup_point || point);
 						triggerCheckoutUpdate();
 					}
 					return true;
@@ -171,6 +175,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 						}
 						syncPickupContextAfterLocationChange(location, savedPoint);
 						if (requiresRateRefreshAfterPickupSave(savedPoint || point)) {
+							rememberPreferredShippingMethod(currentMethod, savedPoint || point);
 							triggerCheckoutUpdate();
 						}
 						disableDestinationResetSuppression();
@@ -1716,15 +1721,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			container.setAttribute('data-shipping-method-id', method);
 			ownMethod = method;
 		}
-		var visible = !method || (isPickupRateValue(method) && containerMatchesActivePickup(container, method, family));
+		var visible = !!method && isPickupRateValue(method) && containerMatchesActivePickup(container, method, family);
 		container.hidden = !visible;
 		container.classList.toggle('wdc-is-hidden', !visible);
 		container.setAttribute('aria-hidden', visible ? 'false' : 'true');
+		syncPickupPostFields(container, visible);
 		container.querySelectorAll('[data-wdc-pickup-open]').forEach(function (button) {
 			button.disabled = !visible;
 		});
 		if (!visible) {
-			clearContainerSelection(container);
 			return;
 		}
 		var hasSelection = isContainerSelectionComplete(container, family);
@@ -1734,6 +1739,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
 			setHidden(button, hasSelection);
 			button.disabled = false;
+		});
+	}
+
+	function syncPickupPostFields(container, active) {
+		if (!container) {
+			return;
+		}
+		container.querySelectorAll('input[name], select[name], textarea[name]').forEach(function (field) {
+			field.disabled = !active;
 		});
 	}
 
@@ -1790,6 +1804,58 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 	}
 
+	function shippingMethodInput(method) {
+		method = normalizeShippingMethod(method);
+		return Array.prototype.find.call(document.querySelectorAll('input[name^="shipping_method"]'), function (input) {
+			return normalizeShippingMethod(input.value) === method;
+		}) || null;
+	}
+
+	function rememberPreferredShippingMethod(method, point) {
+		method = normalizeShippingMethod(method);
+		if (pickupFamily(point) !== 'yandex_delivery:pickup' || shippingMethodFamily(method) !== 'yandex_delivery:pickup') {
+			return;
+		}
+		preferredShippingMethod = method;
+		preferredShippingMethodPending = true;
+		preferredShippingMethodRecoveryUpdateSent = false;
+		var input = shippingMethodInput(method);
+		if (input && !input.disabled) {
+			input.checked = true;
+			activeMethod = method;
+			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+		}
+	}
+
+	function clearPreferredShippingMethod() {
+		preferredShippingMethod = '';
+		preferredShippingMethodPending = false;
+		preferredShippingMethodRecoveryUpdateSent = false;
+	}
+
+	function restorePreferredShippingMethod() {
+		if (!preferredShippingMethodPending || !preferredShippingMethod) {
+			return false;
+		}
+		var input = shippingMethodInput(preferredShippingMethod);
+		if (!input || input.disabled) {
+			clearPreferredShippingMethod();
+			return false;
+		}
+		var needsRecovery = !input.checked;
+		if (needsRecovery) {
+			input.checked = true;
+			activeMethod = preferredShippingMethod;
+			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+			if (!preferredShippingMethodRecoveryUpdateSent) {
+				preferredShippingMethodRecoveryUpdateSent = true;
+				return true;
+			}
+		}
+		clearPreferredShippingMethod();
+		return false;
+	}
+
 	function requiresRateRefreshAfterPickupSave(point) {
 		var family = pickupFamily(point);
 		return family === 'dpd:pickup' || family === 'yandex_delivery:pickup';
@@ -1798,6 +1864,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function boot() {
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);
 		restoreSelectedPickupUi();
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 	}
 
 	function selectedPickupPointId() {
@@ -2001,8 +2068,13 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		window.jQuery(document.body).on('checkout_place_order', beginPlaceOrder);
 		window.jQuery(document.body).on('checkout_error', releasePlaceOrderGuardSoon);
 		window.jQuery(document.body).on('updated_checkout', function () {
+			var runRecoveryUpdate = restorePreferredShippingMethod();
 			boot();
 			restoreSelectedPickupUi();
+			if (runRecoveryUpdate) {
+				triggerCheckoutUpdate();
+				return;
+			}
 			if (isPlacingOrder) {
 				releasePlaceOrderGuardSoon();
 				return;

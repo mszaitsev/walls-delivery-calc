@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.10. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.11. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -32,6 +32,10 @@ The Yandex Delivery admin surface now follows the intended working model:
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
 
+
+## 0.104.11 Checkout pickup POST and selected-method stabilization
+
+Only the active pickup rate container now contributes named hidden fields to WooCommerce checkout POST; inactive carrier containers keep their values but their named fields are disabled. After a Yandex point is saved, `yandex_pickup` is remembered across the resulting rate repricing/re-sort and restored when still available, with a one-update recovery guard. This applies equally to 5Post points through the common `yandex_delivery:pickup` family flow. Visible shipping-item `pickup_family` is removed, while hidden family/session/calculation data remains stored.
 
 ## 0.104.10 Courier pricing fallback through destination PVZ address
 

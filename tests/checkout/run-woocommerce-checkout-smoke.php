@@ -652,6 +652,7 @@ $cdek_item->meta = array(
 	'carrier_key' => 'cdek',
 	'rate_id' => 'cdek:courier',
 	'delivery_type' => 'courier',
+	'pickup_family' => 'technical:pickup',
 	'service_key' => 'cdek',
 	'api_base_price_rub' => 520,
 	'tariff_key' => '137',
@@ -666,7 +667,7 @@ $cdek_persister = new OrderShippingMetaPersister( $session );
 $cdek_persister->persist_shipping_item_meta( $cdek_item );
 wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
 wc_checkout_smoke_assert( array( 'Срок доставки' => '10-14 дней' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only delivery time.' );
-foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
+foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'pickup_family', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	wc_checkout_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
 }
 $cdek_order = new WdcSmokeOrder();

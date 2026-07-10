@@ -8,6 +8,12 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 
 `WooCommerce package -> WooCommercePackageMapper -> QuoteRequest -> CheckoutOrchestrator -> DeliveryRate[] -> WooCommerceRateMapper -> WC_Shipping_Method::add_rate()`.
 
+### Pickup POST and selected-method stabilization 0.104.11
+
+Each rendered pickup rate keeps its own family-specific values, but `wdc-pickup-checkout.js` enables named `input`/`select`/`textarea` fields only for the container matching the checked shipping method. Inactive containers are hidden and disabled for form serialization without clearing their values; `boot()` and `updated_checkout` resynchronize this state after WooCommerce replaces rate HTML.
+
+After saving a `yandex_delivery:pickup` point, the script remembers `yandex_pickup` before triggering repricing. If WooCommerce changes the checked method while rates are repriced or reordered, the script restores Yandex when that radio still exists and is enabled, then sends at most one guarded recovery `update_checkout`; unavailable/disabled Yandex rates are never forced. `OrderShippingMetaPersister` removes visible shipping-item `pickup_family`, while `_wdc_pickup_family`, calculation pickup data and family session buckets remain persisted.
+
 ### Standalone rate delivery labels 0.104.8
 
 For rates without `domestic_tariff_grouped` or `tariff_variants`, `WooCommerceRateMapper` treats final `DeliveryRate::delivery_days` as the display source of truth and formats it through `DeliveryDaysFormatter`. A title that already ends with the final formatted term is retained; when it ends with formatted `original_delivery_days`, only that suffix is replaced; otherwise the final term is appended once as `{title} — {delivery label}`. `planned_delivery_comment` remains available in rate/order metadata for compatibility and diagnostics but is no longer concatenated into the WooCommerce label or rendered as a separate block below a standalone method. Ordinary `comments` continue to render, and grouped tariff selector labels/rows remain unchanged.
