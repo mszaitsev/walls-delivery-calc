@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.12. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.13. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -33,6 +33,11 @@ Architecture decision: coverage batch as a separate mass stage is not needed. Th
 
 
 
+## 0.104.13 Explicit and technical pickup save intent
+
+The checkout frontend now labels real map/cross-location selection saves as `explicit` and automatic family rate synchronization as `technical`; the shared API client forwards the intent in the checkout pickup REST body. Missing/unknown intent remains explicit for backward compatibility.
+
+Explicit save always creates a fresh server UTC `selected_at` and ignores client time. Technical save preserves the existing family timestamp before incoming values, never substitutes current time, and omits an absent timestamp. Existing operator_id and platform_station_id are fallback identity sources during technical synchronization. This prevents AJAX rate synchronization from extending yesterday 5Post, while a real repeated buyer choice receives a new timestamp. Calendar-day expiration and the 5Post warning are unchanged.
 ## 0.104.12 5Post calendar-day selection expiration and warning
 
 Yandex checkout save now copies `operator_id` to the family selection top level while preserving the formatter snapshot and UTC `selected_at`. The narrow session expiration operation compares the selected timestamp and `current_datetime()` as calendar dates in the WordPress timezone. A missing, invalid or previous-day timestamp clears only a selected `operator_id=5post` from `yandex_delivery:pickup`; market_l4g and every other family remain untouched.

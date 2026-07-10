@@ -220,13 +220,18 @@ $courier_errors = new YandexPickupSelectionErrors();
 $validation->validate( array( 'shipping_method' => array( $courier_rate_id ), 'shipping_city' => 'Новосибирск', 'shipping_address_1' => 'ул Ленина, 1' ), $courier_errors );
 yandex_pickup_selection_assert( false === $courier_errors->has( 'wdc_pickup_required' ), 'Yandex courier must not require pickup point.' );
 
-$fivepost_response = $checkout_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'DST-B' ) ) );
+$client_old_timestamp = '2020-01-01T00:00:00+00:00';
+$fivepost_response = $checkout_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'DST-B', 'selection_intent' => 'explicit', 'point' => array( 'point_code' => 'DST-B', 'selected_at' => $client_old_timestamp ) ) ) );
+$explicit_selected_at = (string) ( $fivepost_response['pickup_point']['selected_at'] ?? '' );
 yandex_pickup_selection_assert( 'DST-B' === (string) ( $fivepost_response['pickup_point']['platform_station_id'] ?? '' ), '5Post must use the common Yandex pickup save flow without losing platform_station_id.' );
-yandex_pickup_selection_assert( '5post' === (string) ( $fivepost_response['pickup_point']['operator_id'] ?? '' ) && '5post' === (string) ( $fivepost_response['pickup_point']['snapshot']['operator_id'] ?? '' ) && '' !== (string) ( $fivepost_response['pickup_point']['selected_at'] ?? '' ), 'REST save must keep 5Post operator_id at top level and in snapshot with a UTC selected_at timestamp.' );
+yandex_pickup_selection_assert( false !== strtotime( $explicit_selected_at ) && abs( time() - (int) strtotime( $explicit_selected_at ) ) <= 10, 'Explicit selected_at must match current server UTC time.' );
+yandex_pickup_selection_assert( '5post' === (string) ( $fivepost_response['pickup_point']['operator_id'] ?? '' ) && '5post' === (string) ( $fivepost_response['pickup_point']['snapshot']['operator_id'] ?? '' ) && '' !== (string) ( $fivepost_response['pickup_point']['selected_at'] ?? '' ) && $client_old_timestamp !== (string) ( $fivepost_response['pickup_point']['selected_at'] ?? '' ), 'Explicit REST save must keep 5Post identity and replace any client timestamp with a new server UTC selected_at.' );
 yandex_pickup_selection_assert( '5post' === (string) ( $fivepost_response['pickup_point']['operator_id'] ?? $fivepost_response['pickup_point']['snapshot']['operator_id'] ?? '' ), 'The saved Yandex pickup regression point must remain identified as 5Post in its safe presentation payload.' );
 $fivepost_current_day = $session->pickup_selection_for_family( 'yandex_delivery:pickup' );
 $fivepost_current_day['selected_at'] = '2026-07-10T22:00:00+00:00';
 $session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $fivepost_current_day );
+$technical_response = $checkout_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'shipping_method_id' => 'wdc_platform:yandex_pickup', 'point_code' => 'DST-B', 'selection_intent' => 'technical', 'point' => array( 'point_code' => 'DST-B', 'selected_at' => '2026-07-11T12:00:00+00:00' ) ) ) );
+yandex_pickup_selection_assert( '2026-07-10T22:00:00+00:00' === (string) ( $technical_response['pickup_point']['selected_at'] ?? '' ) && '5post' === (string) ( $technical_response['pickup_point']['operator_id'] ?? '' ) && 'DST-B' === (string) ( $technical_response['pickup_point']['platform_station_id'] ?? '' ) && 'yandex_pickup' === (string) ( $technical_response['pickup_point']['rate_id'] ?? '' ), 'Technical REST save must preserve existing selected_at, operator and station while allowing normalized rate-id synchronization.' );
 $session->save_pickup_selection_for_family( 'dpd:pickup', array( 'carrier_key' => 'dpd', 'service_key' => 'dpd', 'pickup_family' => 'dpd:pickup', 'point_code' => 'DPD-OTHER', 'platform_station_id' => '' ) );
 $saved_yandex = $session->pickup_selection_for_family( 'yandex_delivery:pickup' );
 yandex_pickup_selection_assert( 'dpd' === (string) ( $session->pickup_selection()['carrier_key'] ?? '' ) && 'DST-B' === (string) ( $saved_yandex['point_code'] ?? '' ) && 'DST-B' === (string) ( $saved_yandex['platform_station_id'] ?? '' ), 'A global selection from another carrier must not overwrite the saved 5Post Yandex family selection.' );
@@ -267,6 +272,30 @@ $selection_for_day = static function ( string $operator_id, string $selected_at,
 		),
 	);
 };
+
+$technical_missing_session = new CheckoutSessionManager();
+$technical_missing_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
+$missing_timestamp_selection = $selection_for_day( '5post', '', 'DST-B' );
+$technical_missing_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $missing_timestamp_selection );
+$technical_missing_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $technical_missing_session, null, null, null, $repository, $formatter );
+$technical_missing_response = $technical_missing_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => 'yandex_delivery', 'shipping_method_id' => 'yandex_pickup', 'point_code' => 'DST-B', 'selection_intent' => 'technical' ) ) );
+yandex_pickup_selection_assert( ! array_key_exists( 'selected_at', $technical_missing_response['pickup_point'] ?? array() ), 'Technical save without an existing/incoming timestamp must not create selected_at.' );
+yandex_pickup_selection_assert( true === $technical_missing_session->expire_stale_yandex_5post_selection() && array() === $technical_missing_session->pickup_selection_for_family( 'yandex_delivery:pickup' ), '5Post technical save without selected_at must remain eligible for normal expiration.' );
+
+$client_extension_session = new CheckoutSessionManager();
+$client_extension_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
+$client_extension_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $selection_for_day( '5post', '2026-07-10T20:00:00+00:00', 'DST-B' ) );
+$client_extension_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $client_extension_session, null, null, null, $repository, $formatter );
+$client_extension_response = $client_extension_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => 'yandex_delivery', 'shipping_method_id' => 'yandex_pickup', 'point_code' => 'DST-B', 'selection_intent' => 'technical', 'point' => array( 'point_code' => 'DST-B', 'selected_at' => '2026-07-11T12:00:00+00:00' ) ) ) );
+yandex_pickup_selection_assert( '2026-07-10T20:00:00+00:00' === (string) ( $client_extension_response['pickup_point']['selected_at'] ?? '' ), 'Incoming technical payload must not override the existing family selected_at.' );
+yandex_pickup_selection_assert( true === $client_extension_session->expire_stale_yandex_5post_selection(), 'A client extension attempt must not prevent yesterday 5Post from expiring.' );
+$explicit_repeat_response = $client_extension_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => 'yandex_delivery', 'shipping_method_id' => 'yandex_pickup', 'point_code' => 'DST-B', 'selection_intent' => 'explicit', 'point' => array( 'point_code' => 'DST-B', 'selected_at' => '2026-07-10T20:00:00+00:00' ) ) ) );
+$explicit_repeat_at = (string) ( $explicit_repeat_response['pickup_point']['selected_at'] ?? '' );
+yandex_pickup_selection_assert( '' !== $explicit_repeat_at && '2026-07-10T20:00:00+00:00' !== $explicit_repeat_at, 'A real repeated explicit selection must receive a new server selected_at.' );
+$previous_test_now = $GLOBALS['wdc_yandex_test_current_datetime'];
+$GLOBALS['wdc_yandex_test_current_datetime'] = ( new DateTimeImmutable( $explicit_repeat_at ) )->setTimezone( new DateTimeZone( 'Europe/Moscow' ) );
+yandex_pickup_selection_assert( false === $client_extension_session->expire_stale_yandex_5post_selection(), 'A newly repeated explicit 5Post selection must remain current on its WordPress calendar day.' );
+$GLOBALS['wdc_yandex_test_current_datetime'] = $previous_test_now;
 
 $today_session = new CheckoutSessionManager();
 $today_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );

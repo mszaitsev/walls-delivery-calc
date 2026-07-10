@@ -99,6 +99,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 					return Promise.resolve(false);
 				}
 				var payload = pointPayload(point);
+				payload.selection_intent = 'explicit';
 				if (!savingPoint) {
 					setLoading(options.message || 'Сохраняем пункт выдачи...');
 				}
@@ -165,7 +166,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 						disableDestinationResetSuppression();
 						return;
 					}
-					window.WDCPickupApi.save(point.id, currentMethod, pointPayload(point)).then(function (response) {
+					var payload = pointPayload(point);
+					payload.selection_intent = 'explicit';
+					window.WDCPickupApi.save(point.id, currentMethod, payload).then(function (response) {
 						boot();
 						mergePickupSelectionsFromResponse(response);
 						var actualContainer = document.querySelector('[data-wdc-pickup-checkout]');
@@ -1885,7 +1888,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (!pointId || !window.WDCPickupApi || !window.WDCPickupApi.save) {
 			return;
 		}
-		window.WDCPickupApi.save(pointId, method, selected).catch(function () {});
+		var payload = Object.assign({}, selected, { selection_intent: 'technical' });
+		window.WDCPickupApi.save(pointId, method, payload).catch(function () {});
 	}
 
 	function beginPlaceOrder() {

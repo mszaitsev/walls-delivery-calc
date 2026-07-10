@@ -8,6 +8,11 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 
 `WooCommerce package -> WooCommercePackageMapper -> QuoteRequest -> CheckoutOrchestrator -> DeliveryRate[] -> WooCommerceRateMapper -> WC_Shipping_Method::add_rate()`.
 
+### Pickup selection intent and selected_at 0.104.13
+
+All production `WDCPickupApi.save()` calls carry `selection_intent`: `commitPoint()` and the confirmed cross-location point save use `explicit`, while `syncSelectedPickupRate()` clones the saved selection with `technical`. `wdc-pickup-api.js` forwards the value as a top-level field in `/wdc/v1/checkout/pickup-point`; point identity, family, destination identity and snapshot remain unchanged.
+
+The REST controller accepts only `explicit`/`technical` and treats missing or unknown values as `explicit`. Explicit save ignores client timestamps and assigns fresh server `gmdate('c')`. Technical save reads `selected_at` from existing family top level, existing snapshot, incoming top level and incoming snapshot in that order; it does not call `gmdate()` and omits the key when no timestamp exists. Thus a client payload cannot replace an existing yesterday timestamp, while technical rate-id synchronization retains operator/station identity and leaves timestamp-free 5Post eligible for the existing expiration logic.
 ### Yandex 5Post selection calendar-day expiration 0.104.12
 
 A real Yandex pickup save stores `operator_id` at selection top level, retains it in the safe snapshot, and writes `selected_at` once as an ISO UTC timestamp. `CheckoutSessionManager::expire_stale_yandex_5post_selection()` converts that timestamp to the timezone of `current_datetime()` and compares `Y-m-d`; only `operator_id=5post` expires when the site calendar date differs or the timestamp is absent/invalid. The method clears only `yandex_delivery:pickup` through the family-specific reset.

@@ -59,6 +59,7 @@
 				payload.point = point;
 				payload.point_code = point.point_code || '';
 				payload.carrier = point.carrier_key || point.carrier || currentCarrier();
+				payload.selection_intent = point.selection_intent || '';
 			} else {
 				payload.carrier = currentCarrier();
 			}
