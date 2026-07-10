@@ -58,8 +58,13 @@
 # Карта текущего кода
 
 
-## Checkout Sorting 0.103.5
+## Single Checkout Rate Labels 0.104.8
 
+- `src/Checkout/WooCommerce/WooCommerceRateMapper.php` builds standalone method labels from final `DeliveryRate::delivery_days` via `DeliveryDaysFormatter`, replacing only a matching formatted `original_delivery_days` suffix or appending the final term once with an em dash. Rates carrying `domestic_tariff_grouped` or `tariff_variants` bypass this path.
+- `src/Checkout/WooCommerce/CheckoutRateRenderer.php` renders ordinary `meta['comments']` but no longer emits standalone `planned_delivery_comment`; the field remains in WooCommerce/domain/order metadata and tariff variants keep their existing selector presentation.
+- `tests/checkout/run-woocommerce-checkout-smoke.php` covers Yandex pickup/courier, another carrier range, missing/already-final delivery suffixes, grouped labels and renderer comment separation. Runtime stabilization smoke protects the mapper/renderer source contracts.
+
+## Checkout Sorting 0.103.5
 - `src/Checkout/Sorting/RateSorter.php` owns deterministic checkout ordering for all carriers, with separate strategies for selector variants and checkout methods. Only rates with `meta['tariff_selector_group']` are grouped, using `meta['checkout_group_id']`; ordinary rates are standalone checkout methods keyed by `rate_id`, so `service_key` never merges pickup/courier methods. `sort_group_rates()` uses original carrier values inside one selector; `sort_methods()` uses final active rate values between methods.
 - `src/Domain/Quote/DeliveryRate.php` carries neutral `original_cost` and `original_delivery_days` fields. `sorting_cost()` and `sorting_delivery_days()` fall back to current `price`/`delivery_days` for older/direct rates.
 - Inside a group, price sorting uses original carrier cost and fastest sorting uses original minimum days. Between methods, price sorting uses final `price` and fastest sorting uses final `delivery_days.min_days`; ties use the secondary value, title, `tariff_key`, `rate_id` and input index.

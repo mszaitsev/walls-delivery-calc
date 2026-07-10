@@ -52,10 +52,6 @@ final class CheckoutRateRenderer {
 		$this->render_pickup_selector( $meta, $method );
 		$this->render_courier_address_summary( $meta );
 
-		if ( empty( $meta['domestic_tariff_grouped'] ) && empty( $meta['tariff_variants'] ) && '' !== trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) ) ) {
-			echo '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' . esc_html( (string) $meta['planned_delivery_comment'] ) . '</div>';
-		}
-
 		if ( is_array( $meta['comments'] ?? null ) ) {
 			foreach ( $meta['comments'] as $comment ) {
 				if ( '' !== trim( (string) $comment ) ) {

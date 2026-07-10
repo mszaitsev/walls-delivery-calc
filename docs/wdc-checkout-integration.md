@@ -8,6 +8,10 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 
 `WooCommerce package -> WooCommercePackageMapper -> QuoteRequest -> CheckoutOrchestrator -> DeliveryRate[] -> WooCommerceRateMapper -> WC_Shipping_Method::add_rate()`.
 
+### Standalone rate delivery labels 0.104.8
+
+For rates without `domestic_tariff_grouped` or `tariff_variants`, `WooCommerceRateMapper` treats final `DeliveryRate::delivery_days` as the display source of truth and formats it through `DeliveryDaysFormatter`. A title that already ends with the final formatted term is retained; when it ends with formatted `original_delivery_days`, only that suffix is replaced; otherwise the final term is appended once as `{title} — {delivery label}`. `planned_delivery_comment` remains available in rate/order metadata for compatibility and diagnostics but is no longer concatenated into the WooCommerce label or rendered as a separate block below a standalone method. Ordinary `comments` continue to render, and grouped tariff selector labels/rows remain unchanged.
+
 ## Shipping method registration
 
 `ShippingMethodRegistrar` hooks `woocommerce_shipping_methods` and registers the method only when `new_shipping_method_enabled` is enabled or the `enable_new_checkout_shipping` setting is true. The default for both rollout gates is off.
