@@ -90,6 +90,7 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 	private function rate( QuoteRequest $request, string $delivery_type ): DeliveryRate {
 		$delivery_type = $this->normalize_delivery_type( $delivery_type ) ?: DeliveryType::PICKUP;
 		$method_title = DeliveryType::COURIER === $delivery_type ? $this->settings->courier_method_title() : $this->settings->pickup_method_title();
+		$this->last_pricing_request_diagnostics = array();
 
 		try {
 			$result = $this->pricing_result( $request, $delivery_type );
@@ -98,7 +99,7 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 			$reason = $this->disabled_reason( $exception, $delivery_type );
 			$this->log_pricing_error( $delivery_type, $exception, $request );
 
-			return $this->build_rate( $delivery_type, $method_title, self::DEFAULT_DELIVERY_TIME, Money::from_kopecks( 0 ), true, $reason, array( 'pricing_error' => $this->error_code( $exception ) ) );
+			return $this->build_rate( $delivery_type, $method_title, self::DEFAULT_DELIVERY_TIME, Money::from_kopecks( 0 ), true, $reason, array_merge( array( 'pricing_error' => $this->error_code( $exception ) ), $this->last_pricing_request_diagnostics ) );
 		}
 	}
 
@@ -148,21 +149,120 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 			throw new YandexDeliveryApiException( 'Не выбран ПВЗ сдачи Яндекс.Доставки.', array( 'error_code' => 'source_platform_station_missing' ) );
 		}
 		if ( DeliveryType::COURIER === $delivery_type ) {
-			$address = $this->courier_address( $request );
-			if ( '' === $address ) {
-				throw new YandexDeliveryApiException( 'Недостаточно адреса для расчета курьера Яндекс.Доставки.', array( 'error_code' => 'courier_address_missing' ) );
-			}
-			$payload = $this->request_builder->courier( $request, $source_station_id, $address );
-		} else {
-			$pickup_destination = $this->pickup_destination_station_id( $request );
-			$payload = $this->request_builder->pickup( $request, $source_station_id, $pickup_destination['station_id'] );
-		}
-		$this->last_pricing_request_diagnostics = $this->request_builder->last_diagnostics();
-		if ( DeliveryType::PICKUP === $delivery_type && isset( $pickup_destination ) && is_array( $pickup_destination ) ) {
-			$this->last_pricing_request_diagnostics = array_merge( $this->last_pricing_request_diagnostics, array( 'pickup_source' => $pickup_destination['source'], 'destination_platform_station_id' => $pickup_destination['station_id'] ) );
+			return $this->courier_pricing_result( $request, $source_station_id );
 		}
 
+		$pickup_destination = $this->pickup_destination_station_id( $request );
+		$payload = $this->request_builder->pickup( $request, $source_station_id, $pickup_destination['station_id'] );
+		$this->last_pricing_request_diagnostics = array_merge(
+			$this->request_builder->last_diagnostics(),
+			array( 'pickup_source' => $pickup_destination['source'], 'destination_platform_station_id' => $pickup_destination['station_id'] )
+		);
+
 		return $this->response_parser->parse( $this->api->pricingCalculator( $payload ) );
+	}
+
+	private function courier_pricing_result( QuoteRequest $request, string $source_station_id ): YandexDeliveryPricingResult {
+		$primary_error = null;
+		$checkout_address = $this->courier_address( $request );
+		if ( '' !== $checkout_address ) {
+			try {
+				$result = $this->courier_request_result( $request, $source_station_id, $checkout_address );
+				$this->last_pricing_request_diagnostics = array_merge(
+					$this->request_builder->last_diagnostics(),
+					array( 'courier_pricing_source' => 'checkout_address', 'courier_fallback_used' => false )
+				);
+
+				return $result;
+			} catch ( Throwable $exception ) {
+				$primary_error = $exception;
+				$this->last_pricing_request_diagnostics = array_merge(
+					$this->request_builder->last_diagnostics(),
+					array( 'courier_pricing_source' => 'checkout_address', 'courier_fallback_used' => false, 'courier_primary_error_code' => $this->error_code( $exception ) )
+				);
+				$this->log_courier_primary_error( $exception, $request );
+			}
+		} else {
+			$primary_error = new YandexDeliveryApiException( 'Недостаточно адреса для расчета курьера Яндекс.Доставки.', array( 'error_code' => 'courier_address_missing' ) );
+			$this->last_pricing_request_diagnostics = array(
+				'courier_pricing_source' => 'checkout_address',
+				'courier_fallback_used' => false,
+				'courier_primary_error_code' => 'courier_address_missing',
+			);
+		}
+
+		$pickup_destination = null;
+		try {
+			$pickup_destination = $this->pickup_destination_station_id( $request );
+			$fallback_address = $this->courier_fallback_pickup_address( $pickup_destination['station_id'] );
+			if ( '' === $fallback_address ) {
+				throw new YandexDeliveryApiException( 'У резервного ПВЗ Яндекс.Доставки отсутствует адрес.', array( 'error_code' => 'courier_fallback_pickup_address_missing' ) );
+			}
+			$result = $this->courier_request_result( $request, $source_station_id, $fallback_address );
+			$this->last_pricing_request_diagnostics = array_merge(
+				$this->request_builder->last_diagnostics(),
+				array(
+					'courier_pricing_source' => 'pickup_address_fallback',
+					'courier_fallback_used' => true,
+					'courier_fallback_pickup_source' => $pickup_destination['source'],
+					'courier_fallback_platform_station_id' => $pickup_destination['station_id'],
+					'courier_primary_error_code' => $this->error_code( $primary_error ),
+				)
+			);
+
+			return $result;
+		} catch ( Throwable $fallback_error ) {
+			$this->last_pricing_request_diagnostics = array_merge(
+				$this->last_pricing_request_diagnostics,
+				array(
+					'courier_pricing_source' => 'pickup_address_fallback',
+					'courier_fallback_used' => true,
+					'courier_fallback_pickup_source' => is_array( $pickup_destination ) ? (string) $pickup_destination['source'] : '',
+					'courier_fallback_platform_station_id' => is_array( $pickup_destination ) ? (string) $pickup_destination['station_id'] : '',
+					'courier_primary_error_code' => $this->error_code( $primary_error ),
+					'courier_fallback_error_code' => $this->error_code( $fallback_error ),
+				)
+			);
+
+			throw new YandexDeliveryApiException(
+				'Не удалось рассчитать курьерскую доставку Яндекс.Доставки ни по адресу checkout, ни по адресу ПВЗ.',
+				array(
+					'error_code' => 'courier_pricing_fallback_failed',
+					'courier_primary_error_code' => $this->error_code( $primary_error ),
+					'courier_fallback_error_code' => $this->error_code( $fallback_error ),
+				),
+				0,
+				$fallback_error
+			);
+		}
+	}
+
+	private function courier_request_result( QuoteRequest $request, string $source_station_id, string $destination_address ): YandexDeliveryPricingResult {
+		$payload = $this->request_builder->courier( $request, $source_station_id, $destination_address );
+
+		return $this->response_parser->parse( $this->api->pricingCalculator( $payload ) );
+	}
+
+	private function courier_fallback_pickup_address( string $station_id ): string {
+		if ( ! $this->pickup_points instanceof YandexDeliveryPickupPointV2Repository ) {
+			throw new YandexDeliveryApiException( 'Локальная база ПВЗ Яндекс.Доставки недоступна.', array( 'error_code' => 'pickup_repository_missing' ) );
+		}
+		$point = $this->pickup_points->destination_pickup_point_by_platform_station_id( $station_id );
+		if ( ! is_array( $point ) ) {
+			throw new YandexDeliveryApiException( 'Резервный ПВЗ Яндекс.Доставки не найден.', array( 'error_code' => 'courier_fallback_pickup_missing' ) );
+		}
+		$full_address = trim( (string) ( $point['full_address'] ?? '' ) );
+		if ( '' !== $full_address ) {
+			return $this->compact_address( array( $full_address ) );
+		}
+		$locality = trim( (string) ( $point['locality'] ?? '' ) );
+		$street = trim( (string) ( $point['street'] ?? '' ) );
+		$house = trim( (string) ( $point['house'] ?? '' ) );
+		if ( '' === $locality || '' === $street || '' === $house ) {
+			return '';
+		}
+
+		return $this->compact_address( array( $locality, $street, $house ) );
 	}
 
 	/** @return array{station_id:string,source:string} */
@@ -269,6 +369,25 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 		}
 
 		return DeliveryType::COURIER === $delivery_type ? 'Не удалось рассчитать курьерскую доставку Яндекс.Доставки.' : 'Не удалось рассчитать доставку Яндекс.Доставки до ПВЗ.';
+	}
+
+	private function log_courier_primary_error( Throwable $exception, QuoteRequest $request ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+		$details = $exception instanceof YandexDeliveryApiException ? $exception->details() : array();
+		$this->logger->warning(
+			'Yandex Delivery primary courier pricing failed; pickup-address fallback will be attempted.',
+			$this->settings->sanitize_for_diagnostics(
+				array(
+					'delivery_type' => DeliveryType::COURIER,
+					'error' => $exception->getMessage(),
+					'error_code' => $this->error_code( $exception ),
+					'location_id' => $this->destination_location_id( $request ),
+					'details' => $details,
+				)
+			)
+		);
 	}
 
 	private function log_pricing_error( string $delivery_type, Throwable $exception, QuoteRequest $request ): void {

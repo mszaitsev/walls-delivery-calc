@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.6. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.10. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -32,6 +32,12 @@ The Yandex Delivery admin surface now follows the intended working model:
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
 
+
+## 0.104.10 Courier pricing fallback through destination PVZ address
+
+Courier pricing first sends `tariff=time_interval` with the real checkout destination address. If that address is unavailable or the primary API/parser fails, `YandexDeliveryCarrier` makes one fallback request using the local address of the same destination PVZ selected by the existing pickup priority: family-specific `yandex_delivery:pickup` selection first, otherwise the representative PVZ for all mapped/manual geo ids of the checkout location. The row is loaded by `platform_station_id`; `full_address` is preferred and complete `locality/street/house` is the only assembly fallback.
+
+Diagnostics expose `courier_pricing_source`, `courier_fallback_used`, pickup source/station and primary/fallback error codes, but never the PVZ address. The fallback address is a local pricing argument only: QuoteRequest destination, checkout/session fields, shipping/billing address, order address/meta and mandatory courier validation remain based on the buyer's real address. The next checkout recalculation always retries that real address, so a successful primary quote replaces the preliminary fallback price. Pickup pricing, selected/representative priority, request places, source station, imports and mapping pipeline are unchanged.
 
 ## 0.104.6 Leaflet zoom cluster rebuild
 

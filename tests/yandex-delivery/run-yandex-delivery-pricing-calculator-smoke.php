@@ -77,6 +77,18 @@ function yandex_pricing_request( array $context = array(), ?Package $package = n
 	return new QuoteRequest( 'RU', $address, $package, 'card', $total, '2026-06-29', array_merge( array( 'selected_location_id' => 10 ), $context ) );
 }
 
+/** @param array<string,mixed> $request @return array<string,mixed> */
+function yandex_pricing_http_payload( array $request ): array {
+	$decoded = json_decode( (string) ( $request['args']['body'] ?? '{}' ), true );
+
+	return is_array( $decoded ) ? $decoded : array();
+}
+
+/** @return array<string,\WallsShop\WDC\Domain\Quote\DeliveryRate> */
+function yandex_pricing_rates_by_id( mixed $quote ): array {
+	return array_combine( array_map( static fn( $rate ): string => $rate->rate_id, $quote->rates ), $quote->rates );
+}
+
 $GLOBALS['wdc_options'] = array();
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->yandex_location_mapping_v2 = array(
@@ -182,6 +194,7 @@ $quote = $carrier->quote( yandex_pricing_request() );
 $rates = array_combine( array_map( static fn( $rate ): string => $rate->rate_id, $quote->rates ), $quote->rates );
 yandex_pricing_assert( 23790 === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 'Яндекс до ПВЗ - 7 дней' === $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Pickup checkout rate must use pricing response price and delivery days.' );
 yandex_pricing_assert( 46360 === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks() && 'Яндекс до двери - 9 дней' === $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Courier checkout rate must use pricing response price and delivery days.' );
+yandex_pricing_assert( 'checkout_address' === (string) ( $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_pricing_source'] ?? '' ) && false === ( $rates[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_fallback_used'] ?? null ), 'Successful primary courier pricing must mark checkout_address and skip fallback.' );
 yandex_pricing_assert( isset( $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['package'], $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['package_builder_source'] ) && (int) $rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['places_count'] >= 1, 'Yandex checkout rate meta must include safe package diagnostics.' );
 yandex_pricing_assert( isset( $http->requests[0], $http->requests[1] ), 'Pricing client must call API once per Yandex tariff.' );
 $first_payload = json_decode( (string) $http->requests[0]['args']['body'], true );
@@ -205,6 +218,108 @@ $error_courier = new YandexPricingFakeHttp( array(
 ) );
 $error_quote = ( new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $error_courier ), $mapping, $pickup_repo, null, $builder, $parser ) )->quote( yandex_pricing_request() );
 yandex_pricing_assert( ! $error_quote->rates[0]->disabled && $error_quote->rates[1]->disabled && 23790 === $error_quote->rates[0]->price->get_kopecks(), 'Courier API error must not break pickup pricing.' );
+
+// Empty checkout address: skip primary API and use representative PVZ address assembled from locality/street/house.
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'REP-COMPONENTS', 'name' => 'Representative', 'locality' => 'Москва', 'street' => 'Тестовая', 'house' => '5', 'full_address' => '', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$empty_address_http = new YandexPricingFakeHttp( array( new YandexDeliveryApiResponse( 200, '{"pricing_total":"321 RUB","delivery_days":4}' ) ) );
+$empty_address_carrier = new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $empty_address_http ), $mapping, $pickup_repo, null, new YandexDeliveryPricingRequestBuilder(), $parser );
+$empty_address_request = yandex_pricing_request( array( 'delivery_type' => DeliveryType::COURIER ), address: new Address( country_code: 'RU', city: 'Москва' ) );
+$empty_address_quote = $empty_address_carrier->quote( $empty_address_request );
+$empty_address_rate = $empty_address_quote->rates[0];
+$empty_address_payload = yandex_pricing_http_payload( $empty_address_http->requests[0] ?? array() );
+yandex_pricing_assert( 1 === count( $empty_address_http->requests ) && ! $empty_address_rate->disabled && 32100 === $empty_address_rate->price->get_kopecks(), 'Empty checkout address must skip primary API and return an active courier rate from one fallback request.' );
+yandex_pricing_assert( 'Москва, Тестовая, 5' === (string) ( $empty_address_payload['destination']['address'] ?? '' ) && 'pickup_address_fallback' === (string) ( $empty_address_rate->meta['courier_pricing_source'] ?? '' ) && true === ( $empty_address_rate->meta['courier_fallback_used'] ?? null ), 'Courier fallback must assemble the representative PVZ address and mark fallback diagnostics.' );
+yandex_pricing_assert( '' === $empty_address_request->destination->raw_address && '' === $empty_address_request->destination->street && '' === $empty_address_request->destination->house && ! str_contains( json_encode( $empty_address_rate->meta ) ?: '', 'Тестовая' ), 'Courier fallback must not mutate QuoteRequest destination or persist the PVZ address in rate meta.' );
+
+// Primary API failure: retry once with the same representative pickup destination.
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'REP-FULL', 'name' => 'Representative full', 'locality' => 'Москва', 'full_address' => 'Москва, Резервная улица, 10', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$primary_error_http = new YandexPricingFakeHttp( array(
+	new YandexDeliveryApiException( 'address not recognized', array( 'error_code' => 'address_not_recognized' ) ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"345 RUB","delivery_days":5}' ),
+) );
+$primary_error_rate = ( new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $primary_error_http ), $mapping, $pickup_repo, null, new YandexDeliveryPricingRequestBuilder(), $parser ) )->quote( yandex_pricing_request( array( 'delivery_type' => DeliveryType::COURIER ) ) )->rates[0];
+$primary_payload = yandex_pricing_http_payload( $primary_error_http->requests[0] ?? array() );
+$primary_fallback_payload = yandex_pricing_http_payload( $primary_error_http->requests[1] ?? array() );
+yandex_pricing_assert( 2 === count( $primary_error_http->requests ) && ! $primary_error_rate->disabled && 34500 === $primary_error_rate->price->get_kopecks(), 'Unrecognized checkout address must retry exactly once and use fallback response price.' );
+yandex_pricing_assert( 'Москва, Волжский бульвар, д 1 к1' === (string) ( $primary_payload['destination']['address'] ?? '' ) && 'Москва, Резервная улица, 10' === (string) ( $primary_fallback_payload['destination']['address'] ?? '' ), 'Primary and fallback courier requests must use checkout and PVZ addresses respectively.' );
+yandex_pricing_assert( 'address_not_recognized' === (string) ( $primary_error_rate->meta['courier_primary_error_code'] ?? '' ) && 'representative' === (string) ( $primary_error_rate->meta['courier_fallback_pickup_source'] ?? '' ) && 'REP-FULL' === (string) ( $primary_error_rate->meta['courier_fallback_platform_station_id'] ?? '' ), 'Fallback diagnostics must preserve primary error and representative station identity.' );
+yandex_pricing_assert( ! str_contains( json_encode( $primary_error_rate->meta ) ?: '', 'Резервная улица' ), 'Courier fallback diagnostics must not store the PVZ address.' );
+
+// Family-specific selected PVZ must be shared by pickup pricing and courier fallback.
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'REP-FULL', 'name' => 'Representative full', 'locality' => 'Москва', 'full_address' => 'Москва, Резервная улица, 10', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+	array( 'platform_station_id' => 'SELECTED-FULL', 'name' => 'Selected full', 'locality' => 'Москва', 'full_address' => 'Москва, Выбранная улица, 20', 'type' => 'terminal', 'operator_id' => '5post', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$selected_context = array(
+	'pickup_selections' => array(
+		YandexDeliverySettings::CARRIER_KEY . ':pickup' => array( 'carrier_key' => YandexDeliverySettings::CARRIER_KEY, 'pickup_family' => YandexDeliverySettings::CARRIER_KEY . ':pickup', 'platform_station_id' => 'SELECTED-FULL' ),
+	),
+);
+$selected_http = new YandexPricingFakeHttp( array(
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"210 RUB","delivery_days":3}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"360 RUB","delivery_days":6}' ),
+) );
+$selected_rates = yandex_pricing_rates_by_id( ( new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $selected_http ), $mapping, $pickup_repo, null, new YandexDeliveryPricingRequestBuilder(), $parser ) )->quote( yandex_pricing_request( $selected_context, address: new Address( country_code: 'RU', city: 'Москва' ) ) ) );
+$selected_pickup_payload = yandex_pricing_http_payload( $selected_http->requests[0] ?? array() );
+$selected_courier_payload = yandex_pricing_http_payload( $selected_http->requests[1] ?? array() );
+yandex_pricing_assert( 'SELECTED-FULL' === (string) ( $selected_pickup_payload['destination']['platform_station_id'] ?? '' ) && 'Москва, Выбранная улица, 20' === (string) ( $selected_courier_payload['destination']['address'] ?? '' ), 'Pickup pricing and courier fallback must use the same family-specific selected PVZ.' );
+yandex_pricing_assert( 'selected' === (string) ( $selected_rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pickup_source'] ?? '' ) && 'selected' === (string) ( $selected_rates[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_fallback_pickup_source'] ?? '' ) && 'SELECTED-FULL' === (string) ( $selected_rates[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_fallback_platform_station_id'] ?? '' ), 'Selected PVZ must have priority in both pickup and courier fallback diagnostics.' );
+
+// Without selection, pickup pricing and courier fallback must share the representative PVZ.
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'REP-SHARED', 'name' => 'Representative shared', 'locality' => 'Москва', 'full_address' => 'Москва, Общая улица, 30', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$representative_http = new YandexPricingFakeHttp( array(
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"220 RUB","delivery_days":3}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"370 RUB","delivery_days":6}' ),
+) );
+$representative_rates = yandex_pricing_rates_by_id( ( new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $representative_http ), $mapping, $pickup_repo, null, new YandexDeliveryPricingRequestBuilder(), $parser ) )->quote( yandex_pricing_request( address: new Address( country_code: 'RU', city: 'Москва' ) ) ) );
+$representative_pickup_payload = yandex_pricing_http_payload( $representative_http->requests[0] ?? array() );
+$representative_courier_payload = yandex_pricing_http_payload( $representative_http->requests[1] ?? array() );
+yandex_pricing_assert( 'REP-SHARED' === (string) ( $representative_pickup_payload['destination']['platform_station_id'] ?? '' ) && 'Москва, Общая улица, 30' === (string) ( $representative_courier_payload['destination']['address'] ?? '' ), 'Pickup pricing and courier fallback must use the same representative PVZ when selection is absent.' );
+yandex_pricing_assert( 'representative' === (string) ( $representative_rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pickup_source'] ?? '' ) && 'representative' === (string) ( $representative_rates[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_fallback_pickup_source'] ?? '' ), 'Representative source must be reported consistently for pickup and courier fallback.' );
+
+// Missing PVZ address: no fallback API request, courier disabled, pickup remains active.
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'REP-NO-ADDRESS', 'name' => 'No address', 'locality' => 'Москва', 'full_address' => '', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$no_address_http = new YandexPricingFakeHttp( array( new YandexDeliveryApiResponse( 200, '{"pricing_total":"230 RUB","delivery_days":3}' ) ) );
+$no_address_rates = yandex_pricing_rates_by_id( ( new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $no_address_http ), $mapping, $pickup_repo, null, new YandexDeliveryPricingRequestBuilder(), $parser ) )->quote( yandex_pricing_request( address: new Address( country_code: 'RU', city: 'Москва' ) ) ) );
+yandex_pricing_assert( 1 === count( $no_address_http->requests ) && ! $no_address_rates[YandexDeliveryCarrier::PICKUP_RATE_ID]->disabled && $no_address_rates[YandexDeliveryCarrier::COURIER_RATE_ID]->disabled, 'Missing fallback PVZ address must skip courier fallback API without breaking pickup pricing.' );
+yandex_pricing_assert( 'courier_fallback_pickup_address_missing' === (string) ( $no_address_rates[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_fallback_error_code'] ?? '' ), 'Disabled courier diagnostics must identify missing fallback PVZ address.' );
+
+// Both primary and fallback API calls fail: exactly two calls and disabled courier.
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'REP-FAIL', 'name' => 'Fail', 'locality' => 'Москва', 'full_address' => 'Москва, Ошибочная улица, 40', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$double_error_http = new YandexPricingFakeHttp( array(
+	new YandexDeliveryApiException( 'primary failed', array( 'error_code' => 'primary_failed' ) ),
+	new YandexDeliveryApiException( 'fallback failed', array( 'error_code' => 'fallback_failed' ) ),
+) );
+$double_error_rate = ( new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $double_error_http ), $mapping, $pickup_repo, null, new YandexDeliveryPricingRequestBuilder(), $parser ) )->quote( yandex_pricing_request( array( 'delivery_type' => DeliveryType::COURIER ) ) )->rates[0];
+yandex_pricing_assert( 2 === count( $double_error_http->requests ) && $double_error_rate->disabled, 'Primary and fallback failures must perform at most two API calls and disable courier.' );
+yandex_pricing_assert( 'primary_failed' === (string) ( $double_error_rate->meta['courier_primary_error_code'] ?? '' ) && 'fallback_failed' === (string) ( $double_error_rate->meta['courier_fallback_error_code'] ?? '' ) && 'courier_pricing_fallback_failed' === (string) ( $double_error_rate->meta['pricing_error'] ?? '' ), 'Disabled courier diagnostics must preserve both error codes and final fallback failure.' );
+
+// Corrected checkout address must replace prior fallback pricing on the next quote.
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'REP-REFRESH', 'name' => 'Refresh', 'locality' => 'Москва', 'full_address' => 'Москва, Предварительная улица, 50', 'type' => 'pickup_point', 'operator_id' => 'market_l4g', 'yandex_geo_id' => 65, 'active' => 1 ),
+);
+$refresh_http = new YandexPricingFakeHttp( array(
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"380 RUB","delivery_days":6}' ),
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"440 RUB","delivery_days":4}' ),
+) );
+$refresh_carrier = new YandexDeliveryCarrier( $settings, new YandexDeliveryApiClient( $settings, $refresh_http ), $mapping, $pickup_repo, null, new YandexDeliveryPricingRequestBuilder(), $parser );
+$refresh_fallback_rate = $refresh_carrier->quote( yandex_pricing_request( array( 'delivery_type' => DeliveryType::COURIER ), address: new Address( country_code: 'RU', city: 'Москва' ) ) )->rates[0];
+$refresh_primary_rate = $refresh_carrier->quote( yandex_pricing_request( array( 'delivery_type' => DeliveryType::COURIER ) ) )->rates[0];
+$refresh_primary_payload = yandex_pricing_http_payload( $refresh_http->requests[1] ?? array() );
+yandex_pricing_assert( 2 === count( $refresh_http->requests ) && 38000 === $refresh_fallback_rate->price->get_kopecks() && 44000 === $refresh_primary_rate->price->get_kopecks(), 'Corrected checkout address must replace fallback pricing on the next quote without an extra fallback call.' );
+yandex_pricing_assert( true === ( $refresh_fallback_rate->meta['courier_fallback_used'] ?? null ) && 'checkout_address' === (string) ( $refresh_primary_rate->meta['courier_pricing_source'] ?? '' ) && false === ( $refresh_primary_rate->meta['courier_fallback_used'] ?? null ), 'Corrected address must reset courier pricing source to checkout_address.' );
+yandex_pricing_assert( 'Москва, Волжский бульвар, д 1 к1' === (string) ( $refresh_primary_payload['destination']['address'] ?? '' ), 'Corrected courier request must use the real checkout address.' );
+
 yandex_pricing_assert( YandexDeliveryCarrier::PICKUP_RATE_ID === $quote->rates[0]->rate_id && YandexDeliveryCarrier::COURIER_RATE_ID === $quote->rates[1]->rate_id, 'Yandex checkout rate ids must stay unchanged.' );
 
 $checkout_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Runtime/YandexDeliveryCarrier.php' );
