@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.4. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.5. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -32,6 +32,12 @@ The Yandex Delivery admin surface now follows the intended working model:
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 
 
+
+## 0.104.5 Checkout pickup map presentation
+
+Yandex destination pickup rows are still loaded from `wp_wdc_yandex_delivery_pickup_points_v2` by selected checkout `location_id` and all mapped/manual `yandex_geo_id` values, without server-side limits for the Yandex checkout picker. The formatter now maps operator/type/name to buyer-facing titles: 5Post, Yandex.Market terminal, partner terminal, generic Yandex terminal and generic Yandex Delivery fallback. `platform_station_id` remains available only as `id`/`point_code`/`platform_station_id`/`snapshot.platform_station_id`; `display_code` is empty for Yandex points.
+
+Warnings such as the 5Post price note and terminal storage note are carried as `presentation_comment`, kept separate from pickup instructions in `description`, and rendered under the title in the map popup/list. The frontend keeps all loaded Yandex city points for map markers and clustering but filters the side list client-side by the current map bbox, preserving committed selection if the selected point leaves the viewport. Leaflet `clusterCellSize` and Yandex `gridSize` are now 128. Pricing-calculator requests, representative fallback, selected-station priority, source station, imports and geo/mapping pipelines were not changed.
 
 ## 0.104.4 Checkout pickup chain fix
 

@@ -133,6 +133,46 @@ $formatted = $formatter->format( $rows[0] );
 yandex_pickup_selection_assert( YandexDeliverySettings::CARRIER_KEY === (string) $formatted['carrier_key'] && (string) ( $rows[0]['platform_station_id'] ?? '' ) === (string) $formatted['platform_station_id'] && (string) $formatted['platform_station_id'] === (string) $formatted['point_code'], 'Yandex formatter must emit common checkout pickup point identity.' );
 yandex_pickup_selection_assert( ! array_key_exists( 'raw_json', $formatted ) && ! array_key_exists( 'raw_json', $formatted['snapshot'] ?? array() ), 'Yandex formatter must not expose raw_json.' );
 
+
+$presentation_cases = array(
+	array(
+		'row' => array( 'platform_station_id' => 'TECH-5POST', 'operator_id' => '5post', 'type' => 'pickup_point', 'name' => 'Любое имя', 'full_address' => 'Адрес 5Post', 'active' => 1 ),
+		'title' => '5 Post (Пятерочка)',
+		'comment' => 'Цена будет пересчитана, иногда сюда получается дороже!',
+	),
+	array(
+		'row' => array( 'platform_station_id' => 'TECH-MARKET', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Пункт выдачи заказов Яндекс Маркета', 'full_address' => 'Адрес Маркет', 'active' => 1 ),
+		'title' => 'Пункт выдачи Яндекс.Маркет',
+		'comment' => 'Срок хранения посылки - 2-3 дня!',
+	),
+	array(
+		'row' => array( 'platform_station_id' => 'TECH-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Пункт выдачи заказов партнёра', 'full_address' => 'Адрес партнера', 'active' => 1 ),
+		'title' => 'Партнёрский пункт выдачи',
+		'comment' => 'Срок хранения посылки - 2-3 дня!',
+	),
+	array(
+		'row' => array( 'platform_station_id' => 'TECH-TERMINAL', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Другое имя', 'full_address' => 'Адрес терминал', 'active' => 1 ),
+		'title' => 'Постамат Яндекса',
+		'comment' => 'Срок хранения посылки - 2-3 дня!',
+	),
+	array(
+		'row' => array( 'platform_station_id' => 'TECH-FALLBACK', 'operator_id' => 'other', 'type' => 'pickup_point', 'name' => 'Другое имя', 'full_address' => 'Адрес fallback', 'active' => 1 ),
+		'title' => 'Выдача посылок Яндекс.Доставки',
+		'comment' => '',
+	),
+);
+foreach ( $presentation_cases as $case ) {
+	$point = $formatter->format( $case['row'] );
+	$station = (string) $case['row']['platform_station_id'];
+	foreach ( array( 'point_title', 'card_title', 'display_title', 'title' ) as $field ) {
+		yandex_pickup_selection_assert( $case['title'] === (string) ( $point[ $field ] ?? '' ), 'Yandex formatter must expose presentation title in ' . $field . '.' );
+		yandex_pickup_selection_assert( ! str_contains( (string) ( $point[ $field ] ?? '' ), $station ), 'Yandex user-facing title field must not contain platform_station_id: ' . $field . '.' );
+	}
+	yandex_pickup_selection_assert( '' === (string) ( $point['display_code'] ?? 'not-empty' ) && '' === (string) ( $point['snapshot']['display_code'] ?? 'not-empty' ), 'Yandex formatter must keep display_code empty.' );
+	yandex_pickup_selection_assert( $case['comment'] === (string) ( $point['presentation_comment'] ?? '' ) && $case['comment'] === (string) ( $point['snapshot']['presentation_comment'] ?? '' ), 'Yandex formatter must expose presentation_comment separately from description.' );
+	yandex_pickup_selection_assert( $station === (string) ( $point['point_code'] ?? '' ) && $station === (string) ( $point['platform_station_id'] ?? '' ) && $station === (string) ( $point['snapshot']['platform_station_id'] ?? '' ), 'Yandex formatter must keep technical platform_station_id in identity fields.' );
+}
+
 $points_controller = new PickupPointsRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), null, null, null, null, $repository, $mapping, $formatter );
 $points = $points_controller->points( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'location_id' => '10', 'limit' => '10' ) );
 yandex_pickup_selection_assert( 1008 === count( $points ) && 'yandex_delivery:pickup' === (string) ( $points[0]['pickup_family'] ?? '' ), 'Pickup REST endpoint must ignore REST limit and return all Yandex points in common map/list shape.' );

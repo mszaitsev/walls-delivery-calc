@@ -14,7 +14,7 @@
 		var popupCloseCallback = function () {};
 		var mapClickCallback = function () {};
 		var maxClusterZoom = 18;
-		var clusterCellSize = 64;
+		var clusterCellSize = 128;
 		var suppressPopupClose = false;
 
 		if (!window.L) {

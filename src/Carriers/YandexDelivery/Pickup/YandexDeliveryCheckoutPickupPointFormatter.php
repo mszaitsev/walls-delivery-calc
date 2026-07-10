@@ -14,15 +14,15 @@ final class YandexDeliveryCheckoutPickupPointFormatter {
 	 */
 	public function format( array $row ): array {
 		$station_id = $this->station_id( $row );
-		$type = (string) ( $row['type'] ?? '' );
+		$type = trim( (string) ( $row['type'] ?? '' ) );
 		$type_label = 'terminal' === $type ? 'Терминал' : 'Пункт выдачи';
-		$point_title = 'terminal' === $type ? 'Терминал Яндекс.Доставки' : 'Пункт выдачи Яндекс.Доставки';
 		$marker_type = 'terminal' === $type ? 'terminal' : 'pickup';
 		$address = (string) ( $row['full_address'] ?? '' );
 		$name = (string) ( $row['name'] ?? '' );
-		if ( '' === trim( $name ) ) {
-			$name = $point_title;
-		}
+		$presentation = $this->presentation( $row );
+		$point_title = $presentation['title'];
+		$presentation_comment = $presentation['comment'];
+		$point_name = '' !== trim( $name ) ? trim( $name ) : $point_title;
 		$snapshot = array(
 			'id' => YandexDeliverySettings::CARRIER_KEY . ':' . $station_id,
 			'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
@@ -33,10 +33,11 @@ final class YandexDeliveryCheckoutPickupPointFormatter {
 			'point_type' => $type,
 			'point_type_label' => $type_label,
 			'point_title' => $point_title,
-			'display_code' => $station_id,
-			'display_title' => trim( $point_title . ' ' . $station_id ),
+			'display_code' => '',
+			'display_title' => $point_title,
+			'presentation_comment' => $presentation_comment,
 			'marker_type' => $marker_type,
-			'point_name' => $name,
+			'point_name' => $point_name,
 			'address' => $address,
 			'city' => (string) ( $row['locality'] ?? '' ),
 			'region' => (string) ( $row['region'] ?? '' ),
@@ -63,11 +64,12 @@ final class YandexDeliveryCheckoutPickupPointFormatter {
 			'point_type_label' => $type_label,
 			'point_title' => $point_title,
 			'card_title' => $point_title,
-			'display_code' => $station_id,
+			'display_code' => '',
 			'display_title' => $snapshot['display_title'],
+			'presentation_comment' => $presentation_comment,
 			'marker_type' => $marker_type,
-			'title' => $name,
-			'point_name' => $name,
+			'title' => $point_title,
+			'point_name' => $point_name,
 			'address' => $address,
 			'point_address' => $address,
 			'city' => $snapshot['city'],
@@ -93,6 +95,45 @@ final class YandexDeliveryCheckoutPickupPointFormatter {
 	/** @param array<string,mixed> $row */
 	private function station_id( array $row ): string {
 		return substr( preg_replace( '/[^A-Za-z0-9_-]+/', '', trim( (string) ( $row['platform_station_id'] ?? '' ) ) ) ?? '', 0, 80 );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array{title:string,comment:string}
+	 */
+	private function presentation( array $row ): array {
+		$operator_id = $this->normalized( $row['operator_id'] ?? '' );
+		$type = $this->normalized( $row['type'] ?? '' );
+		$name = trim( (string) ( $row['name'] ?? '' ) );
+		$terminal_warning = 'Срок хранения посылки - 2-3 дня!';
+
+		if ( 'market_l4g' === $operator_id && 'terminal' === $type && $this->name_matches( $name, 'Пункт выдачи заказов Яндекс Маркета' ) ) {
+			return array( 'title' => 'Пункт выдачи Яндекс.Маркет', 'comment' => $terminal_warning );
+		}
+		if ( 'market_l4g' === $operator_id && 'terminal' === $type && $this->name_matches( $name, 'Пункт выдачи заказов партнёра' ) ) {
+			return array( 'title' => 'Партнёрский пункт выдачи', 'comment' => $terminal_warning );
+		}
+		if ( '5post' === $operator_id ) {
+			return array( 'title' => '5 Post (Пятерочка)', 'comment' => 'Цена будет пересчитана, иногда сюда получается дороже!' );
+		}
+		if ( 'market_l4g' === $operator_id && 'terminal' === $type ) {
+			return array( 'title' => 'Постамат Яндекса', 'comment' => $terminal_warning );
+		}
+
+		return array( 'title' => 'Выдача посылок Яндекс.Доставки', 'comment' => '' );
+	}
+
+	private function name_matches( string $name, string $expected ): bool {
+		$name = trim( $name );
+		$expected = trim( $expected );
+
+		return $name === $expected || $this->normalized( $name ) === $this->normalized( $expected );
+	}
+
+	private function normalized( mixed $value ): string {
+		$value = trim( (string) $value );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 	}
 
 	private function coordinate( mixed $value ): ?float {

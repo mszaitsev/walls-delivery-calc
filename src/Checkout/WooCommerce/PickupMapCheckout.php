@@ -232,6 +232,7 @@ final class PickupMapCheckout {
 				'point_title' => $selection['point_title'] ?? $selection['card_title'] ?? $snapshot['point_title'] ?? $snapshot['card_title'] ?? null,
 				'display_code' => $selection['display_code'] ?? $snapshot['display_code'] ?? null,
 				'display_title' => $selection['display_title'] ?? $snapshot['display_title'] ?? null,
+				'presentation_comment' => $selection['presentation_comment'] ?? $snapshot['presentation_comment'] ?? null,
 				'point_name' => $selection['point_name'] ?? $snapshot['point_name'] ?? null,
 				'point_address' => $address ?: ( $selection['point_address'] ?? $selection['address'] ?? $snapshot['address'] ?? null ),
 				'point_postcode' => $selection['point_postcode'] ?? $selection['postcode'] ?? $snapshot['postcode'] ?? null,

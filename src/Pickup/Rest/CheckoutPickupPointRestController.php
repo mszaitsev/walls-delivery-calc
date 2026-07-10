@@ -311,6 +311,7 @@ final class CheckoutPickupPointRestController {
 			'point_title' => $selection['point_title'] ?? ( $selection['snapshot']['point_title'] ?? '' ),
 			'display_code' => $selection['display_code'] ?? ( $selection['snapshot']['display_code'] ?? '' ),
 			'display_title' => $selection['display_title'] ?? ( $selection['snapshot']['display_title'] ?? '' ),
+			'presentation_comment' => $selection['presentation_comment'] ?? ( $selection['snapshot']['presentation_comment'] ?? '' ),
 			'marker_type' => $selection['marker_type'] ?? ( $selection['snapshot']['marker_type'] ?? '' ),
 			'point_name' => $selection['point_name'] ?? ( $selection['snapshot']['point_name'] ?? '' ),
 			'point_address' => $selection['address'] ?? $selection['point_address'] ?? '',

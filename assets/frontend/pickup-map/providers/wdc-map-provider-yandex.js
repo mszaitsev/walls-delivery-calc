@@ -46,7 +46,7 @@
 				clusterIconLayout: ymaps.templateLayoutFactory.createClass('<div class="wdc-map-cluster"><span class="wdc-map-cluster__inner">$[properties.geoObjects.length]</span></div>'),
 				clusterIconShape: { type: 'Circle', coordinates: [23, 23], radius: 23 },
 				clusterIcons: [{ href: '', size: [46, 46], offset: [-23, -23] }],
-				gridSize: 80,
+				gridSize: 128,
 				groupByCoordinates: false
 			});
 			map.geoObjects.add(collection);
