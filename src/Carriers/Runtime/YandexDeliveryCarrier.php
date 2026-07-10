@@ -104,7 +104,7 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 
 	/** @param array<string,mixed> $meta */
 	private function build_rate( string $delivery_type, string $method_title, string $delivery_time, Money $price, bool $disabled, string $disabled_reason, array $meta ): DeliveryRate {
-		$title = $method_title . ' — ' . $delivery_time;
+		$title = $method_title . ' - ' . $delivery_time;
 
 		return new DeliveryRate(
 			DeliveryType::COURIER === $delivery_type ? self::COURIER_RATE_ID : self::PICKUP_RATE_ID,

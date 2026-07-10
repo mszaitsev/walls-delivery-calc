@@ -73,7 +73,7 @@ final class WooCommerceRateMapper {
 			return substr( $title, 0, -strlen( $original_delivery_label ) ) . $final_delivery_label;
 		}
 
-		return '' === trim( $title ) ? $final_delivery_label : rtrim( $title ) . ' — ' . $final_delivery_label;
+		return '' === trim( $title ) ? $final_delivery_label : rtrim( $title ) . ' - ' . $final_delivery_label;
 	}
 
 	private function pickup_family( DeliveryRate $rate ): string {
