@@ -301,6 +301,7 @@ final class CheckoutPickupPointRestController {
 			'carrier' => $carrier,
 			'service_key' => $service_key,
 			'pickup_family' => $family,
+			'operator_id' => (string) ( $selection['operator_id'] ?? $selection['snapshot']['operator_id'] ?? '' ),
 			'rate_id' => $method_id,
 			'point_id' => $selection['id'] ?? '',
 			'point_code' => $selection['point_code'] ?? '',

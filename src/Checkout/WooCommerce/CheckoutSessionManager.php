@@ -190,6 +190,52 @@ final class CheckoutSessionManager {
 		}
 	}
 
+	public function expire_stale_yandex_5post_selection(): bool {
+		$family = YandexDeliverySettings::CARRIER_KEY . ':pickup';
+		$selection = $this->pickup_selection_for_family( $family );
+		if ( array() === $selection ) {
+			return false;
+		}
+
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$operator_id = strtolower( trim( (string) ( $selection['operator_id'] ?? $snapshot['operator_id'] ?? '' ) ) );
+		if ( '5post' !== $operator_id ) {
+			return false;
+		}
+
+		$selected_at = trim( (string) ( $selection['selected_at'] ?? $snapshot['selected_at'] ?? '' ) );
+		$current = $this->site_current_datetime();
+		try {
+			$selected = '' !== $selected_at ? new \DateTimeImmutable( $selected_at ) : null;
+		} catch ( \Throwable ) {
+			$selected = null;
+		}
+
+		if ( $selected instanceof \DateTimeImmutable && $selected->setTimezone( $current->getTimezone() )->format( 'Y-m-d' ) === $current->format( 'Y-m-d' ) ) {
+			return false;
+		}
+
+		$this->clear_pickup_selection_for_family( $family, 'stale_yandex_5post' );
+
+		return true;
+	}
+
+	private function site_current_datetime(): \DateTimeImmutable {
+		if ( function_exists( 'current_datetime' ) ) {
+			$current = current_datetime();
+			if ( $current instanceof \DateTimeImmutable ) {
+				return $current;
+			}
+			if ( $current instanceof \DateTimeInterface ) {
+				return \DateTimeImmutable::createFromInterface( $current );
+			}
+		}
+
+		$timezone = function_exists( 'wp_timezone' ) ? wp_timezone() : new \DateTimeZone( 'UTC' );
+
+		return new \DateTimeImmutable( 'now', $timezone );
+	}
+
 	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
 		$current_family = '' !== $currentRateId ? $this->shipping_method_family( $currentRateId ) : '';
 		if ( '' !== $current_family && str_ends_with( $current_family, ':pickup' ) ) {

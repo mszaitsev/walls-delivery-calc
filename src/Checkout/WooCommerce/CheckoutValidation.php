@@ -16,6 +16,8 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutValidation {
+	private bool $stale_yandex_5post_post_blocked = false;
+
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
 		private ?CheckoutAddressValidation $address_validation = null,
@@ -36,6 +38,14 @@ final class CheckoutValidation {
 		$data = $this->posted_checkout_data();
 		$chosen_methods = $this->chosen_shipping_methods( $data );
 		$chosen_rate_id = $this->first_chosen_shipping_method( $chosen_methods );
+		$expired = $this->session_manager->expire_stale_yandex_5post_selection();
+		if ( $expired && $this->is_yandex_pickup_rate( $chosen_rate_id ) ) {
+			$this->stale_yandex_5post_post_blocked = true;
+		}
+
+		if ( $this->stale_yandex_5post_post_blocked && $this->is_yandex_pickup_rate( $chosen_rate_id ) ) {
+			return;
+		}
 
 		if ( ! $this->is_supported_pickup_family( $chosen_rate_id ) ) {
 			return;
@@ -54,6 +64,10 @@ final class CheckoutValidation {
 		$data = is_array( $data ) ? $data : array();
 		$chosen_methods = $this->chosen_shipping_methods( $data );
 		$chosen_rate_id = $this->first_chosen_shipping_method( $chosen_methods );
+		$expired = $this->session_manager->expire_stale_yandex_5post_selection();
+		if ( $expired && $this->is_yandex_pickup_rate( $chosen_rate_id ) ) {
+			$this->stale_yandex_5post_post_blocked = true;
+		}
 		$rate = $this->selected_rate( $data );
 		if ( array() === $rate && $this->is_supported_pickup_family( $chosen_rate_id ) ) {
 			$rate = $this->synthetic_pickup_rate( $chosen_rate_id );
@@ -79,6 +93,12 @@ final class CheckoutValidation {
 
 		$selected_rate_id = $this->selected_rate_id( $rate );
 		$active_family = $this->rate_pickup_family( $rate, $selected_rate_id );
+		if ( $this->stale_yandex_5post_post_blocked && YandexDeliverySettings::CARRIER_KEY . ':pickup' === $active_family ) {
+			$this->stale_yandex_5post_post_blocked = false;
+			$this->add_pickup_error( $errors, $rate );
+			return;
+		}
+		$this->stale_yandex_5post_post_blocked = false;
 		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
 		if ( array() !== $active_selection && $this->session_manager->valid_pickup_selection_for_checkout( $active_family ) ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
@@ -290,7 +310,7 @@ final class CheckoutValidation {
 		if ( $is_dpd_family && '' !== $point_code ) {
 			$selection = $this->selection_from_dpd_point_code( $point_code, $rate );
 		}
-		if ( $is_yandex_family && '' !== $point_code ) {
+		if ( array() === $selection && $is_yandex_family && '' !== $point_code ) {
 			$selection = $this->selection_from_yandex_point_code( $point_code, $rate );
 		}
 		if ( ( $is_dpd_family || $is_yandex_family ) && array() === $selection ) {
@@ -342,7 +362,16 @@ final class CheckoutValidation {
 		$selection['service_key'] = $this->session_manager->normalize_carrier_key_for_pickup( (string) ( $selection['service_key'] ?? $selection['carrier_key'] ) );
 		$selection['pickup_family'] = $family;
 		$selection['rate_id'] = $this->selected_rate_id( $rate ) ?: $selection['pickup_family'];
-		$selection['selected_at'] = gmdate( 'c' );
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$operator_id = (string) ( $selection['operator_id'] ?? $snapshot['operator_id'] ?? '' );
+		if ( '' !== trim( $operator_id ) ) {
+			$selection['operator_id'] = $operator_id;
+		}
+		$selected_at = trim( (string) ( $selection['selected_at'] ?? $snapshot['selected_at'] ?? '' ) );
+		if ( $is_yandex_family && '5post' === strtolower( trim( $operator_id ) ) && '' === $selected_at ) {
+			return false;
+		}
+		$selection['selected_at'] = '' !== $selected_at ? $selected_at : gmdate( 'c' );
 		$this->session_manager->save_pickup_selection( $selection );
 		$this->session_manager->save_checkout_pickup_point( $this->checkout_pickup_point_from_selection( $selection ) );
 
@@ -377,6 +406,8 @@ final class CheckoutValidation {
 			'carrier_key' => $carrier,
 			'service_key' => (string) ( $checkout['service_key'] ?? $snapshot['service_key'] ?? $carrier ),
 			'pickup_family' => $family,
+			'operator_id' => (string) ( $checkout['operator_id'] ?? $snapshot['operator_id'] ?? '' ),
+			'selected_at' => (string) ( $checkout['selected_at'] ?? $snapshot['selected_at'] ?? '' ),
 			'point_code' => $point_code,
 			'point_type' => (string) ( $checkout['point_type'] ?? $snapshot['point_type'] ?? '' ),
 			'point_type_label' => (string) ( $checkout['point_type_label'] ?? $snapshot['point_type_label'] ?? '' ),
@@ -663,6 +694,9 @@ final class CheckoutValidation {
 			'service_key' => $selection['service_key'] ?? $snapshot['service_key'] ?? '',
 			'pickup_family' => $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '',
 			'point_code' => $selection['point_code'] ?? $snapshot['point_code'] ?? '',
+			'platform_station_id' => $selection['platform_station_id'] ?? $snapshot['platform_station_id'] ?? '',
+			'operator_id' => $selection['operator_id'] ?? $snapshot['operator_id'] ?? '',
+			'selected_at' => $selection['selected_at'] ?? $snapshot['selected_at'] ?? '',
 			'terminal_code' => $selection['terminal_code'] ?? $snapshot['terminal_code'] ?? '',
 			'point_type' => $selection['point_type'] ?? $snapshot['point_type'] ?? '',
 			'point_type_label' => $selection['point_type_label'] ?? $snapshot['point_type_label'] ?? '',
@@ -792,6 +826,10 @@ final class CheckoutValidation {
 	 */
 	private function selected_rate_id( array $rate ): string {
 		return $this->session_manager->normalize_rate_id( (string) ( $rate['_selected_rate_id'] ?? $rate['rate_id'] ?? '' ) );
+	}
+
+	private function is_yandex_pickup_rate( string $rate_id ): bool {
+		return YandexDeliverySettings::CARRIER_KEY . ':pickup' === $this->session_manager->shipping_method_family( $rate_id );
 	}
 
 	private function is_supported_pickup_family( string $rate_id ): bool {

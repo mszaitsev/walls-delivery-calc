@@ -6,6 +6,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPoi
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -30,13 +31,18 @@ function yandex_pickup_selection_assert( bool $condition, string $message ): voi
 	}
 }
 function __( string $text, string $domain = '' ): string { return $text; }
+function esc_attr( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_html( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_html__( string $text, string $domain = '' ): string { return esc_html( $text ); }
 function sanitize_key( mixed $value ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $value ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function rest_ensure_response( mixed $data ): mixed { return $data; }
 function wp_verify_nonce( string $nonce, string $action ): bool { return true; }
-function current_time( string $type ): string { return '2026-06-30 12:00:00'; }
+$GLOBALS['wdc_yandex_test_current_datetime'] = new DateTimeImmutable( '2026-07-11 00:30:00', new DateTimeZone( 'Europe/Moscow' ) );
+function current_datetime(): DateTimeImmutable { return $GLOBALS['wdc_yandex_test_current_datetime']; }
+function current_time( string $type ): string { return current_datetime()->format( 'Y-m-d H:i:s' ); }
 
 function WC(): object {
 	static $wc = null;
@@ -216,7 +222,11 @@ yandex_pickup_selection_assert( false === $courier_errors->has( 'wdc_pickup_requ
 
 $fivepost_response = $checkout_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'DST-B' ) ) );
 yandex_pickup_selection_assert( 'DST-B' === (string) ( $fivepost_response['pickup_point']['platform_station_id'] ?? '' ), '5Post must use the common Yandex pickup save flow without losing platform_station_id.' );
+yandex_pickup_selection_assert( '5post' === (string) ( $fivepost_response['pickup_point']['operator_id'] ?? '' ) && '5post' === (string) ( $fivepost_response['pickup_point']['snapshot']['operator_id'] ?? '' ) && '' !== (string) ( $fivepost_response['pickup_point']['selected_at'] ?? '' ), 'REST save must keep 5Post operator_id at top level and in snapshot with a UTC selected_at timestamp.' );
 yandex_pickup_selection_assert( '5post' === (string) ( $fivepost_response['pickup_point']['operator_id'] ?? $fivepost_response['pickup_point']['snapshot']['operator_id'] ?? '' ), 'The saved Yandex pickup regression point must remain identified as 5Post in its safe presentation payload.' );
+$fivepost_current_day = $session->pickup_selection_for_family( 'yandex_delivery:pickup' );
+$fivepost_current_day['selected_at'] = '2026-07-10T22:00:00+00:00';
+$session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $fivepost_current_day );
 $session->save_pickup_selection_for_family( 'dpd:pickup', array( 'carrier_key' => 'dpd', 'service_key' => 'dpd', 'pickup_family' => 'dpd:pickup', 'point_code' => 'DPD-OTHER', 'platform_station_id' => '' ) );
 $saved_yandex = $session->pickup_selection_for_family( 'yandex_delivery:pickup' );
 yandex_pickup_selection_assert( 'dpd' === (string) ( $session->pickup_selection()['carrier_key'] ?? '' ) && 'DST-B' === (string) ( $saved_yandex['point_code'] ?? '' ) && 'DST-B' === (string) ( $saved_yandex['platform_station_id'] ?? '' ), 'A global selection from another carrier must not overwrite the saved 5Post Yandex family selection.' );
@@ -234,4 +244,102 @@ yandex_pickup_selection_assert( ! str_contains( (string) ( $order->meta['_wdc_pi
 $calculation = is_array( $order->meta[OrderShippingMetaPersister::CALCULATION_META_KEY] ?? null ) ? $order->meta[OrderShippingMetaPersister::CALCULATION_META_KEY] : array();
 yandex_pickup_selection_assert( 'DST-B' === (string) ( $calculation['pickup']['platform_station_id'] ?? '' ) && 'yandex_delivery:pickup' === (string) ( $calculation['pickup']['pickup_family'] ?? '' ), 'Calculation meta pickup block must preserve selected 5Post station and Yandex family.' );
 
+$selection_for_day = static function ( string $operator_id, string $selected_at, string $station_id ): array {
+	return array(
+		'carrier_key' => 'yandex_delivery',
+		'service_key' => 'yandex_delivery',
+		'pickup_family' => 'yandex_delivery:pickup',
+		'rate_id' => 'yandex_pickup',
+		'id' => 'yandex_delivery:' . $station_id,
+		'point_code' => $station_id,
+		'platform_station_id' => $station_id,
+		'operator_id' => $operator_id,
+		'selected_at' => $selected_at,
+		'point_address' => 'Москва, тестовый ПВЗ',
+		'address' => 'Москва, тестовый ПВЗ',
+		'snapshot' => array(
+			'carrier_key' => 'yandex_delivery',
+			'pickup_family' => 'yandex_delivery:pickup',
+			'point_code' => $station_id,
+			'platform_station_id' => $station_id,
+			'operator_id' => $operator_id,
+			'address' => 'Москва, тестовый ПВЗ',
+		),
+	);
+};
+
+$today_session = new CheckoutSessionManager();
+$today_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
+$today_selection = $selection_for_day( '5post', '2026-07-10T22:00:00+00:00', 'DST-TODAY' );
+$today_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $today_selection );
+yandex_pickup_selection_assert( false === $today_session->expire_stale_yandex_5post_selection() && 'DST-TODAY' === (string) ( $today_session->pickup_selection_for_family( 'yandex_delivery:pickup' )['platform_station_id'] ?? '' ), 'A 5Post selection whose UTC timestamp maps to today in Moscow must remain selected.' );
+$today_session->update_pickup_selection_rate_id( 'wdc_platform:yandex_pickup' );
+yandex_pickup_selection_assert( '2026-07-10T22:00:00+00:00' === (string) ( $today_session->pickup_selection_for_family( 'yandex_delivery:pickup' )['selected_at'] ?? '' ), 'Technical rate-id rebinding must not refresh selected_at.' );
+
+$warning_method = (object) array(
+	'id' => 'wdc_platform:yandex_pickup',
+	'meta_data' => array(
+		'carrier_key' => 'yandex_delivery',
+		'rate_id' => 'yandex_pickup',
+		'delivery_type' => 'pickup',
+		'pickup_family' => 'yandex_delivery:pickup',
+		'comments' => array( 'Обычный комментарий' ),
+	),
+);
+ob_start();
+( new CheckoutRateRenderer( $today_session ) )->render( $warning_method );
+$warning_html = (string) ob_get_clean();
+$comment_position = strpos( $warning_html, 'Обычный комментарий' );
+$warning_position = strpos( $warning_html, 'wdc-yandex-5post-warning' );
+yandex_pickup_selection_assert( false !== $comment_position && false !== $warning_position && $comment_position < $warning_position && str_contains( $warning_html, 'При выборе 5Post цена доставки могла стать дороже. Попробуйте выбрать другой ПВЗ' ), 'Current 5Post warning must render with exact text after ordinary rate comments.' );
+
+$yesterday_session = new CheckoutSessionManager();
+$yesterday_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
+$yesterday_session->save_pickup_selection_for_family( 'dpd:pickup', array( 'carrier_key' => 'dpd', 'pickup_family' => 'dpd:pickup', 'point_code' => 'DPD-KEPT', 'point_address' => 'DPD address' ) );
+$yesterday_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $selection_for_day( '5post', '2026-07-10T20:00:00+00:00', 'DST-YESTERDAY' ) );
+yandex_pickup_selection_assert( true === $yesterday_session->expire_stale_yandex_5post_selection(), 'A 5Post selection from the previous Moscow calendar day must expire.' );
+yandex_pickup_selection_assert( array() === $yesterday_session->pickup_selection_for_family( 'yandex_delivery:pickup' ) && 'DPD-KEPT' === (string) ( $yesterday_session->pickup_selection_for_family( 'dpd:pickup' )['point_code'] ?? '' ), 'Expiration must clear only yandex_delivery:pickup and preserve other family buckets.' );
+
+$market_session = new CheckoutSessionManager();
+$market_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
+$market_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $selection_for_day( 'market_l4g', '2026-07-09T20:00:00+00:00', 'DST-MARKET' ) );
+yandex_pickup_selection_assert( false === $market_session->expire_stale_yandex_5post_selection() && 'DST-MARKET' === (string) ( $market_session->pickup_selection_for_family( 'yandex_delivery:pickup' )['platform_station_id'] ?? '' ), 'market_l4g selections must not expire based on selected_at.' );
+ob_start();
+( new CheckoutRateRenderer( $market_session ) )->render( $warning_method );
+$market_html = (string) ob_get_clean();
+yandex_pickup_selection_assert( ! str_contains( $market_html, 'wdc-yandex-5post-warning' ), 'market_l4g must not render the 5Post warning.' );
+$courier_method = (object) array( 'id' => 'wdc_platform:yandex_courier', 'meta_data' => array( 'carrier_key' => 'yandex_delivery', 'rate_id' => 'yandex_courier', 'delivery_type' => 'courier', 'pickup_family' => 'yandex_delivery:courier' ) );
+ob_start();
+( new CheckoutRateRenderer( $today_session ) )->render( $courier_method );
+$courier_html = (string) ob_get_clean();
+yandex_pickup_selection_assert( ! str_contains( $courier_html, 'wdc-yandex-5post-warning' ), 'Yandex courier must not render the 5Post pickup warning.' );
+
+$missing_time_session = new CheckoutSessionManager();
+$missing_time_session->save_pickup_selection_for_family( 'dpd:pickup', array( 'carrier_key' => 'dpd', 'pickup_family' => 'dpd:pickup', 'point_code' => 'DPD-STILL-KEPT' ) );
+$missing_time_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $selection_for_day( '5post', '', 'DST-NO-TIME' ) );
+yandex_pickup_selection_assert( true === $missing_time_session->expire_stale_yandex_5post_selection() && 'DPD-STILL-KEPT' === (string) ( $missing_time_session->pickup_selection_for_family( 'dpd:pickup' )['point_code'] ?? '' ), 'A 5Post selection without selected_at must expire without clearing other families.' );
+
+$stale_post_session = new CheckoutSessionManager();
+$stale_post_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
+$stale_post_session->save_rates( array( 'yandex_pickup' => array( 'carrier_key' => 'yandex_delivery', 'rate_id' => 'yandex_pickup', 'delivery_type' => 'pickup', 'requires_pickup_point' => true, 'pickup_family' => 'yandex_delivery:pickup' ) ) );
+$stale_post_session->save_pickup_selection_for_family( 'dpd:pickup', array( 'carrier_key' => 'dpd', 'pickup_family' => 'dpd:pickup', 'point_code' => 'DPD-POST-KEPT' ) );
+$stale_post_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $selection_for_day( '5post', '2026-07-10T20:00:00+00:00', 'DST-B' ) );
+$stale_validation = new CheckoutValidation( $stale_post_session, new CheckoutAddressValidation( $stale_post_session ), null, null, $repository, $formatter );
+$stale_post = array( 'shipping_method' => array( 'yandex_pickup' ), 'shipping_city' => 'Москва', 'wdc_pickup_point_code' => 'DST-B', 'wdc_pickup_carrier_key' => 'yandex_delivery', 'wdc_pickup_family' => 'yandex_delivery:pickup' );
+$_POST = $stale_post;
+$stale_validation->preload_from_post();
+$stale_errors = new YandexPickupSelectionErrors();
+$stale_validation->validate( $stale_post, $stale_errors );
+yandex_pickup_selection_assert( 'Выберите пункт выдачи Яндекс.Доставки.' === (string) ( $stale_errors->errors['wdc_pickup_required'] ?? '' ), 'Stale 5Post hidden fields must not restore the expired selection during the same checkout request.' );
+yandex_pickup_selection_assert( array() === $stale_post_session->pickup_selection_for_family( 'yandex_delivery:pickup' ) && 'DPD-POST-KEPT' === (string) ( $stale_post_session->pickup_selection_for_family( 'dpd:pickup' )['point_code'] ?? '' ), 'Midnight validation must keep Yandex expired and preserve other family selections.' );
+$_POST = array();
+
+$shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
+$expiration_position = strpos( $shipping_method_source, 'expire_stale_yandex_5post_selection()' );
+$context_position = strpos( $shipping_method_source, "'pickup_selections' => \$this->session_manager->pickup_selections()" );
+yandex_pickup_selection_assert( false !== $expiration_position && false !== $context_position && $expiration_position < $context_position, 'NewShippingMethod must expire stale 5Post before QuoteRequest receives pickup selections, allowing representative pricing fallback.' );
+$pickup_map_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/PickupMapCheckout.php' );
+yandex_pickup_selection_assert( str_contains( $pickup_map_source, 'expire_stale_yandex_5post_selection()' ), 'PickupMapCheckout must expire stale 5Post before localizing selected pickup UI state.' );
+$checkout_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
+yandex_pickup_selection_assert( str_contains( $checkout_css, '.wdc-yandex-5post-warning' ), 'Checkout styles must define a dedicated 5Post warning block.' );
 echo "Yandex Delivery checkout pickup selection smoke test passed.\n";

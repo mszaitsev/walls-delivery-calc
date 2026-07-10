@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.11. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.104.12. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -33,6 +33,11 @@ Architecture decision: coverage batch as a separate mass stage is not needed. Th
 
 
 
+## 0.104.12 5Post calendar-day selection expiration and warning
+
+Yandex checkout save now copies `operator_id` to the family selection top level while preserving the formatter snapshot and UTC `selected_at`. The narrow session expiration operation compares the selected timestamp and `current_datetime()` as calendar dates in the WordPress timezone. A missing, invalid or previous-day timestamp clears only a selected `operator_id=5post` from `yandex_delivery:pickup`; market_l4g and every other family remain untouched.
+
+The check runs before quote context, pickup UI localization/rendering and validation. A validation request that performed expiration refuses to rebuild the same stale 5Post from posted hidden fields, so `yandex_pickup` receives the standard choose-point error and pricing falls back to the existing representative station. Current-day selected 5Post points keep their original timestamp across AJAX repricing and display a dedicated highlighted warning after ordinary method comments.
 ## 0.104.11 Checkout pickup POST and selected-method stabilization
 
 Only the active pickup rate container now contributes named hidden fields to WooCommerce checkout POST; inactive carrier containers keep their values but their named fields are disabled. After a Yandex point is saved, `yandex_pickup` is remembered across the resulting rate repricing/re-sort and restored when still available, with a one-update recovery guard. This applies equally to 5Post points through the common `yandex_delivery:pickup` family flow. Visible shipping-item `pickup_family` is removed, while hidden family/session/calculation data remains stored.

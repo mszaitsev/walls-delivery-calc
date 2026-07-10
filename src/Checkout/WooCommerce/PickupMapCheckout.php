@@ -30,6 +30,7 @@ final class PickupMapCheckout {
 		if ( function_exists( 'is_checkout' ) && ! is_checkout() ) {
 			return;
 		}
+		$this->session_manager->expire_stale_yandex_5post_selection();
 		$base = $this->environment->plugin_url();
 		$version = $this->environment->version();
 		$provider = $this->map_provider();

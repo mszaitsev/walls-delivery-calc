@@ -36,6 +36,7 @@ final class CheckoutRateRenderer {
 	}
 
 	public function render( mixed $method, int|string $index = 0 ): void {
+		$this->session_manager->expire_stale_yandex_5post_selection();
 		$meta = $this->meta( $method );
 		if ( array() === $meta || ! isset( $meta['carrier_key'] ) ) {
 			return;
@@ -59,8 +60,26 @@ final class CheckoutRateRenderer {
 				}
 			}
 		}
+		$this->render_yandex_5post_warning( $meta, $method );
 
 		echo '</div>';
+	}
+
+	private function render_yandex_5post_warning( array $meta, mixed $method ): void {
+		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
+		$family = $this->session_manager->normalize_pickup_family( (string) ( $meta['pickup_family'] ?? $this->session_manager->shipping_method_family( $rate_id ) ) );
+		if ( 'yandex_pickup' !== $this->session_manager->normalize_rate_id( $rate_id ) || 'yandex_delivery:pickup' !== $family ) {
+			return;
+		}
+
+		$selection = $this->session_manager->pickup_selection_for_family( $family );
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$operator_id = strtolower( trim( (string) ( $selection['operator_id'] ?? $snapshot['operator_id'] ?? '' ) ) );
+		if ( '5post' !== $operator_id || ! $this->session_manager->valid_pickup_selection_for_checkout( $family ) ) {
+			return;
+		}
+
+		echo '<div class="wdc-yandex-5post-warning">' . esc_html( __( 'При выборе 5Post цена доставки могла стать дороже. Попробуйте выбрать другой ПВЗ', 'walls-delivery-calc' ) ) . '</div>';
 	}
 
 	/**

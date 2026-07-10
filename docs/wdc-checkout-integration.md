@@ -8,6 +8,11 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 
 `WooCommerce package -> WooCommercePackageMapper -> QuoteRequest -> CheckoutOrchestrator -> DeliveryRate[] -> WooCommerceRateMapper -> WC_Shipping_Method::add_rate()`.
 
+### Yandex 5Post selection calendar-day expiration 0.104.12
+
+A real Yandex pickup save stores `operator_id` at selection top level, retains it in the safe snapshot, and writes `selected_at` once as an ISO UTC timestamp. `CheckoutSessionManager::expire_stale_yandex_5post_selection()` converts that timestamp to the timezone of `current_datetime()` and compares `Y-m-d`; only `operator_id=5post` expires when the site calendar date differs or the timestamp is absent/invalid. The method clears only `yandex_delivery:pickup` through the family-specific reset.
+
+Expiration is invoked before `NewShippingMethod` builds QuoteRequest customer context, before `PickupMapCheckout` localizes selected point state, and before checkout validation. `CheckoutValidation` carries a request-local guard from preload into validation so stale hidden fields cannot restore an expired 5Post in the same order submission. Existing family selections preserve their original `selected_at` during rate-id synchronization and repricing. A valid current-day 5Post renders `wdc-yandex-5post-warning` after ordinary rate comments; representative points, courier and other operators do not render it.
 ### Pickup POST and selected-method stabilization 0.104.11
 
 Each rendered pickup rate keeps its own family-specific values, but `wdc-pickup-checkout.js` enables named `input`/`select`/`textarea` fields only for the container matching the checked shipping method. Inactive containers are hidden and disabled for form serialization without clearing their values; `boot()` and `updated_checkout` resynchronize this state after WooCommerce replaces rate HTML.
