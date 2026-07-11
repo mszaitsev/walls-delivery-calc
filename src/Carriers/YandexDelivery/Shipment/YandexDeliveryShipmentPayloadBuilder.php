@@ -27,6 +27,10 @@ final class YandexDeliveryShipmentPayloadBuilder {
 		if ( null === $from || null === $to ) {
 			throw new \InvalidArgumentException( 'ready_from and ready_to must be DateTimeInterface values.' );
 		}
+		$allocation_errors = $allocation->validate();
+		if ( array() !== $allocation_errors ) {
+			throw new \InvalidArgumentException( implode( "\n", $allocation_errors ) );
+		}
 
 		$barcodes = array();
 		$places = array();
@@ -43,13 +47,15 @@ final class YandexDeliveryShipmentPayloadBuilder {
 					'name' => $item->name,
 					'article' => $item->sku,
 					'count' => $item->quantity,
-					'unit_price' => $item->unit_price_kopecks,
-					'assessed_unit_price' => $item->unit_price_kopecks,
-					'nds' => (int) ( $context['nds'] ?? -1 ),
-					'inn' => (string) ( $context['inn'] ?? '540601021727' ),
+					'billing_details' => array(
+						'inn' => (string) ( $context['inn'] ?? '540601021727' ),
+						'nds' => (int) ( $context['nds'] ?? -1 ),
+						'unit_price' => $item->unit_price_kopecks,
+						'assessed_unit_price' => $item->assessed_unit_price_kopecks,
+					),
+					'place_barcode' => $barcode,
 					'refused_count' => 0,
 					'fitting' => false,
-					'place_barcode' => $barcode,
 				);
 			}
 		}
@@ -72,10 +78,10 @@ final class YandexDeliveryShipmentPayloadBuilder {
 	private function aggregate_place_items( array $items ): array {
 		$aggregated = array();
 		foreach ( $items as $item ) {
-			$key = $item->source_item_id;
+			$key = $item->source_item_id . "\0" . (string) $item->unit_price_kopecks . "\0" . (string) $item->assessed_unit_price_kopecks;
 			if ( isset( $aggregated[ $key ] ) ) {
 				$old = $aggregated[ $key ];
-				$aggregated[ $key ] = new ShipmentAllocationItem( $old->source_item_id, $old->identity, $old->name, $old->sku, $old->quantity + $item->quantity, $old->unit_price_kopecks, $old->weight_g );
+				$aggregated[ $key ] = new ShipmentAllocationItem( $old->source_item_id, $old->identity, $old->name, $old->sku, $old->quantity + $item->quantity, $old->unit_price_kopecks, $old->assessed_unit_price_kopecks, $old->weight_g );
 				continue;
 			}
 			$aggregated[ $key ] = $item;
@@ -99,7 +105,7 @@ final class YandexDeliveryShipmentPayloadBuilder {
 	}
 
 	private function utc( mixed $value ): ?string {
-		return $value instanceof DateTimeInterface ? $value->setTimezone( new \DateTimeZone( 'UTC' ) )->format( DATE_ATOM ) : null;
+		return $value instanceof DateTimeInterface ? \DateTimeImmutable::createFromInterface( $value )->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d\TH:i:s.u\Z' ) : null;
 	}
 
 	private function phone( string $phone ): string {

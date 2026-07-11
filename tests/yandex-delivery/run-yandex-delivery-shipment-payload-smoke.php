@@ -8,6 +8,9 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayloadBuilder;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
+use WallsShop\WDC\Shipments\Allocation\ShipmentAllocation;
+use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationItem;
+use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationPlace;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentAllocationAdapter;
 
 function yandex_shipment_assert( bool $condition, string $message ): void {
@@ -30,7 +33,9 @@ $one = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, M
 yandex_shipment_assert( 1 === count( $one['places'] ) && 2 === count( $one['items'] ) && 2 === $one['items'][0]['count'] && 3 === array_sum( array_column( $one['items'], 'count' ) ), 'One-place allocation must preserve two item rows and quantities.' );
 yandex_shipment_assert( 'ORDER-123-1' === $one['places'][0]['barcode'] && 'ORDER-123-1' === $one['items'][0]['place_barcode'] && 'platform_station' === $one['destination']['type'] && 'self_pickup' === $one['last_mile_policy'], 'Pickup payload must use deterministic place barcode and pickup destination.' );
 yandex_shipment_assert( 'Михайлов Михаил' === $one['recipient_info']['first_name'] && '' === $one['recipient_info']['last_name'] && '+79131234567' === $one['recipient_info']['phone'], 'Recipient must use surname and first name in first_name with normalized phone.' );
-yandex_shipment_assert( true === $one['forbid_unboxing'] && 'already_paid' === $one['billing_info']['payment_method'] && 0 === $one['billing_info']['delivery_cost'] && -1 === $one['items'][0]['nds'], 'Yandex defaults must keep prepaid, forbid unboxing and nds -1.' );
+yandex_shipment_assert( isset( $one['items'][0]['billing_details'] ) && ! array_key_exists( 'unit_price', $one['items'][0] ) && ! array_key_exists( 'nds', $one['items'][0] ), 'Yandex item billing values must live inside billing_details.' );
+yandex_shipment_assert( true === $one['forbid_unboxing'] && 'already_paid' === $one['billing_info']['payment_method'] && 0 === $one['billing_info']['delivery_cost'] && -1 === $one['items'][0]['billing_details']['nds'], 'Yandex defaults must keep prepaid, forbid unboxing and nds -1.' );
+yandex_shipment_assert( '2026-07-12T05:00:00.000000Z' === $one['source']['interval_utc']['from'] && '2026-07-12T06:00:00.000000Z' === $one['source']['interval_utc']['to'], 'Ready interval must use production UTC format with microseconds and Z suffix.' );
 
 $two_places = array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 1200, 21, 16, 11, Money::from_kopecks( 0 ) ) );
 $split = yandex_shipment_payload( $two_places, array(
@@ -41,12 +46,45 @@ $split = yandex_shipment_payload( $two_places, array(
 yandex_shipment_assert( 2 === count( $split['places'] ) && 'ORDER-123-1' !== $split['places'][1]['barcode'], 'Two places must have unique temporary barcodes.' );
 yandex_shipment_assert( 3 === count( $split['items'] ) && 2 === array_sum( array_map( static fn( array $item ): int => 'A' === $item['article'] ? $item['count'] : 0, $split['items'] ) ) && $split['items'][0]['place_barcode'] !== $split['items'][1]['place_barcode'], 'Split item must never be merged across places.' );
 yandex_shipment_assert( 'custom_location' === $split['destination']['type'] && 'Ходынский бульвар' === $split['destination']['custom_location']['details']['street'] && 'time_interval' === $split['last_mile_policy'], 'Courier payload must retain structured address without coordinates.' );
+yandex_shipment_assert( ! array_key_exists( 'latitude', $split['destination']['custom_location']['details'] ) && ! array_key_exists( 'longitude', $split['destination']['custom_location']['details'] ), 'Courier structured address must not require coordinates.' );
 
 $same_place = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), array(
 	array( 'item_key' => 'A', 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'A', 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'A', 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
 ), $pickup );
-yandex_shipment_assert( 1 === count( $same_place['items'] ) && 2 === $same_place['items'][0]['count'], 'Same-place duplicate allocation rows may aggregate only inside that barcode.' );
+yandex_shipment_assert( 1 === count( $same_place['items'] ) && 3 === $same_place['items'][0]['count'], 'Same-place duplicate allocation rows may aggregate only inside that barcode.' );
+
+$same_identity_across_places = yandex_shipment_payload( $two_places, array(
+	array( 'item_key' => 'A', 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'A', 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
+), $pickup );
+yandex_shipment_assert( 2 === count( $same_identity_across_places['items'] ) && $same_identity_across_places['items'][0]['place_barcode'] !== $same_identity_across_places['items'][1]['place_barcode'], 'Same item across different places must remain separate Yandex rows.' );
+
+$same_sku_payload = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => 'order-item-1', 'place_number' => 1, 'name' => 'Item 1', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'order-item-2', 'place_number' => 1, 'name' => 'Item 2', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+), $pickup );
+yandex_shipment_assert( 2 === count( $same_sku_payload['items'] ) && 'SAME-SKU' === $same_sku_payload['items'][0]['article'] && 'SAME-SKU' === $same_sku_payload['items'][1]['article'], 'Different source identities with the same SKU must not be merged.' );
+
+$priced_payload = ( new YandexDeliveryShipmentPayloadBuilder() )->build( new ShipmentAllocation( array( new ShipmentAllocationPlace( 1, 1000, 20, 15, 10, array( new ShipmentAllocationItem( 'priced', array( 'order_item_id' => 'priced' ), 'Priced item', 'PRICE', 1, 10000, 15000, 300 ) ) ) ) ), array(
+	'operator_request_id' => 'ORDER-123', 'source_platform_station_id' => 'SOURCE-1',
+	'ready_from' => new DateTimeImmutable( '2026-07-12 12:00:00+07:00' ), 'ready_to' => new DateTimeImmutable( '2026-07-12 13:00:00+07:00' ),
+	'recipient' => array( 'first_name' => 'Михаил', 'last_name' => 'Михайлов', 'phone' => '9131234567', 'email' => 'buyer@example.test' ),
+	'destination' => $pickup,
+) );
+yandex_shipment_assert( 10000 === $priced_payload['items'][0]['billing_details']['unit_price'] && 15000 === $priced_payload['items'][0]['billing_details']['assessed_unit_price'], 'Yandex billing_details must preserve different unit and assessed prices.' );
+
+$builder = new YandexDeliveryShipmentPayloadBuilder();
+$recipient_base = array(
+	'operator_request_id' => 'ORDER-123', 'source_platform_station_id' => 'SOURCE-1',
+	'ready_from' => new DateTimeImmutable( '2026-07-12 12:00:00+07:00' ), 'ready_to' => new DateTimeImmutable( '2026-07-12 13:00:00+07:00' ),
+	'destination' => $pickup,
+);
+$recipient_allocation = new ShipmentAllocation( array( new ShipmentAllocationPlace( 1, 1000, 20, 15, 10, array( new ShipmentAllocationItem( 'recipient', array( 'order_item_id' => 'recipient' ), 'Recipient item', 'R', 1, 100, 100, 100 ) ) ) ) );
+$no_last_name = $builder->build( $recipient_allocation, array_merge( $recipient_base, array( 'recipient' => array( 'first_name' => ' Михаил ', 'last_name' => '', 'phone' => '9131234567', 'email' => 'buyer@example.test' ) ) ) );
+$no_first_name = $builder->build( $recipient_allocation, array_merge( $recipient_base, array( 'recipient' => array( 'first_name' => '', 'last_name' => ' Михайлов ', 'phone' => '9131234567', 'email' => 'buyer@example.test' ) ) ) );
+$double_spaces = $builder->build( $recipient_allocation, array_merge( $recipient_base, array( 'recipient' => array( 'first_name' => '  Михаил  ', 'last_name' => '  Михайлов  ', 'phone' => '9131234567', 'email' => 'buyer@example.test' ) ) ) );
+yandex_shipment_assert( 'Михаил' === $no_last_name['recipient_info']['first_name'] && 'Михайлов' === $no_first_name['recipient_info']['first_name'] && 'Михайлов Михаил' === $double_spaces['recipient_info']['first_name'], 'Recipient edge cases must trim missing names and collapse double spaces.' );
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Shipment/YandexDeliveryShipmentPayloadBuilder.php' );
 yandex_shipment_assert( ! str_contains( $source, 'wp_remote_request' ) && ! str_contains( $source, 'curl' ) && ! str_contains( $source, 'HttpClient' ), 'Yandex shipment payload builder must not use HTTP.' );
 

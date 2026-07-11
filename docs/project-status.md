@@ -662,6 +662,10 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 
 - `YandexDeliveryGeoMappingService` now defaults to `ambiguous_only` candidate storage: confident auto-primary results save only the primary row, while ambiguous results keep all candidates for review.
 - The Yandex geo admin tab and integration notes document that candidates are diagnostic and runtime code should use only `is_primary=1` / `find_primary_geo_id()`.
+# 0.106.1 Yandex Delivery shipment payload hardening
+
+Prepared the shipment allocation foundation for the next real HTTP stage without adding HTTP. Yandex `items[]` now uses the production-confirmed `billing_details` structure for `inn`, `nds`, `unit_price` and `assessed_unit_price`. `ShipmentAllocationItem` stores unit and assessed prices separately, while the current CDEK allocation adapter fills both from the existing CDEK `cost`. Allocation validation now fails fast on broken source rows such as unknown places or non-positive quantities instead of silently producing an incorrect payload.
+
 # 0.106.0 Yandex Delivery shipment payload foundation
 
 Added a pure Yandex Delivery shipment payload builder and a minimal neutral shipment-allocation read-model. The existing CDEK `cdek_item_rows` allocation is adapted without changing CDEK payload construction or packing. The builder covers deterministic temporary place barcodes, item-to-place quantities (including split quantities), recipient naming, pickup/courier destinations, prepaid defaults and UTC ready intervals. No Yandex shipment HTTP/API/UI/persistence flow is included; the next stage will implement offers/create → earliest offer → confirm → info.

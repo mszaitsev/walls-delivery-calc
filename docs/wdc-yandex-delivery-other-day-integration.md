@@ -971,6 +971,8 @@ php tests/yandex-delivery/run-yandex-delivery-geo-manual-review-smoke.php
 
 ### Phase 4 — shipment preparation and creation
 
+0.106.1 hardened the payload contract before HTTP implementation: Yandex item prices and VAT are emitted under `items[].billing_details`, shipment allocation stores both `unit_price_kopecks` and `assessed_unit_price_kopecks`, and broken CDEK-origin allocation rows fail with `InvalidArgumentException` instead of being silently repaired.
+
 0.106.0 completed the payload-only foundation: `YandexDeliveryShipmentPayloadBuilder` builds `items[]` and `places[]` from the CDEK-originated neutral allocation adapter without HTTP. It uses temporary `{operator_request_id}-{place_number}` barcodes, formats a supplied ready interval in UTC, puts recipient surname plus name into `first_name`, and emits verified pickup/courier, prepaid, VAT and unboxing fields. The actual transport/persistence work below remains for the next patch.
 
 - payload builder;
