@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector and checkout pricing-calculator integration are implemented through 0.105.0. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector, checkout pricing-calculator integration and order-admin recalculation are implemented through 0.105.8. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Shipments remain planned.
 
 Date: 2026-06-30.
 
@@ -36,6 +36,11 @@ Architecture decision: coverage batch as a separate mass stage is not needed. Th
 ## 0.105.0 Order delivery recalculation
 
 The existing WooCommerce order-admin calculator now uses the checkout Yandex runtime rather than a separate calculator. Its common pickup map resolves active local destination rows by selected WDC location and mapped `yandex_geo_id`, uses the checkout formatter, and repeats preview after an explicit PVZ choice. `OrderQuoteRequestMapper` passes the selection as both `pickup_selection` and `pickup_selections['yandex_delivery:pickup']`, so `YandexDeliveryCarrier` prices to the selected `platform_station_id`. Save writes canonical pickup data and the same Yandex pickup aliases as checkout; courier clears them. Shipments remain out of scope.
+## 0.105.8 Calculation persistence
+
+Yandex rate meta treats `api_base_price_rub` as the canonical price returned by pricing-calculator before Rule Engine. `pricing_total_kopecks` remains as the Yandex fallback source for both checkout and admin replacement. Persisted calculation data stores final rule-adjusted price separately in `result.final_price_rub`.
+
+Checkout and admin replacement both keep `change_delivery_days` audit entries in `rules.formula_visualization`; a 535 RUB API price changed to 662 RUB by rules still starts the formula from 535 and records the delivery-days rule line. Admin shipping titles replace the original API term with the final term, so `Яндекс до двери - 8 дней` becomes `Яндекс до двери - 10 дней` without appending a second term.
 ## 0.104.13 Explicit and technical pickup save intent
 
 The checkout frontend now labels real map/cross-location selection saves as `explicit` and automatic family rate synchronization as `technical`; the shared API client forwards the intent in the checkout pickup REST body. Missing/unknown intent remains explicit for backward compatibility.

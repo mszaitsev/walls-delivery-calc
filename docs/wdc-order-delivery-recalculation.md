@@ -1,6 +1,12 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.105.7.
+Version: 0.105.8.
+
+## Статус 0.105.8
+
+- Admin replacement сохраняет `api_base_price_rub` как исходную цену API до правил, а `result.final_price_rub` как итог после Rule Engine. Для Яндекса `pricing_total_kopecks / 100` используется как fallback, если явного `api_base_price_rub` нет; `original_cost` в форме `Money::to_array()` разбирается безопасно.
+- `rules.formula_visualization` строится от исходной API-цены и включает `change_delivery_days`: например, формула для 535 -> 662 начинается с `Базовая цена API: 535 руб.`, содержит строку правила срока и заканчивается `Итог: 662 руб.`.
+- `OrderDeliveryReplacementService` заменяет исходный suffix срока в title на финальный: `Яндекс до двери - 8 дней` сохраняется как `Яндекс до двери - 10 дней`; уже финальный title не дублируется, grouped/tariff-selector сценарии других служб не меняются.
 
 ## Статус 0.105.7
 

@@ -1624,6 +1624,119 @@ $saved_yandex_courier = $replacement->save(
 );
 recalc_smoke_assert( true === $saved_yandex_courier['success'] && '' === (string) ( $yandex_order->meta['_wdc_yandex_delivery_pickup_platform_station_id'] ?? '' ), 'Yandex courier save must clear Yandex pickup meta.' );
 
+$yandex_days_audit = array(
+	array(
+		'applied' => true,
+		'action_type' => 'change_delivery_days',
+		'rule_name' => 'Срок доставки',
+		'operation' => 'increase',
+		'operation_value' => 2,
+		'operation_base' => 'calendar_days',
+		'after_value' => array( 'min_days' => 10, 'max_days' => 10 ),
+	),
+);
+$yandex_admin_rate = array(
+	'id' => 'yandex_courier',
+	'rate_id' => 'yandex_courier',
+	'carrier_key' => 'yandex_delivery',
+	'service_key' => 'yandex_delivery',
+	'service_title' => 'Яндекс.Доставка',
+	'label' => 'Яндекс до двери - 8 дней',
+	'delivery_type' => DeliveryType::COURIER,
+	'cost' => 662.0,
+	'api_base_price_rub' => 535.0,
+	'pricing_total_kopecks' => 53500,
+	'delivery_days' => array( 'min_days' => 10, 'max_days' => 10 ),
+	'original_delivery_days' => array( 'min_days' => 8, 'max_days' => 8 ),
+	'delivery_comment' => '10 дней',
+	'rules_source' => 'rule_engine',
+	'rules_audit' => $yandex_days_audit,
+	'rate_meta' => array(
+		'api_base_price_rub' => 535.0,
+		'pricing_total_kopecks' => 53500,
+		'delivery_min_days' => 8,
+		'delivery_max_days' => 8,
+		'api_delivery_days' => 8,
+		'original_delivery_days' => array( 'min_days' => 8, 'max_days' => 8 ),
+		'rules_source' => 'rule_engine',
+		'rules_audit' => $yandex_days_audit,
+	),
+);
+$yandex_admin_order = new WdcRecalcOrder( 128, array() );
+$yandex_admin_order->shipping_items = array();
+$yandex_admin_result = $replacement->save(
+	$yandex_admin_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_admin_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+$yandex_admin_calc = $yandex_admin_order->meta['_wdc_delivery_calculation_data'] ?? array();
+$yandex_admin_formula = $yandex_admin_calc['rules']['formula_visualization'] ?? array();
+$yandex_admin_title = (string) ( $yandex_admin_order->shipping_items['method_title'] ?? '' );
+recalc_smoke_assert( true === $yandex_admin_result['success'], 'Yandex admin courier save must succeed for 535 -> 662 regression rate.' );
+recalc_smoke_assert( 535.0 === (float) ( $yandex_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_admin_calc['result']['final_price_rub'] ?? 0 ), 'Yandex admin persistence must keep API base 535 separate from final 662.' );
+recalc_smoke_assert( 'Яндекс до двери - 10 дней' === $yandex_admin_title && ! str_contains( $yandex_admin_title, '8 дней' ) && 1 === substr_count( $yandex_admin_title, '10 дней' ) && ! str_contains( $yandex_admin_title, 'Array' ) && ! str_contains( $yandex_admin_title, '8 дней - 10 дней' ), 'Yandex admin method title must replace original 8 days with final 10 days without duplication.' );
+recalc_smoke_assert( is_array( $yandex_admin_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_admin_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), '10 дней' ) && 'Итог: 662 руб.' === end( $yandex_admin_formula ), 'Yandex admin formula must persist base price, delivery-days audit and final price.' );
+
+$yandex_final_title_rate = $yandex_admin_rate;
+$yandex_final_title_rate['label'] = 'Яндекс до двери - 10 дней';
+$yandex_final_title_order = new WdcRecalcOrder( 129, array() );
+$yandex_final_title_order->shipping_items = array();
+$yandex_final_title_result = $replacement->save(
+	$yandex_final_title_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_final_title_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_final_title_result['success'] && 'Яндекс до двери - 10 дней' === (string) ( $yandex_final_title_order->shipping_items['method_title'] ?? '' ), 'Yandex admin title already ending with final delivery time must stay unchanged.' );
+
+$yandex_no_days_title_rate = $yandex_admin_rate;
+$yandex_no_days_title_rate['label'] = 'Яндекс до двери';
+$yandex_no_days_title_order = new WdcRecalcOrder( 130, array() );
+$yandex_no_days_title_order->shipping_items = array();
+$yandex_no_days_title_result = $replacement->save(
+	$yandex_no_days_title_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_no_days_title_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_no_days_title_result['success'] && 'Яндекс до двери - 10 дней' === (string) ( $yandex_no_days_title_order->shipping_items['method_title'] ?? '' ), 'Yandex admin title without delivery time must append final delivery time once.' );
+
+$yandex_pricing_total_rate = $yandex_admin_rate;
+unset( $yandex_pricing_total_rate['api_base_price_rub'], $yandex_pricing_total_rate['rate_meta']['api_base_price_rub'] );
+$yandex_pricing_total_order = new WdcRecalcOrder( 131, array() );
+$yandex_pricing_total_order->shipping_items = array();
+$yandex_pricing_total_result = $replacement->save(
+	$yandex_pricing_total_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_pricing_total_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_pricing_total_result['success'] && 535.0 === (float) ( $yandex_pricing_total_order->meta['_wdc_delivery_calculation_data']['api']['api_base_price_rub'] ?? 0 ), 'Yandex admin persistence must use pricing_total_kopecks fallback before final cost.' );
+
+$yandex_money_array_rate = $yandex_admin_rate;
+unset( $yandex_money_array_rate['api_base_price_rub'], $yandex_money_array_rate['pricing_total_kopecks'], $yandex_money_array_rate['rate_meta']['api_base_price_rub'], $yandex_money_array_rate['rate_meta']['pricing_total_kopecks'] );
+$yandex_money_array_rate['original_cost'] = Money::from_rubles( 535 )->to_array();
+$yandex_money_array_order = new WdcRecalcOrder( 132, array() );
+$yandex_money_array_order->shipping_items = array();
+$yandex_money_array_result = $replacement->save(
+	$yandex_money_array_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_money_array_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_money_array_result['success'] && 535.0 === (float) ( $yandex_money_array_order->meta['_wdc_delivery_calculation_data']['api']['api_base_price_rub'] ?? 0 ), 'Yandex admin persistence must safely read Money::to_array() original_cost as 535 rubles.' );
+
 $yandex_db = new WdcRecalcLocationDb();
 $yandex_db->yandex_location_mapping_v2 = array(
 	array( 'location_id' => 501, 'yandex_geo_id' => 77, 'status' => 'mapped' ),

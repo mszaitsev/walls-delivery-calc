@@ -776,12 +776,19 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 		$title = (string) ( $rate['label'] ?? '' );
 		$tariff = (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' );
 		$title = '' !== $tariff && ! str_contains( $title, $tariff ) ? $title . ', ' . $tariff : $title;
-		$delivery = $this->delivery_label_from_value( $rate['delivery_days'] ?? null ) ?: (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' );
+		$delivery = $this->delivery_label_from_value( $rate['delivery_days'] ?? null ) ?: trim( (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' ) );
 		$original = $this->delivery_label_from_value( $rate['original_delivery_days'] ?? ( $rate['rate_meta']['original_delivery_days'] ?? null ) );
-		if ( '' !== $delivery && '' !== $original && str_ends_with( $title, $original ) ) {
-			$title = rtrim( substr( $title, 0, -strlen( $original ) ), " -" );
+		if ( '' === $delivery ) {
+			return $title;
 		}
-		return '' !== $delivery && ! str_contains( $title, $delivery ) ? $title . ' - ' . $delivery : $title;
+		if ( str_ends_with( $title, $delivery ) ) {
+			return $title;
+		}
+		if ( '' !== $original && str_ends_with( $title, $original ) ) {
+			$title = rtrim( substr( $title, 0, -strlen( $original ) ) );
+			$title = rtrim( $title, " \t\n\r\0\x0B-" );
+		}
+		return '' !== $title ? $title . ' - ' . $delivery : $delivery;
 	}
 
 	private function delivery_label_from_value( mixed $value ): string {
@@ -807,7 +814,48 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 	private function base_price( array $rate ): float {
 		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
 		$api = is_array( $meta['api'] ?? null ) ? $meta['api'] : array();
-		return (float) ( $rate['api_base_price_rub'] ?? $meta['api_base_price_rub'] ?? ( is_numeric( $meta['pricing_total_kopecks'] ?? null ) ? (float) $meta['pricing_total_kopecks'] / 100 : null ) ?? $rate['original_cost'] ?? $api['api_base_price_rub'] ?? $rate['cost'] ?? 0 );
+		foreach ( array(
+			$this->nullable_float( $rate['api_base_price_rub'] ?? null ),
+			$this->nullable_float( $meta['api_base_price_rub'] ?? null ),
+			$this->kopecks_value( $meta['pricing_total_kopecks'] ?? null ),
+			$this->kopecks_value( $rate['pricing_total_kopecks'] ?? null ),
+			$this->money_value( $rate['original_cost'] ?? null ),
+			$this->money_value( $meta['original_cost'] ?? null ),
+			$this->nullable_float( $api['api_base_price_rub'] ?? null ),
+			$this->nullable_float( $meta['api_price_with_vat_rub'] ?? null ),
+			$this->nullable_float( $api['api_price_with_vat_rub'] ?? null ),
+			$this->nullable_float( $rate['cost'] ?? null ),
+		) as $value ) {
+			if ( null !== $value ) {
+				return $value;
+			}
+		}
+		return 0.0;
+	}
+
+	private function kopecks_value( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value / 100 : null;
+	}
+
+	private function money_value( mixed $value ): ?float {
+		if ( is_array( $value ) ) {
+			if ( is_numeric( $value['amount_kopecks'] ?? null ) ) {
+				return (float) $value['amount_kopecks'] / 100;
+			}
+			if ( is_numeric( $value['amount'] ?? null ) ) {
+				return (float) $value['amount'] / 100;
+			}
+			if ( is_numeric( $value['rubles'] ?? null ) ) {
+				return (float) $value['rubles'];
+			}
+			return null;
+		}
+
+		return is_numeric( $value ) ? (float) $value : null;
+	}
+
+	private function nullable_float( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value : null;
 	}
 
 	private function old_base_price( object $order ): float {

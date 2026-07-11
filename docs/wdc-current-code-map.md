@@ -1,9 +1,10 @@
-## Yandex Delivery Order Recalculation 0.105.7
+## Yandex Delivery Order Recalculation 0.105.8
 
 - `OrderQuoteRequestMapper` converts an explicitly selected `yandex_delivery:pickup` point into checkout-compatible `pickup_selection` and family-scoped `pickup_selections` for the existing Yandex carrier.
 - For order-admin preview, `OrderQuoteRequestMapper` can recover the original order numeric WDC `location_id` read-only through the injected `LocationRepository`: explicit selected location and saved numeric ids keep priority, exact `fias_id` wins over `city_fias_id`, `city_fias_id` is accepted only when a unique active location exists, duplicate city FIAS values resolve to no location, and exact positive GAR is the fallback. This lets the first Yandex preview load representative pickup rates without changing order meta.
 - `OrderDeliveryRecalculationAdminController` loads mapped local Yandex destination PVZ rows through `YandexDeliveryPickupPointV2Repository` and the shared checkout formatter; the shared picker triggers a fresh preview after the station is chosen.
-- `OrderDeliveryReplacementService` persists the same canonical and Yandex pickup aliases as checkout.
+- `OrderDeliveryReplacementService` persists the same canonical and Yandex pickup aliases as checkout. Its calculation persistence keeps `api_base_price_rub` as the API/base value, falls back through `pricing_total_kopecks / 100` and safe `Money::to_array()` original cost, stores final price separately, preserves `change_delivery_days` in formula visualization, and replaces original delivery-time suffixes in Yandex titles with the final term.
+- `OrderShippingMetaPersister` uses the same base/final separation for checkout-created orders, so Yandex checkout and admin replacement share the same 535 -> 662 audit behavior.
 - 0.88.0 Yandex Geo Manual Review Queue: YandexDeliveryGeoMappingRepository exposes grouped needs_review queue methods plus approve/reject/bulk reject transitions; the Маппинг geo_id tab blocks those manual actions while the runner is running.
 ## Yandex Geo Mapping Runner 0.87.0
 

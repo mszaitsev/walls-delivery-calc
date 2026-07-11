@@ -866,6 +866,88 @@ $unspecified_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'techni
 ( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $unspecified_item );
 wc_checkout_smoke_assert( array( 'Срок доставки' => 'не указан' ) === $unspecified_item->meta, 'Checkout visible meta must use not specified when delivery time is missing.' );
 
+$delivery_days_audit = array(
+	array(
+		'applied' => true,
+		'action_type' => 'change_delivery_days',
+		'rule_name' => 'Срок доставки',
+		'operation' => 'increase',
+		'operation_value' => 2,
+		'operation_base' => 'calendar_days',
+		'after_value' => array( 'min_days' => 10, 'max_days' => 10 ),
+	),
+);
+$session->save_rates(
+	array(
+		'yandex_courier_535_662' => array(
+			'rate_id' => 'yandex_courier',
+			'carrier_key' => 'yandex_delivery',
+			'service_key' => 'yandex_delivery',
+			'service_title' => 'Яндекс.Доставка',
+			'label' => 'Яндекс до двери - 8 дней',
+			'delivery_type' => 'courier',
+			'cost' => 662.0,
+			'delivery_days' => array( 'min_days' => 10, 'max_days' => 10 ),
+			'delivery_comment' => '10 дней',
+			'original_delivery_days' => array( 'min_days' => 8, 'max_days' => 8 ),
+			'rules_source' => 'rule_engine',
+			'rate_meta' => array(
+				'api_base_price_rub' => 535.0,
+				'pricing_total_kopecks' => 53500,
+				'delivery_min_days' => 8,
+				'delivery_max_days' => 8,
+				'api_delivery_days' => 8,
+				'rules_source' => 'rule_engine',
+				'rules_audit' => $delivery_days_audit,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:yandex_courier_535_662' ) );
+$yandex_checkout_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $yandex_checkout_order );
+$yandex_checkout_calc = $yandex_checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+$yandex_checkout_formula = $yandex_checkout_calc['rules']['formula_visualization'] ?? array();
+wc_checkout_smoke_assert( 535.0 === (float) ( $yandex_checkout_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_checkout_calc['result']['final_price_rub'] ?? 0 ), 'Yandex checkout persistence must keep API base 535 separate from final 662.' );
+wc_checkout_smoke_assert( is_array( $yandex_checkout_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_checkout_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), '10 дней' ) && 'Итог: 662 руб.' === end( $yandex_checkout_formula ), 'Yandex checkout formula must persist base price, delivery-days audit and final price.' );
+
+$session->save_rates(
+	array(
+		'yandex_pricing_total_fallback' => array(
+			'rate_id' => 'yandex_courier',
+			'carrier_key' => 'yandex_delivery',
+			'service_key' => 'yandex_delivery',
+			'label' => 'Яндекс до двери',
+			'delivery_type' => 'courier',
+			'cost' => 662.0,
+			'rate_meta' => array( 'pricing_total_kopecks' => 53500 ),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:yandex_pricing_total_fallback' ) );
+$pricing_total_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $pricing_total_order );
+wc_checkout_smoke_assert( 535.0 === (float) ( $pricing_total_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['api']['api_base_price_rub'] ?? 0 ), 'Yandex checkout persistence must use pricing_total_kopecks fallback before final cost.' );
+
+$session->save_rates(
+	array(
+		'money_array_original_cost' => array(
+			'rate_id' => 'yandex_courier',
+			'carrier_key' => 'yandex_delivery',
+			'service_key' => 'yandex_delivery',
+			'label' => 'Яндекс до двери',
+			'delivery_type' => 'courier',
+			'cost' => 662.0,
+			'original_cost' => Money::from_rubles( 535 )->to_array(),
+			'rate_meta' => array(),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:money_array_original_cost' ) );
+$money_array_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $money_array_order );
+wc_checkout_smoke_assert( 535.0 === (float) ( $money_array_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['api']['api_base_price_rub'] ?? 0 ), 'Checkout persistence must safely read Money::to_array() original_cost as 535 rubles.' );
+
 WC()->session->set( 'chosen_shipping_methods', array( 'legacy_method:rate' ) );
 $order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
