@@ -11,10 +11,15 @@ use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OrderQuoteRequestMapper {
+	public function __construct(
+		private ?LocationRepository $location_repository = null
+	) {
+	}
 	/**
 	 * @param array<string,mixed>|null $selected_location
 	 * @param array<string,mixed> $selected_pickup_point
@@ -140,6 +145,7 @@ final class OrderQuoteRequestMapper {
 	 * @return array<string,mixed>
 	 */
 	private function customer_context( object $order, Address $address, ?array $selected_location = null, array $selected_pickup_point = array() ): array {
+		$resolved_location_id = $this->resolved_location_id( $order, $address, $selected_location );
 		$city_display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
 		if ( '' === $city_display ) {
 			$city_display = $address->city ?: $address->settlement;
@@ -155,7 +161,7 @@ final class OrderQuoteRequestMapper {
 				'order_id'                  => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
 				'location_override'         => array() !== $override,
 				'selected_location_id'      => $override['id'] ?? null,
-				'location_id'               => $override['id'] ?? $this->saved_location_id( $order ),
+				'location_id'               => $resolved_location_id,
 				'items_quantity'            => $address instanceof Address && method_exists( $order, 'get_item_count' ) ? (int) $order->get_item_count() : 0,
 				'postcode'                  => $address->postcode,
 				'resolved_postcode'         => array() !== $override ? $address->postcode : ( $this->meta_string( $order, '_wdc_platform_resolved_postcode' ) ?: $address->postcode ),
@@ -187,6 +193,20 @@ final class OrderQuoteRequestMapper {
 		}
 
 		return $context;
+	}
+
+	private function resolved_location_id( object $order, Address $address, ?array $selected_location ): int {
+		$override = $this->normalize_location_override( $selected_location );
+		if ( (int) ( $override['id'] ?? 0 ) > 0 ) { return (int) $override['id']; }
+		$saved = $this->saved_location_id( $order );
+		if ( $saved > 0 || ! $this->location_repository instanceof LocationRepository ) { return $saved; }
+		$calculation = $this->calculation_data( $order );
+		$destination = is_array( $calculation['destination'] ?? null ) ? $calculation['destination'] : array();
+		$fias = array_unique( array_filter( array( $this->meta_string( $order, '_wdc_platform_location_fias_id' ), $this->meta_string( $order, '_wdc_platform_fias_id' ), $this->meta_string( $order, '_wdc_platform_city_fias_id' ), (string) ( $destination['fias_id'] ?? '' ), $address->fias_id ) ) );
+		foreach ( $fias as $value ) { $location = $this->location_repository->find_by_fias_or_city_fias_id( $value ); if ( null !== $location && $location->id > 0 ) { return $location->id; } }
+		$gar = array_unique( array_filter( array( $this->meta_string( $order, '_wdc_platform_gar_id' ), $this->meta_string( $order, '_wdc_platform_city_gar_id' ), (string) ( $destination['gar_id'] ?? '' ), $address->gar_id ), static fn( string $value ): bool => ctype_digit( $value ) && (int) $value > 0 ) );
+		foreach ( $gar as $value ) { $location = $this->location_repository->find_by_gar_object_id( (int) $value ); if ( null !== $location && $location->id > 0 ) { return $location->id; } }
+		return 0;
 	}
 
 	/** @param array<string,mixed> $selected_pickup_point */

@@ -686,7 +686,7 @@ final class Plugin {
 				$this->container->get( YandexDeliveryGeoPipelineV2Runner::class ),
 			)
 		);
-		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );
+		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( OrderDeliveryRecalculationService::class, fn(): OrderDeliveryRecalculationService => new OrderDeliveryRecalculationService( $this->container->get( OrderQuoteRequestMapper::class ), $this->container->get( CheckoutOrchestrator::class ), $this->container->get( OrderShipmentRepository::class ) ) );
 		$this->container->register( OrderDeliveryAddressNormalizationService::class, fn(): OrderDeliveryAddressNormalizationService => new OrderDeliveryAddressNormalizationService( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionService::class ) ) );
 		$this->container->register( OrderDeliveryReplacementService::class, fn(): OrderDeliveryReplacementService => new OrderDeliveryReplacementService( $this->container->get( OrderShipmentRepository::class ) ) );

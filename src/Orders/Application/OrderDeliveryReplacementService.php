@@ -776,12 +776,18 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 		$title = (string) ( $rate['label'] ?? '' );
 		$tariff = (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' );
 		$title = '' !== $tariff && ! str_contains( $title, $tariff ) ? $title . ', ' . $tariff : $title;
-		$delivery = (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' );
-		$original = (string) ( $rate['original_delivery_days'] ?? ( $rate['rate_meta']['original_delivery_days'] ?? '' ) );
+		$delivery = $this->delivery_label_from_value( $rate['delivery_days'] ?? null ) ?: (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' );
+		$original = $this->delivery_label_from_value( $rate['original_delivery_days'] ?? ( $rate['rate_meta']['original_delivery_days'] ?? null ) );
 		if ( '' !== $delivery && '' !== $original && str_ends_with( $title, $original ) ) {
 			$title = rtrim( substr( $title, 0, -strlen( $original ) ), " -" );
 		}
 		return '' !== $delivery && ! str_contains( $title, $delivery ) ? $title . ' - ' . $delivery : $title;
+	}
+
+	private function delivery_label_from_value( mixed $value ): string {
+		if ( is_array( $value ) ) { return DeliveryDaysFormatter::format_array( $value ); }
+		if ( is_numeric( $value ) ) { return DeliveryDaysFormatter::format_values( (int) $value, (int) $value ); }
+		return is_string( $value ) ? trim( $value ) : '';
 	}
 
 	/**
