@@ -171,7 +171,7 @@ final class OrderDeliveryRecalculationAdminController {
 			);
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
-			wp_send_json_success( array( 'points' => $this->yandex_pickup_points( $location ) ) );
+			wp_send_json_success( array( 'points' => $this->yandex_pickup_points( $location, $query, $mode ) ) );
 		}
 		if ( 'cdek' === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
 			$rows = $this->cdek_pickup_points( $location, $query, $mode, $limit );
@@ -638,11 +638,7 @@ final class OrderDeliveryRecalculationAdminController {
 	 * @param array<string,mixed> $location
 	 * @return array<int,array<string,mixed>>
 	 */
-	/**
-	 * @param array<string,mixed> $location
-	 * @return array<int,array<string,mixed>>
-	 */
-	private function yandex_pickup_points( array $location ): array {
+	private function yandex_pickup_points( array $location, string $query, string $mode ): array {
 		if ( ! $this->yandex_points instanceof YandexDeliveryPickupPointV2Repository || ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
 			return array();
 		}
@@ -655,7 +651,27 @@ final class OrderDeliveryRecalculationAdminController {
 			return array();
 		}
 
-		return array_map( fn( array $row ): array => $this->yandex_formatter->format( $row ), $this->yandex_points->destination_pickup_points_by_geo_ids( $geo_ids ) );
+		$points = array_map( fn( array $row ): array => $this->yandex_formatter->format( $row ), $this->yandex_points->destination_pickup_points_by_geo_ids( $geo_ids ) );
+		if ( 'search' !== $mode || '' === trim( $query ) ) {
+			return $points;
+		}
+
+		$query = $this->normalize_search_text( $query );
+		return array_values(
+			array_filter(
+				$points,
+				function ( array $point ) use ( $query ): bool {
+					$fields = array( 'address', 'point_address', 'full_address', 'point_title', 'card_title', 'display_title', 'title', 'point_name', 'name', 'platform_station_id' );
+					foreach ( $fields as $field ) {
+						if ( str_contains( $this->normalize_search_text( (string) ( $point[ $field ] ?? '' ) ), $query ) ) {
+							return true;
+						}
+					}
+
+					return false;
+				}
+			)
+		);
 	}
 	private function pickup_rows_for_location( array $location, int $limit, string $postcode ): array {
 		foreach ( array( 'ids', 'city_region', 'city' ) as $match ) {

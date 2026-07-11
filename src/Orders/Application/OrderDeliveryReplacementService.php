@@ -821,6 +821,32 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 	 */
 	private function canonical_pickup_for_save( object $order, array $rate, array $pickup ): array {
 		$carrier = (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' );
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
+			$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+			$station_id = $this->first_meaningful(
+				$pickup['platform_station_id'] ?? '',
+				$snapshot['platform_station_id'] ?? '',
+				$pickup['point_code'] ?? '',
+				$snapshot['point_code'] ?? ''
+			);
+			$pickup_carrier = (string) ( $pickup['carrier_key'] ?? $pickup['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+			$pickup_family = (string) ( $pickup['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+			if (
+				YandexDeliverySettings::CARRIER_KEY !== $pickup_carrier
+				|| YandexDeliverySettings::CARRIER_KEY . ':pickup' !== $pickup_family
+				|| '' === $station_id
+			) {
+				return array();
+			}
+
+			$pickup['carrier_key'] = YandexDeliverySettings::CARRIER_KEY;
+			$pickup['service_key'] = YandexDeliverySettings::SERVICE_KEY;
+			$pickup['pickup_family'] = YandexDeliverySettings::CARRIER_KEY . ':pickup';
+			$pickup['platform_station_id'] = $station_id;
+			$pickup['point_code'] = $station_id;
+
+			return $pickup;
+		}
 		if ( 'cdek' !== $carrier ) {
 			if ( DpdSettings::CARRIER_KEY === $carrier ) {
 				$code = $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '' );

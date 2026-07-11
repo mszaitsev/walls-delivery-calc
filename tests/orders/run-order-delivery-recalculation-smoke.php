@@ -4,6 +4,8 @@ declare(strict_types=1);
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -113,6 +115,8 @@ final class WdcRecalcLocationDb extends wpdb {
 	public array $locations = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $russian_post_pickup_rows = array();
+	public array $yandex_location_mapping_v2 = array();
+	public array $yandex_delivery_pickup_points_v2 = array();
 }
 
 final class WdcRecalcProduct {
@@ -1418,5 +1422,69 @@ try {
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Geocode endpoint must require nonce.' );
 }
+
+$yandex_order = new WdcRecalcOrder( 126, array() );
+$yandex_rate = array(
+	'id' => 'yandex_pickup',
+	'rate_id' => 'yandex_pickup',
+	'carrier_key' => 'yandex_delivery',
+	'service_key' => 'yandex_delivery',
+	'service_title' => 'Яндекс.Доставка',
+	'label' => 'Яндекс до ПВЗ',
+	'delivery_type' => DeliveryType::PICKUP,
+	'cost' => 500,
+	'delivery_comment' => '2 дня',
+);
+$missing_yandex_station = $replacement->save(
+	$yandex_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_rate,
+		'selected_pickup_point' => array( 'carrier_key' => 'yandex_delivery', 'pickup_family' => 'yandex_delivery:pickup' ),
+	)
+);
+recalc_smoke_assert( false === $missing_yandex_station['success'], 'Yandex pickup save must reject a point without a station id.' );
+$saved_yandex_station = $replacement->save(
+	$yandex_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_rate,
+		'selected_pickup_point' => array(
+			'carrier_key' => 'yandex_delivery',
+			'pickup_family' => 'yandex_delivery:pickup',
+			'platform_station_id' => 'YANDEX-ORDER-1',
+			'point_code' => 'forged-code',
+			'point_address' => 'Новосибирск, Ленина, 1',
+		),
+	)
+);
+recalc_smoke_assert( true === $saved_yandex_station['success'] && 'YANDEX-ORDER-1' === (string) ( $yandex_order->meta['_wdc_pickup_point_code'] ?? '' ) && 'YANDEX-ORDER-1' === (string) ( $yandex_order->meta['_wdc_yandex_delivery_pickup_platform_station_id'] ?? '' ), 'Yandex pickup save must canonicalize point_code to platform_station_id and persist the checkout-compatible alias.' );
+$saved_yandex_courier = $replacement->save(
+	$yandex_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => array_merge( $yandex_rate, array( 'id' => 'yandex_courier', 'rate_id' => 'yandex_courier', 'delivery_type' => DeliveryType::COURIER, 'label' => 'Яндекс до двери' ) ),
+		'normalized_shipping_address' => array( 'address_1' => 'Ленина, 2', 'normalized' => true, 'country' => 'RU' ),
+	)
+);
+recalc_smoke_assert( true === $saved_yandex_courier['success'] && '' === (string) ( $yandex_order->meta['_wdc_yandex_delivery_pickup_platform_station_id'] ?? '' ), 'Yandex courier save must clear Yandex pickup meta.' );
+
+$yandex_db = new WdcRecalcLocationDb();
+$yandex_db->yandex_location_mapping_v2 = array(
+	array( 'location_id' => 501, 'yandex_geo_id' => 77, 'status' => 'mapped' ),
+);
+$yandex_db->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'YANDEX-ADDRESS', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов Яндекс Маркета', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Ленина, 10', 'yandex_geo_id' => 77, 'active' => 1 ),
+	array( 'platform_station_id' => 'YANDEX-TITLE', 'operator_id' => '5post', 'type' => 'terminal', 'name' => '5Post', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Советская, 2', 'yandex_geo_id' => 77, 'active' => 1 ),
+);
+$yandex_search_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$yandex_search = new ReflectionMethod( $yandex_search_controller, 'yandex_pickup_points' );
+$yandex_search->setAccessible( true );
+$yandex_location_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), '', 'location' );
+$yandex_address_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), 'Ленина', 'search' );
+$yandex_title_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), '5 post', 'search' );
+$yandex_station_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), 'yandex-title', 'search' );
+recalc_smoke_assert( 2 === count( $yandex_location_points ) && 1 === count( $yandex_address_points ) && 'YANDEX-ADDRESS' === (string) ( $yandex_address_points[0]['platform_station_id'] ?? '' ), 'Yandex location mode must return all local points, while address search must return only a match.' );
+recalc_smoke_assert( 1 === count( $yandex_title_points ) && 'YANDEX-TITLE' === (string) ( $yandex_title_points[0]['platform_station_id'] ?? '' ) && 1 === count( $yandex_station_points ), 'Yandex search must match presentation title and platform_station_id case-insensitively.' );
 
 echo "Order delivery recalculation smoke OK\n";
