@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
@@ -146,7 +147,7 @@ final class OrderDeliveryReplacementService {
 				}
 			}
 		} else {
-			$rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
+$rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 		}
 		$rate['cost'] = (float) ( $rate['cost'] ?? 0 );
 
@@ -290,6 +291,7 @@ final class OrderDeliveryReplacementService {
 			$map['_wdc_platform_pickup_comment'] = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' );
 			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['work_time'] ?? '', $pickup['point_work_time'] ?? '' );
 			$map['_wdc_pickup_point_code'] = (string) ( $pickup['point_code'] ?? '' );
+			$map['_wdc_pickup_platform_station_id'] = $this->first_meaningful( $pickup['platform_station_id'] ?? '', $pickup['snapshot']['platform_station_id'] ?? '' );
 			$map['_wdc_pickup_point_type'] = (string) ( $pickup['point_type'] ?? '' );
 			$map['_wdc_pickup_carrier_key'] = (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' );
 			$map['_wdc_pickup_service_key'] = (string) ( $pickup['service_key'] ?? $rate['service_key'] ?? $rate['carrier_key'] ?? '' );
@@ -311,12 +313,25 @@ final class OrderDeliveryReplacementService {
 				$map['_wdc_dpd_pickup_longitude'] = $this->first_meaningful( $pickup['lng'] ?? '', $pickup['longitude'] ?? '', $snapshot['lng'] ?? '' );
 				$map['_wdc_dpd_pickup_source'] = $this->first_meaningful( $pickup['dpd_source'] ?? '', $pickup['source'] ?? '', $snapshot['dpd_source'] ?? '', $snapshot['source'] ?? '', 'recalculation/admin' );
 			}
+			if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' ) ) {
+				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+				$map['_wdc_yandex_delivery_pickup_platform_station_id'] = $this->first_meaningful( $pickup['platform_station_id'] ?? '', $pickup['point_code'] ?? '', $snapshot['platform_station_id'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_point_code'] = $this->first_meaningful( $pickup['point_code'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_type'] = $this->first_meaningful( $pickup['point_type'] ?? '', $snapshot['point_type'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_name'] = $this->first_meaningful( $pickup['point_name'] ?? '', $snapshot['point_name'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_city_name'] = $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $snapshot['city_name'] ?? '', $snapshot['city'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_region_name'] = $this->first_meaningful( $pickup['region_name'] ?? '', $pickup['region'] ?? '', $snapshot['region_name'] ?? '', $snapshot['region'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_latitude'] = $this->first_meaningful( $pickup['lat'] ?? '', $snapshot['lat'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_longitude'] = $this->first_meaningful( $pickup['lng'] ?? '', $snapshot['lng'] ?? '' );
+			}
 		} else {
 			$map['_wdc_platform_pickup_code'] = '';
 			$map['_wdc_platform_pickup_address'] = '';
 			$map['_wdc_platform_pickup_comment'] = '';
 			$map['_wdc_platform_pickup_work_time'] = '';
 			$map['_wdc_pickup_point_code'] = '';
+			$map['_wdc_pickup_platform_station_id'] = '';
 			$map['_wdc_pickup_point_type'] = '';
 			$map['_wdc_pickup_carrier_key'] = '';
 			$map['_wdc_pickup_service_key'] = '';
@@ -335,6 +350,15 @@ final class OrderDeliveryReplacementService {
 			$map['_wdc_dpd_pickup_latitude'] = '';
 			$map['_wdc_dpd_pickup_longitude'] = '';
 			$map['_wdc_dpd_pickup_source'] = '';
+			$map['_wdc_yandex_delivery_pickup_platform_station_id'] = '';
+			$map['_wdc_yandex_delivery_pickup_point_code'] = '';
+			$map['_wdc_yandex_delivery_pickup_type'] = '';
+			$map['_wdc_yandex_delivery_pickup_name'] = '';
+			$map['_wdc_yandex_delivery_pickup_address'] = '';
+			$map['_wdc_yandex_delivery_pickup_city_name'] = '';
+			$map['_wdc_yandex_delivery_pickup_region_name'] = '';
+			$map['_wdc_yandex_delivery_pickup_latitude'] = '';
+			$map['_wdc_yandex_delivery_pickup_longitude'] = '';
 		}
 		foreach ( $map as $key => $value ) {
 			if ( method_exists( $order, 'update_meta_data' ) ) {

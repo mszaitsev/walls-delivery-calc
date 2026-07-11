@@ -527,6 +527,20 @@ $order->meta['_wdc_pickup_point_postcode'] = '630099';
 $order->meta['_wdc_pickup_point_snapshot'] = wp_json_encode( array( 'point_code' => '630099-OPS', 'point_name' => 'ОПС 630099', 'point_address' => 'Новосибирск, Красный проспект, 10' ) );
 $GLOBALS['wdc_recalc_orders'][101] = $order;
 
+$yandex_selection_request = ( new OrderQuoteRequestMapper() )->map(
+	$order,
+	null,
+	array(
+		'carrier_key' => 'yandex_delivery',
+		'service_key' => 'yandex_delivery',
+		'pickup_family' => 'yandex_delivery:pickup',
+		'point_code' => 'YANDEX-PVZ-1',
+		'platform_station_id' => 'YANDEX-PVZ-1',
+		'snapshot' => array( 'carrier_key' => 'yandex_delivery', 'pickup_family' => 'yandex_delivery:pickup', 'platform_station_id' => 'YANDEX-PVZ-1' ),
+	)
+);
+recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selection']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed to the checkout-compatible pickup_selection context.' );
+recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selections']['yandex_delivery:pickup']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed in its family pickup_selections bucket.' );
 $metabox = new OrderDeliveryMetabox( new OrderShipmentRepository() );
 ob_start();
 $metabox->render( $order );

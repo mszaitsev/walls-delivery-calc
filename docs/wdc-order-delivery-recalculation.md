@@ -1,5 +1,16 @@
 # WDC Order Delivery Recalculation
 
+Version: 0.105.0.
+
+## Статус 0.105.0
+
+Яндекс.Доставка подключена к существующему блоку WooCommerce заказа `Калькулятор доставок` без отдельного order calculator или API client.
+
+- Preview идет через общий `OrderQuoteRequestMapper -> CheckoutOrchestrator -> YandexDeliveryCarrier -> YandexDeliveryPricingRequestBuilder -> pricing-calculator` runtime и показывает варианты `Яндекс до ПВЗ` и `Яндекс до двери`.
+- Общий admin picker ПВЗ получает активные destination rows из локальной Yandex v2 базы по рабочим `yandex_geo_id` выбранного населенного пункта и форматирует их тем же `YandexDeliveryCheckoutPickupPointFormatter`, что checkout.
+- После явного выбора ПВЗ admin JS запускает fresh preview; mapper передает checkout-compatible `pickup_selection` и `pickup_selections['yandex_delivery:pickup']`, поэтому pickup pricing использует конкретный `platform_station_id`.
+- Save переиспользует общий replacement flow, пишет canonical `_wdc_pickup_*`, `_wdc_pickup_platform_station_id` и Yandex aliases `_wdc_yandex_delivery_pickup_*`; для courier pickup meta очищаются.
+
 Version: 0.69.3.
 
 ## Статус 0.69.3

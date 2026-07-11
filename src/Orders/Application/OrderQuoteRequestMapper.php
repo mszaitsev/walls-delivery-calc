@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -148,7 +149,7 @@ final class OrderQuoteRequestMapper {
 			$city_display = (string) ( $override['display_name'] ?? $city_display );
 		}
 
-		return array_filter(
+		$context = array_filter(
 			array(
 				'source'                    => 'woocommerce_order_admin_preview',
 				'order_id'                  => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
@@ -177,6 +178,27 @@ final class OrderQuoteRequestMapper {
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value && 0 !== $value
 		);
+		$yandex_selection = $this->yandex_pickup_selection( $selected_pickup_point );
+		if ( array() !== $yandex_selection ) {
+			$context['pickup_selection'] = $yandex_selection;
+			$context['pickup_selections'] = array(
+				YandexDeliverySettings::CARRIER_KEY . ':pickup' => $yandex_selection,
+			);
+		}
+
+		return $context;
+	}
+
+	/** @param array<string,mixed> $selected_pickup_point */
+	private function yandex_pickup_selection( array $selected_pickup_point ): array {
+		$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+		$carrier = (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+		$family = (string) ( $selected_pickup_point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		if ( YandexDeliverySettings::CARRIER_KEY !== $carrier || YandexDeliverySettings::CARRIER_KEY . ':pickup' !== $family ) {
+			return array();
+		}
+
+		return $selected_pickup_point;
 	}
 
 	private function saved_location_id( object $order ): int {
@@ -240,7 +262,7 @@ final class OrderQuoteRequestMapper {
 		$location_id = $this->positive_int( $selected_location['id'] ?? $selected_location['location_id'] ?? $selected_location['selected_location_id'] ?? null );
 		$dpd_city_id = $this->positive_int( $selected_location['dpd_city_id'] ?? $selected_location['dpd_receiver_city_id'] ?? null );
 
-		return array_filter(
+		$context = array_filter(
 			array(
 				'id'           => $location_id > 0 ? $location_id : null,
 				'fias_id'      => trim( (string) ( $selected_location['fias_id'] ?? $selected_location['selected_location_fias_id'] ?? '' ) ),
@@ -255,6 +277,7 @@ final class OrderQuoteRequestMapper {
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
+		return $context;
 	}
 
 	private function positive_int( mixed $value ): int {

@@ -1,3 +1,8 @@
+## Yandex Delivery Order Recalculation 0.105.0
+
+- `OrderQuoteRequestMapper` converts an explicitly selected `yandex_delivery:pickup` point into checkout-compatible `pickup_selection` and family-scoped `pickup_selections` for the existing Yandex carrier.
+- `OrderDeliveryRecalculationAdminController` loads mapped local Yandex destination PVZ rows through `YandexDeliveryPickupPointV2Repository` and the shared checkout formatter; the shared picker triggers a fresh preview after the station is chosen.
+- `OrderDeliveryReplacementService` persists the same canonical and Yandex pickup aliases as checkout.
 - 0.88.0 Yandex Geo Manual Review Queue: YandexDeliveryGeoMappingRepository exposes grouped needs_review queue methods plus approve/reject/bulk reject transitions; the Маппинг geo_id tab blocks those manual actions while the runner is running.
 ## Yandex Geo Mapping Runner 0.87.0
 

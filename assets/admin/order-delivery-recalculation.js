@@ -1132,6 +1132,7 @@
 			service_key: String( point.service_key || point.carrier_key || point.carrier || '' ),
 			pickup_family: String( point.pickup_family || ( point.carrier_key ? point.carrier_key + ':pickup' : '' ) ),
 			point_code: pointCode,
+			platform_station_id: String( point.platform_station_id || pointCode || '' ),
 			terminal_code: terminalCode,
 			point_type: String( point.point_type || 'OPS' ),
 			point_type_label: String( point.point_type_label || '' ),
@@ -1149,6 +1150,7 @@
 			lng: Number.isFinite( lng ) ? lng : null,
 			work_time: firstMeaningfulText( point.work_time ),
 			description: firstMeaningfulText( point.description, point.point_comment, point.cdek_note ),
+			presentation_comment: meaningfulText( point.presentation_comment ),
 			storage_notice: meaningfulText( point.storage_notice ),
 			raw_sanitized: point.raw_sanitized || point.raw || {},
 			cdek_code: String( point.cdek_code || '' ),
@@ -1158,6 +1160,8 @@
 			cdek_nearest_station: String( point.cdek_nearest_station || '' ),
 			cdek_note: String( point.cdek_note || '' ),
 			dpd_source: String( point.dpd_source || point.source || '' ),
+			operator_id: String( point.operator_id || '' ),
+			snapshot: point.snapshot || {},
 			point_raw: point
 		};
 	}
@@ -1265,7 +1269,7 @@
 			normalizedShippingAddresses.delete( box );
 			updatePickupSelectors( box );
 			close();
-			if ( 'dpd' === String( point.carrier_key || point.carrier || rate.carrier_key || '' ) ) {
+			if ( [ 'dpd', 'yandex_delivery' ].indexOf( String( point.carrier_key || point.carrier || rate.carrier_key || '' ) ) !== -1 ) {
 				requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ), {
 					selectedPickupPoint: point,
 					restoreDpdPickup: true,
