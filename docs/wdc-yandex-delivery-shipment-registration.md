@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.106.2
+
+Этап 0.106.2 закрывает validation-блокеры перед реальным HTTP-flow, не добавляя HTTP/API/UI/persistence. Registration allocation не может быть пустым: `ShipmentAllocation` должен содержать хотя бы один item суммарно, а каждое `ShipmentAllocationPlace` должно содержать хотя бы один `ShipmentAllocationItem`. `CdekShipmentAllocationAdapter` отклоняет пустые `cdek_item_rows` и ситуацию, когда одно из мест не имеет allocation rows.
+
+Yandex destination теперь строгий: `destination.mode` принимает только `pickup` или `courier`. Для pickup обязателен непустой `platform_station_id`. Для courier обязательны структурированные `details.locality`, `details.street`, `details.house` и `details.full_address`; `country`, `region`, `room`, `postal_code`, `geoId` и `geo_id` остаются необязательными scalar-полями. Координаты не требуются и не добавляются искусственно.
+
+Recipient validation обязательна до построения payload: итоговый `first_name` (`Фамилия Имя`) не может быть пустым, телефон должен нормализоваться в `+7XXXXXXXXXX`, email может быть пустым, но если задан — должен пройти `FILTER_VALIDATE_EMAIL`. Ready interval проверяется по timestamp: `ready_to` может быть равен `ready_from`, но не может быть раньше. Формат UTC остаётся `Y-m-d\TH:i:s.u\Z`.
+
 ## Статус 0.106.1
 
 Этап 0.106.1 готовит foundation к реальному HTTP-flow без добавления HTTP. `items[]` приведены к подтверждённой production-структуре: цены и НДС передаются только внутри `billing_details`, а не на верхнем уровне товарной строки. `ShipmentAllocationItem` хранит две нейтральные цены: `unit_price_kopecks` и `assessed_unit_price_kopecks`, потому что для Яндекса обычная цена и оценочная стоимость могут различаться; текущий CDEK adapter заполняет их одинаковым значением из существующего `cost`, не меняя CDEK payload.

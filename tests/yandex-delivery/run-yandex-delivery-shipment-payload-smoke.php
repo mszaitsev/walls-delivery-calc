@@ -16,6 +16,14 @@ use WallsShop\WDC\Shipments\Cdek\CdekShipmentAllocationAdapter;
 function yandex_shipment_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) { throw new RuntimeException( $message ); }
 }
+function yandex_shipment_expect_exception( callable $callback, string $message_part, string $message ): void {
+	try {
+		$callback();
+		throw new RuntimeException( $message );
+	} catch ( InvalidArgumentException $exception ) {
+		yandex_shipment_assert( str_contains( $exception->getMessage(), $message_part ), $message );
+	}
+}
 function yandex_shipment_payload( array $places, array $rows, array $destination ): array {
 	$allocation = ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $places, $rows );
 	return ( new YandexDeliveryShipmentPayloadBuilder() )->build( $allocation, array(
@@ -24,6 +32,18 @@ function yandex_shipment_payload( array $places, array $rows, array $destination
 		'recipient' => array( 'first_name' => 'Михаил', 'last_name' => 'Михайлов', 'phone' => '8 (913) 123-45-67', 'email' => 'buyer@example.test' ),
 		'destination' => $destination,
 	) );
+}
+function yandex_context_payload( ShipmentAllocation $allocation, array $overrides = array() ): array {
+	$context = array_merge( array(
+		'operator_request_id' => 'ORDER-123',
+		'source_platform_station_id' => 'SOURCE-1',
+		'ready_from' => new DateTimeImmutable( '2026-07-12 12:00:00+07:00' ),
+		'ready_to' => new DateTimeImmutable( '2026-07-12 13:00:00+07:00' ),
+		'recipient' => array( 'first_name' => 'Михаил', 'last_name' => 'Михайлов', 'phone' => '8 (913) 123-45-67', 'email' => 'buyer@example.test' ),
+		'destination' => array( 'mode' => 'pickup', 'platform_station_id' => 'PVZ-1' ),
+	), $overrides );
+
+	return ( new YandexDeliveryShipmentPayloadBuilder() )->build( $allocation, $context );
 }
 $pickup = array( 'mode' => 'pickup', 'platform_station_id' => 'PVZ-1' );
 $one = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), array(
@@ -85,6 +105,47 @@ $no_last_name = $builder->build( $recipient_allocation, array_merge( $recipient_
 $no_first_name = $builder->build( $recipient_allocation, array_merge( $recipient_base, array( 'recipient' => array( 'first_name' => '', 'last_name' => ' Михайлов ', 'phone' => '9131234567', 'email' => 'buyer@example.test' ) ) ) );
 $double_spaces = $builder->build( $recipient_allocation, array_merge( $recipient_base, array( 'recipient' => array( 'first_name' => '  Михаил  ', 'last_name' => '  Михайлов  ', 'phone' => '9131234567', 'email' => 'buyer@example.test' ) ) ) );
 yandex_shipment_assert( 'Михаил' === $no_last_name['recipient_info']['first_name'] && 'Михайлов' === $no_first_name['recipient_info']['first_name'] && 'Михайлов Михаил' === $double_spaces['recipient_info']['first_name'], 'Recipient edge cases must trim missing names and collapse double spaces.' );
+
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'destination' => array() ) ), 'destination.mode must be pickup or courier', 'Missing destination mode must fail.' );
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'destination' => array( 'mode' => 'unknown' ) ) ), 'destination.mode must be pickup or courier', 'Unknown destination mode must fail.' );
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'destination' => array( 'mode' => 'self_pickup', 'platform_station_id' => 'PVZ-1' ) ) ), 'destination.mode must be pickup or courier', 'Carrier policy names must not be accepted as destination mode.' );
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'destination' => array( 'mode' => 'pickup', 'platform_station_id' => ' ' ) ) ), 'destination.platform_station_id is required for pickup', 'Pickup destination must require platform station id.' );
+$trimmed_pickup = yandex_context_payload( $recipient_allocation, array( 'destination' => array( 'mode' => 'pickup', 'platform_station_id' => ' PVZ-TRIM ' ) ) );
+yandex_shipment_assert( 'PVZ-TRIM' === $trimmed_pickup['destination']['platform_station']['platform_id'], 'Pickup platform station id must be trimmed.' );
+
+$valid_courier_details = array( 'country' => ' Россия ', 'region' => ' Москва ', 'locality' => ' Москва ', 'street' => ' Ходынский бульвар ', 'house' => ' 9 ', 'room' => ' 15 ', 'full_address' => ' 125252, Москва, Ходынский бульвар, 9, кв. 15 ', 'postal_code' => '', 'geoId' => 213, 'latitude' => 55.1 );
+foreach ( array( 'locality', 'street', 'house', 'full_address' ) as $required_field ) {
+	$broken_details = $valid_courier_details;
+	$broken_details[ $required_field ] = ' ';
+	yandex_shipment_expect_exception(
+		static fn() => yandex_context_payload( $recipient_allocation, array( 'destination' => array( 'mode' => 'courier', 'details' => $broken_details ) ) ),
+		'destination.details.' . $required_field . ' is required for courier',
+		'Courier destination must require ' . $required_field . '.'
+	);
+}
+$sanitized_courier = yandex_context_payload( $recipient_allocation, array( 'destination' => array( 'mode' => 'courier', 'details' => $valid_courier_details ) ) );
+$sanitized_details = $sanitized_courier['destination']['custom_location']['details'];
+yandex_shipment_assert( 'Москва' === $sanitized_details['locality'] && 'Ходынский бульвар' === $sanitized_details['street'] && '9' === $sanitized_details['house'] && '125252, Москва, Ходынский бульвар, 9, кв. 15' === $sanitized_details['full_address'], 'Courier details must be trimmed.' );
+yandex_shipment_assert( isset( $sanitized_details['geoId'] ) && ! array_key_exists( 'latitude', $sanitized_details ) && ! array_key_exists( 'longitude', $sanitized_details ) && ! array_key_exists( 'postal_code', $sanitized_details ), 'Courier details must keep supported scalar fields and omit coordinates/empty optionals.' );
+
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'recipient' => array( 'first_name' => ' ', 'last_name' => ' ', 'phone' => '9131234567', 'email' => '' ) ) ), 'recipient name is required', 'Empty recipient name must fail.' );
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'recipient' => array( 'first_name' => 'Михаил', 'last_name' => '', 'phone' => '', 'email' => '' ) ) ), 'recipient phone is invalid', 'Empty recipient phone must fail.' );
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'recipient' => array( 'first_name' => 'Михаил', 'last_name' => '', 'phone' => '123', 'email' => '' ) ) ), 'recipient phone is invalid', 'Short recipient phone must fail.' );
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'recipient' => array( 'first_name' => 'Михаил', 'last_name' => '', 'phone' => 'phone', 'email' => '' ) ) ), 'recipient phone is invalid', 'Non-numeric recipient phone must fail.' );
+$phone_from_eight = yandex_context_payload( $recipient_allocation, array( 'recipient' => array( 'first_name' => 'Михаил', 'last_name' => '', 'phone' => '8 (913) 123-45-67', 'email' => '' ) ) );
+$phone_from_ten = yandex_context_payload( $recipient_allocation, array( 'recipient' => array( 'first_name' => 'Михаил', 'last_name' => '', 'phone' => '9131234567', 'email' => '' ) ) );
+yandex_shipment_assert( '+79131234567' === $phone_from_eight['recipient_info']['phone'] && '+79131234567' === $phone_from_ten['recipient_info']['phone'] && '' === $phone_from_ten['recipient_info']['email'], 'Russian recipient phones must normalize and empty email must pass.' );
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'recipient' => array( 'first_name' => 'Михаил', 'last_name' => '', 'phone' => '9131234567', 'email' => 'not-an-email' ) ) ), 'recipient email is invalid', 'Invalid recipient email must fail.' );
+
+yandex_shipment_expect_exception( static fn() => yandex_context_payload( $recipient_allocation, array( 'ready_from' => new DateTimeImmutable( '2026-07-12 13:00:00+07:00' ), 'ready_to' => new DateTimeImmutable( '2026-07-12 12:00:00+07:00' ) ) ), 'ready_to must be greater than or equal to ready_from', 'ready_to earlier than ready_from must fail.' );
+$equal_ready = yandex_context_payload( $recipient_allocation, array( 'ready_from' => new DateTimeImmutable( '2026-07-12 12:00:00.123456+07:00' ), 'ready_to' => new DateTimeImmutable( '2026-07-12 12:00:00.123456+07:00' ) ) );
+yandex_shipment_assert( '2026-07-12T05:00:00.123456Z' === $equal_ready['source']['interval_utc']['from'] && $equal_ready['source']['interval_utc']['from'] === $equal_ready['source']['interval_utc']['to'], 'Equal ready interval must pass and preserve UTC microseconds with Z suffix.' );
+
+yandex_shipment_expect_exception(
+	static fn() => yandex_context_payload( new ShipmentAllocation( array( new ShipmentAllocationPlace( 1, 1000, 20, 15, 10, array() ) ) ) ),
+	'shipment place must contain at least one item',
+	'Yandex builder must reject allocation places without items.'
+);
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Shipment/YandexDeliveryShipmentPayloadBuilder.php' );
 yandex_shipment_assert( ! str_contains( $source, 'wp_remote_request' ) && ! str_contains( $source, 'curl' ) && ! str_contains( $source, 'HttpClient' ), 'Yandex shipment payload builder must not use HTTP.' );
 

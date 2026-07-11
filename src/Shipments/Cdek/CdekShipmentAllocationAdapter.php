@@ -78,7 +78,11 @@ final class CdekShipmentAllocationAdapter {
 		if ( array() === $known_places ) {
 			$errors[] = 'Shipment allocation source must contain at least one place.';
 		}
+		if ( array() === $item_rows ) {
+			$errors[] = 'CDEK allocation rows must not be empty.';
+		}
 
+		$row_counts_by_place = array();
 		foreach ( $item_rows as $row_index => $row ) {
 			$label = 'CDEK allocation row ' . (string) ( $row_index + 1 );
 			if ( ! is_array( $row ) ) {
@@ -88,6 +92,8 @@ final class CdekShipmentAllocationAdapter {
 			$place_number = (int) ( $row['place_number'] ?? 0 );
 			if ( ! isset( $known_places[ $place_number ] ) ) {
 				$errors[] = $label . ' references an unknown shipment place.';
+			} else {
+				$row_counts_by_place[ $place_number ] = ( $row_counts_by_place[ $place_number ] ?? 0 ) + 1;
 			}
 			if ( '' === trim( (string) ( $row['item_key'] ?? '' ) ) ) {
 				$errors[] = $label . ' must contain item_key.';
@@ -101,6 +107,11 @@ final class CdekShipmentAllocationAdapter {
 			$cost = str_replace( ',', '.', (string) ( $row['cost'] ?? '' ) );
 			if ( '' === $cost || ! is_numeric( $cost ) || (float) $cost < 0 ) {
 				$errors[] = $label . ' cost must be greater than or equal to 0.';
+			}
+		}
+		foreach ( array_keys( $known_places ) as $place_number ) {
+			if ( empty( $row_counts_by_place[ $place_number ] ) ) {
+				$errors[] = sprintf( 'Shipment place %d must contain at least one allocation row.', $place_number );
 			}
 		}
 

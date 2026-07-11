@@ -25,6 +25,9 @@ final class ShipmentAllocationPlace {
 		if ( $this->place_number <= 0 ) {
 			$errors[] = 'place_number must be greater than 0';
 		}
+		if ( array() === $this->items ) {
+			$errors[] = 'shipment place must contain at least one item';
+		}
 		foreach ( array( 'weight_g' => $this->weight_g, 'length_cm' => $this->length_cm, 'width_cm' => $this->width_cm, 'height_cm' => $this->height_cm ) as $field => $value ) {
 			if ( $value <= 0 ) {
 				$errors[] = $field . ' must be greater than 0';
