@@ -373,6 +373,16 @@
 	gap: 4px;
 }
 
+.wdc-order-delivery-pickup-picker__heading > strong {
+	display: block;
+}
+
+.wdc-order-delivery-pickup-picker__heading > .wdc-pickup-list__title-comment,
+.wdc-order-delivery-pickup-picker__heading > em {
+	display: block;
+	margin-top: 2px;
+}
+
 .wdc-order-delivery-pickup-picker__footer {
 	flex: 0 0 auto;
 	padding-top: 8px;
