@@ -1,6 +1,12 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.105.0.
+Version: 0.105.7.
+
+## Статус 0.105.7
+
+- `OrderQuoteRequestMapper` для admin preview восстанавливает numeric `location_id` исходного заказа read-only через внедренный `LocationRepository`, если explicit selected location и сохраненный numeric id отсутствуют.
+- Приоритет lookup: explicit selected location id, сохраненный numeric id, exact `fias_id`, затем `city_fias_id` только при единственном активном совпадении, затем exact positive GAR (`gar_object_id`). Неоднозначный `city_fias_id` не выбирает первую случайную строку.
+- Первый preview исходного города для Яндекса теперь получает numeric `location_id` без ручной смены населенного пункта, поэтому `Яндекс до ПВЗ` доступен сразу и использует representative ПВЗ. Preview не записывает найденный id в order meta.
 
 ## Статус 0.105.0
 

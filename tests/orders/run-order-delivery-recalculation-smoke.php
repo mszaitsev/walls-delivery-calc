@@ -302,6 +302,58 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 	}
 }
 
+final class WdcRecalcYandexLocationCarrier implements CarrierAdapterInterface {
+	public function __construct( private int $expected_location_id ) {}
+
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( 'yandex_delivery', 'Яндекс.Доставка', 'api', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities( supports_quotes: true, supports_courier_delivery: true, supports_pickup_delivery: true );
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return 'RU' === strtoupper( $countryCode );
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		$location_id = (int) ( $request->customer_context['location_id'] ?? 0 );
+		$rates = array();
+		if ( $this->expected_location_id === $location_id ) {
+			$rates[] = new DeliveryRate(
+				'yandex_pickup',
+				'yandex_delivery',
+				'Яндекс.Доставка',
+				'yandex_delivery',
+				'Яндекс.Доставка',
+				'yandex_pickup',
+				'Яндекс до ПВЗ',
+				DeliveryType::PICKUP,
+				'Яндекс до ПВЗ',
+				Money::from_rubles( 535 ),
+				null,
+				null,
+				DateRange::single( 8 ),
+				'',
+				'8 дней',
+				array(),
+				false,
+				'',
+				true,
+				false,
+				array(
+					'pickup_family' => 'yandex_delivery:pickup',
+					'pickup_source' => 'representative',
+					'platform_station_id' => 'YANDEX-REPRESENTATIVE-92468',
+				)
+			);
+		}
+
+		return new DeliveryQuote( 'yandex-test', 'yandex_delivery', $request->destination, $request->package, $rates );
+	}
+}
+
 final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientInterface {
 	public array $requests = array();
 	public function __construct( private bool $with_coordinates = true ) {}
@@ -413,10 +465,13 @@ function wdc_recalc_address_suggestion_service( AddressSuggestionClientInterface
 	return new AddressSuggestionService( new AddressSuggestionSettings( $settings, $encryption, $pool ), $client, new AddressSuggestionNormalizer() );
 }
 
-function wdc_recalc_service(): OrderDeliveryRecalculationService {
+function wdc_recalc_service( ?OrderQuoteRequestMapper $mapper = null, array $extra_carriers = array() ): OrderDeliveryRecalculationService {
 	$registry = new CarrierRegistry();
 	$registry->register( new WdcRecalcCarrier( RussianPostDomesticSettings::CARRIER_KEY ) );
 	$registry->register( new WdcRecalcCarrier( 'demo' ) );
+	foreach ( $extra_carriers as $carrier ) {
+		$registry->register( $carrier );
+	}
 	$logger = new CheckoutLogger();
 	$orchestrator = new CheckoutOrchestrator(
 		$registry,
@@ -427,7 +482,50 @@ function wdc_recalc_service(): OrderDeliveryRecalculationService {
 		$logger
 	);
 
-	return new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
+	return new OrderDeliveryRecalculationService( $mapper ?? new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
+}
+
+function wdc_recalc_location_row( int $id, array $overrides = array() ): array {
+	return array_merge(
+		array(
+			'id' => $id,
+			'fias_id' => 'fias-' . $id,
+			'city_fias_id' => '',
+			'gar_id' => (string) ( 880000 + $id ),
+			'gar_object_id' => 880000 + $id,
+			'country_code' => 'RU',
+			'region_name' => 'Новосибирская область',
+			'region_type' => 'обл',
+			'region_code' => '54',
+			'city_name' => 'Новосибирск',
+			'city_type' => 'г',
+			'place_name' => 'Новосибирск',
+			'place_type' => 'г',
+			'settlement_name' => 'Новосибирск',
+			'settlement_type' => 'г',
+			'display_name' => 'Новосибирская область, г Новосибирск',
+			'postal_code' => '630099',
+			'active' => 1,
+		),
+		$overrides
+	);
+}
+
+function wdc_recalc_location_repository( array $rows ): LocationRepository {
+	$db = new WdcRecalcLocationDb();
+	$db->locations = $rows;
+	return new LocationRepository( $db );
+}
+
+function wdc_recalc_location_context( OrderQuoteRequestMapper $mapper, array $meta, ?array $selected_location = null ): array {
+	$order = new WdcRecalcOrder(
+		900,
+		array(
+			new WdcRecalcOrderItem( new WdcRecalcProduct( 'SKU-LOC', 'Товар', 0.5, 10, 20, 30 ), 1, 1000, 'Товар' ),
+		)
+	);
+	$order->meta = $meta;
+	return $mapper->map( $order, $selected_location )->customer_context;
 }
 
 function wdc_recalc_location_ajax(): CheckoutLocationAjax {
@@ -545,6 +643,63 @@ $yandex_selection_request = ( new OrderQuoteRequestMapper() )->map(
 );
 recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selection']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed to the checkout-compatible pickup_selection context.' );
 recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selections']['yandex_delivery:pickup']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed in its family pickup_selections bucket.' );
+
+$location_lookup_repository = wdc_recalc_location_repository(
+	array(
+		wdc_recalc_location_row( 92468, array( 'fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'city_fias_id' => '' ) ),
+		wdc_recalc_location_row( 92469, array( 'fias_id' => '11111111-1111-1111-1111-111111111111', 'city_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' ) ),
+		wdc_recalc_location_row( 92470, array( 'fias_id' => '22222222-2222-2222-2222-222222222222', 'city_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' ) ),
+		wdc_recalc_location_row( 92500, array( 'fias_id' => '33333333-3333-3333-3333-333333333333', 'city_fias_id' => 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' ) ),
+		wdc_recalc_location_row( 92501, array( 'fias_id' => '44444444-4444-4444-4444-444444444444', 'city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) ),
+		wdc_recalc_location_row( 92502, array( 'fias_id' => '55555555-5555-5555-5555-555555555555', 'city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) ),
+		wdc_recalc_location_row( 92600, array( 'fias_id' => 'gar-row', 'city_fias_id' => '', 'gar_id' => '889336', 'gar_object_id' => 889336 ) ),
+		wdc_recalc_location_row( 92601, array( 'fias_id' => '66666666-6666-6666-6666-666666666666', 'city_fias_id' => '', 'gar_id' => '889337', 'gar_object_id' => 889337 ) ),
+	)
+);
+$location_lookup_mapper = new OrderQuoteRequestMapper( $location_lookup_repository );
+$exact_fias_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' ) );
+recalc_smoke_assert( 92468 === (int) ( $exact_fias_context['location_id'] ?? 0 ), 'OrderQuoteRequestMapper must resolve exact FIAS through LocationRepository.' );
+$exact_fias_priority_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) );
+recalc_smoke_assert( 92468 === (int) ( $exact_fias_priority_context['location_id'] ?? 0 ), 'Exact fias_id must win over conflicting city_fias_id rows.' );
+$unique_city_fias_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_city_fias_id' => 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' ) );
+recalc_smoke_assert( 92500 === (int) ( $unique_city_fias_context['location_id'] ?? 0 ), 'Unique city_fias_id must resolve the original order location.' );
+$duplicate_city_fias_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) );
+recalc_smoke_assert( 0 === (int) ( $duplicate_city_fias_context['location_id'] ?? 0 ), 'Duplicate city_fias_id must not choose a random location.' );
+$gar_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_gar_id' => '889336' ) );
+recalc_smoke_assert( 92600 === (int) ( $gar_context['location_id'] ?? 0 ), 'GAR fallback must resolve by exact positive gar_object_id.' );
+$numeric_priority_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_location_id' => 92700, '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_gar_id' => '889336' ) );
+recalc_smoke_assert( 92700 === (int) ( $numeric_priority_context['location_id'] ?? 0 ), 'Saved numeric location id must have priority over repository lookup.' );
+$explicit_priority_context = wdc_recalc_location_context(
+	$location_lookup_mapper,
+	array( '_wdc_platform_location_id' => 92700, '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_gar_id' => '889336' ),
+	array( 'id' => 92800, 'display_name' => 'Москва', 'city_value' => 'Москва', 'country_code' => 'RU' )
+);
+recalc_smoke_assert( 92800 === (int) ( $explicit_priority_context['location_id'] ?? 0 ) && 92800 === (int) ( $explicit_priority_context['selected_location_id'] ?? 0 ), 'Explicit selected_location id must have priority over saved/repository location ids.' );
+$repository_absent_context = wdc_recalc_location_context( new OrderQuoteRequestMapper(), array( '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_gar_id' => '889336' ) );
+recalc_smoke_assert( 0 === (int) ( $repository_absent_context['location_id'] ?? 0 ), 'Mapper without LocationRepository must not throw and must not invent a location_id.' );
+
+$first_preview_repository = wdc_recalc_location_repository(
+	array(
+		wdc_recalc_location_row( 92468, array( 'fias_id' => 'dddddddd-dddd-dddd-dddd-dddddddddddd', 'city_fias_id' => '' ) ),
+	)
+);
+$first_preview_order = new WdcRecalcOrder(
+	127,
+	array(
+		new WdcRecalcOrderItem( new WdcRecalcProduct( 'SKU-YA', 'Товар', 0.5, 10, 20, 30 ), 1, 1000, 'Товар' ),
+	)
+);
+$first_preview_order->meta['_wdc_platform_location_fias_id'] = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+$first_preview_before_meta = $first_preview_order->meta;
+$first_preview_service = wdc_recalc_service( new OrderQuoteRequestMapper( $first_preview_repository ), array( new WdcRecalcYandexLocationCarrier( 92468 ) ) );
+$first_preview = $first_preview_service->preview( $first_preview_order );
+$first_preview_rates = array_column( $first_preview['rates'] ?? array(), null, 'id' );
+recalc_smoke_assert( true === ( $first_preview['success'] ?? false ), 'First Yandex preview must succeed for the original order location.' );
+recalc_smoke_assert( 92468 === (int) ( $first_preview['request']['customer_context']['location_id'] ?? 0 ), 'First Yandex preview must pass read-only resolved location_id into QuoteRequest.' );
+recalc_smoke_assert( isset( $first_preview_rates['yandex_pickup'] ), 'First Yandex preview must include yandex_pickup without manually selecting another settlement.' );
+recalc_smoke_assert( 'representative' === (string) ( $first_preview_rates['yandex_pickup']['rate_meta']['pickup_source'] ?? '' ), 'First Yandex preview must use representative pickup source, not a selected pickup.' );
+recalc_smoke_assert( $first_preview_before_meta === $first_preview_order->meta, 'First Yandex preview must not write resolved location_id or any other data to order meta.' );
+
 $metabox = new OrderDeliveryMetabox( new OrderShipmentRepository() );
 ob_start();
 $metabox->render( $order );
