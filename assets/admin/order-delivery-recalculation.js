@@ -676,6 +676,39 @@
 		return String( location.display_name || location.label || location.option_label || location.city_value || location.city_name || location.place_name || '' );
 	}
 
+	function positiveLocationId( value ) {
+		const id = parseInt( value, 10 );
+		return Number.isFinite( id ) && id > 0 ? id : 0;
+	}
+
+	function mergeMeaningfulFields( base, extra ) {
+		const merged = Object.assign( {}, base || {} );
+		Object.keys( extra || {} ).forEach( function ( key ) {
+			const value = extra[ key ];
+			if ( value !== null && value !== undefined && value !== '' ) {
+				merged[ key ] = value;
+			}
+		} );
+		return merged;
+	}
+
+	function syncPreviewLocation( box, previewLocation ) {
+		if ( ! box || ! previewLocation || typeof previewLocation !== 'object' || Array.isArray( previewLocation ) ) {
+			return;
+		}
+		const currentLocation = selectedLocations.get( box ) || {};
+		const mergedLocation = mergeMeaningfulFields( previewLocation, currentLocation );
+		const currentId = positiveLocationId( currentLocation.id || currentLocation.location_id );
+		const previewId = positiveLocationId( previewLocation.id || previewLocation.location_id );
+		const resolvedId = currentId || previewId;
+		if ( resolvedId > 0 ) {
+			mergedLocation.id = resolvedId;
+			mergedLocation.location_id = resolvedId;
+		}
+		selectedLocations.set( box, mergedLocation );
+		updateLocationSummary( box, mergedLocation );
+	}
+
 	function requestPreview( box, button, options ) {
 		options = options || {};
 		if ( ! box ) {
@@ -716,6 +749,7 @@
 					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось пересчитать доставку.' );
 				}
 				renderPreview( box, payload.data && payload.data.html ? payload.data.html : '' );
+				syncPreviewLocation( box, payload.data && payload.data.location );
 				if ( options.restoreDpdPickup && options.selectedPickupPoint ) {
 					restoreDpdPickupPreview( box, options.selectedPickupPoint, options.selectedTariffCode || '' );
 				}
@@ -870,10 +904,16 @@
 	}
 
 	function pickupPointLabel( point ) {
+		if ( isYandexPickupPoint( point ) ) {
+			return String( point.point_address || point.address || point.full_address || point.point_name || point.name || '' );
+		}
 		return String( point.point_address || point.address || point.point_name || point.point_code || '' );
 	}
 
 	function pickupPointDisplayCode( point ) {
+		if ( isYandexPickupPoint( point ) ) {
+			return '';
+		}
 		if ( isDpdPickupPoint( point ) ) {
 			return String( point.terminal_code || point.point_code || '' );
 		}
@@ -882,6 +922,9 @@
 
 	function pickupPointTitle( point ) {
 		const carrier = String( point.carrier_key || point.carrier || '' );
+		if ( isYandexPickupPoint( point ) ) {
+			return firstMeaningfulText( point.point_title, point.card_title, point.display_title ) || 'Выдача посылок Яндекс.Доставки';
+		}
 		if ( isDpdPickupPoint( point ) ) {
 			const type = String( point.marker_type || point.point_type || point.type || '' ).toLowerCase();
 			return 'terminal' === type || 'terminal_self_delivery' === type ? 'Терминал DPD' : 'Пункт выдачи DPD';
@@ -906,12 +949,22 @@
 		return 'dpd' === carrier || 'dpd:pickup' === family || String( point && point.terminal_code || '' ).trim() !== '';
 	}
 
+	function isYandexPickupPoint( point ) {
+		const carrier = String( point && ( point.carrier_key || point.carrier || point.service_key || '' ) || '' ).toLowerCase();
+		const family = String( point && point.pickup_family || '' ).toLowerCase();
+		return 'yandex_delivery' === carrier || 'yandex_delivery:pickup' === family;
+	}
+
 	function pickupPointStorageNotice( point ) {
 		const notice = meaningfulText( point && point.storage_notice );
 		if ( notice ) {
 			return notice;
 		}
 		return '';
+	}
+
+	function pickupPointPresentationComment( point ) {
+		return meaningfulText( point && point.presentation_comment );
 	}
 
 	function meaningfulText( value ) {
@@ -1140,7 +1193,7 @@
 		const postcode = String( point.point_postcode || point.postcode || point.postal_code || '' );
 		const terminalCode = String( point.terminal_code || point.terminalCode || point.delivery_point || '' );
 		const pointCode = String( point.point_code || terminalCode || '' );
-		const address = String( point.point_address || point.address || '' );
+		const address = String( point.point_address || point.address || point.full_address || '' );
 		return {
 			id: String( point.id || pointCode || postcode || address || '' ),
 			carrier_key: String( point.carrier_key || point.carrier || '' ),
@@ -1152,9 +1205,14 @@
 			point_type: String( point.point_type || 'OPS' ),
 			point_type_label: String( point.point_type_label || '' ),
 			point_title: String( point.point_title || point.card_title || '' ),
+			card_title: String( point.card_title || '' ),
+			display_title: String( point.display_title || '' ),
+			display_code: String( point.display_code || '' ),
 			marker_type: String( point.marker_type || '' ),
-			point_name: String( point.point_name || postcode || point.point_code || '' ),
+			point_name: String( point.point_name || point.name || postcode || point.point_code || '' ),
+			name: String( point.name || point.point_name || '' ),
 			point_address: address,
+			full_address: String( point.full_address || address || '' ),
 			point_postcode: postcode,
 			postcode: postcode,
 			postal_code: postcode,
@@ -1237,12 +1295,21 @@
 		}
 
 		function renderPopup( point ) {
+			const displayCode = pickupPointDisplayCode( point );
+			const presentationComment = pickupPointPresentationComment( point );
 			const rows = [
 				'<div class="wdc-pickup-popup">',
-				'<h3 class="wdc-pickup-popup__title">' + escapeHtml( [ pickupPointTitle( point ), pickupPointDisplayCode( point ) ].filter( Boolean ).join( ' ' ) ) + '</h3>',
-				'<div class="wdc-pickup-popup__section"><strong>' + escapeHtml( pickupPointCodeLabel( point ) ) + '</strong><span>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span></div>',
-				'<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span></div>'
+				'<h3 class="wdc-pickup-popup__title">' + escapeHtml( [ pickupPointTitle( point ), displayCode ].filter( Boolean ).join( ' ' ) ) + '</h3>'
 			];
+			if ( presentationComment ) {
+				rows.push( '<div class="wdc-pickup-popup__title-comment">' + escapeHtml( presentationComment ) + '</div>' );
+			}
+			if ( displayCode ) {
+				rows.push( '<div class="wdc-pickup-popup__section"><strong>' + escapeHtml( pickupPointCodeLabel( point ) ) + '</strong><span>' + escapeHtml( displayCode ) + '</span></div>' );
+			}
+			rows.push(
+				'<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span></div>'
+			);
 			if ( point.description ) {
 				rows.push( '<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml( point.description ) + '</span></div>' );
 			}
@@ -1418,7 +1485,15 @@
 				'<div class="wdc-order-delivery-pickup-picker__items">',
 				points.map( function ( point, index ) {
 					const active = previewPoint && pointId( previewPoint ) === pointId( point ) ? ' class="is-active"' : '';
-					return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span><strong>' + escapeHtml( [ pickupPointTitle( point ), pickupPointDisplayCode( point ) ].filter( Boolean ).join( ' ' ) ) + '</strong>' + ( pickupPointStorageNotice( point ) ? '<em class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</em>' : '' ) + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + '</button>';
+					const displayCode = pickupPointDisplayCode( point );
+					const presentationComment = pickupPointPresentationComment( point );
+					const title = escapeHtml( [ pickupPointTitle( point ), displayCode ].filter( Boolean ).join( ' ' ) );
+					const commentHtml = presentationComment ? '<em class="wdc-pickup-list__title-comment">' + escapeHtml( presentationComment ) + '</em>' : '';
+					const storageHtml = pickupPointStorageNotice( point ) ? '<em class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</em>' : '';
+					if ( isYandexPickupPoint( point ) ) {
+						return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span><strong>' + title + '</strong>' + commentHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + storageHtml + '</button>';
+					}
+					return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span><strong>' + title + '</strong>' + commentHtml + storageHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + '</button>';
 				} ).join( '' ),
 				'</div>'
 			].join( '' );

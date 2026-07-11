@@ -696,6 +696,8 @@ $first_preview = $first_preview_service->preview( $first_preview_order );
 $first_preview_rates = array_column( $first_preview['rates'] ?? array(), null, 'id' );
 recalc_smoke_assert( true === ( $first_preview['success'] ?? false ), 'First Yandex preview must succeed for the original order location.' );
 recalc_smoke_assert( 92468 === (int) ( $first_preview['request']['customer_context']['location_id'] ?? 0 ), 'First Yandex preview must pass read-only resolved location_id into QuoteRequest.' );
+recalc_smoke_assert( 92468 === (int) ( $first_preview['location']['id'] ?? 0 ) && 92468 === (int) ( $first_preview['location']['location_id'] ?? 0 ), 'First Yandex preview location payload must expose resolved id and location_id for pickup map search.' );
+recalc_smoke_assert( empty( $first_preview['location']['is_override'] ), 'Read-only resolved location_id must not mark the original order city as an override.' );
 recalc_smoke_assert( isset( $first_preview_rates['yandex_pickup'] ), 'First Yandex preview must include yandex_pickup without manually selecting another settlement.' );
 recalc_smoke_assert( 'representative' === (string) ( $first_preview_rates['yandex_pickup']['rate_meta']['pickup_source'] ?? '' ), 'First Yandex preview must use representative pickup source, not a selected pickup.' );
 recalc_smoke_assert( $first_preview_before_meta === $first_preview_order->meta, 'First Yandex preview must not write resolved location_id or any other data to order meta.' );
@@ -880,6 +882,10 @@ recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'sea
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-block' ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestions' ) && ! str_contains( $pickup_js, 'data-wdc-normalize-courier-address' ), 'Courier UI source must render automatic suggestions without old check-address button.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ) );" ), 'Location selection must trigger preview automatically.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function syncPreviewLocation' ) && str_contains( $pickup_js, 'syncPreviewLocation( box, payload.data && payload.data.location );' ) && str_contains( $pickup_js, 'selectedLocations.set( box, mergedLocation );' ) && str_contains( $pickup_js, 'updateLocationSummary( box, mergedLocation );' ), 'JS preview success must sync resolved location payload into selectedLocations.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function mergeMeaningfulFields' ) && str_contains( $pickup_js, 'const currentId = positiveLocationId( currentLocation.id || currentLocation.location_id );' ) && str_contains( $pickup_js, 'const previewId = positiveLocationId( previewLocation.id || previewLocation.location_id );' ), 'JS preview location sync must preserve full selected location payload while filling missing resolved id/location_id.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function isYandexPickupPoint' ) && str_contains( $pickup_js, "'yandex_delivery:pickup' === family" ) && str_contains( $pickup_js, "return '';" ), 'JS must detect Yandex pickup points and hide their technical display code.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function pickupPointPresentationComment' ) && str_contains( $pickup_js, 'wdc-pickup-popup__title-comment' ) && str_contains( $pickup_js, 'wdc-pickup-list__title-comment' ), 'JS must render Yandex presentation_comment in popup and side card using checkout presentation classes.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'Населенный пункт выбран. Нажмите' ), 'JS must not ask admin to click recalculate after selecting location.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Проверьте адрес перед сохранением.' ) && ! str_contains( $pickup_js, 'Проверьте адрес через DaData перед сохранением.' ), 'Courier address hint must not mention DaData.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Использовать этот адрес' ) && str_contains( $pickup_js, 'data-wdc-use-manual-courier-address disabled="disabled"' ), 'Courier block must render disabled manual address button by default.' );
@@ -1740,10 +1746,14 @@ recalc_smoke_assert( true === $yandex_money_array_result['success'] && 535.0 ===
 $yandex_db = new WdcRecalcLocationDb();
 $yandex_db->yandex_location_mapping_v2 = array(
 	array( 'location_id' => 501, 'yandex_geo_id' => 77, 'status' => 'mapped' ),
+	array( 'location_id' => 92468, 'yandex_geo_id' => 88, 'status' => 'mapped' ),
 );
 $yandex_db->yandex_delivery_pickup_points_v2 = array(
 	array( 'platform_station_id' => 'YANDEX-ADDRESS', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов Яндекс Маркета', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Ленина, 10', 'yandex_geo_id' => 77, 'active' => 1 ),
 	array( 'platform_station_id' => 'YANDEX-TITLE', 'operator_id' => '5post', 'type' => 'terminal', 'name' => '5Post', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Советская, 2', 'yandex_geo_id' => 77, 'active' => 1 ),
+	array( 'platform_station_id' => 'TECHNICAL-ID', 'operator_id' => '5post', 'type' => 'pickup_point', 'name' => '5Post', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Красный проспект, 1', 'yandex_geo_id' => 88, 'active' => 1 ),
+	array( 'platform_station_id' => 'YANDEX-TERMINAL', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Постамат', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Гоголя, 7', 'yandex_geo_id' => 88, 'active' => 1 ),
+	array( 'platform_station_id' => 'YANDEX-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов партнёра', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Фрунзе, 12', 'yandex_geo_id' => 88, 'active' => 1 ),
 );
 $yandex_search_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
 $yandex_search = new ReflectionMethod( $yandex_search_controller, 'yandex_pickup_points' );
@@ -1753,6 +1763,47 @@ $yandex_address_points = $yandex_search->invoke( $yandex_search_controller, arra
 $yandex_title_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), '5 post', 'search' );
 $yandex_station_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), 'yandex-title', 'search' );
 recalc_smoke_assert( 2 === count( $yandex_location_points ) && 1 === count( $yandex_address_points ) && 'YANDEX-ADDRESS' === (string) ( $yandex_address_points[0]['platform_station_id'] ?? '' ), 'Yandex location mode must return all local points, while address search must return only a match.' );
+recalc_smoke_assert( 'Пункт выдачи Яндекс.Маркет' === (string) ( $yandex_address_points[0]['point_title'] ?? '' ), 'Yandex market pickup point must use checkout presentation title without technical code.' );
 recalc_smoke_assert( 1 === count( $yandex_title_points ) && 'YANDEX-TITLE' === (string) ( $yandex_title_points[0]['platform_station_id'] ?? '' ) && 1 === count( $yandex_station_points ), 'Yandex search must match presentation title and platform_station_id case-insensitively.' );
+$yandex_first_preview_points = $yandex_search->invoke( $yandex_search_controller, $first_preview['location'] ?? array(), '', 'location' );
+recalc_smoke_assert( count( $yandex_first_preview_points ) >= 3, 'Yandex pickup helper must find points for the first preview resolved location payload.' );
+$yandex_points_by_station = array_column( $yandex_first_preview_points, null, 'platform_station_id' );
+recalc_smoke_assert( '5 Post (Пятерочка)' === (string) ( $yandex_points_by_station['TECHNICAL-ID']['point_title'] ?? '' ) && '' === (string) ( $yandex_points_by_station['TECHNICAL-ID']['display_code'] ?? 'not-empty' ) && 'Цена будет пересчитана, иногда сюда получается дороже!' === (string) ( $yandex_points_by_station['TECHNICAL-ID']['presentation_comment'] ?? '' ), 'Yandex 5Post formatter payload must expose checkout title/comment and keep display_code empty.' );
+recalc_smoke_assert( 'Постамат Яндекса' === (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['point_title'] ?? '' ) && str_contains( (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['presentation_comment'] ?? '' ), '2-3 дня' ), 'Yandex terminal formatter payload must expose checkout terminal title and storage warning comment.' );
+recalc_smoke_assert( 'Партнёрский пункт выдачи' === (string) ( $yandex_points_by_station['YANDEX-PARTNER']['point_title'] ?? '' ), 'Yandex market partner pickup payload must use checkout presentation title without technical code.' );
+$GLOBALS['wdc_recalc_orders'][127] = $first_preview_order;
+$yandex_fallback_controller = new OrderDeliveryRecalculationAdminController( $first_preview_service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$first_preview_resolved_location = $first_preview_service->resolved_location_payload( $first_preview_order, null );
+recalc_smoke_assert( 92468 === (int) ( $first_preview_resolved_location['location_id'] ?? 0 ), 'Resolved location payload helper must return location_id=92468 without running pricing.' );
+$yandex_fallback_points_direct = $yandex_search->invoke( $yandex_fallback_controller, $first_preview_resolved_location, '', 'location' );
+recalc_smoke_assert( count( $yandex_fallback_points_direct ) >= 3, 'Yandex fallback controller must find points for resolved location payload before ajax wrapping.' );
+$_POST = array( 'order_id' => 127, 'nonce' => 'ok', 'selected_location' => wp_json_encode( array( 'label' => 'Новосибирск', 'fias_id' => 'dddddddd-dddd-dddd-dddd-dddddddddddd' ) ), 'selected_rate' => wp_json_encode( array( 'carrier_key' => 'yandex_delivery', 'service_key' => 'yandex_delivery' ) ), 'mode' => 'location', 'query' => '' );
+$array_from_request = new ReflectionMethod( $yandex_fallback_controller, 'array_from_request' );
+$array_from_request->setAccessible( true );
+$posted_yandex_rate = $array_from_request->invoke( $yandex_fallback_controller, 'selected_rate' );
+recalc_smoke_assert( 'yandex_delivery' === (string) ( $posted_yandex_rate['carrier_key'] ?? '' ), 'Yandex fallback ajax smoke must post selected_rate.carrier_key=yandex_delivery.' );
+$selected_location_from_request = new ReflectionMethod( $yandex_fallback_controller, 'selected_location_from_request' );
+$selected_location_from_request->setAccessible( true );
+$posted_yandex_location = $selected_location_from_request->invoke( $yandex_fallback_controller );
+$resolved_yandex_location_for_ajax = $first_preview_service->resolved_location_payload( $first_preview_order, is_array( $posted_yandex_location ) && array() !== $posted_yandex_location ? $posted_yandex_location : null );
+if ( (int) ( $resolved_yandex_location_for_ajax['location_id'] ?? 0 ) <= 0 ) {
+	$resolved_yandex_location_for_ajax = $first_preview_service->resolved_location_payload( $first_preview_order, null );
+}
+$merge_resolved_location_payload = new ReflectionMethod( $yandex_fallback_controller, 'merge_resolved_location_payload' );
+$merge_resolved_location_payload->setAccessible( true );
+$merged_yandex_location_for_ajax = $merge_resolved_location_payload->invoke( $yandex_fallback_controller, is_array( $posted_yandex_location ) ? $posted_yandex_location : array(), $resolved_yandex_location_for_ajax );
+recalc_smoke_assert( 92468 === (int) ( $merged_yandex_location_for_ajax['location_id'] ?? 0 ), 'Yandex fallback ajax merge must produce location_id=92468 before pickup search.' );
+recalc_smoke_assert( count( $yandex_search->invoke( $yandex_fallback_controller, $merged_yandex_location_for_ajax, '', 'location' ) ) >= 3, 'Yandex fallback ajax merged location must find destination points before endpoint call.' );
+$GLOBALS['wdc_recalc_current_can'] = true;
+$GLOBALS['wdc_recalc_nonce_ok'] = true;
+try {
+	$yandex_fallback_controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'Yandex fallback pickup endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$fallback_points = $response->data['points'] ?? array();
+	$fallback_station_ids = array_column( $fallback_points, 'platform_station_id' );
+	recalc_smoke_assert( $response->success && count( $fallback_points ) >= 3 && in_array( 'TECHNICAL-ID', $fallback_station_ids, true ), 'Yandex pickup endpoint must resolve original order location server-side when JS payload has no numeric id. Got stations: ' . implode( ',', array_map( 'strval', $fallback_station_ids ) ) );
+	recalc_smoke_assert( $first_preview_before_meta === $first_preview_order->meta, 'Yandex pickup endpoint fallback must not write resolved location_id to order meta.' );
+}
 
 echo "Order delivery recalculation smoke OK\n";

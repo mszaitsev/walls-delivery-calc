@@ -171,6 +171,13 @@ final class OrderDeliveryRecalculationAdminController {
 			);
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
+			if ( $this->positive_location_id( $location ) <= 0 ) {
+				$resolved_location = $this->service->resolved_location_payload( $order, array() === $location ? null : $location );
+				if ( $this->positive_location_id( $resolved_location ) <= 0 && array() !== $location ) {
+					$resolved_location = $this->service->resolved_location_payload( $order, null );
+				}
+				$location = $this->merge_resolved_location_payload( $location, $resolved_location );
+			}
 			wp_send_json_success( array( 'points' => $this->yandex_pickup_points( $location, $query, $mode ) ) );
 		}
 		if ( 'cdek' === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
@@ -448,6 +455,46 @@ final class OrderDeliveryRecalculationAdminController {
 	private function clean_string( string $value ): string {
 		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
 		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( $value );
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 */
+	private function positive_location_id( array $location ): int {
+		foreach ( array( 'id', 'location_id' ) as $key ) {
+			$value = $location[ $key ] ?? null;
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
+	}
+
+	/**
+	 * @param array<string,mixed> $current
+	 * @param array<string,mixed> $resolved
+	 * @return array<string,mixed>
+	 */
+	private function merge_resolved_location_payload( array $current, array $resolved ): array {
+		if ( array() === $resolved ) {
+			return $current;
+		}
+		$merged = $resolved;
+		foreach ( $current as $key => $value ) {
+			if ( null !== $value && '' !== $value ) {
+				$merged[ $key ] = $value;
+			}
+		}
+		$current_id = $this->positive_location_id( $current );
+		$resolved_id = $this->positive_location_id( $resolved );
+		$location_id = $current_id > 0 ? $current_id : $resolved_id;
+		if ( $location_id > 0 ) {
+			$merged['id'] = $location_id;
+			$merged['location_id'] = $location_id;
+		}
+
+		return $merged;
 	}
 
 	/**

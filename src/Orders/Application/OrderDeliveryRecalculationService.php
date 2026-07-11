@@ -41,6 +41,16 @@ final class OrderDeliveryRecalculationService {
 		);
 	}
 
+	/**
+	 * @param array<string,mixed>|null $selected_location
+	 * @return array<string,mixed>
+	 */
+	public function resolved_location_payload( object $order, ?array $selected_location = null ): array {
+		$request = $this->mapper->map( $order, $selected_location );
+
+		return $this->location_payload_from_request( $request->to_array() );
+	}
+
 	public function has_blocking_shipment( object $order ): bool {
 		foreach ( $this->shipments->all_for_order( $order ) as $shipment ) {
 			if ( ! is_array( $shipment ) ) {
@@ -235,19 +245,59 @@ final class OrderDeliveryRecalculationService {
 		$context = is_array( $request['customer_context'] ?? null ) ? $request['customer_context'] : array();
 		$region = trim( (string) ( $destination['region_name'] ?? $context['selected_location_region'] ?? '' ) );
 		$name = trim( (string) ( $context['display_name'] ?? $context['selected_location_name'] ?? $destination['display_name'] ?? $destination['city'] ?? $destination['settlement'] ?? '' ) );
+		$resolved_location_id = $this->first_positive_int(
+			array(
+				$context['selected_location_id'] ?? null,
+				$context['location_id'] ?? null,
+				$destination['location_id'] ?? null,
+			)
+		);
 
 		return array_filter(
 			array(
-				'id'          => $context['selected_location_id'] ?? null,
-				'fias_id'     => $destination['fias_id'] ?? '',
-				'name'        => $name,
-				'postcode'    => $destination['postcode'] ?? '',
-				'country'     => $destination['country_code'] ?? '',
-				'region'      => $region,
-				'label'       => $name,
-				'is_override' => ! empty( $context['location_override'] ),
+				'id'            => $resolved_location_id > 0 ? $resolved_location_id : null,
+				'location_id'   => $resolved_location_id > 0 ? $resolved_location_id : null,
+				'fias_id'       => $destination['fias_id'] ?? '',
+				'gar_id'        => $destination['gar_id'] ?? $context['selected_location_gar_id'] ?? '',
+				'gar_object_id' => $destination['gar_object_id'] ?? $destination['gar_id'] ?? $context['selected_location_gar_object_id'] ?? $context['selected_location_gar_id'] ?? '',
+				'name'          => $name,
+				'display_name'  => $destination['display_name'] ?? $name,
+				'postcode'      => $destination['postcode'] ?? '',
+				'postal_code'   => $destination['postcode'] ?? '',
+				'country'       => $destination['country_code'] ?? '',
+				'country_code'  => $destination['country_code'] ?? '',
+				'region'        => $region,
+				'region_name'   => $region,
+				'label'         => $name,
+				'is_override'   => ! empty( $context['location_override'] ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
+	}
+
+	private function positive_int( mixed $value ): int {
+		if ( is_int( $value ) ) {
+			return $value > 0 ? $value : 0;
+		}
+		if ( is_string( $value ) && ctype_digit( trim( $value ) ) ) {
+			return max( 0, (int) trim( $value ) );
+		}
+		if ( is_float( $value ) && $value > 0 ) {
+			return (int) $value;
+		}
+
+		return 0;
+	}
+
+	/** @param array<int,mixed> $values */
+	private function first_positive_int( array $values ): int {
+		foreach ( $values as $value ) {
+			$int_value = $this->positive_int( $value );
+			if ( $int_value > 0 ) {
+				return $int_value;
+			}
+		}
+
+		return 0;
 	}
 }

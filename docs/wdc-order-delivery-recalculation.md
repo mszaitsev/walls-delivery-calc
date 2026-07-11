@@ -1,6 +1,13 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.105.8.
+Version: 0.105.9.
+
+## Статус 0.105.9
+
+- `OrderDeliveryRecalculationService` возвращает в preview `location.id` и `location.location_id` из read-only resolved `customer_context.location_id` исходного заказа, если explicit override не выбран. `is_override` по-прежнему выставляется только от явного `location_override`; найденный id не записывается в order meta.
+- Admin JS после `renderPreview()` синхронизирует `payload.data.location` в `selectedLocations`: полный current/selected payload не затирается, но missing `id/location_id` дополняется resolved значением. Поэтому первый preview исходного города сразу дает последующему Yandex pickup search numeric location id.
+- `ajax_pickup_search()` для Яндекса имеет безопасный fallback: если старый/неполный JS payload пришел без numeric id, controller запрашивает preview-compatible location через `OrderDeliveryRecalculationService::resolved_location_payload()` и затем ищет ПВЗ по тому же Yandex mapping. Полный pricing preview для этого не запускается.
+- Admin popup и боковые карточки Яндекс ПВЗ используют checkout presentation formatter fields: `point_title`/`card_title`/`display_title`, `presentation_comment`, address, description и storage notice. `platform_station_id`/`point_code` остаются в payload для identity/save/pricing, но station id и строка `Код/индекс:` для Яндекса визуально не выводятся.
 
 ## Статус 0.105.8
 
