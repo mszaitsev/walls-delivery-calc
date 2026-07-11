@@ -77,6 +77,24 @@ function recalc_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
+function recalc_smoke_run_node( string $script, string $message ): void {
+	$tmp = tempnam( sys_get_temp_dir(), 'wdc-recalc-js-' );
+	if ( false === $tmp ) {
+		throw new RuntimeException( $message . ': cannot create temporary JS file.' );
+	}
+	$js_file = $tmp . '.js';
+	if ( ! rename( $tmp, $js_file ) ) {
+		@unlink( $tmp );
+		throw new RuntimeException( $message . ': cannot prepare temporary JS file.' );
+	}
+	file_put_contents( $js_file, $script );
+	$output = array();
+	$code = 1;
+	exec( 'node ' . escapeshellarg( $js_file ) . ' 2>&1', $output, $code );
+	@unlink( $js_file );
+	recalc_smoke_assert( 0 === $code, $message . ': ' . implode( "\n", $output ) );
+}
+
 function current_user_can( string $capability ): bool {
 	return 'manage_woocommerce' === $capability && (bool) $GLOBALS['wdc_recalc_current_can'];
 }
@@ -875,10 +893,13 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'geoco
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'loadPickupPointsForLocation' ) && str_contains( $pickup_js, "form.append( 'mode', modeOverride || 'location' );" ) && str_contains( $pickup_js, 'geocodeAddress( box, value )' ) && ! str_contains( $pickup_js, "loadPickupPointsForLocation( 'search', value )" ), 'JS pickup loader must keep location mode by default and use shared DaData geocoding for manual search.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "? 1000 : 2000" ) && ! str_contains( $pickup_js, "? 1000 : 300" ), 'Admin recalculation pickup loader must not cap Russian Post location lists at 300.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'renderSearchResults( \'address\', value' ) && str_contains( $pickup_js, 'provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );' ), 'JS manual address search must keep city pickup points rendered and center the map on the DaData marker.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'let currentBounds = null;' ) && str_contains( $pickup_js, 'function normalizeBounds' ) && str_contains( $pickup_js, 'function pointInsideBounds' ) && str_contains( $pickup_js, 'return lng >= bounds.west && lng <= bounds.east && lat >= bounds.south && lat <= bounds.north;' ), 'Admin pickup picker must use checkout-compatible west,south,east,north bounds filtering.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function visiblePickupPoints' ) && str_contains( $pickup_js, 'if ( ! currentBounds )' ) && str_contains( $pickup_js, 'return points.filter( function ( point )' ), 'Admin pickup picker side list must derive visible points from current viewport bounds.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'let pointsGeneration = 0;' ) && str_contains( $pickup_js, 'let boundsGeneration = -1;' ) && str_contains( $pickup_js, 'let currentBounds = null;' ), 'Admin pickup picker must track bounds against the current loaded points generation.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function normalizeBounds' ) && str_contains( $pickup_js, 'function pointInsideBounds' ) && str_contains( $pickup_js, 'return lng >= bounds.west && lng <= bounds.east && lat >= bounds.south && lat <= bounds.north;' ), 'Admin pickup picker must use checkout-compatible west,south,east,north bounds filtering.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function visiblePickupPoints' ) && str_contains( $pickup_js, 'if ( ! currentBounds || boundsGeneration !== pointsGeneration )' ) && str_contains( $pickup_js, 'return points.filter( function ( point )' ), 'Admin pickup picker side list must not apply stale bounds from a previous points dataset.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'provider.renderMarkers( points' ) && ! str_contains( $pickup_js, 'provider.renderMarkers( visiblePoints' ), 'Admin pickup picker must keep the full marker dataset on the map while filtering only the side list.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'onBoundsChange: function ( bounds )' ) && str_contains( $pickup_js, 'scheduleBoundsRender( bounds );' ) && ! str_contains( $pickup_js, 'onBoundsChange: function () {}' ), 'Admin pickup picker bounds changes must rerender locally and not keep the empty callback.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function syncCurrentProviderBounds' ) && str_contains( $pickup_js, 'provider.getBounds' ) && str_contains( $pickup_js, 'function scheduleProviderBoundsSync' ) && str_contains( $pickup_js, 'scheduleProviderBoundsSync();' ), 'Admin pickup picker must synchronize provider bounds after map camera actions.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function initialMapCenter' ) && str_contains( $pickup_js, 'selectedPickupPoints.get( box )' ) && str_contains( $pickup_js, 'center: initialMapCenter()' ), 'Admin pickup picker initial center must prefer selected pickup/location coordinates before fallback.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.' ) && str_contains( $pickup_js, 'Показано \' + visibleCount + \' из \' + totalCount + \' ПВЗ.' ), 'Admin pickup picker must show viewport counts and a distinct empty-viewport message.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'const visiblePoints = visiblePickupPoints();' ) && str_contains( $pickup_js, 'visiblePoints.map( function ( point, index )' ) && str_contains( $pickup_js, 'const point = findPoint( row.getAttribute( \'data-wdc-point-id\' ) );' ), 'Admin pickup picker rows must use visible indexes while selection stays based on full dataset point ids.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'через DaData' ) && str_contains( $pickup_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $pickup_js, "'Адрес найден.'" ) && str_contains( $pickup_js, "'Адрес не найден.'" ), 'Pickup map address search UI must not mention DaData.' );
@@ -910,6 +931,153 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'wdc_o
 $pickup_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.css' );
 recalc_smoke_assert( is_string( $pickup_css ) && str_contains( $pickup_css, 'width: min(1500px, 95vw)' ) && str_contains( $pickup_css, 'height: min(860px, 90vh)' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__list' ) && str_contains( $pickup_css, 'overflow-y: auto;' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__footer' ), 'Pickup picker CSS must keep a large map layout and scroll the side list separately.' );
 recalc_smoke_assert( is_string( $pickup_css ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__heading' ) && str_contains( $pickup_css, 'display: grid;' ) && str_contains( $pickup_css, 'gap: 4px;' ), 'Pickup picker CSS must render presentation comments on a separate heading line.' );
+$yandex_provider_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js' );
+$leaflet_provider_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js' );
+recalc_smoke_assert( is_string( $yandex_provider_js ) && str_contains( $yandex_provider_js, 'function currentBoundsValue()' ) && str_contains( $yandex_provider_js, 'settings.onBoundsChange(bounds);' ) && str_contains( $yandex_provider_js, 'getBounds: currentBoundsValue' ), 'Yandex pickup map provider must expose read-only getBounds using the same converter as boundsChanged().' );
+recalc_smoke_assert( is_string( $leaflet_provider_js ) && str_contains( $leaflet_provider_js, 'function currentBoundsValue()' ) && str_contains( $leaflet_provider_js, 'settings.onBoundsChange(bounds);' ) && str_contains( $leaflet_provider_js, 'getBounds: currentBoundsValue' ), 'Leaflet pickup map provider must expose read-only getBounds using the same converter as boundsChanged().' );
+recalc_smoke_run_node( <<<'JS'
+const assert = require('assert');
+
+let points = [];
+let pointsGeneration = 0;
+let boundsGeneration = -1;
+let currentBounds = null;
+let fetchCount = 0;
+let markerRenderCount = 0;
+let focusCount = 0;
+let selectedPoint = null;
+let providerMarkers = [];
+let providerBounds = null;
+
+function normalizeBounds(bbox) {
+	if (bbox && typeof bbox === 'object' && !Array.isArray(bbox)) {
+		const westValue = parseFloat(bbox.west);
+		const southValue = parseFloat(bbox.south);
+		const eastValue = parseFloat(bbox.east);
+		const northValue = parseFloat(bbox.north);
+		if ([westValue, southValue, eastValue, northValue].some((value) => Number.isNaN(value))) {
+			return null;
+		}
+		return { west: westValue, south: southValue, east: eastValue, north: northValue };
+	}
+	const values = Array.isArray(bbox) ? bbox : String(bbox || '').split(',');
+	if (values.length < 4) {
+		return null;
+	}
+	const west = parseFloat(values[0]);
+	const south = parseFloat(values[1]);
+	const east = parseFloat(values[2]);
+	const north = parseFloat(values[3]);
+	if ([west, south, east, north].some((value) => Number.isNaN(value))) {
+		return null;
+	}
+	return { west, south, east, north };
+}
+
+function validPointCoordinates(point) {
+	return point && point.lat !== null && point.lng !== null && Number.isFinite(parseFloat(point.lat)) && Number.isFinite(parseFloat(point.lng));
+}
+
+function pointInsideBounds(point, bounds) {
+	bounds = normalizeBounds(bounds);
+	if (!bounds || !validPointCoordinates(point)) {
+		return false;
+	}
+	const lat = parseFloat(point.lat);
+	const lng = parseFloat(point.lng);
+	return lng >= bounds.west && lng <= bounds.east && lat >= bounds.south && lat <= bounds.north;
+}
+
+function visiblePickupPoints() {
+	if (!currentBounds || boundsGeneration !== pointsGeneration) {
+		return points;
+	}
+	return points.filter((point) => pointInsideBounds(point, currentBounds));
+}
+
+function viewportMessage() {
+	const visibleCount = visiblePickupPoints().length;
+	if (points.length > 0 && currentBounds && boundsGeneration === pointsGeneration && visibleCount <= 0) {
+		return 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.';
+	}
+	return 'Показано ' + visibleCount + ' из ' + points.length + ' ПВЗ.';
+}
+
+function onBoundsChange(bounds) {
+	const normalized = normalizeBounds(bounds);
+	if (!normalized) {
+		return;
+	}
+	currentBounds = normalized;
+	boundsGeneration = pointsGeneration;
+}
+
+function loadPoints(nextPoints) {
+	fetchCount += 1;
+	pointsGeneration += 1;
+	currentBounds = null;
+	boundsGeneration = -1;
+	points = nextPoints.slice();
+}
+
+function renderMarkers(nextPoints) {
+	markerRenderCount += 1;
+	providerMarkers = nextPoints.slice();
+}
+
+function syncCurrentProviderBounds() {
+	const bounds = normalizeBounds(providerBounds);
+	if (!bounds) {
+		return false;
+	}
+	currentBounds = bounds;
+	boundsGeneration = pointsGeneration;
+	return true;
+}
+
+function focusPoint() {
+	focusCount += 1;
+}
+
+const moscowA = { id: 'A', lat: 55.75, lng: 37.62 };
+const moscowB = { id: 'B', lat: 55.76, lng: 37.63 };
+const moscowC = { id: 'C', lat: 55.9, lng: 37.9 };
+
+assert.strictEqual(pointInsideBounds(moscowA, '37.50,55.65,37.75,55.85'), true, 'Moscow point must be inside Moscow bbox.');
+assert.strictEqual(pointInsideBounds(moscowA, '82.80,54.90,83.10,55.10'), false, 'Moscow point must be outside Novosibirsk bbox.');
+
+onBoundsChange('82.80,54.90,83.10,55.10');
+assert.strictEqual(boundsGeneration, 0, 'Initial bounds belong only to the empty dataset generation.');
+loadPoints([moscowA, moscowB, moscowC]);
+assert.strictEqual(boundsGeneration !== pointsGeneration, true, 'Loading Moscow points must invalidate stale Novosibirsk bounds.');
+assert.strictEqual(visiblePickupPoints().length, 3, 'Before fresh bounds, stale Novosibirsk bounds must not hide Moscow points.');
+assert.notStrictEqual(viewportMessage(), 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.', 'No false empty state during camera transition.');
+renderMarkers(points);
+assert.strictEqual(providerMarkers.length, 3, 'Provider must receive full marker dataset.');
+
+providerBounds = '37.50,55.65,38.00,55.95';
+assert.strictEqual(syncCurrentProviderBounds(), true, 'Provider getBounds result must sync after fitToMarkers/focusPoint.');
+assert.strictEqual(boundsGeneration, pointsGeneration, 'Synced provider bounds must be tied to current generation.');
+assert.strictEqual(visiblePickupPoints().length, 3, 'Fresh Moscow fit bounds must show Moscow points.');
+
+selectedPoint = moscowA;
+const fetchBeforePan = fetchCount;
+const markerRendersBeforePan = markerRenderCount;
+const focusBeforePan = focusCount;
+onBoundsChange('37.50,55.65,37.75,55.85');
+assert.deepStrictEqual(visiblePickupPoints().map((point) => point.id), ['A', 'B'], 'Narrow Moscow bounds must show only visible points.');
+onBoundsChange('37.85,55.85,38.00,55.95');
+assert.deepStrictEqual(visiblePickupPoints().map((point) => point.id), ['C'], 'Pan/zoom bounds must locally replace visible side-list points.');
+assert.strictEqual(fetchCount, fetchBeforePan, 'Bounds changes must not perform REST fetches.');
+assert.strictEqual(markerRenderCount, markerRendersBeforePan, 'Bounds changes must not rerender full marker dataset.');
+assert.strictEqual(focusCount, focusBeforePan, 'Bounds changes must not refocus the selected point.');
+assert.strictEqual(selectedPoint.id, 'A', 'Selected point must remain selected when it leaves the viewport.');
+
+onBoundsChange('30.00,50.00,31.00,51.00');
+assert.strictEqual(visiblePickupPoints().length, 0, 'Empty viewport with current-generation bounds must be allowed.');
+assert.strictEqual(viewportMessage(), 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.', 'Empty viewport message appears only for current-generation bounds.');
+JS
+, 'Runtime JS smoke for pickup viewport bounds generation must pass' );
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Pickup endpoint must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not change order totals.' );
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );

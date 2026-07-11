@@ -1275,11 +1275,24 @@
 		let points = [];
 		let previewPoint = selectedPickupPoints.get( box ) || null;
 		let searchMarker = null;
+		let pointsGeneration = 0;
+		let boundsGeneration = -1;
 		let currentBounds = null;
 		let statusPrefix = '';
 		let boundsRenderFrame = null;
+		let providerBoundsSyncFrame = null;
+		let providerBoundsSyncTimer = null;
 
 		function close() {
+			if ( boundsRenderFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( boundsRenderFrame );
+			}
+			if ( providerBoundsSyncFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( providerBoundsSyncFrame );
+			}
+			if ( providerBoundsSyncTimer ) {
+				window.clearTimeout( providerBoundsSyncTimer );
+			}
 			if ( provider && provider.destroy ) {
 				provider.destroy();
 			}
@@ -1298,6 +1311,16 @@
 		}
 
 		function normalizeBounds( bbox ) {
+			if ( bbox && typeof bbox === 'object' && ! Array.isArray( bbox ) ) {
+				const westValue = parseFloat( bbox.west );
+				const southValue = parseFloat( bbox.south );
+				const eastValue = parseFloat( bbox.east );
+				const northValue = parseFloat( bbox.north );
+				if ( [ westValue, southValue, eastValue, northValue ].some( function ( value ) { return Number.isNaN( value ); } ) ) {
+					return null;
+				}
+				return { west: westValue, south: southValue, east: eastValue, north: northValue };
+			}
 			const values = Array.isArray( bbox ) ? bbox : String( bbox || '' ).split( ',' );
 			if ( values.length < 4 ) {
 				return null;
@@ -1316,6 +1339,34 @@
 			return point && point.lat !== null && point.lng !== null && Number.isFinite( parseFloat( point.lat ) ) && Number.isFinite( parseFloat( point.lng ) );
 		}
 
+		function pointCoordinates( value ) {
+			if ( ! value ) {
+				return null;
+			}
+			const lat = value.lat !== undefined && value.lat !== null ? parseFloat( value.lat ) : parseFloat( value.latitude );
+			const lng = value.lng !== undefined && value.lng !== null ? parseFloat( value.lng ) : parseFloat( value.longitude );
+			if ( ! Number.isFinite( lat ) || ! Number.isFinite( lng ) ) {
+				return null;
+			}
+			return { lat: lat, lng: lng };
+		}
+
+		function initialMapCenter() {
+			const selectedPoint = pointCoordinates( selectedPickupPoints.get( box ) );
+			if ( selectedPoint ) {
+				return { lat: selectedPoint.lat, lng: selectedPoint.lng, zoom: 15 };
+			}
+			const restoredPoint = pointCoordinates( previewPoint );
+			if ( restoredPoint ) {
+				return { lat: restoredPoint.lat, lng: restoredPoint.lng, zoom: 15 };
+			}
+			const selectedLocation = pointCoordinates( location );
+			if ( selectedLocation ) {
+				return { lat: selectedLocation.lat, lng: selectedLocation.lng, zoom: 12 };
+			}
+			return { lat: 55.0302, lng: 82.9204, zoom: 11 };
+		}
+
 		function pointInsideBounds( point, bounds ) {
 			bounds = normalizeBounds( bounds );
 			if ( ! bounds || ! validPointCoordinates( point ) ) {
@@ -1327,7 +1378,7 @@
 		}
 
 		function visiblePickupPoints() {
-			if ( ! currentBounds ) {
+			if ( ! currentBounds || boundsGeneration !== pointsGeneration ) {
 				return points;
 			}
 			return points.filter( function ( point ) {
@@ -1336,7 +1387,7 @@
 		}
 
 		function viewportCountMessage( visibleCount, totalCount ) {
-			if ( totalCount > 0 && currentBounds && visibleCount <= 0 ) {
+			if ( totalCount > 0 && currentBounds && boundsGeneration === pointsGeneration && visibleCount <= 0 ) {
 				return 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.';
 			}
 			return 'Показано ' + visibleCount + ' из ' + totalCount + ' ПВЗ.';
@@ -1352,7 +1403,7 @@
 				parts.push( statusPrefix );
 			}
 			parts.push( viewportCountMessage( visibleCount, points.length ) );
-			if ( ! currentBounds && points.some( function ( point ) { return ! validPointCoordinates( point ); } ) ) {
+			if ( ( ! currentBounds || boundsGeneration !== pointsGeneration ) && points.some( function ( point ) { return ! validPointCoordinates( point ); } ) ) {
 				parts.push( 'Часть ПВЗ без координат доступна только в списке.' );
 			}
 			if ( searchMarker ) {
@@ -1362,7 +1413,12 @@
 		}
 
 		function scheduleBoundsRender( bounds ) {
-			currentBounds = normalizeBounds( bounds );
+			const normalizedBounds = normalizeBounds( bounds );
+			if ( ! normalizedBounds ) {
+				return;
+			}
+			currentBounds = normalizedBounds;
+			boundsGeneration = pointsGeneration;
 			if ( boundsRenderFrame && window.cancelAnimationFrame ) {
 				window.cancelAnimationFrame( boundsRenderFrame );
 			}
@@ -1374,6 +1430,44 @@
 				boundsRenderFrame = window.requestAnimationFrame( render );
 			} else {
 				window.setTimeout( render, 0 );
+			}
+		}
+
+		function syncCurrentProviderBounds() {
+			if ( ! provider || typeof provider.getBounds !== 'function' ) {
+				return false;
+			}
+			const providerBounds = normalizeBounds( provider.getBounds() );
+			if ( ! providerBounds ) {
+				return false;
+			}
+			currentBounds = providerBounds;
+			boundsGeneration = pointsGeneration;
+			renderPickupPoints();
+			return true;
+		}
+
+		function scheduleProviderBoundsSync() {
+			const sync = function () {
+				providerBoundsSyncFrame = null;
+				if ( syncCurrentProviderBounds() ) {
+					return;
+				}
+				if ( providerBoundsSyncTimer ) {
+					window.clearTimeout( providerBoundsSyncTimer );
+				}
+				providerBoundsSyncTimer = window.setTimeout( function () {
+					providerBoundsSyncTimer = null;
+					syncCurrentProviderBounds();
+				}, 50 );
+			};
+			if ( providerBoundsSyncFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( providerBoundsSyncFrame );
+			}
+			if ( window.requestAnimationFrame ) {
+				providerBoundsSyncFrame = window.requestAnimationFrame( sync );
+			} else {
+				window.setTimeout( sync, 0 );
 			}
 		}
 
@@ -1516,6 +1610,9 @@
 					if ( ! payload || ! payload.success ) {
 						throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось найти ПВЗ.' );
 					}
+					pointsGeneration += 1;
+					currentBounds = null;
+					boundsGeneration = -1;
 					points = Array.isArray( payload.data && payload.data.points ) ? payload.data.points.map( normalizePickupPoint ) : [];
 					previewPoint = matchSelectedPickup( points, previewPoint || selectedPickupPoints.get( box ) );
 					updateConfirmButton();
@@ -1523,9 +1620,6 @@
 		}
 
 		function renderSearchResults( mode, value, geocodeMessage ) {
-					const withCoordinates = points.filter( function ( point ) {
-						return point.lat !== null && point.lng !== null;
-					} ).length;
 					if ( points.length ) {
 						statusPrefix = 'address' === mode && geocodeMessage ? geocodeMessage : '';
 					} else {
@@ -1544,6 +1638,7 @@
 						} else if ( provider.fitToMarkers ) {
 							provider.fitToMarkers();
 						}
+						scheduleProviderBoundsSync();
 					}
 					renderPickupPoints();
 					updateConfirmButton();
@@ -1563,7 +1658,7 @@
 			const visiblePoints = visiblePickupPoints();
 			updateViewportStatus();
 			if ( ! visiblePoints.length ) {
-				list.innerHTML = '<p class="description">На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.</p>';
+				list.innerHTML = '<p class="description">' + escapeHtml( viewportCountMessage( 0, points.length ) ) + '</p>';
 				updateConfirmButton();
 				return;
 			}
@@ -1645,7 +1740,7 @@
 			status.textContent = 'Карта недоступна: для Яндекс.Карт не задан API key. Выберите ПВЗ из списка.';
 		} else {
 			provider = providerFactory.create( mapElement, {
-				center: { lat: 55.0302, lng: 82.9204, zoom: 11 },
+				center: initialMapCenter(),
 				yandexApiKey: config.yandexApiKey || '',
 				onBoundsChange: function ( bounds ) {
 					scheduleBoundsRender( bounds );

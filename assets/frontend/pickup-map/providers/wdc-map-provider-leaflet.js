@@ -39,8 +39,22 @@
 			if (typeof settings.onBoundsChange !== 'function') {
 				return;
 			}
+			var bounds = currentBoundsValue();
+			if (!bounds) {
+				return;
+			}
+			settings.onBoundsChange(bounds);
+		}
+
+		function currentBoundsValue() {
+			if (!map || typeof map.getBounds !== 'function') {
+				return null;
+			}
 			var bounds = map.getBounds();
-			settings.onBoundsChange([bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].join(','));
+			if (!bounds) {
+				return null;
+			}
+			return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].join(',');
 		}
 
 		map.on('zoomend', rebuildClusters);
@@ -93,6 +107,7 @@
 				var group = window.L.featureGroup(markers);
 				map.fitBounds(group.getBounds(), { padding: [24, 24] });
 			},
+			getBounds: currentBoundsValue,
 			destroy: function () {
 				suppressPopupClose = true;
 				clearMarkers();

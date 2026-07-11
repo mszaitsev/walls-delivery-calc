@@ -1,6 +1,14 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.105.10.
+Version: 0.105.11.
+
+## Статус 0.105.11
+
+- Viewport bounds в admin picker теперь привязаны к поколению загруженного набора ПВЗ: `pointsGeneration` увеличивается при каждом новом dataset, а `boundsGeneration` показывает, к какому dataset относятся текущие bounds.
+- Initial bounds provider-а, пришедшие до загрузки точек (например fallback-центр Новосибирска), инвалидируются при загрузке ПВЗ другого города. Пока bounds текущего поколения еще не получены, боковой список не фильтруется старым viewport и не показывает ложное сообщение `На текущем участке карты ПВЗ не видны...`.
+- Оба map provider (`Yandex`, `Leaflet`) получили read-only `getBounds()` с тем же converter-ом `west,south,east,north`, который используется в `boundschange`. После `renderMarkers()` и camera action (`setCenter`, `focusPoint`, `fitToMarkers`) admin picker делает deferred sync текущих provider bounds.
+- Initial center карты выбирается из координат уже выбранного ПВЗ, затем preview point, затем selected location, и только потом используется fallback Новосибирска.
+- Pan/zoom остается полностью локальным: REST не вызывается, полный marker dataset не перерисовывается, выбранный ПВЗ не сбрасывается и confirm button не отключается.
 
 ## Статус 0.105.10
 

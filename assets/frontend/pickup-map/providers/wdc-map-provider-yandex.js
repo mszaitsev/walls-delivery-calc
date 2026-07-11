@@ -71,11 +71,22 @@
 			if (!map || typeof settings.onBoundsChange !== 'function') {
 				return;
 			}
-			var bounds = map.getBounds();
-			if (!bounds || !bounds[0] || !bounds[1]) {
+			var bounds = currentBoundsValue();
+			if (!bounds) {
 				return;
 			}
-			settings.onBoundsChange([bounds[0][1], bounds[0][0], bounds[1][1], bounds[1][0]].join(','));
+			settings.onBoundsChange(bounds);
+		}
+
+		function currentBoundsValue() {
+			if (!map || typeof map.getBounds !== 'function') {
+				return null;
+			}
+			var bounds = map.getBounds();
+			if (!bounds || !bounds[0] || !bounds[1]) {
+				return null;
+			}
+			return [bounds[0][1], bounds[0][0], bounds[1][1], bounds[1][0]].join(',');
 		}
 
 		function renderMarkers(points, options) {
@@ -200,6 +211,7 @@
 					map.setBounds(collection.getBounds(), { checkZoomRange: true, zoomMargin: 24 });
 				}
 			},
+			getBounds: currentBoundsValue,
 			openPointPopup: function (point, html) {
 				var id = pointId(point);
 				var placemark = placemarkById[id];
