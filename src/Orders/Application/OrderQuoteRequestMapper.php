@@ -203,7 +203,7 @@ final class OrderQuoteRequestMapper {
 		$calculation = $this->calculation_data( $order );
 		$destination = is_array( $calculation['destination'] ?? null ) ? $calculation['destination'] : array();
 		$fias = array_unique( array_filter( array( $this->meta_string( $order, '_wdc_platform_location_fias_id' ), $this->meta_string( $order, '_wdc_platform_fias_id' ), $this->meta_string( $order, '_wdc_platform_city_fias_id' ), (string) ( $destination['fias_id'] ?? '' ), $address->fias_id ) ) );
-		foreach ( $fias as $value ) { $location = $this->location_repository->find_by_fias_or_city_fias_id( $value ); if ( null !== $location && $location->id > 0 ) { return $location->id; } }
+		foreach ( $fias as $value ) { $location = $this->location_repository->find_by_fias_id( $value ); if ( null !== $location && $location->id > 0 ) { return $location->id; } $location = $this->location_repository->find_unique_by_city_fias_id( $value ); if ( null !== $location && $location->id > 0 ) { return $location->id; } }
 		$gar = array_unique( array_filter( array( $this->meta_string( $order, '_wdc_platform_gar_id' ), $this->meta_string( $order, '_wdc_platform_city_gar_id' ), (string) ( $destination['gar_id'] ?? '' ), $address->gar_id ), static fn( string $value ): bool => ctype_digit( $value ) && (int) $value > 0 ) );
 		foreach ( $gar as $value ) { $location = $this->location_repository->find_by_gar_object_id( (int) $value ); if ( null !== $location && $location->id > 0 ) { return $location->id; } }
 		return 0;
