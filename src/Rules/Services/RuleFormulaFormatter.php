@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Rules\Services;
 
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -19,7 +20,19 @@ final class RuleFormulaFormatter {
 		);
 
 		foreach ( $audit as $entry ) {
-			if ( empty( $entry['applied'] ) || 'change_price' !== (string) ( $entry['action_type'] ?? '' ) ) {
+			if ( empty( $entry['applied'] ) ) {
+				continue;
+			}
+			if ( 'change_delivery_days' === (string) ( $entry['action_type'] ?? '' ) ) {
+				$name = trim( (string) ( $entry['rule_name'] ?? '' ) ) ?: 'Без названия';
+				$days = is_array( $entry['after_value'] ?? null ) ? DeliveryDaysFormatter::format_array( $entry['after_value'] ) : '';
+				if ( '' !== $days ) {
+					$unit = 'business_days' === (string) ( $entry['operation_base'] ?? '' ) ? ' рабочих дней' : ' календарных дня';
+					$lines[] = 'Правило "' . $name . '": ' . $this->delivery_operation_label( (string) ( $entry['operation'] ?? '' ), $entry ) . $unit . ' → ' . $days;
+				}
+				continue;
+			}
+			if ( 'change_price' !== (string) ( $entry['action_type'] ?? '' ) ) {
 				continue;
 			}
 
@@ -44,6 +57,17 @@ final class RuleFormulaFormatter {
 		$lines[] = 'Итог: ' . $this->format_price( $final_price_rub ) . ' руб.';
 
 		return array_values( array_unique( $lines ) );
+	}
+
+	/** @param array<string,mixed> $entry */
+	private function delivery_operation_label( string $operation, array $entry ): string {
+		$value = is_numeric( $entry['operation_value'] ?? null ) ? $this->format_decimal( (float) $entry['operation_value'] ) : '';
+		return match ( $operation ) {
+			'increase' => 'увеличить срок доставки на ' . $value,
+			'decrease' => 'уменьшить срок доставки на ' . $value,
+			'set' => 'установить срок доставки ' . $value,
+			default => 'изменить срок доставки',
+		};
 	}
 
 	/**

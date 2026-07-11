@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
@@ -146,7 +147,7 @@ final class OrderDeliveryReplacementService {
 				}
 			}
 		} else {
-			$rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
+$rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 		}
 		$rate['cost'] = (float) ( $rate['cost'] ?? 0 );
 
@@ -290,6 +291,7 @@ final class OrderDeliveryReplacementService {
 			$map['_wdc_platform_pickup_comment'] = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' );
 			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['work_time'] ?? '', $pickup['point_work_time'] ?? '' );
 			$map['_wdc_pickup_point_code'] = (string) ( $pickup['point_code'] ?? '' );
+			$map['_wdc_pickup_platform_station_id'] = $this->first_meaningful( $pickup['platform_station_id'] ?? '', $pickup['snapshot']['platform_station_id'] ?? '' );
 			$map['_wdc_pickup_point_type'] = (string) ( $pickup['point_type'] ?? '' );
 			$map['_wdc_pickup_carrier_key'] = (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' );
 			$map['_wdc_pickup_service_key'] = (string) ( $pickup['service_key'] ?? $rate['service_key'] ?? $rate['carrier_key'] ?? '' );
@@ -311,12 +313,25 @@ final class OrderDeliveryReplacementService {
 				$map['_wdc_dpd_pickup_longitude'] = $this->first_meaningful( $pickup['lng'] ?? '', $pickup['longitude'] ?? '', $snapshot['lng'] ?? '' );
 				$map['_wdc_dpd_pickup_source'] = $this->first_meaningful( $pickup['dpd_source'] ?? '', $pickup['source'] ?? '', $snapshot['dpd_source'] ?? '', $snapshot['source'] ?? '', 'recalculation/admin' );
 			}
+			if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' ) ) {
+				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+				$map['_wdc_yandex_delivery_pickup_platform_station_id'] = $this->first_meaningful( $pickup['platform_station_id'] ?? '', $pickup['point_code'] ?? '', $snapshot['platform_station_id'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_point_code'] = $this->first_meaningful( $pickup['point_code'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_type'] = $this->first_meaningful( $pickup['point_type'] ?? '', $snapshot['point_type'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_name'] = $this->first_meaningful( $pickup['point_name'] ?? '', $snapshot['point_name'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_city_name'] = $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $snapshot['city_name'] ?? '', $snapshot['city'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_region_name'] = $this->first_meaningful( $pickup['region_name'] ?? '', $pickup['region'] ?? '', $snapshot['region_name'] ?? '', $snapshot['region'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_latitude'] = $this->first_meaningful( $pickup['lat'] ?? '', $snapshot['lat'] ?? '' );
+				$map['_wdc_yandex_delivery_pickup_longitude'] = $this->first_meaningful( $pickup['lng'] ?? '', $snapshot['lng'] ?? '' );
+			}
 		} else {
 			$map['_wdc_platform_pickup_code'] = '';
 			$map['_wdc_platform_pickup_address'] = '';
 			$map['_wdc_platform_pickup_comment'] = '';
 			$map['_wdc_platform_pickup_work_time'] = '';
 			$map['_wdc_pickup_point_code'] = '';
+			$map['_wdc_pickup_platform_station_id'] = '';
 			$map['_wdc_pickup_point_type'] = '';
 			$map['_wdc_pickup_carrier_key'] = '';
 			$map['_wdc_pickup_service_key'] = '';
@@ -335,6 +350,15 @@ final class OrderDeliveryReplacementService {
 			$map['_wdc_dpd_pickup_latitude'] = '';
 			$map['_wdc_dpd_pickup_longitude'] = '';
 			$map['_wdc_dpd_pickup_source'] = '';
+			$map['_wdc_yandex_delivery_pickup_platform_station_id'] = '';
+			$map['_wdc_yandex_delivery_pickup_point_code'] = '';
+			$map['_wdc_yandex_delivery_pickup_type'] = '';
+			$map['_wdc_yandex_delivery_pickup_name'] = '';
+			$map['_wdc_yandex_delivery_pickup_address'] = '';
+			$map['_wdc_yandex_delivery_pickup_city_name'] = '';
+			$map['_wdc_yandex_delivery_pickup_region_name'] = '';
+			$map['_wdc_yandex_delivery_pickup_latitude'] = '';
+			$map['_wdc_yandex_delivery_pickup_longitude'] = '';
 		}
 		foreach ( $map as $key => $value ) {
 			if ( method_exists( $order, 'update_meta_data' ) ) {
@@ -752,8 +776,25 @@ final class OrderDeliveryReplacementService {
 		$title = (string) ( $rate['label'] ?? '' );
 		$tariff = (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' );
 		$title = '' !== $tariff && ! str_contains( $title, $tariff ) ? $title . ', ' . $tariff : $title;
-		$delivery = (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' );
-		return '' !== $delivery && ! str_contains( $title, $delivery ) ? $title . ' - ' . $delivery : $title;
+		$delivery = $this->delivery_label_from_value( $rate['delivery_days'] ?? null ) ?: trim( (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' ) );
+		$original = $this->delivery_label_from_value( $rate['original_delivery_days'] ?? ( $rate['rate_meta']['original_delivery_days'] ?? null ) );
+		if ( '' === $delivery ) {
+			return $title;
+		}
+		if ( str_ends_with( $title, $delivery ) ) {
+			return $title;
+		}
+		if ( '' !== $original && str_ends_with( $title, $original ) ) {
+			$title = rtrim( substr( $title, 0, -strlen( $original ) ) );
+			$title = rtrim( $title, " \t\n\r\0\x0B-" );
+		}
+		return '' !== $title ? $title . ' - ' . $delivery : $delivery;
+	}
+
+	private function delivery_label_from_value( mixed $value ): string {
+		if ( is_array( $value ) ) { return DeliveryDaysFormatter::format_array( $value ); }
+		if ( is_numeric( $value ) ) { return DeliveryDaysFormatter::format_values( (int) $value, (int) $value ); }
+		return is_string( $value ) ? trim( $value ) : '';
 	}
 
 	/**
@@ -773,7 +814,48 @@ final class OrderDeliveryReplacementService {
 	private function base_price( array $rate ): float {
 		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
 		$api = is_array( $meta['api'] ?? null ) ? $meta['api'] : array();
-		return (float) ( $rate['api_base_price_rub'] ?? $meta['api_base_price_rub'] ?? $api['api_base_price_rub'] ?? $rate['cost'] ?? 0 );
+		foreach ( array(
+			$this->nullable_float( $rate['api_base_price_rub'] ?? null ),
+			$this->nullable_float( $meta['api_base_price_rub'] ?? null ),
+			$this->kopecks_value( $meta['pricing_total_kopecks'] ?? null ),
+			$this->kopecks_value( $rate['pricing_total_kopecks'] ?? null ),
+			$this->money_value( $rate['original_cost'] ?? null ),
+			$this->money_value( $meta['original_cost'] ?? null ),
+			$this->nullable_float( $api['api_base_price_rub'] ?? null ),
+			$this->nullable_float( $meta['api_price_with_vat_rub'] ?? null ),
+			$this->nullable_float( $api['api_price_with_vat_rub'] ?? null ),
+			$this->nullable_float( $rate['cost'] ?? null ),
+		) as $value ) {
+			if ( null !== $value ) {
+				return $value;
+			}
+		}
+		return 0.0;
+	}
+
+	private function kopecks_value( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value / 100 : null;
+	}
+
+	private function money_value( mixed $value ): ?float {
+		if ( is_array( $value ) ) {
+			if ( is_numeric( $value['amount_kopecks'] ?? null ) ) {
+				return (float) $value['amount_kopecks'] / 100;
+			}
+			if ( is_numeric( $value['amount'] ?? null ) ) {
+				return (float) $value['amount'] / 100;
+			}
+			if ( is_numeric( $value['rubles'] ?? null ) ) {
+				return (float) $value['rubles'];
+			}
+			return null;
+		}
+
+		return is_numeric( $value ) ? (float) $value : null;
+	}
+
+	private function nullable_float( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value : null;
 	}
 
 	private function old_base_price( object $order ): float {
@@ -797,6 +879,32 @@ final class OrderDeliveryReplacementService {
 	 */
 	private function canonical_pickup_for_save( object $order, array $rate, array $pickup ): array {
 		$carrier = (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' );
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
+			$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+			$station_id = $this->first_meaningful(
+				$pickup['platform_station_id'] ?? '',
+				$snapshot['platform_station_id'] ?? '',
+				$pickup['point_code'] ?? '',
+				$snapshot['point_code'] ?? ''
+			);
+			$pickup_carrier = (string) ( $pickup['carrier_key'] ?? $pickup['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+			$pickup_family = (string) ( $pickup['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+			if (
+				YandexDeliverySettings::CARRIER_KEY !== $pickup_carrier
+				|| YandexDeliverySettings::CARRIER_KEY . ':pickup' !== $pickup_family
+				|| '' === $station_id
+			) {
+				return array();
+			}
+
+			$pickup['carrier_key'] = YandexDeliverySettings::CARRIER_KEY;
+			$pickup['service_key'] = YandexDeliverySettings::SERVICE_KEY;
+			$pickup['pickup_family'] = YandexDeliverySettings::CARRIER_KEY . ':pickup';
+			$pickup['platform_station_id'] = $station_id;
+			$pickup['point_code'] = $station_id;
+
+			return $pickup;
+		}
 		if ( 'cdek' !== $carrier ) {
 			if ( DpdSettings::CARRIER_KEY === $carrier ) {
 				$code = $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '' );

@@ -132,9 +132,46 @@ if ( ! class_exists( 'wpdb' ) ) {
 			$this->tables[ $table ][] = $data;
 			return true;
 		}
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			$this->tables[ $table ] ??= array();
+			foreach ( $this->tables[ $table ] as &$row ) {
+				foreach ( $where as $key => $value ) {
+					if ( (string) ( $row[ $key ] ?? '' ) !== (string) $value ) {
+						continue 2;
+					}
+				}
+				$row = array_merge( $row, $data );
+			}
+			unset( $row );
+			return true;
+		}
+		public function delete( string $table, array $where, array $where_format = array() ): bool {
+			$this->tables[ $table ] = array_values(
+				array_filter(
+					$this->tables[ $table ] ?? array(),
+					static function ( array $row ) use ( $where ): bool {
+						foreach ( $where as $key => $value ) {
+							if ( (string) ( $row[ $key ] ?? '' ) !== (string) $value ) {
+								return true;
+							}
+						}
+						return false;
+					}
+				)
+			);
+			return true;
+		}
 		public function get_var( string $query ): mixed {
 			if ( preg_match( "/SHOW TABLES LIKE '([^']+)'/", $query, $m ) ) {
 				return array_key_exists( $m[1], $this->tables ) ? $m[1] : null;
+			}
+			if ( preg_match( '/SELECT id FROM ([A-Za-z0-9_]+) WHERE service_id = ([0-9]+) AND setting_key = \'([^\']+)\'/', $query, $m ) ) {
+				foreach ( $this->tables[ $m[1] ] ?? array() as $row ) {
+					if ( (int) ( $row['service_id'] ?? 0 ) === (int) $m[2] && (string) ( $row['setting_key'] ?? '' ) === $m[3] ) {
+						return $row['id'] ?? null;
+					}
+				}
+				return null;
 			}
 			$rows = $this->filter_rows( $query );
 			return count( $rows );
@@ -174,6 +211,18 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( preg_match( "/point_type = '([^']+)'/", $query, $m ) ) {
 				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (string) ( $row['point_type'] ?? '' ) === $m[1] ) );
 			}
+			if ( preg_match( "/service_key = '([^']+)'/", $query, $m ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (string) ( $row['service_key'] ?? '' ) === $m[1] ) );
+			}
+			if ( preg_match( '/deleted = ([0-9]+)/', $query, $m ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (int) ( $row['deleted'] ?? 0 ) === (int) $m[1] ) );
+			}
+			if ( preg_match( '/service_id = ([0-9]+)/', $query, $m ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (int) ( $row['service_id'] ?? 0 ) === (int) $m[1] ) );
+			}
+			if ( preg_match( "/setting_key = '([^']+)'/", $query, $m ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (string) ( $row['setting_key'] ?? '' ) === $m[1] ) );
+			}
 			return $rows;
 		}
 	}
@@ -181,7 +230,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
@@ -224,7 +277,19 @@ rp_pickup_assert( "Пн–Пт: 09:00–18:00\nСб–Вс: выходной" ==
 rp_pickup_assert( "Пн–Ср: 08:00–17:00\nПерерыв: 12:00–13:00\nЧт–Пт: 09:00–18:00\nПерерыв: 13:00–14:00\nСб–Вс: выходной" === $formatter->format( array( 'пн, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00', 'вт, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00', 'ср, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00', 'чт, открыто: 09:00 - 18:00, перерыв: 13:00 - 14:00', 'пт, открыто: 09:00 - 18:00, перерыв: 13:00 - 14:00', 'сб, выходной', 'вс, выходной' ) ), 'Formatter must split groups with different breaks.' );
 rp_pickup_assert( "непонятный график\nещё строка" === $formatter->format( array( 'непонятный график', 'ещё строка' ) ), 'Formatter fallback must not fail on unknown format.' );
 rp_pickup_assert( '' === $formatter->format( array() ), 'Formatter must return empty string for empty workTime.' );
-$settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), new EncryptionService() );
+$settings_db = new wpdb();
+$service_repository = new DeliveryServiceRepository( $settings_db );
+$service_repository->create_service(
+	array(
+		'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
+		'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+		'service_type' => DeliveryService::TYPE_API,
+		'title' => RussianPostDomesticSettings::TITLE,
+		'enabled' => 1,
+		'deleted' => 0,
+	)
+);
+$settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), new EncryptionService(), $service_repository, new DeliveryServiceSettingsRepository( $settings_db ) );
 $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'token', 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => 'password', 'russian_post_pickup_unload_type' => 'ALL' ) );
 rp_pickup_assert( base64_encode( 'login:password' ) === $settings->basic_key(), 'Otpravka Basic authorization key must be computed from login and password.' );
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => '', 'russian_post_otpravka_' . 'basic_key' => 'legacy-ready-key' ) );
@@ -599,7 +664,7 @@ $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'ru
 $importer->sync_schedule();
 rp_pickup_assert( 'weekly' === ( $GLOBALS['wdc_recurring_events'][ RussianPostPickupImporter::SCHEDULE_HOOK ]['recurrence'] ?? '' ), 'Schedule enabled must create weekly import.' );
 rp_pickup_assert( false !== wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK ), 'Schedule enabled must expose next scheduled import timestamp.' );
-$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login' ) );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_pickup_schedule_enabled' => '' ) );
 $importer->sync_schedule();
 rp_pickup_assert( ! isset( $GLOBALS['wdc_recurring_events'][ RussianPostPickupImporter::SCHEDULE_HOOK ] ), 'Schedule disabled must clear weekly import.' );
 
@@ -607,7 +672,7 @@ $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Delive
 rp_pickup_assert( str_contains( $admin_source, 'rows_inserted_to_staging' ) && str_contains( $admin_source, 'staging_table' ) && str_contains( $admin_source, 'upload_russian_post_pickup_file_import' ) && str_contains( $admin_source, 'accept=".zip,.txt,.json"' ) && str_contains( $admin_source, 'ВАШ_ACCESS_TOKEN' ) && str_contains( $admin_source, 'Expand-Archive' ), 'Admin status output must include staging metrics and unified ZIP/TXT/JSON upload instructions.' );
 rp_pickup_assert( str_contains( $admin_source, '<details><summary data-wdc-rp-status-summary>' ) && str_contains( $admin_source, 'data-wdc-rp-status="' ) && str_contains( $admin_source, 'Статус: %s; этап: %s; обработано: %d; записано: %d' ), 'Admin import status block must render collapsible status markup with compact summary.' );
 rp_pickup_assert( str_contains( $admin_source, 'wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK )' ) && str_contains( $admin_source, 'Расписание включено, но следующий запуск пока не запланирован.' ), 'Admin UI must show next scheduled weekly import or a warning when missing.' );
-rp_pickup_assert( str_contains( $admin_source, 'Таймаут загрузки, сек.' ) && str_contains( $admin_source, 'Используется только при автоматическом скачивании архива через API. Для ручной загрузки ZIP/TXT не применяется.' ), 'Admin timeout field must keep Russian label/help and remain visible.' );
+rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_timeout' ) && str_contains( $admin_source, 'Таймаут API, сек.' ), 'Admin timeout field must keep Russian label and remain visible.' );
 rp_pickup_assert( ! str_contains( $admin_source, 'russian_post_otpravka_basic_key' ) && ! str_contains( $admin_source, 'Basic key' ) && ! str_contains( $admin_source, 'BasicKey' ), 'Admin UI must not render a Basic key field.' );
 rp_pickup_assert( str_contains( $admin_source, 'Автоматическая загрузка из API' ) && str_contains( $admin_source, 'Загруженный ZIP' ) && str_contains( $admin_source, 'Загруженный TXT/JSON' ), 'Admin status values must be localized.' );
 

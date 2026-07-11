@@ -4,6 +4,8 @@ declare(strict_types=1);
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -75,6 +77,24 @@ function recalc_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
+function recalc_smoke_run_node( string $script, string $message ): void {
+	$tmp = tempnam( sys_get_temp_dir(), 'wdc-recalc-js-' );
+	if ( false === $tmp ) {
+		throw new RuntimeException( $message . ': cannot create temporary JS file.' );
+	}
+	$js_file = $tmp . '.js';
+	if ( ! rename( $tmp, $js_file ) ) {
+		@unlink( $tmp );
+		throw new RuntimeException( $message . ': cannot prepare temporary JS file.' );
+	}
+	file_put_contents( $js_file, $script );
+	$output = array();
+	$code = 1;
+	exec( 'node ' . escapeshellarg( $js_file ) . ' 2>&1', $output, $code );
+	@unlink( $js_file );
+	recalc_smoke_assert( 0 === $code, $message . ': ' . implode( "\n", $output ) );
+}
+
 function current_user_can( string $capability ): bool {
 	return 'manage_woocommerce' === $capability && (bool) $GLOBALS['wdc_recalc_current_can'];
 }
@@ -113,6 +133,8 @@ final class WdcRecalcLocationDb extends wpdb {
 	public array $locations = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $russian_post_pickup_rows = array();
+	public array $yandex_location_mapping_v2 = array();
+	public array $yandex_delivery_pickup_points_v2 = array();
 }
 
 final class WdcRecalcProduct {
@@ -298,6 +320,58 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 	}
 }
 
+final class WdcRecalcYandexLocationCarrier implements CarrierAdapterInterface {
+	public function __construct( private int $expected_location_id ) {}
+
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( 'yandex_delivery', 'Яндекс.Доставка', 'api', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities( supports_quotes: true, supports_courier_delivery: true, supports_pickup_delivery: true );
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return 'RU' === strtoupper( $countryCode );
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		$location_id = (int) ( $request->customer_context['location_id'] ?? 0 );
+		$rates = array();
+		if ( $this->expected_location_id === $location_id ) {
+			$rates[] = new DeliveryRate(
+				'yandex_pickup',
+				'yandex_delivery',
+				'Яндекс.Доставка',
+				'yandex_delivery',
+				'Яндекс.Доставка',
+				'yandex_pickup',
+				'Яндекс до ПВЗ',
+				DeliveryType::PICKUP,
+				'Яндекс до ПВЗ',
+				Money::from_rubles( 535 ),
+				null,
+				null,
+				DateRange::single( 8 ),
+				'',
+				'8 дней',
+				array(),
+				false,
+				'',
+				true,
+				false,
+				array(
+					'pickup_family' => 'yandex_delivery:pickup',
+					'pickup_source' => 'representative',
+					'platform_station_id' => 'YANDEX-REPRESENTATIVE-92468',
+				)
+			);
+		}
+
+		return new DeliveryQuote( 'yandex-test', 'yandex_delivery', $request->destination, $request->package, $rates );
+	}
+}
+
 final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientInterface {
 	public array $requests = array();
 	public function __construct( private bool $with_coordinates = true ) {}
@@ -409,10 +483,13 @@ function wdc_recalc_address_suggestion_service( AddressSuggestionClientInterface
 	return new AddressSuggestionService( new AddressSuggestionSettings( $settings, $encryption, $pool ), $client, new AddressSuggestionNormalizer() );
 }
 
-function wdc_recalc_service(): OrderDeliveryRecalculationService {
+function wdc_recalc_service( ?OrderQuoteRequestMapper $mapper = null, array $extra_carriers = array() ): OrderDeliveryRecalculationService {
 	$registry = new CarrierRegistry();
 	$registry->register( new WdcRecalcCarrier( RussianPostDomesticSettings::CARRIER_KEY ) );
 	$registry->register( new WdcRecalcCarrier( 'demo' ) );
+	foreach ( $extra_carriers as $carrier ) {
+		$registry->register( $carrier );
+	}
 	$logger = new CheckoutLogger();
 	$orchestrator = new CheckoutOrchestrator(
 		$registry,
@@ -423,7 +500,50 @@ function wdc_recalc_service(): OrderDeliveryRecalculationService {
 		$logger
 	);
 
-	return new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
+	return new OrderDeliveryRecalculationService( $mapper ?? new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
+}
+
+function wdc_recalc_location_row( int $id, array $overrides = array() ): array {
+	return array_merge(
+		array(
+			'id' => $id,
+			'fias_id' => 'fias-' . $id,
+			'city_fias_id' => '',
+			'gar_id' => (string) ( 880000 + $id ),
+			'gar_object_id' => 880000 + $id,
+			'country_code' => 'RU',
+			'region_name' => 'Новосибирская область',
+			'region_type' => 'обл',
+			'region_code' => '54',
+			'city_name' => 'Новосибирск',
+			'city_type' => 'г',
+			'place_name' => 'Новосибирск',
+			'place_type' => 'г',
+			'settlement_name' => 'Новосибирск',
+			'settlement_type' => 'г',
+			'display_name' => 'Новосибирская область, г Новосибирск',
+			'postal_code' => '630099',
+			'active' => 1,
+		),
+		$overrides
+	);
+}
+
+function wdc_recalc_location_repository( array $rows ): LocationRepository {
+	$db = new WdcRecalcLocationDb();
+	$db->locations = $rows;
+	return new LocationRepository( $db );
+}
+
+function wdc_recalc_location_context( OrderQuoteRequestMapper $mapper, array $meta, ?array $selected_location = null ): array {
+	$order = new WdcRecalcOrder(
+		900,
+		array(
+			new WdcRecalcOrderItem( new WdcRecalcProduct( 'SKU-LOC', 'Товар', 0.5, 10, 20, 30 ), 1, 1000, 'Товар' ),
+		)
+	);
+	$order->meta = $meta;
+	return $mapper->map( $order, $selected_location )->customer_context;
 }
 
 function wdc_recalc_location_ajax(): CheckoutLocationAjax {
@@ -526,6 +646,79 @@ $order->meta['_wdc_pickup_point_address'] = 'Новосибирск, Красн�
 $order->meta['_wdc_pickup_point_postcode'] = '630099';
 $order->meta['_wdc_pickup_point_snapshot'] = wp_json_encode( array( 'point_code' => '630099-OPS', 'point_name' => 'ОПС 630099', 'point_address' => 'Новосибирск, Красный проспект, 10' ) );
 $GLOBALS['wdc_recalc_orders'][101] = $order;
+
+$yandex_selection_request = ( new OrderQuoteRequestMapper() )->map(
+	$order,
+	null,
+	array(
+		'carrier_key' => 'yandex_delivery',
+		'service_key' => 'yandex_delivery',
+		'pickup_family' => 'yandex_delivery:pickup',
+		'point_code' => 'YANDEX-PVZ-1',
+		'platform_station_id' => 'YANDEX-PVZ-1',
+		'snapshot' => array( 'carrier_key' => 'yandex_delivery', 'pickup_family' => 'yandex_delivery:pickup', 'platform_station_id' => 'YANDEX-PVZ-1' ),
+	)
+);
+recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selection']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed to the checkout-compatible pickup_selection context.' );
+recalc_smoke_assert( 'YANDEX-PVZ-1' === (string) ( $yandex_selection_request->customer_context['pickup_selections']['yandex_delivery:pickup']['platform_station_id'] ?? '' ), 'Yandex selected pickup must be passed in its family pickup_selections bucket.' );
+
+$location_lookup_repository = wdc_recalc_location_repository(
+	array(
+		wdc_recalc_location_row( 92468, array( 'fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'city_fias_id' => '' ) ),
+		wdc_recalc_location_row( 92469, array( 'fias_id' => '11111111-1111-1111-1111-111111111111', 'city_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' ) ),
+		wdc_recalc_location_row( 92470, array( 'fias_id' => '22222222-2222-2222-2222-222222222222', 'city_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' ) ),
+		wdc_recalc_location_row( 92500, array( 'fias_id' => '33333333-3333-3333-3333-333333333333', 'city_fias_id' => 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' ) ),
+		wdc_recalc_location_row( 92501, array( 'fias_id' => '44444444-4444-4444-4444-444444444444', 'city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) ),
+		wdc_recalc_location_row( 92502, array( 'fias_id' => '55555555-5555-5555-5555-555555555555', 'city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) ),
+		wdc_recalc_location_row( 92600, array( 'fias_id' => 'gar-row', 'city_fias_id' => '', 'gar_id' => '889336', 'gar_object_id' => 889336 ) ),
+		wdc_recalc_location_row( 92601, array( 'fias_id' => '66666666-6666-6666-6666-666666666666', 'city_fias_id' => '', 'gar_id' => '889337', 'gar_object_id' => 889337 ) ),
+	)
+);
+$location_lookup_mapper = new OrderQuoteRequestMapper( $location_lookup_repository );
+$exact_fias_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' ) );
+recalc_smoke_assert( 92468 === (int) ( $exact_fias_context['location_id'] ?? 0 ), 'OrderQuoteRequestMapper must resolve exact FIAS through LocationRepository.' );
+$exact_fias_priority_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) );
+recalc_smoke_assert( 92468 === (int) ( $exact_fias_priority_context['location_id'] ?? 0 ), 'Exact fias_id must win over conflicting city_fias_id rows.' );
+$unique_city_fias_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_city_fias_id' => 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' ) );
+recalc_smoke_assert( 92500 === (int) ( $unique_city_fias_context['location_id'] ?? 0 ), 'Unique city_fias_id must resolve the original order location.' );
+$duplicate_city_fias_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_city_fias_id' => 'cccccccc-cccc-cccc-cccc-cccccccccccc' ) );
+recalc_smoke_assert( 0 === (int) ( $duplicate_city_fias_context['location_id'] ?? 0 ), 'Duplicate city_fias_id must not choose a random location.' );
+$gar_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_gar_id' => '889336' ) );
+recalc_smoke_assert( 92600 === (int) ( $gar_context['location_id'] ?? 0 ), 'GAR fallback must resolve by exact positive gar_object_id.' );
+$numeric_priority_context = wdc_recalc_location_context( $location_lookup_mapper, array( '_wdc_platform_location_id' => 92700, '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_gar_id' => '889336' ) );
+recalc_smoke_assert( 92700 === (int) ( $numeric_priority_context['location_id'] ?? 0 ), 'Saved numeric location id must have priority over repository lookup.' );
+$explicit_priority_context = wdc_recalc_location_context(
+	$location_lookup_mapper,
+	array( '_wdc_platform_location_id' => 92700, '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_gar_id' => '889336' ),
+	array( 'id' => 92800, 'display_name' => 'Москва', 'city_value' => 'Москва', 'country_code' => 'RU' )
+);
+recalc_smoke_assert( 92800 === (int) ( $explicit_priority_context['location_id'] ?? 0 ) && 92800 === (int) ( $explicit_priority_context['selected_location_id'] ?? 0 ), 'Explicit selected_location id must have priority over saved/repository location ids.' );
+$repository_absent_context = wdc_recalc_location_context( new OrderQuoteRequestMapper(), array( '_wdc_platform_location_fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '_wdc_platform_gar_id' => '889336' ) );
+recalc_smoke_assert( 0 === (int) ( $repository_absent_context['location_id'] ?? 0 ), 'Mapper without LocationRepository must not throw and must not invent a location_id.' );
+
+$first_preview_repository = wdc_recalc_location_repository(
+	array(
+		wdc_recalc_location_row( 92468, array( 'fias_id' => 'dddddddd-dddd-dddd-dddd-dddddddddddd', 'city_fias_id' => '' ) ),
+	)
+);
+$first_preview_order = new WdcRecalcOrder(
+	127,
+	array(
+		new WdcRecalcOrderItem( new WdcRecalcProduct( 'SKU-YA', 'Товар', 0.5, 10, 20, 30 ), 1, 1000, 'Товар' ),
+	)
+);
+$first_preview_order->meta['_wdc_platform_location_fias_id'] = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+$first_preview_before_meta = $first_preview_order->meta;
+$first_preview_service = wdc_recalc_service( new OrderQuoteRequestMapper( $first_preview_repository ), array( new WdcRecalcYandexLocationCarrier( 92468 ) ) );
+$first_preview = $first_preview_service->preview( $first_preview_order );
+$first_preview_rates = array_column( $first_preview['rates'] ?? array(), null, 'id' );
+recalc_smoke_assert( true === ( $first_preview['success'] ?? false ), 'First Yandex preview must succeed for the original order location.' );
+recalc_smoke_assert( 92468 === (int) ( $first_preview['request']['customer_context']['location_id'] ?? 0 ), 'First Yandex preview must pass read-only resolved location_id into QuoteRequest.' );
+recalc_smoke_assert( 92468 === (int) ( $first_preview['location']['id'] ?? 0 ) && 92468 === (int) ( $first_preview['location']['location_id'] ?? 0 ), 'First Yandex preview location payload must expose resolved id and location_id for pickup map search.' );
+recalc_smoke_assert( empty( $first_preview['location']['is_override'] ), 'Read-only resolved location_id must not mark the original order city as an override.' );
+recalc_smoke_assert( isset( $first_preview_rates['yandex_pickup'] ), 'First Yandex preview must include yandex_pickup without manually selecting another settlement.' );
+recalc_smoke_assert( 'representative' === (string) ( $first_preview_rates['yandex_pickup']['rate_meta']['pickup_source'] ?? '' ), 'First Yandex preview must use representative pickup source, not a selected pickup.' );
+recalc_smoke_assert( $first_preview_before_meta === $first_preview_order->meta, 'First Yandex preview must not write resolved location_id or any other data to order meta.' );
 
 $metabox = new OrderDeliveryMetabox( new OrderShipmentRepository() );
 ob_start();
@@ -700,6 +893,15 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'geoco
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'loadPickupPointsForLocation' ) && str_contains( $pickup_js, "form.append( 'mode', modeOverride || 'location' );" ) && str_contains( $pickup_js, 'geocodeAddress( box, value )' ) && ! str_contains( $pickup_js, "loadPickupPointsForLocation( 'search', value )" ), 'JS pickup loader must keep location mode by default and use shared DaData geocoding for manual search.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "? 1000 : 2000" ) && ! str_contains( $pickup_js, "? 1000 : 300" ), 'Admin recalculation pickup loader must not cap Russian Post location lists at 300.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'renderSearchResults( \'address\', value' ) && str_contains( $pickup_js, 'provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );' ), 'JS manual address search must keep city pickup points rendered and center the map on the DaData marker.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'let pointsGeneration = 0;' ) && str_contains( $pickup_js, 'let boundsGeneration = -1;' ) && str_contains( $pickup_js, 'let currentBounds = null;' ), 'Admin pickup picker must track bounds against the current loaded points generation.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function normalizeBounds' ) && str_contains( $pickup_js, 'function pointInsideBounds' ) && str_contains( $pickup_js, 'return lng >= bounds.west && lng <= bounds.east && lat >= bounds.south && lat <= bounds.north;' ), 'Admin pickup picker must use checkout-compatible west,south,east,north bounds filtering.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function visiblePickupPoints' ) && str_contains( $pickup_js, 'if ( ! currentBounds || boundsGeneration !== pointsGeneration )' ) && str_contains( $pickup_js, 'return points.filter( function ( point )' ), 'Admin pickup picker side list must not apply stale bounds from a previous points dataset.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'provider.renderMarkers( points' ) && ! str_contains( $pickup_js, 'provider.renderMarkers( visiblePoints' ), 'Admin pickup picker must keep the full marker dataset on the map while filtering only the side list.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'onBoundsChange: function ( bounds )' ) && str_contains( $pickup_js, 'scheduleBoundsRender( bounds );' ) && ! str_contains( $pickup_js, 'onBoundsChange: function () {}' ), 'Admin pickup picker bounds changes must rerender locally and not keep the empty callback.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function syncCurrentProviderBounds' ) && str_contains( $pickup_js, 'provider.getBounds' ) && str_contains( $pickup_js, 'function scheduleProviderBoundsSync' ) && str_contains( $pickup_js, 'scheduleProviderBoundsSync();' ), 'Admin pickup picker must synchronize provider bounds after map camera actions.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function initialMapCenter' ) && str_contains( $pickup_js, 'selectedPickupPoints.get( box )' ) && str_contains( $pickup_js, 'center: initialMapCenter()' ), 'Admin pickup picker initial center must prefer selected pickup/location coordinates before fallback.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.' ) && str_contains( $pickup_js, 'Показано \' + visibleCount + \' из \' + totalCount + \' ПВЗ.' ), 'Admin pickup picker must show viewport counts and a distinct empty-viewport message.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'const visiblePoints = visiblePickupPoints();' ) && str_contains( $pickup_js, 'visiblePoints.map( function ( point, index )' ) && str_contains( $pickup_js, 'const point = findPoint( row.getAttribute( \'data-wdc-point-id\' ) );' ), 'Admin pickup picker rows must use visible indexes while selection stays based on full dataset point ids.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'через DaData' ) && str_contains( $pickup_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $pickup_js, "'Адрес найден.'" ) && str_contains( $pickup_js, "'Адрес не найден.'" ), 'Pickup map address search UI must not mention DaData.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-pickup-picker-confirm' ) && ! str_contains( $pickup_js, 'data-wdc-pickup-picker-choose' ) && ! str_contains( $pickup_js, 'data-wdc-pickup-popup-select' ) && ! str_contains( $pickup_js, 'wdc-order-delivery-pickup-picker__selected-grid' ), 'Admin recalculation pickup picker must use one bottom select button and no per-card duplicate select controls.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "'ПВЗ СДЭК'" ) && str_contains( $pickup_js, "'Постамат СДЭК'" ), 'Admin recalculation pickup picker must render CDEK pickup/postamat titles.' );
@@ -707,6 +909,14 @@ recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'sea
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-block' ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestions' ) && ! str_contains( $pickup_js, 'data-wdc-normalize-courier-address' ), 'Courier UI source must render automatic suggestions without old check-address button.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ) );" ), 'Location selection must trigger preview automatically.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function syncPreviewLocation' ) && str_contains( $pickup_js, 'syncPreviewLocation( box, payload.data && payload.data.location );' ) && str_contains( $pickup_js, 'selectedLocations.set( box, mergedLocation );' ) && str_contains( $pickup_js, 'updateLocationSummary( box, mergedLocation );' ), 'JS preview success must sync resolved location payload into selectedLocations.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function mergeMeaningfulFields' ) && str_contains( $pickup_js, 'const currentId = positiveLocationId( currentLocation.id || currentLocation.location_id );' ) && str_contains( $pickup_js, 'const previewId = positiveLocationId( previewLocation.id || previewLocation.location_id );' ), 'JS preview location sync must preserve full selected location payload while filling missing resolved id/location_id.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function isYandexPickupPoint' ) && str_contains( $pickup_js, "'yandex_delivery:pickup' === family" ) && str_contains( $pickup_js, "return '';" ), 'JS must detect Yandex pickup points and hide their technical display code.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function pickupPointPresentationComment' ) && str_contains( $pickup_js, 'wdc-pickup-popup__title-comment' ) && str_contains( $pickup_js, 'wdc-pickup-list__title-comment' ), 'JS must render Yandex presentation_comment in popup and side card using checkout presentation classes.' );
+$heading_pos = is_string( $pickup_js ) ? strpos( $pickup_js, 'class="wdc-order-delivery-pickup-picker__heading"><strong>\' + title + \'</strong>\' + commentHtml' ) : false;
+$address_pos = is_string( $pickup_js ) ? strpos( $pickup_js, '</span><span>\' + escapeHtml( pickupPointLabel( point ) ) + \'</span>' ) : false;
+recalc_smoke_assert( false !== $heading_pos && false !== $address_pos && $heading_pos < $address_pos, 'Pickup side card must render presentation_comment in a vertical heading container before the address.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'updateConfirmButton();' ) && str_contains( $pickup_js, 'renderPickupPoints();' ) && ! str_contains( $pickup_js, 'selectedPickupPoints.delete( box );' . PHP_EOL . "\t\t\trenderPickupPoints" ), 'Viewport rerender must not clear selected pickup or disable confirm when selected point moves out of view.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'Населенный пункт выбран. Нажмите' ), 'JS must not ask admin to click recalculate after selecting location.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Проверьте адрес перед сохранением.' ) && ! str_contains( $pickup_js, 'Проверьте адрес через DaData перед сохранением.' ), 'Courier address hint must not mention DaData.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Использовать этот адрес' ) && str_contains( $pickup_js, 'data-wdc-use-manual-courier-address disabled="disabled"' ), 'Courier block must render disabled manual address button by default.' );
@@ -720,6 +930,154 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'norma
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_save' ) && str_contains( $pickup_js, 'window.location.reload()' ), 'JS must call save endpoint and reload after success.' );
 $pickup_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.css' );
 recalc_smoke_assert( is_string( $pickup_css ) && str_contains( $pickup_css, 'width: min(1500px, 95vw)' ) && str_contains( $pickup_css, 'height: min(860px, 90vh)' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__list' ) && str_contains( $pickup_css, 'overflow-y: auto;' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__footer' ), 'Pickup picker CSS must keep a large map layout and scroll the side list separately.' );
+recalc_smoke_assert( is_string( $pickup_css ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__heading' ) && str_contains( $pickup_css, 'display: grid;' ) && str_contains( $pickup_css, 'gap: 4px;' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__heading > strong' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__heading > .wdc-pickup-list__title-comment' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__heading > em' ) && str_contains( $pickup_css, 'margin-top: 2px;' ), 'Pickup picker CSS must render presentation comments on a separate heading line.' );
+$yandex_provider_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js' );
+$leaflet_provider_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js' );
+recalc_smoke_assert( is_string( $yandex_provider_js ) && str_contains( $yandex_provider_js, 'function currentBoundsValue()' ) && str_contains( $yandex_provider_js, 'settings.onBoundsChange(bounds);' ) && str_contains( $yandex_provider_js, 'getBounds: currentBoundsValue' ), 'Yandex pickup map provider must expose read-only getBounds using the same converter as boundsChanged().' );
+recalc_smoke_assert( is_string( $leaflet_provider_js ) && str_contains( $leaflet_provider_js, 'function currentBoundsValue()' ) && str_contains( $leaflet_provider_js, 'settings.onBoundsChange(bounds);' ) && str_contains( $leaflet_provider_js, 'getBounds: currentBoundsValue' ), 'Leaflet pickup map provider must expose read-only getBounds using the same converter as boundsChanged().' );
+recalc_smoke_run_node( <<<'JS'
+const assert = require('assert');
+
+let points = [];
+let pointsGeneration = 0;
+let boundsGeneration = -1;
+let currentBounds = null;
+let fetchCount = 0;
+let markerRenderCount = 0;
+let focusCount = 0;
+let selectedPoint = null;
+let providerMarkers = [];
+let providerBounds = null;
+
+function normalizeBounds(bbox) {
+	if (bbox && typeof bbox === 'object' && !Array.isArray(bbox)) {
+		const westValue = parseFloat(bbox.west);
+		const southValue = parseFloat(bbox.south);
+		const eastValue = parseFloat(bbox.east);
+		const northValue = parseFloat(bbox.north);
+		if ([westValue, southValue, eastValue, northValue].some((value) => Number.isNaN(value))) {
+			return null;
+		}
+		return { west: westValue, south: southValue, east: eastValue, north: northValue };
+	}
+	const values = Array.isArray(bbox) ? bbox : String(bbox || '').split(',');
+	if (values.length < 4) {
+		return null;
+	}
+	const west = parseFloat(values[0]);
+	const south = parseFloat(values[1]);
+	const east = parseFloat(values[2]);
+	const north = parseFloat(values[3]);
+	if ([west, south, east, north].some((value) => Number.isNaN(value))) {
+		return null;
+	}
+	return { west, south, east, north };
+}
+
+function validPointCoordinates(point) {
+	return point && point.lat !== null && point.lng !== null && Number.isFinite(parseFloat(point.lat)) && Number.isFinite(parseFloat(point.lng));
+}
+
+function pointInsideBounds(point, bounds) {
+	bounds = normalizeBounds(bounds);
+	if (!bounds || !validPointCoordinates(point)) {
+		return false;
+	}
+	const lat = parseFloat(point.lat);
+	const lng = parseFloat(point.lng);
+	return lng >= bounds.west && lng <= bounds.east && lat >= bounds.south && lat <= bounds.north;
+}
+
+function visiblePickupPoints() {
+	if (!currentBounds || boundsGeneration !== pointsGeneration) {
+		return points;
+	}
+	return points.filter((point) => pointInsideBounds(point, currentBounds));
+}
+
+function viewportMessage() {
+	const visibleCount = visiblePickupPoints().length;
+	if (points.length > 0 && currentBounds && boundsGeneration === pointsGeneration && visibleCount <= 0) {
+		return 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.';
+	}
+	return 'Показано ' + visibleCount + ' из ' + points.length + ' ПВЗ.';
+}
+
+function onBoundsChange(bounds) {
+	const normalized = normalizeBounds(bounds);
+	if (!normalized) {
+		return;
+	}
+	currentBounds = normalized;
+	boundsGeneration = pointsGeneration;
+}
+
+function loadPoints(nextPoints) {
+	fetchCount += 1;
+	pointsGeneration += 1;
+	currentBounds = null;
+	boundsGeneration = -1;
+	points = nextPoints.slice();
+}
+
+function renderMarkers(nextPoints) {
+	markerRenderCount += 1;
+	providerMarkers = nextPoints.slice();
+}
+
+function syncCurrentProviderBounds() {
+	const bounds = normalizeBounds(providerBounds);
+	if (!bounds) {
+		return false;
+	}
+	currentBounds = bounds;
+	boundsGeneration = pointsGeneration;
+	return true;
+}
+
+function focusPoint() {
+	focusCount += 1;
+}
+
+const moscowA = { id: 'A', lat: 55.75, lng: 37.62 };
+const moscowB = { id: 'B', lat: 55.76, lng: 37.63 };
+const moscowC = { id: 'C', lat: 55.9, lng: 37.9 };
+
+assert.strictEqual(pointInsideBounds(moscowA, '37.50,55.65,37.75,55.85'), true, 'Moscow point must be inside Moscow bbox.');
+assert.strictEqual(pointInsideBounds(moscowA, '82.80,54.90,83.10,55.10'), false, 'Moscow point must be outside Novosibirsk bbox.');
+
+onBoundsChange('82.80,54.90,83.10,55.10');
+assert.strictEqual(boundsGeneration, 0, 'Initial bounds belong only to the empty dataset generation.');
+loadPoints([moscowA, moscowB, moscowC]);
+assert.strictEqual(boundsGeneration !== pointsGeneration, true, 'Loading Moscow points must invalidate stale Novosibirsk bounds.');
+assert.strictEqual(visiblePickupPoints().length, 3, 'Before fresh bounds, stale Novosibirsk bounds must not hide Moscow points.');
+assert.notStrictEqual(viewportMessage(), 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.', 'No false empty state during camera transition.');
+renderMarkers(points);
+assert.strictEqual(providerMarkers.length, 3, 'Provider must receive full marker dataset.');
+
+providerBounds = '37.50,55.65,38.00,55.95';
+assert.strictEqual(syncCurrentProviderBounds(), true, 'Provider getBounds result must sync after fitToMarkers/focusPoint.');
+assert.strictEqual(boundsGeneration, pointsGeneration, 'Synced provider bounds must be tied to current generation.');
+assert.strictEqual(visiblePickupPoints().length, 3, 'Fresh Moscow fit bounds must show Moscow points.');
+
+selectedPoint = moscowA;
+const fetchBeforePan = fetchCount;
+const markerRendersBeforePan = markerRenderCount;
+const focusBeforePan = focusCount;
+onBoundsChange('37.50,55.65,37.75,55.85');
+assert.deepStrictEqual(visiblePickupPoints().map((point) => point.id), ['A', 'B'], 'Narrow Moscow bounds must show only visible points.');
+onBoundsChange('37.85,55.85,38.00,55.95');
+assert.deepStrictEqual(visiblePickupPoints().map((point) => point.id), ['C'], 'Pan/zoom bounds must locally replace visible side-list points.');
+assert.strictEqual(fetchCount, fetchBeforePan, 'Bounds changes must not perform REST fetches.');
+assert.strictEqual(markerRenderCount, markerRendersBeforePan, 'Bounds changes must not rerender full marker dataset.');
+assert.strictEqual(focusCount, focusBeforePan, 'Bounds changes must not refocus the selected point.');
+assert.strictEqual(selectedPoint.id, 'A', 'Selected point must remain selected when it leaves the viewport.');
+
+onBoundsChange('30.00,50.00,31.00,51.00');
+assert.strictEqual(visiblePickupPoints().length, 0, 'Empty viewport with current-generation bounds must be allowed.');
+assert.strictEqual(viewportMessage(), 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.', 'Empty viewport message appears only for current-generation bounds.');
+JS
+, 'Runtime JS smoke for pickup viewport bounds generation must pass' );
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Pickup endpoint must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not change order totals.' );
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );
@@ -1403,6 +1761,228 @@ try {
 	recalc_smoke_assert( false, 'Geocode endpoint must reject bad nonce.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Geocode endpoint must require nonce.' );
+}
+
+$yandex_order = new WdcRecalcOrder( 126, array() );
+$yandex_rate = array(
+	'id' => 'yandex_pickup',
+	'rate_id' => 'yandex_pickup',
+	'carrier_key' => 'yandex_delivery',
+	'service_key' => 'yandex_delivery',
+	'service_title' => 'Яндекс.Доставка',
+	'label' => 'Яндекс до ПВЗ',
+	'delivery_type' => DeliveryType::PICKUP,
+	'cost' => 500,
+	'delivery_comment' => '2 дня',
+);
+$missing_yandex_station = $replacement->save(
+	$yandex_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_rate,
+		'selected_pickup_point' => array( 'carrier_key' => 'yandex_delivery', 'pickup_family' => 'yandex_delivery:pickup' ),
+	)
+);
+recalc_smoke_assert( false === $missing_yandex_station['success'], 'Yandex pickup save must reject a point without a station id.' );
+$saved_yandex_station = $replacement->save(
+	$yandex_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_rate,
+		'selected_pickup_point' => array(
+			'carrier_key' => 'yandex_delivery',
+			'pickup_family' => 'yandex_delivery:pickup',
+			'platform_station_id' => 'YANDEX-ORDER-1',
+			'point_code' => 'forged-code',
+			'point_address' => 'Новосибирск, Ленина, 1',
+		),
+	)
+);
+recalc_smoke_assert( true === $saved_yandex_station['success'] && 'YANDEX-ORDER-1' === (string) ( $yandex_order->meta['_wdc_pickup_point_code'] ?? '' ) && 'YANDEX-ORDER-1' === (string) ( $yandex_order->meta['_wdc_yandex_delivery_pickup_platform_station_id'] ?? '' ), 'Yandex pickup save must canonicalize point_code to platform_station_id and persist the checkout-compatible alias.' );
+$saved_yandex_courier = $replacement->save(
+	$yandex_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => array_merge( $yandex_rate, array( 'id' => 'yandex_courier', 'rate_id' => 'yandex_courier', 'delivery_type' => DeliveryType::COURIER, 'label' => 'Яндекс до двери' ) ),
+		'normalized_shipping_address' => array( 'address_1' => 'Ленина, 2', 'normalized' => true, 'country' => 'RU' ),
+	)
+);
+recalc_smoke_assert( true === $saved_yandex_courier['success'] && '' === (string) ( $yandex_order->meta['_wdc_yandex_delivery_pickup_platform_station_id'] ?? '' ), 'Yandex courier save must clear Yandex pickup meta.' );
+
+$yandex_days_audit = array(
+	array(
+		'applied' => true,
+		'action_type' => 'change_delivery_days',
+		'rule_name' => 'Срок доставки',
+		'operation' => 'increase',
+		'operation_value' => 2,
+		'operation_base' => 'calendar_days',
+		'after_value' => array( 'min_days' => 10, 'max_days' => 10 ),
+	),
+);
+$yandex_admin_rate = array(
+	'id' => 'yandex_courier',
+	'rate_id' => 'yandex_courier',
+	'carrier_key' => 'yandex_delivery',
+	'service_key' => 'yandex_delivery',
+	'service_title' => 'Яндекс.Доставка',
+	'label' => 'Яндекс до двери - 8 дней',
+	'delivery_type' => DeliveryType::COURIER,
+	'cost' => 662.0,
+	'api_base_price_rub' => 535.0,
+	'pricing_total_kopecks' => 53500,
+	'delivery_days' => array( 'min_days' => 10, 'max_days' => 10 ),
+	'original_delivery_days' => array( 'min_days' => 8, 'max_days' => 8 ),
+	'delivery_comment' => '10 дней',
+	'rules_source' => 'rule_engine',
+	'rules_audit' => $yandex_days_audit,
+	'rate_meta' => array(
+		'api_base_price_rub' => 535.0,
+		'pricing_total_kopecks' => 53500,
+		'delivery_min_days' => 8,
+		'delivery_max_days' => 8,
+		'api_delivery_days' => 8,
+		'original_delivery_days' => array( 'min_days' => 8, 'max_days' => 8 ),
+		'rules_source' => 'rule_engine',
+		'rules_audit' => $yandex_days_audit,
+	),
+);
+$yandex_admin_order = new WdcRecalcOrder( 128, array() );
+$yandex_admin_order->shipping_items = array();
+$yandex_admin_result = $replacement->save(
+	$yandex_admin_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_admin_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+$yandex_admin_calc = $yandex_admin_order->meta['_wdc_delivery_calculation_data'] ?? array();
+$yandex_admin_formula = $yandex_admin_calc['rules']['formula_visualization'] ?? array();
+$yandex_admin_title = (string) ( $yandex_admin_order->shipping_items['method_title'] ?? '' );
+recalc_smoke_assert( true === $yandex_admin_result['success'], 'Yandex admin courier save must succeed for 535 -> 662 regression rate.' );
+recalc_smoke_assert( 535.0 === (float) ( $yandex_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_admin_calc['result']['final_price_rub'] ?? 0 ), 'Yandex admin persistence must keep API base 535 separate from final 662.' );
+recalc_smoke_assert( 'Яндекс до двери - 10 дней' === $yandex_admin_title && ! str_contains( $yandex_admin_title, '8 дней' ) && 1 === substr_count( $yandex_admin_title, '10 дней' ) && ! str_contains( $yandex_admin_title, 'Array' ) && ! str_contains( $yandex_admin_title, '8 дней - 10 дней' ), 'Yandex admin method title must replace original 8 days with final 10 days without duplication.' );
+recalc_smoke_assert( is_array( $yandex_admin_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_admin_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), '10 дней' ) && 'Итог: 662 руб.' === end( $yandex_admin_formula ), 'Yandex admin formula must persist base price, delivery-days audit and final price.' );
+
+$yandex_final_title_rate = $yandex_admin_rate;
+$yandex_final_title_rate['label'] = 'Яндекс до двери - 10 дней';
+$yandex_final_title_order = new WdcRecalcOrder( 129, array() );
+$yandex_final_title_order->shipping_items = array();
+$yandex_final_title_result = $replacement->save(
+	$yandex_final_title_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_final_title_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_final_title_result['success'] && 'Яндекс до двери - 10 дней' === (string) ( $yandex_final_title_order->shipping_items['method_title'] ?? '' ), 'Yandex admin title already ending with final delivery time must stay unchanged.' );
+
+$yandex_no_days_title_rate = $yandex_admin_rate;
+$yandex_no_days_title_rate['label'] = 'Яндекс до двери';
+$yandex_no_days_title_order = new WdcRecalcOrder( 130, array() );
+$yandex_no_days_title_order->shipping_items = array();
+$yandex_no_days_title_result = $replacement->save(
+	$yandex_no_days_title_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_no_days_title_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_no_days_title_result['success'] && 'Яндекс до двери - 10 дней' === (string) ( $yandex_no_days_title_order->shipping_items['method_title'] ?? '' ), 'Yandex admin title without delivery time must append final delivery time once.' );
+
+$yandex_pricing_total_rate = $yandex_admin_rate;
+unset( $yandex_pricing_total_rate['api_base_price_rub'], $yandex_pricing_total_rate['rate_meta']['api_base_price_rub'] );
+$yandex_pricing_total_order = new WdcRecalcOrder( 131, array() );
+$yandex_pricing_total_order->shipping_items = array();
+$yandex_pricing_total_result = $replacement->save(
+	$yandex_pricing_total_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_pricing_total_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_pricing_total_result['success'] && 535.0 === (float) ( $yandex_pricing_total_order->meta['_wdc_delivery_calculation_data']['api']['api_base_price_rub'] ?? 0 ), 'Yandex admin persistence must use pricing_total_kopecks fallback before final cost.' );
+
+$yandex_money_array_rate = $yandex_admin_rate;
+unset( $yandex_money_array_rate['api_base_price_rub'], $yandex_money_array_rate['pricing_total_kopecks'], $yandex_money_array_rate['rate_meta']['api_base_price_rub'], $yandex_money_array_rate['rate_meta']['pricing_total_kopecks'] );
+$yandex_money_array_rate['original_cost'] = Money::from_rubles( 535 )->to_array();
+$yandex_money_array_order = new WdcRecalcOrder( 132, array() );
+$yandex_money_array_order->shipping_items = array();
+$yandex_money_array_result = $replacement->save(
+	$yandex_money_array_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $yandex_money_array_rate,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $yandex_money_array_result['success'] && 535.0 === (float) ( $yandex_money_array_order->meta['_wdc_delivery_calculation_data']['api']['api_base_price_rub'] ?? 0 ), 'Yandex admin persistence must safely read Money::to_array() original_cost as 535 rubles.' );
+
+$yandex_db = new WdcRecalcLocationDb();
+$yandex_db->yandex_location_mapping_v2 = array(
+	array( 'location_id' => 501, 'yandex_geo_id' => 77, 'status' => 'mapped' ),
+	array( 'location_id' => 92468, 'yandex_geo_id' => 88, 'status' => 'mapped' ),
+);
+$yandex_db->yandex_delivery_pickup_points_v2 = array(
+	array( 'platform_station_id' => 'YANDEX-ADDRESS', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов Яндекс Маркета', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Ленина, 10', 'yandex_geo_id' => 77, 'active' => 1 ),
+	array( 'platform_station_id' => 'YANDEX-TITLE', 'operator_id' => '5post', 'type' => 'terminal', 'name' => '5Post', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Советская, 2', 'yandex_geo_id' => 77, 'active' => 1 ),
+	array( 'platform_station_id' => 'TECHNICAL-ID', 'operator_id' => '5post', 'type' => 'pickup_point', 'name' => '5Post', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Красный проспект, 1', 'yandex_geo_id' => 88, 'active' => 1 ),
+	array( 'platform_station_id' => 'YANDEX-TERMINAL', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Постамат', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Гоголя, 7', 'yandex_geo_id' => 88, 'active' => 1 ),
+	array( 'platform_station_id' => 'YANDEX-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов партнёра', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Фрунзе, 12', 'yandex_geo_id' => 88, 'active' => 1 ),
+);
+$yandex_search_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$yandex_search = new ReflectionMethod( $yandex_search_controller, 'yandex_pickup_points' );
+$yandex_search->setAccessible( true );
+$yandex_location_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), '', 'location' );
+$yandex_address_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), 'Ленина', 'search' );
+$yandex_title_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), '5 post', 'search' );
+$yandex_station_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), 'yandex-title', 'search' );
+recalc_smoke_assert( 2 === count( $yandex_location_points ) && 1 === count( $yandex_address_points ) && 'YANDEX-ADDRESS' === (string) ( $yandex_address_points[0]['platform_station_id'] ?? '' ), 'Yandex location mode must return all local points, while address search must return only a match.' );
+recalc_smoke_assert( 'Пункт выдачи Яндекс.Маркет' === (string) ( $yandex_address_points[0]['point_title'] ?? '' ), 'Yandex market pickup point must use checkout presentation title without technical code.' );
+recalc_smoke_assert( 1 === count( $yandex_title_points ) && 'YANDEX-TITLE' === (string) ( $yandex_title_points[0]['platform_station_id'] ?? '' ) && 1 === count( $yandex_station_points ), 'Yandex search must match presentation title and platform_station_id case-insensitively.' );
+$yandex_first_preview_points = $yandex_search->invoke( $yandex_search_controller, $first_preview['location'] ?? array(), '', 'location' );
+recalc_smoke_assert( count( $yandex_first_preview_points ) >= 3, 'Yandex pickup helper must find points for the first preview resolved location payload.' );
+$yandex_points_by_station = array_column( $yandex_first_preview_points, null, 'platform_station_id' );
+recalc_smoke_assert( '5 Post (Пятерочка)' === (string) ( $yandex_points_by_station['TECHNICAL-ID']['point_title'] ?? '' ) && '' === (string) ( $yandex_points_by_station['TECHNICAL-ID']['display_code'] ?? 'not-empty' ) && 'Цена будет пересчитана, иногда сюда получается дороже!' === (string) ( $yandex_points_by_station['TECHNICAL-ID']['presentation_comment'] ?? '' ), 'Yandex 5Post formatter payload must expose checkout title/comment and keep display_code empty.' );
+recalc_smoke_assert( 'Постамат Яндекса' === (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['point_title'] ?? '' ) && str_contains( (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['presentation_comment'] ?? '' ), '2-3 дня' ), 'Yandex terminal formatter payload must expose checkout terminal title and storage warning comment.' );
+recalc_smoke_assert( 'Партнёрский пункт выдачи' === (string) ( $yandex_points_by_station['YANDEX-PARTNER']['point_title'] ?? '' ), 'Yandex market partner pickup payload must use checkout presentation title without technical code.' );
+$GLOBALS['wdc_recalc_orders'][127] = $first_preview_order;
+$yandex_fallback_controller = new OrderDeliveryRecalculationAdminController( $first_preview_service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$first_preview_resolved_location = $first_preview_service->resolved_location_payload( $first_preview_order, null );
+recalc_smoke_assert( 92468 === (int) ( $first_preview_resolved_location['location_id'] ?? 0 ), 'Resolved location payload helper must return location_id=92468 without running pricing.' );
+$yandex_fallback_points_direct = $yandex_search->invoke( $yandex_fallback_controller, $first_preview_resolved_location, '', 'location' );
+recalc_smoke_assert( count( $yandex_fallback_points_direct ) >= 3, 'Yandex fallback controller must find points for resolved location payload before ajax wrapping.' );
+$_POST = array( 'order_id' => 127, 'nonce' => 'ok', 'selected_location' => wp_json_encode( array( 'label' => 'Новосибирск', 'fias_id' => 'dddddddd-dddd-dddd-dddd-dddddddddddd' ) ), 'selected_rate' => wp_json_encode( array( 'carrier_key' => 'yandex_delivery', 'service_key' => 'yandex_delivery' ) ), 'mode' => 'location', 'query' => '' );
+$array_from_request = new ReflectionMethod( $yandex_fallback_controller, 'array_from_request' );
+$array_from_request->setAccessible( true );
+$posted_yandex_rate = $array_from_request->invoke( $yandex_fallback_controller, 'selected_rate' );
+recalc_smoke_assert( 'yandex_delivery' === (string) ( $posted_yandex_rate['carrier_key'] ?? '' ), 'Yandex fallback ajax smoke must post selected_rate.carrier_key=yandex_delivery.' );
+$selected_location_from_request = new ReflectionMethod( $yandex_fallback_controller, 'selected_location_from_request' );
+$selected_location_from_request->setAccessible( true );
+$posted_yandex_location = $selected_location_from_request->invoke( $yandex_fallback_controller );
+$resolved_yandex_location_for_ajax = $first_preview_service->resolved_location_payload( $first_preview_order, is_array( $posted_yandex_location ) && array() !== $posted_yandex_location ? $posted_yandex_location : null );
+if ( (int) ( $resolved_yandex_location_for_ajax['location_id'] ?? 0 ) <= 0 ) {
+	$resolved_yandex_location_for_ajax = $first_preview_service->resolved_location_payload( $first_preview_order, null );
+}
+$merge_resolved_location_payload = new ReflectionMethod( $yandex_fallback_controller, 'merge_resolved_location_payload' );
+$merge_resolved_location_payload->setAccessible( true );
+$merged_yandex_location_for_ajax = $merge_resolved_location_payload->invoke( $yandex_fallback_controller, is_array( $posted_yandex_location ) ? $posted_yandex_location : array(), $resolved_yandex_location_for_ajax );
+recalc_smoke_assert( 92468 === (int) ( $merged_yandex_location_for_ajax['location_id'] ?? 0 ), 'Yandex fallback ajax merge must produce location_id=92468 before pickup search.' );
+recalc_smoke_assert( count( $yandex_search->invoke( $yandex_fallback_controller, $merged_yandex_location_for_ajax, '', 'location' ) ) >= 3, 'Yandex fallback ajax merged location must find destination points before endpoint call.' );
+$GLOBALS['wdc_recalc_current_can'] = true;
+$GLOBALS['wdc_recalc_nonce_ok'] = true;
+try {
+	$yandex_fallback_controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'Yandex fallback pickup endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$fallback_points = $response->data['points'] ?? array();
+	$fallback_station_ids = array_column( $fallback_points, 'platform_station_id' );
+	recalc_smoke_assert( $response->success && count( $fallback_points ) >= 3 && in_array( 'TECHNICAL-ID', $fallback_station_ids, true ), 'Yandex pickup endpoint must resolve original order location server-side when JS payload has no numeric id. Got stations: ' . implode( ',', array_map( 'strval', $fallback_station_ids ) ) );
+	recalc_smoke_assert( $first_preview_before_meta === $first_preview_order->meta, 'Yandex pickup endpoint fallback must not write resolved location_id to order meta.' );
 }
 
 echo "Order delivery recalculation smoke OK\n";

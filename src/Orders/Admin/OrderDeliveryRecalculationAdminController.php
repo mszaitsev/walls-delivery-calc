@@ -7,6 +7,10 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
@@ -39,11 +43,15 @@ final class OrderDeliveryRecalculationAdminController {
 		private ?OrderDeliveryAddressNormalizationService $address_normalization = null,
 		private ?OrderDeliveryReplacementService $replacement = null,
 		private ?CdekDeliveryPointService $cdek_points = null,
-		private ?DpdPickupPointService $dpd_points = null
+		private ?DpdPickupPointService $dpd_points = null,
+		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
+		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null,
+		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null
 	) {
 		$this->pickup_points = $this->pickup_points ?? new RussianPostPickupPointRepository();
 		$this->address_normalization = $this->address_normalization ?? new OrderDeliveryAddressNormalizationService();
 		$this->replacement = $this->replacement ?? new OrderDeliveryReplacementService( new OrderShipmentRepository() );
+		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 	}
 
 	public function register(): void {
@@ -161,6 +169,16 @@ final class OrderDeliveryRecalculationAdminController {
 					'points' => array_map( array( $this, 'pickup_point_payload' ), $rows ),
 				)
 			);
+		}
+		if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
+			if ( $this->positive_location_id( $location ) <= 0 ) {
+				$resolved_location = $this->service->resolved_location_payload( $order, array() === $location ? null : $location );
+				if ( $this->positive_location_id( $resolved_location ) <= 0 && array() !== $location ) {
+					$resolved_location = $this->service->resolved_location_payload( $order, null );
+				}
+				$location = $this->merge_resolved_location_payload( $location, $resolved_location );
+			}
+			wp_send_json_success( array( 'points' => $this->yandex_pickup_points( $location, $query, $mode ) ) );
 		}
 		if ( 'cdek' === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
 			$rows = $this->cdek_pickup_points( $location, $query, $mode, $limit );
@@ -440,6 +458,46 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	/**
+	 * @param array<string,mixed> $location
+	 */
+	private function positive_location_id( array $location ): int {
+		foreach ( array( 'id', 'location_id' ) as $key ) {
+			$value = $location[ $key ] ?? null;
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
+	}
+
+	/**
+	 * @param array<string,mixed> $current
+	 * @param array<string,mixed> $resolved
+	 * @return array<string,mixed>
+	 */
+	private function merge_resolved_location_payload( array $current, array $resolved ): array {
+		if ( array() === $resolved ) {
+			return $current;
+		}
+		$merged = $resolved;
+		foreach ( $current as $key => $value ) {
+			if ( null !== $value && '' !== $value ) {
+				$merged[ $key ] = $value;
+			}
+		}
+		$current_id = $this->positive_location_id( $current );
+		$resolved_id = $this->positive_location_id( $resolved );
+		$location_id = $current_id > 0 ? $current_id : $resolved_id;
+		if ( $location_id > 0 ) {
+			$merged['id'] = $location_id;
+			$merged['location_id'] = $location_id;
+		}
+
+		return $merged;
+	}
+
+	/**
 	 * @param array<string,mixed> $row
 	 * @return array<string,mixed>
 	 */
@@ -627,6 +685,41 @@ final class OrderDeliveryRecalculationAdminController {
 	 * @param array<string,mixed> $location
 	 * @return array<int,array<string,mixed>>
 	 */
+	private function yandex_pickup_points( array $location, string $query, string $mode ): array {
+		if ( ! $this->yandex_points instanceof YandexDeliveryPickupPointV2Repository || ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
+			return array();
+		}
+		$location_id = (int) ( $location['id'] ?? $location['location_id'] ?? 0 );
+		if ( $location_id <= 0 ) {
+			return array();
+		}
+		$geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $this->yandex_location_mapping->geo_ids_for_location( $location_id ) ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		if ( array() === $geo_ids ) {
+			return array();
+		}
+
+		$points = array_map( fn( array $row ): array => $this->yandex_formatter->format( $row ), $this->yandex_points->destination_pickup_points_by_geo_ids( $geo_ids ) );
+		if ( 'search' !== $mode || '' === trim( $query ) ) {
+			return $points;
+		}
+
+		$query = $this->normalize_search_text( $query );
+		return array_values(
+			array_filter(
+				$points,
+				function ( array $point ) use ( $query ): bool {
+					$fields = array( 'address', 'point_address', 'full_address', 'point_title', 'card_title', 'display_title', 'title', 'point_name', 'name', 'platform_station_id' );
+					foreach ( $fields as $field ) {
+						if ( str_contains( $this->normalize_search_text( (string) ( $point[ $field ] ?? '' ) ), $query ) ) {
+							return true;
+						}
+					}
+
+					return false;
+				}
+			)
+		);
+	}
 	private function pickup_rows_for_location( array $location, int $limit, string $postcode ): array {
 		foreach ( array( 'ids', 'city_region', 'city' ) as $match ) {
 			$rows = $this->pickup_points->find_rows_by_location_context(

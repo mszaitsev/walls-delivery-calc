@@ -2,6 +2,12 @@
 
 As of version 0.20.0, checkout is part of the `src/`-only runtime. The legacy `includes/*` shipping method and demo runtime fallback have been removed; demo datasets used by smoke tests live under `tests/fixtures/demo`.
 
+## Calculation persistence 0.105.8
+
+Checkout order persistence keeps carrier API price and final rule-adjusted price as separate values. `api_base_price_rub` is the canonical API/base field; for Yandex rates, `pricing_total_kopecks / 100` is used as a fallback before `original_cost`, carrier-specific legacy API fields or final cost. `original_cost` may be a `Money::to_array()` payload with `amount_kopecks` and `currency`; it is decoded as rubles instead of being cast to float.
+
+`OrderShippingMetaPersister` regenerates `rules.formula_visualization` from the persisted rules audit when necessary. `change_delivery_days` audit rows are kept alongside price rules, so checkout-created orders store the same delivery-days rule line as admin replacement while keeping `result.final_price_rub` separate from `api.api_base_price_rub`.
+
 ## WooCommerce integration flow
 
 The new checkout path is registered as a WooCommerce shipping method with id `wdc_platform_delivery` and title `WDC Platform Delivery`. Runtime flow:

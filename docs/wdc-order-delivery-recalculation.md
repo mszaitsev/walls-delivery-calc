@@ -1,5 +1,51 @@
 # WDC Order Delivery Recalculation
 
+Version: 0.105.11.
+
+## Статус 0.105.11
+
+- Viewport bounds в admin picker теперь привязаны к поколению загруженного набора ПВЗ: `pointsGeneration` увеличивается при каждом новом dataset, а `boundsGeneration` показывает, к какому dataset относятся текущие bounds.
+- Initial bounds provider-а, пришедшие до загрузки точек (например fallback-центр Новосибирска), инвалидируются при загрузке ПВЗ другого города. Пока bounds текущего поколения еще не получены, боковой список не фильтруется старым viewport и не показывает ложное сообщение `На текущем участке карты ПВЗ не видны...`.
+- Оба map provider (`Yandex`, `Leaflet`) получили read-only `getBounds()` с тем же converter-ом `west,south,east,north`, который используется в `boundschange`. После `renderMarkers()` и camera action (`setCenter`, `focusPoint`, `fitToMarkers`) admin picker делает deferred sync текущих provider bounds.
+- Initial center карты выбирается из координат уже выбранного ПВЗ, затем preview point, затем selected location, и только потом используется fallback Новосибирска.
+- Pan/zoom остается полностью локальным: REST не вызывается, полный marker dataset не перерисовывается, выбранный ПВЗ не сбрасывается и confirm button не отключается.
+
+## Статус 0.105.10
+
+- Admin picker ПВЗ хранит полный набор загруженных точек в `points` и передает именно его в map provider, поэтому маркеры и кластеризация остаются полными для выбранного населенного пункта.
+- Боковой список фильтруется локально по текущему viewport карты. Оба provider уже отдают bounds в checkout-compatible формате `west,south,east,north`; admin JS нормализует этот формат и показывает в списке только точки с валидными `lat/lng`, попавшие в bounds.
+- Pan/zoom вызывает только локальный rerender списка и статус `Показано X из Y ПВЗ`; REST-запросы при движении карты не выполняются. Если в текущем viewport нет точек, показывается сообщение `На текущем участке карты ПВЗ не видны...`, а не ошибка отсутствия ПВЗ в городе.
+- Выбранный/preview ПВЗ не сбрасывается, если он вышел за пределы viewport: confirm button остается доступной, active marker сохраняется, а строка снова появляется при возврате карты к точке.
+- `presentation_comment` в боковой карточке теперь находится в `.wdc-order-delivery-pickup-picker__heading` сразу после title и перед адресом; контейнер отображается вертикально, popup markup не менялся.
+
+## Статус 0.105.9
+
+- `OrderDeliveryRecalculationService` возвращает в preview `location.id` и `location.location_id` из read-only resolved `customer_context.location_id` исходного заказа, если explicit override не выбран. `is_override` по-прежнему выставляется только от явного `location_override`; найденный id не записывается в order meta.
+- Admin JS после `renderPreview()` синхронизирует `payload.data.location` в `selectedLocations`: полный current/selected payload не затирается, но missing `id/location_id` дополняется resolved значением. Поэтому первый preview исходного города сразу дает последующему Yandex pickup search numeric location id.
+- `ajax_pickup_search()` для Яндекса имеет безопасный fallback: если старый/неполный JS payload пришел без numeric id, controller запрашивает preview-compatible location через `OrderDeliveryRecalculationService::resolved_location_payload()` и затем ищет ПВЗ по тому же Yandex mapping. Полный pricing preview для этого не запускается.
+- Admin popup и боковые карточки Яндекс ПВЗ используют checkout presentation formatter fields: `point_title`/`card_title`/`display_title`, `presentation_comment`, address, description и storage notice. `platform_station_id`/`point_code` остаются в payload для identity/save/pricing, но station id и строка `Код/индекс:` для Яндекса визуально не выводятся.
+
+## Статус 0.105.8
+
+- Admin replacement сохраняет `api_base_price_rub` как исходную цену API до правил, а `result.final_price_rub` как итог после Rule Engine. Для Яндекса `pricing_total_kopecks / 100` используется как fallback, если явного `api_base_price_rub` нет; `original_cost` в форме `Money::to_array()` разбирается безопасно.
+- `rules.formula_visualization` строится от исходной API-цены и включает `change_delivery_days`: например, формула для 535 -> 662 начинается с `Базовая цена API: 535 руб.`, содержит строку правила срока и заканчивается `Итог: 662 руб.`.
+- `OrderDeliveryReplacementService` заменяет исходный suffix срока в title на финальный: `Яндекс до двери - 8 дней` сохраняется как `Яндекс до двери - 10 дней`; уже финальный title не дублируется, grouped/tariff-selector сценарии других служб не меняются.
+
+## Статус 0.105.7
+
+- `OrderQuoteRequestMapper` для admin preview восстанавливает numeric `location_id` исходного заказа read-only через внедренный `LocationRepository`, если explicit selected location и сохраненный numeric id отсутствуют.
+- Приоритет lookup: explicit selected location id, сохраненный numeric id, exact `fias_id`, затем `city_fias_id` только при единственном активном совпадении, затем exact positive GAR (`gar_object_id`). Неоднозначный `city_fias_id` не выбирает первую случайную строку.
+- Первый preview исходного города для Яндекса теперь получает numeric `location_id` без ручной смены населенного пункта, поэтому `Яндекс до ПВЗ` доступен сразу и использует representative ПВЗ. Preview не записывает найденный id в order meta.
+
+## Статус 0.105.0
+
+Яндекс.Доставка подключена к существующему блоку WooCommerce заказа `Калькулятор доставок` без отдельного order calculator или API client.
+
+- Preview идет через общий `OrderQuoteRequestMapper -> CheckoutOrchestrator -> YandexDeliveryCarrier -> YandexDeliveryPricingRequestBuilder -> pricing-calculator` runtime и показывает варианты `Яндекс до ПВЗ` и `Яндекс до двери`.
+- Общий admin picker ПВЗ получает активные destination rows из локальной Yandex v2 базы по рабочим `yandex_geo_id` выбранного населенного пункта и форматирует их тем же `YandexDeliveryCheckoutPickupPointFormatter`, что checkout.
+- После явного выбора ПВЗ admin JS запускает fresh preview; mapper передает checkout-compatible `pickup_selection` и `pickup_selections['yandex_delivery:pickup']`, поэтому pickup pricing использует конкретный `platform_station_id`.
+- Save переиспользует общий replacement flow, пишет canonical `_wdc_pickup_*`, `_wdc_pickup_platform_station_id` и Yandex aliases `_wdc_yandex_delivery_pickup_*`; для courier pickup meta очищаются.
+
 Version: 0.69.3.
 
 ## Статус 0.69.3

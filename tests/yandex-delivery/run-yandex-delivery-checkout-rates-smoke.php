@@ -32,10 +32,15 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Rules\Domain\Rule;
+use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
+use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'WDC_SECRET_KEY' ) || define( 'WDC_SECRET_KEY', 'yandex-checkout-rates-smoke-key' );
@@ -285,6 +290,7 @@ yandex_checkout_assert( DeliveryType::PICKUP === $pickup_delivery_rate->delivery
 $mapped_yandex_pickup = ( new WooCommerceRateMapper() )->map( $pickup_delivery_rate );
 yandex_checkout_assert( true === ( $mapped_yandex_pickup['meta_data']['requires_pickup_point'] ?? null ) && YandexDeliverySettings::CARRIER_KEY . ':pickup' === (string) ( $mapped_yandex_pickup['meta_data']['pickup_family'] ?? '' ) && DeliveryType::PICKUP === (string) ( $mapped_yandex_pickup['meta_data']['delivery_type'] ?? '' ) && YandexDeliverySettings::CARRIER_KEY === (string) ( $mapped_yandex_pickup['meta_data']['carrier_key'] ?? '' ) && YandexDeliveryCarrier::PICKUP_RATE_ID === (string) ( $mapped_yandex_pickup['meta_data']['rate_id'] ?? '' ), 'WooCommerceRateMapper must preserve Yandex pickup point meta for checkout rendering.' );
 yandex_checkout_assert( 23790 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ) && 46360 === (int) ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ), 'Yandex checkout rates must keep pricing-calculator prices in rate meta.' );
+yandex_checkout_assert( 237.9 === (float) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['api_base_price_rub'] ?? 0 ) && 7 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['api_delivery_days'] ?? 0 ), 'Yandex checkout rates must preserve API base price and original delivery days before rules.' );
 yandex_checkout_assert( 'checkout_address' === (string) ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_pricing_source'] ?? '' ) && false === ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['courier_fallback_used'] ?? null ), 'Successful Yandex courier checkout pricing must use the real checkout address without fallback.' );
 yandex_checkout_assert( 23800 === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->price->get_kopecks() && 46400 === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->price->get_kopecks(), 'Yandex checkout final prices must use regular delivery-service post-processing.' );
 yandex_checkout_assert( 'representative' === (string) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pickup_source'] ?? '' ), 'Yandex pickup pricing must mark representative fallback before buyer selection.' );
@@ -294,6 +300,36 @@ yandex_checkout_assert( 'DST-1' === (string) ( $first_pickup_payload['destinatio
 foreach ( $rates as $rate ) {
 	yandex_checkout_assert( str_contains( $rate->title, ' - ' ) && 1 === preg_match( '/- [0-9]+ (день|дня|дней)$/u', $rate->title ), 'Yandex rate title must always use "Название - срок" format with pricing delivery days.' );
 }
+
+$pricing_535_http = new YandexCheckoutRatesFakeHttp( array(
+	new YandexDeliveryApiResponse( 200, '{"pricing_total":"535 RUB","delivery_days":8}' ),
+) );
+$carrier_535 = new YandexDeliveryCarrier( $yandex_settings, new YandexDeliveryApiClient( $yandex_settings, $pricing_535_http ), new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] ), new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, new YandexDeliveryPricingRequestBuilder(), new YandexDeliveryPricingResponseParser() );
+$quote_535 = $carrier_535->quote( yandex_checkout_request( array( 'delivery_type' => DeliveryType::PICKUP ) ) );
+$rate_535 = $quote_535->rates[0] ?? null;
+yandex_checkout_assert( null !== $rate_535 && 535.0 === (float) ( $rate_535->meta['api_base_price_rub'] ?? 0 ) && 53500 === (int) ( $rate_535->meta['pricing_total_kopecks'] ?? 0 ) && 8 === (int) ( $rate_535->meta['api_delivery_days'] ?? 0 ), 'Yandex carrier meta must keep API base price, pricing kopecks and original API delivery days.' );
+$rule_context = new RuleEvaluationContext(
+	Money::from_rubles( 1000 ),
+	Money::from_rubles( 535 ),
+	Package::from_items( array( new PackageItem( 'SKU-RULE', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000, 20, 15, 10 ) ), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
+	new Address( country_code: 'RU', city: 'Москва', street: 'Тверская', house: '1', raw_address: 'Москва, Тверская 1' ),
+	DeliveryType::PICKUP,
+	'card',
+	'2026-05-21',
+	array(),
+	array( 'original_delivery_days' => 8 )
+);
+$applied_535 = ( new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ) )->apply(
+	$rate_535,
+	$rule_context,
+	array(
+		new Rule( null, 'Увеличить цену Яндекс', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 127, RuleOperationBases::RUBLES, false, false ),
+		new Rule( null, 'Срок доставки', true, 20, 'default', '', RuleActionTypes::CHANGE_DELIVERY_DAYS, RuleOperationTypes::INCREASE, 2, RuleOperationBases::CALENDAR_DAYS, false, false ),
+	)
+);
+$final_535 = $applied_535['rate'];
+yandex_checkout_assert( 535.0 === (float) ( $final_535->meta['api_base_price_rub'] ?? 0 ) && 66200 === $final_535->price->get_kopecks() && 53500 === ( $final_535->original_cost?->get_kopecks() ?? 0 ), 'Yandex rate after rules must keep API base/original cost at 535 and final price at 662.' );
+yandex_checkout_assert( 8 === ( $final_535->original_delivery_days?->min_days ?? 0 ) && 10 === $final_535->delivery_days->min_days, 'Yandex rate after rules must keep original 8 days and final 10 days.' );
 
 $settings->set_setting( (int) $service->id, YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY, 'Самовывоз Яндекс', 'string' );
 $settings->set_setting( (int) $service->id, YandexDeliverySettings::COURIER_METHOD_TITLE_KEY, 'Курьер Яндекс', 'string' );

@@ -184,7 +184,7 @@ final class OrderShippingMetaPersister {
 	private function delivery_calculation_data( array $rate, array $order_meta ): array {
 		$rate_meta   = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
 		$destination = $this->calculation_destination_data( $rate_meta, $order_meta );
-		$api         = $this->calculation_api_data( $rate_meta );
+		$api         = $this->calculation_api_data( $rate, $rate_meta );
 		$result      = $this->calculation_result_data( $rate, $rate_meta );
 
 		return array_filter(
@@ -287,14 +287,14 @@ final class OrderShippingMetaPersister {
 	 * @param array<string,mixed> $rate_meta
 	 * @return array<string,mixed>
 	 */
-	private function calculation_api_data( array $rate_meta ): array {
+	private function calculation_api_data( array $rate, array $rate_meta ): array {
 		$country    = is_array( $rate_meta['country_mapping'] ?? null ) ? $rate_meta['country_mapping'] : array();
 		$api_result = is_array( $rate_meta['api_result'] ?? null ) ? $rate_meta['api_result'] : array();
 		$location   = is_array( $rate_meta['location'] ?? null ) ? $rate_meta['location'] : array();
 
 		return array_filter(
 			array(
-				'api_base_price_rub'      => $this->nullable_float( $rate_meta['api_base_price_rub'] ?? $rate_meta['api_price_with_vat_rub'] ?? null ),
+				'api_base_price_rub'      => $this->base_price( $rate, $rate_meta ),
 				'api_price_has_vat'       => array_key_exists( 'api_price_has_vat', $rate_meta ) ? (bool) $rate_meta['api_price_has_vat'] : null,
 				'api_price_with_vat_rub'  => $this->nullable_float( $rate_meta['api_price_with_vat_rub'] ?? null ),
 				'pay'                     => array_key_exists( 'pay', $rate_meta ) ? (int) $rate_meta['pay'] : null,
@@ -512,6 +512,53 @@ final class OrderShippingMetaPersister {
 				)
 			),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 */
+	private function base_price( array $rate, array $rate_meta ): ?float {
+		$api = is_array( $rate_meta['api'] ?? null ) ? $rate_meta['api'] : array();
+		foreach ( array(
+			$this->nullable_float( $rate_meta['api_base_price_rub'] ?? null ),
+			$this->nullable_float( $rate['api_base_price_rub'] ?? null ),
+			$this->kopecks_value( $rate_meta['pricing_total_kopecks'] ?? null ),
+			$this->kopecks_value( $rate['pricing_total_kopecks'] ?? null ),
+			$this->money_value( $rate['original_cost'] ?? null ),
+			$this->money_value( $rate_meta['original_cost'] ?? null ),
+			$this->nullable_float( $api['api_base_price_rub'] ?? null ),
+			$this->nullable_float( $rate_meta['api_price_with_vat_rub'] ?? null ),
+			$this->nullable_float( $api['api_price_with_vat_rub'] ?? null ),
+			$this->nullable_float( $rate['cost'] ?? null ),
+		) as $value ) {
+			if ( null !== $value ) {
+				return $value;
+			}
+		}
+
+		return null;
+	}
+
+	private function kopecks_value( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value / 100 : null;
+	}
+
+	private function money_value( mixed $value ): ?float {
+		if ( is_array( $value ) ) {
+			if ( is_numeric( $value['amount_kopecks'] ?? null ) ) {
+				return (float) $value['amount_kopecks'] / 100;
+			}
+			if ( is_numeric( $value['amount'] ?? null ) ) {
+				return (float) $value['amount'] / 100;
+			}
+			if ( is_numeric( $value['rubles'] ?? null ) ) {
+				return (float) $value['rubles'];
+			}
+			return null;
+		}
+
+		return is_numeric( $value ) ? (float) $value : null;
 	}
 
 	private function delete_visible_technical_item_meta( object $item ): void {

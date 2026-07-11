@@ -195,6 +195,17 @@ final class LocationRepository {
 		return is_array( $row ) ? $this->row_to_location( $row ) : null;
 	}
 
+	public function find_unique_by_city_fias_id( string $city_fias_id ): ?Location {
+		$normalized = $this->normalize_guid( $city_fias_id );
+		if ( '' === $normalized ) { return null; }
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values( array_filter( $this->test_location_rows(), fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 1 ) && $normalized === $this->normalize_guid( (string) ( $row['city_fias_id'] ?? '' ) ) ) );
+			return 1 === count( $rows ) ? $this->row_to_location( $this->join_region_for_test_double( $rows[0] ) ) : null;
+		}
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type FROM {$this->table_name()} l LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code WHERE l.active = 1 AND LOWER(REPLACE(REPLACE(REPLACE(REPLACE(l.city_fias_id, '-', ''), '{', ''), '}', ''), ' ', '')) = %s LIMIT 2", $normalized ), ARRAY_A );
+		return is_array( $rows ) && 1 === count( $rows ) ? $this->row_to_location( $rows[0] ) : null;
+	}
+
 	public function find_by_kladr_id( string $kladr_id ): ?Location {
 		return $this->find_one( 'kladr_id', trim( $kladr_id ), '%s' );
 	}
