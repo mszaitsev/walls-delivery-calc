@@ -7,8 +7,6 @@ C:.
 |   uninstall.php
 |   walls-delivery-calc.php
 |   
-+---.agents
-+---.codex
 +---assets
 |   +---admin
 |   |       .gitkeep
