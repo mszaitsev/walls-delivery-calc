@@ -1275,6 +1275,9 @@
 		let points = [];
 		let previewPoint = selectedPickupPoints.get( box ) || null;
 		let searchMarker = null;
+		let currentBounds = null;
+		let statusPrefix = '';
+		let boundsRenderFrame = null;
 
 		function close() {
 			if ( provider && provider.destroy ) {
@@ -1292,6 +1295,86 @@
 			return points.find( function ( point ) {
 				return pointId( point ) === id;
 			} ) || null;
+		}
+
+		function normalizeBounds( bbox ) {
+			const values = Array.isArray( bbox ) ? bbox : String( bbox || '' ).split( ',' );
+			if ( values.length < 4 ) {
+				return null;
+			}
+			const west = parseFloat( values[0] );
+			const south = parseFloat( values[1] );
+			const east = parseFloat( values[2] );
+			const north = parseFloat( values[3] );
+			if ( [ west, south, east, north ].some( function ( value ) { return Number.isNaN( value ); } ) ) {
+				return null;
+			}
+			return { west: west, south: south, east: east, north: north };
+		}
+
+		function validPointCoordinates( point ) {
+			return point && point.lat !== null && point.lng !== null && Number.isFinite( parseFloat( point.lat ) ) && Number.isFinite( parseFloat( point.lng ) );
+		}
+
+		function pointInsideBounds( point, bounds ) {
+			bounds = normalizeBounds( bounds );
+			if ( ! bounds || ! validPointCoordinates( point ) ) {
+				return false;
+			}
+			const lat = parseFloat( point.lat );
+			const lng = parseFloat( point.lng );
+			return lng >= bounds.west && lng <= bounds.east && lat >= bounds.south && lat <= bounds.north;
+		}
+
+		function visiblePickupPoints() {
+			if ( ! currentBounds ) {
+				return points;
+			}
+			return points.filter( function ( point ) {
+				return pointInsideBounds( point, currentBounds );
+			} );
+		}
+
+		function viewportCountMessage( visibleCount, totalCount ) {
+			if ( totalCount > 0 && currentBounds && visibleCount <= 0 ) {
+				return 'На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.';
+			}
+			return 'Показано ' + visibleCount + ' из ' + totalCount + ' ПВЗ.';
+		}
+
+		function updateViewportStatus() {
+			if ( ! points.length ) {
+				return;
+			}
+			const visibleCount = visiblePickupPoints().length;
+			const parts = [];
+			if ( statusPrefix ) {
+				parts.push( statusPrefix );
+			}
+			parts.push( viewportCountMessage( visibleCount, points.length ) );
+			if ( ! currentBounds && points.some( function ( point ) { return ! validPointCoordinates( point ); } ) ) {
+				parts.push( 'Часть ПВЗ без координат доступна только в списке.' );
+			}
+			if ( searchMarker ) {
+				parts.push( 'Булавка показывает найденный адрес.' );
+			}
+			status.textContent = parts.join( ' ' );
+		}
+
+		function scheduleBoundsRender( bounds ) {
+			currentBounds = normalizeBounds( bounds );
+			if ( boundsRenderFrame && window.cancelAnimationFrame ) {
+				window.cancelAnimationFrame( boundsRenderFrame );
+			}
+			const render = function () {
+				boundsRenderFrame = null;
+				renderPickupPoints();
+			};
+			if ( window.requestAnimationFrame ) {
+				boundsRenderFrame = window.requestAnimationFrame( render );
+			} else {
+				window.setTimeout( render, 0 );
+			}
 		}
 
 		function renderPopup( point ) {
@@ -1444,13 +1527,9 @@
 						return point.lat !== null && point.lng !== null;
 					} ).length;
 					if ( points.length ) {
-						status.textContent = 'address' === mode && geocodeMessage
-							? geocodeMessage + ' ПВЗ: ' + points.length + '.'
-							: 'Найдено ПВЗ: ' + points.length + ( searchMarker ? '. Булавка показывает найденный адрес.' : '' );
-						if ( withCoordinates < points.length ) {
-							status.textContent += ' Часть ПВЗ без координат доступна только в списке.';
-						}
+						statusPrefix = 'address' === mode && geocodeMessage ? geocodeMessage : '';
 					} else {
+						statusPrefix = '';
 						status.textContent = 'ПВЗ для выбранного населенного пункта не найдены. Попробуйте другой населенный пункт.';
 						if ( 'address' === mode && geocodeMessage ) {
 							status.textContent = geocodeMessage + ' ' + status.textContent;
@@ -1481,9 +1560,16 @@
 				updateConfirmButton();
 				return;
 			}
+			const visiblePoints = visiblePickupPoints();
+			updateViewportStatus();
+			if ( ! visiblePoints.length ) {
+				list.innerHTML = '<p class="description">На текущем участке карты ПВЗ не видны. Отдалите карту или переместите её.</p>';
+				updateConfirmButton();
+				return;
+			}
 			list.innerHTML = [
 				'<div class="wdc-order-delivery-pickup-picker__items">',
-				points.map( function ( point, index ) {
+				visiblePoints.map( function ( point, index ) {
 					const active = previewPoint && pointId( previewPoint ) === pointId( point ) ? ' class="is-active"' : '';
 					const displayCode = pickupPointDisplayCode( point );
 					const presentationComment = pickupPointPresentationComment( point );
@@ -1491,9 +1577,9 @@
 					const commentHtml = presentationComment ? '<em class="wdc-pickup-list__title-comment">' + escapeHtml( presentationComment ) + '</em>' : '';
 					const storageHtml = pickupPointStorageNotice( point ) ? '<em class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</em>' : '';
 					if ( isYandexPickupPoint( point ) ) {
-						return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span><strong>' + title + '</strong>' + commentHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + storageHtml + '</button>';
+						return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span class="wdc-order-delivery-pickup-picker__heading"><strong>' + title + '</strong>' + commentHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + storageHtml + '</button>';
 					}
-					return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span><strong>' + title + '</strong>' + commentHtml + storageHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + '</button>';
+					return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span class="wdc-order-delivery-pickup-picker__heading"><strong>' + title + '</strong>' + commentHtml + storageHtml + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + '</button>';
 				} ).join( '' ),
 				'</div>'
 			].join( '' );
@@ -1561,7 +1647,9 @@
 			provider = providerFactory.create( mapElement, {
 				center: { lat: 55.0302, lng: 82.9204, zoom: 11 },
 				yandexApiKey: config.yandexApiKey || '',
-				onBoundsChange: function () {}
+				onBoundsChange: function ( bounds ) {
+					scheduleBoundsRender( bounds );
+				}
 			} );
 			if ( provider && provider.onPointClick ) {
 				provider.onPointClick( function ( point ) {
