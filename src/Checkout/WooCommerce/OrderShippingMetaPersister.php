@@ -294,7 +294,7 @@ final class OrderShippingMetaPersister {
 
 		return array_filter(
 			array(
-				'api_base_price_rub'      => $this->nullable_float( $rate_meta['api_base_price_rub'] ?? $rate_meta['api_price_with_vat_rub'] ?? null ),
+				'api_base_price_rub'      => $this->nullable_float( $rate_meta['api_base_price_rub'] ?? ( is_numeric( $rate_meta['pricing_total_kopecks'] ?? null ) ? (float) $rate_meta['pricing_total_kopecks'] / 100 : null ) ?? $rate_meta['original_cost'] ?? $rate_meta['api_price_with_vat_rub'] ?? null ),
 				'api_price_has_vat'       => array_key_exists( 'api_price_has_vat', $rate_meta ) ? (bool) $rate_meta['api_price_has_vat'] : null,
 				'api_price_with_vat_rub'  => $this->nullable_float( $rate_meta['api_price_with_vat_rub'] ?? null ),
 				'pay'                     => array_key_exists( 'pay', $rate_meta ) ? (int) $rate_meta['pay'] : null,

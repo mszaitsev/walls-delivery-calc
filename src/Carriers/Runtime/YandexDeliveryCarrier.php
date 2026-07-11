@@ -94,7 +94,7 @@ final class YandexDeliveryCarrier implements CarrierAdapterInterface {
 
 		try {
 			$result = $this->pricing_result( $request, $delivery_type );
-			return $this->build_rate( $delivery_type, $method_title, $result->delivery_time_label(), Money::from_kopecks( $result->price_kopecks ), false, '', array_merge( array( 'pricing_total_kopecks' => $result->price_kopecks, 'delivery_days' => $result->delivery_days ), $this->last_pricing_request_diagnostics ) );
+			return $this->build_rate( $delivery_type, $method_title, $result->delivery_time_label(), Money::from_kopecks( $result->price_kopecks ), false, '', array_merge( array( 'api_base_price_rub' => $result->price_kopecks / 100, 'pricing_total_kopecks' => $result->price_kopecks, 'delivery_days' => $result->delivery_days, 'delivery_min_days' => $result->delivery_days, 'delivery_max_days' => $result->delivery_days, 'api_delivery_days' => $result->delivery_days, 'api_delivery_text' => $result->delivery_time_label() ), $this->last_pricing_request_diagnostics ) );
 		} catch ( Throwable $exception ) {
 			$reason = $this->disabled_reason( $exception, $delivery_type );
 			$this->log_pricing_error( $delivery_type, $exception, $request );

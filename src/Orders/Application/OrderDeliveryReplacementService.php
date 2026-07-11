@@ -777,6 +777,10 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 		$tariff = (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' );
 		$title = '' !== $tariff && ! str_contains( $title, $tariff ) ? $title . ', ' . $tariff : $title;
 		$delivery = (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' );
+		$original = (string) ( $rate['original_delivery_days'] ?? ( $rate['rate_meta']['original_delivery_days'] ?? '' ) );
+		if ( '' !== $delivery && '' !== $original && str_ends_with( $title, $original ) ) {
+			$title = rtrim( substr( $title, 0, -strlen( $original ) ), " -" );
+		}
 		return '' !== $delivery && ! str_contains( $title, $delivery ) ? $title . ' - ' . $delivery : $title;
 	}
 
@@ -797,7 +801,7 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 	private function base_price( array $rate ): float {
 		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
 		$api = is_array( $meta['api'] ?? null ) ? $meta['api'] : array();
-		return (float) ( $rate['api_base_price_rub'] ?? $meta['api_base_price_rub'] ?? $api['api_base_price_rub'] ?? $rate['cost'] ?? 0 );
+		return (float) ( $rate['api_base_price_rub'] ?? $meta['api_base_price_rub'] ?? ( is_numeric( $meta['pricing_total_kopecks'] ?? null ) ? (float) $meta['pricing_total_kopecks'] / 100 : null ) ?? $rate['original_cost'] ?? $api['api_base_price_rub'] ?? $rate['cost'] ?? 0 );
 	}
 
 	private function old_base_price( object $order ): float {
