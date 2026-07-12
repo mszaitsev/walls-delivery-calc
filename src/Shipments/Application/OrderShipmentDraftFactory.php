@@ -38,7 +38,8 @@ final class OrderShipmentDraftFactory {
 		private ?DpdSettings $dpd_settings = null,
 		private ?DpdPickupPointService $dpd_pickup_points = null,
 		private ?DpdShipmentDateResolver $dpd_dates = null,
-		private ?YandexDeliverySettings $yandex_settings = null
+		private ?YandexDeliverySettings $yandex_settings = null,
+		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null
 	) {
 	}
 
@@ -392,22 +393,9 @@ final class OrderShipmentDraftFactory {
 		$pickup_code = DeliveryType::PICKUP === $delivery_type ? (string) ( $pickup_row['point_code'] ?? $base->meta['pickup_point_code'] ?? '' ) : '';
 		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? '' ) );
 		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->normalized_address_from_admin_data( $data, $original_address, CdekSettings::SERVICE_KEY ) : array();
-		$places = array();
-		foreach ( is_array( $data['places'] ?? null ) ? $data['places'] : array() as $index => $row ) {
-			if ( ! is_array( $row ) ) {
-				continue;
-			}
-			$places[] = new ShipmentPlace(
-				$index + 1,
-				$this->whole_number_from_place_row( $row, 'weight_g' ),
-				$this->whole_number_from_place_row( $row, 'length_cm' ),
-				$this->whole_number_from_place_row( $row, 'width_cm' ),
-				$this->whole_number_from_place_row( $row, 'height_cm' ),
-				Money::from_kopecks( 0 ),
-				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
-			);
-		}
-		$cdek_items = $this->cdek_item_rows_from_admin_data( $data );
+		$shipment_data = $this->shipment_modal_mapper()->parse( $data );
+		$places = $shipment_data->places;
+		$cdek_items = $shipment_data->item_rows;
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
@@ -455,6 +443,7 @@ final class OrderShipmentDraftFactory {
 					'pickup_point_postcode' => DeliveryType::PICKUP === $delivery_type ? (string) ( $pickup_row['postcode'] ?? $base->meta['pickup_point_postcode'] ?? '' ) : (string) ( $base->meta['pickup_point_postcode'] ?? '' ),
 					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? '' !== $pickup_code : ! empty( $base->meta['pickup_point_found'] ),
 					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->safe_pickup_row( $pickup_row ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
+					'shipment_item_rows' => $cdek_items,
 					'cdek_item_rows' => $cdek_items,
 				)
 			)
@@ -605,7 +594,7 @@ final class OrderShipmentDraftFactory {
 				'yandex_destination_mode' => DeliveryType::PICKUP === $delivery_type ? 'pickup' : 'courier',
 				'yandex_pickup_platform_station_id' => $pickup_code,
 				'yandex_courier_details' => $this->yandex_courier_details_from_order( $order, $full_address ),
-				'yandex_item_rows' => $this->yandex_item_rows_from_order( $order, $items ),
+				'shipment_item_rows' => $this->shipment_item_rows_from_order( $order, $items ),
 				'pickup_point_code' => $pickup_code,
 				'pickup_point_found' => DeliveryType::PICKUP !== $delivery_type || '' !== $pickup_code,
 				'courier_original_address' => $full_address,
@@ -697,22 +686,9 @@ final class OrderShipmentDraftFactory {
 
 	private function create_yandex_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
 		$delivery_type = $this->normalize_yandex_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? $base->delivery_type ) ) );
-		$places = array();
-		foreach ( is_array( $data['places'] ?? null ) ? $data['places'] : array() as $index => $row ) {
-			if ( ! is_array( $row ) ) {
-				continue;
-			}
-			$places[] = new ShipmentPlace(
-				$index + 1,
-				$this->whole_number_from_place_row( $row, 'weight_g' ),
-				$this->whole_number_from_place_row( $row, 'length_cm' ),
-				$this->whole_number_from_place_row( $row, 'width_cm' ),
-				$this->whole_number_from_place_row( $row, 'height_cm' ),
-				Money::from_kopecks( 0 ),
-				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
-			);
-		}
-		$item_rows = $this->shipment_item_rows_from_rows( is_array( $data['cdek_items'] ?? null ) ? $data['cdek_items'] : array() );
+		$shipment_data = $this->shipment_modal_mapper()->parse( $data );
+		$places = $shipment_data->places;
+		$item_rows = $shipment_data->item_rows;
 		$pickup_code = sanitize_text_field( wp_unslash( $data['pickup_point_code'] ?? $data['yandex_pickup_platform_station_id'] ?? $base->meta['yandex_pickup_platform_station_id'] ?? '' ) );
 		$source_station = sanitize_text_field( wp_unslash( $data['yandex_source_platform_station_id'] ?? $base->meta['yandex_source_platform_station_id'] ?? '' ) );
 		$ready_from = sanitize_text_field( wp_unslash( $data['yandex_ready_from'] ?? $base->meta['yandex_ready_from'] ?? '' ) );
@@ -729,7 +705,7 @@ final class OrderShipmentDraftFactory {
 				? new Address( country_code: 'RU', city: (string) ( $base->recipient_address->city ), raw_address: (string) ( $base->recipient_address->raw_address ) )
 				: new Address( country_code: 'RU', region_name: (string) ( $courier_details['region'] ?? $base->recipient_address->region_name ), city: (string) ( $courier_details['locality'] ?? $base->recipient_address->city ), postcode: (string) ( $courier_details['postal_code'] ?? $base->recipient_address->postcode ), street: (string) ( $courier_details['street'] ?? $base->recipient_address->street ), apartment: (string) ( $courier_details['room'] ?? $base->recipient_address->apartment ), raw_address: $full_address ),
 			DeliveryType::PICKUP === $delivery_type && '' !== $pickup_code ? new PickupPointSelection( YandexDeliverySettings::CARRIER_KEY, YandexDeliverySettings::SERVICE_KEY, $pickup_code, $base->pickup_point?->point_address ?: '', $base->pickup_point?->selected_at ?: $this->now() ) : null,
-			array() !== $places ? $places : $base->places,
+			$places,
 			$base->declared_value,
 			false,
 			array(),
@@ -751,7 +727,7 @@ final class OrderShipmentDraftFactory {
 					'yandex_destination_mode' => DeliveryType::PICKUP === $delivery_type ? 'pickup' : 'courier',
 					'yandex_pickup_platform_station_id' => $pickup_code,
 					'yandex_courier_details' => $courier_details,
-					'yandex_item_rows' => array() !== $item_rows ? $item_rows : (array) ( $base->meta['yandex_item_rows'] ?? array() ),
+					'shipment_item_rows' => $item_rows,
 					'pickup_point_code' => $pickup_code,
 					'pickup_point_found' => DeliveryType::PICKUP !== $delivery_type || '' !== $pickup_code,
 					'courier_original_address' => $full_address,
@@ -785,37 +761,11 @@ final class OrderShipmentDraftFactory {
 		return ( new \DateTimeImmutable( 'tomorrow 12:00:00', new \DateTimeZone( 'Asia/Novosibirsk' ) ) )->format( 'Y-m-d H:i:sP' );
 	}
 
-	/** @param array<int|string,mixed> $rows @return array<int,array<string,mixed>> */
-	private function shipment_item_rows_from_rows( array $rows ): array {
-		$item_rows = array();
-		foreach ( $rows as $row ) {
-			if ( ! is_array( $row ) ) {
-				$item_rows[] = array();
-				continue;
-			}
-			$item_rows[] = array(
-				'item_key' => sanitize_text_field( wp_unslash( $row['item_key'] ?? $row['order_item_id'] ?? '' ) ),
-				'ordered_quantity' => (int) ( $row['ordered_quantity'] ?? $row['quantity'] ?? $row['amount'] ?? 0 ),
-				'place_number' => (int) ( $row['place_number'] ?? 0 ),
-				'name' => sanitize_text_field( wp_unslash( $row['name'] ?? '' ) ),
-				'ware_key' => sanitize_text_field( wp_unslash( $row['ware_key'] ?? $row['sku'] ?? '' ) ),
-				'amount' => (int) ( $row['amount'] ?? $row['quantity'] ?? 0 ),
-				'cost' => (string) wp_unslash( $row['cost'] ?? $row['unit_price'] ?? '' ),
-				'weight' => (int) ( $row['weight'] ?? $row['weight_g'] ?? 0 ),
-				'length_cm' => (string) wp_unslash( $row['length_cm'] ?? '' ),
-				'width_cm' => (string) wp_unslash( $row['width_cm'] ?? '' ),
-				'height_cm' => (string) wp_unslash( $row['height_cm'] ?? '' ),
-			);
-		}
-
-		return $item_rows;
-	}
-
 	/**
 	 * @param array<int,PackageItem> $items
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function yandex_item_rows_from_order( object $order, array $items ): array {
+	private function shipment_item_rows_from_order( object $order, array $items ): array {
 		$rows = array();
 		$order_items = method_exists( $order, 'get_items' ) ? array_values( (array) $order->get_items() ) : array();
 		foreach ( $items as $index => $item ) {
@@ -1599,44 +1549,6 @@ final class OrderShipmentDraftFactory {
 	}
 
 	/**
-	 * @return array<int,array<string,mixed>>
-	 */
-	private function cdek_item_rows_from_admin_data( array $data ): array {
-		$rows = array();
-		foreach ( is_array( $data['cdek_items'] ?? null ) ? $data['cdek_items'] : array() as $row ) {
-			if ( ! is_array( $row ) ) {
-				continue;
-			}
-			$item_key = sanitize_text_field( wp_unslash( $row['item_key'] ?? '' ) );
-			if ( '' === $item_key ) {
-				$item_key = 'manual-' . (string) ( count( $rows ) + 1 );
-			}
-			$rows[] = array(
-				'item_key' => $item_key,
-				'ordered_quantity' => max( 1, (int) ( $row['ordered_quantity'] ?? $row['amount'] ?? 1 ) ),
-				'place_number' => max( 1, (int) ( $row['place_number'] ?? 1 ) ),
-				'name' => sanitize_text_field( wp_unslash( $row['name'] ?? 'Товар' ) ),
-				'ware_key' => substr( sanitize_text_field( wp_unslash( $row['ware_key'] ?? $item_key ) ), 0, 20 ),
-				'amount' => max( 1, (int) ( $row['amount'] ?? 1 ) ),
-				'cost' => $this->decimal_from_admin_row( $row, 'cost' ),
-				'weight' => max( 0, (int) ( $row['weight'] ?? 0 ) ),
-				'length_cm' => $this->decimal_from_admin_row( $row, 'length_cm' ),
-				'width_cm' => $this->decimal_from_admin_row( $row, 'width_cm' ),
-				'height_cm' => $this->decimal_from_admin_row( $row, 'height_cm' ),
-			);
-		}
-
-		return $rows;
-	}
-
-	/**
-	 * @param array<string,mixed> $row
-	 */
-	private function decimal_from_admin_row( array $row, string $key ): float {
-		return max( 0.0, (float) str_replace( ',', '.', (string) wp_unslash( $row[ $key ] ?? '0' ) ) );
-	}
-
-	/**
 	 * @param array<string,mixed> $data
 	 */
 	private function short_text_from_admin_data( array $data, string $key, int $max_length ): string {
@@ -1921,6 +1833,14 @@ final class OrderShipmentDraftFactory {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	private function shipment_modal_mapper(): ShipmentModalRequestMapper {
+		if ( ! $this->shipment_modal_mapper instanceof ShipmentModalRequestMapper ) {
+			$this->shipment_modal_mapper = new ShipmentModalRequestMapper();
+		}
+
+		return $this->shipment_modal_mapper;
 	}
 
 	private function order_id( object $order ): int {

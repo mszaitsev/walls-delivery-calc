@@ -9,11 +9,11 @@ use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
-use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 
 defined( 'ABSPATH' ) || exit;
 
-final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
+final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private DpdShipmentPayloadBuilder $builder,
 		private ?DpdApiClient $client = null,

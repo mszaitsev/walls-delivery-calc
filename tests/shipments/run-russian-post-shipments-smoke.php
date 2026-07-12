@@ -17,7 +17,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
-use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
@@ -190,7 +190,7 @@ final class ShipmentsSmokeProduct {
 	}
 }
 
-final class ShipmentsSmokeAdapter implements ShipmentCarrierAdapterInterface {
+final class ShipmentsSmokeAdapter implements CarrierShipmentAdapterInterface {
 	public bool $called = false;
 	public ?ShipmentCreateRequest $preview_request = null;
 	public ?ShipmentCreateRequest $created_request = null;

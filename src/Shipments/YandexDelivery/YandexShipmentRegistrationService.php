@@ -176,7 +176,10 @@ final class YandexShipmentRegistrationService {
 	}
 
 	private function allocation( ShipmentCreateRequest $request ): \WallsShop\WDC\Shipments\Allocation\ShipmentAllocation {
-		$rows = is_array( $request->meta['yandex_item_rows'] ?? null ) ? $request->meta['yandex_item_rows'] : array();
+		$rows = is_array( $request->meta['shipment_item_rows'] ?? null ) ? $request->meta['shipment_item_rows'] : array();
+		if ( array() === $rows && is_array( $request->meta['yandex_item_rows'] ?? null ) ) {
+			$rows = $request->meta['yandex_item_rows'];
+		}
 		if ( array() === $rows && is_array( $request->meta['cdek_item_rows'] ?? null ) ) {
 			$rows = $request->meta['cdek_item_rows'];
 		}

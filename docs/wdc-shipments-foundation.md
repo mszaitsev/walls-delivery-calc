@@ -16,7 +16,8 @@ Version 0.37.2 separates Russian Post cancellation from local WooCommerce shipme
 
 ## Code
 
-- `src/Shipments/Contracts/ShipmentCarrierAdapterInterface.php` defines the carrier-neutral adapter contract.
+- `src/Shipments/Contracts/CarrierShipmentAdapterInterface.php` defines the carrier-neutral adapter contract.
+- `src/Shipments/Application/ShipmentModalRequestMapper.php` parses the shared shipment modal `places[]` and canonical `shipment_items[]` allocation rows for carrier admin submit paths.
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` builds shipment drafts from HPOS-safe WooCommerce order APIs and saved WDC order meta.
 - `src/Shipments/Application/ShipmentCreationService.php` performs idempotency checks, adapter dispatch, safe snapshot persistence and order notes.
 - `src/Shipments/Application/ShipmentStatusUpdateService.php` manually refreshes shipment status through Russian Post Tracking API and saves carrier-neutral status state.

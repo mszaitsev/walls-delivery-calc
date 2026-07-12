@@ -280,7 +280,7 @@
 }
 
 .wdc-cdek-items-table .wdc-cdek-input-dim,
-.wdc-cdek-items-table [data-wdc-cdek-place-select] {
+.wdc-cdek-items-table [data-wdc-shipment-place-select] {
   width: 54px;
   min-width: 54px;
 }

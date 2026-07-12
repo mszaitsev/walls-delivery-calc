@@ -37,7 +37,7 @@
     return data;
   }
 
-  function nextCdekItemIndex(form) {
+  function nextShipmentItemIndex(form) {
     const rows = shipmentItemRows(form);
     return rows.reduce((max, row) => {
       const value = parseInt(row.getAttribute('data-wdc-row-index') || '0', 10) || 0;
@@ -45,11 +45,11 @@
     }, 0) + 1;
   }
 
-  function rewriteCdekItemNames(row, index) {
+  function rewriteShipmentItemNames(row, index) {
     if (!row) return;
     row.setAttribute('data-wdc-row-index', String(index));
     row.querySelectorAll('[name]').forEach((input) => {
-      input.name = input.name.replace(/cdek_items\[[^\]]+\]/, 'cdek_items[' + index + ']');
+      input.name = input.name.replace(/shipment_items\[[^\]]+\]/, 'shipment_items[' + index + ']');
     });
   }
 
@@ -73,15 +73,15 @@
   }
 
   function shipmentItemRows(form) {
-    return form ? Array.from(form.querySelectorAll('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]')) : [];
+    return form ? Array.from(form.querySelectorAll('[data-wdc-shipment-item-row]')) : [];
   }
 
   function placeSelect(row) {
-    return row ? row.querySelector('[data-wdc-shipment-place-select], [data-wdc-cdek-place-select]') : null;
+    return row ? row.querySelector('[data-wdc-shipment-place-select]') : null;
   }
 
   function shipmentQtyInput(row) {
-    return row ? row.querySelector('[data-wdc-shipment-item-qty], [data-wdc-cdek-qty]') : null;
+    return row ? row.querySelector('[data-wdc-shipment-item-qty]') : null;
   }
 
   function switchShipmentTab(form, tabName) {
@@ -92,10 +92,10 @@
     form.querySelectorAll('[data-wdc-shipment-tab-panel]').forEach((panel) => {
       panel.hidden = panel.getAttribute('data-wdc-shipment-tab-panel') !== tabName;
     });
-    if (tabName === 'places') updateCdekPlaceOptions(form);
+    if (tabName === 'places') updateShipmentPlaceOptions(form);
   }
 
-  function updateCdekPlaceOptions(form) {
+  function updateShipmentPlaceOptions(form) {
     if (!form) return;
     const places = Array.from(form.querySelectorAll('[data-wdc-place]'));
     const options = places.map((row, index) => {
@@ -117,7 +117,7 @@
       const hint = row.querySelector('[data-wdc-weight-hint]');
       if (hint) hint.hidden = places.length !== 1;
     });
-    form.querySelectorAll('[data-wdc-shipment-place-select], [data-wdc-cdek-place-select]').forEach((select) => {
+    form.querySelectorAll('[data-wdc-shipment-place-select]').forEach((select) => {
       const current = select.value || '1';
       select.innerHTML = '';
       options.forEach((option) => {
@@ -128,12 +128,12 @@
       });
       select.value = options.some((option) => option.number === current) ? current : '1';
     });
-    updateCdekSplitAvailability(form, options.length);
-    updateCdekItemsSummary(form, options);
+    updateShipmentSplitAvailability(form, options.length);
+    updateShipmentItemsSummary(form, options);
   }
 
-  function updateCdekItemsSummary(form, places) {
-    const summary = form && form.querySelector('[data-wdc-shipment-items-summary], [data-wdc-cdek-items-summary]');
+  function updateShipmentItemsSummary(form, places) {
+    const summary = form && form.querySelector('[data-wdc-shipment-items-summary]');
     if (!summary) return;
     const totals = {};
     (places || []).forEach((place) => {
@@ -210,7 +210,7 @@
     }
   }
 
-  function rebalanceCdekGroup(form, groupKey, changedRow) {
+  function rebalanceShipmentItemGroup(form, groupKey, changedRow) {
     if (!form || !groupKey) return;
     const rows = shipmentItemRows(form).filter((row) => row.getAttribute('data-group-key') === groupKey);
     const base = rows.find((row) => row.hasAttribute('data-wdc-base-row'));
@@ -246,14 +246,14 @@
     if (select) select.value = String(original.place_number || 1);
   }
 
-  function mergeCdekSplitRows(form) {
+  function mergeShipmentSplitRows(form) {
     if (!form) return;
     shipmentItemRows(form).filter((row) => row.hasAttribute('data-wdc-split-row')).forEach((row) => {
       const groupKey = row.getAttribute('data-group-key') || '';
       row.remove();
-      rebalanceCdekGroup(form, groupKey);
+      rebalanceShipmentItemGroup(form, groupKey);
     });
-    form.querySelectorAll('[data-wdc-shipment-place-select], [data-wdc-cdek-place-select]').forEach((select) => {
+    form.querySelectorAll('[data-wdc-shipment-place-select]').forEach((select) => {
       select.value = '1';
     });
     shipmentItemRows(form).filter((row) => row.hasAttribute('data-wdc-base-row')).forEach((row) => {
@@ -271,7 +271,7 @@
       if (groupKey) affectedGroups.add(groupKey);
       if (row.hasAttribute('data-wdc-split-row')) {
         row.remove();
-        rebalanceCdekGroup(form, groupKey);
+        rebalanceShipmentItemGroup(form, groupKey);
         return;
       }
       select.value = '1';
@@ -279,23 +279,23 @@
     affectedGroups.forEach((groupKey) => {
       const base = shipmentItemRows(form).find((row) => row.hasAttribute('data-wdc-base-row') && row.getAttribute('data-group-key') === groupKey);
       if (base) restoreOriginalBaseRow(base, false);
-      rebalanceCdekGroup(form, groupKey);
+      rebalanceShipmentItemGroup(form, groupKey);
     });
   }
 
-  function updateCdekSplitAvailability(form, placeCount) {
+  function updateShipmentSplitAvailability(form, placeCount) {
     if (!form) return;
-    if (placeCount <= 1) mergeCdekSplitRows(form);
-    form.querySelectorAll('[data-wdc-shipment-item-split], [data-wdc-cdek-split]').forEach((button) => {
-      const row = button.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+    if (placeCount <= 1) mergeShipmentSplitRows(form);
+    form.querySelectorAll('[data-wdc-shipment-item-split]').forEach((button) => {
+      const row = button.closest('[data-wdc-shipment-item-row]');
       const qty = parseInt(row && row.getAttribute('data-ordered-quantity') || '1', 10) || 1;
       button.hidden = placeCount <= 1 || qty <= 1;
       button.disabled = button.hidden;
     });
   }
 
-  function splitCdekItemRow(button) {
-    const row = button && button.closest ? button.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]') : null;
+  function splitShipmentItemRow(button) {
+    const row = button && button.closest ? button.closest('[data-wdc-shipment-item-row]') : null;
     const form = findShipmentForm(button);
     if (!row || !form) return;
     const rowQtyInput = shipmentQtyInput(row);
@@ -303,14 +303,13 @@
     if (currentQty <= 1) return;
     const clone = row.cloneNode(true);
     const groupKey = row.getAttribute('data-group-key') || row.getAttribute('data-item-key') || '';
-    const index = nextCdekItemIndex(form);
-    rewriteCdekItemNames(clone, index);
+    const index = nextShipmentItemIndex(form);
+    rewriteShipmentItemNames(clone, index);
     clone.removeAttribute('data-wdc-base-row');
     clone.setAttribute('data-wdc-split-row', '1');
     clone.setAttribute('data-group-key', groupKey);
-    clone.querySelectorAll('[data-wdc-shipment-item-split], [data-wdc-cdek-split]').forEach((splitButton) => {
+    clone.querySelectorAll('[data-wdc-shipment-item-split]').forEach((splitButton) => {
       splitButton.removeAttribute('data-wdc-shipment-item-split');
-      splitButton.removeAttribute('data-wdc-cdek-split');
       splitButton.classList.remove('wdc-icon-action--split');
       splitButton.remove();
     });
@@ -321,48 +320,47 @@
     const parent = clone.querySelector('input[name$="[split_parent]"]') || document.createElement('input');
     if (itemKey) itemKey.value = groupKey + ':split:' + index;
     parent.type = 'hidden';
-    parent.name = 'cdek_items[' + index + '][split_parent]';
+    parent.name = 'shipment_items[' + index + '][split_parent]';
     parent.value = groupKey;
     clone.appendChild(parent);
     const actionCell = clone.querySelector('[data-wdc-shipment-item-actions], .wdc-cdek-item-actions') || clone.querySelector('td:last-child');
     if (actionCell) {
-      actionCell.innerHTML = '<button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-shipment-split data-wdc-remove-cdek-split title="Удалить строку" aria-label="Удалить строку">❌</button>';
+      actionCell.innerHTML = '<button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-shipment-split title="Удалить строку" aria-label="Удалить строку">❌</button>';
     }
     row.after(clone);
-    rebalanceCdekGroup(form, groupKey);
-    updateCdekPlaceOptions(form);
+    rebalanceShipmentItemGroup(form, groupKey);
+    updateShipmentPlaceOptions(form);
     schedulePreview(form);
   }
 
-  function addManualCdekItemRow(button) {
+  function addManualShipmentItemRow(button) {
     const form = findShipmentForm(button);
-    const table = form && form.querySelector('[data-wdc-shipment-items-table], [data-wdc-cdek-items-table]');
+    const table = form && form.querySelector('[data-wdc-shipment-items-table]');
     const body = table && table.querySelector('tbody');
     if (!form || !body) return;
-    const index = nextCdekItemIndex(form);
+    const index = nextShipmentItemIndex(form);
     const rowKey = 'manual-' + index;
     const row = document.createElement('tr');
     row.setAttribute('data-wdc-shipment-item-row', '1');
-    row.setAttribute('data-wdc-cdek-item-row', '1');
     row.setAttribute('data-wdc-manual-row', '1');
     row.setAttribute('data-item-key', rowKey);
     row.setAttribute('data-group-key', rowKey);
     row.setAttribute('data-ordered-quantity', '999');
     row.setAttribute('data-wdc-row-index', String(index));
     row.innerHTML = [
-      '<td class="wdc-cdek-item-product"><input type="text" name="cdek_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="cdek_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="cdek_items[' + index + '][ordered_quantity]" value="999"></td>',
-      '<td class="wdc-cdek-item-sku wdc-product-search-cell"><input type="text" name="cdek_items[' + index + '][ware_key]" value="" placeholder="Артикул" autocomplete="off" data-wdc-product-search-input><div class="wdc-product-search-results" data-wdc-product-search-results hidden></div></td>',
-      '<td><input class="wdc-cdek-input-qty" type="number" min="1" max="999" step="1" name="cdek_items[' + index + '][amount]" value="1" data-wdc-shipment-item-qty data-wdc-cdek-qty data-wdc-integer-input></td>',
-      '<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',
-      '<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="cdek_items[' + index + '][weight]" value="1" data-wdc-integer-input></td>',
-      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][length_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><select name="cdek_items[' + index + '][place_number]" data-wdc-shipment-place-select data-wdc-cdek-place-select><option value="1">1</option></select></td>',
-      '<td class="wdc-cdek-item-actions" data-wdc-shipment-item-actions><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-manual-shipment-item data-wdc-remove-manual-cdek-item title="Удалить строку" aria-label="Удалить строку">❌</button></td>'
+      '<td class="wdc-cdek-item-product"><input type="text" name="shipment_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="shipment_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="shipment_items[' + index + '][ordered_quantity]" value="999"></td>',
+      '<td class="wdc-cdek-item-sku wdc-product-search-cell"><input type="text" name="shipment_items[' + index + '][ware_key]" value="" placeholder="Артикул" autocomplete="off" data-wdc-product-search-input><div class="wdc-product-search-results" data-wdc-product-search-results hidden></div></td>',
+      '<td><input class="wdc-cdek-input-qty" type="number" min="1" max="999" step="1" name="shipment_items[' + index + '][amount]" value="1" data-wdc-shipment-item-qty data-wdc-integer-input></td>',
+      '<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',
+      '<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="shipment_items[' + index + '][weight]" value="1" data-wdc-integer-input></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][length_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><select name="shipment_items[' + index + '][place_number]" data-wdc-shipment-place-select><option value="1">1</option></select></td>',
+      '<td class="wdc-cdek-item-actions" data-wdc-shipment-item-actions><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-manual-shipment-item title="Удалить строку" aria-label="Удалить строку">❌</button></td>'
     ].join('');
     body.appendChild(row);
-    updateCdekPlaceOptions(form);
+    updateShipmentPlaceOptions(form);
     schedulePreview(form);
   }
 
@@ -384,7 +382,7 @@
   }
 
   function renderProductSearchResults(input, items) {
-    const row = input.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+    const row = input.closest('[data-wdc-shipment-item-row]');
     const results = row && row.querySelector('[data-wdc-product-search-results]');
     if (!results) return;
     if (!items.length) {
@@ -2129,7 +2127,7 @@
       container.appendChild(clone);
       renumberPlaces(container);
       updateRemoveButtons(container);
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) updateDeclaredValueFields(form);
       if (form) schedulePreview(form);
       return;
@@ -2151,7 +2149,7 @@
       if (row) row.remove();
       renumberPlaces(container);
       updateRemoveButtons(container);
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) requestPreview(form);
       return;
     }
@@ -2162,43 +2160,43 @@
       return;
     }
 
-    const split = event.target.closest('[data-wdc-shipment-item-split], [data-wdc-cdek-split]');
+    const split = event.target.closest('[data-wdc-shipment-item-split]');
     if (split) {
-      splitCdekItemRow(split);
+      splitShipmentItemRow(split);
       return;
     }
 
-    const removeSplit = event.target.closest('[data-wdc-remove-shipment-split], [data-wdc-remove-cdek-split]');
+    const removeSplit = event.target.closest('[data-wdc-remove-shipment-split]');
     if (removeSplit) {
-      const row = removeSplit.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+      const row = removeSplit.closest('[data-wdc-shipment-item-row]');
       const form = findShipmentForm(removeSplit);
       const groupKey = row && row.getAttribute('data-group-key');
       if (row) row.remove();
-      if (form) rebalanceCdekGroup(form, groupKey);
-      if (form) updateCdekPlaceOptions(form);
+      if (form) rebalanceShipmentItemGroup(form, groupKey);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) schedulePreview(form);
       return;
     }
 
     const addManualItem = event.target.closest('[data-wdc-add-manual-shipment-item], [data-wdc-add-manual-cdek-item]');
     if (addManualItem) {
-      addManualCdekItemRow(addManualItem);
+      addManualShipmentItemRow(addManualItem);
       return;
     }
 
-    const removeManualItem = event.target.closest('[data-wdc-remove-manual-shipment-item], [data-wdc-remove-manual-cdek-item]');
+    const removeManualItem = event.target.closest('[data-wdc-remove-manual-shipment-item]');
     if (removeManualItem) {
-      const row = removeManualItem.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+      const row = removeManualItem.closest('[data-wdc-shipment-item-row]');
       const form = findShipmentForm(removeManualItem);
       if (row) row.remove();
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) schedulePreview(form);
       return;
     }
 
     const productChoice = event.target.closest('[data-wdc-product-search-choice]');
     if (productChoice) {
-      const row = productChoice.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+      const row = productChoice.closest('[data-wdc-shipment-item-row]');
       const form = findShipmentForm(productChoice);
       let product = null;
       try {
@@ -2209,7 +2207,7 @@
       applyProductToManualRow(row, product);
       const results = row && row.querySelector('[data-wdc-product-search-results]');
       if (results) results.hidden = true;
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) schedulePreview(form);
       return;
     }
@@ -2449,13 +2447,13 @@
     if (event.target.matches('[data-wdc-integer-input]')) {
       cleanIntegerInput(event.target);
       const integerForm = findShipmentForm(event.target);
-      const row = event.target.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
-      if (integerForm && row && event.target.matches('[data-wdc-shipment-item-qty], [data-wdc-cdek-qty]')) {
-        rebalanceCdekGroup(integerForm, row.getAttribute('data-group-key') || '', row);
+      const row = event.target.closest('[data-wdc-shipment-item-row]');
+      if (integerForm && row && event.target.matches('[data-wdc-shipment-item-qty]')) {
+        rebalanceShipmentItemGroup(integerForm, row.getAttribute('data-group-key') || '', row);
       }
       if (integerForm) {
         updateScenarioSections(integerForm);
-        updateCdekPlaceOptions(integerForm);
+        updateShipmentPlaceOptions(integerForm);
         schedulePreview(integerForm);
       }
       return;
@@ -2464,7 +2462,7 @@
       cleanDecimalInput(event.target, parseInt(event.target.getAttribute('data-wdc-decimal-input') || '2', 10) || 2);
       const decimalForm = findShipmentForm(event.target);
       if (decimalForm) {
-        updateCdekPlaceOptions(decimalForm);
+        updateShipmentPlaceOptions(decimalForm);
         schedulePreview(decimalForm);
       }
       return;
@@ -2479,7 +2477,7 @@
     const form = findShipmentForm(event.target);
     if (form) {
       updateScenarioSections(form);
-      updateCdekPlaceOptions(form);
+      updateShipmentPlaceOptions(form);
       schedulePreview(form);
     }
   });
@@ -2538,7 +2536,7 @@
       updateDeclaredValueFields(form);
     }
     updateScenarioSections(form);
-    updateCdekPlaceOptions(form);
+    updateShipmentPlaceOptions(form);
     schedulePreview(form);
   });
 
@@ -2549,6 +2547,6 @@
   });
   forms.forEach((form) => {
     initializeForm(form, false);
-    updateCdekPlaceOptions(form);
+    updateShipmentPlaceOptions(form);
   });
 })();

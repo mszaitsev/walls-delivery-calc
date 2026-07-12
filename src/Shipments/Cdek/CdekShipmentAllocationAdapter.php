@@ -101,6 +101,9 @@ final class CdekShipmentAllocationAdapter {
 			if ( (int) ( $row['amount'] ?? 0 ) <= 0 ) {
 				$errors[] = $label . ' amount must be greater than 0.';
 			}
+			if ( (int) ( $row['ordered_quantity'] ?? 0 ) <= 0 ) {
+				$errors[] = $label . ' ordered_quantity must be greater than 0.';
+			}
 			if ( (int) ( $row['weight'] ?? 0 ) <= 0 ) {
 				$errors[] = $label . ' weight must be greater than 0.';
 			}

@@ -1,3 +1,13 @@
+## Shipment Modal Contract and Yandex Persistence Mapper 0.108.3
+
+- The shared shipment modal item allocation contract is now `shipment_items[]`. The table still visually uses existing CDEK CSS classes where they are styling-only, but submitted field names and generic JS hooks use shipment-neutral names.
+- `src/Shipments/Application/ShipmentModalRequestMapper.php` parses modal `places[]` plus `shipment_items[]` into `ShipmentPreparationData` (`places`, `item_rows`). It accepts `cdek_items[]` only as a temporary CDEK fallback and validates the result through the existing `CdekShipmentAllocationAdapter`/`ShipmentAllocation` path; it does not create a second allocation validator or repair damaged data.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` uses the common mapper for CDEK and Yandex admin submit paths. CDEK currently writes both canonical `shipment_item_rows` and migration `cdek_item_rows`; Yandex writes canonical `shipment_item_rows`.
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` reads `meta['shipment_item_rows']` first and keeps `yandex_item_rows`/`cdek_item_rows` only as temporary fallback migration keys.
+- `src/Shipments/YandexDelivery/YandexShipmentPersistenceMapper.php` owns Yandex-specific persistence fields, canonical request/info snapshots, reconciliation pending fields and post-persist lookup meta sync. `ShipmentCreationService` keeps the common envelope and delegates Yandex-specific fields to the mapper.
+- `src/Shipments/Contracts/CarrierShipmentAdapterInterface.php` is the canonical carrier adapter interface. The empty `ShipmentCarrierAdapterInterface` alias was removed.
+- `assets/admin/shipments-admin.js` generic shipment allocation functions now use names such as `updateShipmentPlaceOptions`, `rebalanceShipmentItemGroup`, `splitShipmentItemRow` and `addManualShipmentItemRow`; CDEK-only functions such as label polling/download remain CDEK-named.
+
 ## Yandex Shipment Framework Final Hardening 0.108.2
 
 - The real multi-place source for shipment registration is the existing shipment modal submission: `places[]` plus `cdek_items[]`. `OrderShipmentDraftFactory::create_cdek_request_from_admin_data()` already uses this source for CDEK, and `create_yandex_request_from_admin_data()` now uses the same source for Yandex.
@@ -20,7 +30,7 @@
 
 ## Yandex Shipment Framework Integration 0.108.0
 
-- `src/Shipments/YandexDelivery/YandexShipmentAdapter.php` implements the existing `ShipmentCarrierAdapterInterface` for carrier `yandex_delivery`. It stays thin: preview builds the pure offers/create payload, `create()` delegates to the Yandex framework registration service, status/cancel/remove delegate to the same service, and labels/documents remain empty.
+- `src/Shipments/YandexDelivery/YandexShipmentAdapter.php` implements the existing `CarrierShipmentAdapterInterface` for carrier `yandex_delivery`. It stays thin: preview builds the pure offers/create payload, `create()` delegates to the Yandex framework registration service, status/cancel/remove delegate to the same service, and labels/documents remain empty.
 - `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` is the carrier-specific bridge from the common shipment request to the already existing Yandex HTTP registration flow. It converts existing `ShipmentCreateRequest::places` plus `meta['yandex_item_rows']`/`meta['cdek_item_rows']` through `CdekShipmentAllocationAdapter`, builds the Yandex context, calls `YandexDeliveryShipmentRegistrationService`, and persists only canonical request/info fields.
 - `src/Shipments/YandexDelivery/YandexShipmentRepository.php` wraps `OrderShipmentRepository` for `_wdc_shipments[yandex_delivery]` and maintains `_wdc_yandex_delivery_request_id` as an HPOS-safe lookup/index field.
 - `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` mirrors the modern DPD approach: absent shipment shows create, created shipment shows status/cancel, terminal Yandex statuses hide cancel and allow local remove, and manual attach is disabled.

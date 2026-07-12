@@ -1,5 +1,15 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.3
+
+Общая shipment modal получила canonical контракт для товарного allocation: `shipment_items[]`. Это теперь основной submit-формат для распределения товаров по грузоместам; `cdek_items[]` оставлен только как временный fallback для CDEK/common parser migration и зафиксирован как технический долг. Яндекс не создаёт свой `yandex_items` контракт для модалки и пишет в `ShipmentCreateRequest::meta` canonical `shipment_item_rows`.
+
+Разбор данных модалки вынесен в `ShipmentModalRequestMapper`, который возвращает `ShipmentPreparationData` с двумя нейтральными полями: `places` и `item_rows`. Его используют CDEK и Яндекс admin submit paths. Mapper не исправляет `amount`, `place_number`, `weight`, `item_key` или стоимость: после базовой sanitization результат проходит через существующий `CdekShipmentAllocationAdapter` / `ShipmentAllocation` validator. Поэтому повреждённые rows отклоняются до Yandex HTTP, а split quantity и одинаковые SKU с разными `item_key` остаются различимыми.
+
+Yandex-specific persistence вынесен из общего `ShipmentCreationService` в `YandexShipmentPersistenceMapper`. Общий сервис сохраняет common shipment envelope и вызывает mapper для Yandex fields: canonical request/info snapshot, selected offer, offer expiration, request ids, barcodes, reconciliation pending fields and lookup meta sync через `YandexShipmentRepository`. Reconciliation после successful confirm по-прежнему сохраняет pending shipment и не повторяет confirm.
+
+Пустой alias `ShipmentCarrierAdapterInterface` удалён; canonical interface теперь `CarrierShipmentAdapterInterface`. Общая JS-логика allocation переименована с CDEK-specific names на shipment-neutral names и использует generic `data-wdc-shipment-*` selectors. Carrier-specific CDEK hooks for labels/polling/status remain untouched.
+
 ## Статус 0.108.2
 
 Проведён повторный аудит источника allocation для существующей shipment modal. Канонический production flow для CDEK использует не order meta, а отправленные из общей модалки поля `places[]` и `cdek_items[]`; `OrderShipmentDraftFactory::create_cdek_request_from_admin_data()` превращает их в `ShipmentCreateRequest::places` и `meta['cdek_item_rows']`. Для Яндекса используется тот же источник: `create_yandex_request_from_admin_data()` читает `places[]` и `cdek_items[]`, сохраняет split quantity, `place_number`, `item_key` и одинаковые SKU разных order items как разные строки.
@@ -28,7 +38,7 @@ Lookup meta `_wdc_yandex_delivery_request_id` синхронизируется �
 
 Carrier-specific слой:
 
-- `YandexShipmentAdapter` реализует существующий `ShipmentCarrierAdapterInterface`;
+- `YandexShipmentAdapter` реализует существующий `CarrierShipmentAdapterInterface`;
 - `YandexShipmentRegistrationService` является bridge над уже готовым HTTP flow `YandexDeliveryShipmentRegistrationService`;
 - `YandexShipmentRepository` сохраняет данные через общий `OrderShipmentRepository`;
 - `YandexShipmentButtonPolicy` управляет кнопками create/status/cancel/remove без проверок в metabox.

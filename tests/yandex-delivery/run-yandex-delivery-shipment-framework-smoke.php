@@ -51,6 +51,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentAdapter;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentButtonPolicy;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRegistrationService;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRepository;
 
@@ -180,7 +181,7 @@ function yd_framework_request(): ShipmentCreateRequest {
 			'yandex_ready_from' => '2026-07-12 12:00:00+07:00',
 			'yandex_ready_to' => '2026-07-12 12:00:00+07:00',
 			'yandex_pickup_platform_station_id' => 'PVZ-1',
-			'yandex_item_rows' => array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SKU-A', 'amount' => 1, 'cost' => 100, 'weight' => 500 ) ),
+			'shipment_item_rows' => array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SKU-A', 'amount' => 1, 'cost' => 100, 'weight' => 500 ) ),
 		)
 	);
 }
@@ -196,7 +197,7 @@ function yd_framework_stack( array $responses ): array {
 	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository );
 	$adapter = new YandexShipmentAdapter( $framework_registration, new YandexShipmentButtonPolicy() );
 	$registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry );
+	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( new YandexShipmentPersistenceMapper( $yandex_repository ) ) );
 
 	return array( $base_repository, $adapter, $creation, $framework_registration, $fake );
 }
@@ -220,7 +221,7 @@ $yandex_repository = new YandexShipmentRepository( $base_repository );
 $framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository );
 $adapter = new YandexShipmentAdapter( $framework_registration, new YandexShipmentButtonPolicy() );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry );
+$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( new YandexShipmentPersistenceMapper( $yandex_repository ) ) );
 $order = new YdFrameworkOrder( 777 );
 $request = yd_framework_request();
 
@@ -261,7 +262,7 @@ $history = $framework_registration->history( $order );
 yd_framework_assert( ! empty( $history['success'] ) && 'SHOP_CANCELLED' === (string) ( $history['events'][1]['reason'] ?? '' ), 'Yandex history must use request/history through the framework service.' );
 
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
-yd_framework_assert( str_contains( $source, 'create_yandex_request_from_order' ) && str_contains( $source, 'yandex_item_rows' ), 'OrderShipmentDraftFactory must provide Yandex ShipmentCreateRequest data.' );
+yd_framework_assert( str_contains( $source, 'create_yandex_request_from_order' ) && str_contains( $source, 'shipment_item_rows' ) && ! str_contains( $source, 'shipment_item_rows_from_rows' ), 'OrderShipmentDraftFactory must provide canonical shipment item rows without a second Yandex parser.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 yd_framework_assert( str_contains( $metabox_source, 'can_attach_manual' ) && str_contains( $metabox_source, 'data-wdc-open-shipment-modal' ), 'Existing shipment metabox/modal must be reused and respect carrier button policy.' );
 
@@ -345,7 +346,7 @@ $draft_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySetti
 $draft_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':pickup' );
 $draft_order->update_meta_data( '_wdc_yandex_delivery_pickup_platform_station_id', 'PVZ-1' );
 $draft_request = $draft_factory->create_request_from_order( $draft_order );
-yd_framework_assert( 1 === count( $draft_request->places ) && 1 === (int) ( $draft_request->meta['yandex_item_rows'][0]['place_number'] ?? 0 ), 'Initial Yandex draft must match CDEK production flow and use one place before modal admin data is submitted.' );
+yd_framework_assert( 1 === count( $draft_request->places ) && 1 === (int) ( $draft_request->meta['shipment_item_rows'][0]['place_number'] ?? 0 ), 'Initial Yandex draft must use canonical shipment_item_rows and one place before modal admin data is submitted.' );
 $modal_item_rows = array(
 	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
 	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
@@ -359,13 +360,13 @@ $admin_request = $draft_factory->create_request_from_admin_data(
 			array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ),
 			array( 'weight_g' => 800, 'length_cm' => 15, 'width_cm' => 15, 'height_cm' => 10 ),
 		),
-		'cdek_items' => $modal_item_rows,
+		'shipment_items' => $modal_item_rows,
 		'yandex_pickup_platform_station_id' => 'PVZ-1',
 	)
 );
-yd_framework_assert( 2 === count( $admin_request->places ) && 3 === count( $admin_request->meta['yandex_item_rows'] ?? array() ) && 2 === (int) $admin_request->meta['yandex_item_rows'][1]['place_number'], 'Yandex admin data must preserve multi-place item rows from the shared shipment modal.' );
+yd_framework_assert( 2 === count( $admin_request->places ) && 3 === count( $admin_request->meta['shipment_item_rows'] ?? array() ) && 2 === (int) $admin_request->meta['shipment_item_rows'][1]['place_number'], 'Yandex admin data must preserve multi-place item rows from the shared shipment modal.' );
 yd_framework_assert( 1000 === $admin_request->places[0]->weight_g && 800 === $admin_request->places[1]->weight_g, 'Yandex admin data must keep modal place dimensions and weight.' );
-$admin_rows = $admin_request->meta['yandex_item_rows'];
+$admin_rows = $admin_request->meta['shipment_item_rows'];
 yd_framework_assert( 2 === (int) $admin_rows[0]['amount'] && 1 === (int) $admin_rows[1]['amount'] && 2 === (int) $admin_rows[1]['place_number'], 'Yandex admin data must preserve split quantity across places.' );
 yd_framework_assert( 'order-item-a' === (string) $admin_rows[0]['item_key'] && 'order-item-b' === (string) $admin_rows[2]['item_key'] && $admin_rows[0]['ware_key'] === $admin_rows[2]['ware_key'], 'Yandex admin data identity must keep same SKU order items distinct by item_key.' );
 $fallback_order = new YdFrameworkOrder( 782 );
@@ -373,21 +374,23 @@ $fallback_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySe
 $fallback_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':pickup' );
 $fallback_order->update_meta_data( '_wdc_yandex_delivery_pickup_platform_station_id', 'PVZ-1' );
 $fallback_request = $draft_factory->create_request_from_order( $fallback_order );
-yd_framework_assert( 1 === count( $fallback_request->places ) && 1 === (int) ( $fallback_request->meta['yandex_item_rows'][0]['place_number'] ?? 0 ), 'Yandex draft fallback must use one place only when existing allocation is absent.' );
+yd_framework_assert( 1 === count( $fallback_request->places ) && 1 === (int) ( $fallback_request->meta['shipment_item_rows'][0]['place_number'] ?? 0 ), 'Yandex draft fallback must use one place only when existing allocation is absent.' );
 
-$invalid_admin_request = $draft_factory->create_request_from_admin_data(
-	$draft_order,
-	array(
-		'delivery_type' => DeliveryType::PICKUP,
-		'places' => array( array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ) ),
-		'cdek_items' => array( array( 'item_key' => 'broken-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Broken', 'ware_key' => 'BROKEN', 'amount' => 0, 'cost' => 100, 'weight' => 300 ) ),
-		'yandex_pickup_platform_station_id' => 'PVZ-1',
-	)
-);
-yd_framework_assert( 0 === (int) ( $invalid_admin_request->meta['yandex_item_rows'][0]['amount'] ?? -1 ), 'Yandex admin allocation parser must not silently repair amount=0.' );
-list( $invalid_repository, $invalid_adapter, $invalid_creation, $invalid_registration, $invalid_http ) = yd_framework_stack( array() );
-$invalid_result = $invalid_adapter->create( $invalid_admin_request );
-yd_framework_assert( ! $invalid_result->success && str_contains( $invalid_result->error_message, 'amount must be greater than 0' ) && 0 === count( $invalid_http->requests ), 'Broken Yandex allocation must fail through existing ShipmentAllocation validation before HTTP.' );
+$invalid_thrown = false;
+try {
+	$draft_factory->create_request_from_admin_data(
+		$draft_order,
+		array(
+			'delivery_type' => DeliveryType::PICKUP,
+			'places' => array( array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ) ),
+			'shipment_items' => array( array( 'item_key' => 'broken-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Broken', 'ware_key' => 'BROKEN', 'amount' => 0, 'cost' => 100, 'weight' => 300 ) ),
+			'yandex_pickup_platform_station_id' => 'PVZ-1',
+		)
+	);
+} catch ( InvalidArgumentException $e ) {
+	$invalid_thrown = str_contains( $e->getMessage(), 'amount must be greater than 0' );
+}
+yd_framework_assert( $invalid_thrown, 'Broken Yandex admin allocation must be rejected through existing ShipmentAllocation validation without silent repair.' );
 
 $request_id_safety_order = new YdFrameworkOrder( 777 );
 list( $request_id_repository, $request_id_adapter, $request_id_creation, $request_id_registration, $request_id_http ) = yd_framework_stack(

@@ -10,11 +10,11 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
-use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 
 defined( 'ABSPATH' ) || exit;
 
-final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterface {
+final class RussianPostShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private RussianPostOtpravkaApiClient $client,
 		private ?RussianPostCreateRequestBuilder $builder = null,
