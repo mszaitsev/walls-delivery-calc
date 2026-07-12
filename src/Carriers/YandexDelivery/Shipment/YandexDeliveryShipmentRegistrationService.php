@@ -42,6 +42,7 @@ final class YandexDeliveryShipmentRegistrationService {
 						'registration_phase' => 'request_info',
 						'confirmed_request_id' => $confirmed->request_id,
 						'selected_offer_id' => $selected->offer_id,
+						'selected_offer_expires_at' => $selected->expires_at,
 					)
 				),
 				0,

@@ -14,7 +14,11 @@ final class YandexShipmentButtonPolicy {
 			return array( 'create' => true, 'manual_attach' => false, 'update' => false, 'cancel' => false, 'remove' => false );
 		}
 		$request_id = $this->request_id( $shipment );
-		$status = strtoupper( trim( (string) ( $shipment['yandex_status'] ?? $shipment['status'] ?? '' ) ) );
+		$local_status = trim( (string) ( $shipment['status'] ?? '' ) );
+		if ( '' !== $request_id && in_array( $local_status, array( 'reconciliation_required', 'cancellation_started' ), true ) ) {
+			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => false );
+		}
+		$status = strtoupper( trim( (string) ( $shipment['yandex_status'] ?? $local_status ) ) );
 		$terminal = in_array( $status, self::TERMINAL_STATUSES, true );
 
 		return array(
@@ -28,7 +32,7 @@ final class YandexShipmentButtonPolicy {
 
 	/** @param array<string,mixed> $shipment */
 	public function request_id( array $shipment ): string {
-		foreach ( array( 'yandex_request_id', 'request_id', 'external_id', 'barcode', 'tracking_number' ) as $key ) {
+		foreach ( array( 'yandex_request_id', 'request_id', 'external_id' ) as $key ) {
 			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
 			if ( '' !== $value ) {
 				return $value;

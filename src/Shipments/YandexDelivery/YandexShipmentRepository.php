@@ -18,23 +18,39 @@ final class YandexShipmentRepository {
 
 	/** @param array<string,mixed> $shipment */
 	public function save( object $order, array $shipment ): void {
-		$this->repository->save_for_carrier( $order, YandexDeliverySettings::CARRIER_KEY, $shipment );
+		if ( ! method_exists( $order, 'update_meta_data' ) || ! method_exists( $order, 'save' ) ) {
+			return;
+		}
+		$shipments = $this->repository->all_for_order( $order );
+		$shipments[ YandexDeliverySettings::CARRIER_KEY ] = $shipment;
+		$order->update_meta_data( OrderShipmentRepository::META_KEY, $shipments );
+		$order->update_meta_data( OrderShipmentRepository::LAST_ERROR_META_KEY, '' );
+		$this->sync_lookup_meta( $order, $shipment );
+		$order->save();
+	}
+
+	/** @param array<string,mixed> $shipment */
+	public function sync_lookup_meta( object $order, array $shipment ): void {
 		$request_id = trim( (string) ( $shipment['yandex_request_id'] ?? $shipment['request_id'] ?? $shipment['external_id'] ?? '' ) );
-		if ( '' !== $request_id && method_exists( $order, 'update_meta_data' ) && method_exists( $order, 'save' ) ) {
+		if ( '' !== $request_id && method_exists( $order, 'update_meta_data' ) ) {
 			$order->update_meta_data( self::REQUEST_ID_META_KEY, $request_id );
-			$order->save();
 		}
 	}
 
 	public function delete( object $order ): void {
-		$this->repository->delete_for_carrier( $order, YandexDeliverySettings::CARRIER_KEY );
-		if ( method_exists( $order, 'delete_meta_data' ) && method_exists( $order, 'save' ) ) {
-			$order->delete_meta_data( self::REQUEST_ID_META_KEY );
-			$order->save();
-		} elseif ( method_exists( $order, 'update_meta_data' ) && method_exists( $order, 'save' ) ) {
-			$order->update_meta_data( self::REQUEST_ID_META_KEY, '' );
-			$order->save();
+		if ( ! method_exists( $order, 'update_meta_data' ) || ! method_exists( $order, 'save' ) ) {
+			return;
 		}
+		$shipments = $this->repository->all_for_order( $order );
+		unset( $shipments[ YandexDeliverySettings::CARRIER_KEY ] );
+		$order->update_meta_data( OrderShipmentRepository::META_KEY, $shipments );
+		$order->update_meta_data( OrderShipmentRepository::LAST_ERROR_META_KEY, '' );
+		if ( method_exists( $order, 'delete_meta_data' ) ) {
+			$order->delete_meta_data( self::REQUEST_ID_META_KEY );
+		} else {
+			$order->update_meta_data( self::REQUEST_ID_META_KEY, '' );
+		}
+		$order->save();
 	}
 
 	public function order_id( object $order ): int { return method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0; }

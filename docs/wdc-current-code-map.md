@@ -1,3 +1,14 @@
+## Yandex Shipment Framework Lifecycle 0.108.1
+
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` now preserves confirmed Yandex requests when `offers/confirm` succeeds but `request/info` fails. The framework-level result carries `raw_reference['yandex_reconciliation']`, and `ShipmentCreationService` persists a local `reconciliation_required` shipment instead of only saving `last_error`.
+- `src/Shipments/Application/ShipmentCreationService.php` stores pending reconciliation shipments through the existing `OrderShipmentRepository`: `yandex_request_id`, `request_id`, `external_id`, selected offer id/expires_at, sanitized diagnostics and local status `reconciliation_required`. The existing duplicate guard prevents a second create; status update is the recovery path.
+- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` treats `reconciliation_required` and `cancellation_started` as protected local lifecycle states: create/cancel/remove/manual attach are hidden, status update remains available.
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` handles asynchronous cancel: it saves `yandex_cancel_state`, `yandex_cancel_requested=true` and local `status=cancellation_started` immediately after `request/cancel`; a later successful `request/info` with `CANCELLED` clears the active flag and writes the final note once.
+- Yandex API lifecycle request ids are resolved only from `yandex_request_id`, `request_id`, then `external_id`. Courier order numbers may still be shown as tracking identifiers, but they are no longer used for `request/info`, `request/history` or `request/cancel`.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` reuses existing prepared/shared/CDEK shipment allocation rows for Yandex drafts before falling back to a single place. The reused rows keep `item_key`/order-item identity, place number and per-place quantity, so split quantity and same-SKU different order items survive into `yandex_item_rows`.
+- `src/Shipments/YandexDelivery/YandexShipmentRepository.php` keeps `_wdc_yandex_delivery_request_id` synchronized on create, reconciliation, status/cancel updates and remove.
+- `tests/yandex-delivery/run-yandex-delivery-shipment-framework-smoke.php` covers reconciliation persistence/recovery, async cancellation, request_id safety, lookup meta, offer expiry persistence, multi-place draft/admin data and the existing successful create/status/cancel/history path.
+
 ## Yandex Shipment Framework Integration 0.108.0
 
 - `src/Shipments/YandexDelivery/YandexShipmentAdapter.php` implements the existing `ShipmentCarrierAdapterInterface` for carrier `yandex_delivery`. It stays thin: preview builds the pure offers/create payload, `create()` delegates to the Yandex framework registration service, status/cancel/remove delegate to the same service, and labels/documents remain empty.

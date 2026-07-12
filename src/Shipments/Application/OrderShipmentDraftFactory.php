@@ -571,6 +571,7 @@ final class OrderShipmentDraftFactory {
 			Money::from_kopecks( 0 ),
 			$items
 		);
+		$prepared_allocation = $this->prepared_shipment_allocation_from_order( $order, $items, $place );
 		$pickup_code = $this->first_non_empty( $this->meta_string( $order, '_wdc_yandex_delivery_pickup_platform_station_id' ), $this->meta_string( $order, '_wdc_platform_pickup_code' ), $this->meta_string( $order, '_wdc_pickup_point_code' ) );
 		$ready = $this->yandex_default_ready_time();
 		$full_address = $this->shipping_address( $order );
@@ -582,7 +583,7 @@ final class OrderShipmentDraftFactory {
 			rate_id: YandexDeliverySettings::CARRIER_KEY . ':' . $delivery_type,
 			recipient_address: $this->recipient_address( $order, $delivery_type, DeliveryType::PICKUP === $delivery_type ? array( 'point_code' => $pickup_code, 'address' => $this->meta_string( $order, '_wdc_pickup_point_address' ) ) : array() ),
 			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $pickup_code ? new PickupPointSelection( YandexDeliverySettings::CARRIER_KEY, YandexDeliverySettings::SERVICE_KEY, $pickup_code, $this->meta_string( $order, '_wdc_pickup_point_address' ), $this->now() ) : null,
-			places: array( $place ),
+			places: $prepared_allocation['places'],
 			declared_value: Money::from_rubles( $this->default_declared_value_rub( $items ) ),
 			services: array(),
 			recipient: array(
@@ -605,7 +606,7 @@ final class OrderShipmentDraftFactory {
 				'yandex_destination_mode' => DeliveryType::PICKUP === $delivery_type ? 'pickup' : 'courier',
 				'yandex_pickup_platform_station_id' => $pickup_code,
 				'yandex_courier_details' => $this->yandex_courier_details_from_order( $order, $full_address ),
-				'yandex_item_rows' => $this->yandex_item_rows_from_order( $order, $items ),
+				'yandex_item_rows' => $prepared_allocation['item_rows'],
 				'pickup_point_code' => $pickup_code,
 				'pickup_point_found' => DeliveryType::PICKUP !== $delivery_type || '' !== $pickup_code,
 				'courier_original_address' => $full_address,
@@ -783,6 +784,113 @@ final class OrderShipmentDraftFactory {
 
 	private function yandex_default_ready_time(): string {
 		return ( new \DateTimeImmutable( 'tomorrow 12:00:00', new \DateTimeZone( 'Asia/Novosibirsk' ) ) )->format( 'Y-m-d H:i:sP' );
+	}
+
+	/**
+	 * @param array<int,PackageItem> $items
+	 * @return array{places:array<int,ShipmentPlace>,item_rows:array<int,array<string,mixed>>}
+	 */
+	private function prepared_shipment_allocation_from_order( object $order, array $items, ShipmentPlace $fallback_place ): array {
+		$places = $this->shipment_places_from_existing_allocation( $order );
+		$rows = $this->shipment_item_rows_from_existing_allocation( $order );
+		if ( array() !== $places && array() !== $rows ) {
+			return array( 'places' => $places, 'item_rows' => $rows );
+		}
+
+		return array(
+			'places' => array( $fallback_place ),
+			'item_rows' => $this->yandex_item_rows_from_order( $order, $items ),
+		);
+	}
+
+	/** @return array<int,ShipmentPlace> */
+	private function shipment_places_from_existing_allocation( object $order ): array {
+		foreach ( array( '_wdc_shipment_places', '_wdc_cdek_shipment_places', '_wdc_prepared_shipment_places' ) as $key ) {
+			$value = $this->meta_array( $order, $key );
+			$places = $this->shipment_places_from_rows( $value );
+			if ( array() !== $places ) {
+				return $places;
+			}
+		}
+		$calculation = $this->calculation_data( $order );
+		foreach ( array( 'shipment_places', 'cdek_shipment_places', 'places' ) as $key ) {
+			$places = $this->shipment_places_from_rows( is_array( $calculation[ $key ] ?? null ) ? $calculation[ $key ] : array() );
+			if ( array() !== $places ) {
+				return $places;
+			}
+		}
+
+		return array();
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	private function shipment_item_rows_from_existing_allocation( object $order ): array {
+		foreach ( array( '_wdc_shipment_item_rows', '_wdc_cdek_item_rows', '_wdc_prepared_shipment_item_rows' ) as $key ) {
+			$rows = $this->shipment_item_rows_from_rows( $this->meta_array( $order, $key ) );
+			if ( array() !== $rows ) {
+				return $rows;
+			}
+		}
+		$calculation = $this->calculation_data( $order );
+		foreach ( array( 'shipment_item_rows', 'cdek_item_rows', 'item_rows' ) as $key ) {
+			$rows = $this->shipment_item_rows_from_rows( is_array( $calculation[ $key ] ?? null ) ? $calculation[ $key ] : array() );
+			if ( array() !== $rows ) {
+				return $rows;
+			}
+		}
+
+		return array();
+	}
+
+	/** @param array<int|string,mixed> $rows @return array<int,ShipmentPlace> */
+	private function shipment_places_from_rows( array $rows ): array {
+		$places = array();
+		foreach ( $rows as $index => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$row['place_number'] = (int) ( $row['place_number'] ?? $row['number'] ?? ( $index + 1 ) );
+			$row['weight_g'] = (int) ( $row['weight_g'] ?? $row['weight'] ?? $row['weight_gross'] ?? 0 );
+			$row['length_cm'] = (int) ( $row['length_cm'] ?? $row['dx'] ?? $row['length'] ?? 0 );
+			$row['width_cm'] = (int) ( $row['width_cm'] ?? $row['dy'] ?? $row['width'] ?? 0 );
+			$row['height_cm'] = (int) ( $row['height_cm'] ?? $row['dz'] ?? $row['height'] ?? 0 );
+			$row['declared_value'] = is_array( $row['declared_value'] ?? null ) ? $row['declared_value'] : Money::from_kopecks( 0 )->to_array();
+			$place = ShipmentPlace::from_array( $row );
+			if ( array() === $place->validate() ) {
+				$places[] = $place;
+			}
+		}
+
+		return $places;
+	}
+
+	/** @param array<int|string,mixed> $rows @return array<int,array<string,mixed>> */
+	private function shipment_item_rows_from_rows( array $rows ): array {
+		$item_rows = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$item_key = trim( (string) ( $row['item_key'] ?? $row['order_item_id'] ?? '' ) );
+			if ( '' === $item_key ) {
+				continue;
+			}
+			$item_rows[] = array(
+				'item_key' => $item_key,
+				'ordered_quantity' => max( 1, (int) ( $row['ordered_quantity'] ?? $row['quantity'] ?? $row['amount'] ?? 1 ) ),
+				'place_number' => max( 1, (int) ( $row['place_number'] ?? 1 ) ),
+				'name' => (string) ( $row['name'] ?? 'Товар' ),
+				'ware_key' => (string) ( $row['ware_key'] ?? $row['sku'] ?? $item_key ),
+				'amount' => max( 1, (int) ( $row['amount'] ?? $row['quantity'] ?? 1 ) ),
+				'cost' => is_numeric( $row['cost'] ?? null ) ? (float) $row['cost'] : ( is_numeric( $row['unit_price'] ?? null ) ? (float) $row['unit_price'] : 0.0 ),
+				'weight' => max( 1, (int) ( $row['weight'] ?? $row['weight_g'] ?? 1 ) ),
+				'length_cm' => is_numeric( $row['length_cm'] ?? null ) ? (float) $row['length_cm'] : 0.0,
+				'width_cm' => is_numeric( $row['width_cm'] ?? null ) ? (float) $row['width_cm'] : 0.0,
+				'height_cm' => is_numeric( $row['height_cm'] ?? null ) ? (float) $row['height_cm'] : 0.0,
+			);
+		}
+
+		return $item_rows;
 	}
 
 	/**
@@ -1749,6 +1857,20 @@ final class OrderShipmentDraftFactory {
 		$value = $order->get_meta( $key, true );
 
 		return is_scalar( $value ) ? trim( (string) $value ) : '';
+	}
+
+	/** @return array<int|string,mixed> */
+	private function meta_array( object $order, string $key ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( $key, true );
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return is_array( $value ) ? $value : array();
 	}
 
 	private function delivery_type_from_order( object $order ): string {

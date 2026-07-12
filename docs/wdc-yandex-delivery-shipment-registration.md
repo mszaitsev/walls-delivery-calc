@@ -1,5 +1,17 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.1
+
+Этот patch закрывает lifecycle/persistence-блокеры внутри уже существующего Shipment Framework. Новая архитектура, metabox, modal, AJAX flow, retry policy и `request/create` не добавлялись.
+
+Если `offers/confirm` уже вернул `request_id`, но обязательный `request/info` упал, framework больше не теряет связь с реальным заказом Яндекса. `YandexShipmentRegistrationService` возвращает failed `ShipmentCreateResult` с `raw_reference['yandex_reconciliation']`, а `ShipmentCreationService` сохраняет pending shipment со статусом `reconciliation_required`, `yandex_request_id`, lookup meta `_wdc_yandex_delivery_request_id`, selected offer id/expires_at и безопасными diagnostics. Повторный create блокируется существующим duplicate guard; recovery выполняется только через кнопку обновления статуса, которая снова вызывает `request/info` и переводит запись в canonical created state.
+
+Отмена Яндекса теперь обрабатывается как асинхронная операция. Ответ `request/cancel` с `status=CREATED` и `reason=cancellation_started` сохраняется сразу как `yandex_cancel_state`, local `status=cancellation_started` и `yandex_cancel_requested=true`. Пока `request/info` не подтвердил terminal `CANCELLED`, повторная отмена и локальное удаление скрыты, а доступно только обновление статуса. Если follow-up `request/info` после cancel временно падает, принятая отмена остаётся сохранённой и не повторяется автоматически.
+
+Исходный Yandex draft теперь сначала переиспользует существующее подготовленное распределение shipment places/item rows, включая shared/CDEK meta/calculation rows. Это сохраняет dimensions/weight мест, `item_key` как identity order item, `place_number` и quantity внутри каждого места; split quantity между местами не агрегируется обратно. Только при отсутствии такого allocation используется fallback с одним местом и всеми товарами.
+
+Lookup meta `_wdc_yandex_delivery_request_id` синхронизируется при успешном create, reconciliation pending, status/cancel update и удаляется при local remove. `yandex_offer_expires_at` сохраняется как audit/persistence field и не используется для retry/повторного confirm. Для API lifecycle `request_id` берётся только из `yandex_request_id`, `request_id`, затем `external_id`; courier `tracking_number`/`courier_order_id` не используются в `request/info` или `request/cancel`.
+
 ## Статус 0.108.0
 
 Яндекс.Доставка теперь встроена в существующий Shipment Framework как carrier `yandex_delivery`. Новая архитектура регистрации не создавалась: используется тот же путь, что у современной DPD-модели — `CarrierShipmentAdapterRegistry` -> `ShipmentCreationService` -> carrier adapter -> carrier registration service -> `OrderShipmentRepository` -> общий metabox/buttons lifecycle.

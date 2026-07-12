@@ -78,6 +78,10 @@ final class ShipmentCreationService {
 		$result = $adapter->create( $request );
 		$now = $this->now();
 		if ( ! $result->success ) {
+			if ( $this->is_yandex_reconciliation_result( $request, $result ) ) {
+				$this->save_yandex_reconciliation_shipment( $order, $request, $result, $preview, $now );
+				return $result;
+			}
 			$this->repository->save_last_error(
 				$order,
 				array(
@@ -164,6 +168,9 @@ final class ShipmentCreationService {
 			$shipment = array_merge( $shipment, $actual_cost );
 		}
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
+		if ( $is_yandex ) {
+			$this->sync_yandex_lookup_meta( $order, $shipment );
+		}
 		if ( ! $is_cdek ) {
 			$this->add_order_note( $order, $this->success_note( $request, $result, $raw ) );
 		}
@@ -242,6 +249,85 @@ final class ShipmentCreationService {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	private function is_yandex_reconciliation_result( ShipmentCreateRequest $request, ShipmentCreateResult $result ): bool {
+		if ( YandexDeliverySettings::CARRIER_KEY !== $request->carrier_key || 'request_info_after_confirm_failed' !== $result->error_code ) {
+			return false;
+		}
+		$reconciliation = is_array( $result->raw_reference['yandex_reconciliation'] ?? null ) ? $result->raw_reference['yandex_reconciliation'] : array();
+
+		return '' !== trim( (string) ( $reconciliation['confirmed_request_id'] ?? '' ) );
+	}
+
+	/** @param array<string,mixed> $preview */
+	private function save_yandex_reconciliation_shipment( object $order, ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, string $now ): void {
+		$reconciliation = is_array( $result->raw_reference['yandex_reconciliation'] ?? null ) ? $result->raw_reference['yandex_reconciliation'] : array();
+		$request_id = trim( (string) ( $reconciliation['confirmed_request_id'] ?? '' ) );
+		$shipment = array(
+			'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+			'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
+			'order_id' => $request->order_id,
+			'service_title' => (string) ( $request->meta['service_title'] ?? '' ),
+			'delivery_type' => $request->delivery_type,
+			'places' => array_map( static fn ( $place ): array => $place->to_array(), $request->places ),
+			'request_snapshot' => array( 'method' => 'POST', 'path' => '/api/b2b/platform/offers/create?send_unix=false', 'body' => array(), 'errors' => array(), 'note' => 'Canonical Yandex shipment state is request/info; offers/create payload is not persisted.' ),
+			'response_snapshot' => $this->sanitize_yandex_diagnostics( $reconciliation ),
+			'barcode' => $request_id,
+			'tracking_number' => $request_id,
+			'external_id' => $request_id,
+			'request_id' => $request_id,
+			'yandex_request_id' => $request_id,
+			'yandex_operator_request_id' => (string) ( $request->meta['yandex_operator_request_id'] ?? $request->meta['order_num'] ?? $request->order_id ),
+			'yandex_selected_offer_id' => (string) ( $reconciliation['selected_offer_id'] ?? '' ),
+			'yandex_offer_expires_at' => (string) ( $reconciliation['selected_offer_expires_at'] ?? '' ),
+			'status' => 'reconciliation_required',
+			'yandex_status' => 'reconciliation_required',
+			'status_title' => 'Отправление Яндекс создано, требуется получение статуса',
+			'yandex_reconciliation_required' => true,
+			'yandex_registration_phase' => (string) ( $reconciliation['registration_phase'] ?? 'request_info' ),
+			'yandex_registration_error_code' => (string) ( $reconciliation['error_code'] ?? $result->error_code ),
+			'yandex_registration_error_message' => (string) ( $reconciliation['error_message'] ?? $result->error_message ),
+			'yandex_registration_error_details' => is_array( $reconciliation['api_error_details'] ?? null ) ? $this->sanitize_yandex_diagnostics( $reconciliation['api_error_details'] ) : array(),
+			'created_by' => function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0,
+			'created_by_context' => 'admin_manual',
+			'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
+			'created_at' => $now,
+			'updated_at' => $now,
+		);
+		$this->repository->save_for_carrier( $order, YandexDeliverySettings::CARRIER_KEY, $shipment );
+		$this->sync_yandex_lookup_meta( $order, $shipment );
+		$this->repository->save_last_error(
+			$order,
+			array(
+				'carrier_key' => $request->carrier_key,
+				'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
+				'error_code' => $result->error_code,
+				'error_message' => $result->error_message,
+				'updated_at' => $now,
+			)
+		);
+		$this->add_order_note( $order, sprintf( 'Отправление Яндекс подтверждено, но требуется восстановить данные по request_id: %s.', $request_id ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $diagnostics
+	 * @return array<string,mixed>
+	 */
+	private function sanitize_yandex_diagnostics( array $diagnostics ): array {
+		$sanitized = $diagnostics;
+		unset( $sanitized['Authorization'], $sanitized['authorization'], $sanitized['token'], $sanitized['bearer_token'] );
+
+		return $sanitized;
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function sync_yandex_lookup_meta( object $order, array $shipment ): void {
+		$request_id = trim( (string) ( $shipment['yandex_request_id'] ?? $shipment['request_id'] ?? $shipment['external_id'] ?? '' ) );
+		if ( '' !== $request_id && method_exists( $order, 'update_meta_data' ) && method_exists( $order, 'save' ) ) {
+			$order->update_meta_data( '_wdc_yandex_delivery_request_id', $request_id );
+			$order->save();
+		}
 	}
 
 	/**
