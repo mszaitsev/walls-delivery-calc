@@ -19,7 +19,7 @@ final class YandexShipmentButtonPolicy {
 			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => false );
 		}
 		$status = strtoupper( trim( (string) ( $shipment['yandex_status'] ?? $local_status ) ) );
-		$terminal = in_array( $status, self::TERMINAL_STATUSES, true );
+		$terminal = self::is_terminal_status( $status );
 
 		return array(
 			'create' => false,
@@ -40,5 +40,9 @@ final class YandexShipmentButtonPolicy {
 		}
 
 		return '';
+	}
+
+	public static function is_terminal_status( string $status ): bool {
+		return in_array( strtoupper( trim( $status ) ), self::TERMINAL_STATUSES, true );
 	}
 }

@@ -1,5 +1,15 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.2
+
+Проведён повторный аудит источника allocation для существующей shipment modal. Канонический production flow для CDEK использует не order meta, а отправленные из общей модалки поля `places[]` и `cdek_items[]`; `OrderShipmentDraftFactory::create_cdek_request_from_admin_data()` превращает их в `ShipmentCreateRequest::places` и `meta['cdek_item_rows']`. Для Яндекса используется тот же источник: `create_yandex_request_from_admin_data()` читает `places[]` и `cdek_items[]`, сохраняет split quantity, `place_number`, `item_key` и одинаковые SKU разных order items как разные строки.
+
+Поиски `_wdc_shipment_places`, `_wdc_cdek_shipment_places`, `_wdc_prepared_shipment_places` и аналогичных item-row meta удалены: существующий modal workflow их не пишет, поэтому они не являются каноническим источником. Начальный draft из заказа остаётся одногрузоместным, как у CDEK, и нужен для открытия модалки; многоместное распределение становится каноническим после submit общей shipment modal.
+
+Yandex parser allocation rows больше не исправляет повреждённые значения. `amount=0`, отсутствующий `place_number`, пустой `item_key` или нулевой `weight` проходят в rows как есть и отклоняются существующим `CdekShipmentAllocationAdapter` / `ShipmentAllocation` validator до HTTP. Отдельный validator не добавлялся.
+
+Cancellation lifecycle теперь использует общий helper terminal statuses из `YandexShipmentButtonPolicy`. Если shipment находится в `cancellation_started`, а `request/info` возвращает `CANCELLED`, сохраняется прежняя семантика успешной отмены. Если возвращается другой terminal status (`DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER`, `REJECTED`), active cancel ожидание завершается, `yandex_cancel_requested` сбрасывается, повторный cancel скрывается через существующую button policy, но note не говорит «отправление отменено».
+
 ## Статус 0.108.1
 
 Этот patch закрывает lifecycle/persistence-блокеры внутри уже существующего Shipment Framework. Новая архитектура, metabox, modal, AJAX flow, retry policy и `request/create` не добавлялись.

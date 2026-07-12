@@ -1,3 +1,12 @@
+## Yandex Shipment Framework Final Hardening 0.108.2
+
+- The real multi-place source for shipment registration is the existing shipment modal submission: `places[]` plus `cdek_items[]`. `OrderShipmentDraftFactory::create_cdek_request_from_admin_data()` already uses this source for CDEK, and `create_yandex_request_from_admin_data()` now uses the same source for Yandex.
+- The previously probed order-meta keys `_wdc_shipment_places`, `_wdc_cdek_shipment_places`, `_wdc_prepared_shipment_places` and matching item-row keys are not canonical production data for the modal flow and are no longer searched by Yandex draft creation.
+- Initial `create_yandex_request_from_order()` mirrors CDEK: it builds the safe one-place base draft used to render the modal. Multi-place allocation becomes canonical only after admin modal data is submitted back through `create_request_from_admin_data()`.
+- Yandex modal item rows are parsed without silent repair: `amount=0`, missing `place_number`, missing `item_key` or zero `weight` remain invalid and are rejected by the existing `CdekShipmentAllocationAdapter`/`ShipmentAllocation` validation before HTTP.
+- `YandexShipmentButtonPolicy::is_terminal_status()` is the shared terminal-status helper for Yandex shipment lifecycle. `YandexShipmentRegistrationService` uses it when a pending cancellation receives `CANCELLED`, `DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER` or `REJECTED` from `request/info`.
+- Non-`CANCELLED` terminal statuses close `cancellation_started` and clear `yandex_cancel_requested` without writing the successful-cancel note; the note records that the terminal Yandex status ended the wait for cancellation.
+
 ## Yandex Shipment Framework Lifecycle 0.108.1
 
 - `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` now preserves confirmed Yandex requests when `offers/confirm` succeeds but `request/info` fails. The framework-level result carries `raw_reference['yandex_reconciliation']`, and `ShipmentCreationService` persists a local `reconciliation_required` shipment instead of only saving `last_error`.

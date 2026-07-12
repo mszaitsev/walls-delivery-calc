@@ -344,27 +344,13 @@ $draft_order = new YdFrameworkOrder( 781 );
 $draft_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySettings::CARRIER_KEY );
 $draft_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':pickup' );
 $draft_order->update_meta_data( '_wdc_yandex_delivery_pickup_platform_station_id', 'PVZ-1' );
-$draft_order->update_meta_data(
-	'_wdc_shipment_places',
-	array(
-		array( 'place_number' => 1, 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ),
-		array( 'place_number' => 2, 'weight_g' => 800, 'length_cm' => 15, 'width_cm' => 15, 'height_cm' => 10 ),
-	)
-);
-$draft_order->update_meta_data(
-	'_wdc_shipment_item_rows',
-	array(
-		array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
-		array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-		array( 'item_key' => 'order-item-b', 'ordered_quantity' => 1, 'place_number' => 2, 'name' => 'Item B', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 200, 'weight' => 400 ),
-	)
-);
 $draft_request = $draft_factory->create_request_from_order( $draft_order );
-yd_framework_assert( 2 === count( $draft_request->places ) && 3 === count( $draft_request->meta['yandex_item_rows'] ?? array() ), 'Yandex draft must reuse existing multi-place allocation rows.' );
-yd_framework_assert( 1000 === $draft_request->places[0]->weight_g && 800 === $draft_request->places[1]->weight_g, 'Yandex draft must keep place dimensions and weight from existing allocation.' );
-$draft_rows = $draft_request->meta['yandex_item_rows'];
-yd_framework_assert( 2 === (int) $draft_rows[0]['amount'] && 1 === (int) $draft_rows[1]['amount'] && 2 === (int) $draft_rows[1]['place_number'], 'Yandex draft must preserve split quantity across places.' );
-yd_framework_assert( 'order-item-a' === (string) $draft_rows[0]['item_key'] && 'order-item-b' === (string) $draft_rows[2]['item_key'] && $draft_rows[0]['ware_key'] === $draft_rows[2]['ware_key'], 'Yandex draft identity must keep same SKU order items distinct by item_key.' );
+yd_framework_assert( 1 === count( $draft_request->places ) && 1 === (int) ( $draft_request->meta['yandex_item_rows'][0]['place_number'] ?? 0 ), 'Initial Yandex draft must match CDEK production flow and use one place before modal admin data is submitted.' );
+$modal_item_rows = array(
+	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'order-item-b', 'ordered_quantity' => 1, 'place_number' => 2, 'name' => 'Item B', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 200, 'weight' => 400 ),
+);
 $admin_request = $draft_factory->create_request_from_admin_data(
 	$draft_order,
 	array(
@@ -373,17 +359,35 @@ $admin_request = $draft_factory->create_request_from_admin_data(
 			array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ),
 			array( 'weight_g' => 800, 'length_cm' => 15, 'width_cm' => 15, 'height_cm' => 10 ),
 		),
-		'cdek_items' => $draft_order->get_meta( '_wdc_shipment_item_rows', true ),
+		'cdek_items' => $modal_item_rows,
 		'yandex_pickup_platform_station_id' => 'PVZ-1',
 	)
 );
 yd_framework_assert( 2 === count( $admin_request->places ) && 3 === count( $admin_request->meta['yandex_item_rows'] ?? array() ) && 2 === (int) $admin_request->meta['yandex_item_rows'][1]['place_number'], 'Yandex admin data must preserve multi-place item rows from the shared shipment modal.' );
+yd_framework_assert( 1000 === $admin_request->places[0]->weight_g && 800 === $admin_request->places[1]->weight_g, 'Yandex admin data must keep modal place dimensions and weight.' );
+$admin_rows = $admin_request->meta['yandex_item_rows'];
+yd_framework_assert( 2 === (int) $admin_rows[0]['amount'] && 1 === (int) $admin_rows[1]['amount'] && 2 === (int) $admin_rows[1]['place_number'], 'Yandex admin data must preserve split quantity across places.' );
+yd_framework_assert( 'order-item-a' === (string) $admin_rows[0]['item_key'] && 'order-item-b' === (string) $admin_rows[2]['item_key'] && $admin_rows[0]['ware_key'] === $admin_rows[2]['ware_key'], 'Yandex admin data identity must keep same SKU order items distinct by item_key.' );
 $fallback_order = new YdFrameworkOrder( 782 );
 $fallback_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySettings::CARRIER_KEY );
 $fallback_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':pickup' );
 $fallback_order->update_meta_data( '_wdc_yandex_delivery_pickup_platform_station_id', 'PVZ-1' );
 $fallback_request = $draft_factory->create_request_from_order( $fallback_order );
 yd_framework_assert( 1 === count( $fallback_request->places ) && 1 === (int) ( $fallback_request->meta['yandex_item_rows'][0]['place_number'] ?? 0 ), 'Yandex draft fallback must use one place only when existing allocation is absent.' );
+
+$invalid_admin_request = $draft_factory->create_request_from_admin_data(
+	$draft_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'places' => array( array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ) ),
+		'cdek_items' => array( array( 'item_key' => 'broken-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Broken', 'ware_key' => 'BROKEN', 'amount' => 0, 'cost' => 100, 'weight' => 300 ) ),
+		'yandex_pickup_platform_station_id' => 'PVZ-1',
+	)
+);
+yd_framework_assert( 0 === (int) ( $invalid_admin_request->meta['yandex_item_rows'][0]['amount'] ?? -1 ), 'Yandex admin allocation parser must not silently repair amount=0.' );
+list( $invalid_repository, $invalid_adapter, $invalid_creation, $invalid_registration, $invalid_http ) = yd_framework_stack( array() );
+$invalid_result = $invalid_adapter->create( $invalid_admin_request );
+yd_framework_assert( ! $invalid_result->success && str_contains( $invalid_result->error_message, 'amount must be greater than 0' ) && 0 === count( $invalid_http->requests ), 'Broken Yandex allocation must fail through existing ShipmentAllocation validation before HTTP.' );
 
 $request_id_safety_order = new YdFrameworkOrder( 777 );
 list( $request_id_repository, $request_id_adapter, $request_id_creation, $request_id_registration, $request_id_http ) = yd_framework_stack(
@@ -404,6 +408,27 @@ $request_id_adapter->cancel_in_carrier( $request_id_safety_order );
 yd_framework_assert( str_contains( $request_id_http->requests[3]['url'], 'request_id=REQ-SAFE' ) && ! str_contains( $request_id_http->requests[3]['url'], '880191690' ), 'Status update must use yandex_request_id and not courier_order_id tracking.' );
 $safe_cancel_body = json_decode( (string) ( $request_id_http->requests[4]['args']['body'] ?? '{}' ), true );
 yd_framework_assert( 'REQ-SAFE' === (string) ( $safe_cancel_body['request_id'] ?? '' ), 'Cancel must use yandex_request_id and not courier_order_id tracking.' );
+
+foreach ( array( 'DELIVERED', 'RETURNED', 'RETURNED_TO_SENDER', 'REJECTED' ) as $terminal_status ) {
+	$terminal_order = new YdFrameworkOrder( 777 );
+	list( $terminal_repository, $terminal_adapter, $terminal_creation, $terminal_registration, $terminal_http ) = yd_framework_stack(
+		array(
+			yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-' . $terminal_status ) ) ) ),
+			yd_framework_response( array( 'request_id' => 'REQ-' . $terminal_status ) ),
+			yd_framework_response( yd_framework_info( 'REQ-' . $terminal_status, 'CREATED', 'YD-' . $terminal_status ) ),
+			yd_framework_response( array( 'status' => 'CREATED', 'description' => 'Заказ отменяется', 'reason' => 'cancellation_started' ) ),
+			yd_framework_response( yd_framework_info( 'REQ-' . $terminal_status, $terminal_status, 'YD-' . $terminal_status ) ),
+		)
+	);
+	yd_framework_assert( $terminal_creation->create( $terminal_order, yd_framework_request() )->success, 'Terminal cancel scenario must start from successful create.' );
+	$terminal_cancel = $terminal_adapter->cancel_in_carrier( $terminal_order );
+	$terminal_shipment = $terminal_repository->find_by_carrier( $terminal_order, YandexDeliverySettings::CARRIER_KEY );
+	$terminal_policy = ( new YandexShipmentButtonPolicy() )->resolve( $terminal_shipment );
+	yd_framework_assert( ! empty( $terminal_cancel['success'] ) && $terminal_status === (string) ( $terminal_cancel['status'] ?? '' ), 'Cancel follow-up info must surface non-CANCELLED terminal status.' );
+	yd_framework_assert( 'created' === (string) ( $terminal_shipment['status'] ?? '' ) && $terminal_status === (string) ( $terminal_shipment['yandex_status'] ?? '' ) && empty( $terminal_shipment['yandex_cancel_requested'] ), 'Non-CANCELLED terminal status must close cancellation_started lifecycle.' );
+	yd_framework_assert( empty( $terminal_policy['cancel'] ) && ! empty( $terminal_policy['remove'] ), 'Terminal Yandex status must use existing button policy to hide cancel and allow remove.' );
+	yd_framework_assert( ! str_contains( implode( "\n", $terminal_order->notes ), 'Отправление Яндекс отменено.' ) && str_contains( implode( "\n", $terminal_order->notes ), 'Получен терминальный статус Яндекс: ' . $terminal_status ), 'Non-CANCELLED terminal cancel resolution must not write successful-cancel note.' );
+}
 
 $remove = $adapter->remove_from_order( $order );
 yd_framework_assert( ! empty( $remove['success'] ) && '' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Yandex remove_local must delete lookup meta.' );

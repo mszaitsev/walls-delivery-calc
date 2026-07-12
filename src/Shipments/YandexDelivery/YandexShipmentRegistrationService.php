@@ -88,19 +88,14 @@ final class YandexShipmentRegistrationService {
 			$info = $this->client->request_info( $request_id, $this->temporary_places_for_request_info( $shipment ) );
 			$was_reconciliation = ! empty( $shipment['yandex_reconciliation_required'] ) || 'reconciliation_required' === (string) ( $shipment['status'] ?? '' );
 			$was_cancel_pending = ! empty( $shipment['yandex_cancel_requested'] ) || 'cancellation_started' === (string) ( $shipment['status'] ?? '' );
-			$local_status = $was_cancel_pending && ! $this->is_terminal_cancel_status( $info->status ) ? 'cancellation_started' : 'created';
+			$local_status = $was_cancel_pending && ! $this->is_terminal_status( $info->status ) ? 'cancellation_started' : 'created';
 			$updated = $this->merge_info( $shipment, $info, $local_status );
-			if ( $was_cancel_pending && ! $this->is_terminal_cancel_status( $info->status ) ) {
+			if ( $was_cancel_pending && ! $this->is_terminal_status( $info->status ) ) {
 				$updated['yandex_cancel_requested'] = true;
 				$updated['status_title'] = 'Запрос на отмену отправления Яндекс отправлен';
 			}
-			if ( $was_cancel_pending && $this->is_terminal_cancel_status( $info->status ) ) {
-				$updated['yandex_cancel_requested'] = false;
-				$updated['yandex_cancel_completed'] = true;
-				if ( empty( $shipment['yandex_cancel_completed_noted'] ) ) {
-					$updated['yandex_cancel_completed_noted'] = true;
-					$this->add_order_note( $order, 'Отправление Яндекс отменено.' );
-				}
+			if ( $was_cancel_pending && $this->is_terminal_status( $info->status ) ) {
+				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
 			} elseif ( $was_reconciliation ) {
 				$this->add_order_note( $order, 'Данные отправления Яндекс восстановлены. Статус: ' . $info->status . '.' );
 			} elseif ( (string) ( $shipment['yandex_last_noted_status'] ?? '' ) !== $info->status ) {
@@ -136,15 +131,10 @@ final class YandexShipmentRegistrationService {
 				}
 				return array( 'success' => true, 'accepted' => true, 'message' => 'Запрос на отмену отправлен, но актуальный статус пока не получен.', 'details' => $info_exception->details() );
 			}
-			$updated = $this->merge_info( $cancel_started, $info, $this->is_terminal_cancel_status( $info->status ) ? 'created' : 'cancellation_started' );
+			$updated = $this->merge_info( $cancel_started, $info, $this->is_terminal_status( $info->status ) ? 'created' : 'cancellation_started' );
 			$updated['yandex_cancel_state'] = $cancel_state->raw;
-			if ( $this->is_terminal_cancel_status( $info->status ) ) {
-				$updated['yandex_cancel_requested'] = false;
-				$updated['yandex_cancel_completed'] = true;
-				if ( empty( $shipment['yandex_cancel_completed_noted'] ) ) {
-					$updated['yandex_cancel_completed_noted'] = true;
-					$this->add_order_note( $order, 'Отправление Яндекс отменено.' );
-				}
+			if ( $this->is_terminal_status( $info->status ) ) {
+				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
 			} else {
 				$updated['yandex_cancel_requested'] = true;
 				$updated['status'] = 'cancellation_started';
@@ -368,8 +358,35 @@ final class YandexShipmentRegistrationService {
 		);
 	}
 
-	private function is_terminal_cancel_status( string $status ): bool {
+	private function is_terminal_status( string $status ): bool {
+		return YandexShipmentButtonPolicy::is_terminal_status( $status );
+	}
+
+	private function is_cancelled_status( string $status ): bool {
 		return 'CANCELLED' === strtoupper( trim( $status ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $previous
+	 * @param array<string,mixed> $updated
+	 */
+	private function apply_terminal_cancel_resolution( object $order, array $previous, array &$updated, string $status ): void {
+		$status = strtoupper( trim( $status ) );
+		$updated['yandex_cancel_requested'] = false;
+		$updated['status'] = 'created';
+		if ( $this->is_cancelled_status( $status ) ) {
+			$updated['yandex_cancel_completed'] = true;
+			if ( empty( $previous['yandex_cancel_completed_noted'] ) ) {
+				$updated['yandex_cancel_completed_noted'] = true;
+				$this->add_order_note( $order, 'Отправление Яндекс отменено.' );
+			}
+			return;
+		}
+		$updated['yandex_cancel_terminal_status'] = $status;
+		if ( empty( $previous['yandex_cancel_terminal_noted'] ) ) {
+			$updated['yandex_cancel_terminal_noted'] = true;
+			$this->add_order_note( $order, 'Получен терминальный статус Яндекс: ' . $status . '. Операция отмены более не ожидается.' );
+		}
 	}
 
 	/**
