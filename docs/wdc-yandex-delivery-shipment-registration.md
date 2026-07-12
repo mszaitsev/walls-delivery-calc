@@ -1,10 +1,20 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.9
+
+Реальный тест подтвердил eventual consistency после `offers/confirm`: отправление уже создано в кабинете Яндекс.Доставки, но немедленный `request/info` может временно не содержать `state.status`. Такой ответ теперь не считается провалом create. Framework сохраняет pending shipment с `status=reconciliation_required`, подтверждённым `request_id`, lookup meta `_wdc_yandex_delivery_request_id`, safe diagnostics и selected offer audit, а AJAX create возвращает success/accepted с сообщением `Отправление создано в Яндекс.Доставке. Ожидается получение статуса.`
+
+После accepted create модалка закрывается, блок `Отправления` обновляется, и общий JS запускает bounded registration polling через существующий status AJAX endpoint. Для Яндекса polling настроен на 5 секунд × 14 попыток. Каждый tick вызывает только `request/info`; `offers/create`, `offers/confirm` и `request/create` не повторяются. Как только `request/info` возвращает canonical response с непустым `state.status`, reconciliation flags очищаются, сохраняются canonical request/info snapshot, destination/recipient/items/places/barcodes, `courier_order_id`, `sharing_url`, а статус отображается без дублирования: `Статус Яндекс.Доставки: CREATED`.
+
+Если все 14 попыток остаются pending, UI показывает `Статус отправления пока не получен. Повторите обновление статуса позднее.`, оставляет доступной кнопку `Обновить статус` и локально показывает `Удалить из заказа`. Перед local remove Яндекс показывает предупреждение: `Удаление уберёт запись только из заказа WooCommerce и не отменит отправление в Яндекс.Доставке. Продолжить?` Удаление остаётся только локальным и не вызывает `request/cancel`.
+
+Selected offer сохраняется как audit до reconciliation и после status update: `yandex_selected_offer_id`, `yandex_offer_expires_at`, `yandex_offer_pricing`, `yandex_offer_pricing_total`, `yandex_offer_pricing_total_kopecks`, `yandex_offer_delivery_interval`, `yandex_offer_pickup_interval`, `yandex_selected_offer_snapshot`. `source.interval_utc` в payload остаётся заявленной готовностью заказа; `pickup_interval` выбранного offer — фактическое окно сдачи на исходную станцию, а `delivery_interval` — окно доставки получателю.
+
 ## Статус 0.108.8
 
 Перед первым реальным тестом регистрации Яндекс.Доставки общий shipment modal больше не подставляет рассчитанные weight/dimensions в редактируемые поля грузоместа ни для одной службы доставки. `OrderShipmentsMetabox` очищает только initial UI values `weight_g`, `length_cm`, `width_cm`, `height_cm`, но сохраняет все draft places, place numbers, товары и `shipment_items[]` в распределении. При submit `places[]` из формы являются единственным источником фактических размеров: пустые значения не заменяются calculated defaults, проходят в strict validation как invalid и возвращаются менеджеру русскими сообщениями `Укажите вес/длину/ширину/высоту грузоместа.`
 
-Расчётный вес теперь показывается только подсказкой `Расчётный вес товаров: %d г`: для одного исходного грузоместа рядом с полем веса, для нескольких мест — как общий hint над списком. Эта подсказка не является `value`, не попадает в `FormData`, не разблокирует preview/create и не распределяется автоматически по нескольким коробкам. Расчётные dimensions не показываются как подсказки: менеджер вводит фактические внешние габариты упаковки вручную.
+Расчётный вес теперь показывается только compact-подсказкой `⚖️{weight}`: для одного исходного грузоместа рядом с полем веса, для нескольких мест — как общий hint над списком. Эта подсказка не является `value`, не попадает в `FormData`, не разблокирует preview/create и не распределяется автоматически по нескольким коробкам. Расчётные dimensions не показываются как подсказки: менеджер вводит фактические внешние габариты упаковки вручную.
 
 Ручное прикрепление Яндекс использует существующий generic manual attach UI. Если локального Yandex shipment ещё нет, button policy показывает `Ввести номер Яндекс вручную`; поле подписано `Request ID Яндекс`, placeholder равен `***-udp`, а input value при открытии пустой. Введённое поле интерпретируется как Yandex `request_id`. Adapter не вызывает `offers/create`, `offers/confirm` или `request/create`: выполняется один `request/info?request_id=...&slim=false`, затем проверяется совпадение `request.info.operator_request_id` с номером WooCommerce заказа. При mismatch или отсутствии operator id shipment не сохраняется.
 
@@ -99,7 +109,7 @@ Offer DTO читает production shape `offer_details`: `delivery_interval.poli
 
 `RequestInfo` читает `request_id`, `courier_order_id`, `sharing_url` и `state` с верхнего уровня ответа, а `destination`, `recipient_info`, `items`, `places`, `available_actions` и `delivery_policy` из nested `request`. `RequestHistory` читает primary поле `state_history`. `request/cancel` сохраняет async response `status=CREATED`, `description=Заказ отменяется`, `reason=cancellation_started`; это не трактуется как финальный lifecycle status.
 
-Защиты перед будущим persistence: `request_info()` отклоняет пустой или чужой `request_id`, отсутствие `request`, отсутствие `state.status`, mismatch количества temporary/real places и ненадёжную barcode map. Если `request/info` падает после успешного confirm, registration service перевыбрасывает `YandexDeliveryApiException` с `error_code=request_info_after_confirm_failed` и `confirmed_request_id`; следующий этап должен делать reconciliation через `request/info`, а не повторять confirm.
+Защиты перед persistence: `request_info()` отклоняет пустой или чужой `request_id`, отсутствие `request`, отсутствие `state.status`, mismatch количества temporary/real places и ненадёжную barcode map. Если `request/info` ещё не готов после успешного confirm, lower-level client по-прежнему отдаёт deterministic `YandexDeliveryApiException`, но framework stage 0.108.9 переводит temporary `request_info_status_missing` / `request_info_request_missing` в accepted reconciliation и продолжает через последующие `request/info`, не повторяя confirm.
 
 ## Статус 0.107.0
 

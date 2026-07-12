@@ -168,6 +168,23 @@ function yd_framework_info( string $request_id, string $status, string $real_bar
 		'courier_order_id' => '880191690',
 	);
 }
+function yd_framework_incomplete_info( string $request_id, ?string $operator_request_id = 'ORDER-777' ): array {
+	$info = array();
+	if ( null !== $operator_request_id ) {
+		$info['operator_request_id'] = $operator_request_id;
+	}
+
+	return array(
+		'request_id' => $request_id,
+		'request' => array(
+			'info' => $info,
+			'destination' => array( 'type' => 'platform_station', 'platform_station' => array( 'platform_id' => 'PVZ-1' ) ),
+			'recipient_info' => array( 'first_name' => 'Михайлов Михаил', 'phone' => '+79131234567' ),
+			'items' => array(),
+			'places' => array(),
+		),
+	);
+}
 function yd_framework_request(): ShipmentCreateRequest {
 	$item = new PackageItem( 'SKU-A', 'Item A', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 500, 10, 10, 5 );
 	return new ShipmentCreateRequest(
@@ -245,6 +262,8 @@ yd_framework_assert( $result->success && 'REQ-777' === $result->external_id && '
 $shipment = $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( 'REQ-777' === (string) ( $shipment['yandex_request_id'] ?? '' ) && 'OFFER-1' === (string) ( $shipment['yandex_selected_offer_id'] ?? '' ) && 'CREATED' === (string) ( $shipment['yandex_status'] ?? '' ), 'Repository must persist request_id, selected_offer_id and Yandex status.' );
 yd_framework_assert( '2026-07-11T16:23:01.000000Z' === (string) ( $shipment['yandex_offer_expires_at'] ?? '' ), 'Repository must persist selected offer expires_at.' );
+yd_framework_assert( '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing'] ?? '' ) && '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing_total'] ?? '' ) && 29880 === (int) ( $shipment['yandex_offer_pricing_total_kopecks'] ?? 0 ), 'Repository must persist selected offer pricing audit fields.' );
+yd_framework_assert( '2026-07-21T07:00:00.000000Z' === (string) ( $shipment['yandex_offer_delivery_interval']['min'] ?? '' ) && '2026-07-13T05:00:00.000000Z' === (string) ( $shipment['yandex_offer_pickup_interval']['max'] ?? '' ) && 'OFFER-1' === (string) ( $shipment['yandex_selected_offer_snapshot']['offer_id'] ?? '' ), 'Repository must persist selected offer interval snapshot audit fields.' );
 yd_framework_assert( 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Successful create must persist Yandex request_id lookup meta.' );
 yd_framework_assert( 'YD-REAL-1' === (string) ( $shipment['yandex_place_barcode_map']['ORDER-777-1'] ?? '' ) && 'YD-REAL-1' === (string) ( $shipment['yandex_places'][0]['barcode'] ?? '' ) && 'ITEM-YD-1' === (string) ( $shipment['yandex_items'][0]['barcode'] ?? '' ), 'Repository must persist request/info items, places and temporary-to-real barcode map.' );
 yd_framework_assert( array() === (array) ( $shipment['request_snapshot']['body'] ?? array( 'not-empty' ) ) && is_array( $shipment['response_snapshot'] ?? null ), 'Yandex persistence must not store offers/create payload body and must store canonical request/info snapshot.' );
@@ -259,6 +278,7 @@ $updated_after_status = $base_repository->find_by_carrier( $order, YandexDeliver
 yd_framework_assert( 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 'OFFER-1' === (string) ( $updated_after_status['yandex_selected_offer_id'] ?? '' ) && '2026-07-11T16:23:01.000000Z' === (string) ( $updated_after_status['yandex_offer_expires_at'] ?? '' ), 'Status update must keep lookup meta and selected offer audit fields.' );
 $payload = $adapter->status_payload( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
 yd_framework_assert( ! empty( $payload['can_update_status'] ) && ! empty( $payload['can_cancel'] ) && empty( $payload['can_attach_manual'] ), 'Yandex button policy must expose status/cancel and hide manual attach.' );
+yd_framework_assert( 'CREATED' === (string) ( $payload['carrier_status_title'] ?? '' ), 'Yandex status payload must expose status value without duplicating carrier label.' );
 
 $cancel = $adapter->cancel_in_carrier( $order );
 yd_framework_assert( ! empty( $cancel['success'] ) && 6 === count( $fake->requests ), 'Yandex cancel must call request/cancel and canonical request/info.' );
@@ -286,12 +306,14 @@ yd_framework_assert( str_contains( $metabox_source, 'shipment_preview_validation
 yd_framework_assert( str_contains( $metabox_source, 'data-wdc-requires-successful-preview' ) && str_contains( $metabox_source, 'shipment_create_validation_failed' ) && str_contains( $metabox_source, 'shipment_create_unexpected_error' ) && str_contains( $metabox_source, 'public_shipment_error_message' ), 'Shipment create AJAX must be JSON-safe and expose the preview-required capability to runtime.' );
 yd_framework_assert( str_contains( $metabox_source, 'editable_place_rows' ) && str_contains( $metabox_source, "\$row['weight_g'] = ''" ) && ! str_contains( $metabox_source, $removed_manual_place_capability ), 'Shared modal must clear editable place dimensions for every carrier without carrier-specific capability.' );
 yd_framework_assert( str_contains( $metabox_source, 'shipment_attach_validation_failed' ) && str_contains( $metabox_source, 'shipment_attach_unexpected_error' ) && str_contains( $metabox_source, "'request_id' => \$barcode" ), 'Generic manual attach AJAX must stay JSON-safe and pass request_id alias to carrier adapters.' );
+yd_framework_assert( str_contains( $metabox_source, "__( '⚖️%d'" ) && ! str_contains( $metabox_source, 'Расчётный вес товаров: %d г' ), 'Shared modal must preserve compact calculated weight hint format.' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 yd_framework_assert( str_contains( $js_source, 'can_create' ) && str_contains( $js_source, 'can_attach_manual' ) && str_contains( $js_source, 'setVisible(openButton, canCreate)' ) && str_contains( $js_source, 'setVisible(manualButton, canAttachManual)' ), 'Runtime shipment buttons must consume adapter create/manual capabilities.' );
 yd_framework_assert( str_contains( $js_source, 'function parseShipmentJsonResponse' ) && str_contains( $js_source, 'Сервер вернул некорректный ответ при подготовке отправления' ) && str_contains( $js_source, '.then(parseShipmentJsonResponse)' ), 'Shipment preview JS must parse malformed responses through controlled JSON fallback.' );
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresTariff !== '0'" ) && str_contains( $js_source, 'parseDecimalValue(length' ), 'Shipment admin JS must support no-tariff carriers and decimal place dimensions.' );
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresSuccessfulPreview === '1'" ) && str_contains( $js_source, 'const latestPreviewReady = !requiresSuccessfulPreview' ), 'Shipment admin JS must block create by carrier-neutral preview capability instead of checking a Yandex/DPD branch.' );
 yd_framework_assert( str_contains( $js_source, "data.append('barcode', input ? input.value || '' : '')" ) && str_contains( $js_source, 'canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload' ) && str_contains( $js_source, 'manualAttachFieldLabel' ), 'Runtime manual attach must send the generic barcode field and consume adapter manual-attach capability after success.' );
+yd_framework_assert( str_contains( $js_source, 'function startShipmentRegistrationPolling' ) && str_contains( $js_source, 'registrationPollIntervalMs' ) && str_contains( $js_source, 'registrationPollMaxAttempts' ) && str_contains( $js_source, 'canRemove: true' ) && str_contains( $js_source, 'removeConfirmationMessage' ), 'Runtime registration polling must be carrier-neutral, bounded and expose local remove after exhaustion.' );
 yd_framework_assert( ! str_contains( $js_source, 'response.json()' ) && ! str_contains( $js_source, 'Unexpected token' ) && ! str_contains( $js_source, 'Server returned' ) && ! str_contains( $js_source, 'DPD registration failed' ), 'Shipment admin runtime must not expose raw JSON parser or English fallback messages.' );
 
 $metabox_reflection = new ReflectionClass( \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox::class );
@@ -320,6 +342,9 @@ yd_framework_assert( empty( $created_yandex_buttons['show_create'] ) && ! empty(
 $reconciliation_yandex = array( 'status' => 'reconciliation_required', 'yandex_request_id' => 'REQ-META-PENDING' );
 $reconciliation_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $reconciliation_yandex, $adapter->status_payload( $order, $reconciliation_yandex ) );
 yd_framework_assert( ! empty( $reconciliation_yandex_buttons['has_shipment'] ) && empty( $reconciliation_yandex_buttons['show_create'] ) && ! empty( $reconciliation_yandex_buttons['show_update'] ) && empty( $reconciliation_yandex_buttons['show_cancel'] ) && empty( $reconciliation_yandex_buttons['show_remove'] ), 'Metabox capabilities must treat Yandex reconciliation_required as existing shipment with status update only.' );
+$reconciliation_exhausted_yandex = array( 'status' => 'reconciliation_required', 'yandex_request_id' => 'REQ-META-EXHAUSTED', 'yandex_reconciliation_poll_exhausted' => true );
+$reconciliation_exhausted_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $reconciliation_exhausted_yandex, $adapter->status_payload( $order, $reconciliation_exhausted_yandex ) );
+yd_framework_assert( ! empty( $reconciliation_exhausted_buttons['show_update'] ) && ! empty( $reconciliation_exhausted_buttons['show_remove'] ) && empty( $reconciliation_exhausted_buttons['show_create'] ) && empty( $reconciliation_exhausted_buttons['show_cancel'] ), 'Yandex exhausted reconciliation must allow status update and local remove without create/cancel.' );
 
 $cancel_started_yandex = array( 'status' => 'cancellation_started', 'yandex_request_id' => 'REQ-META-CANCEL' );
 $cancel_started_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $cancel_started_yandex, $adapter->status_payload( $order, $cancel_started_yandex ) );
@@ -341,25 +366,35 @@ list( $reconciliation_repository, $reconciliation_adapter, $reconciliation_creat
 	array(
 		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-PENDING' ) ) ) ),
 		yd_framework_response( array( 'request_id' => 'REQ-PENDING' ) ),
-		yd_framework_error_response( 500, array( 'message' => 'temporary info failure' ) ),
+		yd_framework_response( yd_framework_incomplete_info( 'REQ-PENDING' ) ),
+		yd_framework_response( yd_framework_incomplete_info( 'REQ-PENDING' ) ),
 		yd_framework_response( yd_framework_info( 'REQ-PENDING', 'CREATED', 'YD-PENDING-REAL' ) ),
 	)
 );
 $pending_result = $reconciliation_creation->create( $reconciliation_order, yd_framework_request() );
-yd_framework_assert( ! $pending_result->success && 'request_info_after_confirm_failed' === $pending_result->error_code, 'Info failure after successful confirm must return failed ShipmentCreateResult for admin feedback.' );
+yd_framework_assert( $pending_result->success && 'REQ-PENDING' === $pending_result->external_id && ! empty( $pending_result->raw_reference['yandex_accepted_reconciliation']['accepted'] ), 'Incomplete request/info after successful confirm must return accepted ShipmentCreateResult for admin feedback.' );
 $pending = $reconciliation_repository->find_by_carrier( $reconciliation_order, YandexDeliverySettings::CARRIER_KEY );
-yd_framework_assert( 'REQ-PENDING' === (string) ( $pending['yandex_request_id'] ?? '' ) && 'reconciliation_required' === (string) ( $pending['status'] ?? '' ) && ! empty( $pending['yandex_reconciliation_required'] ), 'Confirmed request_id must be persisted as reconciliation_required shipment.' );
+yd_framework_assert( 'REQ-PENDING' === (string) ( $pending['yandex_request_id'] ?? '' ) && 'reconciliation_required' === (string) ( $pending['status'] ?? '' ) && '' === (string) ( $pending['yandex_status'] ?? '' ) && ! empty( $pending['yandex_reconciliation_required'] ), 'Confirmed request_id must be persisted as reconciliation_required shipment without a fake API status.' );
 yd_framework_assert( 'REQ-PENDING' === (string) $reconciliation_order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Reconciliation pending shipment must persist lookup meta.' );
-yd_framework_assert( 'OFFER-PENDING' === (string) ( $pending['yandex_selected_offer_id'] ?? '' ) && '2026-07-11T16:23:01.000000Z' === (string) ( $pending['yandex_offer_expires_at'] ?? '' ), 'Reconciliation pending shipment must keep selected offer fields.' );
+yd_framework_assert( 'OFFER-PENDING' === (string) ( $pending['yandex_selected_offer_id'] ?? '' ) && '2026-07-11T16:23:01.000000Z' === (string) ( $pending['yandex_offer_expires_at'] ?? '' ) && '298.8 RUB' === (string) ( $pending['yandex_offer_pricing_total'] ?? '' ), 'Reconciliation pending shipment must keep selected offer fields.' );
+yd_framework_assert( '2026-07-21T20:00:00.000000Z' === (string) ( $pending['yandex_offer_delivery_interval']['max'] ?? '' ) && '2026-07-11T16:08:01.000000Z' === (string) ( $pending['yandex_offer_pickup_interval']['min'] ?? '' ), 'Reconciliation pending shipment must keep selected offer interval fields.' );
+yd_framework_assert( array() !== array_filter( $reconciliation_order->notes, static fn ( string $note ): bool => str_contains( $note, 'Отправление Яндекс создано. Request ID: REQ-PENDING. Ожидается получение статуса.' ) ), 'Accepted pending create must write a non-failure order note.' );
 $pending_policy = ( new YandexShipmentButtonPolicy() )->resolve( $pending );
 yd_framework_assert( empty( $pending_policy['create'] ) && ! empty( $pending_policy['update'] ) && empty( $pending_policy['cancel'] ) && empty( $pending_policy['remove'] ) && empty( $pending_policy['manual_attach'] ), 'Reconciliation button policy must allow only status update.' );
+$pending_payload = $reconciliation_adapter->status_payload( $reconciliation_order, $pending );
+yd_framework_assert( ! empty( $pending_payload['polling_continue'] ) && 5000 === (int) ( $pending_payload['registration_poll_interval_ms'] ?? 0 ) && 14 === (int) ( $pending_payload['registration_poll_max_attempts'] ?? 0 ) && 'Ожидается получение статуса' === (string) ( $pending_payload['carrier_status_title'] ?? '' ), 'Pending Yandex status payload must request bounded 5s x 14 polling and render pending without duplicate label.' );
 $blocked_pending_duplicate = $reconciliation_creation->create( $reconciliation_order, yd_framework_request() );
 yd_framework_assert( ! $blocked_pending_duplicate->success && 'shipment_already_created' === $blocked_pending_duplicate->error_code && 3 === count( $reconciliation_http->requests ), 'Pending reconciliation must block repeat create without repeating confirm.' );
+$still_pending = $reconciliation_adapter->update_status( $reconciliation_order );
+yd_framework_assert( ! empty( $still_pending['success'] ) && ! empty( $still_pending['pending'] ) && 'Яндекс ещё не подготовил статус созданного отправления.' === (string) ( $still_pending['message'] ?? '' ) && 4 === count( $reconciliation_http->requests ), 'Pending request/info without state.status must stay a controlled retryable success.' );
 $recovered = $reconciliation_adapter->update_status( $reconciliation_order );
-yd_framework_assert( ! empty( $recovered['success'] ) && 4 === count( $reconciliation_http->requests ), 'Reconciliation update_status must call only request/info.' );
+yd_framework_assert( ! empty( $recovered['success'] ) && 5 === count( $reconciliation_http->requests ), 'Reconciliation update_status must call only request/info.' );
 $recovered_shipment = $reconciliation_repository->find_by_carrier( $reconciliation_order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( 'created' === (string) ( $recovered_shipment['status'] ?? '' ) && 'CREATED' === (string) ( $recovered_shipment['yandex_status'] ?? '' ) && empty( $recovered_shipment['yandex_reconciliation_required'] ), 'Successful request/info must convert reconciliation shipment to canonical created state.' );
 yd_framework_assert( 'YD-PENDING-REAL' === (string) ( $recovered_shipment['yandex_place_barcode_map']['ORDER-777-1'] ?? '' ) && 'REQ-PENDING' === (string) $reconciliation_order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Reconciliation recovery must persist barcode map and keep lookup meta.' );
+$recovered_payload = $reconciliation_adapter->status_payload( $reconciliation_order, $recovered_shipment );
+yd_framework_assert( 'CREATED' === (string) ( $recovered_payload['carrier_status_title'] ?? '' ) && empty( $recovered_payload['polling_continue'] ) && ! empty( $recovered_payload['can_cancel'] ) && empty( $recovered_payload['can_remove_from_order'] ), 'Recovered Yandex shipment must stop polling, render CREATED once, allow cancel and hide remove.' );
+yd_framework_assert( 'OFFER-PENDING' === (string) ( $recovered_shipment['yandex_selected_offer_id'] ?? '' ) && '298.8 RUB' === (string) ( $recovered_shipment['yandex_offer_pricing_total'] ?? '' ), 'Reconciliation recovery must preserve selected offer audit fields.' );
 
 $cancel_pending_order = new YdFrameworkOrder( 777 );
 list( $cancel_pending_repository, $cancel_pending_adapter, $cancel_pending_creation, $cancel_pending_registration, $cancel_pending_http ) = yd_framework_stack(
@@ -586,6 +621,7 @@ $empty_attach_payload = $attach_adapter->status_payload( $attach_order, array() 
 yd_framework_assert( ! empty( $empty_attach_payload['can_create'] ) && ! empty( $empty_attach_payload['can_attach_manual'] ), 'Yandex status payload must expose manual attach when local shipment is absent.' );
 $attach_presentation = $attach_adapter->presentation();
 yd_framework_assert( 'Ввести номер Яндекс вручную' === (string) ( $attach_presentation['manual_attach_button_label'] ?? '' ) && 'Request ID Яндекс' === (string) ( $attach_presentation['manual_attach_field_label'] ?? '' ) && '***-udp' === (string) ( $attach_presentation['manual_attach_placeholder'] ?? '' ) && str_contains( (string) ( $attach_presentation['manual_attach_help'] ?? '' ), 'request_id' ), 'Yandex manual attach presentation must use the new Russian button, Request ID label and ***-udp placeholder.' );
+yd_framework_assert( 'Статус отправления пока не получен. Повторите обновление статуса позднее.' === (string) ( $attach_presentation['polling_timeout_message'] ?? '' ) && str_contains( (string) ( $attach_presentation['remove_confirmation_message'] ?? '' ), 'не отменит отправление в Яндекс.Доставке' ), 'Yandex presentation must expose Russian polling exhaustion and local-remove warning messages.' );
 $attach_result = $attach_adapter->attach_manual( $attach_order, array( 'barcode' => 'REQ-MANUAL' ) );
 $attached = $attach_repository->find_by_carrier( $attach_order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( ! empty( $attach_result['success'] ) && 1 === count( $attach_http->requests ) && str_contains( $attach_http->requests[0]['url'], '/request/info' ) && str_contains( $attach_http->requests[0]['url'], 'request_id=REQ-MANUAL' ), 'Manual attach must verify Yandex request_id with a single request/info call.' );

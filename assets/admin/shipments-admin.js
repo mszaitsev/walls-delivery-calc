@@ -1025,9 +1025,12 @@
       removeSuccessToast: 'Данные отправления удалены из заказа.',
       errorFallbackMessage: 'Не удалось получить статус отправления.',
       pollingTimeoutMessage: 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».',
+      removeConfirmationMessage: '',
       registrationErrorToast: 'Регистрация завершилась ошибкой.',
       registrationSuccessToast: 'Регистрация завершена успешно.',
-      autoPollRegistration: '0'
+      autoPollRegistration: '0',
+      registrationPollIntervalMs: '5000',
+      registrationPollMaxAttempts: '14'
     };
     if (!box || !box.dataset) return defaults;
     return Object.keys(defaults).reduce(function (result, key) {
@@ -1264,28 +1267,57 @@
   }
 
   function startDpdRegistrationPolling(button) {
+    startShipmentRegistrationPolling(button, { interval: 10000, maxAttempts: 0, mode: 'dpd' });
+  }
+
+  function startShipmentRegistrationPolling(button, options) {
+    const settings = Object.assign({ interval: 5000, maxAttempts: 14, mode: 'generic' }, options || {});
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     if (!box || shipmentPollingTimers.has(box)) return;
+    const text = getPresentation(box);
+    let attempts = 0;
+    const interval = Math.max(1000, parseInt(settings.interval, 10) || 5000);
+    const maxAttempts = Math.max(0, parseInt(settings.maxAttempts, 10) || 0);
+    const stop = function () {
+      const timer = shipmentPollingTimers.get(box);
+      if (timer) window.clearTimeout(timer);
+      shipmentPollingTimers.delete(box);
+      setShipmentPollingIndicator(box, false);
+    };
+    const exhausted = function () {
+      stop();
+      updateShipmentButtons(box, { hasShipment: true, canCreate: false, canAttachManual: false, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false, canDownloadDpdDocuments: false });
+      showShipmentToast(box, text.pollingTimeoutMessage, 'warning', { append: true });
+    };
     setShipmentPollingIndicator(box, true);
     const tick = function () {
+      attempts += 1;
       requestShipmentStatus(button, { auto: true })
         .then((payload) => {
           const status = payload && payload.data && payload.data.status ? payload.data.status : {};
           if (status.registration_terminal || status.registration_success || status.registration_error || !status.polling_continue) {
-            const timer = shipmentPollingTimers.get(box);
-            if (timer) window.clearTimeout(timer);
-            shipmentPollingTimers.delete(box);
-            setShipmentPollingIndicator(box, false);
+            stop();
             return;
           }
-          shipmentPollingTimers.set(box, window.setTimeout(tick, 10000));
+          if (maxAttempts > 0 && attempts >= maxAttempts) {
+            exhausted();
+            return;
+          }
+          shipmentPollingTimers.set(box, window.setTimeout(tick, interval));
         })
         .catch(() => {
-          shipmentPollingTimers.delete(box);
-          setShipmentPollingIndicator(box, false);
+          if (maxAttempts > 0 && attempts >= maxAttempts) {
+            exhausted();
+            return;
+          }
+          if (settings.mode === 'dpd') {
+            stop();
+            return;
+          }
+          shipmentPollingTimers.set(box, window.setTimeout(tick, interval));
         });
     };
-    shipmentPollingTimers.set(box, window.setTimeout(tick, 10000));
+    shipmentPollingTimers.set(box, window.setTimeout(tick, interval));
   }
 
   function startCdekPolling(button) {
@@ -1365,6 +1397,10 @@
 
   function requestShipmentRemoveFromOrder(button) {
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const confirmation = getPresentation(box).removeConfirmationMessage;
+    if (confirmation && !window.confirm(confirmation)) {
+      return Promise.resolve(null);
+    }
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.removeFromOrderAction || 'wdc_remove_shipment_from_order');
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
@@ -2422,11 +2458,15 @@
             canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents
           });
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
+          const pollInterval = parseInt(statusPayload.registration_poll_interval_ms || text.registrationPollIntervalMs || '5000', 10) || 5000;
+          const pollMaxAttempts = parseInt(statusPayload.registration_poll_max_attempts || text.registrationPollMaxAttempts || '14', 10) || 14;
           if (payload.data && payload.data.registration_attempt_id) {
             submitDpdRegistration(form, payload.data.registration_attempt_id, box, updateButton);
           } else if (updateButton && !updateButton.disabled) {
             if (text.autoPollRegistration === '1' && statusPayload.carrier_key === 'dpd' && statusPayload.polling_continue) {
               startDpdRegistrationPolling(updateButton);
+            } else if (text.autoPollRegistration === '1' && statusPayload.polling_continue) {
+              startShipmentRegistrationPolling(updateButton, { interval: pollInterval, maxAttempts: pollMaxAttempts, mode: 'registration' });
             } else if (text.autoPollRegistration === '1') {
               startCdekPolling(updateButton);
             } else {

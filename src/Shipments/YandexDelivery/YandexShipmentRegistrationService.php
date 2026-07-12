@@ -63,6 +63,12 @@ final class YandexShipmentRegistrationService {
 							'confirmed_request_id' => trim( (string) $details['confirmed_request_id'] ),
 							'selected_offer_id' => trim( (string) ( $details['selected_offer_id'] ?? '' ) ),
 							'selected_offer_expires_at' => trim( (string) ( $details['selected_offer_expires_at'] ?? '' ) ),
+							'selected_offer_pricing' => trim( (string) ( $details['selected_offer_pricing'] ?? '' ) ),
+							'selected_offer_pricing_total' => trim( (string) ( $details['selected_offer_pricing_total'] ?? '' ) ),
+							'selected_offer_pricing_total_kopecks' => max( 0, (int) ( $details['selected_offer_pricing_total_kopecks'] ?? 0 ) ),
+							'selected_offer_delivery_interval' => is_array( $details['selected_offer_delivery_interval'] ?? null ) ? $details['selected_offer_delivery_interval'] : array(),
+							'selected_offer_pickup_interval' => is_array( $details['selected_offer_pickup_interval'] ?? null ) ? $details['selected_offer_pickup_interval'] : array(),
+							'selected_offer_snapshot' => is_array( $details['selected_offer_snapshot'] ?? null ) ? $details['selected_offer_snapshot'] : array(),
 							'registration_phase' => (string) ( $details['registration_phase'] ?? 'request_info' ),
 							'error_code' => 'request_info_after_confirm_failed',
 							'error_message' => $exception->getMessage(),
@@ -107,6 +113,23 @@ final class YandexShipmentRegistrationService {
 
 			return array( 'success' => true, 'message' => 'Статус Яндекс.Доставки обновлён.', 'status' => $info->status );
 		} catch ( YandexDeliveryApiException $exception ) {
+			if ( $this->is_reconciliation_pending( $shipment ) && $this->is_temporary_request_info_error( $exception ) ) {
+				$updated = array_merge(
+					$shipment,
+					array(
+						'yandex_reconciliation_required' => true,
+						'yandex_registration_phase' => 'request_info',
+						'yandex_registration_error_code' => (string) ( $exception->details()['error_code'] ?? '' ),
+						'yandex_registration_error_message' => $this->temporary_request_info_message( (string) ( $exception->details()['error_code'] ?? '' ) ),
+						'yandex_registration_error_details' => $exception->details(),
+						'status' => 'reconciliation_required',
+						'status_title' => 'Ожидается получение статуса',
+						'updated_at' => $this->now(),
+					)
+				);
+				$this->repository->save( $order, $updated );
+				return array( 'success' => true, 'pending' => true, 'retryable' => true, 'message' => $updated['yandex_registration_error_message'], 'status' => '' );
+			}
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
 	}
@@ -328,6 +351,19 @@ final class YandexShipmentRegistrationService {
 		$fields = $this->fields_from_info( $result->request_info );
 		$fields['yandex_selected_offer_id'] = $result->selected_offer->offer_id;
 		$fields['yandex_offer_expires_at'] = $result->selected_offer->expires_at;
+		$fields['yandex_offer_pricing'] = $result->selected_offer->pricing;
+		$fields['yandex_offer_pricing_total'] = (string) ( $result->selected_offer->raw['offer_details']['pricing_total'] ?? $result->selected_offer->raw['pricing_total'] ?? '' );
+		$fields['yandex_offer_pricing_total_kopecks'] = $result->selected_offer->pricing_total_kopecks;
+		$fields['yandex_offer_delivery_interval'] = array(
+			'min' => $result->selected_offer->delivery_interval_min,
+			'max' => $result->selected_offer->delivery_interval_max,
+			'policy' => $result->selected_offer->last_mile_policy,
+		);
+		$fields['yandex_offer_pickup_interval'] = array(
+			'min' => $result->selected_offer->pickup_interval_min,
+			'max' => $result->selected_offer->pickup_interval_max,
+		);
+		$fields['yandex_selected_offer_snapshot'] = $result->selected_offer->raw;
 
 		return $fields;
 	}
@@ -349,8 +385,10 @@ final class YandexShipmentRegistrationService {
 			$fields,
 			array(
 				'status' => $local_status,
-				'status_title' => 'Статус Яндекс.Доставки: ' . $info->status,
+				'status_title' => $info->status,
 				'yandex_reconciliation_required' => false,
+				'yandex_reconciliation_poll_exhausted' => false,
+				'yandex_reconciliation_attempts' => 0,
 				'yandex_registration_phase' => '',
 				'yandex_registration_error_code' => '',
 				'yandex_registration_error_message' => '',
@@ -390,6 +428,26 @@ final class YandexShipmentRegistrationService {
 
 	private function is_cancelled_status( string $status ): bool {
 		return 'CANCELLED' === strtoupper( trim( $status ) );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function is_reconciliation_pending( array $shipment ): bool {
+		return ! empty( $shipment['yandex_reconciliation_required'] ) || 'reconciliation_required' === (string) ( $shipment['status'] ?? '' );
+	}
+
+	private function is_temporary_request_info_error( YandexDeliveryApiException $exception ): bool {
+		return in_array(
+			(string) ( $exception->details()['error_code'] ?? '' ),
+			array( 'request_info_status_missing', 'request_info_request_missing' ),
+			true
+		);
+	}
+
+	private function temporary_request_info_message( string $error_code ): string {
+		return match ( $error_code ) {
+			'request_info_request_missing' => 'Яндекс ещё не подготовил полные данные созданного отправления.',
+			default => 'Яндекс ещё не подготовил статус созданного отправления.',
+		};
 	}
 
 	/**

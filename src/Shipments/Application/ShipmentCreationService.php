@@ -87,6 +87,24 @@ final class ShipmentCreationService {
 				$shipment = $this->common_shipment_envelope( $request, $result, $preview, $failed_fields, $now );
 				$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
 				$mapper->after_persist( $order, $shipment );
+				if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key && ! empty( $shipment['yandex_reconciliation_required'] ) ) {
+					$request_id = (string) ( $shipment['request_id'] ?? $shipment['external_id'] ?? '' );
+					$this->add_order_note( $order, sprintf( 'Отправление Яндекс создано. Request ID: %s. Ожидается получение статуса.', $request_id ) );
+					return new ShipmentCreateResult(
+						true,
+						external_id: $request_id,
+						tracking_number: $request_id,
+						backlog_order_id: $request_id,
+						raw_reference: array(
+							'yandex_accepted_reconciliation' => array(
+								'accepted' => true,
+								'reconciliation_required' => true,
+								'request_id' => $request_id,
+								'error_code' => $result->error_code,
+							),
+						)
+					);
+				}
 				$this->repository->save_last_error(
 					$order,
 					array(
@@ -97,7 +115,6 @@ final class ShipmentCreationService {
 						'updated_at' => $now,
 					)
 				);
-				$this->add_order_note( $order, sprintf( 'Отправление Яндекс подтверждено, но требуется восстановить данные по request_id: %s.', (string) ( $shipment['request_id'] ?? $shipment['external_id'] ?? '' ) ) );
 				return $result;
 			}
 			$this->repository->save_last_error(

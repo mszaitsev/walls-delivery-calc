@@ -35,10 +35,14 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'manual_attach_help' => 'Введите request_id отправления, созданного напрямую в кабинете Яндекс.Доставки.',
 			'cancel_button_label' => 'Отменить отправление в Яндекс',
 			'remove_button_label' => 'Удалить из заказа',
+			'remove_confirmation_message' => 'Удаление уберёт запись только из заказа WooCommerce и не отменит отправление в Яндекс.Доставке. Продолжить?',
 			'update_status_button_label' => 'Обновить статус',
 			'created_toast' => 'Отправление Яндекс создано.',
+			'polling_timeout_message' => 'Статус отправления пока не получен. Повторите обновление статуса позднее.',
 			'error_fallback_message' => 'Не удалось получить статус Яндекс.Доставки.',
 			'auto_poll_registration' => '1',
+			'registration_poll_interval_ms' => '5000',
+			'registration_poll_max_attempts' => '14',
 		);
 	}
 
@@ -68,7 +72,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'can_cancel' => ! empty( $policy['cancel'] ),
 			'can_remove_from_order' => ! empty( $policy['remove'] ),
 			'shipment_status_label' => '' !== $status ? $status : ( array() === $shipment ? 'не создано' : 'зарегистрировано' ),
-			'carrier_status_title' => (string) ( $shipment['status_title'] ?? ( '' !== $status ? 'Статус Яндекс.Доставки: ' . $status : '' ) ),
+			'carrier_status_title' => $this->carrier_status_title( $shipment, $status ),
 			'tracking_checked_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'updated_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'barcode' => $this->tracking_identifier( $shipment ),
@@ -77,7 +81,27 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'yandex_sharing_url' => (string) ( $shipment['yandex_sharing_url'] ?? '' ),
 			'yandex_places' => is_array( $shipment['yandex_places'] ?? null ) ? $shipment['yandex_places'] : array(),
 			'yandex_items' => is_array( $shipment['yandex_items'] ?? null ) ? $shipment['yandex_items'] : array(),
+			'registration_polling' => array() !== $shipment && ! empty( $shipment['yandex_reconciliation_required'] ),
+			'polling_continue' => array() !== $shipment && ! empty( $shipment['yandex_reconciliation_required'] ) && empty( $shipment['yandex_reconciliation_poll_exhausted'] ),
+			'registration_terminal' => array() !== $shipment && empty( $shipment['yandex_reconciliation_required'] ),
+			'registration_success' => '' !== $status && empty( $shipment['yandex_reconciliation_required'] ),
+			'registration_error' => false,
+			'registration_poll_interval_ms' => 5000,
+			'registration_poll_max_attempts' => 14,
 		);
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function carrier_status_title( array $shipment, string $status ): string {
+		$title = trim( (string) ( $shipment['status_title'] ?? '' ) );
+		if ( str_starts_with( $title, 'Статус Яндекс.Доставки:' ) ) {
+			$title = trim( substr( $title, strlen( 'Статус Яндекс.Доставки:' ) ) );
+		}
+		if ( '' !== $title ) {
+			return $title;
+		}
+
+		return '' !== $status ? $status : ( array() === $shipment ? '' : 'Ожидается получение статуса' );
 	}
 
 	/** @return array<string,mixed> */

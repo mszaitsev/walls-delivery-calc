@@ -284,7 +284,7 @@ final class OrderShipmentsMetabox {
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		$calculated_weight_g = max( 0, (int) ( $meta['place_weight_hint_g'] ?? $place['weight_g'] ?? 0 ) );
-		$weight_hint = $calculated_weight_g > 0 ? sprintf( __( '⚖️ %d', 'walls-delivery-calc' ), $calculated_weight_g ) : '';
+		$weight_hint = $calculated_weight_g > 0 ? sprintf( __( '⚖️%d', 'walls-delivery-calc' ), $calculated_weight_g ) : '';
 		$shipment_point = (string) ( $meta['shipment_point'] ?? '' );
 		$shipment_point_address = (string) ( $meta['shipment_point_address'] ?? '' );
 		if ( $is_dpd ) {
@@ -670,14 +670,21 @@ final class OrderShipmentsMetabox {
 			}
 
 			$this->discard_preview_buffer( $buffer_level );
+			$accepted_reconciliation = is_array( $result->raw_reference['yandex_accepted_reconciliation'] ?? null ) ? $result->raw_reference['yandex_accepted_reconciliation'] : array();
+			$success_message = array() !== $accepted_reconciliation
+				? __( 'Отправление создано в Яндекс.Доставке. Ожидается получение статуса.', 'walls-delivery-calc' )
+				: $this->carrier_presentation( $request->carrier_key )['created_toast'];
 			wp_send_json_success(
 				array_merge(
 					$this->carrier_ui_payload( $order, $request->carrier_key ),
 					array(
-					'message' => $this->carrier_presentation( $request->carrier_key )['created_toast'],
+					'message' => $success_message,
 					'tracking_number' => $result->tracking_number,
 					'backlog_order_id' => $result->backlog_order_id,
 					'preview' => $preview,
+					'accepted' => ! empty( $accepted_reconciliation['accepted'] ),
+					'reconciliation_required' => ! empty( $accepted_reconciliation['reconciliation_required'] ),
+					'request_id' => (string) ( $accepted_reconciliation['request_id'] ?? '' ),
 					)
 				)
 			);
@@ -1851,9 +1858,12 @@ final class OrderShipmentsMetabox {
 			'remove_success_toast' => __( 'Данные отправления удалены из заказа.', 'walls-delivery-calc' ),
 			'error_fallback_message' => __( 'Не удалось получить статус отправления.', 'walls-delivery-calc' ),
 			'polling_timeout_message' => __( 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».', 'walls-delivery-calc' ),
+			'remove_confirmation_message' => '',
 			'registration_error_toast' => __( 'Регистрация завершилась ошибкой.', 'walls-delivery-calc' ),
 			'registration_success_toast' => __( 'Регистрация завершена успешно.', 'walls-delivery-calc' ),
 			'auto_poll_registration' => '0',
+			'registration_poll_interval_ms' => '5000',
+			'registration_poll_max_attempts' => '14',
 		);
 		$adapter = $this->carrier_adapter( $carrier_key );
 		if ( null !== $adapter ) {
