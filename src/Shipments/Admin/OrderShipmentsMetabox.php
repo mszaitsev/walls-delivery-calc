@@ -199,6 +199,7 @@ final class OrderShipmentsMetabox {
 		if ( array() === $place_rows ) {
 			$place_rows = array( $place );
 		}
+		$place_rows = $this->editable_place_rows( $place_rows );
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
 		$carrier_key = (string) ( $request['carrier_key'] ?? $meta['carrier_key'] ?? '' );
 		$service_key = (string) ( $meta['service_key'] ?? $request['rate_id'] ?? '' );
@@ -209,16 +210,6 @@ final class OrderShipmentsMetabox {
 		$requires_tariff = array_key_exists( 'requires_tariff', $modal_capabilities ) ? (bool) $modal_capabilities['requires_tariff'] : ! $is_yandex;
 		$requires_postoffice = array_key_exists( 'requires_postoffice', $modal_capabilities ) ? (bool) $modal_capabilities['requires_postoffice'] : $is_russian_post;
 		$requires_successful_preview = array_key_exists( 'requires_successful_preview', $modal_capabilities ) ? (bool) $modal_capabilities['requires_successful_preview'] : $is_dpd;
-		$requires_manual_place_dimensions = ! empty( $modal_capabilities['requires_manual_place_dimensions'] );
-		if ( $requires_manual_place_dimensions ) {
-			$base_place_row = is_array( $place_rows[0] ?? null ) ? $place_rows[0] : array();
-			$base_place_row['place_number'] = (int) ( $base_place_row['place_number'] ?? $base_place_row['number'] ?? 1 );
-			$base_place_row['weight_g'] = '';
-			$base_place_row['length_cm'] = '';
-			$base_place_row['width_cm'] = '';
-			$base_place_row['height_cm'] = '';
-			$place_rows = array( $base_place_row );
-		}
 		$shipment = '' !== $carrier_key ? $this->repository->find_by_carrier( $order, $carrier_key ) : array();
 		$settings = is_array( $request['services'] ?? null ) ? $request['services'] : array();
 		$pickup_code = (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' );
@@ -293,10 +284,7 @@ final class OrderShipmentsMetabox {
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		$calculated_weight_g = max( 0, (int) ( $meta['place_weight_hint_g'] ?? $place['weight_g'] ?? 0 ) );
-		$weight_hint = $calculated_weight_g > 0 ? sprintf( '(%d)', $calculated_weight_g ) : '';
-		if ( $requires_manual_place_dimensions ) {
-			$weight_hint = '';
-		}
+		$weight_hint = $calculated_weight_g > 0 ? sprintf( __( 'Расчётный вес товаров: %d г', 'walls-delivery-calc' ), $calculated_weight_g ) : '';
 		$shipment_point = (string) ( $meta['shipment_point'] ?? '' );
 		$shipment_point_address = (string) ( $meta['shipment_point_address'] ?? '' );
 		if ( $is_dpd ) {
@@ -378,7 +366,7 @@ final class OrderShipmentsMetabox {
 				<button type="button" class="button" data-wdc-remove-shipment-from-order data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_remove ? '' : 'hidden'; ?> <?php disabled( ! $show_remove ); ?>><?php echo esc_html( $presentation['remove_button_label'] ); ?></button>
 			</p>
 			<div class="wdc-manual-tracking" data-wdc-manual-tracking-form hidden>
-				<label><span data-wdc-manual-attach-label><?php echo esc_html( $presentation['manual_attach_placeholder'] ); ?></span><input type="text" data-wdc-manual-tracking-input autocomplete="off" placeholder="<?php echo esc_attr( $presentation['manual_attach_placeholder'] ); ?>"></label>
+				<label><span data-wdc-manual-attach-label><?php echo esc_html( $presentation['manual_attach_field_label'] ?? $presentation['manual_attach_placeholder'] ); ?></span><input type="text" data-wdc-manual-tracking-input autocomplete="off" placeholder="<?php echo esc_attr( $presentation['manual_attach_placeholder'] ); ?>"></label>
 				<p class="description" data-wdc-manual-attach-help><?php echo esc_html( $presentation['manual_attach_help'] ); ?></p>
 				<p>
 					<button type="button" class="button button-primary" data-wdc-attach-tracking data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>"><?php echo esc_html__( 'Найти и сохранить', 'walls-delivery-calc' ); ?></button>
@@ -389,7 +377,7 @@ final class OrderShipmentsMetabox {
 				<div class="wdc-shipment-modal__dialog" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr__( 'Подготовка отправления', 'walls-delivery-calc' ); ?>">
 					<button type="button" class="wdc-shipment-modal__close" data-wdc-close-shipment-modal aria-label="<?php echo esc_attr__( 'Закрыть', 'walls-delivery-calc' ); ?>">×</button>
 					<h2><?php echo esc_html__( 'Подготовка отправления', 'walls-delivery-calc' ); ?></h2>
-					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" data-wdc-requires-tariff="<?php echo $requires_tariff ? '1' : '0'; ?>" data-wdc-requires-successful-preview="<?php echo $requires_successful_preview ? '1' : '0'; ?>" data-wdc-requires-manual-place-dimensions="<?php echo $requires_manual_place_dimensions ? '1' : '0'; ?>" role="group">
+					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" data-wdc-requires-tariff="<?php echo $requires_tariff ? '1' : '0'; ?>" data-wdc-requires-successful-preview="<?php echo $requires_successful_preview ? '1' : '0'; ?>" role="group">
 						<input type="hidden" name="order_id" value="<?php echo esc_attr( (string) $order_id ); ?>">
 						<input type="hidden" name="carrier_key" value="<?php echo esc_attr( $carrier_key ); ?>">
 						<div class="wdc-shipment-tabs" role="tablist">
@@ -576,11 +564,12 @@ final class OrderShipmentsMetabox {
 						</div>
 						<section>
 							<h3><?php echo esc_html__( 'Грузоместа', 'walls-delivery-calc' ); ?></h3>
+							<?php if ( '' !== $weight_hint && count( $place_rows ) > 1 ) : ?><p class="description" data-wdc-weight-hint><?php echo esc_html( $weight_hint ); ?></p><?php endif; ?>
 							<div data-wdc-places>
 								<?php foreach ( $place_rows as $place_index => $place_row ) : ?>
 									<?php
 									$declared_value_for_place = 0 === $place_index ? $declared_value_initial : '';
-									$weight_hint_for_place = 0 === $place_index ? $weight_hint : '';
+									$weight_hint_for_place = 1 === count( $place_rows ) && 0 === $place_index ? $weight_hint : '';
 									?>
 									<div class="wdc-place-row" data-wdc-place>
 										<div class="wdc-place-row__title" data-wdc-place-title><?php echo esc_html( sprintf( __( 'Место %d', 'walls-delivery-calc' ), $place_index + 1 ) ); ?></div>
@@ -790,6 +779,27 @@ final class OrderShipmentsMetabox {
 		while ( ob_get_level() > $buffer_level ) {
 			ob_end_clean();
 		}
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $draft_place_rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function editable_place_rows( array $draft_place_rows ): array {
+		$rows = array();
+		foreach ( array_values( $draft_place_rows ) as $index => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$row['place_number'] = (int) ( $row['place_number'] ?? $row['number'] ?? ( $index + 1 ) );
+			$row['weight_g'] = '';
+			$row['length_cm'] = '';
+			$row['width_cm'] = '';
+			$row['height_cm'] = '';
+			$rows[] = $row;
+		}
+
+		return array() !== $rows ? $rows : array( array( 'place_number' => 1, 'weight_g' => '', 'length_cm' => '', 'width_cm' => '', 'height_cm' => '' ) );
 	}
 
 	private function validate_preview_request( ShipmentCreateRequest $request ): void {
@@ -1832,6 +1842,7 @@ final class OrderShipmentsMetabox {
 			'cancel_button_label' => __( 'Отменить отправление', 'walls-delivery-calc' ),
 			'remove_button_label' => __( 'Удалить из заказа', 'walls-delivery-calc' ),
 			'update_status_button_label' => __( 'Обновить статус', 'walls-delivery-calc' ),
+			'manual_attach_field_label' => __( 'Номер отслеживания', 'walls-delivery-calc' ),
 			'manual_attach_placeholder' => __( 'Номер отслеживания', 'walls-delivery-calc' ),
 			'manual_attach_help' => __( 'Введите номер отслеживания для поиска и привязки отправления.', 'walls-delivery-calc' ),
 			'created_toast' => __( 'Отправление создано.', 'walls-delivery-calc' ),

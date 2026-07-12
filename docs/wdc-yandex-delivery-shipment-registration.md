@@ -1,10 +1,12 @@
 # Регистрация отправлений Яндекс.Доставки
 
-## Статус 0.108.7
+## Статус 0.108.8
 
-Перед первым реальным тестом регистрации Яндекс.Доставки модалка больше не подставляет рассчитанные weight/dimensions в редактируемые поля грузоместа. Для carrier `yandex_delivery` draft содержит capability `requires_manual_place_dimensions`, и общий `OrderShipmentsMetabox` очищает только initial UI values `weight_g`, `length_cm`, `width_cm`, `height_cm`; товары и `shipment_items[]` остаются в распределении. При submit `places[]` из формы являются единственным источником фактических размеров: пустые значения не заменяются calculated defaults, проходят в strict validation как invalid и возвращаются менеджеру русскими сообщениями `Укажите вес/длину/ширину/высоту грузоместа.`
+Перед первым реальным тестом регистрации Яндекс.Доставки общий shipment modal больше не подставляет рассчитанные weight/dimensions в редактируемые поля грузоместа ни для одной службы доставки. `OrderShipmentsMetabox` очищает только initial UI values `weight_g`, `length_cm`, `width_cm`, `height_cm`, но сохраняет все draft places, place numbers, товары и `shipment_items[]` в распределении. При submit `places[]` из формы являются единственным источником фактических размеров: пустые значения не заменяются calculated defaults, проходят в strict validation как invalid и возвращаются менеджеру русскими сообщениями `Укажите вес/длину/ширину/высоту грузоместа.`
 
-Ручное прикрепление Яндекс использует существующий generic manual attach UI. Если локального Yandex shipment ещё нет, button policy показывает `Добавить отправление Яндекс вручную`; введённое поле интерпретируется как Yandex `request_id`. Adapter не вызывает `offers/create`, `offers/confirm` или `request/create`: выполняется один `request/info?request_id=...&slim=false`, затем проверяется совпадение `request.info.operator_request_id` с номером WooCommerce заказа. При mismatch или отсутствии operator id shipment не сохраняется.
+Расчётный вес теперь показывается только подсказкой `Расчётный вес товаров: %d г`: для одного исходного грузоместа рядом с полем веса, для нескольких мест — как общий hint над списком. Эта подсказка не является `value`, не попадает в `FormData`, не разблокирует preview/create и не распределяется автоматически по нескольким коробкам. Расчётные dimensions не показываются как подсказки: менеджер вводит фактические внешние габариты упаковки вручную.
+
+Ручное прикрепление Яндекс использует существующий generic manual attach UI. Если локального Yandex shipment ещё нет, button policy показывает `Ввести номер Яндекс вручную`; поле подписано `Request ID Яндекс`, placeholder равен `***-udp`, а input value при открытии пустой. Введённое поле интерпретируется как Yandex `request_id`. Adapter не вызывает `offers/create`, `offers/confirm` или `request/create`: выполняется один `request/info?request_id=...&slim=false`, затем проверяется совпадение `request.info.operator_request_id` с номером WooCommerce заказа. При mismatch или отсутствии operator id shipment не сохраняется.
 
 Успешный manual attach сохраняет canonical request/info state через `YandexShipmentPersistenceMapper` и `YandexShipmentRepository`: `request_id`/`yandex_request_id`, `courier_order_id`, `sharing_url`, `yandex_status`, `operator_request_id`, delivery policy, destination/recipient/items/places snapshots, request/info snapshot, generic local status, `created_by_context=admin_manual_attach` and lookup meta `_wdc_yandex_delivery_request_id`. После attach повторный create/manual attach блокируются существующей button policy; status/cancel/remove определяются по сохранённому API status.
 
@@ -28,7 +30,7 @@ Yandex-specific presentation в общей модалке:
 - для pickup — snapshot конечного ПВЗ (`pickup_point_code`, `yandex_pickup_platform_station_id`, адрес/ID);
 - для courier — структурированные адресные поля `yandex_postal_code`, `yandex_region`, `yandex_locality`, `yandex_street`, `yandex_house`, `yandex_room` и `courier_original_address`;
 - `yandex_ready_from` / `yandex_ready_to` как сохранённые hidden ISO/offset values;
-- все initial places из draft с заполненными weight/dimensions.
+- все initial places из draft с пустыми editable factual weight/dimensions и сохранённым распределением товаров.
 
 Preview остаётся dry-run/local: он строит `ShipmentCreateRequest`, allocation и Yandex offers/create payload без HTTP-вызовов. AJAX preview теперь возвращает controlled JSON errors для отсутствующей исходной станции, отсутствующего pickup destination, невалидных places/allocation и unexpected throwable; HTML critical-error body не показывается администратору. JS использует controlled parser для preview response и показывает понятное сообщение вместо `Unexpected token`.
 

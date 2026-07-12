@@ -275,6 +275,7 @@ yd_framework_assert( ! empty( $history['success'] ) && 'SHOP_CANCELLED' === (str
 
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 yd_framework_assert( str_contains( $source, 'create_yandex_request_from_order' ) && str_contains( $source, 'shipment_item_rows' ) && ! str_contains( $source, 'shipment_item_rows_from_rows' ), 'OrderShipmentDraftFactory must provide canonical shipment item rows without a second Yandex parser.' );
+$removed_manual_place_capability = 'requires_manual' . '_place_dimensions';
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 yd_framework_assert( str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, 'data-wdc-open-shipment-modal' ), 'Existing shipment metabox/modal must be reused through shared capability-driven button policy.' );
 yd_framework_assert( str_contains( $metabox_source, 'data-wdc-yandex-source-station' ) && str_contains( $metabox_source, 'name="yandex_source_platform_station_id"' ) && str_contains( $metabox_source, 'data-wdc-yandex-pickup-destination' ) && str_contains( $metabox_source, 'name="yandex_pickup_platform_station_id"' ), 'Shared modal must render Yandex source station and pickup destination fields.' );
@@ -283,15 +284,29 @@ yd_framework_assert( str_contains( $metabox_source, '$requires_tariff' ) && str_
 yd_framework_assert( str_contains( $metabox_source, 'foreach ( $place_rows as $place_index => $place_row )' ) && str_contains( $metabox_source, 'data-wdc-decimal-input="2"' ) && str_contains( $metabox_source, 'places[<?php echo esc_attr( (string) $place_index ); ?>][weight_g]' ), 'Shared modal must render initial places from draft and allow decimal dimensions while keeping weight integer.' );
 yd_framework_assert( str_contains( $metabox_source, 'shipment_preview_validation_failed' ) && str_contains( $metabox_source, 'shipment_preview_unexpected_error' ) && str_contains( $metabox_source, 'discard_preview_buffer' ), 'Shipment preview AJAX must return controlled JSON errors instead of leaking HTML output.' );
 yd_framework_assert( str_contains( $metabox_source, 'data-wdc-requires-successful-preview' ) && str_contains( $metabox_source, 'shipment_create_validation_failed' ) && str_contains( $metabox_source, 'shipment_create_unexpected_error' ) && str_contains( $metabox_source, 'public_shipment_error_message' ), 'Shipment create AJAX must be JSON-safe and expose the preview-required capability to runtime.' );
-yd_framework_assert( str_contains( $metabox_source, 'data-wdc-requires-manual-place-dimensions' ) && str_contains( $metabox_source, '$requires_manual_place_dimensions' ) && str_contains( $metabox_source, "\$base_place_row['weight_g'] = ''" ), 'Shared modal must clear editable Yandex place dimensions through carrier-neutral modal capability.' );
+yd_framework_assert( str_contains( $metabox_source, 'editable_place_rows' ) && str_contains( $metabox_source, "\$row['weight_g'] = ''" ) && ! str_contains( $metabox_source, $removed_manual_place_capability ), 'Shared modal must clear editable place dimensions for every carrier without carrier-specific capability.' );
 yd_framework_assert( str_contains( $metabox_source, 'shipment_attach_validation_failed' ) && str_contains( $metabox_source, 'shipment_attach_unexpected_error' ) && str_contains( $metabox_source, "'request_id' => \$barcode" ), 'Generic manual attach AJAX must stay JSON-safe and pass request_id alias to carrier adapters.' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 yd_framework_assert( str_contains( $js_source, 'can_create' ) && str_contains( $js_source, 'can_attach_manual' ) && str_contains( $js_source, 'setVisible(openButton, canCreate)' ) && str_contains( $js_source, 'setVisible(manualButton, canAttachManual)' ), 'Runtime shipment buttons must consume adapter create/manual capabilities.' );
 yd_framework_assert( str_contains( $js_source, 'function parseShipmentJsonResponse' ) && str_contains( $js_source, 'Сервер вернул некорректный ответ при подготовке отправления' ) && str_contains( $js_source, '.then(parseShipmentJsonResponse)' ), 'Shipment preview JS must parse malformed responses through controlled JSON fallback.' );
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresTariff !== '0'" ) && str_contains( $js_source, 'parseDecimalValue(length' ), 'Shipment admin JS must support no-tariff carriers and decimal place dimensions.' );
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresSuccessfulPreview === '1'" ) && str_contains( $js_source, 'const latestPreviewReady = !requiresSuccessfulPreview' ), 'Shipment admin JS must block create by carrier-neutral preview capability instead of checking a Yandex/DPD branch.' );
-yd_framework_assert( str_contains( $js_source, "data.append('barcode', input ? input.value || '' : '')" ) && str_contains( $js_source, 'canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload' ), 'Runtime manual attach must send the generic barcode field and consume adapter manual-attach capability after success.' );
+yd_framework_assert( str_contains( $js_source, "data.append('barcode', input ? input.value || '' : '')" ) && str_contains( $js_source, 'canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload' ) && str_contains( $js_source, 'manualAttachFieldLabel' ), 'Runtime manual attach must send the generic barcode field and consume adapter manual-attach capability after success.' );
 yd_framework_assert( ! str_contains( $js_source, 'response.json()' ) && ! str_contains( $js_source, 'Unexpected token' ) && ! str_contains( $js_source, 'Server returned' ) && ! str_contains( $js_source, 'DPD registration failed' ), 'Shipment admin runtime must not expose raw JSON parser or English fallback messages.' );
+
+$metabox_reflection = new ReflectionClass( \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox::class );
+$metabox_without_constructor = $metabox_reflection->newInstanceWithoutConstructor();
+$editable_method = $metabox_reflection->getMethod( 'editable_place_rows' );
+$editable_method->setAccessible( true );
+$editable_rows = $editable_method->invoke(
+	$metabox_without_constructor,
+	array(
+		array( 'place_number' => 1, 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 10, 'items' => array( 'a' ) ),
+		array( 'place_number' => 2, 'weight_g' => 800, 'length_cm' => 30, 'width_cm' => 25, 'height_cm' => 12, 'items' => array( 'b' ) ),
+	)
+);
+yd_framework_assert( 2 === count( $editable_rows ) && 1 === (int) $editable_rows[0]['place_number'] && 2 === (int) $editable_rows[1]['place_number'], 'Generic modal editable place helper must keep all draft places and place numbers.' );
+yd_framework_assert( '' === $editable_rows[0]['weight_g'] && '' === $editable_rows[0]['length_cm'] && '' === $editable_rows[1]['weight_g'] && '' === $editable_rows[1]['height_cm'] && array( 'a' ) === $editable_rows[0]['items'], 'Generic modal editable place helper must clear only factual weight/dimensions and preserve allocation data.' );
 
 $metabox_buttons = new ShipmentMetaboxButtonPolicy();
 $empty_yandex_payload = $adapter->status_payload( $order, array() );
@@ -406,7 +421,7 @@ $draft_array = $draft_factory->draft_array( $draft_order );
 yd_framework_assert( 'Яндекс до ПВЗ' === (string) ( $draft_array['services'][0]['title'] ?? '' ) && DeliveryType::PICKUP === (string) ( $draft_array['services'][0]['delivery_type'] ?? '' ), 'Yandex pickup modal draft must expose one actual service variant.' );
 yd_framework_assert( array() === (array) ( $draft_array['postoffice_codes'] ?? array( 'unexpected' ) ) && false === (bool) ( $draft_array['modal_capabilities']['requires_tariff'] ?? true ) && false === (bool) ( $draft_array['modal_capabilities']['requires_postoffice'] ?? true ), 'Yandex modal draft must not require tariff or Russian Post postoffice fields.' );
 yd_framework_assert( true === (bool) ( $draft_array['modal_capabilities']['requires_successful_preview'] ?? false ), 'Yandex modal draft must require successful preview before create.' );
-yd_framework_assert( true === (bool) ( $draft_array['modal_capabilities']['requires_manual_place_dimensions'] ?? false ), 'Yandex modal draft must require manual factual place weight and dimensions.' );
+yd_framework_assert( ! array_key_exists( $removed_manual_place_capability, $draft_array['modal_capabilities'] ?? array() ) && ! str_contains( $source, $removed_manual_place_capability ), 'Yandex modal draft must not expose carrier-specific manual place dimensions capability.' );
 $draft_courier_order = new YdFrameworkOrder( 783 );
 $draft_courier_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySettings::CARRIER_KEY );
 $draft_courier_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':courier' );
@@ -569,6 +584,8 @@ list( $attach_repository, $attach_adapter, $attach_creation, $attach_registratio
 );
 $empty_attach_payload = $attach_adapter->status_payload( $attach_order, array() );
 yd_framework_assert( ! empty( $empty_attach_payload['can_create'] ) && ! empty( $empty_attach_payload['can_attach_manual'] ), 'Yandex status payload must expose manual attach when local shipment is absent.' );
+$attach_presentation = $attach_adapter->presentation();
+yd_framework_assert( 'Ввести номер Яндекс вручную' === (string) ( $attach_presentation['manual_attach_button_label'] ?? '' ) && 'Request ID Яндекс' === (string) ( $attach_presentation['manual_attach_field_label'] ?? '' ) && '***-udp' === (string) ( $attach_presentation['manual_attach_placeholder'] ?? '' ) && str_contains( (string) ( $attach_presentation['manual_attach_help'] ?? '' ), 'request_id' ), 'Yandex manual attach presentation must use the new Russian button, Request ID label and ***-udp placeholder.' );
 $attach_result = $attach_adapter->attach_manual( $attach_order, array( 'barcode' => 'REQ-MANUAL' ) );
 $attached = $attach_repository->find_by_carrier( $attach_order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( ! empty( $attach_result['success'] ) && 1 === count( $attach_http->requests ) && str_contains( $attach_http->requests[0]['url'], '/request/info' ) && str_contains( $attach_http->requests[0]['url'], 'request_id=REQ-MANUAL' ), 'Manual attach must verify Yandex request_id with a single request/info call.' );

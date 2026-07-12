@@ -1016,6 +1016,7 @@
       cancelButtonLabel: 'Отменить отправление',
       removeButtonLabel: 'Удалить из заказа',
       updateStatusButtonLabel: 'Обновить статус',
+      manualAttachFieldLabel: 'Номер отслеживания',
       manualAttachPlaceholder: 'Номер отслеживания',
       manualAttachHelp: 'Введите номер отслеживания для поиска и привязки отправления.',
       createdToast: 'Отправление создано.',
@@ -1053,7 +1054,7 @@
       ['[data-wdc-cancel-shipment]', text.cancelButtonLabel],
       ['[data-wdc-remove-shipment-from-order]', text.removeButtonLabel],
       ['[data-wdc-update-shipment-status]', text.updateStatusButtonLabel],
-      ['[data-wdc-manual-attach-label]', text.manualAttachPlaceholder],
+      ['[data-wdc-manual-attach-label]', text.manualAttachFieldLabel],
       ['[data-wdc-manual-attach-help]', text.manualAttachHelp]
     ];
     pairs.forEach(function (pair) {
