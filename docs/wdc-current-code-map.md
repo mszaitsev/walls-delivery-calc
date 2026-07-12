@@ -1,3 +1,15 @@
+## Yandex Shipment Framework Integration 0.108.0
+
+- `src/Shipments/YandexDelivery/YandexShipmentAdapter.php` implements the existing `ShipmentCarrierAdapterInterface` for carrier `yandex_delivery`. It stays thin: preview builds the pure offers/create payload, `create()` delegates to the Yandex framework registration service, status/cancel/remove delegate to the same service, and labels/documents remain empty.
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` is the carrier-specific bridge from the common shipment request to the already existing Yandex HTTP registration flow. It converts existing `ShipmentCreateRequest::places` plus `meta['yandex_item_rows']`/`meta['cdek_item_rows']` through `CdekShipmentAllocationAdapter`, builds the Yandex context, calls `YandexDeliveryShipmentRegistrationService`, and persists only canonical request/info fields.
+- `src/Shipments/YandexDelivery/YandexShipmentRepository.php` wraps `OrderShipmentRepository` for `_wdc_shipments[yandex_delivery]` and maintains `_wdc_yandex_delivery_request_id` as an HPOS-safe lookup/index field.
+- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` mirrors the modern DPD approach: absent shipment shows create, created shipment shows status/cancel, terminal Yandex statuses hide cancel and allow local remove, and manual attach is disabled.
+- `src/Core/Plugin.php` registers Yandex payload/client/selector/core registration services, the Yandex framework repository/button policy/registration service/adapter, passes `YandexDeliverySettings` into `OrderShipmentDraftFactory`, and adds the adapter to `CarrierShipmentAdapterRegistry` and `ShipmentCreationService`.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` now recognizes `yandex_delivery` and creates a normal `ShipmentCreateRequest` with ready interval, source station, destination mode, pickup station/courier details, recipient fields and allocation item rows preserving order item identity. It does not create a new allocation algorithm.
+- `src/Shipments/Application/ShipmentCreationService.php` still owns duplicate checks and repository persistence. For Yandex it stores request/info snapshot and Yandex canonical fields, while intentionally not storing the offers/create payload body.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` still renders the existing shipment block/modal; it now respects `can_attach_manual=false` from carrier status payloads so Yandex can hide manual attach without carrier-specific metabox branching.
+- `tests/yandex-delivery/run-yandex-delivery-shipment-framework-smoke.php` covers registry integration, create through `ShipmentCreationService`, duplicate guard, status update, cancel, history, repository persistence, button policy and request/info canonical storage.
+
 ## Yandex Delivery Order Recalculation 0.105.11
 
 - `OrderQuoteRequestMapper` converts an explicitly selected `yandex_delivery:pickup` point into checkout-compatible `pickup_selection` and family-scoped `pickup_selections` for the existing Yandex carrier.

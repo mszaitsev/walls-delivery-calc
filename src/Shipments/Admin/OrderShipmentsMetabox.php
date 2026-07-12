@@ -316,7 +316,7 @@ final class OrderShipmentsMetabox {
 		$can_remove = ! empty( $status_payload['can_remove_from_order'] ) || ( $is_russian_post && '' !== $barcode && ! $can_cancel );
 		$can_update = ! empty( $status_payload['can_update_status'] ) || ( $has_created && ( $is_cdek || '' !== $barcode ) );
 		$show_primary_actions = '' !== $carrier_key && ! $has_created;
-		$show_manual_attach = $show_primary_actions;
+		$show_manual_attach = $show_primary_actions && ( ! array_key_exists( 'can_attach_manual', $status_payload ) || ! empty( $status_payload['can_attach_manual'] ) );
 		$show_update = $has_created && $can_update;
 		$show_cancel = $has_created && $can_cancel;
 		$show_remove = $has_created && $can_remove;

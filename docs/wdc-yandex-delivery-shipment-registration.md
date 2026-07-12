@@ -1,5 +1,22 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.0
+
+Яндекс.Доставка теперь встроена в существующий Shipment Framework как carrier `yandex_delivery`. Новая архитектура регистрации не создавалась: используется тот же путь, что у современной DPD-модели — `CarrierShipmentAdapterRegistry` -> `ShipmentCreationService` -> carrier adapter -> carrier registration service -> `OrderShipmentRepository` -> общий metabox/buttons lifecycle.
+
+Carrier-specific слой:
+
+- `YandexShipmentAdapter` реализует существующий `ShipmentCarrierAdapterInterface`;
+- `YandexShipmentRegistrationService` является bridge над уже готовым HTTP flow `YandexDeliveryShipmentRegistrationService`;
+- `YandexShipmentRepository` сохраняет данные через общий `OrderShipmentRepository`;
+- `YandexShipmentButtonPolicy` управляет кнопками create/status/cancel/remove без проверок в metabox.
+
+Создание отправления идёт так: общий `OrderShipmentDraftFactory` строит `ShipmentCreateRequest` для `yandex_delivery`, adapter переиспользует существующий `ShipmentAllocation` через `CdekShipmentAllocationAdapter`, Yandex payload builder строит offers/create payload, HTTP service выполняет `offers/create` -> earliest offer -> `offers/confirm` -> обязательный `request/info`. Каноническое состояние shipment — именно `request/info`, а не исходный payload.
+
+После успешной регистрации в `_wdc_shipments[yandex_delivery]` сохраняются `request_id`, `courier_order_id`, `sharing_url`, статус Яндекса, `operator_request_id`, `selected_offer_id`, `delivery_policy`, snapshots destination/recipient/items/places, temporary-to-real barcode map and full request/info snapshot. Body `offers/create` не сохраняется намеренно.
+
+Повторная регистрация запрещается существующим `OrderShipmentRepository::has_created_for_carrier()` через общий `ShipmentCreationService`. Кнопка статуса вызывает `request/info` и обновляет canonical state. Кнопка отмены вызывает `request/cancel`, затем mandatory `request/info`, и сохраняет both async cancel response and final canonical info. History доступна через Yandex registration service over `request/history`; отдельный новый UI не добавлялся.
+
 ## Статус 0.107.1
 
 Этап 0.107.1 выравнивает HTTP/DTO слой с production-схемой, проверенной реальными PowerShell запросами. `offers/create` вызывается как `POST /api/b2b/platform/offers/create?send_unix=false`, чтобы API возвращал строковые UTC интервалы. `request/info` и `request/history` отправляются как GET query requests без JSON body: `request/info?request_id=...&slim=false` и `request/history?request_id=...`.

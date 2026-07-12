@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Application;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -96,10 +97,14 @@ final class ShipmentCreationService {
 		$backlog_order_id = trim( $result->backlog_order_id );
 		$is_cdek = CdekSettings::CARRIER_KEY === $request->carrier_key;
 		$is_dpd = DpdSettings::CARRIER_KEY === $request->carrier_key;
-		$request_snapshot = ( $is_cdek || $is_dpd ) && is_array( $raw['request'] ?? null )
+		$is_yandex = YandexDeliverySettings::CARRIER_KEY === $request->carrier_key;
+		$yandex = is_array( $raw['yandex'] ?? null ) ? $raw['yandex'] : array();
+		$request_snapshot = $is_yandex
+			? array( 'method' => 'POST', 'path' => '/api/b2b/platform/offers/create?send_unix=false', 'body' => array(), 'errors' => array(), 'note' => 'Canonical Yandex shipment state is request/info; offers/create payload is not persisted.' )
+			: ( ( $is_cdek || $is_dpd ) && is_array( $raw['request'] ?? null )
 			? ( $is_dpd ? $raw['request'] : array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => $raw['request'], 'errors' => array() ) )
-			: $preview;
-		$response_snapshot = ( $is_cdek || $is_dpd ) && is_array( $raw['response'] ?? null ) ? $raw : $raw;
+			: $preview );
+		$response_snapshot = $is_yandex && is_array( $yandex['yandex_request_info_snapshot'] ?? null ) ? $yandex['yandex_request_info_snapshot'] : ( ( $is_cdek || $is_dpd ) && is_array( $raw['response'] ?? null ) ? $raw : $raw );
 		$shipment = array(
 			'carrier_key' => $request->carrier_key,
 			'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
@@ -136,10 +141,16 @@ final class ShipmentCreationService {
 			'group_name' => (string) ( $raw['group_name'] ?? '' ),
 			'status' => $is_dpd ? 'pending_creation_in_carrier' : ( $is_cdek ? 'registration_pending' : 'created' ),
 			'universal_status_code' => $is_dpd ? 'pending_creation_in_carrier' : '',
-			'status_title' => $is_dpd ? 'Заявка DPD создана' : ( $is_cdek ? 'Заявка на регистрацию принята' : '' ),
+			'status_title' => $is_yandex ? 'Отправление Яндекс создано: ' . (string) ( $yandex['yandex_status'] ?? '' ) : ( $is_dpd ? 'Заявка DPD создана' : ( $is_cdek ? 'Заявка на регистрацию принята' : '' ) ),
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
+		if ( $is_yandex ) {
+			$shipment = array_merge( $shipment, $yandex );
+			foreach ( array( 'cdek_number', 'cdek_request_uuid', 'cdek_request_state', 'cdek_order_status_code', 'cdek_order_status_name', 'cdek_planned_delivery_date', 'cdek_actual_cost_kopecks', 'dpd_order_number', 'dpd_request_number', 'dpd_parcel_numbers', 'dpd_status', 'dpd_pickup_date', 'dpd_date_flag', 'dpd_service_code', 'dpd_sender_terminal_code', 'dpd_receiver_terminal_code', 'dpd_date_pickup', 'dpd_cargo_value' ) as $foreign_key ) {
+				unset( $shipment[ $foreign_key ] );
+			}
+		}
 		if ( $is_dpd ) {
 			foreach ( array( 'cdek_number', 'cdek_request_uuid', 'cdek_request_state', 'cdek_order_status_code', 'cdek_order_status_name', 'cdek_planned_delivery_date', 'cdek_actual_cost_kopecks' ) as $cdek_key ) {
 				unset( $shipment[ $cdek_key ] );
@@ -241,6 +252,13 @@ final class ShipmentCreationService {
 			return sprintf(
 				'DPD отправление создано вручную. Номер: %s. Мест: %d',
 				$result->tracking_number,
+				count( $request->places )
+			);
+		}
+		if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
+			return sprintf(
+				'Создано отправление Яндекс. Request ID: %s. Мест: %d',
+				$result->external_id,
 				count( $request->places )
 			);
 		}
