@@ -1,3 +1,10 @@
+## Shipment Metabox Capability Policy 0.108.4
+
+- `src/Shipments/Application/ShipmentMetaboxButtonPolicy.php` is the carrier-neutral resolver used by the order shipment metabox. It prefers adapter-provided capabilities (`has_shipment`, `can_create`, `can_attach_manual`, `can_update_status`, `can_cancel`, `can_remove_from_order`) key-by-key and falls back to the previous legacy status/barcode rules only when a capability is absent.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` no longer decides cancel/create/update/remove visibility through hardcoded Yandex/CDEK/DPD status branches. Yandex `reconciliation_required` and `cancellation_started` are existing shipments because the adapter says so.
+- `assets/admin/shipments-admin.js` copies `can_create` and `can_attach_manual` from AJAX status payloads and uses them for runtime button visibility; it no longer infers create/manual visibility only from `!has_shipment`.
+- `src/Shipments/Application/ShipmentModalRequestMapper.php` keeps integer-gram weight strict and rounds decimal centimeter dimensions upward before existing `ShipmentPlace`/allocation validation.
+
 ## Shipment Modal Contract and Yandex Persistence Mapper 0.108.3
 
 - The shared shipment modal item allocation contract is now `shipment_items[]`. The table still visually uses existing CDEK CSS classes where they are styling-only, but submitted field names and generic JS hooks use shipment-neutral names.

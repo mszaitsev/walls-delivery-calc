@@ -20,6 +20,7 @@ use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
@@ -63,7 +64,8 @@ final class OrderShipmentsMetabox {
 		private string $version = '1',
 		private ?CdekBarcodePrintService $cdek_barcode_print = null,
 		private ?CarrierShipmentAdapterRegistry $carrier_adapters = null,
-		private ?DpdShipmentDocumentService $dpd_documents = null
+		private ?DpdShipmentDocumentService $dpd_documents = null,
+		private ?ShipmentMetaboxButtonPolicy $button_policy = null
 	) {
 	}
 
@@ -300,7 +302,6 @@ final class OrderShipmentsMetabox {
 			$history = $this->dpd_courier_contact_history();
 			$sender_contact_fio = (string) ( $history[0] ?? '' );
 		}
-		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'registration_pending', 'created', 'registered' ), true );
 		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
 		$status_payload = $this->status_payload_for_carrier( $order, $carrier_key );
@@ -309,17 +310,14 @@ final class OrderShipmentsMetabox {
 		$price_label = (string) ( $status_payload['actual_cost_label'] ?? '' );
 		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
 		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
-		$can_cancel = $is_russian_post && $this->can_cancel_shipment( $shipment );
-		if ( $is_cdek || $is_dpd ) {
-			$can_cancel = ! empty( $status_payload['can_cancel'] );
-		}
-		$can_remove = ! empty( $status_payload['can_remove_from_order'] ) || ( $is_russian_post && '' !== $barcode && ! $can_cancel );
-		$can_update = ! empty( $status_payload['can_update_status'] ) || ( $has_created && ( $is_cdek || '' !== $barcode ) );
-		$show_primary_actions = '' !== $carrier_key && ! $has_created;
-		$show_manual_attach = $show_primary_actions && ( ! array_key_exists( 'can_attach_manual', $status_payload ) || ! empty( $status_payload['can_attach_manual'] ) );
-		$show_update = $has_created && $can_update;
-		$show_cancel = $has_created && $can_cancel;
-		$show_remove = $has_created && $can_remove;
+		$button_policy = $this->button_policy()->resolve( $carrier_key, $shipment, $status_payload, $is_russian_post && $this->can_cancel_shipment( $shipment ) );
+		$has_created = ! empty( $button_policy['has_shipment'] );
+		$can_cancel = ! empty( $button_policy['can_cancel'] );
+		$show_primary_actions = ! empty( $button_policy['show_create'] );
+		$show_manual_attach = ! empty( $button_policy['show_manual_attach'] );
+		$show_update = ! empty( $button_policy['show_update'] );
+		$show_cancel = ! empty( $button_policy['show_cancel'] );
+		$show_remove = ! empty( $button_policy['show_remove'] );
 		$label_actions = $this->label_actions_for_carrier( $order, $carrier_key, $shipment );
 		$show_cdek_barcode = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_label' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
 		$show_dpd_documents = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_documents' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
@@ -1454,6 +1452,14 @@ final class OrderShipmentsMetabox {
 			&& ( '28' === (string) ( $shipment['carrier_operation_type_id'] ?? '' ) || 'Присвоение идентификатора' === (string) ( $shipment['carrier_operation_type_name'] ?? '' ) );
 	}
 
+	private function button_policy(): ShipmentMetaboxButtonPolicy {
+		if ( ! $this->button_policy instanceof ShipmentMetaboxButtonPolicy ) {
+			$this->button_policy = new ShipmentMetaboxButtonPolicy();
+		}
+
+		return $this->button_policy;
+	}
+
 	/**
 	 * @param array<string,mixed> $status
 	 */
@@ -1528,6 +1534,8 @@ final class OrderShipmentsMetabox {
 			'presentation' => $presentation,
 			'label_actions' => $label_actions,
 			'has_shipment' => ! empty( $status['has_shipment'] ),
+			'can_create' => ! empty( $status['can_create'] ),
+			'can_attach_manual' => ! empty( $status['can_attach_manual'] ),
 			'can_update_status' => ! empty( $status['can_update_status'] ),
 			'can_cancel' => ! empty( $status['can_cancel'] ),
 			'can_remove_from_order' => ! empty( $status['can_remove_from_order'] ),

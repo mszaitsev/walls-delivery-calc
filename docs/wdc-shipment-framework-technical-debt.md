@@ -1,6 +1,6 @@
 # Shipment Framework technical debt
 
-## 0.108.3 focused debt register
+## 0.108.4 focused debt register
 
 1. CDEK modal fallback `cdek_items[]`
    - Current problem: the shared modal now submits canonical `shipment_items[]`, but `ShipmentModalRequestMapper` still accepts `cdek_items[]` for the CDEK migration window.
@@ -55,3 +55,9 @@
    - Target architecture: one documented command/profile runs all shipment framework, Yandex, CDEK, DPD, Russian Post, Packaging and checkout regressions.
    - Affected classes/files: `tests/*`, development workflow docs.
    - Migration sequence: stabilize current smoke list, add a wrapper only after individual smoke failures are deterministic and baseline DPD preparation behavior is documented.
+
+10. Assessed price in shipment allocation
+   - Current problem: the canonical modal/parser can read `assessed_cost` / `assessed_unit_price`, but `CdekShipmentAllocationAdapter` still uses `cost` simultaneously for `unit_price_kopecks` and `assessed_unit_price_kopecks`. A separate assessed price is therefore not yet carried into the neutral `ShipmentAllocation`.
+   - Target architecture: the common modal contract, persistence snapshot and allocation adapter carry unit price and assessed/declared value as distinct carrier-neutral values, and each carrier maps them explicitly.
+   - Affected classes/files: `ShipmentModalRequestMapper`, `CdekShipmentAllocationAdapter`, `ShipmentAllocationItem`, CDEK/Yandex payload builders and smoke fixtures.
+   - Migration sequence: first add/verify separate assessed value in neutral allocation without changing CDEK payload, then migrate CDEK/Yandex adapters with regression payload equality. This is intentionally not part of 0.108.4 to preserve current CDEK business behavior.

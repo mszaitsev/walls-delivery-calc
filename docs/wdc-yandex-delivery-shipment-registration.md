@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.4
+
+Этот patch закрывает последние metabox/runtime замечания перед реальным тестом регистрации. Общий shipment metabox теперь использует capability payload carrier adapter как основной источник видимости кнопок: `has_shipment`, `can_create`, `can_attach_manual`, `can_update_status`, `can_cancel`, `can_remove_from_order`. Legacy fallback остался только для путей, где конкретный capability key отсутствует.
+
+Для Яндекса это важно в промежуточных состояниях: `reconciliation_required` и `cancellation_started` считаются существующим shipment, поэтому повторное создание скрыто, доступно только обновление статуса, а cancel/remove/manual attach недоступны. Терминальный `CANCELLED` скрывает cancel и разрешает remove по существующей adapter policy. Отдельные Яндекс-кнопки, разметка или carrier-specific UI не добавлялись.
+
+`ShipmentModalRequestMapper` теперь округляет дробные габариты грузомест вверх до целого сантиметра (`19.9` -> `20`, `19,1` -> `20`), чтобы carrier payload не занижал размеры. Вес остаётся строгим целым значением в граммах; decimal/invalid weight не исправляется и блокируется существующей validation. `CdekShipmentAllocationAdapter` в этом этапе не менялся.
+
 ## Статус 0.108.3
 
 Общая shipment modal получила canonical контракт для товарного allocation: `shipment_items[]`. Это теперь основной submit-формат для распределения товаров по грузоместам; `cdek_items[]` оставлен только как временный fallback для CDEK/common parser migration и зафиксирован как технический долг. Яндекс не создаёт свой `yandex_items` контракт для модалки и пишет в `ShipmentCreateRequest::meta` canonical `shipment_item_rows`.

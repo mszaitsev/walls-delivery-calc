@@ -37,10 +37,10 @@ final class ShipmentModalRequestMapper {
 			}
 			$places[] = new ShipmentPlace(
 				(int) ( $row['place_number'] ?? $row['number'] ?? ( $index + 1 ) ),
-				$this->required_int( $row, 'weight_g' ),
-				$this->required_int( $row, 'length_cm' ),
-				$this->required_int( $row, 'width_cm' ),
-				$this->required_int( $row, 'height_cm' ),
+				$this->integer_value( $row['weight_g'] ?? null ),
+				$this->dimension_cm( $row['length_cm'] ?? null ),
+				$this->dimension_cm( $row['width_cm'] ?? null ),
+				$this->dimension_cm( $row['height_cm'] ?? null ),
 				Money::from_kopecks( 0 ),
 				array()
 			);
@@ -84,13 +84,21 @@ final class ShipmentModalRequestMapper {
 		return $item_rows;
 	}
 
-	/**
-	 * @param array<string,mixed> $row
-	 */
-	private function required_int( array $row, string $key ): int {
-		$value = $row[ $key ] ?? null;
+	private function integer_value( mixed $value ): int {
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
+		$value = trim( (string) $value );
 
-		return is_numeric( $value ) ? (int) $value : 0;
+		return 1 === preg_match( '/^-?\d+$/', $value ) ? (int) $value : 0;
+	}
+
+	private function dimension_cm( mixed $value ): int {
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
+		$value = trim( str_replace( ',', '.', (string) $value ) );
+		if ( ! is_numeric( $value ) ) {
+			return 0;
+		}
+
+		return (int) ceil( (float) $value );
 	}
 
 	private function text( mixed $value ): string {

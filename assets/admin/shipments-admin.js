@@ -896,6 +896,8 @@
     if (dpdPlacesRow) dpdPlacesRow.hidden = !String(status.dpd_places_summary || '').trim();
     updateShipmentButtons(box, {
       hasShipment: !!status.has_shipment,
+      canCreate: Object.prototype.hasOwnProperty.call(status, 'can_create') ? !!status.can_create : undefined,
+      canAttachManual: Object.prototype.hasOwnProperty.call(status, 'can_attach_manual') ? !!status.can_attach_manual : undefined,
       canCancel: !!status.can_cancel,
       canRemove: !!status.can_remove_from_order,
       canUpdate: !!status.can_update_status,
@@ -909,7 +911,7 @@
   function shipmentStatusFromResponse(data) {
     const payload = data || {};
     const status = Object.assign({}, payload.status || {});
-    ['carrier_key', 'presentation', 'label_actions', 'has_shipment', 'can_update_status', 'can_cancel', 'can_remove_from_order'].forEach(function (key) {
+    ['carrier_key', 'presentation', 'label_actions', 'has_shipment', 'can_create', 'can_attach_manual', 'can_update_status', 'can_cancel', 'can_remove_from_order'].forEach(function (key) {
       if (Object.prototype.hasOwnProperty.call(payload, key) && !Object.prototype.hasOwnProperty.call(status, key)) {
         status[key] = payload[key];
       }
@@ -1047,6 +1049,8 @@
   function updateShipmentButtons(box, state) {
     if (!box) return;
     const hasShipment = !!(state && state.hasShipment);
+    const canCreate = state && Object.prototype.hasOwnProperty.call(state, 'canCreate') ? !!state.canCreate : !hasShipment;
+    const canAttachManual = state && Object.prototype.hasOwnProperty.call(state, 'canAttachManual') ? !!state.canAttachManual : !hasShipment;
     const canCancel = !!(state && state.canCancel);
     const canRemove = !!(state && state.canRemove);
     const canUpdate = !!(state && state.canUpdate);
@@ -1061,16 +1065,16 @@
     const dpdDocumentsDownload = box.querySelector('[data-wdc-dpd-documents-download]');
     if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
-      setVisible(openButton, !hasShipment);
-      openButton.disabled = hasShipment;
+      setVisible(openButton, canCreate);
+      openButton.disabled = !canCreate;
     }
     if (updateButton) {
       setVisible(updateButton, canUpdate);
       updateButton.disabled = !canUpdate;
     }
     if (manualButton) {
-      setVisible(manualButton, !hasShipment);
-      manualButton.disabled = hasShipment;
+      setVisible(manualButton, canAttachManual);
+      manualButton.disabled = !canAttachManual;
     }
     if (cancelButton) {
       setVisible(cancelButton, canCancel);

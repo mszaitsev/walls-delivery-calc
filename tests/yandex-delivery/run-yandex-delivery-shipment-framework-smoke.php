@@ -29,6 +29,9 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiResponse;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryHttpClientInterface;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryEarliestOfferSelector;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayloadBuilder;
@@ -47,6 +50,8 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
+use WallsShop\WDC\Shipments\Application\ShipmentModalRequestMapper;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentAdapter;
@@ -264,7 +269,37 @@ yd_framework_assert( ! empty( $history['success'] ) && 'SHOP_CANCELLED' === (str
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 yd_framework_assert( str_contains( $source, 'create_yandex_request_from_order' ) && str_contains( $source, 'shipment_item_rows' ) && ! str_contains( $source, 'shipment_item_rows_from_rows' ), 'OrderShipmentDraftFactory must provide canonical shipment item rows without a second Yandex parser.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
-yd_framework_assert( str_contains( $metabox_source, 'can_attach_manual' ) && str_contains( $metabox_source, 'data-wdc-open-shipment-modal' ), 'Existing shipment metabox/modal must be reused and respect carrier button policy.' );
+yd_framework_assert( str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, 'data-wdc-open-shipment-modal' ), 'Existing shipment metabox/modal must be reused through shared capability-driven button policy.' );
+$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+yd_framework_assert( str_contains( $js_source, 'can_create' ) && str_contains( $js_source, 'can_attach_manual' ) && str_contains( $js_source, 'setVisible(openButton, canCreate)' ) && str_contains( $js_source, 'setVisible(manualButton, canAttachManual)' ), 'Runtime shipment buttons must consume adapter create/manual capabilities.' );
+
+$metabox_buttons = new ShipmentMetaboxButtonPolicy();
+$empty_yandex_payload = $adapter->status_payload( $order, array() );
+$empty_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, array(), $empty_yandex_payload );
+yd_framework_assert( ! empty( $empty_yandex_buttons['show_create'] ) && empty( $empty_yandex_buttons['show_manual_attach'] ) && empty( $empty_yandex_buttons['show_update'] ) && empty( $empty_yandex_buttons['show_cancel'] ) && empty( $empty_yandex_buttons['show_remove'] ), 'Metabox capabilities must show only Create for empty Yandex shipment.' );
+
+$created_yandex = array( 'status' => 'created', 'yandex_status' => 'CREATED', 'yandex_request_id' => 'REQ-META-CREATED' );
+$created_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $created_yandex, $adapter->status_payload( $order, $created_yandex ) );
+yd_framework_assert( empty( $created_yandex_buttons['show_create'] ) && ! empty( $created_yandex_buttons['show_update'] ) && ! empty( $created_yandex_buttons['show_cancel'] ) && empty( $created_yandex_buttons['show_remove'] ), 'Metabox capabilities must show update/cancel for active CREATED Yandex shipment.' );
+
+$reconciliation_yandex = array( 'status' => 'reconciliation_required', 'yandex_request_id' => 'REQ-META-PENDING' );
+$reconciliation_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $reconciliation_yandex, $adapter->status_payload( $order, $reconciliation_yandex ) );
+yd_framework_assert( ! empty( $reconciliation_yandex_buttons['has_shipment'] ) && empty( $reconciliation_yandex_buttons['show_create'] ) && ! empty( $reconciliation_yandex_buttons['show_update'] ) && empty( $reconciliation_yandex_buttons['show_cancel'] ) && empty( $reconciliation_yandex_buttons['show_remove'] ), 'Metabox capabilities must treat Yandex reconciliation_required as existing shipment with status update only.' );
+
+$cancel_started_yandex = array( 'status' => 'cancellation_started', 'yandex_request_id' => 'REQ-META-CANCEL' );
+$cancel_started_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $cancel_started_yandex, $adapter->status_payload( $order, $cancel_started_yandex ) );
+yd_framework_assert( ! empty( $cancel_started_yandex_buttons['has_shipment'] ) && empty( $cancel_started_yandex_buttons['show_create'] ) && ! empty( $cancel_started_yandex_buttons['show_update'] ) && empty( $cancel_started_yandex_buttons['show_cancel'] ) && empty( $cancel_started_yandex_buttons['show_remove'] ), 'Metabox capabilities must treat Yandex cancellation_started as existing shipment with status update only.' );
+
+$cancelled_yandex = array( 'status' => 'created', 'yandex_status' => 'CANCELLED', 'yandex_request_id' => 'REQ-META-CANCELLED' );
+$cancelled_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $cancelled_yandex, $adapter->status_payload( $order, $cancelled_yandex ) );
+yd_framework_assert( empty( $cancelled_yandex_buttons['show_create'] ) && ! empty( $cancelled_yandex_buttons['show_update'] ) && empty( $cancelled_yandex_buttons['show_cancel'] ) && ! empty( $cancelled_yandex_buttons['show_remove'] ), 'Metabox capabilities must hide cancel and show remove for terminal Yandex CANCELLED shipment.' );
+
+$legacy_cdek_buttons = $metabox_buttons->resolve( CdekSettings::CARRIER_KEY, array( 'status' => 'registration_pending' ), array() );
+$legacy_dpd_buttons = $metabox_buttons->resolve( DpdSettings::CARRIER_KEY, array( 'status' => 'created', 'barcode' => 'DPD-TRACK' ), array() );
+$legacy_russian_post_buttons = $metabox_buttons->resolve( RussianPostDomesticSettings::CARRIER_KEY, array( 'barcode' => 'RP-TRACK' ), array(), false );
+yd_framework_assert( ! empty( $legacy_cdek_buttons['has_shipment'] ) && ! empty( $legacy_cdek_buttons['show_update'] ) && empty( $legacy_cdek_buttons['show_create'] ), 'Legacy CDEK metabox fallback must remain available when capability keys are absent.' );
+yd_framework_assert( ! empty( $legacy_dpd_buttons['has_shipment'] ) && ! empty( $legacy_dpd_buttons['show_update'] ) && empty( $legacy_dpd_buttons['show_create'] ), 'Legacy DPD metabox fallback must remain available when capability keys are absent.' );
+yd_framework_assert( ! empty( $legacy_russian_post_buttons['has_shipment'] ) && ! empty( $legacy_russian_post_buttons['show_remove'] ) && empty( $legacy_russian_post_buttons['show_create'] ), 'Legacy Russian Post metabox fallback must remain available when capability keys are absent.' );
 
 $reconciliation_order = new YdFrameworkOrder( 777 );
 list( $reconciliation_repository, $reconciliation_adapter, $reconciliation_creation, $reconciliation_registration, $reconciliation_http ) = yd_framework_stack(
@@ -357,7 +392,7 @@ $admin_request = $draft_factory->create_request_from_admin_data(
 	array(
 		'delivery_type' => DeliveryType::PICKUP,
 		'places' => array(
-			array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ),
+			array( 'weight_g' => 1000, 'length_cm' => '19.9', 'width_cm' => '19,1', 'height_cm' => 19 ),
 			array( 'weight_g' => 800, 'length_cm' => 15, 'width_cm' => 15, 'height_cm' => 10 ),
 		),
 		'shipment_items' => $modal_item_rows,
@@ -366,6 +401,7 @@ $admin_request = $draft_factory->create_request_from_admin_data(
 );
 yd_framework_assert( 2 === count( $admin_request->places ) && 3 === count( $admin_request->meta['shipment_item_rows'] ?? array() ) && 2 === (int) $admin_request->meta['shipment_item_rows'][1]['place_number'], 'Yandex admin data must preserve multi-place item rows from the shared shipment modal.' );
 yd_framework_assert( 1000 === $admin_request->places[0]->weight_g && 800 === $admin_request->places[1]->weight_g, 'Yandex admin data must keep modal place dimensions and weight.' );
+yd_framework_assert( 20 === $admin_request->places[0]->length_cm && 20 === $admin_request->places[0]->width_cm && 19 === $admin_request->places[0]->height_cm, 'Shipment modal mapper must round decimal dimensions up without changing integer dimensions.' );
 $admin_rows = $admin_request->meta['shipment_item_rows'];
 yd_framework_assert( 2 === (int) $admin_rows[0]['amount'] && 1 === (int) $admin_rows[1]['amount'] && 2 === (int) $admin_rows[1]['place_number'], 'Yandex admin data must preserve split quantity across places.' );
 yd_framework_assert( 'order-item-a' === (string) $admin_rows[0]['item_key'] && 'order-item-b' === (string) $admin_rows[2]['item_key'] && $admin_rows[0]['ware_key'] === $admin_rows[2]['ware_key'], 'Yandex admin data identity must keep same SKU order items distinct by item_key.' );
@@ -391,6 +427,33 @@ try {
 	$invalid_thrown = str_contains( $e->getMessage(), 'amount must be greater than 0' );
 }
 yd_framework_assert( $invalid_thrown, 'Broken Yandex admin allocation must be rejected through existing ShipmentAllocation validation without silent repair.' );
+
+$mapper = new ShipmentModalRequestMapper();
+$invalid_dimension_thrown = false;
+try {
+	$mapper->parse(
+		array(
+			'places' => array( array( 'weight_g' => 1000, 'length_cm' => 'bad', 'width_cm' => 20, 'height_cm' => 10 ) ),
+			'shipment_items' => array( array( 'item_key' => 'bad-dim-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Bad dimensions', 'ware_key' => 'BAD-DIM', 'amount' => 1, 'cost' => 100, 'weight' => 300 ) ),
+		)
+	);
+} catch ( InvalidArgumentException $e ) {
+	$invalid_dimension_thrown = str_contains( $e->getMessage(), 'length_cm must be greater than 0' );
+}
+yd_framework_assert( $invalid_dimension_thrown, 'Invalid modal dimensions must become validation errors instead of being silently repaired.' );
+
+$invalid_weight_thrown = false;
+try {
+	$mapper->parse(
+		array(
+			'places' => array( array( 'weight_g' => '1000.9', 'length_cm' => 20, 'width_cm' => 20, 'height_cm' => 10 ) ),
+			'shipment_items' => array( array( 'item_key' => 'bad-weight-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Bad weight', 'ware_key' => 'BAD-WEIGHT', 'amount' => 1, 'cost' => 100, 'weight' => 300 ) ),
+		)
+	);
+} catch ( InvalidArgumentException $e ) {
+	$invalid_weight_thrown = str_contains( $e->getMessage(), 'weight_g must be greater than 0' );
+}
+yd_framework_assert( $invalid_weight_thrown, 'Modal weight must remain an integer contract and must not be rounded up like dimensions.' );
 
 $request_id_safety_order = new YdFrameworkOrder( 777 );
 list( $request_id_repository, $request_id_adapter, $request_id_creation, $request_id_registration, $request_id_http ) = yd_framework_stack(
