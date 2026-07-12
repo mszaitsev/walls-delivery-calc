@@ -142,7 +142,7 @@ final class YandexDeliveryApiClient {
 	 * @return array<string,mixed>
 	 */
 	public function offersCreate( array $payload ): array {
-		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::OFFERS_CREATE_PATH, $payload );
+		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::OFFERS_CREATE_PATH, $payload, array( 'send_unix' => 'false' ) );
 	}
 
 	/**
@@ -158,7 +158,12 @@ final class YandexDeliveryApiClient {
 	 * @return array<string,mixed>
 	 */
 	public function requestInfo( array $payload ): array {
-		return $this->authorizedJsonRequest( 'GET', YandexDeliveryEndpoints::REQUEST_INFO_PATH, $payload );
+		$request_id = trim( (string) ( $payload['request_id'] ?? '' ) );
+		if ( '' === $request_id ) {
+			throw new YandexDeliveryApiException( 'Yandex request_id is required.', array( 'error_code' => 'request_id_missing' ) );
+		}
+
+		return $this->authorizedJsonRequest( 'GET', YandexDeliveryEndpoints::REQUEST_INFO_PATH, array( 'request_id' => $request_id, 'slim' => 'false' ) );
 	}
 
 	/**
@@ -166,7 +171,12 @@ final class YandexDeliveryApiClient {
 	 * @return array<string,mixed>
 	 */
 	public function requestHistory( array $payload ): array {
-		return $this->authorizedJsonRequest( 'GET', YandexDeliveryEndpoints::REQUEST_HISTORY_PATH, $payload );
+		$request_id = trim( (string) ( $payload['request_id'] ?? '' ) );
+		if ( '' === $request_id ) {
+			throw new YandexDeliveryApiException( 'Yandex request_id is required.', array( 'error_code' => 'request_id_missing' ) );
+		}
+
+		return $this->authorizedJsonRequest( 'GET', YandexDeliveryEndpoints::REQUEST_HISTORY_PATH, array( 'request_id' => $request_id ) );
 	}
 
 	/**
@@ -181,7 +191,7 @@ final class YandexDeliveryApiClient {
 	 * @param array<string,mixed> $payload
 	 * @return array<string,mixed>
 	 */
-	private function authorizedJsonRequest( string $method, string $path, array $payload = array() ): array {
+	private function authorizedJsonRequest( string $method, string $path, array $payload = array(), array $query = array() ): array {
 		$credentials = $this->settings->credentials();
 		if ( ! $credentials->is_complete() ) {
 			throw new YandexDeliveryApiException(
@@ -190,7 +200,12 @@ final class YandexDeliveryApiClient {
 			);
 		}
 
-		$response = $this->rawRequest( $method, $path, $payload, $credentials );
+		if ( 'GET' === strtoupper( $method ) ) {
+			$query = array_merge( $query, $payload );
+			$payload = array();
+		}
+		$response = $this->rawRequest( $method, $path, $payload, $credentials, array(), $query );
+		$diagnostic_request = 'GET' === strtoupper( $method ) ? $query : $payload;
 		$data = $response->json();
 		if ( '' !== trim( $response->body ) && array() === $data ) {
 			throw new YandexDeliveryApiException(
@@ -198,7 +213,7 @@ final class YandexDeliveryApiClient {
 				array(
 					'http_code' => $response->status_code,
 					'endpoint' => $path,
-					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'request' => $this->settings->sanitize_for_diagnostics( $diagnostic_request ),
 					'response' => array( '_raw' => $this->safeMessage( $response->body, $response->status_code ) ),
 					'error_body' => $this->safeMessage( $response->body, $response->status_code ),
 					'error_code' => 'malformed_json',
@@ -223,7 +238,7 @@ final class YandexDeliveryApiClient {
 				array(
 					'http_code' => $response->status_code,
 					'endpoint' => $path,
-					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'request' => $this->settings->sanitize_for_diagnostics( $diagnostic_request ),
 					'response' => $this->settings->sanitize_for_diagnostics( $data ),
 					'error_body' => $this->safeMessage( $response->body, $response->status_code ),
 					'yandex_error_code' => $this->extractErrorCode( $data ),
@@ -241,23 +256,29 @@ final class YandexDeliveryApiClient {
 	/**
 	 * @param array<string,mixed> $payload
 	 * @param array<string,mixed> $extra_args
+	 * @param array<string,mixed> $query
 	 */
-	private function rawRequest( string $method, string $path, array $payload, YandexDeliveryCredentials $credentials, array $extra_args = array() ): YandexDeliveryApiResponse {
-		$args = array_merge(
-			array(
-				'timeout' => $this->settings->request_timeout(),
-				'headers' => array(
-					'Authorization' => 'Bearer ' . $credentials->bearer_token,
-					'Accept' => 'application/json',
-					'Content-Type' => 'application/json',
-				),
-				'body' => $this->encodePayloadBody( $payload ),
+	private function rawRequest( string $method, string $path, array $payload, YandexDeliveryCredentials $credentials, array $extra_args = array(), array $query = array() ): YandexDeliveryApiResponse {
+		$method = strtoupper( $method );
+		$args = array(
+			'timeout' => $this->settings->request_timeout(),
+			'headers' => array(
+				'Authorization' => 'Bearer ' . $credentials->bearer_token,
+				'Accept' => 'application/json',
 			),
-			$extra_args
 		);
+		if ( 'GET' !== $method ) {
+			$args['headers']['Content-Type'] = 'application/json';
+			$args['body'] = $this->encodePayloadBody( $payload );
+		}
+		$args = array_merge( $args, $extra_args );
+		$url = YandexDeliveryEndpoints::url( $this->settings->environment(), $path );
+		if ( array() !== $query ) {
+			$url .= ( str_contains( $url, '?' ) ? '&' : '?' ) . http_build_query( $query, '', '&', PHP_QUERY_RFC3986 );
+		}
 
 		try {
-			return $this->http->request( $method, YandexDeliveryEndpoints::url( $this->settings->environment(), $path ), $args );
+			return $this->http->request( $method, $url, $args );
 		} catch ( YandexDeliveryApiException $exception ) {
 			throw new YandexDeliveryApiException(
 				$this->safeMessage( $this->settings->redact( $exception->getMessage() ), 0 ),
@@ -265,7 +286,7 @@ final class YandexDeliveryApiClient {
 					$exception->details(),
 					array(
 						'endpoint' => $path,
-						'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+						'request' => $this->settings->sanitize_for_diagnostics( array() !== $query ? $query : $payload ),
 					)
 				),
 				0,

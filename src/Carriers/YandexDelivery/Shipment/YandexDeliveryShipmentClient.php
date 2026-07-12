@@ -40,9 +40,28 @@ final class YandexDeliveryShipmentClient {
 		if ( '' === $request_id ) {
 			throw new YandexDeliveryApiException( 'Yandex request_id is required.', array( 'error_code' => 'request_id_missing' ) );
 		}
-		$info = YandexDeliveryRequestInfo::from_api_response( $this->api->requestInfo( array( 'request_id' => $request_id ) ), $temporary_places );
+		$api_response = $this->api->requestInfo( array( 'request_id' => $request_id ) );
+		$body = is_array( $api_response['body'] ?? null ) ? $api_response['body'] : $api_response;
+		if ( ! is_array( $body['request'] ?? null ) ) {
+			throw new YandexDeliveryApiException( 'Yandex request/info did not return request object.', array( 'error_code' => 'request_info_request_missing', 'request_id' => $request_id, 'response' => $body ) );
+		}
+		$info = YandexDeliveryRequestInfo::from_api_response( $api_response, $temporary_places );
 		if ( '' === $info->request_id ) {
 			throw new YandexDeliveryApiException( 'Yandex request/info did not return request_id.', array( 'error_code' => 'request_info_id_missing', 'request_id' => $request_id, 'response' => $info->raw ) );
+		}
+		if ( $info->request_id !== $request_id ) {
+			throw new YandexDeliveryApiException( 'Yandex request/info returned unexpected request_id.', array( 'error_code' => 'request_info_id_mismatch', 'expected_request_id' => $request_id, 'actual_request_id' => $info->request_id, 'response' => $info->raw ) );
+		}
+		if ( '' === $info->status ) {
+			throw new YandexDeliveryApiException( 'Yandex request/info did not return state.status.', array( 'error_code' => 'request_info_status_missing', 'request_id' => $request_id, 'response' => $info->raw ) );
+		}
+		if ( array() !== $temporary_places ) {
+			if ( count( $temporary_places ) !== count( $info->places ) || count( $temporary_places ) !== count( $info->place_barcode_map ) ) {
+				throw new YandexDeliveryApiException( 'Yandex request/info places count does not match temporary payload places.', array( 'error_code' => 'request_info_places_count_mismatch', 'request_id' => $request_id, 'temporary_places_count' => count( $temporary_places ), 'real_places_count' => count( $info->places ), 'response' => $info->raw ) );
+			}
+			if ( count( array_unique( array_values( $info->place_barcode_map ) ) ) !== count( $info->place_barcode_map ) ) {
+				throw new YandexDeliveryApiException( 'Yandex request/info returned duplicate real place barcodes.', array( 'error_code' => 'request_info_place_barcode_duplicate', 'request_id' => $request_id, 'response' => $info->raw ) );
+			}
 		}
 
 		return $info;
@@ -63,6 +82,11 @@ final class YandexDeliveryShipmentClient {
 			throw new YandexDeliveryApiException( 'Yandex request_id is required.', array( 'error_code' => 'request_id_missing' ) );
 		}
 
-		return YandexDeliveryShipmentState::from_api_response( $this->api->requestCancel( array( 'request_id' => $request_id ) ), $request_id );
+		$state = YandexDeliveryShipmentState::from_api_response( $this->api->requestCancel( array( 'request_id' => $request_id ) ), $request_id );
+		if ( '' === $state->status ) {
+			throw new YandexDeliveryApiException( 'Yandex request/cancel did not return status.', array( 'error_code' => 'cancel_status_missing', 'request_id' => $request_id, 'response' => $state->raw ) );
+		}
+
+		return $state;
 	}
 }

@@ -20,7 +20,7 @@ final class YandexDeliveryRequestHistory {
 	/** @param array<string,mixed> $response */
 	public static function from_api_response( array $response, string $request_id ): self {
 		$body = is_array( $response['body'] ?? null ) ? $response['body'] : $response;
-		$events = is_array( $body['history'] ?? null ) ? $body['history'] : ( is_array( $body['events'] ?? null ) ? $body['events'] : array() );
+		$events = is_array( $body['state_history'] ?? null ) ? $body['state_history'] : ( is_array( $body['history'] ?? null ) ? $body['history'] : ( is_array( $body['events'] ?? null ) ? $body['events'] : array() ) );
 		$events = array_values( array_filter( $events, 'is_array' ) );
 
 		return new self( $request_id, $events, $body );

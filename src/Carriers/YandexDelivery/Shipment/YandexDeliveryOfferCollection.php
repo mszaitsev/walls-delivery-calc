@@ -24,7 +24,7 @@ final class YandexDeliveryOfferCollection {
 		foreach ( $rows as $row ) {
 			if ( is_array( $row ) ) {
 				$offer = YandexDeliveryOffer::from_array( $row );
-				if ( '' !== $offer->offer_id ) {
+				if ( $offer->is_valid() ) {
 					$offers[] = $offer;
 				}
 			}

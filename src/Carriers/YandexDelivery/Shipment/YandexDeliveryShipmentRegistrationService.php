@@ -30,7 +30,24 @@ final class YandexDeliveryShipmentRegistrationService {
 			);
 		}
 		$confirmed = $this->client->confirm_offer( $selected );
-		$info = $this->client->request_info( $confirmed->request_id, is_array( $payload['places'] ?? null ) ? $payload['places'] : array() );
+		try {
+			$info = $this->client->request_info( $confirmed->request_id, is_array( $payload['places'] ?? null ) ? $payload['places'] : array() );
+		} catch ( YandexDeliveryApiException $exception ) {
+			throw new YandexDeliveryApiException(
+				$exception->getMessage(),
+				array_merge(
+					$exception->details(),
+					array(
+						'error_code' => 'request_info_after_confirm_failed',
+						'registration_phase' => 'request_info',
+						'confirmed_request_id' => $confirmed->request_id,
+						'selected_offer_id' => $selected->offer_id,
+					)
+				),
+				0,
+				$exception
+			);
+		}
 
 		return new YandexDeliveryShipmentRegistrationResult( $payload, $offers, $selected, $confirmed, $info );
 	}

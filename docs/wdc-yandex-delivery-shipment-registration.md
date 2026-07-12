@@ -1,5 +1,15 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.107.1
+
+Этап 0.107.1 выравнивает HTTP/DTO слой с production-схемой, проверенной реальными PowerShell запросами. `offers/create` вызывается как `POST /api/b2b/platform/offers/create?send_unix=false`, чтобы API возвращал строковые UTC интервалы. `request/info` и `request/history` отправляются как GET query requests без JSON body: `request/info?request_id=...&slim=false` и `request/history?request_id=...`.
+
+Offer DTO читает production shape `offer_details`: `delivery_interval.policy`, `delivery_interval.min/max`, `pickup_interval.min/max`, `pricing_total`, `pricing`, `features`, а также top-level `expires_at` и `station_id`. Повреждённые offers без `offer_id`, policy или delivery interval dates не попадают в публичную collection.
+
+`RequestInfo` читает `request_id`, `courier_order_id`, `sharing_url` и `state` с верхнего уровня ответа, а `destination`, `recipient_info`, `items`, `places`, `available_actions` и `delivery_policy` из nested `request`. `RequestHistory` читает primary поле `state_history`. `request/cancel` сохраняет async response `status=CREATED`, `description=Заказ отменяется`, `reason=cancellation_started`; это не трактуется как финальный lifecycle status.
+
+Защиты перед будущим persistence: `request_info()` отклоняет пустой или чужой `request_id`, отсутствие `request`, отсутствие `state.status`, mismatch количества temporary/real places и ненадёжную barcode map. Если `request/info` падает после успешного confirm, registration service перевыбрасывает `YandexDeliveryApiException` с `error_code=request_info_after_confirm_failed` и `confirmed_request_id`; следующий этап должен делать reconciliation через `request/info`, а не повторять confirm.
+
 ## Статус 0.107.0
 
 Этап 0.107.0 добавляет чистый HTTP layer регистрации отправлений Яндекс.Доставки. Подключения к WordPress UI, checkout, order save, tracking, labels и persistence нет. Используется существующий `YandexDeliveryApiClient` и его WordPress transport abstraction `YandexDeliveryHttpClientInterface` / `WpYandexDeliveryHttpClient`; `curl` и второй HTTP abstraction не добавлялись.
