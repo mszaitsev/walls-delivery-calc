@@ -1,5 +1,23 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.107.1
+
+Этап 0.107.1 выравнивает HTTP/DTO слой с production-схемой, проверенной реальными PowerShell запросами. `offers/create` вызывается как `POST /api/b2b/platform/offers/create?send_unix=false`, чтобы API возвращал строковые UTC интервалы. `request/info` и `request/history` отправляются как GET query requests без JSON body: `request/info?request_id=...&slim=false` и `request/history?request_id=...`.
+
+Offer DTO читает production shape `offer_details`: `delivery_interval.policy`, `delivery_interval.min/max`, `pickup_interval.min/max`, `pricing_total`, `pricing`, `features`, а также top-level `expires_at` и `station_id`. Повреждённые offers без `offer_id`, policy или delivery interval dates не попадают в публичную collection.
+
+`RequestInfo` читает `request_id`, `courier_order_id`, `sharing_url` и `state` с верхнего уровня ответа, а `destination`, `recipient_info`, `items`, `places`, `available_actions` и `delivery_policy` из nested `request`. `RequestHistory` читает primary поле `state_history`. `request/cancel` сохраняет async response `status=CREATED`, `description=Заказ отменяется`, `reason=cancellation_started`; это не трактуется как финальный lifecycle status.
+
+Защиты перед будущим persistence: `request_info()` отклоняет пустой или чужой `request_id`, отсутствие `request`, отсутствие `state.status`, mismatch количества temporary/real places и ненадёжную barcode map. Если `request/info` падает после успешного confirm, registration service перевыбрасывает `YandexDeliveryApiException` с `error_code=request_info_after_confirm_failed` и `confirmed_request_id`; следующий этап должен делать reconciliation через `request/info`, а не повторять confirm.
+
+## Статус 0.107.0
+
+Этап 0.107.0 добавляет чистый HTTP layer регистрации отправлений Яндекс.Доставки. Подключения к WordPress UI, checkout, order save, tracking, labels и persistence нет. Используется существующий `YandexDeliveryApiClient` и его WordPress transport abstraction `YandexDeliveryHttpClientInterface` / `WpYandexDeliveryHttpClient`; `curl` и второй HTTP abstraction не добавлялись.
+
+Реализованные HTTP методы: `offers/create`, `offers/confirm`, `request/info`, `request/history`, `request/cancel`. `request/create` не реализован и не используется. `YandexDeliveryShipmentClient` возвращает DTO, а не raw arrays: offers, selected/confirmed request, canonical request info, history and shipment state. `YandexDeliveryApiException` сохраняет HTTP code, sanitized error body and decoded response.
+
+`YandexDeliveryShipmentRegistrationService` выполняет production flow: payload builder -> `offers/create` -> earliest offer selector -> `offers/confirm` -> mandatory `request/info`. Канонический результат регистрации — `RequestInfo`; он содержит `request_id`, `courier_order_id`, `sharing_url`, status, destination, recipient, items, places and a temporary-to-real place barcode map. Retry не реализован: если confirm завершился transport/API exception, сервис не повторяет confirm и не продолжает request/info.
+
 ## Статус 0.106.2
 
 Этап 0.106.2 закрывает validation-блокеры перед реальным HTTP-flow, не добавляя HTTP/API/UI/persistence. Registration allocation не может быть пустым: `ShipmentAllocation` должен содержать хотя бы один item суммарно, а каждое `ShipmentAllocationPlace` должно содержать хотя бы один `ShipmentAllocationItem`. `CdekShipmentAllocationAdapter` отклоняет пустые `cdek_item_rows` и ситуацию, когда одно из мест не имеет allocation rows.
