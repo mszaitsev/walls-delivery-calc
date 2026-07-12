@@ -28,7 +28,8 @@ final class YandexShipmentRegistrationService {
 		private YandexDeliveryShipmentPayloadBuilder $payload_builder,
 		private YandexDeliveryShipmentClient $client,
 		private YandexShipmentRepository $repository,
-		private YandexShipmentPersistenceMapper $persistence_mapper
+		private YandexShipmentPersistenceMapper $persistence_mapper,
+		private YandexShipmentButtonPolicy $button_policy
 	) {
 	}
 
@@ -234,6 +235,12 @@ final class YandexShipmentRegistrationService {
 
 	/** @return array<string,mixed> */
 	public function remove_local( object $order ): array {
+		$shipment = $this->repository->find( $order );
+		$policy = $this->button_policy->resolve( $shipment );
+		if ( empty( $policy['remove'] ) ) {
+			return array( 'success' => false, 'message' => 'Текущее отправление Яндекс нельзя удалить из заказа.' );
+		}
+
 		$this->repository->delete( $order );
 		$this->add_order_note( $order, 'Локальная запись отправления Яндекс удалена.' );
 

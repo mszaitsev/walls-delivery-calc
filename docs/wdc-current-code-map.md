@@ -1,3 +1,10 @@
+## Yandex Remove Guard and Polling Transport Errors 0.108.11
+
+- `YandexShipmentRegistrationService::remove_local()` now enforces server-side removal through `YandexShipmentButtonPolicy::resolve()`. It no longer deletes active `CREATED` or `cancellation_started` shipments if an admin AJAX request is crafted manually.
+- `reconciliation_required` remains locally removable, and terminal Yandex statuses remain removable through the same policy. The backend error for a blocked delete is `Текущее отправление Яндекс нельзя удалить из заказа.`
+- `assets/admin/shipments-admin.js::requestShipmentStatus()` no longer converts transport/HTTP/JSON failures inside bounded registration polling into successful `null` payloads. It rejects to `startShipmentRegistrationPolling()`, where the failure counts as an attempt and polling continues until success/terminal/error or exhaustion.
+- DPD keeps its existing `mode=dpd` stop-on-error semantics, and CDEK polling remains on its separate code path.
+
 ## Yandex Pending Reconciliation Persistence 0.108.10
 
 - `YandexShipmentButtonPolicy` now separates local lifecycle states: `reconciliation_required` with a saved request id exposes update + local remove immediately, while `cancellation_started` keeps update only and does not allow local remove by default.

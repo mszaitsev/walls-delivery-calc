@@ -1235,6 +1235,9 @@
             : error.message;
         }
         if (settings.auto) {
+          if (settings.pollingToken) {
+            throw error;
+          }
           showShipmentToast(box, text.createdToast + ' Статус пока не обновлен: ' + error.message, 'warning', { append: true });
           return null;
         }
@@ -1383,6 +1386,7 @@
           shipmentPollingTimers.set(box, window.setTimeout(tick, interval));
         })
         .catch(() => {
+          if (shipmentPollingTokens.get(box) !== token) return;
           if (maxAttempts > 0 && attempts >= maxAttempts) {
             exhausted();
             return;

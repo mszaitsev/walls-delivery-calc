@@ -1,5 +1,11 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.11
+
+Local remove теперь защищён не только кнопками, но и backend-ом. `YandexShipmentRegistrationService::remove_local()` перед удалением получает сохранённый shipment и вызывает `YandexShipmentButtonPolicy::resolve()`. Если policy возвращает `remove=false`, repository не удаляется, lookup meta остаётся, а AJAX получает русскую ошибку `Текущее отправление Яндекс нельзя удалить из заказа.` Это блокирует ручной AJAX remove для активного `CREATED` и для `cancellation_started`; `reconciliation_required` и terminal статусы (`CANCELLED`, `DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER`, `REJECTED`) удаляются локально по той же policy.
+
+Polling после accepted create теперь различает pending-ответы Яндекса и транспортные ошибки. Pending JSON (`pending=true`) по-прежнему обновляет status message и идёт на следующую попытку без toast-spam. HTTP/network/JSON ошибка внутри bounded generic/Yandex polling больше не возвращается как успешный `null`: ошибка пробрасывается в polling helper, считается попыткой и планирует следующий tick до canonical status, terminal/error response или exhaustion. После 14 pending/transport-error попыток запускается тот же backend mark-exhausted flow. DPD `mode=dpd` сохраняет прежнее поведение остановки после ошибки, CDEK polling не менялся.
+
 ## Статус 0.108.10
 
 Pending reconciliation теперь управляется серверной button policy. Любая сохранённая запись Яндекс со статусом `reconciliation_required` и `request_id` сразу после перезагрузки страницы показывает `Обновить статус` и `Удалить из заказа`, а `Создать`, manual attach и cancel остаются скрытыми. Это сделано намеренно: реальное отправление уже могло быть создано в Яндексе, но менеджер должен иметь выход из локальной pending-связи и затем при необходимости прикрепить `request_id` вручную. `cancellation_started` отделён от reconciliation и по умолчанию не разрешает local remove, чтобы не потерять связь с активным запросом отмены.

@@ -222,8 +222,9 @@ function yd_framework_stack( array $responses ): array {
 	$base_repository = new OrderShipmentRepository();
 	$yandex_repository = new YandexShipmentRepository( $base_repository );
 	$mapper = new YandexShipmentPersistenceMapper( $yandex_repository );
-	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper );
-	$adapter = new YandexShipmentAdapter( $framework_registration, new YandexShipmentButtonPolicy() );
+	$button_policy = new YandexShipmentButtonPolicy();
+	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy );
+	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy );
 	$registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
 	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
 
@@ -247,8 +248,9 @@ $core_registration = new CoreYandexRegistrationService( $payload_builder, $clien
 $base_repository = new OrderShipmentRepository();
 $yandex_repository = new YandexShipmentRepository( $base_repository );
 $mapper = new YandexShipmentPersistenceMapper( $yandex_repository );
-$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper );
-$adapter = new YandexShipmentAdapter( $framework_registration, new YandexShipmentButtonPolicy() );
+$button_policy = new YandexShipmentButtonPolicy();
+$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy );
+$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
 $creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
 $order = new YdFrameworkOrder( 777 );
@@ -279,6 +281,8 @@ yd_framework_assert( 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_deliv
 $payload = $adapter->status_payload( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
 yd_framework_assert( ! empty( $payload['can_update_status'] ) && ! empty( $payload['can_cancel'] ) && empty( $payload['can_attach_manual'] ), 'Yandex button policy must expose status/cancel and hide manual attach.' );
 yd_framework_assert( 'CREATED' === (string) ( $payload['carrier_status_title'] ?? '' ), 'Yandex status payload must expose status value without duplicating carrier label.' );
+$active_remove = $adapter->remove_from_order( $order );
+yd_framework_assert( empty( $active_remove['success'] ) && 'Текущее отправление Яндекс нельзя удалить из заказа.' === (string) ( $active_remove['message'] ?? '' ) && array() !== $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) && 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Server-side Yandex remove guard must reject active CREATED shipment and keep persistence.' );
 
 $cancel = $adapter->cancel_in_carrier( $order );
 yd_framework_assert( ! empty( $cancel['success'] ) && 6 === count( $fake->requests ), 'Yandex cancel must call request/cancel and canonical request/info.' );
@@ -315,7 +319,7 @@ yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresTariff !
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresSuccessfulPreview === '1'" ) && str_contains( $js_source, 'const latestPreviewReady = !requiresSuccessfulPreview' ), 'Shipment admin JS must block create by carrier-neutral preview capability instead of checking a Yandex/DPD branch.' );
 yd_framework_assert( str_contains( $js_source, "data.append('barcode', input ? input.value || '' : '')" ) && str_contains( $js_source, 'canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload' ) && str_contains( $js_source, 'manualAttachFieldLabel' ), 'Runtime manual attach must send the generic barcode field and consume adapter manual-attach capability after success.' );
 yd_framework_assert( str_contains( $js_source, 'function startShipmentRegistrationPolling' ) && str_contains( $js_source, 'function markShipmentPollingExhausted' ) && str_contains( $js_source, 'markPollExhaustedAction' ) && str_contains( $js_source, 'shipmentPollingTokens' ) && str_contains( $js_source, 'removeConfirmationMessage' ), 'Runtime registration polling must be carrier-neutral, bounded, persist exhaustion and protect stale responses.' );
-yd_framework_assert( str_contains( $js_source, 'settings.auto && !isPending' ) && str_contains( $js_source, 'stopShipmentRegistrationPolling(box)' ), 'Runtime polling must suppress pending toast spam and stop polling before local remove.' );
+yd_framework_assert( str_contains( $js_source, 'settings.auto && !isPending' ) && str_contains( $js_source, 'if (settings.pollingToken)' ) && str_contains( $js_source, 'throw error;' ) && str_contains( $js_source, 'stopShipmentRegistrationPolling(box)' ), 'Runtime polling must suppress pending toast spam, propagate transport errors during bounded polling and stop polling before local remove.' );
 yd_framework_assert( ! str_contains( $js_source, 'response.json()' ) && ! str_contains( $js_source, 'Unexpected token' ) && ! str_contains( $js_source, 'Server returned' ) && ! str_contains( $js_source, 'DPD registration failed' ), 'Shipment admin runtime must not expose raw JSON parser or English fallback messages.' );
 
 $metabox_reflection = new ReflectionClass( \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox::class );
@@ -404,6 +408,18 @@ $recovered_payload = $reconciliation_adapter->status_payload( $reconciliation_or
 yd_framework_assert( 'CREATED' === (string) ( $recovered_payload['carrier_status_title'] ?? '' ) && empty( $recovered_payload['polling_continue'] ) && ! empty( $recovered_payload['can_cancel'] ) && empty( $recovered_payload['can_remove_from_order'] ), 'Recovered Yandex shipment must stop polling, render CREATED once, allow cancel and hide remove.' );
 yd_framework_assert( 'OFFER-PENDING' === (string) ( $recovered_shipment['yandex_selected_offer_id'] ?? '' ) && '298.8 RUB' === (string) ( $recovered_shipment['yandex_offer_pricing_total'] ?? '' ), 'Reconciliation recovery must preserve selected offer audit fields.' );
 
+$remove_pending_order = new YdFrameworkOrder( 777 );
+list( $remove_pending_repository, $remove_pending_adapter, $remove_pending_creation, $remove_pending_registration, $remove_pending_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-REMOVE-PENDING' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-REMOVE-PENDING' ) ),
+		yd_framework_response( yd_framework_incomplete_info( 'REQ-REMOVE-PENDING' ) ),
+	)
+);
+yd_framework_assert( $remove_pending_creation->create( $remove_pending_order, yd_framework_request() )->success, 'Pending remove scenario must start from accepted reconciliation.' );
+$pending_remove = $remove_pending_adapter->remove_from_order( $remove_pending_order );
+yd_framework_assert( ! empty( $pending_remove['success'] ) && array() === $remove_pending_repository->find_by_carrier( $remove_pending_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $remove_pending_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 3 === count( $remove_pending_http->requests ), 'Server-side Yandex remove guard must allow reconciliation_required local remove without extra API calls.' );
+
 $exhausted_pending_order = new YdFrameworkOrder( 777 );
 list( $exhausted_pending_repository, $exhausted_pending_adapter, $exhausted_pending_creation, $exhausted_pending_registration, $exhausted_pending_http ) = yd_framework_stack(
 	array(
@@ -440,6 +456,8 @@ $cancel_pending_shipment = $cancel_pending_repository->find_by_carrier( $cancel_
 yd_framework_assert( 'cancellation_started' === (string) ( $cancel_pending_shipment['status'] ?? '' ) && ! empty( $cancel_pending_shipment['yandex_cancel_requested'] ) && 'cancellation_started' === (string) ( $cancel_pending_shipment['yandex_cancel_reason'] ?? '' ), 'Non-terminal info after cancel must keep local cancellation_started state.' );
 $cancel_pending_policy = ( new YandexShipmentButtonPolicy() )->resolve( $cancel_pending_shipment );
 yd_framework_assert( empty( $cancel_pending_policy['cancel'] ) && ! empty( $cancel_pending_policy['update'] ) && empty( $cancel_pending_policy['remove'] ), 'Cancel pending button policy must block repeat cancel and local remove.' );
+$cancel_pending_remove = $cancel_pending_adapter->remove_from_order( $cancel_pending_order );
+yd_framework_assert( empty( $cancel_pending_remove['success'] ) && 'Текущее отправление Яндекс нельзя удалить из заказа.' === (string) ( $cancel_pending_remove['message'] ?? '' ) && array() !== $cancel_pending_repository->find_by_carrier( $cancel_pending_order, YandexDeliverySettings::CARRIER_KEY ), 'Server-side Yandex remove guard must reject cancellation_started shipment.' );
 yd_framework_assert( ! str_contains( implode( "\n", $cancel_pending_order->notes ), 'отменено' ), 'Cancel pending note must not claim final cancellation.' );
 $cancel_completed = $cancel_pending_adapter->update_status( $cancel_pending_order );
 yd_framework_assert( ! empty( $cancel_completed['success'] ) && 'CANCELLED' === (string) ( $cancel_completed['status'] ?? '' ), 'Subsequent update_status must complete async cancellation when request/info returns CANCELLED.' );
@@ -497,7 +515,7 @@ $preview_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient(
 $preview_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
 $preview_mapper = new YandexShipmentPersistenceMapper( $preview_repository );
 $preview_adapter = new YandexShipmentAdapter(
-	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, $preview_repository, $preview_mapper ),
+	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, $preview_repository, $preview_mapper, new YandexShipmentButtonPolicy() ),
 	new YandexShipmentButtonPolicy()
 );
 $preview_payload = $preview_adapter->build_safe_payload_preview( yd_framework_request() );
