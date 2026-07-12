@@ -29,9 +29,9 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'status_title' => 'Статус Яндекс.Доставки',
 			'tracking_label' => 'Request ID Яндекс',
 			'create_button_label' => 'Создать отправление Яндекс',
-			'manual_attach_button_label' => 'Внести request_id Яндекс вручную',
-			'manual_attach_placeholder' => 'request_id',
-			'manual_attach_help' => 'Ручное прикрепление Яндекс-отправлений пока отключено.',
+			'manual_attach_button_label' => 'Добавить отправление Яндекс вручную',
+			'manual_attach_placeholder' => 'Request ID Яндекс',
+			'manual_attach_help' => 'Введите request_id отправления, созданного напрямую в кабинете Яндекс.Доставки.',
 			'cancel_button_label' => 'Отменить отправление в Яндекс',
 			'remove_button_label' => 'Удалить из заказа',
 			'update_status_button_label' => 'Обновить статус',
@@ -83,7 +83,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function update_status( object $order, string $shipment_key = '' ): array { unset( $shipment_key ); return $this->registration->update_status( $order ); }
 
 	/** @param array<string,mixed> $payload @return array<string,mixed> */
-	public function attach_manual( object $order, array $payload ): array { unset( $order, $payload ); return array( 'success' => false, 'message' => 'Ручное прикрепление Яндекс-отправлений пока отключено.' ); }
+	public function attach_manual( object $order, array $payload ): array { return $this->registration->attach_manual( $order, $payload ); }
 
 	/** @return array<string,mixed> */
 	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { unset( $shipment_key ); return $this->registration->cancel( $order ); }

@@ -1,3 +1,11 @@
+## Yandex Manual Dimensions and Manual Attach 0.108.7
+
+- `OrderShipmentDraftFactory::draft_array()` exposes `modal_capabilities.requires_manual_place_dimensions=true` for Yandex. `OrderShipmentsMetabox` uses that carrier-neutral capability to render the editable initial Yandex place weight/dimensions empty, while keeping the backend draft, `shipment_items[]`, and place allocation rows intact.
+- `OrderShipmentDraftFactory::create_yandex_request_from_admin_data()` still uses `ShipmentModalRequestMapper::parse($data)` as the only submitted-place source. Empty Yandex place fields therefore remain invalid and are rejected by existing `ShipmentPlace`/allocation validation rather than falling back to calculated order dimensions.
+- `YandexShipmentButtonPolicy` exposes manual attach only when `_wdc_shipments[yandex_delivery]` is absent. `YandexShipmentAdapter::attach_manual()` delegates to `YandexShipmentRegistrationService::attach_manual()`.
+- `YandexShipmentRegistrationService::attach_manual()` accepts the generic manual attach input as Yandex `request_id`, checks duplicates before HTTP, calls only `request/info`, validates `operator_request_id` against the WooCommerce order number, and persists canonical request/info fields through `YandexShipmentPersistenceMapper`.
+- `YandexShipmentPersistenceMapper::build_manual_attach_fields()` creates the Yandex shipment envelope for `admin_manual_attach`, stores request/courier/sharing/status/destination/recipient/items/places/request-info snapshots, and `YandexShipmentRepository` keeps `_wdc_yandex_delivery_request_id` synchronized.
+
 ## Shipment Modal Preview Gate 0.108.6
 
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` exposes `modal_capabilities.requires_successful_preview=true` for Yandex and DPD. The capability is carrier-neutral and does not add Yandex-specific JS branching.

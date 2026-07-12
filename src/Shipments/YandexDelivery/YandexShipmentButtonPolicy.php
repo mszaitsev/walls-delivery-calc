@@ -11,7 +11,7 @@ final class YandexShipmentButtonPolicy {
 	/** @param array<string,mixed> $shipment @return array<string,bool> */
 	public function resolve( array $shipment ): array {
 		if ( array() === $shipment ) {
-			return array( 'create' => true, 'manual_attach' => false, 'update' => false, 'cancel' => false, 'remove' => false );
+			return array( 'create' => true, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => false );
 		}
 		$request_id = $this->request_id( $shipment );
 		$local_status = trim( (string) ( $shipment['status'] ?? '' ) );

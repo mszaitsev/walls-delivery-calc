@@ -1420,6 +1420,8 @@
         setTrackingDisplay(box, payload.data.tracking_number || payload.data.status && payload.data.status.barcode || '');
         updateShipmentButtons(box, {
           hasShipment: !!statusPayload.has_shipment,
+          canCreate: Object.prototype.hasOwnProperty.call(statusPayload, 'can_create') ? !!statusPayload.can_create : undefined,
+          canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload, 'can_attach_manual') ? !!statusPayload.can_attach_manual : undefined,
           canCancel: !!statusPayload.can_cancel,
           canRemove: !!statusPayload.can_remove_from_order,
           canUpdate: !!statusPayload.can_update_status,
@@ -2410,6 +2412,8 @@
           const text = getPresentation(box);
           updateShipmentButtons(box, {
             hasShipment: !!statusPayload.has_shipment,
+            canCreate: Object.prototype.hasOwnProperty.call(statusPayload, 'can_create') ? !!statusPayload.can_create : undefined,
+            canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload, 'can_attach_manual') ? !!statusPayload.can_attach_manual : undefined,
             canCancel: !!statusPayload.can_cancel,
             canRemove: !!statusPayload.can_remove_from_order,
             canUpdate: !!statusPayload.can_update_status,

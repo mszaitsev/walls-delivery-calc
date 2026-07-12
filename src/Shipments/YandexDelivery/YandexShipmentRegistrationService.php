@@ -27,7 +27,8 @@ final class YandexShipmentRegistrationService {
 		private CoreYandexShipmentRegistrationService $registration,
 		private YandexDeliveryShipmentPayloadBuilder $payload_builder,
 		private YandexDeliveryShipmentClient $client,
-		private YandexShipmentRepository $repository
+		private YandexShipmentRepository $repository,
+		private YandexShipmentPersistenceMapper $persistence_mapper
 	) {
 	}
 
@@ -108,6 +109,46 @@ final class YandexShipmentRegistrationService {
 		} catch ( YandexDeliveryApiException $exception ) {
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
+	}
+
+	/** @param array<string,mixed> $payload @return array<string,mixed> */
+	public function attach_manual( object $order, array $payload ): array {
+		$request_id = $this->manual_request_id( $payload );
+		if ( '' === $request_id ) {
+			return array( 'success' => false, 'message' => 'Введите Request ID Яндекс.' );
+		}
+		if ( array() !== $this->repository->find( $order ) ) {
+			return array( 'success' => false, 'message' => 'По заказу уже сохранено отправление Яндекс.' );
+		}
+
+		try {
+			$info = $this->client->request_info( $request_id );
+		} catch ( YandexDeliveryApiException $exception ) {
+			return array( 'success' => false, 'message' => $this->manual_attach_api_error_message( $exception ), 'details' => $exception->details() );
+		}
+
+		$expected_operator_request_id = $this->expected_operator_request_id( $order );
+		if ( '' === trim( $info->operator_request_id ) ) {
+			return array( 'success' => false, 'message' => 'Яндекс не вернул номер заказа для проверки принадлежности отправления.' );
+		}
+		if ( $info->operator_request_id !== $expected_operator_request_id ) {
+			return array( 'success' => false, 'message' => 'Отправление Яндекс создано для другого заказа.' );
+		}
+		if ( array() !== $this->repository->find( $order ) ) {
+			return array( 'success' => false, 'message' => 'По заказу уже сохранено отправление Яндекс.' );
+		}
+
+		$shipment = $this->persistence_mapper->build_manual_attach_fields( $order, $info, $this->now() );
+		$this->repository->save( $order, $shipment );
+		$this->add_order_note( $order, 'Отправление Яндекс добавлено в заказ. Request ID: ' . $info->request_id . '.' );
+
+		return array(
+			'success' => true,
+			'message' => 'Отправление Яндекс добавлено в заказ.',
+			'tracking_number' => '' !== $info->courier_order_id ? $info->courier_order_id : $info->request_id,
+			'backlog_order_id' => $info->request_id,
+			'shipment' => $shipment,
+		);
 	}
 
 	/** @return array<string,mixed> */
@@ -293,25 +334,7 @@ final class YandexShipmentRegistrationService {
 
 	/** @return array<string,mixed> */
 	private function fields_from_info( YandexDeliveryRequestInfo $info ): array {
-		return array(
-			'yandex_request_id' => $info->request_id,
-			'request_id' => $info->request_id,
-			'yandex_courier_order_id' => $info->courier_order_id,
-			'courier_order_id' => $info->courier_order_id,
-			'yandex_sharing_url' => $info->sharing_url,
-			'sharing_url' => $info->sharing_url,
-			'yandex_status' => $info->status,
-			'yandex_operator_request_id' => $info->operator_request_id,
-			'yandex_delivery_policy' => $info->delivery_policy,
-			'yandex_destination' => $info->destination,
-			'yandex_recipient' => $info->recipient,
-			'yandex_items' => $info->items,
-			'yandex_places' => $info->places,
-			'yandex_place_barcode_map' => $info->place_barcode_map,
-			'yandex_request_info_snapshot' => $info->raw,
-			'yandex_available_actions' => $info->available_actions,
-			'yandex_full_items_price_kopecks' => $info->full_items_price_kopecks,
-		);
+		return $this->persistence_mapper->fields_from_info( $info );
 	}
 
 	/** @param array<string,mixed> $shipment */
@@ -443,6 +466,34 @@ final class YandexShipmentRegistrationService {
 		if ( method_exists( $order, 'add_order_note' ) ) {
 			$order->add_order_note( $message );
 		}
+	}
+
+	/** @param array<string,mixed> $payload */
+	private function manual_request_id( array $payload ): string {
+		foreach ( array( 'request_id', 'barcode', 'tracking_number' ) as $key ) {
+			$value = trim( (string) ( $payload[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
+	}
+
+	private function expected_operator_request_id( object $order ): string {
+		if ( method_exists( $order, 'get_order_number' ) ) {
+			return trim( (string) $order->get_order_number() );
+		}
+
+		return (string) $this->repository->order_id( $order );
+	}
+
+	private function manual_attach_api_error_message( YandexDeliveryApiException $exception ): string {
+		if ( 404 === $exception->http_code() ) {
+			return 'Отправление Яндекс с указанным Request ID не найдено.';
+		}
+
+		return 'Не удалось получить данные отправления Яндекс.';
 	}
 
 	private function now(): string {

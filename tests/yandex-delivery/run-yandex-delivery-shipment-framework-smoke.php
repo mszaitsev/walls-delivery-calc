@@ -145,11 +145,16 @@ function yd_framework_offer( string $offer_id ): array {
 		),
 	);
 }
-function yd_framework_info( string $request_id, string $status, string $real_barcode ): array {
+function yd_framework_info( string $request_id, string $status, string $real_barcode, ?string $operator_request_id = 'ORDER-777' ): array {
+	$info = array();
+	if ( null !== $operator_request_id ) {
+		$info['operator_request_id'] = $operator_request_id;
+	}
+
 	return array(
 		'request_id' => $request_id,
 		'request' => array(
-			'info' => array( 'operator_request_id' => 'ORDER-777' ),
+			'info' => $info,
 			'destination' => array( 'type' => 'platform_station', 'platform_station' => array( 'platform_id' => 'PVZ-1' ) ),
 			'recipient_info' => array( 'first_name' => 'Михайлов Михаил', 'last_name' => '', 'patronymic' => '', 'phone' => '+79131234567', 'email' => 'buyer@example.test' ),
 			'items' => array( array( 'count' => 1, 'name' => 'Item A', 'article' => 'SKU-A', 'barcode' => 'ITEM-YD-1', 'billing_details' => array( 'nds' => -1, 'unit_price' => 10000, 'assessed_unit_price' => 10000 ), 'place_barcode' => $real_barcode, 'refused_count' => 0 ) ),
@@ -199,10 +204,11 @@ function yd_framework_stack( array $responses ): array {
 	$core_registration = new CoreYandexRegistrationService( $payload_builder, $client, new YandexDeliveryEarliestOfferSelector() );
 	$base_repository = new OrderShipmentRepository();
 	$yandex_repository = new YandexShipmentRepository( $base_repository );
-	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository );
+	$mapper = new YandexShipmentPersistenceMapper( $yandex_repository );
+	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper );
 	$adapter = new YandexShipmentAdapter( $framework_registration, new YandexShipmentButtonPolicy() );
 	$registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( new YandexShipmentPersistenceMapper( $yandex_repository ) ) );
+	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
 
 	return array( $base_repository, $adapter, $creation, $framework_registration, $fake );
 }
@@ -223,10 +229,11 @@ $payload_builder = new YandexDeliveryShipmentPayloadBuilder();
 $core_registration = new CoreYandexRegistrationService( $payload_builder, $client, new YandexDeliveryEarliestOfferSelector() );
 $base_repository = new OrderShipmentRepository();
 $yandex_repository = new YandexShipmentRepository( $base_repository );
-$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository );
+$mapper = new YandexShipmentPersistenceMapper( $yandex_repository );
+$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper );
 $adapter = new YandexShipmentAdapter( $framework_registration, new YandexShipmentButtonPolicy() );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( new YandexShipmentPersistenceMapper( $yandex_repository ) ) );
+$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
 $order = new YdFrameworkOrder( 777 );
 $request = yd_framework_request();
 
@@ -276,17 +283,20 @@ yd_framework_assert( str_contains( $metabox_source, '$requires_tariff' ) && str_
 yd_framework_assert( str_contains( $metabox_source, 'foreach ( $place_rows as $place_index => $place_row )' ) && str_contains( $metabox_source, 'data-wdc-decimal-input="2"' ) && str_contains( $metabox_source, 'places[<?php echo esc_attr( (string) $place_index ); ?>][weight_g]' ), 'Shared modal must render initial places from draft and allow decimal dimensions while keeping weight integer.' );
 yd_framework_assert( str_contains( $metabox_source, 'shipment_preview_validation_failed' ) && str_contains( $metabox_source, 'shipment_preview_unexpected_error' ) && str_contains( $metabox_source, 'discard_preview_buffer' ), 'Shipment preview AJAX must return controlled JSON errors instead of leaking HTML output.' );
 yd_framework_assert( str_contains( $metabox_source, 'data-wdc-requires-successful-preview' ) && str_contains( $metabox_source, 'shipment_create_validation_failed' ) && str_contains( $metabox_source, 'shipment_create_unexpected_error' ) && str_contains( $metabox_source, 'public_shipment_error_message' ), 'Shipment create AJAX must be JSON-safe and expose the preview-required capability to runtime.' );
+yd_framework_assert( str_contains( $metabox_source, 'data-wdc-requires-manual-place-dimensions' ) && str_contains( $metabox_source, '$requires_manual_place_dimensions' ) && str_contains( $metabox_source, "\$base_place_row['weight_g'] = ''" ), 'Shared modal must clear editable Yandex place dimensions through carrier-neutral modal capability.' );
+yd_framework_assert( str_contains( $metabox_source, 'shipment_attach_validation_failed' ) && str_contains( $metabox_source, 'shipment_attach_unexpected_error' ) && str_contains( $metabox_source, "'request_id' => \$barcode" ), 'Generic manual attach AJAX must stay JSON-safe and pass request_id alias to carrier adapters.' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 yd_framework_assert( str_contains( $js_source, 'can_create' ) && str_contains( $js_source, 'can_attach_manual' ) && str_contains( $js_source, 'setVisible(openButton, canCreate)' ) && str_contains( $js_source, 'setVisible(manualButton, canAttachManual)' ), 'Runtime shipment buttons must consume adapter create/manual capabilities.' );
 yd_framework_assert( str_contains( $js_source, 'function parseShipmentJsonResponse' ) && str_contains( $js_source, 'Сервер вернул некорректный ответ при подготовке отправления' ) && str_contains( $js_source, '.then(parseShipmentJsonResponse)' ), 'Shipment preview JS must parse malformed responses through controlled JSON fallback.' );
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresTariff !== '0'" ) && str_contains( $js_source, 'parseDecimalValue(length' ), 'Shipment admin JS must support no-tariff carriers and decimal place dimensions.' );
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresSuccessfulPreview === '1'" ) && str_contains( $js_source, 'const latestPreviewReady = !requiresSuccessfulPreview' ), 'Shipment admin JS must block create by carrier-neutral preview capability instead of checking a Yandex/DPD branch.' );
+yd_framework_assert( str_contains( $js_source, "data.append('barcode', input ? input.value || '' : '')" ) && str_contains( $js_source, 'canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload' ), 'Runtime manual attach must send the generic barcode field and consume adapter manual-attach capability after success.' );
 yd_framework_assert( ! str_contains( $js_source, 'response.json()' ) && ! str_contains( $js_source, 'Unexpected token' ) && ! str_contains( $js_source, 'Server returned' ) && ! str_contains( $js_source, 'DPD registration failed' ), 'Shipment admin runtime must not expose raw JSON parser or English fallback messages.' );
 
 $metabox_buttons = new ShipmentMetaboxButtonPolicy();
 $empty_yandex_payload = $adapter->status_payload( $order, array() );
 $empty_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, array(), $empty_yandex_payload );
-yd_framework_assert( ! empty( $empty_yandex_buttons['show_create'] ) && empty( $empty_yandex_buttons['show_manual_attach'] ) && empty( $empty_yandex_buttons['show_update'] ) && empty( $empty_yandex_buttons['show_cancel'] ) && empty( $empty_yandex_buttons['show_remove'] ), 'Metabox capabilities must show only Create for empty Yandex shipment.' );
+yd_framework_assert( ! empty( $empty_yandex_buttons['show_create'] ) && ! empty( $empty_yandex_buttons['show_manual_attach'] ) && empty( $empty_yandex_buttons['show_update'] ) && empty( $empty_yandex_buttons['show_cancel'] ) && empty( $empty_yandex_buttons['show_remove'] ), 'Metabox capabilities must show Create and manual attach for empty Yandex shipment.' );
 
 $created_yandex = array( 'status' => 'created', 'yandex_status' => 'CREATED', 'yandex_request_id' => 'REQ-META-CREATED' );
 $created_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $created_yandex, $adapter->status_payload( $order, $created_yandex ) );
@@ -396,7 +406,7 @@ $draft_array = $draft_factory->draft_array( $draft_order );
 yd_framework_assert( 'Яндекс до ПВЗ' === (string) ( $draft_array['services'][0]['title'] ?? '' ) && DeliveryType::PICKUP === (string) ( $draft_array['services'][0]['delivery_type'] ?? '' ), 'Yandex pickup modal draft must expose one actual service variant.' );
 yd_framework_assert( array() === (array) ( $draft_array['postoffice_codes'] ?? array( 'unexpected' ) ) && false === (bool) ( $draft_array['modal_capabilities']['requires_tariff'] ?? true ) && false === (bool) ( $draft_array['modal_capabilities']['requires_postoffice'] ?? true ), 'Yandex modal draft must not require tariff or Russian Post postoffice fields.' );
 yd_framework_assert( true === (bool) ( $draft_array['modal_capabilities']['requires_successful_preview'] ?? false ), 'Yandex modal draft must require successful preview before create.' );
-yd_framework_assert( 1000 <= (int) ( $draft_array['request']['places'][0]['weight_g'] ?? 0 ) && 20 === (int) ( $draft_array['request']['places'][0]['length_cm'] ?? 0 ), 'Yandex modal draft must include populated initial place values.' );
+yd_framework_assert( true === (bool) ( $draft_array['modal_capabilities']['requires_manual_place_dimensions'] ?? false ), 'Yandex modal draft must require manual factual place weight and dimensions.' );
 $draft_courier_order = new YdFrameworkOrder( 783 );
 $draft_courier_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySettings::CARRIER_KEY );
 $draft_courier_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':courier' );
@@ -409,12 +419,33 @@ yd_framework_assert( true === (bool) ( $draft_dpd_array['modal_capabilities']['r
 
 $preview_http = new YdFrameworkFakeHttp( array() );
 $preview_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $preview_http ) );
+$preview_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
+$preview_mapper = new YandexShipmentPersistenceMapper( $preview_repository );
 $preview_adapter = new YandexShipmentAdapter(
-	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexShipmentRepository( new OrderShipmentRepository() ) ),
+	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, $preview_repository, $preview_mapper ),
 	new YandexShipmentButtonPolicy()
 );
 $preview_payload = $preview_adapter->build_safe_payload_preview( yd_framework_request() );
 yd_framework_assert( array() === $preview_http->requests && empty( $preview_payload['live_api_call'] ), 'Yandex modal payload preview must not call offers/create, confirm or request/info HTTP.' );
+
+$empty_dimensions_blocked = false;
+try {
+	$draft_factory->create_request_from_admin_data(
+		$draft_order,
+		array(
+			'delivery_type' => DeliveryType::PICKUP,
+			'places' => array( array( 'weight_g' => '', 'length_cm' => '', 'width_cm' => '', 'height_cm' => '' ) ),
+			'shipment_items' => array( array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SKU-A', 'amount' => 3, 'cost' => 100, 'weight' => 500 ) ),
+			'yandex_pickup_platform_station_id' => 'PVZ-1',
+		)
+	);
+} catch ( InvalidArgumentException $e ) {
+	$empty_dimensions_blocked = str_contains( $e->getMessage(), 'weight_g must be greater than 0' )
+		&& str_contains( $e->getMessage(), 'length_cm must be greater than 0' )
+		&& str_contains( $e->getMessage(), 'width_cm must be greater than 0' )
+		&& str_contains( $e->getMessage(), 'height_cm must be greater than 0' );
+}
+yd_framework_assert( $empty_dimensions_blocked && array() === $preview_http->requests, 'Empty Yandex modal place fields must block preview/create without falling back to calculated dimensions or HTTP.' );
 
 $modal_item_rows = array(
 	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
@@ -529,6 +560,47 @@ foreach ( array( 'DELIVERED', 'RETURNED', 'RETURNED_TO_SENDER', 'REJECTED' ) as 
 	yd_framework_assert( empty( $terminal_policy['cancel'] ) && ! empty( $terminal_policy['remove'] ), 'Terminal Yandex status must use existing button policy to hide cancel and allow remove.' );
 	yd_framework_assert( ! str_contains( implode( "\n", $terminal_order->notes ), 'Отправление Яндекс отменено.' ) && str_contains( implode( "\n", $terminal_order->notes ), 'Получен терминальный статус Яндекс: ' . $terminal_status ), 'Non-CANCELLED terminal cancel resolution must not write successful-cancel note.' );
 }
+
+$attach_order = new YdFrameworkOrder( 777 );
+list( $attach_repository, $attach_adapter, $attach_creation, $attach_registration, $attach_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( yd_framework_info( 'REQ-MANUAL', 'CREATED', 'YD-MANUAL' ) ),
+	)
+);
+$empty_attach_payload = $attach_adapter->status_payload( $attach_order, array() );
+yd_framework_assert( ! empty( $empty_attach_payload['can_create'] ) && ! empty( $empty_attach_payload['can_attach_manual'] ), 'Yandex status payload must expose manual attach when local shipment is absent.' );
+$attach_result = $attach_adapter->attach_manual( $attach_order, array( 'barcode' => 'REQ-MANUAL' ) );
+$attached = $attach_repository->find_by_carrier( $attach_order, YandexDeliverySettings::CARRIER_KEY );
+yd_framework_assert( ! empty( $attach_result['success'] ) && 1 === count( $attach_http->requests ) && str_contains( $attach_http->requests[0]['url'], '/request/info' ) && str_contains( $attach_http->requests[0]['url'], 'request_id=REQ-MANUAL' ), 'Manual attach must verify Yandex request_id with a single request/info call.' );
+yd_framework_assert( ! str_contains( implode( "\n", array_column( $attach_http->requests, 'url' ) ), '/offers/create' ) && ! str_contains( implode( "\n", array_column( $attach_http->requests, 'url' ) ), '/offers/confirm' ), 'Manual attach must not call offers/create or offers/confirm.' );
+yd_framework_assert( 'REQ-MANUAL' === (string) ( $attached['yandex_request_id'] ?? '' ) && 'ORDER-777' === (string) ( $attached['yandex_operator_request_id'] ?? '' ) && 'CREATED' === (string) ( $attached['yandex_status'] ?? '' ), 'Manual attach must persist canonical Yandex request/info fields.' );
+yd_framework_assert( 'REQ-MANUAL' === (string) $attach_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 'admin_manual_attach' === (string) ( $attached['created_by_context'] ?? '' ), 'Manual attach must persist lookup meta and admin_manual_attach context.' );
+$attached_payload = $attach_adapter->status_payload( $attach_order, $attached );
+yd_framework_assert( empty( $attached_payload['can_create'] ) && empty( $attached_payload['can_attach_manual'] ) && ! empty( $attached_payload['can_update_status'] ) && ! empty( $attached_payload['can_cancel'] ), 'Attached CREATED Yandex shipment must hide create/manual attach and expose update/cancel.' );
+$duplicate_attach = $attach_adapter->attach_manual( $attach_order, array( 'request_id' => 'REQ-DUPLICATE' ) );
+yd_framework_assert( empty( $duplicate_attach['success'] ) && 'По заказу уже сохранено отправление Яндекс.' === (string) ( $duplicate_attach['message'] ?? '' ) && 1 === count( $attach_http->requests ), 'Duplicate manual attach must be blocked before request/info.' );
+
+$wrong_order = new YdFrameworkOrder( 777 );
+list( $wrong_repository, $wrong_adapter, $wrong_creation, $wrong_registration, $wrong_http ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-WRONG', 'CREATED', 'YD-WRONG', 'ORDER-999' ) ) ) );
+$wrong_attach = $wrong_adapter->attach_manual( $wrong_order, array( 'barcode' => 'REQ-WRONG' ) );
+yd_framework_assert( empty( $wrong_attach['success'] ) && 'Отправление Яндекс создано для другого заказа.' === (string) ( $wrong_attach['message'] ?? '' ) && array() === $wrong_repository->find_by_carrier( $wrong_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $wrong_order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Manual attach must reject request/info with mismatched operator_request_id.' );
+
+$missing_operator_order = new YdFrameworkOrder( 777 );
+list( $missing_repository, $missing_adapter ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-NO-OP', 'CREATED', 'YD-NO-OP', null ) ) ) );
+$missing_attach = $missing_adapter->attach_manual( $missing_operator_order, array( 'barcode' => 'REQ-NO-OP' ) );
+yd_framework_assert( empty( $missing_attach['success'] ) && 'Яндекс не вернул номер заказа для проверки принадлежности отправления.' === (string) ( $missing_attach['message'] ?? '' ) && array() === $missing_repository->find_by_carrier( $missing_operator_order, YandexDeliverySettings::CARRIER_KEY ), 'Manual attach must reject request/info without operator_request_id.' );
+
+$api_error_order = new YdFrameworkOrder( 777 );
+list( $api_error_repository, $api_error_adapter, $api_error_creation, $api_error_registration, $api_error_http ) = yd_framework_stack( array( yd_framework_error_response( 404, array( 'message' => 'not found' ) ) ) );
+$api_error_attach = $api_error_adapter->attach_manual( $api_error_order, array( 'barcode' => 'REQ-404' ) );
+yd_framework_assert( empty( $api_error_attach['success'] ) && 'Отправление Яндекс с указанным Request ID не найдено.' === (string) ( $api_error_attach['message'] ?? '' ) && array() === $api_error_repository->find_by_carrier( $api_error_order, YandexDeliverySettings::CARRIER_KEY ) && 1 === count( $api_error_http->requests ), 'Manual attach must return Russian not-found error and avoid persistence.' );
+
+$terminal_attach_order = new YdFrameworkOrder( 777 );
+list( $terminal_attach_repository, $terminal_attach_adapter ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-ATTACH-CANCELLED', 'CANCELLED', 'YD-ATTACH-CANCELLED' ) ) ) );
+$terminal_attach = $terminal_attach_adapter->attach_manual( $terminal_attach_order, array( 'barcode' => 'REQ-ATTACH-CANCELLED' ) );
+$terminal_attached = $terminal_attach_repository->find_by_carrier( $terminal_attach_order, YandexDeliverySettings::CARRIER_KEY );
+$terminal_attach_payload = $terminal_attach_adapter->status_payload( $terminal_attach_order, $terminal_attached );
+yd_framework_assert( ! empty( $terminal_attach['success'] ) && 'CANCELLED' === (string) ( $terminal_attached['yandex_status'] ?? '' ) && empty( $terminal_attach_payload['can_cancel'] ) && ! empty( $terminal_attach_payload['can_remove_from_order'] ), 'Manual attach of terminal Yandex shipment must persist terminal status and expose remove without cancel.' );
 
 $remove = $adapter->remove_from_order( $order );
 yd_framework_assert( ! empty( $remove['success'] ) && '' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Yandex remove_local must delete lookup meta.' );

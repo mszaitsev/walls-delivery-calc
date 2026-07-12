@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\YandexDelivery;
 
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryRequestInfo;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
@@ -66,6 +67,58 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 		);
 	}
 
+	public function build_manual_attach_fields( object $order, YandexDeliveryRequestInfo $info, string $now ): array {
+		$request_id = $info->request_id;
+		$tracking = '' !== $info->courier_order_id ? $info->courier_order_id : $request_id;
+
+		return array_merge(
+			array(
+				'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+				'service_key' => YandexDeliverySettings::SERVICE_KEY,
+				'order_id' => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
+				'service_title' => YandexDeliverySettings::TITLE,
+				'delivery_type' => $this->delivery_type_from_info( $info ),
+				'places' => $this->generic_places_from_info( $info ),
+				'request_snapshot' => $this->canonical_request_snapshot(),
+				'response_snapshot' => $info->raw,
+				'barcode' => $tracking,
+				'tracking_number' => $tracking,
+				'external_id' => $request_id,
+				'created_by' => function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0,
+				'created_by_context' => 'admin_manual_attach',
+				'order_num' => method_exists( $order, 'get_order_number' ) ? (string) $order->get_order_number() : (string) ( method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0 ),
+				'status' => 'created',
+				'status_title' => 'Статус Яндекс.Доставки: ' . $info->status,
+				'created_at' => $now,
+				'updated_at' => $now,
+			),
+			$this->fields_from_info( $info )
+		);
+	}
+
+	/** @return array<string,mixed> */
+	public function fields_from_info( YandexDeliveryRequestInfo $info ): array {
+		return array(
+			'yandex_request_id' => $info->request_id,
+			'request_id' => $info->request_id,
+			'yandex_courier_order_id' => $info->courier_order_id,
+			'courier_order_id' => $info->courier_order_id,
+			'yandex_sharing_url' => $info->sharing_url,
+			'sharing_url' => $info->sharing_url,
+			'yandex_status' => $info->status,
+			'yandex_operator_request_id' => $info->operator_request_id,
+			'yandex_delivery_policy' => $info->delivery_policy,
+			'yandex_destination' => $info->destination,
+			'yandex_recipient' => $info->recipient,
+			'yandex_items' => $info->items,
+			'yandex_places' => $info->places,
+			'yandex_place_barcode_map' => $info->place_barcode_map,
+			'yandex_request_info_snapshot' => $info->raw,
+			'yandex_available_actions' => $info->available_actions,
+			'yandex_full_items_price_kopecks' => $info->full_items_price_kopecks,
+		);
+	}
+
 	public function after_persist( object $order, array $shipment ): void {
 		$this->repository->sync_lookup_meta( $order, $shipment );
 		if ( method_exists( $order, 'save' ) ) {
@@ -93,5 +146,35 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 		unset( $sanitized['Authorization'], $sanitized['authorization'], $sanitized['token'], $sanitized['bearer_token'] );
 
 		return $sanitized;
+	}
+
+	private function delivery_type_from_info( YandexDeliveryRequestInfo $info ): string {
+		$type = (string) ( $info->destination['type'] ?? '' );
+		if ( 'custom_location' === $type ) {
+			return 'courier';
+		}
+
+		return 'pickup';
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	private function generic_places_from_info( YandexDeliveryRequestInfo $info ): array {
+		$places = array();
+		foreach ( array_values( $info->places ) as $index => $place ) {
+			if ( ! is_array( $place ) ) {
+				continue;
+			}
+			$dims = is_array( $place['physical_dims'] ?? null ) ? $place['physical_dims'] : array();
+			$places[] = array(
+				'place_number' => $index + 1,
+				'weight_g' => (int) ( $dims['weight_gross'] ?? 0 ),
+				'length_cm' => (int) ( $dims['dx'] ?? 0 ),
+				'width_cm' => (int) ( $dims['dy'] ?? 0 ),
+				'height_cm' => (int) ( $dims['dz'] ?? 0 ),
+				'barcode' => (string) ( $place['barcode'] ?? '' ),
+			);
+		}
+
+		return $places;
 	}
 }

@@ -1,5 +1,7 @@
 # WDC Shipments Foundation
 
+Version 0.108.7 keeps the shared modal but requires factual Yandex parcel dimensions to be entered manually. The Yandex draft exposes `requires_manual_place_dimensions`, so the modal clears editable place weight/dimension fields for initial render; submitted `places[]` remain the only source for preview/create and empty values fail existing strict validation. Yandex also uses the existing generic manual attach UI: the entered value is treated as `request_id`, verified through `request/info`, checked against `operator_request_id`, and persisted as canonical request/info state.
+
 Version 0.108.6 adds a carrier-neutral successful-preview gate for shipment creation. Carriers that set `requires_successful_preview` in modal capabilities keep the create button disabled until preview succeeds without errors; currently this applies to Yandex and DPD. Preview/create AJAX boundaries return controlled JSON errors and public shipment validation messages are Russianized at the metabox boundary.
 
 Version 0.108.5 keeps the existing shared shipment modal and adds Yandex-specific modal presentation through the current draft/metabox/preview pipeline: one concrete Yandex service variant, no tariff/postoffice requirement, read-only source station, destination snapshot/address fields, ready interval hidden values, populated initial places and JSON-safe preview errors. Yandex preview remains local-only and does not call carrier HTTP.

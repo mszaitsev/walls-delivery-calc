@@ -209,6 +209,16 @@ final class OrderShipmentsMetabox {
 		$requires_tariff = array_key_exists( 'requires_tariff', $modal_capabilities ) ? (bool) $modal_capabilities['requires_tariff'] : ! $is_yandex;
 		$requires_postoffice = array_key_exists( 'requires_postoffice', $modal_capabilities ) ? (bool) $modal_capabilities['requires_postoffice'] : $is_russian_post;
 		$requires_successful_preview = array_key_exists( 'requires_successful_preview', $modal_capabilities ) ? (bool) $modal_capabilities['requires_successful_preview'] : $is_dpd;
+		$requires_manual_place_dimensions = ! empty( $modal_capabilities['requires_manual_place_dimensions'] );
+		if ( $requires_manual_place_dimensions ) {
+			$base_place_row = is_array( $place_rows[0] ?? null ) ? $place_rows[0] : array();
+			$base_place_row['place_number'] = (int) ( $base_place_row['place_number'] ?? $base_place_row['number'] ?? 1 );
+			$base_place_row['weight_g'] = '';
+			$base_place_row['length_cm'] = '';
+			$base_place_row['width_cm'] = '';
+			$base_place_row['height_cm'] = '';
+			$place_rows = array( $base_place_row );
+		}
 		$shipment = '' !== $carrier_key ? $this->repository->find_by_carrier( $order, $carrier_key ) : array();
 		$settings = is_array( $request['services'] ?? null ) ? $request['services'] : array();
 		$pickup_code = (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' );
@@ -284,6 +294,9 @@ final class OrderShipmentsMetabox {
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		$calculated_weight_g = max( 0, (int) ( $meta['place_weight_hint_g'] ?? $place['weight_g'] ?? 0 ) );
 		$weight_hint = $calculated_weight_g > 0 ? sprintf( '(%d)', $calculated_weight_g ) : '';
+		if ( $requires_manual_place_dimensions ) {
+			$weight_hint = '';
+		}
 		$shipment_point = (string) ( $meta['shipment_point'] ?? '' );
 		$shipment_point_address = (string) ( $meta['shipment_point_address'] ?? '' );
 		if ( $is_dpd ) {
@@ -376,7 +389,7 @@ final class OrderShipmentsMetabox {
 				<div class="wdc-shipment-modal__dialog" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr__( 'Подготовка отправления', 'walls-delivery-calc' ); ?>">
 					<button type="button" class="wdc-shipment-modal__close" data-wdc-close-shipment-modal aria-label="<?php echo esc_attr__( 'Закрыть', 'walls-delivery-calc' ); ?>">×</button>
 					<h2><?php echo esc_html__( 'Подготовка отправления', 'walls-delivery-calc' ); ?></h2>
-					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" data-wdc-requires-tariff="<?php echo $requires_tariff ? '1' : '0'; ?>" data-wdc-requires-successful-preview="<?php echo $requires_successful_preview ? '1' : '0'; ?>" role="group">
+					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" data-wdc-requires-tariff="<?php echo $requires_tariff ? '1' : '0'; ?>" data-wdc-requires-successful-preview="<?php echo $requires_successful_preview ? '1' : '0'; ?>" data-wdc-requires-manual-place-dimensions="<?php echo $requires_manual_place_dimensions ? '1' : '0'; ?>" role="group">
 						<input type="hidden" name="order_id" value="<?php echo esc_attr( (string) $order_id ); ?>">
 						<input type="hidden" name="carrier_key" value="<?php echo esc_attr( $carrier_key ); ?>">
 						<div class="wdc-shipment-tabs" role="tablist">
@@ -801,6 +814,17 @@ final class OrderShipmentsMetabox {
 		if ( '' === $message ) {
 			return __( 'Проверьте данные отправления.', 'walls-delivery-calc' );
 		}
+		if ( str_contains( $message, "\n" ) ) {
+			$messages = array();
+			foreach ( preg_split( '/\R+/', $message ) ?: array() as $line ) {
+				$translated = $this->public_shipment_error_message( (string) $line );
+				if ( '' !== $translated && ! in_array( $translated, $messages, true ) ) {
+					$messages[] = $translated;
+				}
+			}
+
+			return array() !== $messages ? implode( "\n", $messages ) : __( 'Проверьте данные отправления.', 'walls-delivery-calc' );
+		}
 
 		$translations = array(
 			'amount must be greater than 0' => __( 'Укажите количество товара больше 0.', 'walls-delivery-calc' ),
@@ -933,36 +957,61 @@ final class OrderShipmentsMetabox {
 	}
 
 	public function ajax_attach_tracking(): void {
+		$buffer_level = ob_get_level();
+		ob_start();
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			$this->discard_preview_buffer( $buffer_level );
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
-		$order_id = (int) ( $_POST['order_id'] ?? 0 );
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) || $order_id <= 0 ) {
-			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
-		}
-		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		$barcode = sanitize_text_field( wp_unslash( $_POST['barcode'] ?? '' ) );
-		$adapter = $this->carrier_adapter( $shipment_key );
-		if ( null === $adapter ) {
-			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
-		}
-		$result = $adapter->attach_manual( $order, array( 'barcode' => $barcode ) );
-		if ( ! (bool) ( $result['success'] ?? false ) ) {
-			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось сохранить номер отслеживания.', 'walls-delivery-calc' ) ) ), 400 );
-		}
+		try {
+			$order_id = (int) ( $_POST['order_id'] ?? 0 );
+			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+			if ( ! is_object( $order ) || $order_id <= 0 ) {
+				$this->discard_preview_buffer( $buffer_level );
+				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_attach_invalid_request' ), 404 );
+			}
+			$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
+			$barcode = sanitize_text_field( wp_unslash( $_POST['barcode'] ?? '' ) );
+			$adapter = $this->carrier_adapter( $shipment_key );
+			if ( null === $adapter ) {
+				throw new \InvalidArgumentException( __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) );
+			}
+			$result = $adapter->attach_manual( $order, array( 'barcode' => $barcode, 'request_id' => $barcode, 'tracking_number' => $barcode ) );
+			if ( ! (bool) ( $result['success'] ?? false ) ) {
+				throw new \InvalidArgumentException( (string) ( $result['message'] ?? __( 'Не удалось сохранить номер отслеживания.', 'walls-delivery-calc' ) ) );
+			}
 
-		wp_send_json_success(
-			array_merge(
-				$this->carrier_ui_payload( $order, $shipment_key ),
-				array(
-				'message' => (string) ( $result['message'] ?? __( 'Номер отслеживания сохранен.', 'walls-delivery-calc' ) ),
-				'warning' => (string) ( $result['warning'] ?? '' ),
-				'tracking_number' => (string) ( $result['tracking_number'] ?? '' ),
-				'backlog_order_id' => (string) ( $result['backlog_order_id'] ?? '' ),
+			$this->discard_preview_buffer( $buffer_level );
+			wp_send_json_success(
+				array_merge(
+					$this->carrier_ui_payload( $order, $shipment_key ),
+					array(
+					'message' => (string) ( $result['message'] ?? __( 'Номер отслеживания сохранен.', 'walls-delivery-calc' ) ),
+					'warning' => (string) ( $result['warning'] ?? '' ),
+					'tracking_number' => (string) ( $result['tracking_number'] ?? '' ),
+					'backlog_order_id' => (string) ( $result['backlog_order_id'] ?? '' ),
+					)
 				)
-			)
-		);
+			);
+		} catch ( \InvalidArgumentException $exception ) {
+			$this->discard_preview_buffer( $buffer_level );
+			wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $exception->getMessage() ), 'error_code' => 'shipment_attach_validation_failed' ), 400 );
+		} catch ( \Throwable $exception ) {
+			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
+				throw $exception;
+			}
+			error_log(
+				sprintf(
+					'[walls-delivery-calc] shipment attach failed. class=%s message=%s location=%s:%d',
+					$exception::class,
+					$exception->getMessage(),
+					$exception->getFile(),
+					$exception->getLine()
+				)
+			);
+			$this->discard_preview_buffer( $buffer_level );
+			wp_send_json_error( array( 'message' => __( 'Не удалось прикрепить отправление. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ), 'error_code' => 'shipment_attach_unexpected_error' ), 500 );
+		}
 	}
 
 	public function admin_post_cdek_barcode_pdf(): void {

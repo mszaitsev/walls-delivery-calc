@@ -146,6 +146,7 @@ final class OrderShipmentDraftFactory {
 					'requires_tariff' => false,
 					'requires_postoffice' => false,
 					'requires_successful_preview' => true,
+					'requires_manual_place_dimensions' => true,
 					'shows_source_station' => true,
 					'shows_ready_interval' => true,
 				),

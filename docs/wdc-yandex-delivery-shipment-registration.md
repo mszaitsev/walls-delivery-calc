@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.7
+
+Перед первым реальным тестом регистрации Яндекс.Доставки модалка больше не подставляет рассчитанные weight/dimensions в редактируемые поля грузоместа. Для carrier `yandex_delivery` draft содержит capability `requires_manual_place_dimensions`, и общий `OrderShipmentsMetabox` очищает только initial UI values `weight_g`, `length_cm`, `width_cm`, `height_cm`; товары и `shipment_items[]` остаются в распределении. При submit `places[]` из формы являются единственным источником фактических размеров: пустые значения не заменяются calculated defaults, проходят в strict validation как invalid и возвращаются менеджеру русскими сообщениями `Укажите вес/длину/ширину/высоту грузоместа.`
+
+Ручное прикрепление Яндекс использует существующий generic manual attach UI. Если локального Yandex shipment ещё нет, button policy показывает `Добавить отправление Яндекс вручную`; введённое поле интерпретируется как Yandex `request_id`. Adapter не вызывает `offers/create`, `offers/confirm` или `request/create`: выполняется один `request/info?request_id=...&slim=false`, затем проверяется совпадение `request.info.operator_request_id` с номером WooCommerce заказа. При mismatch или отсутствии operator id shipment не сохраняется.
+
+Успешный manual attach сохраняет canonical request/info state через `YandexShipmentPersistenceMapper` и `YandexShipmentRepository`: `request_id`/`yandex_request_id`, `courier_order_id`, `sharing_url`, `yandex_status`, `operator_request_id`, delivery policy, destination/recipient/items/places snapshots, request/info snapshot, generic local status, `created_by_context=admin_manual_attach` and lookup meta `_wdc_yandex_delivery_request_id`. После attach повторный create/manual attach блокируются существующей button policy; status/cancel/remove определяются по сохранённому API status.
+
 ## Статус 0.108.6
 
 Перед первым реальным созданием отправления добавлен обязательный UI-gate: Яндекс использует carrier-neutral capability `requires_successful_preview`, поэтому кнопка `Создать отправление` остаётся disabled, пока preview не загрузился успешно и не вернул ошибок. Это реализовано в общей shipment modal без Yandex-specific JS-проверки.
