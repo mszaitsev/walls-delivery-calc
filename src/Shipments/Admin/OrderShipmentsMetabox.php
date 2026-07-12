@@ -284,7 +284,7 @@ final class OrderShipmentsMetabox {
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		$calculated_weight_g = max( 0, (int) ( $meta['place_weight_hint_g'] ?? $place['weight_g'] ?? 0 ) );
-		$weight_hint = $calculated_weight_g > 0 ? sprintf( __( 'Расчётный вес товаров: %d г', 'walls-delivery-calc' ), $calculated_weight_g ) : '';
+		$weight_hint = $calculated_weight_g > 0 ? sprintf( __( '⚖️ %d', 'walls-delivery-calc' ), $calculated_weight_g ) : '';
 		$shipment_point = (string) ( $meta['shipment_point'] ?? '' );
 		$shipment_point_address = (string) ( $meta['shipment_point_address'] ?? '' );
 		if ( $is_dpd ) {
