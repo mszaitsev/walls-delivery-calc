@@ -116,6 +116,9 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	/** @return array<string,mixed> */
 	public function remove_from_order( object $order, string $shipment_key = '' ): array { unset( $shipment_key ); return $this->registration->remove_local( $order ); }
 
+	/** @return array<string,mixed> */
+	public function mark_polling_exhausted( object $order, int $attempts ): array { return $this->registration->mark_polling_exhausted( $order, $attempts ); }
+
 	/** @param array<string,mixed> $shipment @return array<int,array<string,mixed>> */
 	public function label_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }
 

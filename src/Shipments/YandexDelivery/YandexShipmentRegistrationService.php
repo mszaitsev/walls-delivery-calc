@@ -114,6 +114,7 @@ final class YandexShipmentRegistrationService {
 			return array( 'success' => true, 'message' => 'Статус Яндекс.Доставки обновлён.', 'status' => $info->status );
 		} catch ( YandexDeliveryApiException $exception ) {
 			if ( $this->is_reconciliation_pending( $shipment ) && $this->is_temporary_request_info_error( $exception ) ) {
+				$was_exhausted = ! empty( $shipment['yandex_reconciliation_poll_exhausted'] );
 				$updated = array_merge(
 					$shipment,
 					array(
@@ -123,7 +124,7 @@ final class YandexShipmentRegistrationService {
 						'yandex_registration_error_message' => $this->temporary_request_info_message( (string) ( $exception->details()['error_code'] ?? '' ) ),
 						'yandex_registration_error_details' => $exception->details(),
 						'status' => 'reconciliation_required',
-						'status_title' => 'Ожидается получение статуса',
+						'status_title' => $was_exhausted ? (string) ( $shipment['status_title'] ?? 'Статус пока не получен. Повторите обновление позднее.' ) : 'Ожидается получение статуса',
 						'updated_at' => $this->now(),
 					)
 				);
@@ -237,6 +238,35 @@ final class YandexShipmentRegistrationService {
 		$this->add_order_note( $order, 'Локальная запись отправления Яндекс удалена.' );
 
 		return array( 'success' => true, 'message' => 'Отправление Яндекс удалено из заказа.' );
+	}
+
+	/** @return array<string,mixed> */
+	public function mark_polling_exhausted( object $order, int $attempts ): array {
+		$shipment = $this->repository->find( $order );
+		$request_id = $this->request_id( $shipment );
+		if ( '' === $request_id || ! $this->is_reconciliation_pending( $shipment ) ) {
+			return array( 'success' => false, 'message' => 'Pending-отправление Яндекс не найдено.' );
+		}
+
+		$updated = array_merge(
+			$shipment,
+			array(
+				'yandex_reconciliation_required' => true,
+				'yandex_reconciliation_poll_exhausted' => true,
+				'yandex_reconciliation_attempts' => max( 0, $attempts ),
+				'yandex_reconciliation_poll_exhausted_at' => $this->now(),
+				'status' => 'reconciliation_required',
+				'status_title' => 'Статус пока не получен. Повторите обновление позднее.',
+				'updated_at' => $this->now(),
+			)
+		);
+		$this->repository->save( $order, $updated );
+
+		return array(
+			'success' => true,
+			'message' => 'Статус отправления пока не получен. Повторите обновление статуса позднее.',
+			'shipment' => $updated,
+		);
 	}
 
 	private function allocation( ShipmentCreateRequest $request ): \WallsShop\WDC\Shipments\Allocation\ShipmentAllocation {
@@ -389,6 +419,7 @@ final class YandexShipmentRegistrationService {
 				'yandex_reconciliation_required' => false,
 				'yandex_reconciliation_poll_exhausted' => false,
 				'yandex_reconciliation_attempts' => 0,
+				'yandex_reconciliation_poll_exhausted_at' => '',
 				'yandex_registration_phase' => '',
 				'yandex_registration_error_code' => '',
 				'yandex_registration_error_message' => '',

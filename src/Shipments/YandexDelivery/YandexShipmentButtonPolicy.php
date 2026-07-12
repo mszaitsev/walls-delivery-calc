@@ -15,8 +15,11 @@ final class YandexShipmentButtonPolicy {
 		}
 		$request_id = $this->request_id( $shipment );
 		$local_status = trim( (string) ( $shipment['status'] ?? '' ) );
-		if ( '' !== $request_id && in_array( $local_status, array( 'reconciliation_required', 'cancellation_started' ), true ) ) {
-			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => ! empty( $shipment['yandex_reconciliation_poll_exhausted'] ) );
+		if ( '' !== $request_id && 'reconciliation_required' === $local_status ) {
+			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => true );
+		}
+		if ( '' !== $request_id && 'cancellation_started' === $local_status ) {
+			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => false );
 		}
 		$status = strtoupper( trim( (string) ( $shipment['yandex_status'] ?? $local_status ) ) );
 		$terminal = self::is_terminal_status( $status );

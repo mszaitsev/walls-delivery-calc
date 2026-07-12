@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.10
+
+Pending reconciliation теперь управляется серверной button policy. Любая сохранённая запись Яндекс со статусом `reconciliation_required` и `request_id` сразу после перезагрузки страницы показывает `Обновить статус` и `Удалить из заказа`, а `Создать`, manual attach и cancel остаются скрытыми. Это сделано намеренно: реальное отправление уже могло быть создано в Яндексе, но менеджер должен иметь выход из локальной pending-связи и затем при необходимости прикрепить `request_id` вручную. `cancellation_started` отделён от reconciliation и по умолчанию не разрешает local remove, чтобы не потерять связь с активным запросом отмены.
+
+После 14 polling-попыток JS больше не оставляет exhausted только в DOM. Общий AJAX `wdc_mark_shipment_poll_exhausted` вызывает Yandex adapter hook и сохраняет `yandex_reconciliation_poll_exhausted=true`, `yandex_reconciliation_attempts=14`, `yandex_reconciliation_poll_exhausted_at`, `status=reconciliation_required` и `status_title=Статус пока не получен. Повторите обновление позднее.` Request ID, `_wdc_yandex_delivery_request_id`, diagnostics, temporary place data и selected offer audit не очищаются. Если позже `request/info` всё ещё неполный, exhausted-флаги сохраняются и remove остаётся доступным; если приходит canonical status (`CREATED` или другой валидный статус), exhausted-флаги очищаются, reconciliation завершается и кнопки пересчитываются обычной policy.
+
+Polling attempts после обычной перезагрузки не восстанавливаются и не стартуют автоматически. Metabox просто показывает persisted pending state с update/remove. При local remove используется предупреждение `Удаление уберёт запись только из заказа WooCommerce и не отменит отправление в Яндекс.Доставке. Продолжить?`; операция не вызывает `request/cancel`, `request/info`, `offers/create` или `offers/confirm`. Runtime polling подавляет повторяющиеся pending-toast, сохраняет timeout через backend и останавливает/инвалидирует timer перед local remove, чтобы поздний status response не восстановил удалённую запись визуально.
+
 ## Статус 0.108.9
 
 Реальный тест подтвердил eventual consistency после `offers/confirm`: отправление уже создано в кабинете Яндекс.Доставки, но немедленный `request/info` может временно не содержать `state.status`. Такой ответ теперь не считается провалом create. Framework сохраняет pending shipment с `status=reconciliation_required`, подтверждённым `request_id`, lookup meta `_wdc_yandex_delivery_request_id`, safe diagnostics и selected offer audit, а AJAX create возвращает success/accepted с сообщением `Отправление создано в Яндекс.Доставке. Ожидается получение статуса.`

@@ -38,6 +38,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_CREATE = 'wdc_create_shipment';
 	private const AJAX_PREVIEW = 'wdc_preview_shipment';
 	private const AJAX_UPDATE_STATUS = 'wdc_update_shipment_status';
+	private const AJAX_MARK_POLL_EXHAUSTED = 'wdc_mark_shipment_poll_exhausted';
 	private const AJAX_CANCEL = 'wdc_cancel_shipment';
 	private const AJAX_REMOVE_FROM_ORDER = 'wdc_remove_shipment_from_order';
 	private const AJAX_ATTACH_TRACKING = 'wdc_attach_shipment_tracking_number';
@@ -77,6 +78,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this, 'ajax_create' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
 		add_action( 'wp_ajax_' . self::AJAX_UPDATE_STATUS, array( $this, 'ajax_update_status' ) );
+		add_action( 'wp_ajax_' . self::AJAX_MARK_POLL_EXHAUSTED, array( $this, 'ajax_mark_poll_exhausted' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CANCEL, array( $this, 'ajax_cancel' ) );
 		add_action( 'wp_ajax_' . self::AJAX_REMOVE_FROM_ORDER, array( $this, 'ajax_remove_from_order' ) );
 		add_action( 'wp_ajax_' . self::AJAX_ATTACH_TRACKING, array( $this, 'ajax_attach_tracking' ) );
@@ -132,6 +134,7 @@ final class OrderShipmentsMetabox {
 				'createAction' => self::AJAX_CREATE,
 				'previewAction' => self::AJAX_PREVIEW,
 				'updateStatusAction' => self::AJAX_UPDATE_STATUS,
+				'markPollExhaustedAction' => self::AJAX_MARK_POLL_EXHAUSTED,
 				'cancelAction' => self::AJAX_CANCEL,
 				'removeFromOrderAction' => self::AJAX_REMOVE_FROM_ORDER,
 				'attachTrackingAction' => self::AJAX_ATTACH_TRACKING,
@@ -905,10 +908,66 @@ final class OrderShipmentsMetabox {
 			array_merge(
 				$this->carrier_ui_payload( $order, $shipment_key ),
 				array(
-				'message' => (string) ( $result['message'] ?? __( 'Статус отправления обновлен.', 'walls-delivery-calc' ) ),
+					'message' => (string) ( $result['message'] ?? __( 'Статус отправления обновлен.', 'walls-delivery-calc' ) ),
+					'pending' => ! empty( $result['pending'] ),
+					'retryable' => ! empty( $result['retryable'] ),
+					'carrier_status_value' => is_scalar( $result['status'] ?? null ) ? (string) $result['status'] : '',
 				)
 			)
 		);
+	}
+
+	public function ajax_mark_poll_exhausted(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		try {
+			$order_id = (int) ( $_POST['order_id'] ?? 0 );
+			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+			if ( ! is_object( $order ) || $order_id <= 0 ) {
+				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_poll_exhausted_invalid_request' ), 404 );
+			}
+			$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
+			$attempts = max( 0, (int) ( $_POST['attempts'] ?? 0 ) );
+			$adapter = $this->carrier_adapter( $shipment_key );
+			if ( null === $adapter ) {
+				throw new \InvalidArgumentException( __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) );
+			}
+			if ( ! method_exists( $adapter, 'mark_polling_exhausted' ) ) {
+				throw new \InvalidArgumentException( __( 'Служба доставки не поддерживает сохранение состояния polling.', 'walls-delivery-calc' ) );
+			}
+			$result = $adapter->mark_polling_exhausted( $order, $attempts );
+			if ( ! (bool) ( $result['success'] ?? false ) ) {
+				throw new \InvalidArgumentException( (string) ( $result['message'] ?? __( 'Не удалось сохранить состояние polling.', 'walls-delivery-calc' ) ) );
+			}
+
+			wp_send_json_success(
+				array_merge(
+					$this->carrier_ui_payload( $order, $shipment_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
+					array(
+						'message' => (string) ( $result['message'] ?? __( 'Автоматическая проверка статуса завершена.', 'walls-delivery-calc' ) ),
+						'polling_exhausted' => true,
+						'attempts' => $attempts,
+					)
+				)
+			);
+		} catch ( \InvalidArgumentException $exception ) {
+			wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $exception->getMessage() ), 'error_code' => 'shipment_poll_exhausted_validation_failed' ), 400 );
+		} catch ( \Throwable $exception ) {
+			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
+				throw $exception;
+			}
+			error_log(
+				sprintf(
+					'[walls-delivery-calc] shipment poll exhausted failed. class=%s message=%s location=%s:%d',
+					$exception::class,
+					$exception->getMessage(),
+					$exception->getFile(),
+					$exception->getLine()
+				)
+			);
+			wp_send_json_error( array( 'message' => __( 'Не удалось сохранить состояние автоматической проверки. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ), 'error_code' => 'shipment_poll_exhausted_unexpected_error' ), 500 );
+		}
 	}
 
 	public function ajax_cancel(): void {

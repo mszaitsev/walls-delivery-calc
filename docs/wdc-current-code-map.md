@@ -1,3 +1,11 @@
+## Yandex Pending Reconciliation Persistence 0.108.10
+
+- `YandexShipmentButtonPolicy` now separates local lifecycle states: `reconciliation_required` with a saved request id exposes update + local remove immediately, while `cancellation_started` keeps update only and does not allow local remove by default.
+- `OrderShipmentsMetabox` registers the shared `wdc_mark_shipment_poll_exhausted` AJAX action. It calls an optional carrier method (`mark_polling_exhausted`) and then returns the same carrier UI payload used by normal status rendering.
+- `YandexShipmentRegistrationService::mark_polling_exhausted()` persists `yandex_reconciliation_poll_exhausted=true`, `yandex_reconciliation_attempts`, `yandex_reconciliation_poll_exhausted_at` and the Russian timeout `status_title` without calling Yandex HTTP and without clearing request id, lookup meta or selected offer audit.
+- Manual status update after exhaustion preserves the exhausted state while `request/info` is still incomplete; a later canonical `request/info` clears exhausted fields and converts the shipment to normal `created`.
+- `assets/admin/shipments-admin.js` saves exhaustion through the backend, suppresses repeated pending toasts during auto polling, stops polling before local remove, and ignores stale polling responses after local remove/reset.
+
 ## Yandex Async Reconciliation Polling 0.108.9
 
 - Production `offers/confirm` can create the Yandex shipment before the immediate `request/info` response contains `state.status`. `ShipmentCreationService` now persists the Yandex reconciliation shipment and returns an accepted successful create response instead of surfacing the temporary `request_info_status_missing` as a failed creation.
