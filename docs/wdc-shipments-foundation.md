@@ -1,5 +1,7 @@
 # WDC Shipments Foundation
 
+Version 0.108.5 keeps the existing shared shipment modal and adds Yandex-specific modal presentation through the current draft/metabox/preview pipeline: one concrete Yandex service variant, no tariff/postoffice requirement, read-only source station, destination snapshot/address fields, ready interval hidden values, populated initial places and JSON-safe preview errors. Yandex preview remains local-only and does not call carrier HTTP.
+
 Version 0.37.2 separates Russian Post cancellation from local WooCommerce shipment removal and uses an inline SVG tracking-copy icon. Version 0.37.0 adds Russian Post backlog cancellation and manual ШПИ attachment while keeping documents/labels outside the plugin workflow. Version 0.36.4 stores Russian Post Otpravka `result-id` as the explicit technical shipment-state field `backlog_order_id` while keeping barcode/ШПИ as the primary tracking identifier. Version 0.36.2 closes the shipment preparation modal after successful create, shows a 10-second toast, and automatically runs the first Russian Post status refresh. Version 0.36.0 added manual Russian Post tracking status refresh from the existing `Обновить статус` button in the order metabox. Version 0.35.2 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta or pickup-code data in `shipping_address_2`. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
 
 ## Scope
@@ -18,6 +20,7 @@ Version 0.37.2 separates Russian Post cancellation from local WooCommerce shipme
 
 - `src/Shipments/Contracts/CarrierShipmentAdapterInterface.php` defines the carrier-neutral adapter contract.
 - `src/Shipments/Application/ShipmentModalRequestMapper.php` parses the shared shipment modal `places[]` and canonical `shipment_items[]` allocation rows for carrier admin submit paths.
+- `OrderShipmentDraftFactory::draft_array()` may expose small carrier-neutral modal capabilities such as `requires_tariff=false`; the metabox uses them without adding a second modal architecture.
 - `src/Shipments/Application/ShipmentMetaboxButtonPolicy.php` resolves common metabox button capabilities from carrier status payload first and falls back to legacy status/barcode rules only when a capability is absent.
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` builds shipment drafts from HPOS-safe WooCommerce order APIs and saved WDC order meta.
 - `src/Shipments/Application/ShipmentCreationService.php` performs idempotency checks, adapter dispatch, safe snapshot persistence and order notes.

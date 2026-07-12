@@ -1,3 +1,10 @@
+## Yandex Shipment Modal Preparation 0.108.5
+
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` returns one concrete Yandex service variant for the modal instead of an empty services list. The variant reflects the saved order delivery type only: `pickup` is shown as `Яндекс до ПВЗ`, `courier` as `Яндекс до двери`; `tariffs` remains empty because Yandex registration chooses an offer after payload preview/create.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` reuses the existing shared modal but hides tariff and Russian Post postoffice controls when modal capabilities say they are not required. For Yandex it renders read-only source platform station, pickup destination snapshot or courier structured address, ready interval hidden fields, and all draft places with populated weight/dimensions.
+- `assets/admin/shipments-admin.js` supports no-tariff modal carriers via `data-wdc-requires-tariff="0"`, keeps dimensions decimal-compatible, and parses preview AJAX responses through `parseShipmentJsonResponse()` so HTML/fatal responses become a controlled user message instead of `Unexpected token`.
+- `OrderShipmentsMetabox::ajax_preview()` wraps preview mapping/building in JSON-safe error handling. Yandex preview validates source station/destination station locally, calls only the adapter safe preview path, and does not perform offers/create, confirm or request/info.
+
 ## Shipment Metabox Capability Policy 0.108.4
 
 - `src/Shipments/Application/ShipmentMetaboxButtonPolicy.php` is the carrier-neutral resolver used by the order shipment metabox. It prefers adapter-provided capabilities (`has_shipment`, `can_create`, `can_attach_manual`, `can_update_status`, `can_cancel`, `can_remove_from_order`) key-by-key and falls back to the previous legacy status/barcode rules only when a capability is absent.

@@ -270,8 +270,15 @@ $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Ap
 yd_framework_assert( str_contains( $source, 'create_yandex_request_from_order' ) && str_contains( $source, 'shipment_item_rows' ) && ! str_contains( $source, 'shipment_item_rows_from_rows' ), 'OrderShipmentDraftFactory must provide canonical shipment item rows without a second Yandex parser.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 yd_framework_assert( str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, 'data-wdc-open-shipment-modal' ), 'Existing shipment metabox/modal must be reused through shared capability-driven button policy.' );
+yd_framework_assert( str_contains( $metabox_source, 'data-wdc-yandex-source-station' ) && str_contains( $metabox_source, 'name="yandex_source_platform_station_id"' ) && str_contains( $metabox_source, 'data-wdc-yandex-pickup-destination' ) && str_contains( $metabox_source, 'name="yandex_pickup_platform_station_id"' ), 'Shared modal must render Yandex source station and pickup destination fields.' );
+yd_framework_assert( str_contains( $metabox_source, 'data-wdc-yandex-ready-interval' ) && str_contains( $metabox_source, 'name="yandex_ready_from"' ) && str_contains( $metabox_source, 'name="yandex_ready_to"' ), 'Shared modal must render and submit Yandex ready interval values.' );
+yd_framework_assert( str_contains( $metabox_source, '$requires_tariff' ) && str_contains( $metabox_source, 'data-wdc-yandex-offer-note' ) && str_contains( $metabox_source, '$requires_postoffice' ), 'Shared modal must hide tariff/postoffice controls for carriers that do not require them.' );
+yd_framework_assert( str_contains( $metabox_source, 'foreach ( $place_rows as $place_index => $place_row )' ) && str_contains( $metabox_source, 'data-wdc-decimal-input="2"' ) && str_contains( $metabox_source, 'places[<?php echo esc_attr( (string) $place_index ); ?>][weight_g]' ), 'Shared modal must render initial places from draft and allow decimal dimensions while keeping weight integer.' );
+yd_framework_assert( str_contains( $metabox_source, 'shipment_preview_validation_failed' ) && str_contains( $metabox_source, 'shipment_preview_unexpected_error' ) && str_contains( $metabox_source, 'discard_preview_buffer' ), 'Shipment preview AJAX must return controlled JSON errors instead of leaking HTML output.' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 yd_framework_assert( str_contains( $js_source, 'can_create' ) && str_contains( $js_source, 'can_attach_manual' ) && str_contains( $js_source, 'setVisible(openButton, canCreate)' ) && str_contains( $js_source, 'setVisible(manualButton, canAttachManual)' ), 'Runtime shipment buttons must consume adapter create/manual capabilities.' );
+yd_framework_assert( str_contains( $js_source, 'function parseShipmentJsonResponse' ) && str_contains( $js_source, 'Сервер вернул некорректный ответ при подготовке отправления' ) && str_contains( $js_source, '.then(parseShipmentJsonResponse)' ), 'Shipment preview JS must parse malformed responses through controlled JSON fallback.' );
+yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresTariff !== '0'" ) && str_contains( $js_source, 'parseDecimalValue(length' ), 'Shipment admin JS must support no-tariff carriers and decimal place dimensions.' );
 
 $metabox_buttons = new ShipmentMetaboxButtonPolicy();
 $empty_yandex_payload = $adapter->status_payload( $order, array() );
@@ -382,6 +389,25 @@ $draft_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings:
 $draft_order->update_meta_data( '_wdc_yandex_delivery_pickup_platform_station_id', 'PVZ-1' );
 $draft_request = $draft_factory->create_request_from_order( $draft_order );
 yd_framework_assert( 1 === count( $draft_request->places ) && 1 === (int) ( $draft_request->meta['shipment_item_rows'][0]['place_number'] ?? 0 ), 'Initial Yandex draft must use canonical shipment_item_rows and one place before modal admin data is submitted.' );
+$draft_array = $draft_factory->draft_array( $draft_order );
+yd_framework_assert( 'Яндекс до ПВЗ' === (string) ( $draft_array['services'][0]['title'] ?? '' ) && DeliveryType::PICKUP === (string) ( $draft_array['services'][0]['delivery_type'] ?? '' ), 'Yandex pickup modal draft must expose one actual service variant.' );
+yd_framework_assert( array() === (array) ( $draft_array['postoffice_codes'] ?? array( 'unexpected' ) ) && false === (bool) ( $draft_array['modal_capabilities']['requires_tariff'] ?? true ) && false === (bool) ( $draft_array['modal_capabilities']['requires_postoffice'] ?? true ), 'Yandex modal draft must not require tariff or Russian Post postoffice fields.' );
+yd_framework_assert( 1000 <= (int) ( $draft_array['request']['places'][0]['weight_g'] ?? 0 ) && 20 === (int) ( $draft_array['request']['places'][0]['length_cm'] ?? 0 ), 'Yandex modal draft must include populated initial place values.' );
+$draft_courier_order = new YdFrameworkOrder( 783 );
+$draft_courier_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySettings::CARRIER_KEY );
+$draft_courier_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':courier' );
+$draft_courier_array = $draft_factory->draft_array( $draft_courier_order );
+yd_framework_assert( 'Яндекс до двери' === (string) ( $draft_courier_array['services'][0]['title'] ?? '' ) && DeliveryType::COURIER === (string) ( $draft_courier_array['services'][0]['delivery_type'] ?? '' ), 'Yandex courier modal draft must expose one actual courier service variant.' );
+
+$preview_http = new YdFrameworkFakeHttp( array() );
+$preview_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $preview_http ) );
+$preview_adapter = new YandexShipmentAdapter(
+	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexShipmentRepository( new OrderShipmentRepository() ) ),
+	new YandexShipmentButtonPolicy()
+);
+$preview_payload = $preview_adapter->build_safe_payload_preview( yd_framework_request() );
+yd_framework_assert( array() === $preview_http->requests && empty( $preview_payload['live_api_call'] ), 'Yandex modal payload preview must not call offers/create, confirm or request/info HTTP.' );
+
 $modal_item_rows = array(
 	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
 	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 3, 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),

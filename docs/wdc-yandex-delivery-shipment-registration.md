@@ -1,5 +1,21 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.5
+
+Модалка регистрации Яндекс.Доставки теперь открывается через существующий общий shipment modal с заполненным carrier-specific draft. `draft_array()` отдаёт ровно один service variant, соответствующий сохранённому типу доставки заказа: `Яндекс до ПВЗ` для pickup или `Яндекс до двери` для courier. Переключение между сценариями в модалке пока не вводится.
+
+У Яндекса нет заранее выбранного tariff object: registration flow остаётся `payload preview -> offers/create -> earliest offer -> offers/confirm -> request/info`. Поэтому общий tariff select и сообщение об отсутствии включённых тарифов скрыты, а модалка показывает пояснение об автоматическом выборе самого раннего оффера. Поле `postoffice_code` Почты России для Яндекса не отображается и не требуется.
+
+Yandex-specific presentation в общей модалке:
+
+- read-only исходная `yandex_source_platform_station_id` из настроек;
+- для pickup — snapshot конечного ПВЗ (`pickup_point_code`, `yandex_pickup_platform_station_id`, адрес/ID);
+- для courier — структурированные адресные поля `yandex_postal_code`, `yandex_region`, `yandex_locality`, `yandex_street`, `yandex_house`, `yandex_room` и `courier_original_address`;
+- `yandex_ready_from` / `yandex_ready_to` как сохранённые hidden ISO/offset values;
+- все initial places из draft с заполненными weight/dimensions.
+
+Preview остаётся dry-run/local: он строит `ShipmentCreateRequest`, allocation и Yandex offers/create payload без HTTP-вызовов. AJAX preview теперь возвращает controlled JSON errors для отсутствующей исходной станции, отсутствующего pickup destination, невалидных places/allocation и unexpected throwable; HTML critical-error body не показывается администратору. JS использует controlled parser для preview response и показывает понятное сообщение вместо `Unexpected token`.
+
 ## Статус 0.108.4
 
 Этот patch закрывает последние metabox/runtime замечания перед реальным тестом регистрации. Общий shipment metabox теперь использует capability payload carrier adapter как основной источник видимости кнопок: `has_shipment`, `can_create`, `can_attach_manual`, `can_update_status`, `can_cancel`, `can_remove_from_order`. Legacy fallback остался только для путей, где конкретный capability key отсутствует.

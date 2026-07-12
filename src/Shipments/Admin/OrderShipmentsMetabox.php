@@ -9,8 +9,10 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
@@ -188,16 +190,24 @@ final class OrderShipmentsMetabox {
 		);
 		$request = is_array( $draft['request'] ?? null ) ? $draft['request'] : array();
 		$services = is_array( $draft['services'] ?? null ) ? $draft['services'] : array();
+		$modal_capabilities = is_array( $draft['modal_capabilities'] ?? null ) ? $draft['modal_capabilities'] : array();
 		$postoffice_codes = is_array( $draft['postoffice_codes'] ?? null ) ? $draft['postoffice_codes'] : array( '630005' );
 		$recipient = is_array( $request['recipient'] ?? null ) ? $request['recipient'] : array();
 		$address = is_array( $request['recipient_address'] ?? null ) ? $request['recipient_address'] : array();
 		$place = is_array( $request['places'][0] ?? null ) ? $request['places'][0] : array();
+		$place_rows = is_array( $request['places'] ?? null ) ? array_values( array_filter( $request['places'], 'is_array' ) ) : array();
+		if ( array() === $place_rows ) {
+			$place_rows = array( $place );
+		}
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
 		$carrier_key = (string) ( $request['carrier_key'] ?? $meta['carrier_key'] ?? '' );
 		$service_key = (string) ( $meta['service_key'] ?? $request['rate_id'] ?? '' );
 		$is_cdek = CdekSettings::CARRIER_KEY === $carrier_key;
 		$is_dpd = DpdSettings::CARRIER_KEY === $carrier_key;
 		$is_russian_post = RussianPostDomesticSettings::CARRIER_KEY === $carrier_key;
+		$is_yandex = YandexDeliverySettings::CARRIER_KEY === $carrier_key;
+		$requires_tariff = array_key_exists( 'requires_tariff', $modal_capabilities ) ? (bool) $modal_capabilities['requires_tariff'] : ! $is_yandex;
+		$requires_postoffice = array_key_exists( 'requires_postoffice', $modal_capabilities ) ? (bool) $modal_capabilities['requires_postoffice'] : $is_russian_post;
 		$shipment = '' !== $carrier_key ? $this->repository->find_by_carrier( $order, $carrier_key ) : array();
 		$settings = is_array( $request['services'] ?? null ) ? $request['services'] : array();
 		$pickup_code = (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' );
@@ -289,6 +299,13 @@ final class OrderShipmentsMetabox {
 		$pickup_point_found = ! empty( $meta['pickup_point_found'] );
 		$pickup_address = $recipient_address_context;
 		$courier_original_address = (string) ( $meta['courier_original_address'] ?? '' );
+		$yandex_source_platform_station_id = trim( (string) ( $meta['yandex_source_platform_station_id'] ?? '' ) );
+		$yandex_pickup_platform_station_id = trim( (string) ( $meta['yandex_pickup_platform_station_id'] ?? $pickup_code ) );
+		$yandex_pickup_address = trim( (string) ( $meta['pickup_point_address'] ?? $pickup_row['address'] ?? $recipient_address_context ) );
+		$yandex_ready_from = trim( (string) ( $meta['yandex_ready_from'] ?? '' ) );
+		$yandex_ready_to = trim( (string) ( $meta['yandex_ready_to'] ?? $yandex_ready_from ) );
+		$yandex_courier_details = is_array( $meta['yandex_courier_details'] ?? null ) ? $meta['yandex_courier_details'] : array();
+		$yandex_courier_full_address = trim( (string) ( $yandex_courier_details['full_address'] ?? $courier_original_address ) );
 		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
 		$normalized_display = (string) ( $normalized_address['display'] ?? '' );
 		$normalized_is_cdek = 'dadata+cdek_location' === (string) ( $normalized_address['source'] ?? '' );
@@ -358,7 +375,7 @@ final class OrderShipmentsMetabox {
 				<div class="wdc-shipment-modal__dialog" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr__( 'Подготовка отправления', 'walls-delivery-calc' ); ?>">
 					<button type="button" class="wdc-shipment-modal__close" data-wdc-close-shipment-modal aria-label="<?php echo esc_attr__( 'Закрыть', 'walls-delivery-calc' ); ?>">×</button>
 					<h2><?php echo esc_html__( 'Подготовка отправления', 'walls-delivery-calc' ); ?></h2>
-					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" role="group">
+					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" data-wdc-requires-tariff="<?php echo $requires_tariff ? '1' : '0'; ?>" role="group">
 						<input type="hidden" name="order_id" value="<?php echo esc_attr( (string) $order_id ); ?>">
 						<input type="hidden" name="carrier_key" value="<?php echo esc_attr( $carrier_key ); ?>">
 						<div class="wdc-shipment-tabs" role="tablist">
@@ -373,6 +390,17 @@ final class OrderShipmentsMetabox {
 								<label><?php echo esc_html__( 'Телефон', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
 								<label>Email<input name="recipient_email" value="<?php echo esc_attr( (string) ( $recipient['email'] ?? '' ) ); ?>"></label>
 								<div data-wdc-pickup-section <?php echo DeliveryType::PICKUP === $delivery_type ? '' : 'hidden'; ?>>
+									<?php if ( $is_yandex ) : ?>
+										<input type="hidden" name="pickup_point_code" value="<?php echo esc_attr( $yandex_pickup_platform_station_id ); ?>">
+										<input type="hidden" name="yandex_pickup_platform_station_id" value="<?php echo esc_attr( $yandex_pickup_platform_station_id ); ?>">
+										<div data-wdc-yandex-pickup-destination>
+											<p><strong><?php echo esc_html__( 'ПВЗ назначения Яндекс', 'walls-delivery-calc' ); ?>:</strong> <span><?php echo esc_html( '' !== $yandex_pickup_address ? $yandex_pickup_address : '-' ); ?></span></p>
+											<p><strong><?php echo esc_html__( 'Platform station ID', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-yandex-pickup-platform-station><?php echo esc_html( '' !== $yandex_pickup_platform_station_id ? $yandex_pickup_platform_station_id : '-' ); ?></span></p>
+											<?php if ( '' === $yandex_pickup_platform_station_id ) : ?>
+												<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Не выбран ПВЗ назначения Яндекс. Предпросмотр будет заблокирован до выбора точки.', 'walls-delivery-calc' ); ?></p>
+											<?php endif; ?>
+										</div>
+									<?php else : ?>
 									<input type="hidden" name="pickup_point_code" value="<?php echo esc_attr( $pickup_code ); ?>">
 									<?php if ( $is_cdek || $is_dpd ) : ?><input type="hidden" name="delivery_point" value="<?php echo esc_attr( $pickup_code ); ?>" data-wdc-delivery-point-field><?php endif; ?>
 									<input type="hidden" name="pickup_point_postcode" value="<?php echo esc_attr( $pickup_postcode ); ?>" data-wdc-pickup-postcode-field>
@@ -405,8 +433,21 @@ final class OrderShipmentsMetabox {
 									<?php if ( ! $pickup_point_found ) : ?>
 										<p class="description wdc-shipment-warning" data-wdc-pickup-warning><?php echo esc_html( $is_dpd ? __( 'DPD delivery terminalCode не найден. Исправьте выбранный ПВЗ в заказе или checkout meta.', 'walls-delivery-calc' ) : ( $is_cdek ? __( 'ПВЗ СДЭК не выбран. Создание отправления заблокировано до выбора корректного ПВЗ.', 'walls-delivery-calc' ) : __( 'ПВЗ/ОПС не найден в справочнике Почты России. Создание отправления заблокировано до выбора корректного ПВЗ.', 'walls-delivery-calc' ) ) ); ?></p>
 									<?php endif; ?>
+									<?php endif; ?>
 								</div>
 								<div data-wdc-courier-section <?php echo DeliveryType::COURIER === $delivery_type ? '' : 'hidden'; ?>>
+									<?php if ( $is_yandex ) : ?>
+										<div data-wdc-yandex-courier-destination>
+											<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input name="yandex_postal_code" value="<?php echo esc_attr( (string) ( $yandex_courier_details['postal_code'] ?? $recipient_postcode ) ); ?>"></label>
+											<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input name="yandex_region" value="<?php echo esc_attr( (string) ( $yandex_courier_details['region'] ?? $region ) ); ?>"></label>
+											<label><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?><input name="yandex_locality" value="<?php echo esc_attr( (string) ( $yandex_courier_details['locality'] ?? $city ) ); ?>"></label>
+											<label><?php echo esc_html__( 'Улица', 'walls-delivery-calc' ); ?><input name="yandex_street" value="<?php echo esc_attr( (string) ( $yandex_courier_details['street'] ?? '' ) ); ?>"></label>
+											<label><?php echo esc_html__( 'Дом', 'walls-delivery-calc' ); ?><input name="yandex_house" value="<?php echo esc_attr( (string) ( $yandex_courier_details['house'] ?? '' ) ); ?>"></label>
+											<label><?php echo esc_html__( 'Квартира', 'walls-delivery-calc' ); ?><input name="yandex_room" value="<?php echo esc_attr( (string) ( $yandex_courier_details['room'] ?? $address['apartment'] ?? '' ) ); ?>"></label>
+											<label><?php echo esc_html__( 'Полный адрес', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" rows="3" data-wdc-courier-original-address><?php echo esc_textarea( $yandex_courier_full_address ); ?></textarea></label>
+											<input type="hidden" name="yandex_country" value="<?php echo esc_attr( (string) ( $yandex_courier_details['country'] ?? 'Россия' ) ); ?>">
+										</div>
+									<?php else : ?>
 									<input type="hidden" name="recipient_location_city" value="<?php echo esc_attr( (string) ( $pickup_context['city_name'] ?? $pickup_context['city_value'] ?? $city ) ); ?>">
 									<input type="hidden" name="recipient_location_region" value="<?php echo esc_attr( (string) ( $pickup_context['region_name'] ?? $pickup_context['state_value'] ?? $region ) ); ?>">
 									<input type="hidden" name="recipient_location_postcode" value="<?php echo esc_attr( (string) ( $pickup_context['postal_code'] ?? $pickup_context['postcode'] ?? $recipient_postcode ) ); ?>">
@@ -430,6 +471,7 @@ final class OrderShipmentsMetabox {
 									<?php if ( $is_cdek ) : ?>
 										<label data-wdc-cdek-courier-comment-row <?php echo $cdek_recipient_door ? '' : 'hidden'; ?>><?php echo esc_html__( 'Комментарий курьеру', 'walls-delivery-calc' ); ?><textarea name="cdek_courier_comment" rows="2" maxlength="255"><?php echo esc_textarea( (string) ( $meta['cdek_courier_comment'] ?? '' ) ); ?></textarea><span class="description"><?php echo esc_html__( 'Будет передан в СДЭК как комментарий к заказу. Не более 255 символов.', 'walls-delivery-calc' ); ?></span></label>
 									<?php endif; ?>
+									<?php endif; ?>
 								</div>
 							</section>
 							<section>
@@ -440,6 +482,7 @@ final class OrderShipmentsMetabox {
 										<option value="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-service-key="<?php echo esc_attr( (string) $service['service_key'] ); ?>" data-delivery-type="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-tariffs="<?php echo esc_attr( wp_json_encode( $service['tariffs'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '[]' ); ?>" <?php selected( $selected_delivery_type, (string) $service['delivery_type'] ); ?>><?php echo esc_html( (string) $service['title'] ); ?></option>
 									<?php endforeach; ?>
 								</select></label>
+								<?php if ( $requires_tariff ) : ?>
 								<label><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?><select name="tariff_object" data-wdc-tariff-select data-selected-tariff="<?php echo esc_attr( $selected_tariff_object ); ?>" <?php disabled( ! $has_selected_service_tariffs ); ?>>
 									<?php foreach ( $selected_service_tariffs as $tariff ) : ?>
 										<?php
@@ -452,6 +495,10 @@ final class OrderShipmentsMetabox {
 									<?php endforeach; ?>
 								</select></label>
 								<p class="description" data-wdc-tariff-message<?php echo $tariff_message_hidden_attr; ?>><?php echo esc_html__( 'Для выбранной службы доставки нет включенных тарифов. Включите тариф на странице настроек службы доставки.', 'walls-delivery-calc' ); ?></p>
+								<?php elseif ( $is_yandex ) : ?>
+									<input type="hidden" name="tariff_object" value="">
+									<p class="description" data-wdc-yandex-offer-note><?php echo esc_html__( 'Оффер Яндекс.Доставки будет выбран автоматически по самому раннему доступному сроку.', 'walls-delivery-calc' ); ?></p>
+								<?php endif; ?>
 								<?php if ( $is_cdek ) : ?>
 									<p><strong><?php echo esc_html__( 'В заказе тариф', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== $selected_tariff_title ? $selected_tariff_title : '-' ); ?></p>
 									<input type="hidden" name="shipment_point" value="<?php echo esc_attr( $shipment_point ); ?>" data-wdc-sender-shipment-point>
@@ -491,7 +538,20 @@ final class OrderShipmentsMetabox {
 									<?php if ( ! empty( $meta['date_pickup_fallback_used'] ) ) : ?>
 										<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Календарь магазина недоступен, дата отправки DPD рассчитана по fallback-правилу.', 'walls-delivery-calc' ); ?></p>
 									<?php endif; ?>
-								<?php else : ?>
+								<?php elseif ( $is_yandex ) : ?>
+									<div data-wdc-yandex-source-station>
+										<input type="hidden" name="yandex_source_platform_station_id" value="<?php echo esc_attr( $yandex_source_platform_station_id ); ?>">
+										<p><strong><?php echo esc_html__( 'Станция приема Яндекс', 'walls-delivery-calc' ); ?>:</strong> <span><?php echo esc_html( '' !== $yandex_source_platform_station_id ? $yandex_source_platform_station_id : '-' ); ?></span></p>
+										<?php if ( '' === $yandex_source_platform_station_id ) : ?>
+											<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Не указана исходная станция Яндекс. Предпросмотр будет заблокирован.', 'walls-delivery-calc' ); ?></p>
+										<?php endif; ?>
+									</div>
+									<div data-wdc-yandex-ready-interval>
+										<input type="hidden" name="yandex_ready_from" value="<?php echo esc_attr( $yandex_ready_from ); ?>">
+										<input type="hidden" name="yandex_ready_to" value="<?php echo esc_attr( $yandex_ready_to ); ?>">
+										<p><strong><?php echo esc_html__( 'Готовность заказа', 'walls-delivery-calc' ); ?>:</strong> <span><?php echo esc_html( '' !== $yandex_ready_from ? $yandex_ready_from : '-' ); ?><?php echo $yandex_ready_to !== $yandex_ready_from && '' !== $yandex_ready_to ? ' — ' . esc_html( $yandex_ready_to ) : ''; ?></span></p>
+									</div>
+								<?php elseif ( $requires_postoffice ) : ?>
 								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><select name="postoffice_code">
 									<?php foreach ( $postoffice_codes as $code ) : ?>
 										<option value="<?php echo esc_attr( (string) $code ); ?>" <?php selected( (string) ( $meta['postoffice_code'] ?? '' ), (string) $code ); ?>><?php echo esc_html( (string) $code ); ?></option>
@@ -503,15 +563,21 @@ final class OrderShipmentsMetabox {
 						<section>
 							<h3><?php echo esc_html__( 'Грузоместа', 'walls-delivery-calc' ); ?></h3>
 							<div data-wdc-places>
-								<div class="wdc-place-row" data-wdc-place>
-									<div class="wdc-place-row__title" data-wdc-place-title><?php echo esc_html__( 'Место 1', 'walls-delivery-calc' ); ?></div>
-									<label class="wdc-place-field"><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?> <?php if ( '' !== $weight_hint ) : ?><span class="wdc-weight-hint" data-wdc-weight-hint><?php echo esc_html( $weight_hint ); ?></span><?php endif; ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][weight_g]" value="" placeholder="<?php echo esc_attr__( 'г', 'walls-delivery-calc' ); ?>"></label>
-									<label class="wdc-place-field"><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][length_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
-									<label class="wdc-place-field"><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][width_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
-									<label class="wdc-place-field"><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][height_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
-									<label class="wdc-place-field" data-wdc-declared-value-field data-default-declared-value-rub="<?php echo esc_attr( $default_declared_value_attr ); ?>" <?php echo $selected_tariff_has_declared_value ? '' : 'hidden'; ?>><?php echo esc_html__( 'Страховка, руб.', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][declared_value_rub]" value="<?php echo esc_attr( $declared_value_initial ); ?>" <?php disabled( ! $selected_tariff_has_declared_value ); ?>></label>
-									<button type="button" class="button" data-wdc-remove-place disabled><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
-								</div>
+								<?php foreach ( $place_rows as $place_index => $place_row ) : ?>
+									<?php
+									$declared_value_for_place = 0 === $place_index ? $declared_value_initial : '';
+									$weight_hint_for_place = 0 === $place_index ? $weight_hint : '';
+									?>
+									<div class="wdc-place-row" data-wdc-place>
+										<div class="wdc-place-row__title" data-wdc-place-title><?php echo esc_html( sprintf( __( 'Место %d', 'walls-delivery-calc' ), $place_index + 1 ) ); ?></div>
+										<label class="wdc-place-field"><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?> <?php if ( '' !== $weight_hint_for_place ) : ?><span class="wdc-weight-hint" data-wdc-weight-hint><?php echo esc_html( $weight_hint_for_place ); ?></span><?php endif; ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[<?php echo esc_attr( (string) $place_index ); ?>][weight_g]" value="<?php echo esc_attr( (string) ( $place_row['weight_g'] ?? '' ) ); ?>" placeholder="<?php echo esc_attr__( 'г', 'walls-delivery-calc' ); ?>"></label>
+										<label class="wdc-place-field"><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="decimal" autocomplete="off" data-wdc-decimal-input="2" name="places[<?php echo esc_attr( (string) $place_index ); ?>][length_cm]" value="<?php echo esc_attr( (string) ( $place_row['length_cm'] ?? '' ) ); ?>" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
+										<label class="wdc-place-field"><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="decimal" autocomplete="off" data-wdc-decimal-input="2" name="places[<?php echo esc_attr( (string) $place_index ); ?>][width_cm]" value="<?php echo esc_attr( (string) ( $place_row['width_cm'] ?? '' ) ); ?>" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
+										<label class="wdc-place-field"><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="decimal" autocomplete="off" data-wdc-decimal-input="2" name="places[<?php echo esc_attr( (string) $place_index ); ?>][height_cm]" value="<?php echo esc_attr( (string) ( $place_row['height_cm'] ?? '' ) ); ?>" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
+										<label class="wdc-place-field" data-wdc-declared-value-field data-default-declared-value-rub="<?php echo esc_attr( $default_declared_value_attr ); ?>" <?php echo $selected_tariff_has_declared_value ? '' : 'hidden'; ?>><?php echo esc_html__( 'Страховка, руб.', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[<?php echo esc_attr( (string) $place_index ); ?>][declared_value_rub]" value="<?php echo esc_attr( $declared_value_for_place ); ?>" <?php disabled( ! $selected_tariff_has_declared_value ); ?>></label>
+										<button type="button" class="button" data-wdc-remove-place <?php disabled( count( $place_rows ) <= 1 ); ?>><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
+									</div>
+								<?php endforeach; ?>
 							</div>
 							<button type="button" class="button" data-wdc-add-place><?php echo esc_html__( 'Добавить место', 'walls-delivery-calc' ); ?></button>
 						</section>
@@ -602,20 +668,84 @@ final class OrderShipmentsMetabox {
 	}
 
 	public function ajax_preview(): void {
+		$buffer_level = ob_get_level();
+		ob_start();
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			$this->discard_preview_buffer( $buffer_level );
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
-		$order_id = (int) ( $_POST['order_id'] ?? 0 );
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) ) {
-			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
-		}
-		$data = $_POST;
-		$this->maybe_prepare_cdek_courier_address( $order, $data );
-		$request = $this->preview_request( $this->drafts->create_request_from_admin_data( $order, $data ) );
-		$preview = $this->creation->safe_preview( $request );
+		try {
+			$order_id = (int) ( $_POST['order_id'] ?? 0 );
+			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+			if ( ! is_object( $order ) ) {
+				$this->discard_preview_buffer( $buffer_level );
+				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_preview_invalid_request' ), 404 );
+			}
+			$data = $_POST;
+			$prepared = $this->maybe_prepare_cdek_courier_address( $order, $data );
+			if ( ! empty( $prepared['error'] ) ) {
+				throw new \InvalidArgumentException( (string) $prepared['error'] );
+			}
+			$request = $this->preview_request( $this->drafts->create_request_from_admin_data( $order, $data ) );
+			$this->validate_preview_request( $request );
+			$preview = $this->creation->safe_preview( $request );
+			if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key && ! empty( $preview['errors'] ) && is_array( $preview['errors'] ) ) {
+				throw new \InvalidArgumentException( (string) reset( $preview['errors'] ) );
+			}
 
-		wp_send_json_success( array( 'preview' => $preview ) );
+			$this->discard_preview_buffer( $buffer_level );
+			wp_send_json_success( array( 'preview' => $preview ) );
+		} catch ( \InvalidArgumentException $exception ) {
+			$this->discard_preview_buffer( $buffer_level );
+			wp_send_json_error(
+				array(
+					'message' => $exception->getMessage(),
+					'error_code' => 'shipment_preview_validation_failed',
+				),
+				400
+			);
+		} catch ( \Throwable $exception ) {
+			error_log(
+				sprintf(
+					'[walls-delivery-calc] shipment preview failed. class=%s message=%s location=%s:%d',
+					$exception::class,
+					$exception->getMessage(),
+					$exception->getFile(),
+					$exception->getLine()
+				)
+			);
+			$this->discard_preview_buffer( $buffer_level );
+			wp_send_json_error(
+				array(
+					'message' => __( 'Сервер вернул некорректный ответ при подготовке отправления. Проверьте журнал ошибок.', 'walls-delivery-calc' ),
+					'error_code' => 'shipment_preview_unexpected_error',
+				),
+				500
+			);
+		}
+	}
+
+	private function discard_preview_buffer( int $buffer_level ): void {
+		while ( ob_get_level() > $buffer_level ) {
+			ob_end_clean();
+		}
+	}
+
+	private function validate_preview_request( ShipmentCreateRequest $request ): void {
+		if ( YandexDeliverySettings::CARRIER_KEY !== $request->carrier_key ) {
+			return;
+		}
+		$source_station = trim( (string) ( $request->meta['yandex_source_platform_station_id'] ?? '' ) );
+		if ( '' === $source_station ) {
+			throw new \InvalidArgumentException( __( 'Не указана исходная станция Яндекс.', 'walls-delivery-calc' ) );
+		}
+		$delivery_type = (string) ( $request->delivery_type ?: ( $request->meta['delivery_type'] ?? '' ) );
+		if ( DeliveryType::PICKUP === $delivery_type ) {
+			$destination_station = trim( (string) ( $request->meta['yandex_pickup_platform_station_id'] ?? $request->pickup_point?->point_code ?? '' ) );
+			if ( '' === $destination_station ) {
+				throw new \InvalidArgumentException( __( 'Не выбран ПВЗ назначения Яндекс.', 'walls-delivery-calc' ) );
+			}
+		}
 	}
 
 	public function ajax_dpd_courier_contact_history(): void {

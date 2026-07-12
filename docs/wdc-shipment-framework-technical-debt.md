@@ -1,6 +1,38 @@
 # Shipment Framework technical debt
 
-## 0.108.4 focused debt register
+## 0.108.5 focused debt register
+
+1. Carrier-specific modal fields remain partly hardcoded
+   - Current problem: `OrderShipmentsMetabox` now renders Yandex source/destination/ready fields correctly, but CDEK/DPD/Russian Post/Yandex field blocks are still explicit PHP branches inside the shared metabox.
+   - Target architecture: the shared metabox renders common fields plus a small carrier modal extension contract for carrier-owned fields.
+   - Affected classes/files: `OrderShipmentsMetabox`, carrier adapters/button policies, `shipments-admin.js`, carrier modal smokes.
+   - Migration sequence: stabilize current render/runtime tests, extract read-only helper methods, then introduce a carrier field provider without changing the AJAX lifecycle.
+
+2. Yandex source station picker
+   - Current problem: Yandex registration modal shows `yandex_source_platform_station_id` as a read-only value from settings.
+   - Target architecture: a Yandex carrier extension lets the manager select the source platform station from an approved source-station list.
+   - Affected classes/files: `OrderShipmentsMetabox`, Yandex settings/repository layer, Yandex shipment registration docs and smokes.
+   - Migration sequence: add source station data provider, render it through the carrier modal extension point, then persist only the selected station id in the shipment draft.
+
+3. Yandex destination pickup picker
+   - Current problem: pickup destination is read-only and comes from saved order/draft meta (`pickup_point_code`, `yandex_pickup_platform_station_id`).
+   - Target architecture: the shipment modal reuses the existing pickup map/provider infrastructure to choose a Yandex destination platform station for shipment registration.
+   - Affected classes/files: `OrderShipmentsMetabox`, `assets/admin/shipments-admin.js`, Yandex pickup repositories/formatters, existing pickup map providers.
+   - Migration sequence: expose a Yandex destination-picker mode, keep checkout pickup map code as the source of point presentation, then submit only the selected shipment platform_station_id.
+
+4. Destination pickup selection must not reprice checkout
+   - Current problem: future Yandex destination selection is a shipment-registration concern, not an order-delivery recalculation.
+   - Target architecture: changing the destination pickup point in shipment modal updates only shipment draft fields and never triggers checkout repricing or representative PVZ logic.
+   - Affected classes/files: shipment modal JS, Yandex pickup map/provider integration, order-delivery recalculation controller boundaries.
+   - Migration sequence: keep shipment picker AJAX/action separate from checkout repricing actions, add smoke that platform_station_id changes without touching order delivery price meta.
+
+5. CDEK assessed price ambiguity
+   - Current problem: the canonical modal/parser can read `assessed_cost` / `assessed_unit_price`, but `CdekShipmentAllocationAdapter` still uses `cost` simultaneously for `unit_price_kopecks` and `assessed_unit_price_kopecks`. A separate assessed price is therefore not yet carried into the neutral `ShipmentAllocation`.
+   - Target architecture: the common modal contract, persistence snapshot and allocation adapter carry unit price and assessed/declared value as distinct carrier-neutral values, and each carrier maps them explicitly.
+   - Affected classes/files: `ShipmentModalRequestMapper`, `CdekShipmentAllocationAdapter`, `ShipmentAllocationItem`, CDEK/Yandex payload builders and smoke fixtures.
+   - Migration sequence: first add/verify separate assessed value in neutral allocation without changing CDEK payload, then migrate CDEK/Yandex adapters with regression payload equality. This is intentionally not part of 0.108.5 to preserve current CDEK business behavior.
+
+## Earlier shipment framework debt
 
 1. CDEK modal fallback `cdek_items[]`
    - Current problem: the shared modal now submits canonical `shipment_items[]`, but `ShipmentModalRequestMapper` still accepts `cdek_items[]` for the CDEK migration window.
@@ -55,9 +87,3 @@
    - Target architecture: one documented command/profile runs all shipment framework, Yandex, CDEK, DPD, Russian Post, Packaging and checkout regressions.
    - Affected classes/files: `tests/*`, development workflow docs.
    - Migration sequence: stabilize current smoke list, add a wrapper only after individual smoke failures are deterministic and baseline DPD preparation behavior is documented.
-
-10. Assessed price in shipment allocation
-   - Current problem: the canonical modal/parser can read `assessed_cost` / `assessed_unit_price`, but `CdekShipmentAllocationAdapter` still uses `cost` simultaneously for `unit_price_kopecks` and `assessed_unit_price_kopecks`. A separate assessed price is therefore not yet carried into the neutral `ShipmentAllocation`.
-   - Target architecture: the common modal contract, persistence snapshot and allocation adapter carry unit price and assessed/declared value as distinct carrier-neutral values, and each carrier maps them explicitly.
-   - Affected classes/files: `ShipmentModalRequestMapper`, `CdekShipmentAllocationAdapter`, `ShipmentAllocationItem`, CDEK/Yandex payload builders and smoke fixtures.
-   - Migration sequence: first add/verify separate assessed value in neutral allocation without changing CDEK payload, then migrate CDEK/Yandex adapters with regression payload equality. This is intentionally not part of 0.108.4 to preserve current CDEK business behavior.

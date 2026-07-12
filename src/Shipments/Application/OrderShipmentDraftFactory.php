@@ -137,8 +137,14 @@ final class OrderShipmentDraftFactory {
 		if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
 			return array(
 				'request' => $request->to_array(),
-				'services' => array(),
+				'services' => $this->yandex_service_variants( $request ),
 				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'requires_tariff' => false,
+					'requires_postoffice' => false,
+					'shows_source_station' => true,
+					'shows_ready_interval' => true,
+				),
 			);
 		}
 		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
@@ -1386,6 +1392,23 @@ final class OrderShipmentDraftFactory {
 				'title' => CdekSettings::DEFAULT_COURIER_METHOD_TITLE,
 				'delivery_type' => DeliveryType::COURIER,
 				'tariffs' => $this->cdek_tariff_options( DeliveryType::COURIER, $request ),
+			),
+		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function yandex_service_variants( ShipmentCreateRequest $request ): array {
+		$delivery_type = $this->normalize_yandex_delivery_type( (string) ( $request->delivery_type ?: ( $request->meta['delivery_type'] ?? DeliveryType::PICKUP ) ) );
+
+		return array(
+			array(
+				'service_key' => YandexDeliverySettings::SERVICE_KEY,
+				'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+				'title' => DeliveryType::COURIER === $delivery_type ? 'Яндекс до двери' : 'Яндекс до ПВЗ',
+				'delivery_type' => $delivery_type,
+				'tariffs' => array(),
 			),
 		);
 	}

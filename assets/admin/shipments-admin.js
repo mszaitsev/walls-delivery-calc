@@ -72,6 +72,18 @@
     return parseFloat(String(value || '0').replace(',', '.')) || 0;
   }
 
+  function parseShipmentJsonResponse(response) {
+    return response.text().then((text) => {
+      try {
+        return text ? JSON.parse(text) : null;
+      } catch (error) {
+        const controlled = new Error('Сервер вернул некорректный ответ при подготовке отправления. Проверьте журнал ошибок.');
+        controlled.httpStatus = response && response.status ? response.status : 0;
+        throw controlled;
+      }
+    });
+  }
+
   function shipmentItemRows(form) {
     return form ? Array.from(form.querySelectorAll('[data-wdc-shipment-item-row]')) : [];
   }
@@ -411,7 +423,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         const items = payload && payload.success && payload.data && Array.isArray(payload.data.items) ? payload.data.items : [];
         renderProductSearchResults(input, items);
@@ -438,7 +450,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обновить предпросмотр.');
@@ -662,6 +674,7 @@
     const submit = form.querySelector('[data-wdc-create-shipment]');
     if (!submit) return;
     const tariff = form.querySelector('[data-wdc-tariff-select]');
+    const requiresTariff = form.dataset.wdcRequiresTariff !== '0';
     const hasTariffs = !!(tariff && !tariff.disabled && tariff.options.length);
     const deliveryType = selectedDeliveryType(form);
     const pickupMissing = deliveryType === 'pickup' && !!form.querySelector('[data-wdc-pickup-warning]');
@@ -673,10 +686,14 @@
     const senderTerminalReady = !isDpd || !!firstFieldValue(form, ['[name="pickup_terminal_code"]', '[name="sender_shipment_point"]', '[name="shipment_point"]', '[data-wdc-sender-shipment-point]']);
     const receiverTerminalReady = !isDpd || deliveryType !== 'pickup' || !!firstFieldValue(form, ['[name="pickup_point_code"]', '[name="delivery_point"]']);
     const placesReady = Array.from(form.querySelectorAll('[data-wdc-place]')).some((row) => {
-      return ['weight_g', 'length_cm', 'width_cm', 'height_cm'].every((suffix) => {
-        const input = row.querySelector('input[name$="[' + suffix + ']"]');
-        return parseInt(input && input.value ? input.value : '0', 10) > 0;
-      });
+      const weight = row.querySelector('input[name$="[weight_g]"]');
+      const length = row.querySelector('input[name$="[length_cm]"]');
+      const width = row.querySelector('input[name$="[width_cm]"]');
+      const height = row.querySelector('input[name$="[height_cm]"]');
+      return (parseInt(weight && weight.value ? weight.value : '0', 10) || 0) > 0
+        && parseDecimalValue(length && length.value ? length.value : '0') > 0
+        && parseDecimalValue(width && width.value ? width.value : '0') > 0
+        && parseDecimalValue(height && height.value ? height.value : '0') > 0;
     });
     const normalizedJson = form.querySelector('[data-wdc-normalized-address-json]');
     let courierReady = true;
@@ -689,7 +706,7 @@
         courierReady = false;
       }
     }
-    submit.disabled = !hasTariffs || !latestPreviewReady || pickupMissing || !courierReady || !dateReady || !contactReady || !senderTerminalReady || !receiverTerminalReady || !placesReady;
+    submit.disabled = (requiresTariff && !hasTariffs) || !latestPreviewReady || pickupMissing || !courierReady || !dateReady || !contactReady || !senderTerminalReady || !receiverTerminalReady || !placesReady;
   }
   function schedulePreview(form) {
     markPreviewPending(form);
