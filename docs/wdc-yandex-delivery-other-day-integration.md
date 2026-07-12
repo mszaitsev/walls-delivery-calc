@@ -971,6 +971,8 @@ php tests/yandex-delivery/run-yandex-delivery-geo-manual-review-smoke.php
 
 ### Phase 4 — shipment preparation and creation
 
+0.107.0 adds the pure shipment HTTP layer on top of the existing Yandex API transport: `offers/create`, `offers/confirm`, `request/info`, `request/history` and `request/cancel`. `YandexDeliveryShipmentRegistrationService` runs `payload builder -> offers/create -> earliest offer -> confirm -> info`, with `request/info` as the canonical registration result and a temporary-to-real barcode map. No checkout, admin UI, order save, status persistence, labels, retries or `request/create` were added.
+
 0.106.2 tightened validation before transport work: shipment allocations cannot be empty, every place must have item allocation, destination mode is strictly `pickup` or `courier`, pickup requires `platform_station_id`, courier requires structured `locality`, `street`, `house` and `full_address` but not coordinates, recipient name/phone/email are validated, and `ready_to` may equal but not precede `ready_from`. No HTTP calls were added.
 
 0.106.1 hardened the payload contract before HTTP implementation: Yandex item prices and VAT are emitted under `items[].billing_details`, shipment allocation stores both `unit_price_kopecks` and `assessed_unit_price_kopecks`, and broken CDEK-origin allocation rows fail with `InvalidArgumentException` instead of being silently repaired.

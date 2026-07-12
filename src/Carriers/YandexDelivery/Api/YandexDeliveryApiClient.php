@@ -141,6 +141,46 @@ final class YandexDeliveryApiClient {
 	 * @param array<string,mixed> $payload
 	 * @return array<string,mixed>
 	 */
+	public function offersCreate( array $payload ): array {
+		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::OFFERS_CREATE_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function offersConfirm( array $payload ): array {
+		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::OFFERS_CONFIRM_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function requestInfo( array $payload ): array {
+		return $this->authorizedJsonRequest( 'GET', YandexDeliveryEndpoints::REQUEST_INFO_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function requestHistory( array $payload ): array {
+		return $this->authorizedJsonRequest( 'GET', YandexDeliveryEndpoints::REQUEST_HISTORY_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function requestCancel( array $payload ): array {
+		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::REQUEST_CANCEL_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
 	private function authorizedJsonRequest( string $method, string $path, array $payload = array() ): array {
 		$credentials = $this->settings->credentials();
 		if ( ! $credentials->is_complete() ) {
@@ -160,6 +200,7 @@ final class YandexDeliveryApiClient {
 					'endpoint' => $path,
 					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
 					'response' => array( '_raw' => $this->safeMessage( $response->body, $response->status_code ) ),
+					'error_body' => $this->safeMessage( $response->body, $response->status_code ),
 					'error_code' => 'malformed_json',
 				)
 			);
@@ -184,6 +225,7 @@ final class YandexDeliveryApiClient {
 					'endpoint' => $path,
 					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
 					'response' => $this->settings->sanitize_for_diagnostics( $data ),
+					'error_body' => $this->safeMessage( $response->body, $response->status_code ),
 					'yandex_error_code' => $this->extractErrorCode( $data ),
 					'yandex_error_message' => $this->safeMessage( $message, $response->status_code ),
 				)

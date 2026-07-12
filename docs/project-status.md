@@ -662,6 +662,10 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 
 - `YandexDeliveryGeoMappingService` now defaults to `ambiguous_only` candidate storage: confident auto-primary results save only the primary row, while ambiguous results keep all candidates for review.
 - The Yandex geo admin tab and integration notes document that candidates are diagnostic and runtime code should use only `is_primary=1` / `find_primary_geo_id()`.
+# 0.107.0 Yandex Delivery shipment HTTP layer
+
+Added the pure Yandex Delivery shipment HTTP layer without wiring it to checkout, admin UI, order save, labels or persistence. The existing `YandexDeliveryApiClient` now exposes shipment endpoints for `offers/create`, `offers/confirm`, `request/info`, `request/history` and `request/cancel` through the existing WordPress HTTP transport abstraction. New shipment DTOs cover offers, offer collections, confirmed requests, canonical request info, request history, shipment state and registration results. `YandexDeliveryShipmentRegistrationService` runs the production flow `payload builder -> offers/create -> earliest offer selector -> offers/confirm -> request/info`, with no retry after confirm and no `request/create` path.
+
 # 0.106.2 Yandex Delivery shipment validation hardening
 
 Closed the remaining validation blockers before the real Yandex Delivery HTTP flow. Shipment allocation now rejects empty allocations and empty places; the CDEK allocation adapter rejects empty source rows and places without allocation rows. The Yandex payload builder validates destination mode strictly, requires pickup station id, requires courier `locality`, `street`, `house` and `full_address` without requiring coordinates, validates recipient name/phone/email, and allows equal ready interval endpoints while rejecting `ready_to < ready_from`. No HTTP/API/UI/persistence flow is included.

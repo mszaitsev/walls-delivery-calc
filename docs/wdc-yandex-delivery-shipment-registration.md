@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.107.0
+
+Этап 0.107.0 добавляет чистый HTTP layer регистрации отправлений Яндекс.Доставки. Подключения к WordPress UI, checkout, order save, tracking, labels и persistence нет. Используется существующий `YandexDeliveryApiClient` и его WordPress transport abstraction `YandexDeliveryHttpClientInterface` / `WpYandexDeliveryHttpClient`; `curl` и второй HTTP abstraction не добавлялись.
+
+Реализованные HTTP методы: `offers/create`, `offers/confirm`, `request/info`, `request/history`, `request/cancel`. `request/create` не реализован и не используется. `YandexDeliveryShipmentClient` возвращает DTO, а не raw arrays: offers, selected/confirmed request, canonical request info, history and shipment state. `YandexDeliveryApiException` сохраняет HTTP code, sanitized error body and decoded response.
+
+`YandexDeliveryShipmentRegistrationService` выполняет production flow: payload builder -> `offers/create` -> earliest offer selector -> `offers/confirm` -> mandatory `request/info`. Канонический результат регистрации — `RequestInfo`; он содержит `request_id`, `courier_order_id`, `sharing_url`, status, destination, recipient, items, places and a temporary-to-real place barcode map. Retry не реализован: если confirm завершился transport/API exception, сервис не повторяет confirm и не продолжает request/info.
+
 ## Статус 0.106.2
 
 Этап 0.106.2 закрывает validation-блокеры перед реальным HTTP-flow, не добавляя HTTP/API/UI/persistence. Registration allocation не может быть пустым: `ShipmentAllocation` должен содержать хотя бы один item суммарно, а каждое `ShipmentAllocationPlace` должно содержать хотя бы один `ShipmentAllocationItem`. `CdekShipmentAllocationAdapter` отклоняет пустые `cdek_item_rows` и ситуацию, когда одно из мест не имеет allocation rows.

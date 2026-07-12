@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000077 A0AC:74BD
+Volume serial number is 0000001A A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -342,7 +342,17 @@ C:.
 |   |       |       YandexDeliveryPricingResult.php
 |   |       |
 |   |       \---Shipment
+|   |               YandexDeliveryConfirmedRequest.php
+|   |               YandexDeliveryEarliestOfferSelector.php
+|   |               YandexDeliveryOffer.php
+|   |               YandexDeliveryOfferCollection.php
+|   |               YandexDeliveryRequestHistory.php
+|   |               YandexDeliveryRequestInfo.php
+|   |               YandexDeliveryShipmentClient.php
 |   |               YandexDeliveryShipmentPayloadBuilder.php
+|   |               YandexDeliveryShipmentRegistrationResult.php
+|   |               YandexDeliveryShipmentRegistrationService.php
+|   |               YandexDeliveryShipmentState.php
 |   |
 |   +---Checkout
 |   |   +---Address
@@ -828,6 +838,7 @@ C:.
             run-yandex-delivery-pickup-v2-runner-smoke.php
             run-yandex-delivery-pricing-calculator-smoke.php
             run-yandex-delivery-region-mapping-v2-smoke.php
+            run-yandex-delivery-shipment-http-smoke.php
             run-yandex-delivery-shipment-payload-smoke.php
             run-yandex-delivery-source-station-smoke.php
 
