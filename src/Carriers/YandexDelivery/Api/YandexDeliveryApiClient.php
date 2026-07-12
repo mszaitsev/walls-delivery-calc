@@ -226,7 +226,7 @@ final class YandexDeliveryApiClient {
 				array(
 					'http_code' => $response->status_code,
 					'endpoint' => $path,
-					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'request' => $this->settings->sanitize_for_diagnostics( $diagnostic_request ),
 					'error_code' => 'empty_json',
 				)
 			);

@@ -182,6 +182,33 @@ try {
 	yd_shipment_http_assert( 500 === $exception->http_code() && str_contains( $exception->error_body(), 'server_error' ) && 'server_error' === (string) ( $exception->decoded_response()['code'] ?? '' ) && 'REQ-1' === (string) ( $exception->details()['request']['request_id'] ?? '' ) && ! str_contains( serialize( $exception->details() ), 'secret-test-token' ), 'GET API exception must expose code/body/decoded response without auth token.' );
 }
 
+$empty_info_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_shipment_http_settings(), new YdShipmentHttpFake( array( new YandexDeliveryApiResponse( 200, '' ) ) ) ) );
+try {
+	$empty_info_client->request_info( 'REQ-EMPTY-INFO' );
+	throw new RuntimeException( 'GET request/info empty JSON must fail.' );
+} catch ( YandexDeliveryApiException $exception ) {
+	$request = is_array( $exception->details()['request'] ?? null ) ? $exception->details()['request'] : array();
+	yd_shipment_http_assert( 'empty_json' === (string) ( $exception->details()['error_code'] ?? '' ) && 'REQ-EMPTY-INFO' === (string) ( $request['request_id'] ?? '' ) && 'false' === (string) ( $request['slim'] ?? '' ), 'GET request/info empty JSON diagnostics must preserve query request_id and slim.' );
+}
+
+$empty_history_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_shipment_http_settings(), new YdShipmentHttpFake( array( new YandexDeliveryApiResponse( 200, '' ) ) ) ) );
+try {
+	$empty_history_client->request_history( 'REQ-EMPTY-HISTORY' );
+	throw new RuntimeException( 'GET request/history empty JSON must fail.' );
+} catch ( YandexDeliveryApiException $exception ) {
+	$request = is_array( $exception->details()['request'] ?? null ) ? $exception->details()['request'] : array();
+	yd_shipment_http_assert( 'empty_json' === (string) ( $exception->details()['error_code'] ?? '' ) && 'REQ-EMPTY-HISTORY' === (string) ( $request['request_id'] ?? '' ), 'GET request/history empty JSON diagnostics must preserve query request_id.' );
+}
+
+$empty_offers_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_shipment_http_settings(), new YdShipmentHttpFake( array( new YandexDeliveryApiResponse( 200, '' ) ) ) ) );
+try {
+	$empty_offers_client->create_offers( $payload );
+	throw new RuntimeException( 'POST offers/create empty JSON must fail.' );
+} catch ( YandexDeliveryApiException $exception ) {
+	$request = is_array( $exception->details()['request'] ?? null ) ? $exception->details()['request'] : array();
+	yd_shipment_http_assert( 'empty_json' === (string) ( $exception->details()['error_code'] ?? '' ) && 'ORDER-123' === (string) ( $request['info']['operator_request_id'] ?? '' ) && ! isset( $request['send_unix'] ), 'POST offers/create empty JSON diagnostics must keep JSON payload, not query.' );
+}
+
 $confirm_error_fake = new YdShipmentHttpFake( array( yd_shipment_http_response( array( 'offers' => array( yd_offer( 'offer-confirm-error', 'self_pickup', '2026-07-20T07:00:00.000000Z', '2026-07-20T20:00:00.000000Z', '2026-07-13T05:00:00.000000Z', '250 RUB' ) ) ) ), new YandexDeliveryApiException( 'network after confirm', array( 'error_code' => 'transport_error' ) ) ) );
 $confirm_error_service = new YandexDeliveryShipmentRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_shipment_http_settings(), $confirm_error_fake ) ) );
 try {
