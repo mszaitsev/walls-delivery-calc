@@ -1,3 +1,9 @@
+## Shipment Modal Preview Gate 0.108.6
+
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` exposes `modal_capabilities.requires_successful_preview=true` for Yandex and DPD. The capability is carrier-neutral and does not add Yandex-specific JS branching.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` renders `data-wdc-requires-successful-preview`, wraps `ajax_create()` in JSON-safe validation/throwable handling, and maps technical allocation validation messages to Russian public messages at the AJAX boundary.
+- `assets/admin/shipments-admin.js` uses `requiresSuccessfulPreview` to keep `Создать отправление` disabled until preview has loaded and has no errors. Shipment AJAX calls use `parseShipmentJsonResponse()` rather than direct `response.json()`, so malformed HTML responses become controlled Russian messages.
+
 ## Yandex Shipment Modal Preparation 0.108.5
 
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` returns one concrete Yandex service variant for the modal instead of an empty services list. The variant reflects the saved order delivery type only: `pickup` is shown as `Яндекс до ПВЗ`, `courier` as `Яндекс до двери`; `tariffs` remains empty because Yandex registration chooses an offer after payload preview/create.

@@ -132,6 +132,9 @@ final class OrderShipmentDraftFactory {
 				'request' => $request->to_array(),
 				'services' => $this->dpd_service_variants( $request ),
 				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'requires_successful_preview' => true,
+				),
 			);
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
@@ -142,6 +145,7 @@ final class OrderShipmentDraftFactory {
 				'modal_capabilities' => array(
 					'requires_tariff' => false,
 					'requires_postoffice' => false,
+					'requires_successful_preview' => true,
 					'shows_source_station' => true,
 					'shows_ready_interval' => true,
 				),

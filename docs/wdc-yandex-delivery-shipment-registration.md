@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.6
+
+Перед первым реальным созданием отправления добавлен обязательный UI-gate: Яндекс использует carrier-neutral capability `requires_successful_preview`, поэтому кнопка `Создать отправление` остаётся disabled, пока preview не загрузился успешно и не вернул ошибок. Это реализовано в общей shipment modal без Yandex-specific JS-проверки.
+
+`ajax_create()` теперь защищён тем же JSON contract, что и preview: validation errors возвращают JSON с понятным русским сообщением, unexpected throwable логируется и возвращает controlled JSON error, HTML critical-error page не должен попасть в response. JSON shape успешного preview/create и HTTP layer Яндекса не менялись.
+
+Все пользовательские fallback-сообщения shipment modal/runtime приведены к русскому языку. Технические validation strings из neutral allocation остаются внутри validators/tests, но на AJAX boundary переводятся в публичные сообщения вроде `Укажите вес грузоместа.` или `Каждое грузоместо должно содержать хотя бы один товар.` API status codes Яндекса не переводятся.
+
 ## Статус 0.108.5
 
 Модалка регистрации Яндекс.Доставки теперь открывается через существующий общий shipment modal с заполненным carrier-specific draft. `draft_array()` отдаёт ровно один service variant, соответствующий сохранённому типу доставки заказа: `Яндекс до ПВЗ` для pickup или `Яндекс до двери` для courier. Переключение между сценариями в модалке пока не вводится.

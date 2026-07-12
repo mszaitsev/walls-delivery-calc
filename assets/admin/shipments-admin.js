@@ -561,7 +561,7 @@
       method: 'POST',
       credentials: 'same-origin',
       body: data
-    }).then((response) => response.json()).then((payload) => {
+    }).then(parseShipmentJsonResponse).then((payload) => {
       if (payload && payload.success && payload.data && Array.isArray(payload.data.history)) {
         setDpdContactHistory(payload.data.history);
       }
@@ -675,11 +675,12 @@
     if (!submit) return;
     const tariff = form.querySelector('[data-wdc-tariff-select]');
     const requiresTariff = form.dataset.wdcRequiresTariff !== '0';
+    const requiresSuccessfulPreview = form.dataset.wdcRequiresSuccessfulPreview === '1';
     const hasTariffs = !!(tariff && !tariff.disabled && tariff.options.length);
     const deliveryType = selectedDeliveryType(form);
     const pickupMissing = deliveryType === 'pickup' && !!form.querySelector('[data-wdc-pickup-warning]');
     const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
-    const latestPreviewReady = !isDpd || (form.dataset.wdcPreviewLoaded === '1' && form.dataset.wdcPreviewHasErrors !== '1');
+    const latestPreviewReady = !requiresSuccessfulPreview || (form.dataset.wdcPreviewLoaded === '1' && form.dataset.wdcPreviewHasErrors !== '1');
     const datePickup = fieldValue(form, '[data-wdc-dpd-date-pickup]');
     const dateReady = !isDpd || /^\d{4}-\d{2}-\d{2}$/.test(datePickup);
     const contactReady = !isDpd || !!fieldValue(form, '[data-wdc-dpd-contact-fio]');
@@ -1195,7 +1196,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : text.errorFallbackMessage);
@@ -1240,7 +1241,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отправить заявку DPD.');
@@ -1342,7 +1343,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           if (payload && payload.data && payload.data.temporary_can_remove) {
@@ -1374,7 +1375,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось удалить данные отправления.');
@@ -1406,7 +1407,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось сохранить номер отслеживания.');
@@ -1511,7 +1512,7 @@
       body: data,
       signal: signal
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось найти ПВЗ.');
@@ -1943,7 +1944,7 @@
         credentials: 'same-origin',
         body: data
       })
-        .then((response) => response.json())
+        .then(parseShipmentJsonResponse)
         .then((payload) => {
           if (!payload || !payload.success) {
             throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'СДЭК не смог сформировать этикетку.');
@@ -2273,7 +2274,7 @@
         credentials: 'same-origin',
         body: data
       })
-        .then((response) => response.json())
+        .then(parseShipmentJsonResponse)
         .then((payload) => {
           if (!payload || !payload.success) {
             throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обработать адрес.');
@@ -2380,7 +2381,7 @@
         credentials: 'same-origin',
         body: data
       })
-        .then((response) => response.json())
+        .then(parseShipmentJsonResponse)
         .then((payload) => {
           if (!payload || !payload.success) {
             throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось создать отправление.');

@@ -74,7 +74,7 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface {
 			return new ShipmentCreateResult( false, error_code: 'dpd_validation_failed', error_message: implode( "\n", $errors ), raw_reference: array( 'errors' => $errors ) );
 		}
 		if ( ! $this->client instanceof DpdApiClient ) {
-			return new ShipmentCreateResult( false, error_code: 'dpd_api_unavailable', error_message: 'DPD API client is unavailable.' );
+			return new ShipmentCreateResult( false, error_code: 'dpd_api_unavailable', error_message: 'API-клиент DPD недоступен.' );
 		}
 
 		$payload = $this->builder->build( $request );
