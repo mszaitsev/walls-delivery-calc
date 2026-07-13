@@ -1,3 +1,10 @@
+## Yandex source drop-off map scope 0.110.1
+
+- The shipment modal Yandex source picker uses `mode=location` for initial load and sends `source_location_id` plus `source_platform_station_id`; backend resolves mapped/manual `yandex_geo_id` values through `YandexLocationMappingV2Repository::geo_ids_for_location()`.
+- Initial rows come from `YandexDeliveryPickupPointV2Repository::source_dropoff_map_points_by_geo_ids()` and must be active, `available_for_dropoff`, have `platform_station_id` and coordinates. Missing location falls back only to the configured source station geo_id/coordinates, never to a global first-2000 query.
+- Address search keeps the geocoder marker separately, then reloads selectable points via `mode=nearby`, latitude/longitude and radius expansion `10 -> 25 -> 50` km.
+- Nearby rows come from `search_source_dropoff_points_near()`, using bounding-box filtering plus Haversine distance sorting and returning `distance_km`.
+
 ## Yandex source drop-off selector 0.110.0
 
 - Default source station is read from `YandexDeliverySettings::source_platform_station_id()` and placed into the shared shipment modal as the existing `yandex_source_platform_station_id` field.

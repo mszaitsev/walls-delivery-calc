@@ -1,5 +1,11 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.110.1
+
+Карта выбора `ПВЗ отправления Яндекс` теперь загружает точки только в релевантной географии. При открытии picker отправляет `mode=location`, `source_location_id` и текущий/default `source_platform_station_id`; backend получает все mapped/manual `yandex_geo_id` через `YandexLocationMappingV2Repository::geo_ids_for_location()` и возвращает только map-ready drop-off точки этих geo_id. Если `source_location_id` отсутствует, fallback ограничен default station: используется его `yandex_geo_id` или nearby-поиск вокруг его координат. Глобальный список первых 2000 точек больше не используется.
+
+После поиска адреса JS сначала ставит отдельный search marker, затем делает `mode=nearby` запрос по найденным координатам. Радиус расширяется только `10 км -> 25 км -> 50 км`; после 50 км показывается пустой результат без global fallback. Selectable markers/list заменяются на nearby rows, search marker сохраняется и не является выбираемой точкой. Repository nearby-поиск использует bounding box + Haversine distance, сортирует по расстоянию и возвращает `distance_km`.
+
 ## Статус 0.110.0
 
 В общей модалке подготовки отправления Яндекс появился временный selector `ПВЗ отправления Яндекс`. Начальное значение берётся из настроек службы (`source_platform_station_id`) и по-прежнему попадает в payload как `source.platform_station.platform_id`. Менеджер может открыть существующую карту выбора ПВЗ и выбрать другую точку сдачи; выбор обновляет hidden `yandex_source_platform_station_id`, ставит `yandex_source_station_overridden=1`, пересобирает preview и используется при создании отправления.

@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
@@ -52,6 +53,7 @@ final class OrderShipmentsMetabox {
 	private const ACTION_CDEK_BARCODE_PDF = 'wdc_cdek_barcode_pdf';
 	private const ACTION_DPD_DOCUMENTS_ZIP = 'wdc_dpd_documents_zip';
 	private ?YandexDeliveryPickupPointV2Repository $yandex_pickup_points = null;
+	private ?YandexLocationMappingV2Repository $yandex_location_mapping = null;
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -1703,22 +1705,13 @@ final class OrderShipmentsMetabox {
 		}
 
 		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
-		$mode = 'location' === sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) ) ? 'location' : 'search';
+		$mode = sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) );
+		$mode = in_array( $mode, array( 'location', 'nearby', 'search' ), true ) ? $mode : 'search';
 		$limit = max( 1, min( 'location' === $mode ? 2000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 2000 : 50 ) ) ) );
 		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
 		$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? '' ) );
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key && 'source_dropoff' === $purpose ) {
-			$rows = $this->yandex_pickup_points()->search_source_dropoff_points(
-				array(
-					'query' => $query,
-					'limit' => $limit,
-				)
-			);
-			wp_send_json_success(
-				array(
-					'points' => array_map( array( $this, 'yandex_source_dropoff_ajax_row' ), $rows ),
-				)
-			);
+			$this->ajax_search_yandex_source_dropoff_points( $mode, $limit );
 		}
 		if ( DpdSettings::CARRIER_KEY === $carrier_key && $this->dpd_pickup_points instanceof DpdPickupPointService ) {
 			$city_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['city_id'] ?? '' ) );
@@ -2399,12 +2392,103 @@ final class OrderShipmentsMetabox {
 		return 1 === preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
 	}
 
+	private function ajax_search_yandex_source_dropoff_points( string $mode, int $limit ): void {
+		$limit = max( 1, min( 2000, $limit ) );
+		$source_location_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['source_location_id'] ?? $_POST['location_id'] ?? '' ) );
+		$source_platform_station_id = sanitize_text_field( wp_unslash( $_POST['source_platform_station_id'] ?? '' ) );
+		$default_row = '' !== trim( $source_platform_station_id ) ? $this->yandex_pickup_points()->find( $source_platform_station_id ) : null;
+		$context = array(
+			'mode' => $mode,
+			'center' => $this->yandex_source_dropoff_center( is_array( $default_row ) ? $default_row : null, array() ),
+			'radius_km' => null,
+			'total' => 0,
+			'source_location_id' => $source_location_id,
+			'yandex_geo_ids' => array(),
+		);
+
+		if ( 'nearby' === $mode ) {
+			$latitude = filter_var( wp_unslash( $_POST['latitude'] ?? $_POST['lat'] ?? null ), FILTER_VALIDATE_FLOAT );
+			$longitude = filter_var( wp_unslash( $_POST['longitude'] ?? $_POST['lng'] ?? null ), FILTER_VALIDATE_FLOAT );
+			$radius_km = filter_var( wp_unslash( $_POST['radius_km'] ?? 10 ), FILTER_VALIDATE_FLOAT );
+			if ( false === $latitude || false === $longitude || $latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180 ) {
+				wp_send_json_error( array( 'message' => __( 'Не удалось определить область поиска ПВЗ.', 'walls-delivery-calc' ) ), 400 );
+			}
+			$radius_km = false === $radius_km ? 10.0 : max( 1.0, min( 50.0, (float) $radius_km ) );
+			$rows = $this->yandex_pickup_points()->search_source_dropoff_points_near( (float) $latitude, (float) $longitude, $radius_km, min( 200, $limit ) );
+			$context['center'] = array( 'lat' => (float) $latitude, 'lng' => (float) $longitude );
+			$context['radius_km'] = $radius_km;
+			$context['total'] = count( $rows );
+			wp_send_json_success(
+				array(
+					'points' => array_map( array( $this, 'yandex_source_dropoff_ajax_row' ), $rows ),
+					'context' => $context,
+					'message' => array() === $rows ? __( 'Рядом с найденным адресом нет ПВЗ Яндекс, принимающих отправления.', 'walls-delivery-calc' ) : '',
+				)
+			);
+		}
+
+		$geo_ids = $source_location_id > 0 ? $this->yandex_location_mapping()->geo_ids_for_location( $source_location_id ) : array();
+		if ( array() === $geo_ids && is_array( $default_row ) && (int) ( $default_row['yandex_geo_id'] ?? 0 ) > 0 ) {
+			$geo_ids = array( (int) $default_row['yandex_geo_id'] );
+		}
+		if ( array() !== $geo_ids ) {
+			$rows = $this->yandex_pickup_points()->source_dropoff_map_points_by_geo_ids( $geo_ids, $limit );
+		} elseif ( is_array( $default_row ) && is_numeric( $default_row['latitude'] ?? null ) && is_numeric( $default_row['longitude'] ?? null ) ) {
+			$rows = $this->yandex_pickup_points()->search_source_dropoff_points_near( (float) $default_row['latitude'], (float) $default_row['longitude'], 10.0, min( 200, $limit ) );
+		} else {
+			$rows = array();
+		}
+
+		$context['mode'] = 'location';
+		$context['center'] = $this->yandex_source_dropoff_center( is_array( $default_row ) ? $default_row : null, $rows );
+		$context['total'] = count( $rows );
+		$context['yandex_geo_ids'] = array_values( array_map( 'intval', $geo_ids ) );
+		wp_send_json_success(
+			array(
+				'points' => array_map( array( $this, 'yandex_source_dropoff_ajax_row' ), $rows ),
+				'context' => $context,
+				'message' => array() === $rows ? __( 'В выбранном городе не найдены ПВЗ Яндекс, принимающие отправления.', 'walls-delivery-calc' ) : '',
+			)
+		);
+	}
+
 	private function yandex_pickup_points(): YandexDeliveryPickupPointV2Repository {
 		if ( ! $this->yandex_pickup_points instanceof YandexDeliveryPickupPointV2Repository ) {
 			$this->yandex_pickup_points = new YandexDeliveryPickupPointV2Repository();
 		}
 
 		return $this->yandex_pickup_points;
+	}
+
+	private function yandex_location_mapping(): YandexLocationMappingV2Repository {
+		if ( ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
+			$this->yandex_location_mapping = new YandexLocationMappingV2Repository();
+		}
+
+		return $this->yandex_location_mapping;
+	}
+
+	/**
+	 * @param array<string,mixed>|null $source_row
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<string,float>|null
+	 */
+	private function yandex_source_dropoff_center( ?array $source_row, array $rows ): ?array {
+		if ( is_array( $source_row ) && is_numeric( $source_row['latitude'] ?? null ) && is_numeric( $source_row['longitude'] ?? null ) ) {
+			return array( 'lat' => (float) $source_row['latitude'], 'lng' => (float) $source_row['longitude'] );
+		}
+		$lat_sum = 0.0;
+		$lng_sum = 0.0;
+		$count = 0;
+		foreach ( $rows as $row ) {
+			if ( is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null ) ) {
+				$lat_sum += (float) $row['latitude'];
+				$lng_sum += (float) $row['longitude'];
+				++$count;
+			}
+		}
+
+		return $count > 0 ? array( 'lat' => round( $lat_sum / $count, 7 ), 'lng' => round( $lng_sum / $count, 7 ) ) : null;
 	}
 
 	/**
@@ -2502,6 +2586,7 @@ final class OrderShipmentsMetabox {
 			'drop_off' => true,
 			'available_for_dropoff' => true,
 			'marker_type' => 'source_dropoff',
+			'distance_km' => isset( $row['distance_km'] ) ? (float) $row['distance_km'] : null,
 		);
 	}
 

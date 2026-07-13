@@ -1721,6 +1721,11 @@
     data.append('lat', context.lat || '');
     data.append('lng', context.lng || '');
     data.append('purpose', context.purpose || '');
+    data.append('source_location_id', context.sourceLocationId || '');
+    data.append('source_platform_station_id', context.sourcePlatformStationId || '');
+    data.append('latitude', context.latitude || context.lat || '');
+    data.append('longitude', context.longitude || context.lng || '');
+    data.append('radius_km', context.radiusKm || '');
     return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
       method: 'POST',
       credentials: 'same-origin',
@@ -1732,7 +1737,10 @@
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось найти ПВЗ.');
         }
-        return Array.isArray(payload.data && payload.data.points) ? payload.data.points.map(normalizePickupPoint) : [];
+        const result = Array.isArray(payload.data && payload.data.points) ? payload.data.points.map(normalizePickupPoint) : [];
+        result.wdcContext = payload.data && payload.data.context ? payload.data.context : {};
+        result.wdcMessage = payload.data && payload.data.message ? String(payload.data.message) : '';
+        return result;
       });
   }
 
@@ -1797,6 +1805,9 @@
       serviceKey: 'yandex_delivery',
       pickupFamily: 'yandex_delivery:source_dropoff',
       purpose: 'source_dropoff',
+      sourceLocationId: locationId,
+      sourcePlatformStationId: fieldValue(form, '[data-wdc-yandex-source-station-id]'),
+      radiusKm: '',
       city: '',
       cityId: '',
       region: '',
@@ -1808,6 +1819,10 @@
       lat: fieldValue(form, '[data-wdc-yandex-source-lat]'),
       lng: fieldValue(form, '[data-wdc-yandex-source-lng]')
     };
+  }
+
+  function isYandexSourceDropoffContext(context) {
+    return context && context.carrierKey === 'yandex_delivery' && context.purpose === 'source_dropoff';
   }
 
   function setYandexSourceDropoffWarning(form, message) {
@@ -2037,6 +2052,46 @@
       renderList();
     }
 
+    function yandexResponseCenter(found) {
+      const center = found && found.wdcContext && found.wdcContext.center ? found.wdcContext.center : null;
+      const lat = center && center.lat !== null && center.lat !== undefined ? parseFloat(center.lat) : null;
+      const lng = center && center.lng !== null && center.lng !== undefined ? parseFloat(center.lng) : null;
+      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null;
+    }
+
+    function renderYandexSourcePoints(found, message, center) {
+      points = found || [];
+      status.textContent = points.length ? message + ' Найдено: ' + points.length : (points.wdcMessage || message + ' ПВЗ не найдены.');
+      if (provider && provider.renderMarkers) {
+        provider.renderMarkers(points, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: searchMarker });
+        if (center && provider.setCenter) {
+          provider.setCenter(center.lat, center.lng, 14);
+        }
+      }
+      previewPoint = null;
+      renderList();
+      updateConfirmButton();
+    }
+
+    function loadYandexSourceNearby(marker, radii, index) {
+      const radius = radii[index] || 10;
+      status.textContent = 'Ищем ПВЗ Яндекс рядом с найденным адресом...';
+      return pickupSearchRequest(form, '', 100, controller.signal, 'nearby', Object.assign({}, context, {
+        latitude: marker.lat,
+        longitude: marker.lng,
+        lat: '',
+        lng: '',
+        radiusKm: radius
+      }))
+        .then((found) => {
+          if (!found.length && index < radii.length - 1) {
+            return loadYandexSourceNearby(marker, radii, index + 1);
+          }
+          renderYandexSourcePoints(found, found.length ? 'Адрес найден. Радиус ' + radius + ' км.' : 'Рядом с найденным адресом нет ПВЗ Яндекс, принимающих отправления.', { lat: marker.lat, lng: marker.lng });
+          return found;
+        });
+    }
+
     function runSearch(mode) {
       mode = mode || 'search';
       const value = String(query.value || '').trim();
@@ -2058,11 +2113,22 @@
         }, controller.signal)
           .then((result) => {
             searchMarker = addressMarkerFromResult(result);
+            if (isYandexSourceDropoffContext(context)) {
+              if (searchMarker) {
+                return loadYandexSourceNearby(searchMarker, [10, 25, 50], 0);
+              }
+              points = [];
+              renderSearchResults('Адрес не найден.');
+              return null;
+            }
             renderSearchResults(searchMarker ? 'Адрес найден.' : 'Адрес не найден.');
           })
           .catch((error) => {
             if (error.name === 'AbortError') return;
             searchMarker = null;
+            if (isYandexSourceDropoffContext(context)) {
+              points = [];
+            }
             renderSearchResults(error.message || 'Адрес не найден.');
           });
         return;
@@ -2071,6 +2137,10 @@
       status.textContent = 'Поиск...';
       pickupSearchRequest(form, value, mode === 'location' ? 2000 : 100, controller.signal, mode, context)
         .then((found) => {
+          if (isYandexSourceDropoffContext(context)) {
+            renderYandexSourcePoints(found, found.length ? 'ПВЗ Яндекс загружены.' : 'В выбранном городе не найдены ПВЗ Яндекс, принимающие отправления.', yandexResponseCenter(found));
+            return;
+          }
           points = found;
           status.textContent = points.length ? 'Найдено: ' + points.length : 'ПВЗ не найдены.';
           if (provider && provider.renderMarkers) {
@@ -2125,14 +2195,14 @@
         center: {
           lat: Number.isFinite(initialLat) ? initialLat : 55.751244,
           lng: Number.isFinite(initialLng) ? initialLng : 37.618423,
-          zoom: 11
+          zoom: isYandexSourceDropoffContext(context) ? 14 : 11
         },
         yandexApiKey: config.yandexApiKey || '',
         onBoundsChange: function () {}
       });
       provider.onPointClick(function (point) { preview(point); });
       if (provider.onPopupSelect) provider.onPopupSelect(function (point) { choose(point); });
-      if (Number.isFinite(initialLat) && Number.isFinite(initialLng) && provider.setCenter) provider.setCenter(initialLat, initialLng, 11);
+      if (Number.isFinite(initialLat) && Number.isFinite(initialLng) && provider.setCenter) provider.setCenter(initialLat, initialLng, isYandexSourceDropoffContext(context) ? 14 : 11);
       window.setTimeout(function () {
         if (provider && provider.invalidateSize) provider.invalidateSize();
       }, 50);

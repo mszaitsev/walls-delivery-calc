@@ -65,6 +65,7 @@ $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
 	array( 'platform_station_id' => 'NSK-1', 'name' => 'ПВЗ Березовая', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Березовая 1', 'yandex_geo_id' => 65, 'latitude' => 55.030199, 'longitude' => 82.92043, 'available_for_dropoff' => 1, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-4', 'name' => 'ПВЗ Станционная', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Станционная 4', 'yandex_geo_id' => 65, 'latitude' => 55.020199, 'longitude' => 82.93043, 'available_for_dropoff' => 1, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-5', 'name' => 'ПВЗ Фрунзе', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Фрунзе 5', 'yandex_geo_id' => 66, 'latitude' => 55.040199, 'longitude' => 82.94043, 'available_for_dropoff' => 1, 'active' => 1 ),
+	array( 'platform_station_id' => 'NSK-FAR', 'name' => 'ПВЗ Дальний', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Дальний 99', 'yandex_geo_id' => 65, 'latitude' => 55.300000, 'longitude' => 83.300000, 'available_for_dropoff' => 1, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-2', 'name' => 'ПВЗ без сдачи', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Красный 2', 'yandex_geo_id' => 65, 'latitude' => 55.050199, 'longitude' => 82.95043, 'available_for_dropoff' => 0, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-3', 'name' => 'Неактивный ПВЗ', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Ленина 3', 'yandex_geo_id' => 65, 'latitude' => 55.060199, 'longitude' => 82.96043, 'available_for_dropoff' => 1, 'active' => 0 ),
 	array( 'platform_station_id' => 'NSK-6', 'name' => 'Без координат', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Без координат', 'yandex_geo_id' => 65, 'available_for_dropoff' => 1, 'active' => 1 ),
@@ -90,13 +91,23 @@ yandex_source_assert( ! str_contains( $source_dropoff_method, '$limit' ) && ! st
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
 $points = $repository->source_dropoff_points_by_geo_ids( array( 66, 65, 66, 0, -1 ) );
-yandex_source_assert( 4 === count( $points ), 'Source station point list must return all matching active dropoff points for all selected yandex_geo_id values, including admin rows without map coordinates.' );
+yandex_source_assert( 5 === count( $points ), 'Source station point list must return all matching active dropoff points for all selected yandex_geo_id values, including admin rows without map coordinates.' );
 $point_ids = array_column( $points, 'platform_station_id' );
 sort( $point_ids, SORT_STRING );
-yandex_source_assert( array( 'NSK-1', 'NSK-4', 'NSK-5', 'NSK-6' ) === $point_ids, 'Source station point list must include all expected active dropoff ids without relying on Russian byte-sort order.' );
-yandex_source_assert( 3 === count( $repository->source_dropoff_points_by_geo_id( 65 ) ), 'Single geo id wrapper must remain compatible.' );
-$map_points = $repository->search_source_dropoff_points( array( 'query' => 'Новосибирск', 'limit' => 20 ) );
-yandex_source_assert( array( 'NSK-1', 'NSK-4', 'NSK-5' ) === array_column( $map_points, 'platform_station_id' ), 'Modal source dropoff map search must include only active dropoff Yandex points with coordinates and platform_station_id.' );
+yandex_source_assert( array( 'NSK-1', 'NSK-4', 'NSK-5', 'NSK-6', 'NSK-FAR' ) === $point_ids, 'Source station point list must include all expected active dropoff ids without relying on Russian byte-sort order.' );
+yandex_source_assert( 4 === count( $repository->source_dropoff_points_by_geo_id( 65 ) ), 'Single geo id wrapper must remain compatible.' );
+$map_points = $repository->source_dropoff_map_points_by_geo_ids( array( 65, 66 ), 20 );
+$map_ids = array_column( $map_points, 'platform_station_id' );
+sort( $map_ids, SORT_STRING );
+yandex_source_assert( array( 'NSK-1', 'NSK-4', 'NSK-5', 'NSK-FAR' ) === $map_ids, 'Modal initial source dropoff map must use source yandex_geo_ids and exclude points without coordinates.' );
+$near_points = $repository->search_source_dropoff_points_near( 55.0302, 82.9204, 10.0, 20 );
+$near_ids = array_column( $near_points, 'platform_station_id' );
+yandex_source_assert( in_array( 'NSK-1', $near_ids, true ) && in_array( 'NSK-4', $near_ids, true ) && in_array( 'NSK-5', $near_ids, true ), 'Nearby source search must include close Novosibirsk dropoff points.' );
+yandex_source_assert( ! in_array( 'NSK-FAR', $near_ids, true ) && ! in_array( 'MSK-1', $near_ids, true ), 'Nearby source search must exclude points outside the requested radius.' );
+$distances = array_map( static fn( array $row ): float => (float) ( $row['distance_km'] ?? -1 ), $near_points );
+$sorted_distances = $distances;
+sort( $sorted_distances, SORT_NUMERIC );
+yandex_source_assert( $distances === $sorted_distances && min( $distances ) >= 0, 'Nearby source search must add distance_km and sort by Haversine distance ascending.' );
 yandex_source_assert( null !== $repository->source_dropoff_point_by_platform_station_id( 'NSK-1' ) && null === $repository->source_dropoff_point_by_platform_station_id( 'NSK-2' ) && null === $repository->source_dropoff_point_by_platform_station_id( 'NSK-3' ), 'Backend source override validation helper must accept only active available_for_dropoff points.' );
 yandex_source_assert( ! in_array( 'MSK-1', array_column( $points, 'platform_station_id' ), true ), 'PVZ with another yandex_geo_id must not be shown.' );
 yandex_source_assert( ! in_array( 'NSK-2', array_column( $points, 'platform_station_id' ), true ), 'available_for_dropoff=0 PVZ must not be shown.' );
@@ -143,7 +154,8 @@ yandex_source_assert( ! str_contains( $checkout_source, 'pickup map' ) && ! str_
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 yandex_source_assert( str_contains( $metabox_source, 'data-wdc-open-yandex-source-dropoff-picker' ) && str_contains( $metabox_source, 'name="yandex_source_station_overridden"' ) && str_contains( $metabox_source, 'ПВЗ отправления Яндекс' ), 'Shipment modal must render a temporary Yandex source dropoff selector with the existing source platform station field.' );
-yandex_source_assert( str_contains( $metabox_source, 'purpose' ) && str_contains( $metabox_source, "'source_dropoff'" ) && str_contains( $metabox_source, 'search_source_dropoff_points' ) && str_contains( $metabox_source, 'yandex_source_dropoff_ajax_row' ), 'Shipment modal pickup search endpoint must expose Yandex source dropoff points through the shared map search action.' );
+yandex_source_assert( str_contains( $metabox_source, 'purpose' ) && str_contains( $metabox_source, "'source_dropoff'" ) && str_contains( $metabox_source, 'source_dropoff_map_points_by_geo_ids' ) && str_contains( $metabox_source, 'search_source_dropoff_points_near' ) && str_contains( $metabox_source, 'yandex_source_dropoff_ajax_row' ), 'Shipment modal pickup search endpoint must expose scoped initial and nearby Yandex source dropoff points through the shared map search action.' );
+yandex_source_assert( str_contains( $metabox_source, 'geo_ids_for_location' ) && str_contains( $metabox_source, 'source_location_id' ) && str_contains( $metabox_source, 'Не удалось определить область поиска ПВЗ.' ) && ! str_contains( $metabox_source, "search_source_dropoff_points(\n\t\t\t\tarray(" ), 'Shipment modal Yandex source search must use source_location_id/geo ids or nearby coordinates instead of global first-page dropoff search.' );
 yandex_source_assert( str_contains( $metabox_source, 'validate_yandex_source_station' ) && str_contains( $metabox_source, 'ПВЗ отправления Яндекс не найден.' ) && str_contains( $metabox_source, 'Выбранный ПВЗ Яндекс не принимает отправления.' ) && str_contains( $metabox_source, 'Выбранный ПВЗ Яндекс сейчас недоступен.' ), 'Preview/create validation must reject forged Yandex source overrides before shipment API calls.' );
 yandex_source_assert( ! str_contains( $metabox_source, "update_option( 'yandex_source" ) && ! str_contains( $metabox_source, "update_post_meta( \$order_id, '_wdc_yandex_source" ), 'Temporary source dropoff selector must not persist override into settings or order meta.' );
 
@@ -151,7 +163,9 @@ $draft_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipme
 yandex_source_assert( str_contains( $draft_source, "'yandex_source_platform_station_id' => \$source_station" ) && str_contains( $draft_source, "'yandex_source_station_overridden' => \$source_station_overridden ? '1' : '0'" ) && str_contains( $draft_source, "'yandex_pickup_platform_station_id' => \$pickup_code" ), 'DraftFactory must submit selected temporary source separately from unchanged destination pickup point.' );
 
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
-yandex_source_assert( str_contains( $js_source, 'function yandexSourceDropoffContext' ) && str_contains( $js_source, 'purpose: \'source_dropoff\'' ) && str_contains( $js_source, "data.append('purpose', context.purpose || '')" ), 'Shipment admin JS must route Yandex source map searches through the shared picker with purpose=source_dropoff.' );
+yandex_source_assert( str_contains( $js_source, 'function yandexSourceDropoffContext' ) && str_contains( $js_source, 'purpose: \'source_dropoff\'' ) && str_contains( $js_source, "data.append('purpose', context.purpose || '')" ) && str_contains( $js_source, "data.append('source_location_id'" ) && str_contains( $js_source, "data.append('source_platform_station_id'" ), 'Shipment admin JS must route Yandex source map searches through the shared picker with purpose=source_dropoff and source context.' );
+yandex_source_assert( str_contains( $js_source, 'loadYandexSourceNearby' ) && str_contains( $js_source, "[10, 25, 50]" ) && str_contains( $js_source, "'nearby'" ) && str_contains( $js_source, "radiusKm: radius" ) && ! str_contains( $js_source, 'source_dropoff_global' ), 'Yandex source address search must reload nearby points with 10/25/50 km radius expansion and no global fallback.' );
+yandex_source_assert( str_contains( $js_source, 'provider.renderMarkers(points, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: searchMarker })' ) && str_contains( $js_source, 'provider.setCenter(center.lat, center.lng, 14)' ), 'Yandex source picker must preserve the search marker while replacing selectable dropoff markers and centering on scoped coordinates.' );
 yandex_source_assert( str_contains( $js_source, 'function updateYandexSourceDropoffDraft' ) && str_contains( $js_source, '[data-wdc-yandex-source-station-id]' ) && str_contains( $js_source, '[data-wdc-yandex-source-station-overridden]' ) && str_contains( $js_source, 'requestPreview(form)' ), 'Yandex source dropoff selection must update hidden fields and refresh preview inside the current modal form.' );
 yandex_source_assert( str_contains( $js_source, 'function resetYandexSourceDropoff' ) && str_contains( $js_source, 'dataset.defaultId' ) && ! str_contains( $js_source, 'localStorage' ) && ! str_contains( $js_source, 'sessionStorage' ), 'Yandex source reset must restore DOM defaults without browser storage persistence.' );
 
