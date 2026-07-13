@@ -173,6 +173,147 @@ final class YandexDeliveryPickupPointV2Repository {
 		return $rows[0] ?? null;
 	}
 
+	/** @return array<string,mixed>|null */
+	public function source_dropoff_point_by_platform_station_id( string $platform_station_id ): ?array {
+		$row = $this->find( $platform_station_id );
+
+		return is_array( $row ) && $this->is_source_dropoff_row( $row ) ? $row : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function search_source_dropoff_points( array $filters = array() ): array {
+		$limit = max( 1, min( 2000, (int) ( $filters['limit'] ?? 100 ) ) );
+		$query = $this->source_dropoff_query( (string) ( $filters['query'] ?? '' ) );
+
+		if ( $this->has_test_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->{$this->test_rows_property()},
+					fn( array $row ): bool => $this->is_source_dropoff_row( $row )
+						&& $this->has_coordinates( $row )
+						&& $this->source_dropoff_matches_query( $row, $query )
+				)
+			);
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
+			);
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$this->create_schema_if_needed();
+		$where = array(
+			'active = 1',
+			'available_for_dropoff = 1',
+			"platform_station_id <> ''",
+			'latitude IS NOT NULL',
+			'longitude IS NOT NULL',
+		);
+		$args = array();
+		if ( '' !== $query ) {
+			$like = '%' . $this->wpdb->esc_like( $query ) . '%';
+			$where[] = '(platform_station_id LIKE %s OR name LIKE %s OR locality LIKE %s OR full_address LIKE %s)';
+			array_push( $args, $like, $like, $like, $like );
+		}
+		$args[] = $limit;
+		$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, full_address, latitude, longitude, schedule_text, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY locality ASC, name ASC, platform_station_id ASC LIMIT %d';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * @param array<int,mixed> $yandex_geo_ids
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function source_dropoff_map_points_by_geo_ids( array $yandex_geo_ids, int $limit = 2000 ): array {
+		$yandex_geo_ids = array_values( array_unique( array_filter( array_map( 'intval', $yandex_geo_ids ), static fn( int $geo_id ): bool => $geo_id > 0 ) ) );
+		sort( $yandex_geo_ids, SORT_NUMERIC );
+		$limit = max( 1, min( 2000, $limit ) );
+		if ( array() === $yandex_geo_ids ) {
+			return array();
+		}
+		if ( $this->has_test_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->{$this->test_rows_property()},
+					fn( array $row ): bool => $this->is_source_dropoff_row( $row )
+						&& $this->has_coordinates( $row )
+						&& in_array( (int) ( $row['yandex_geo_id'] ?? 0 ), $yandex_geo_ids, true )
+				)
+			);
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
+			);
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$this->create_schema_if_needed();
+		$placeholders = implode( ', ', array_fill( 0, count( $yandex_geo_ids ), '%d' ) );
+		$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, full_address, latitude, longitude, schedule_text, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND yandex_geo_id IN (' . $placeholders . ") AND platform_station_id <> %s AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY locality ASC, name ASC, platform_station_id ASC LIMIT %d";
+		$args = array_merge( $yandex_geo_ids, array( '', $limit ) );
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function search_source_dropoff_points_near( float $latitude, float $longitude, float $radius_km, int $limit = 200 ): array {
+		$radius_km = max( 1.0, min( 50.0, $radius_km ) );
+		$limit = max( 1, min( 200, $limit ) );
+		if ( $latitude < -90.0 || $latitude > 90.0 || $longitude < -180.0 || $longitude > 180.0 ) {
+			return array();
+		}
+		$lat_delta = $radius_km / 111.32;
+		$cos = cos( deg2rad( max( -89.999, min( 89.999, $latitude ) ) ) );
+		$lng_delta = $radius_km / max( 0.001, 111.32 * abs( $cos ) );
+		$min_lat = $latitude - $lat_delta;
+		$max_lat = $latitude + $lat_delta;
+		$min_lng = $longitude - $lng_delta;
+		$max_lng = $longitude + $lng_delta;
+
+		if ( $this->has_test_rows() ) {
+			$candidates = array_values(
+				array_filter(
+					$this->wpdb->{$this->test_rows_property()},
+					fn( array $row ): bool => $this->is_source_dropoff_row( $row )
+						&& $this->has_coordinates( $row )
+						&& (float) $row['latitude'] >= $min_lat
+						&& (float) $row['latitude'] <= $max_lat
+						&& (float) $row['longitude'] >= $min_lng
+						&& (float) $row['longitude'] <= $max_lng
+				)
+			);
+		} else {
+			$this->create_schema_if_needed();
+			$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, full_address, latitude, longitude, schedule_text, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE active = 1 AND available_for_dropoff = 1 AND platform_station_id <> %s AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude BETWEEN %f AND %f AND longitude BETWEEN %f AND %f';
+			$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, '', $min_lat, $max_lat, $min_lng, $max_lng ), ARRAY_A );
+			$candidates = is_array( $rows ) ? $rows : array();
+		}
+
+		$near = array();
+		foreach ( $candidates as $row ) {
+			$distance = $this->haversine_distance_km( $latitude, $longitude, (float) $row['latitude'], (float) $row['longitude'] );
+			if ( $distance <= $radius_km ) {
+				$row['distance_km'] = round( $distance, 3 );
+				$near[] = $row;
+			}
+		}
+		usort(
+			$near,
+			static fn( array $a, array $b ): int => (float) ( $a['distance_km'] ?? 0 ) <=> (float) ( $b['distance_km'] ?? 0 )
+				?: strcmp( (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['platform_station_id'] ?? '' ) )
+		);
+
+		return array_slice( $near, 0, $limit );
+	}
+
 	/**
 	 * @param array<string,mixed> $filters
 	 * @return array<int,array<string,mixed>>
@@ -524,6 +665,44 @@ final class YandexDeliveryPickupPointV2Repository {
 
 	private function is_source_dropoff_row( array $row ): bool {
 		return ! empty( $row['active'] ) && ! empty( $row['available_for_dropoff'] ) && '' !== trim( (string) ( $row['platform_station_id'] ?? '' ) );
+	}
+
+	private function has_coordinates( array $row ): bool {
+		return is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null );
+	}
+
+	private function source_dropoff_query( string $query ): string {
+		$query = function_exists( 'mb_strtolower' ) ? mb_strtolower( $query ) : strtolower( $query );
+
+		return trim( preg_replace( '/\s+/u', ' ', $query ) ?? $query );
+	}
+
+	private function source_dropoff_matches_query( array $row, string $query ): bool {
+		if ( '' === $query ) {
+			return true;
+		}
+		$haystack = $this->source_dropoff_query(
+			implode(
+				' ',
+				array(
+					(string) ( $row['platform_station_id'] ?? '' ),
+					(string) ( $row['name'] ?? '' ),
+					(string) ( $row['locality'] ?? '' ),
+					(string) ( $row['full_address'] ?? '' ),
+				)
+			)
+		);
+
+		return str_contains( $haystack, $query );
+	}
+
+	private function haversine_distance_km( float $lat1, float $lon1, float $lat2, float $lon2 ): float {
+		$earth_radius_km = 6371.0088;
+		$d_lat = deg2rad( $lat2 - $lat1 );
+		$d_lon = deg2rad( $lon2 - $lon1 );
+		$a = sin( $d_lat / 2 ) ** 2 + cos( deg2rad( $lat1 ) ) * cos( deg2rad( $lat2 ) ) * sin( $d_lon / 2 ) ** 2;
+
+		return 2 * $earth_radius_km * atan2( sqrt( $a ), sqrt( max( 0.0, 1 - $a ) ) );
 	}
 
 	private function is_destination_candidate_row( array $row ): bool {

@@ -1,5 +1,25 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.110.2
+
+Ручной поиск адреса в карте `ПВЗ отправления Яндекс` больше не ограничивается городом настроенного source station. Initial load карты по-прежнему использует `source_location_id` для загрузки drop-off точек исходной географии, но address-search строит отдельный context: `carrier=yandex_delivery`, `purpose=source_dropoff`, `country_code=RU`, без `location_id`, `source_location_id`, FIAS/KLADR/GAR или prefix исходного города. Поэтому запросы вроде `Москва, Ходынский бульвар, 9` и `Казань, Баумана 1` уходят в DaData ровно в пользовательском виде, а не как `Новосибирск, Москва, ...`.
+
+Backend `/wdc/v1/points/address-search` дополнительно защищён от старого JS/forged request: для `yandex_delivery + source_dropoff` он принудительно вызывает общий `PickupAddressSearchService` с `location_id=0` и `include_points=false`. После получения координат сохраняется flow 0.110.1: search marker остаётся невыбираемым, selectable markers заменяются nearby drop-off точками Яндекса вокруг найденного адреса с радиусами `10 км -> 25 км -> 50 км`, без возврата к global fallback.
+
+## Статус 0.110.1
+
+Карта выбора `ПВЗ отправления Яндекс` теперь загружает точки только в релевантной географии. При открытии picker отправляет `mode=location`, `source_location_id` и текущий/default `source_platform_station_id`; backend получает все mapped/manual `yandex_geo_id` через `YandexLocationMappingV2Repository::geo_ids_for_location()` и возвращает только map-ready drop-off точки этих geo_id. Если `source_location_id` отсутствует, fallback ограничен default station: используется его `yandex_geo_id` или nearby-поиск вокруг его координат. Глобальный список первых 2000 точек больше не используется.
+
+После поиска адреса JS сначала ставит отдельный search marker, затем делает `mode=nearby` запрос по найденным координатам. Радиус расширяется только `10 км -> 25 км -> 50 км`; после 50 км показывается пустой результат без global fallback. Selectable markers/list заменяются на nearby rows, search marker сохраняется и не является выбираемой точкой. Repository nearby-поиск использует bounding box + Haversine distance, сортирует по расстоянию и возвращает `distance_km`.
+
+## Статус 0.110.0
+
+В общей модалке подготовки отправления Яндекс появился временный selector `ПВЗ отправления Яндекс`. Начальное значение берётся из настроек службы (`source_platform_station_id`) и по-прежнему попадает в payload как `source.platform_station.platform_id`. Менеджер может открыть существующую карту выбора ПВЗ и выбрать другую точку сдачи; выбор обновляет hidden `yandex_source_platform_station_id`, ставит `yandex_source_station_overridden=1`, пересобирает preview и используется при создании отправления.
+
+Карта переиспользует общий admin pickup picker/search endpoint, но вызывает его как `carrier_key=yandex_delivery` + `purpose=source_dropoff`. Источник точек — `YandexDeliveryPickupPointV2Repository`; реальный признак сдачи отправлений — `available_for_dropoff`. В карту попадают только активные точки Яндекса с непустым `platform_station_id`, координатами и `available_for_dropoff=true`. Backend preview/create повторно проверяет temporary override: неизвестная, inactive или pickup-only точка возвращает русскую validation error до любого Yandex shipment HTTP.
+
+Override не сохраняется в настройки, WooCommerce order meta, `_wdc_shipments`, local/session storage или cache. Он живёт только в текущем DOM/FormData экземпляре модалки; reset возвращает default из настроек, а reload снова строит draft с default. Canonical source snapshot уже созданного отправления может сохраняться в request/info для аудита, но это не является preference для следующей регистрации. ПВЗ назначения (`yandex_pickup_platform_station_id`) и courier destination не меняются.
+
 ## Статус 0.109.3
 
 В общем блоке `Отправления` Яндекс больше не показывает `request_id` как основную tracking-строку, если canonical `request/info` уже дал `sharing_url`. `YandexShipmentAdapter` формирует structured `tracking_presentation`: label `Отслеживание посылки`, visible text `ссылка`, link URL and clipboard value = полный `sharing_url`. `OrderShipmentsMetabox` выводит ссылку через общий renderer (`target="_blank"`, `rel="noopener noreferrer"`, `esc_url()`), а runtime refresh/manual attach/reconciliation используют тот же общий copy-button без отдельного Yandex clipboard handler.

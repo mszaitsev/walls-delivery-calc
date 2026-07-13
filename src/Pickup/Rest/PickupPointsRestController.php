@@ -134,7 +134,11 @@ final class PickupPointsRestController {
 			return $this->error( 'address_search_unavailable', 'Address search is unavailable.', 503 );
 		}
 		$carrier = $this->carrier( $request );
+		$purpose = sanitize_key( $this->param( $request, 'purpose' ) );
 		$include_points = 'russian_post' === $carrier;
+		$location_id = YandexDeliverySettings::CARRIER_KEY === $carrier && 'source_dropoff' === $purpose
+			? 0
+			: (int) $this->param( $request, 'location_id' );
 
 		$query = trim( $this->param( $request, 'query' ) );
 		if ( '' === $query ) {
@@ -148,7 +152,7 @@ final class PickupPointsRestController {
 					$this->address_search->search(
 						$query,
 						array(
-							'location_id' => (int) $this->param( $request, 'location_id' ),
+							'location_id' => $location_id,
 							'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
 							'include_points' => false,
 						)
@@ -167,7 +171,7 @@ final class PickupPointsRestController {
 			$this->address_search->search(
 				$query,
 				array(
-					'location_id' => (int) $this->param( $request, 'location_id' ),
+					'location_id' => $location_id,
 					'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
 					'point_types' => $types,
 					'include_points' => $include_points,

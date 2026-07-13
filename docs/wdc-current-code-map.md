@@ -1,3 +1,25 @@
+## Yandex source drop-off address search scope 0.110.2
+
+- Initial map loading for the shipment-modal source selector still uses `mode=location`, `source_location_id` and `source_platform_station_id`.
+- Manual address search uses a separate JS context for `carrier_key=yandex_delivery&purpose=source_dropoff`: only carrier/purpose/country are sent to `/wdc/v1/points/address-search`; `location_id`, `source_location_id`, city, FIAS/KLADR/GAR and source-location display fields are intentionally omitted.
+- `PickupPointsRestController::address_search()` defensively forces `location_id=0` for forged/old Yandex source-dropoff address-search requests and passes `include_points=false`; `PickupAddressSearchService` therefore does not prefix the query with the configured source city and does not return Russian Post points.
+- The geocoded coordinate still feeds the existing nearby source-dropoff reload (`10 -> 25 -> 50` km), replacing selectable markers while preserving the non-selectable search marker.
+
+## Yandex source drop-off map scope 0.110.1
+
+- The shipment modal Yandex source picker uses `mode=location` for initial load and sends `source_location_id` plus `source_platform_station_id`; backend resolves mapped/manual `yandex_geo_id` values through `YandexLocationMappingV2Repository::geo_ids_for_location()`.
+- Initial rows come from `YandexDeliveryPickupPointV2Repository::source_dropoff_map_points_by_geo_ids()` and must be active, `available_for_dropoff`, have `platform_station_id` and coordinates. Missing location falls back only to the configured source station geo_id/coordinates, never to a global first-2000 query.
+- Address search keeps the geocoder marker separately, then reloads selectable points via `mode=nearby`, latitude/longitude and radius expansion `10 -> 25 -> 50` km.
+- Nearby rows come from `search_source_dropoff_points_near()`, using bounding-box filtering plus Haversine distance sorting and returning `distance_km`.
+
+## Yandex source drop-off selector 0.110.0
+
+- Default source station is read from `YandexDeliverySettings::source_platform_station_id()` and placed into the shared shipment modal as the existing `yandex_source_platform_station_id` field.
+- `OrderShipmentsMetabox` renders `ПВЗ отправления Яндекс`, uses the shared pickup-map modal, and sends `carrier_key=yandex_delivery&purpose=source_dropoff` to the existing admin pickup search AJAX action.
+- Source drop-off points are loaded from `YandexDeliveryPickupPointV2Repository`; the canonical capability is `available_for_dropoff`. Map rows must also be active, have `platform_station_id` and coordinates.
+- The temporary override is DOM/FormData-only (`yandex_source_station_overridden=1`). It is used by preview/create through `OrderShipmentDraftFactory`, but is not persisted as a preference.
+- Backend validation rejects forged unknown, inactive or non-drop-off overrides before Yandex shipment HTTP calls. Destination pickup fields (`yandex_pickup_platform_station_id`) and courier destination fields are separate and unchanged.
+
 ## Yandex tracking link presentation 0.109.3
 
 - `YandexShipmentAdapter::status_payload()` now adds a backward-compatible `tracking_presentation` array for Yandex shipments. A valid persisted `sharing_url` becomes label `Отслеживание посылки`, visible text `ссылка`, `url=sharing_url` and `copy_value=sharing_url`; invalid/empty URLs fall back to the existing request-id tracking identifier.

@@ -48,6 +48,12 @@
 			if (context.country_code) {
 				params.set('country_code', context.country_code);
 			}
+			if (context.purpose) {
+				params.set('purpose', context.purpose);
+			}
+			if (context.include_points !== undefined) {
+				params.set('include_points', context.include_points ? '1' : '0');
+			}
 			return request('points/address-search?' + params.toString(), { signal: signal });
 		},
 		save: function (pointId, shippingMethodId, point) {
