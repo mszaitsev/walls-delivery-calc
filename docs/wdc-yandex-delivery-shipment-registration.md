@@ -1,5 +1,11 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.109.2
+
+Raw `CANCELLED` теперь обрабатывается как специальное подтверждение успешной отмены Яндекса независимо от admin mapping. В двух cancel lifecycle paths — immediate `request/info` внутри `cancel()` и последующий `update_status()` во время polling/ручного обновления — код считает отдельно `$is_cancelled` и `$is_terminal`, где `$is_terminal = $is_cancelled || terminal(universal mapping)`. При override `CANCELLED -> in_transit` shipment получает universal `in_transit`, shared universal→WooCommerce mapping успевает выполниться, затем локальная запись Яндекса и lookup meta удаляются, а registration sequence сохраняется.
+
+Immediate terminal response после `request/cancel` больше не запускает polling. Если raw status `CANCELLED`, response возвращает `cancelled_and_removed=true` и `auto_poll=false`. Если terminal universal status пришёл для raw status, отличного от `CANCELLED`, shipment остаётся в canonical state, cancel flags очищаются, local remove становится доступен, а response также возвращает `auto_poll=false`. Polling 5 сек × 14 стартует только для non-terminal статуса или временной ошибки получения status после cancel.
+
 ## Статус 0.109.1
 
 Cancel lifecycle после universal status mapping теперь имеет одинаковую защиту в UI и на сервере. `YandexShipmentRegistrationService::cancel()` перед `request/cancel` получает сохранённый shipment и вызывает `YandexShipmentButtonPolicy::resolve()`; если `cancel=false`, API Яндекса не вызывается, shipment не изменяется, а пользователь получает `Текущее отправление Яндекс нельзя отменить.`.

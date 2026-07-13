@@ -1,3 +1,10 @@
+## Yandex raw CANCELLED cancel lifecycle 0.109.2
+
+- `YandexShipmentRegistrationService::update_status()` and `cancel()` now compute cancel lifecycle with two flags: `$is_cancelled = $this->is_cancelled_status( $info->status )` and `$is_terminal = $is_cancelled || $this->is_terminal_status( $info->status )`.
+- `is_terminal_status()` remains a pure universal-mapping decision through `YandexStatusMapping`; raw `CANCELLED` is only merged in at the cancellation lifecycle boundary.
+- Raw `CANCELLED` always completes Yandex cancellation and local auto-delete, even if an admin maps `CANCELLED` to a non-terminal universal status such as `in_transit`. The mapped universal status is still saved/applied to WooCommerce before the local shipment and lookup meta are deleted.
+- Immediate `request/info` after `request/cancel` no longer starts polling when it already returns a terminal result. Raw `CANCELLED` returns `cancelled_and_removed=true` and `auto_poll=false`; other terminal universal statuses keep the shipment, clear cancel flags, expose local remove and also return `auto_poll=false`.
+
 ## Yandex cancel lifecycle guard 0.109.1
 
 - `YandexShipmentRegistrationService::cancel()` now delegates the server-side cancel decision to `YandexShipmentButtonPolicy::resolve()` before `request/cancel`. A forged AJAX/service call for a shipment whose universal status no longer allows cancel returns `Текущее отправление Яндекс нельзя отменить.` and performs no Yandex HTTP request.

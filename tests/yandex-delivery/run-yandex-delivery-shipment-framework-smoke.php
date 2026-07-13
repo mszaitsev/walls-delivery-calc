@@ -405,7 +405,7 @@ $cancel = $adapter->cancel_in_carrier( $order );
 yd_framework_assert( ! empty( $cancel['success'] ) && 6 === count( $fake->requests ), 'Yandex cancel must call request/cancel and canonical request/info.' );
 $cancel_body = json_decode( (string) ( $fake->requests[4]['args']['body'] ?? '{}' ), true );
 yd_framework_assert( 'REQ-777' === (string) ( $cancel_body['request_id'] ?? '' ), 'Yandex cancel must use request_id, not courier_order_id/tracking_number.' );
-yd_framework_assert( ! empty( $cancel['cancelled_and_removed'] ) && array() === $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Canonical CANCELLED after cancel must automatically remove local Yandex shipment and lookup meta.' );
+yd_framework_assert( ! empty( $cancel['cancelled_and_removed'] ) && empty( $cancel['auto_poll'] ) && array() === $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Canonical CANCELLED after cancel must automatically remove local Yandex shipment, skip polling and clear lookup meta.' );
 
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 yd_framework_assert( str_contains( $source, 'create_yandex_request_from_order' ) && str_contains( $source, 'shipment_item_rows' ) && ! str_contains( $source, 'shipment_item_rows_from_rows' ), 'OrderShipmentDraftFactory must provide canonical shipment item rows without a second Yandex parser.' );
@@ -574,7 +574,7 @@ list( $cancel_pending_repository, $cancel_pending_adapter, $cancel_pending_creat
 );
 yd_framework_assert( $cancel_pending_creation->create( $cancel_pending_order, yd_framework_request() )->success, 'Cancel pending scenario must start from successful create.' );
 $cancel_pending = $cancel_pending_adapter->cancel_in_carrier( $cancel_pending_order );
-yd_framework_assert( ! empty( $cancel_pending['success'] ) && 'CREATED' === (string) ( $cancel_pending['status'] ?? '' ), 'Async cancel must be accepted even when immediate request/info is still CREATED.' );
+yd_framework_assert( ! empty( $cancel_pending['success'] ) && ! empty( $cancel_pending['accepted'] ) && ! empty( $cancel_pending['cancellation_started'] ) && ! empty( $cancel_pending['auto_poll'] ) && 5000 === (int) ( $cancel_pending['poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel_pending['poll_max_attempts'] ?? 0 ) && 'CREATED' === (string) ( $cancel_pending['status'] ?? '' ), 'Async cancel must start polling when immediate request/info is still non-terminal CREATED.' );
 $cancel_pending_shipment = $cancel_pending_repository->find_by_carrier( $cancel_pending_order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( 'cancellation_started' === (string) ( $cancel_pending_shipment['status'] ?? '' ) && ! empty( $cancel_pending_shipment['yandex_cancel_requested'] ) && 'cancellation_started' === (string) ( $cancel_pending_shipment['yandex_cancel_reason'] ?? '' ), 'Non-terminal info after cancel must keep local cancellation_started state.' );
 $cancel_pending_policy = ( new YandexShipmentButtonPolicy() )->resolve( $cancel_pending_shipment );
@@ -583,7 +583,7 @@ $cancel_pending_remove = $cancel_pending_adapter->remove_from_order( $cancel_pen
 yd_framework_assert( empty( $cancel_pending_remove['success'] ) && array() !== $cancel_pending_repository->find_by_carrier( $cancel_pending_order, YandexDeliverySettings::CARRIER_KEY ), 'Server-side remove must reject cancellation_started before polling exhaustion.' );
 yd_framework_assert( ! str_contains( implode( "\n", $cancel_pending_order->notes ), 'отменено' ), 'Cancel pending note must not claim final cancellation.' );
 $cancel_completed = $cancel_pending_adapter->update_status( $cancel_pending_order );
-yd_framework_assert( ! empty( $cancel_completed['success'] ) && 'CANCELLED' === (string) ( $cancel_completed['status'] ?? '' ), 'Subsequent update_status must complete async cancellation when request/info returns CANCELLED.' );
+yd_framework_assert( ! empty( $cancel_completed['success'] ) && ! empty( $cancel_completed['cancelled_and_removed'] ) && 'CANCELLED' === (string) ( $cancel_completed['status'] ?? '' ), 'Subsequent update_status must complete async cancellation when request/info returns CANCELLED.' );
 $cancel_completed_shipment = $cancel_pending_repository->find_by_carrier( $cancel_pending_order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( array() === $cancel_completed_shipment && '' === (string) $cancel_pending_order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Confirmed cancellation must automatically remove local Yandex shipment and lookup meta.' );
 $notes_before_repeat = count( array_filter( $cancel_pending_order->notes, static fn ( string $note ): bool => str_contains( $note, 'Отправление Яндекс отменено.' ) ) );
@@ -802,7 +802,7 @@ foreach ( array(
 	$terminal_cancel = $terminal_adapter->cancel_in_carrier( $terminal_order );
 	$terminal_shipment = $terminal_repository->find_by_carrier( $terminal_order, YandexDeliverySettings::CARRIER_KEY );
 	$terminal_policy = ( new YandexShipmentButtonPolicy() )->resolve( $terminal_shipment );
-	yd_framework_assert( ! empty( $terminal_cancel['success'] ) && $terminal_status === (string) ( $terminal_cancel['status'] ?? '' ), 'Cancel follow-up info must surface non-CANCELLED terminal status.' );
+	yd_framework_assert( ! empty( $terminal_cancel['success'] ) && empty( $terminal_cancel['accepted'] ) && empty( $terminal_cancel['cancellation_started'] ) && empty( $terminal_cancel['auto_poll'] ) && $terminal_status === (string) ( $terminal_cancel['status'] ?? '' ), 'Immediate non-CANCELLED terminal status after cancel must surface status and must not start polling.' );
 	yd_framework_assert( 'created' === (string) ( $terminal_shipment['status'] ?? '' ) && $terminal_status === (string) ( $terminal_shipment['yandex_status'] ?? '' ) && $expected_universal_status === (string) ( $terminal_shipment['universal_status_code'] ?? '' ) && empty( $terminal_shipment['yandex_cancel_requested'] ), 'Non-CANCELLED terminal universal status must close cancellation_started lifecycle.' );
 	yd_framework_assert( empty( $terminal_policy['cancel'] ) && ! empty( $terminal_policy['remove'] ) && 5 === count( $terminal_http->requests ), 'Terminal universal status must hide cancel, allow remove and avoid repeated request/cancel.' );
 	yd_framework_assert( ! str_contains( implode( "\n", $terminal_order->notes ), 'Отправление Яндекс отменено.' ) && str_contains( implode( "\n", $terminal_order->notes ), 'Получен терминальный статус Яндекс: ' . $terminal_status ), 'Non-CANCELLED terminal cancel resolution must not write successful-cancel note.' );
@@ -823,7 +823,54 @@ $cancelled_mapping_settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY
 $cancelled_mapping_settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::CANCELLED => 'wc-completed' ) );
 yd_framework_assert( $cancelled_mapping_creation->create( $cancelled_mapping_order, yd_framework_request( 973, '973' ) )->success, 'CANCELLED mapping scenario must start from successful create.' );
 $cancelled_mapping_result = $cancelled_mapping_adapter->cancel_in_carrier( $cancelled_mapping_order );
-yd_framework_assert( ! empty( $cancelled_mapping_result['cancelled_and_removed'] ) && 'completed' === $cancelled_mapping_order->get_status() && array() === $cancelled_mapping_repository->find_by_carrier( $cancelled_mapping_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $cancelled_mapping_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 0 === (int) ( $cancelled_mapping_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ) && 5 === count( $cancelled_mapping_http->requests ), 'Raw CANCELLED must apply universal-to-Woo mapping before local auto-delete and preserve sequence meta.' );
+yd_framework_assert( ! empty( $cancelled_mapping_result['cancelled_and_removed'] ) && empty( $cancelled_mapping_result['auto_poll'] ) && 'completed' === $cancelled_mapping_order->get_status() && array() === $cancelled_mapping_repository->find_by_carrier( $cancelled_mapping_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $cancelled_mapping_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 0 === (int) ( $cancelled_mapping_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ) && 5 === count( $cancelled_mapping_http->requests ), 'Raw CANCELLED with default mapping must apply universal-to-Woo mapping before local auto-delete, skip polling and preserve sequence meta.' );
+
+$cancelled_override_immediate_order = new YdFrameworkOrder( 979, '979' );
+list( $cancelled_override_immediate_repository, $cancelled_override_immediate_adapter, $cancelled_override_immediate_creation, $cancelled_override_immediate_registration, $cancelled_override_immediate_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-CANCELLED-OVERRIDE-IMMEDIATE' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-CANCELLED-OVERRIDE-IMMEDIATE' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-CANCELLED-OVERRIDE-IMMEDIATE', 'CREATED', 'YD-CANCELLED-OVERRIDE-IMMEDIATE', '979' ) ),
+		yd_framework_response( array( 'status' => 'CREATED', 'description' => 'Заказ отменяется', 'reason' => 'cancellation_started' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-CANCELLED-OVERRIDE-IMMEDIATE', 'CANCELLED', 'YD-CANCELLED-OVERRIDE-IMMEDIATE', '979' ) ),
+	)
+);
+$cancelled_override_immediate_mapping = new YandexStatusMapping( new SettingsRepository() );
+$cancelled_override_immediate_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'CANCELLED' => DeliveryStatus::IN_TRANSIT ) ) );
+$cancelled_override_immediate_settings = new SettingsRepository();
+$cancelled_override_immediate_settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
+$cancelled_override_immediate_settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::IN_TRANSIT => 'wc-shipped' ) );
+yd_framework_assert( $cancelled_override_immediate_creation->create( $cancelled_override_immediate_order, yd_framework_request( 979, '979' ) )->success, 'CANCELLED override immediate scenario must start from successful create.' );
+$cancelled_override_immediate_result = $cancelled_override_immediate_adapter->cancel_in_carrier( $cancelled_override_immediate_order );
+yd_framework_assert( ! empty( $cancelled_override_immediate_result['cancelled_and_removed'] ) && empty( $cancelled_override_immediate_result['auto_poll'] ) && 'shipped' === $cancelled_override_immediate_order->get_status() && array() === $cancelled_override_immediate_repository->find_by_carrier( $cancelled_override_immediate_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $cancelled_override_immediate_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 0 === (int) ( $cancelled_override_immediate_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ) && 5 === count( $cancelled_override_immediate_http->requests ), 'Raw CANCELLED must auto-delete even when admin maps CANCELLED -> in_transit, and Woo mapping must receive in_transit before delete.' );
+
+$cancelled_override_update_order = new YdFrameworkOrder( 980, '980' );
+list( $cancelled_override_update_repository, $cancelled_override_update_adapter, $cancelled_override_update_creation, $cancelled_override_update_registration, $cancelled_override_update_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( yd_framework_info( 'REQ-CANCELLED-OVERRIDE-UPDATE', 'CANCELLED', 'YD-CANCELLED-OVERRIDE-UPDATE', '980' ) ),
+	)
+);
+$cancelled_override_update_mapping = new YandexStatusMapping( new SettingsRepository() );
+$cancelled_override_update_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'CANCELLED' => DeliveryStatus::IN_TRANSIT ) ) );
+$cancelled_override_update_settings = new SettingsRepository();
+$cancelled_override_update_settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
+$cancelled_override_update_settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::IN_TRANSIT => 'wc-shipped' ) );
+$cancelled_override_update_repository->save_for_carrier(
+	$cancelled_override_update_order,
+	YandexDeliverySettings::CARRIER_KEY,
+	array(
+		'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+		'status' => 'cancellation_started',
+		'yandex_request_id' => 'REQ-CANCELLED-OVERRIDE-UPDATE',
+		'request_id' => 'REQ-CANCELLED-OVERRIDE-UPDATE',
+		'yandex_cancel_requested' => true,
+		'yandex_status' => 'CREATED',
+		'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+	)
+);
+( new YandexShipmentRepository( $cancelled_override_update_repository ) )->sync_sequence_from_operator_request_id( $cancelled_override_update_order, '980', '980', '2026-07-14 12:00:00' );
+$cancelled_override_update_result = $cancelled_override_update_adapter->update_status( $cancelled_override_update_order );
+yd_framework_assert( ! empty( $cancelled_override_update_result['cancelled_and_removed'] ) && 'shipped' === $cancelled_override_update_order->get_status() && array() === $cancelled_override_update_repository->find_by_carrier( $cancelled_override_update_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $cancelled_override_update_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 0 === (int) ( $cancelled_override_update_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ) && 1 === count( $cancelled_override_update_http->requests ), 'Polling/update path raw CANCELLED must auto-delete even when admin maps CANCELLED -> in_transit.' );
 
 $override_nonterminal_order = new YdFrameworkOrder( 974, '974' );
 list( $override_nonterminal_repository, $override_nonterminal_adapter, $override_nonterminal_creation, $override_nonterminal_registration, $override_nonterminal_http ) = yd_framework_stack(
@@ -875,6 +922,24 @@ $override_terminal_result = $override_terminal_adapter->update_status( $override
 $override_terminal_shipment = $override_terminal_repository->find_by_carrier( $override_terminal_order, YandexDeliverySettings::CARRIER_KEY );
 $override_terminal_payload = $override_terminal_adapter->status_payload( $override_terminal_order, $override_terminal_shipment );
 yd_framework_assert( ! empty( $override_terminal_result['success'] ) && 'created' === (string) ( $override_terminal_shipment['status'] ?? '' ) && DeliveryStatus::DELIVERED === (string) ( $override_terminal_shipment['universal_status_code'] ?? '' ) && empty( $override_terminal_shipment['yandex_cancel_requested'] ) && empty( $override_terminal_payload['can_cancel'] ) && ! empty( $override_terminal_payload['can_remove_from_order'] ) && 1 === count( $override_terminal_http->requests ), 'Admin override CREATED -> delivered must make cancel polling terminal without auto-delete because raw status is not CANCELLED.' );
+
+$override_terminal_immediate_order = new YdFrameworkOrder( 981, '981' );
+list( $override_terminal_immediate_repository, $override_terminal_immediate_adapter, $override_terminal_immediate_creation, $override_terminal_immediate_registration, $override_terminal_immediate_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-OVERRIDE-TERMINAL-IMMEDIATE' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-OVERRIDE-TERMINAL-IMMEDIATE' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-OVERRIDE-TERMINAL-IMMEDIATE', 'CREATED', 'YD-OVERRIDE-TERMINAL-IMMEDIATE', '981' ) ),
+		yd_framework_response( array( 'status' => 'CREATED', 'description' => 'Заказ отменяется', 'reason' => 'cancellation_started' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-OVERRIDE-TERMINAL-IMMEDIATE', 'CREATED', 'YD-OVERRIDE-TERMINAL-IMMEDIATE', '981' ) ),
+	)
+);
+yd_framework_assert( $override_terminal_immediate_creation->create( $override_terminal_immediate_order, yd_framework_request( 981, '981' ) )->success, 'Immediate CREATED override terminal scenario must start from successful create.' );
+$override_terminal_immediate_mapping = new YandexStatusMapping( new SettingsRepository() );
+$override_terminal_immediate_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'CREATED' => DeliveryStatus::DELIVERED ) ) );
+$override_terminal_immediate_result = $override_terminal_immediate_adapter->cancel_in_carrier( $override_terminal_immediate_order );
+$override_terminal_immediate_shipment = $override_terminal_immediate_repository->find_by_carrier( $override_terminal_immediate_order, YandexDeliverySettings::CARRIER_KEY );
+$override_terminal_immediate_payload = $override_terminal_immediate_adapter->status_payload( $override_terminal_immediate_order, $override_terminal_immediate_shipment );
+yd_framework_assert( ! empty( $override_terminal_immediate_result['success'] ) && empty( $override_terminal_immediate_result['accepted'] ) && empty( $override_terminal_immediate_result['auto_poll'] ) && array() !== $override_terminal_immediate_shipment && 'created' === (string) ( $override_terminal_immediate_shipment['status'] ?? '' ) && DeliveryStatus::DELIVERED === (string) ( $override_terminal_immediate_shipment['universal_status_code'] ?? '' ) && empty( $override_terminal_immediate_shipment['yandex_cancel_requested'] ) && empty( $override_terminal_immediate_payload['can_cancel'] ) && ! empty( $override_terminal_immediate_payload['can_remove_from_order'] ) && 5 === count( $override_terminal_immediate_http->requests ), 'Immediate CREATED -> delivered override must stop cancel polling, keep shipment and expose remove without auto-delete.' );
 
 $partial_default_order = new YdFrameworkOrder( 976, '976' );
 list( $partial_default_repository, $partial_default_adapter, $partial_default_creation, $partial_default_registration, $partial_default_http ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-PARTIAL-DEFAULT', 'PARTICULARLY_DELIVERED', 'YD-PARTIAL-DEFAULT', '976' ) ) ) );

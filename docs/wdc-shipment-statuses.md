@@ -1,5 +1,9 @@
 # WDC Shipment Statuses
 
+Version: 0.109.2.
+
+Version 0.109.2 keeps raw `CANCELLED` as a special Yandex API lifecycle signal. During cancellation, raw `CANCELLED` always completes polling and local auto-delete even if admin status mapping resolves it to a non-terminal universal status. The universal status is still resolved and passed through `ShipmentOrderStatusMappingService` before delete. Other raw statuses remain controlled by universal mapping only, and immediate terminal `request/info` responses after cancel return `auto_poll=false`.
+
 Version: 0.109.1.
 
 Version 0.109.1 narrows Yandex cancel lifecycle decisions to the universal status mapping. `YandexShipmentRegistrationService::cancel()` now enforces `YandexShipmentButtonPolicy` server-side before calling Yandex, and cancel polling treats only universal `delivered`, `returned_to_sender`, `cancelled` and `rejected` as terminal. Admin overrides therefore affect both buttons and cancel polling. Raw `CANCELLED` is the only status that triggers Yandex local auto-delete, and the universal→WooCommerce mapping is applied before deletion. The Yandex default for `PARTICULARLY_DELIVERED` is now `in_transit`; saved overrides remain user settings.
