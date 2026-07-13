@@ -244,6 +244,7 @@ use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentButtonPolicy;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRegistrationService;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRepository;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexStatusMapping;
 use WallsShop\WDC\WooCommerce\HPOSCompatibility;
 
 defined( 'ABSPATH' ) || exit;
@@ -388,10 +389,11 @@ final class Plugin {
 		$this->container->register( DpdOrderRegistrationService::class, fn(): DpdOrderRegistrationService => new DpdOrderRegistrationService( $this->container->get( DpdShipmentPayloadBuilder::class ), $this->container->get( DpdApiClient::class ), $this->container->get( DpdShipmentRepository::class ), $this->container->get( DpdEventSyncService::class ), $this->container->get( DpdShipmentEnrichmentService::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdShipmentAdapter::class, fn(): DpdShipmentAdapter => new DpdShipmentAdapter( $this->container->get( DpdShipmentPayloadBuilder::class ), $this->container->get( DpdApiClient::class ), $this->container->get( DpdOrderRegistrationService::class ), $this->container->get( DpdShipmentButtonPolicy::class ), $this->container->get( DpdShipmentEnrichmentService::class ) ) );
 		$this->container->register( YandexShipmentRepository::class, fn(): YandexShipmentRepository => new YandexShipmentRepository( $this->container->get( OrderShipmentRepository::class ) ) );
-		$this->container->register( YandexShipmentButtonPolicy::class, fn(): YandexShipmentButtonPolicy => new YandexShipmentButtonPolicy() );
-		$this->container->register( YandexShipmentRegistrationService::class, fn(): YandexShipmentRegistrationService => new YandexShipmentRegistrationService( $this->container->get( CoreYandexDeliveryShipmentRegistrationService::class ), $this->container->get( YandexDeliveryShipmentPayloadBuilder::class ), $this->container->get( YandexDeliveryShipmentClient::class ), $this->container->get( YandexShipmentRepository::class ), $this->container->get( YandexShipmentPersistenceMapper::class ), $this->container->get( YandexShipmentButtonPolicy::class ) ) );
-		$this->container->register( YandexShipmentAdapter::class, fn(): YandexShipmentAdapter => new YandexShipmentAdapter( $this->container->get( YandexShipmentRegistrationService::class ), $this->container->get( YandexShipmentButtonPolicy::class ) ) );
-		$this->container->register( YandexShipmentPersistenceMapper::class, fn(): YandexShipmentPersistenceMapper => new YandexShipmentPersistenceMapper( $this->container->get( YandexShipmentRepository::class ) ) );
+		$this->container->register( YandexStatusMapping::class, fn(): YandexStatusMapping => new YandexStatusMapping( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( YandexShipmentButtonPolicy::class, fn(): YandexShipmentButtonPolicy => new YandexShipmentButtonPolicy( $this->container->get( YandexStatusMapping::class ) ) );
+		$this->container->register( YandexShipmentRegistrationService::class, fn(): YandexShipmentRegistrationService => new YandexShipmentRegistrationService( $this->container->get( CoreYandexDeliveryShipmentRegistrationService::class ), $this->container->get( YandexDeliveryShipmentPayloadBuilder::class ), $this->container->get( YandexDeliveryShipmentClient::class ), $this->container->get( YandexShipmentRepository::class ), $this->container->get( YandexShipmentPersistenceMapper::class ), $this->container->get( YandexShipmentButtonPolicy::class ), $this->container->get( YandexStatusMapping::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
+		$this->container->register( YandexShipmentAdapter::class, fn(): YandexShipmentAdapter => new YandexShipmentAdapter( $this->container->get( YandexShipmentRegistrationService::class ), $this->container->get( YandexShipmentButtonPolicy::class ), $this->container->get( YandexStatusMapping::class ) ) );
+		$this->container->register( YandexShipmentPersistenceMapper::class, fn(): YandexShipmentPersistenceMapper => new YandexShipmentPersistenceMapper( $this->container->get( YandexShipmentRepository::class ), $this->container->get( YandexStatusMapping::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
 		$this->container->register( ShipmentMetaboxButtonPolicy::class, fn(): ShipmentMetaboxButtonPolicy => new ShipmentMetaboxButtonPolicy() );
 		$this->container->register( CdekStatusMappingService::class, fn(): CdekStatusMappingService => new CdekStatusMappingService( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CdekOrderStatusService::class, fn(): CdekOrderStatusService => new CdekOrderStatusService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( CdekApiClient::class ), $this->container->get( Logger::class ), $this->container->get( CdekStatusMappingService::class ) ) );
@@ -706,6 +708,7 @@ final class Plugin {
 				$this->container->get( YandexRegionMappingV2Repository::class ),
 				$this->container->get( YandexGeoV2RegionEnrichmentRunner::class ),
 				$this->container->get( YandexDeliveryGeoPipelineV2Runner::class ),
+				$this->container->get( YandexStatusMapping::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );

@@ -333,6 +333,7 @@ final class OrderShipmentsMetabox {
 		$status_payload = $this->status_payload_for_carrier( $order, $carrier_key );
 		$status_payload = array_merge( $status_payload, array( 'carrier_key' => $carrier_key ) );
 		$presentation = $this->carrier_presentation( $carrier_key );
+		$tracking_presentation = $this->tracking_presentation( $status_payload, $presentation, $barcode );
 		$price_label = (string) ( $status_payload['actual_cost_label'] ?? '' );
 		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
 		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
@@ -355,7 +356,7 @@ final class OrderShipmentsMetabox {
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox data-carrier-key="<?php echo esc_attr( $carrier_key ); ?>" data-has-shipment="<?php echo $has_created ? '1' : '0'; ?>" <?php $this->render_presentation_attrs( $presentation ); ?>>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
 			<p><strong><?php echo esc_html__( 'Статус посылки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-summary-status><?php echo esc_html( $this->shipment_status_label( $shipment ) ); ?></span></p>
-			<p data-wdc-tracking-row <?php echo '' === $barcode ? 'hidden' : ''; ?>><strong data-wdc-tracking-label><?php echo esc_html( $presentation['tracking_label'] ); ?></strong>: <span data-wdc-tracking-number><?php echo esc_html( $barcode ); ?></span> <button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $barcode ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $barcode ); ?>>🗐</button> <span class="description" data-wdc-copy-tracking-status></span></p>
+			<p data-wdc-tracking-row <?php echo '' === $tracking_presentation['display_text'] && '' === $tracking_presentation['copy_value'] ? 'hidden' : ''; ?>><strong data-wdc-tracking-label><?php echo esc_html( $tracking_presentation['label'] ); ?></strong>: <span data-wdc-tracking-number><?php $this->render_tracking_value( $tracking_presentation ); ?></span> <button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $tracking_presentation['copy_value'] ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $tracking_presentation['copy_value'] ); ?>>🗐</button> <span class="description" data-wdc-copy-tracking-status></span></p>
 			<p data-wdc-shipment-price-row class="<?php echo esc_attr( $this->shipment_price_class( $price_compare_status ) ); ?>" title="<?php echo esc_attr( $price_compare_message ); ?>" <?php echo '' === $price_label ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Цена', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-price-label><?php echo esc_html( $price_label ); ?></span></p>
 			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( (string) ( $shipment['updated_at'] ?? '' ) ); ?></span></p>
 			<?php $this->render_status_block( $status_payload ); ?>
@@ -2087,6 +2088,57 @@ final class OrderShipmentsMetabox {
 			'can_cancel' => ! empty( $status['can_cancel'] ),
 			'can_remove_from_order' => ! empty( $status['can_remove_from_order'] ),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed>  $status
+	 * @param array<string,string> $presentation
+	 * @return array{label:string,display_text:string,url:string,copy_value:string}
+	 */
+	private function tracking_presentation( array $status, array $presentation, string $fallback_value ): array {
+		$tracking = is_array( $status['tracking_presentation'] ?? null ) ? $status['tracking_presentation'] : array();
+		$label = trim( (string) ( $tracking['label'] ?? $presentation['tracking_label'] ?? __( 'Отслеживание', 'walls-delivery-calc' ) ) );
+		$display_text = trim( (string) ( $tracking['display_text'] ?? $fallback_value ) );
+		$url = $this->safe_tracking_url( (string) ( $tracking['url'] ?? '' ) );
+		$copy_value = trim( (string) ( $tracking['copy_value'] ?? '' ) );
+
+		if ( '' !== $url ) {
+			$display_text = '' !== $display_text ? $display_text : $url;
+			$copy_value = '' !== $copy_value ? $copy_value : $url;
+		} elseif ( '' === $copy_value ) {
+			$copy_value = $display_text;
+		}
+
+		return array(
+			'label' => '' !== $label ? $label : __( 'Отслеживание', 'walls-delivery-calc' ),
+			'display_text' => $display_text,
+			'url' => $url,
+			'copy_value' => $copy_value,
+		);
+	}
+
+	/** @param array{label:string,display_text:string,url:string,copy_value:string} $tracking */
+	private function render_tracking_value( array $tracking ): void {
+		if ( '' !== $tracking['url'] ) {
+			printf(
+				'<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>',
+				esc_url( $tracking['url'] ),
+				esc_html( $tracking['display_text'] )
+			);
+			return;
+		}
+
+		echo esc_html( $tracking['display_text'] );
+	}
+
+	private function safe_tracking_url( string $url ): string {
+		$url = trim( $url );
+		if ( '' === $url || false === filter_var( $url, FILTER_VALIDATE_URL ) ) {
+			return '';
+		}
+		$scheme = strtolower( (string) parse_url( $url, PHP_URL_SCHEME ) );
+
+		return in_array( $scheme, array( 'http', 'https' ), true ) ? $url : '';
 	}
 
 	/**

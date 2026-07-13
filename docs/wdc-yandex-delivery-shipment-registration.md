@@ -1,5 +1,39 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.109.3
+
+В общем блоке `Отправления` Яндекс больше не показывает `request_id` как основную tracking-строку, если canonical `request/info` уже дал `sharing_url`. `YandexShipmentAdapter` формирует structured `tracking_presentation`: label `Отслеживание посылки`, visible text `ссылка`, link URL and clipboard value = полный `sharing_url`. `OrderShipmentsMetabox` выводит ссылку через общий renderer (`target="_blank"`, `rel="noopener noreferrer"`, `esc_url()`), а runtime refresh/manual attach/reconciliation используют тот же общий copy-button без отдельного Yandex clipboard handler.
+
+`request_id` остаётся сохранённым API identifier и lookup value для create/reconciliation/update/cancel/manual attach. Если `sharing_url` отсутствует, пустой или не проходит URL validation по `http/https`, UI возвращается к прежнему fallback `Request ID Яндекс: {request_id}` и копирует именно request_id. После reconciliation/status update, когда `sharing_url` появляется, AJAX refresh заменяет fallback на ссылку без перезагрузки страницы.
+
+## Статус 0.109.2
+
+Raw `CANCELLED` теперь обрабатывается как специальное подтверждение успешной отмены Яндекса независимо от admin mapping. В двух cancel lifecycle paths — immediate `request/info` внутри `cancel()` и последующий `update_status()` во время polling/ручного обновления — код считает отдельно `$is_cancelled` и `$is_terminal`, где `$is_terminal = $is_cancelled || terminal(universal mapping)`. При override `CANCELLED -> in_transit` shipment получает universal `in_transit`, shared universal→WooCommerce mapping успевает выполниться, затем локальная запись Яндекса и lookup meta удаляются, а registration sequence сохраняется.
+
+Immediate terminal response после `request/cancel` больше не запускает polling. Если raw status `CANCELLED`, response возвращает `cancelled_and_removed=true` и `auto_poll=false`. Если terminal universal status пришёл для raw status, отличного от `CANCELLED`, shipment остаётся в canonical state, cancel flags очищаются, local remove становится доступен, а response также возвращает `auto_poll=false`. Polling 5 сек × 14 стартует только для non-terminal статуса или временной ошибки получения status после cancel.
+
+## Статус 0.109.1
+
+Cancel lifecycle после universal status mapping теперь имеет одинаковую защиту в UI и на сервере. `YandexShipmentRegistrationService::cancel()` перед `request/cancel` получает сохранённый shipment и вызывает `YandexShipmentButtonPolicy::resolve()`; если `cancel=false`, API Яндекса не вызывается, shipment не изменяется, а пользователь получает `Текущее отправление Яндекс нельзя отменить.`.
+
+Старый raw-terminal список (`DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER`, `REJECTED`) больше не используется как источник lifecycle-решений. Для cancel polling raw status из `request/info` сначала проходит через текущий `YandexStatusMapping` (с учётом admin overrides), и terminal считаются только universal statuses `delivered`, `returned_to_sender`, `cancelled`, `rejected`. Если raw status равен `CANCELLED`, перед локальным auto-delete применяется universal→WooCommerce mapping, затем удаляются локальная запись и lookup meta. Если terminal universal получен для любого другого raw-кода, polling останавливается, `cancellation_started` очищается, shipment остаётся в заказе, cancel скрывается, local remove доступен.
+
+Default mapping `PARTICULARLY_DELIVERED` изменён на `in_transit`: частичная доставка не означает полную доставку заказа. Сохранённые admin overrides не мигрируются; reset к defaults вернёт `PARTICULARLY_DELIVERED -> in_transit`.
+
+## Статус 0.109.0
+
+Яндекс.Доставка подключена к общей статусной инфраструктуре WDC. Единый каталог `YandexStatusMapping` содержит полный union raw-кодов из официальной модели, включая `DELIVERY_TRACK_RECIEVED`, и не включает reason-коды отмены/переноса (`SHOP_CANCELLED`, `CLIENT_REQUEST` и т.п.) как отдельные carrier statuses. Для каждого кода задано описание, применимость (`courier`, `pickup`, `both`) и default universal status.
+
+Настройки сопоставления находятся в существующей админке службы доставки на вкладке `Яндекс.Доставка`. Таблица использует тот же save/reset flow, что DPD/CDEK: `wdc_core_settings[yandex_delivery_status_mapping]` хранит только валидные коды из catalog и только валидные `DeliveryStatus` значения. Если override отсутствует, используется default mapping из catalog.
+
+После любого canonical `request/info` сохраняются raw поля `yandex_status`, `yandex_status_description`, `yandex_status_reason`, `yandex_status_timestamp`, full request/info snapshot и результат сопоставления `universal_status_code`/`universal_status_label`. Эти поля применяются при normal create, reconciliation, manual attach, manual status update, auto polling и cancel polling. `request/history` сохраняет raw events и добавляет universal status к каждой записи, но не меняет WooCommerce status при чтении истории.
+
+Основной статус в блоке `Отправления` — universal status WDC (`Создан в ТК`, `в пути`, `ожидает самовывоза...`), raw Yandex code остаётся диагностикой (`Статус Яндекс.Доставки: CREATED`). Автоматическая смена WooCommerce order status выполняется через существующий `ShipmentOrderStatusMappingService`; Yandex service не вызывает `update_status()` напрямую.
+
+Button policy canonical shipment больше не использует raw terminal list как источник истины. Если resolved universal status — `pending_creation_in_carrier` или `created_in_carrier`, доступны update + cancel, local remove скрыт. Для `in_transit`, `ready_for_pickup`, `handed_to_courier`, `delivered`, `returning_to_sender`, `returned_to_sender`, `cancelled`, `rejected`, `unknown` cancel скрыт, update доступен при наличии `request_id`, local remove доступен. Технические состояния остаются особыми: `reconciliation_required` всегда update + local remove без cancel; `cancellation_started` до exhaustion скрывает remove, после `yandex_cancel_poll_exhausted=true` показывает update + remove.
+
+Если Яндекс вернул неизвестный raw status, shipment не падает: raw code сохраняется, universal status становится `unknown`, WooCommerce status не меняется без явной общей mapping-политики, а order note один раз фиксирует `Яндекс вернул неизвестный статус: {CODE}.`
+
 ## Статус 0.108.15
 
 Yandex courier address verification still goes through the shared DaData stack (`AddressSuggestionService`, existing client, token pool and usage counter), but locality extraction now follows the actual normalized item contract. The shipment modal reads canonical normalized fields first (`locality`, `city_name`, `city`, `place`, `settlement`), then normalized `data` settlement/city fields (`settlement_with_type`, `city_with_type`, `settlement`, `city`). Region fallback is restricted to federal cities represented at region level, such as Москва, Санкт-Петербург and Севастополь; ordinary regions are not used as locality.
@@ -72,7 +106,7 @@ Payload builder не вычисляет sequence сам: он получает �
 
 ## Статус 0.108.11
 
-Local remove теперь защищён не только кнопками, но и backend-ом. `YandexShipmentRegistrationService::remove_local()` перед удалением получает сохранённый shipment и вызывает `YandexShipmentButtonPolicy::resolve()`. Если policy возвращает `remove=false`, repository не удаляется, lookup meta остаётся, а AJAX получает русскую ошибку `Текущее отправление Яндекс нельзя удалить из заказа.` Это блокирует ручной AJAX remove для активного `CREATED` и для `cancellation_started`; `reconciliation_required` и terminal статусы (`CANCELLED`, `DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER`, `REJECTED`) удаляются локально по той же policy.
+Local remove защищён не только кнопками, но и backend-ом. `YandexShipmentRegistrationService::remove_local()` перед удалением получает сохранённый shipment и вызывает `YandexShipmentButtonPolicy::resolve()`. Если policy возвращает `remove=false`, repository не удаляется, lookup meta остаётся, а AJAX получает русскую ошибку `Текущее отправление Яндекс нельзя удалить из заказа.` Это блокирует ручной AJAX remove для universal `pending_creation_in_carrier`/`created_in_carrier` и для `cancellation_started` до exhaustion; `reconciliation_required`, `cancellation_started` после exhaustion и canonical universal statuses вне ранней пары удаляются локально по той же policy.
 
 Polling после accepted create теперь различает pending-ответы Яндекса и транспортные ошибки. Pending JSON (`pending=true`) по-прежнему обновляет status message и идёт на следующую попытку без toast-spam. HTTP/network/JSON ошибка внутри bounded generic/Yandex polling больше не возвращается как успешный `null`: ошибка пробрасывается в polling helper, считается попыткой и планирует следующий tick до canonical status, terminal/error response или exhaustion. После 14 pending/transport-error попыток запускается тот же backend mark-exhausted flow. DPD `mode=dpd` сохраняет прежнее поведение остановки после ошибки, CDEK polling не менялся.
 
@@ -154,7 +188,7 @@ Yandex-specific persistence вынесен из общего `ShipmentCreationSe
 
 Yandex parser allocation rows больше не исправляет повреждённые значения. `amount=0`, отсутствующий `place_number`, пустой `item_key` или нулевой `weight` проходят в rows как есть и отклоняются существующим `CdekShipmentAllocationAdapter` / `ShipmentAllocation` validator до HTTP. Отдельный validator не добавлялся.
 
-Cancellation lifecycle теперь использует общий helper terminal statuses из `YandexShipmentButtonPolicy`. Если shipment находится в `cancellation_started`, а `request/info` возвращает `CANCELLED`, сохраняется прежняя семантика успешной отмены. Если возвращается другой terminal status (`DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER`, `REJECTED`), active cancel ожидание завершается, `yandex_cancel_requested` сбрасывается, повторный cancel скрывается через существующую button policy, но note не говорит «отправление отменено».
+Cancellation lifecycle теперь использует universal mapping, а не raw terminal helper из `YandexShipmentButtonPolicy`. Если shipment находится в `cancellation_started`, raw status из `request/info` сначала сопоставляется через `YandexStatusMapping`; universal `delivered`, `returned_to_sender`, `cancelled` и `rejected` завершают cancel polling. Только raw `CANCELLED` означает успешную отмену с auto-delete; другой terminal universal status оставляет shipment в заказе, сбрасывает `yandex_cancel_requested`, скрывает повторный cancel и пишет note без утверждения «отправление отменено».
 
 ## Статус 0.108.1
 

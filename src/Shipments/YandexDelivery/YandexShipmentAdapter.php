@@ -7,6 +7,7 @@ use Throwable;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -14,7 +15,8 @@ defined( 'ABSPATH' ) || exit;
 final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private YandexShipmentRegistrationService $registration,
-		private YandexShipmentButtonPolicy $buttons
+		private YandexShipmentButtonPolicy $buttons,
+		private ?YandexStatusMapping $status_mapping = null
 	) {
 	}
 
@@ -65,6 +67,11 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		unset( $order );
 		$policy = $this->buttons->resolve( $shipment );
 		$status = trim( (string) ( $shipment['yandex_status'] ?? '' ) );
+		$universal = sanitize_key( (string) ( $shipment['universal_status_code'] ?? '' ) );
+		if ( ! DeliveryStatus::is_valid( $universal ) && $this->status_mapping instanceof YandexStatusMapping ) {
+			$universal = $this->status_mapping->universal_status_for( $status );
+		}
+		$universal_label = DeliveryStatus::is_valid( $universal ) ? DeliveryStatus::label( $universal ) : '';
 		$cancel_pending = array() !== $shipment && 'cancellation_started' === (string) ( $shipment['status'] ?? '' );
 		$reconciliation_pending = array() !== $shipment && ! empty( $shipment['yandex_reconciliation_required'] );
 
@@ -76,11 +83,15 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'can_update_status' => ! empty( $policy['update'] ),
 			'can_cancel' => ! empty( $policy['cancel'] ),
 			'can_remove_from_order' => ! empty( $policy['remove'] ),
-			'shipment_status_label' => '' !== $status ? $status : ( array() === $shipment ? 'не создано' : 'зарегистрировано' ),
+			'universal_status_code' => $universal,
+			'universal_status_label' => $universal_label,
+			'shipment_status_label' => '' !== $universal_label ? $universal_label : ( array() === $shipment ? 'не создано' : 'зарегистрировано' ),
 			'carrier_status_title' => $this->carrier_status_title( $shipment, $status ),
+			'carrier_status_description' => (string) ( $shipment['yandex_status_description'] ?? '' ),
 			'tracking_checked_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'updated_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'barcode' => $this->tracking_identifier( $shipment ),
+			'tracking_presentation' => $this->tracking_presentation( $shipment ),
 			'yandex_request_id' => (string) ( $shipment['yandex_request_id'] ?? '' ),
 			'yandex_courier_order_id' => (string) ( $shipment['yandex_courier_order_id'] ?? '' ),
 			'yandex_sharing_url' => (string) ( $shipment['yandex_sharing_url'] ?? '' ),
@@ -141,6 +152,45 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		}
 
 		return '';
+	}
+
+	/** @param array<string,mixed> $shipment @return array<string,string> */
+	private function tracking_presentation( array $shipment ): array {
+		$raw_sharing_url = trim( (string) ( $shipment['sharing_url'] ?? '' ) );
+		if ( '' === $raw_sharing_url ) {
+			$raw_sharing_url = trim( (string) ( $shipment['yandex_sharing_url'] ?? '' ) );
+		}
+		$sharing_url = $this->valid_sharing_url( $raw_sharing_url );
+		if ( '' !== $sharing_url ) {
+			return array(
+				'label' => 'Отслеживание посылки',
+				'display_text' => 'ссылка',
+				'url' => $sharing_url,
+				'copy_value' => $sharing_url,
+			);
+		}
+
+		$request_id = $this->tracking_identifier( $shipment );
+		if ( '' === $request_id ) {
+			return array();
+		}
+
+		return array(
+			'label' => 'Request ID Яндекс',
+			'display_text' => $request_id,
+			'url' => '',
+			'copy_value' => $request_id,
+		);
+	}
+
+	private function valid_sharing_url( string $url ): string {
+		$url = trim( $url );
+		if ( '' === $url || false === filter_var( $url, FILTER_VALIDATE_URL ) ) {
+			return '';
+		}
+		$scheme = strtolower( (string) parse_url( $url, PHP_URL_SCHEME ) );
+
+		return in_array( $scheme, array( 'http', 'https' ), true ) ? $url : '';
 	}
 
 	public function auto_sync_throttle_microseconds(): int { return 0; }
