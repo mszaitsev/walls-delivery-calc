@@ -78,7 +78,7 @@ final class ShipmentCreationService {
 		}
 
 		$preview = $this->safe_preview( $request );
-		$result = $adapter->create( $request );
+		$result = method_exists( $adapter, 'create_for_order' ) ? $adapter->create_for_order( $order, $request ) : $adapter->create( $request );
 		$now = $this->now();
 		if ( ! $result->success ) {
 			$mapper = $this->persistence_mapper_for( $request->carrier_key );
@@ -89,7 +89,8 @@ final class ShipmentCreationService {
 				$mapper->after_persist( $order, $shipment );
 				if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key && ! empty( $shipment['yandex_reconciliation_required'] ) ) {
 					$request_id = (string) ( $shipment['request_id'] ?? $shipment['external_id'] ?? '' );
-					$this->add_order_note( $order, sprintf( 'Отправление Яндекс создано. Request ID: %s. Ожидается получение статуса.', $request_id ) );
+					$operator_request_id = (string) ( $shipment['yandex_operator_request_id'] ?? '' );
+					$this->add_order_note( $order, sprintf( 'Отправление Яндекс создано. Номер заказа в Яндекс: %s. Request ID: %s. Ожидается получение статуса.', '' !== $operator_request_id ? $operator_request_id : (string) ( $request->meta['order_num'] ?? $request->order_id ), $request_id ) );
 					return new ShipmentCreateResult(
 						true,
 						external_id: $request_id,
@@ -343,8 +344,10 @@ final class ShipmentCreationService {
 			);
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
+			$operator_request_id = (string) ( $raw['yandex']['yandex_operator_request_id'] ?? $raw['yandex']['operator_request_id'] ?? $request->meta['yandex_operator_request_id'] ?? $request->meta['order_num'] ?? $request->order_id );
 			return sprintf(
-				'Создано отправление Яндекс. Request ID: %s. Мест: %d',
+				'Отправление Яндекс создано. Номер заказа в Яндекс: %s. Request ID: %s. Мест: %d',
+				$operator_request_id,
 				$result->external_id,
 				count( $request->places )
 			);

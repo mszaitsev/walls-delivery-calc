@@ -595,7 +595,7 @@ final class OrderShipmentDraftFactory {
 				'service_title' => YandexDeliverySettings::TITLE,
 				'delivery_type' => $delivery_type,
 				'order_num' => $this->order_number( $order ),
-				'yandex_operator_request_id' => $this->order_number( $order ),
+				'yandex_operator_request_id' => $this->yandex_next_operator_request_id( $order ),
 				'yandex_source_platform_station_id' => $this->yandex_settings instanceof YandexDeliverySettings ? $this->yandex_settings->source_platform_station_id() : '',
 				'yandex_ready_from' => $ready,
 				'yandex_ready_to' => $ready,
@@ -728,7 +728,7 @@ final class OrderShipmentDraftFactory {
 				$base->meta,
 				array(
 					'delivery_type' => $delivery_type,
-					'yandex_operator_request_id' => sanitize_text_field( wp_unslash( $data['yandex_operator_request_id'] ?? $base->meta['yandex_operator_request_id'] ?? $base->meta['order_num'] ?? $base->order_id ) ),
+					'yandex_operator_request_id' => (string) ( $base->meta['yandex_operator_request_id'] ?? $base->meta['order_num'] ?? $base->order_id ),
 					'yandex_source_platform_station_id' => $source_station,
 					'yandex_ready_from' => $ready_from,
 					'yandex_ready_to' => $ready_to,
@@ -1876,6 +1876,58 @@ final class OrderShipmentDraftFactory {
 
 	private function order_number( object $order ): string {
 		return method_exists( $order, 'get_order_number' ) ? (string) $order->get_order_number() : (string) $this->order_id( $order );
+	}
+
+	private function yandex_next_operator_request_id( object $order ): string {
+		$base = $this->order_number( $order );
+		$last_index = -1;
+		$sequence = $this->order_meta_array( $order, '_wdc_yandex_delivery_registration_sequence' );
+		if ( array() !== $sequence ) {
+			$last_index = (int) ( $sequence['last_index'] ?? -1 );
+		} else {
+			$shipment = $this->current_yandex_shipment( $order );
+			foreach ( array( 'yandex_operator_request_id', 'operator_request_id' ) as $key ) {
+				$parsed = $this->yandex_parse_operator_request_id( (string) ( $shipment[ $key ] ?? '' ), $base );
+				if ( null !== $parsed ) {
+					$last_index = max( $last_index, $parsed );
+				}
+			}
+			$snapshot_info = is_array( $shipment['yandex_request_info_snapshot']['request']['info'] ?? null ) ? $shipment['yandex_request_info_snapshot']['request']['info'] : array();
+			$parsed = $this->yandex_parse_operator_request_id( (string) ( $snapshot_info['operator_request_id'] ?? '' ), $base );
+			if ( null !== $parsed ) {
+				$last_index = max( $last_index, $parsed );
+			}
+		}
+		$next = max( 0, $last_index + 1 );
+
+		return 0 === $next ? $base : $base . '/' . (string) $next;
+	}
+
+	/** @return array<string,mixed> */
+	private function order_meta_array( object $order, string $key ): array {
+		$value = method_exists( $order, 'get_meta' ) ? $order->get_meta( $key, true ) : array();
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/** @return array<string,mixed> */
+	private function current_yandex_shipment( object $order ): array {
+		$shipments = $this->order_meta_array( $order, '_wdc_shipments' );
+		$shipment = $shipments[ YandexDeliverySettings::CARRIER_KEY ] ?? array();
+
+		return is_array( $shipment ) ? $shipment : array();
+	}
+
+	private function yandex_parse_operator_request_id( string $operator_request_id, string $base ): ?int {
+		$operator_request_id = trim( $operator_request_id );
+		if ( $operator_request_id === $base ) {
+			return 0;
+		}
+		if ( 1 === preg_match( '/^' . preg_quote( $base, '/' ) . '\/([1-9][0-9]*)$/', $operator_request_id, $matches ) ) {
+			return (int) $matches[1];
+		}
+
+		return null;
 	}
 
 	private function recipient_name( object $order ): string {

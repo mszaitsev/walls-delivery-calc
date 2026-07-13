@@ -80,14 +80,14 @@ final class YdFrameworkOrder {
 	public array $meta = array();
 	/** @var array<int,string> */
 	public array $notes = array();
-	public function __construct( private int $id ) {}
+	public function __construct( private int $id, private string $order_number = '' ) {}
 	public function get_id(): int { return $this->id; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
 	public function delete_meta_data( string $key ): void { unset( $this->meta[ $key ] ); }
 	public function save(): void {}
 	public function add_order_note( string $note ): void { $this->notes[] = $note; }
-	public function get_order_number(): string { return 'ORDER-' . (string) $this->id; }
+	public function get_order_number(): string { return '' !== $this->order_number ? $this->order_number : 'ORDER-' . (string) $this->id; }
 	public function get_items(): array { return array( new YdFrameworkOrderItem( 101, 'Item A', 'SKU-A', 3 ) ); }
 	public function get_shipping_first_name(): string { return 'Михаил'; }
 	public function get_shipping_last_name(): string { return 'Михайлов'; }
@@ -185,10 +185,10 @@ function yd_framework_incomplete_info( string $request_id, ?string $operator_req
 		),
 	);
 }
-function yd_framework_request(): ShipmentCreateRequest {
+function yd_framework_request( int $order_id = 777, string $order_num = 'ORDER-777' ): ShipmentCreateRequest {
 	$item = new PackageItem( 'SKU-A', 'Item A', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 500, 10, 10, 5 );
 	return new ShipmentCreateRequest(
-		777,
+		$order_id,
 		YandexDeliverySettings::CARRIER_KEY,
 		DeliveryType::PICKUP,
 		YandexDeliverySettings::CARRIER_KEY . ':pickup',
@@ -202,8 +202,8 @@ function yd_framework_request(): ShipmentCreateRequest {
 		array(
 			'service_key' => YandexDeliverySettings::SERVICE_KEY,
 			'service_title' => YandexDeliverySettings::TITLE,
-			'order_num' => 'ORDER-777',
-			'yandex_operator_request_id' => 'ORDER-777',
+			'order_num' => $order_num,
+			'yandex_operator_request_id' => $order_num,
 			'yandex_source_platform_station_id' => 'SRC-1',
 			'yandex_ready_from' => '2026-07-12 12:00:00+07:00',
 			'yandex_ready_to' => '2026-07-12 12:00:00+07:00',
@@ -384,7 +384,7 @@ yd_framework_assert( 'REQ-PENDING' === (string) ( $pending['yandex_request_id'] 
 yd_framework_assert( 'REQ-PENDING' === (string) $reconciliation_order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Reconciliation pending shipment must persist lookup meta.' );
 yd_framework_assert( 'OFFER-PENDING' === (string) ( $pending['yandex_selected_offer_id'] ?? '' ) && '2026-07-11T16:23:01.000000Z' === (string) ( $pending['yandex_offer_expires_at'] ?? '' ) && '298.8 RUB' === (string) ( $pending['yandex_offer_pricing_total'] ?? '' ), 'Reconciliation pending shipment must keep selected offer fields.' );
 yd_framework_assert( '2026-07-21T20:00:00.000000Z' === (string) ( $pending['yandex_offer_delivery_interval']['max'] ?? '' ) && '2026-07-11T16:08:01.000000Z' === (string) ( $pending['yandex_offer_pickup_interval']['min'] ?? '' ), 'Reconciliation pending shipment must keep selected offer interval fields.' );
-yd_framework_assert( array() !== array_filter( $reconciliation_order->notes, static fn ( string $note ): bool => str_contains( $note, 'Отправление Яндекс создано. Request ID: REQ-PENDING. Ожидается получение статуса.' ) ), 'Accepted pending create must write a non-failure order note.' );
+yd_framework_assert( array() !== array_filter( $reconciliation_order->notes, static fn ( string $note ): bool => str_contains( $note, 'Отправление Яндекс создано. Номер заказа в Яндекс: ORDER-777. Request ID: REQ-PENDING. Ожидается получение статуса.' ) ), 'Accepted pending create must write a non-failure order note.' );
 $pending_policy = ( new YandexShipmentButtonPolicy() )->resolve( $pending );
 yd_framework_assert( empty( $pending_policy['create'] ) && ! empty( $pending_policy['update'] ) && empty( $pending_policy['cancel'] ) && ! empty( $pending_policy['remove'] ) && empty( $pending_policy['manual_attach'] ), 'Reconciliation button policy must allow status update and local remove while blocking create/cancel/manual attach.' );
 $pending_payload = $reconciliation_adapter->status_payload( $reconciliation_order, $pending );
@@ -697,6 +697,105 @@ $terminal_attach = $terminal_attach_adapter->attach_manual( $terminal_attach_ord
 $terminal_attached = $terminal_attach_repository->find_by_carrier( $terminal_attach_order, YandexDeliverySettings::CARRIER_KEY );
 $terminal_attach_payload = $terminal_attach_adapter->status_payload( $terminal_attach_order, $terminal_attached );
 yd_framework_assert( ! empty( $terminal_attach['success'] ) && 'CANCELLED' === (string) ( $terminal_attached['yandex_status'] ?? '' ) && empty( $terminal_attach_payload['can_cancel'] ) && ! empty( $terminal_attach_payload['can_remove_from_order'] ), 'Manual attach of terminal Yandex shipment must persist terminal status and expose remove without cancel.' );
+
+$sequence_order = new YdFrameworkOrder( 1010, '1010' );
+list( $sequence_repository_1, $sequence_adapter_1, $sequence_creation_1, $sequence_registration_1, $sequence_http_1 ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-SEQ-0' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-SEQ-0' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-SEQ-0', 'CREATED', 'YD-SEQ-0', '1010' ) ),
+	)
+);
+$first_sequence_result = $sequence_creation_1->create( $sequence_order, yd_framework_request( 1010, '1010' ) );
+$first_sequence_shipment = $sequence_repository_1->find_by_carrier( $sequence_order, YandexDeliverySettings::CARRIER_KEY );
+$first_sequence_body = json_decode( (string) ( $sequence_http_1->requests[0]['args']['body'] ?? '{}' ), true );
+yd_framework_assert( $first_sequence_result->success && '1010' === (string) ( $first_sequence_body['info']['operator_request_id'] ?? '' ) && '1010-1' === (string) ( $first_sequence_body['places'][0]['barcode'] ?? '' ), 'First Yandex registration attempt must use base order number and safe temporary place barcode.' );
+yd_framework_assert( '1010' === (string) ( $first_sequence_shipment['yandex_operator_request_id'] ?? '' ) && 0 === (int) ( $first_sequence_shipment['yandex_registration_sequence_index'] ?? -1 ), 'First Yandex shipment persistence must store operator_request_id and sequence index 0.' );
+$sequence_meta_1 = $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
+yd_framework_assert( 0 === (int) ( $sequence_meta_1['last_index'] ?? -1 ) && '1010' === (string) ( $sequence_meta_1['last_operator_request_id'] ?? '' ) && in_array( '1010', (array) ( $sequence_meta_1['allocated_ids'] ?? array() ), true ), 'First reservation must persist sequence meta for base operator id.' );
+$first_sequence_shipment['yandex_status'] = 'CANCELLED';
+$first_sequence_shipment['status_title'] = 'CANCELLED';
+$sequence_repository_1->save_for_carrier( $sequence_order, YandexDeliverySettings::CARRIER_KEY, $first_sequence_shipment );
+yd_framework_assert( ! empty( $sequence_adapter_1->remove_from_order( $sequence_order )['success'] ), 'Terminal sequence shipment must be locally removable before a new attempt.' );
+yd_framework_assert( 0 === (int) ( $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Local remove must not clear Yandex registration sequence.' );
+
+list( $sequence_repository_2, $sequence_adapter_2, $sequence_creation_2, $sequence_registration_2, $sequence_http_2 ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-SEQ-1' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-SEQ-1' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-SEQ-1', 'CREATED', 'YD-SEQ-1', '1010/1' ) ),
+	)
+);
+$second_sequence_result = $sequence_creation_2->create( $sequence_order, yd_framework_request( 1010, '1010' ) );
+$second_sequence_shipment = $sequence_repository_2->find_by_carrier( $sequence_order, YandexDeliverySettings::CARRIER_KEY );
+$second_sequence_body = json_decode( (string) ( $sequence_http_2->requests[0]['args']['body'] ?? '{}' ), true );
+yd_framework_assert( $second_sequence_result->success && '1010/1' === (string) ( $second_sequence_body['info']['operator_request_id'] ?? '' ) && '1010-1-1' === (string) ( $second_sequence_body['places'][0]['barcode'] ?? '' ) && '1010-1-1' === (string) ( $second_sequence_body['items'][0]['place_barcode'] ?? '' ), 'Second Yandex attempt must use 1010/1 and a slash-free stable temporary barcode.' );
+yd_framework_assert( '1010/1' === (string) ( $second_sequence_shipment['yandex_operator_request_id'] ?? '' ) && 1 === (int) ( $second_sequence_shipment['yandex_registration_sequence_index'] ?? -1 ) && 'YD-SEQ-1' === (string) ( $second_sequence_shipment['yandex_place_barcode_map']['1010-1-1'] ?? '' ), 'Second attempt persistence must store sequence index and map temporary barcode to real barcode.' );
+$second_sequence_shipment['yandex_status'] = 'CANCELLED';
+$sequence_repository_2->save_for_carrier( $sequence_order, YandexDeliverySettings::CARRIER_KEY, $second_sequence_shipment );
+yd_framework_assert( ! empty( $sequence_adapter_2->remove_from_order( $sequence_order )['success'] ), 'Second terminal sequence shipment must be removable.' );
+
+list( $sequence_repository_3, $sequence_adapter_3, $sequence_creation_3, $sequence_registration_3, $sequence_http_3 ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-SEQ-2' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-SEQ-2' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-SEQ-2', 'CREATED', 'YD-SEQ-2', '1010/2' ) ),
+	)
+);
+$third_sequence_result = $sequence_creation_3->create( $sequence_order, yd_framework_request( 1010, '1010' ) );
+$third_sequence_body = json_decode( (string) ( $sequence_http_3->requests[0]['args']['body'] ?? '{}' ), true );
+yd_framework_assert( $third_sequence_result->success && '1010/2' === (string) ( $third_sequence_body['info']['operator_request_id'] ?? '' ), 'Third Yandex attempt must use 1010/2.' );
+
+$sequence_repo_probe = new YandexShipmentRepository( new OrderShipmentRepository() );
+$preview_sequence_before = $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
+$peek_1 = $sequence_repo_probe->peek_next_operator_request_id( $sequence_order, '1010' );
+$peek_2 = $sequence_repo_probe->peek_next_operator_request_id( $sequence_order, '1010' );
+yd_framework_assert( '1010/3' === $peek_1['operator_request_id'] && $peek_1 === $peek_2 && $preview_sequence_before === $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true ), 'Preview/peek must not consume Yandex sequence index.' );
+
+$lock_order = new YdFrameworkOrder( 1012, '1012' );
+$lock_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
+$lock_first = $lock_repository->reserve_operator_request_id( $lock_order, '1012', '2026-07-13 12:00:00' );
+$lock_blocked = false;
+try {
+	$lock_repository->reserve_operator_request_id( $lock_order, '1012', '2026-07-13 12:00:01' );
+} catch ( RuntimeException $exception ) {
+	$lock_blocked = str_contains( $exception->getMessage(), 'уже выполняется' );
+}
+$lock_repository->release_registration_lock( $lock_order, $lock_first['lock_token'] );
+yd_framework_assert( '1012' === $lock_first['operator_request_id'] && $lock_blocked, 'Concurrent Yandex reservation must not allocate the same operator_request_id while lock is active.' );
+
+$transport_order = new YdFrameworkOrder( 1011, '1011' );
+list( $transport_repository_1, $transport_adapter_1, $transport_creation_1, $transport_registration_1, $transport_http_1 ) = yd_framework_stack( array( yd_framework_error_response( 503, array( 'message' => 'temporary transport failure' ) ) ) );
+$transport_failed = $transport_creation_1->create( $transport_order, yd_framework_request( 1011, '1011' ) );
+yd_framework_assert( empty( $transport_failed->success ) && 1 === count( $transport_http_1->requests ) && 0 === (int) ( $transport_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'HTTP offers/create attempt must reserve and keep sequence index even when transport/API call fails.' );
+list( $transport_repository_2, $transport_adapter_2, $transport_creation_2, $transport_registration_2, $transport_http_2 ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-AFTER-FAIL' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-AFTER-FAIL' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-AFTER-FAIL', 'CREATED', 'YD-AFTER-FAIL', '1011/1' ) ),
+	)
+);
+yd_framework_assert( $transport_creation_2->create( $transport_order, yd_framework_request( 1011, '1011' ) )->success && '1011/1' === (string) ( json_decode( (string) ( $transport_http_2->requests[0]['args']['body'] ?? '{}' ), true )['info']['operator_request_id'] ?? '' ), 'Next independent attempt after failed HTTP must use the next sequence id.' );
+
+$duplicate_order = new YdFrameworkOrder( 1013, '1013' );
+list( $duplicate_repository, $duplicate_adapter, $duplicate_creation, $duplicate_registration, $duplicate_http ) = yd_framework_stack( array( yd_framework_error_response( 409, array( 'message' => 'There already was request with such code within this employer, request_id: OLD-udp' ) ) ) );
+$duplicate_result = $duplicate_creation->create( $duplicate_order, yd_framework_request( 1013, '1013' ) );
+yd_framework_assert( empty( $duplicate_result->success ) && 'yandex_operator_request_id_duplicate' === $duplicate_result->error_code && str_contains( $duplicate_result->error_message, 'Яндекс уже использовал номер регистрации 1013' ) && 1 === count( $duplicate_http->requests ) && 0 === (int) ( $duplicate_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Duplicate operator_request_id API error must not retry offers/create and must keep allocated sequence with Russian message.' );
+
+$manual_family_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
+foreach ( array( '1010', '1010/1', '1010/12' ) as $valid_operator_id ) {
+	yd_framework_assert( null !== $manual_family_repository->parse_operator_request_id( $valid_operator_id, '1010' ), 'Manual attach ownership must accept base or positive suffixed Yandex operator id.' );
+}
+foreach ( array( '101', '10101', '1010/', '1010/0', '1010/-1', '1010/x', '1010/1/2', '9999/1' ) as $invalid_operator_id ) {
+	yd_framework_assert( null === $manual_family_repository->parse_operator_request_id( $invalid_operator_id, '1010' ), 'Manual attach ownership must reject non-family Yandex operator id: ' . $invalid_operator_id );
+}
+
+$manual_sync_order = new YdFrameworkOrder( 1010, '1010' );
+$manual_sync_repository_seed = new YandexShipmentRepository( new OrderShipmentRepository() );
+$manual_sync_repository_seed->sync_sequence_from_operator_request_id( $manual_sync_order, '1010/1', '1010', '2026-07-13 12:00:00' );
+list( $manual_sync_repository, $manual_sync_adapter, $manual_sync_creation, $manual_sync_registration, $manual_sync_http ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-MANUAL-4', 'CANCELLED', 'YD-MANUAL-4', '1010/4' ) ) ) );
+$manual_sync_attach = $manual_sync_adapter->attach_manual( $manual_sync_order, array( 'barcode' => 'REQ-MANUAL-4' ) );
+yd_framework_assert( ! empty( $manual_sync_attach['success'] ) && 4 === (int) ( $manual_sync_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ) && '1010/5' === $manual_sync_repository_seed->peek_next_operator_request_id( $manual_sync_order, '1010' )['operator_request_id'], 'Manual attach of 1010/4 must sync sequence upward and next preview must use 1010/5.' );
 
 $remove = $adapter->remove_from_order( $order );
 yd_framework_assert( ! empty( $remove['success'] ) && '' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Yandex remove_local must delete lookup meta.' );

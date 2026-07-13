@@ -57,6 +57,8 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 
 	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { return $this->registration->create( $request ); }
 
+	public function create_for_order( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult { return $this->registration->create_for_order( $order, $request ); }
+
 	/** @param array<string,mixed> $shipment @return array<string,mixed> */
 	public function status_payload( object $order, array $shipment ): array {
 		unset( $order );

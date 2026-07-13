@@ -38,10 +38,38 @@ final class YandexShipmentRegistrationService {
 		return $this->payload_builder->build( $this->allocation( $request ), $this->context( $request ) );
 	}
 
+	public function create_for_order( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
+		$now = $this->now();
+		try {
+			$attempt = $this->repository->reserve_operator_request_id( $order, (string) ( $request->meta['order_num'] ?? $this->repository->base_operator_request_id( $order ) ), $now );
+		} catch ( \RuntimeException $exception ) {
+			return new ShipmentCreateResult( false, error_code: 'yandex_registration_locked', error_message: $exception->getMessage() );
+		}
+		$operator_request_id = $attempt['operator_request_id'];
+		$reserved = $this->request_with_meta(
+			$request,
+			array(
+				'yandex_operator_request_id' => $operator_request_id,
+				'yandex_registration_sequence_index' => $attempt['index'],
+				'yandex_registration_attempt_started_at' => $attempt['started_at'],
+				'yandex_temporary_barcode_prefix' => $this->repository->temporary_barcode_prefix( $operator_request_id ),
+			)
+		);
+		$this->add_order_note( $order, 'Начата регистрация отправления Яндекс. Номер попытки: ' . $operator_request_id . '.' );
+		try {
+			return $this->create( $reserved );
+		} finally {
+			$this->repository->release_registration_lock( $order, $attempt['lock_token'] );
+		}
+	}
+
 	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult {
 		try {
 			$result = $this->registration->register( $this->allocation( $request ), $this->context( $request ) );
 			$fields = $this->fields_from_result( $result );
+			$fields['yandex_registration_sequence_index'] = (int) ( $request->meta['yandex_registration_sequence_index'] ?? $fields['yandex_registration_sequence_index'] ?? 0 );
+			$fields['yandex_registration_attempt_started_at'] = (string) ( $request->meta['yandex_registration_attempt_started_at'] ?? '' );
+			$fields['yandex_temporary_barcode_prefix'] = (string) ( $request->meta['yandex_temporary_barcode_prefix'] ?? '' );
 			$request_id = $result->request_info->request_id;
 			$tracking = '' !== $result->request_info->courier_order_id ? $result->request_info->courier_order_id : $request_id;
 
@@ -70,6 +98,10 @@ final class YandexShipmentRegistrationService {
 							'selected_offer_delivery_interval' => is_array( $details['selected_offer_delivery_interval'] ?? null ) ? $details['selected_offer_delivery_interval'] : array(),
 							'selected_offer_pickup_interval' => is_array( $details['selected_offer_pickup_interval'] ?? null ) ? $details['selected_offer_pickup_interval'] : array(),
 							'selected_offer_snapshot' => is_array( $details['selected_offer_snapshot'] ?? null ) ? $details['selected_offer_snapshot'] : array(),
+							'yandex_operator_request_id' => (string) ( $request->meta['yandex_operator_request_id'] ?? '' ),
+							'yandex_registration_sequence_index' => (int) ( $request->meta['yandex_registration_sequence_index'] ?? 0 ),
+							'yandex_registration_attempt_started_at' => (string) ( $request->meta['yandex_registration_attempt_started_at'] ?? '' ),
+							'yandex_temporary_barcode_prefix' => (string) ( $request->meta['yandex_temporary_barcode_prefix'] ?? '' ),
 							'registration_phase' => (string) ( $details['registration_phase'] ?? 'request_info' ),
 							'error_code' => 'request_info_after_confirm_failed',
 							'error_message' => $exception->getMessage(),
@@ -77,6 +109,17 @@ final class YandexShipmentRegistrationService {
 							'reconciliation_required' => true,
 						),
 					)
+				);
+			}
+			if ( $this->is_duplicate_operator_error( $exception ) ) {
+				$operator_request_id = (string) ( $request->meta['yandex_operator_request_id'] ?? '' );
+				return new ShipmentCreateResult(
+					false,
+					error_code: 'yandex_operator_request_id_duplicate',
+					error_message: '' !== $operator_request_id
+						? 'Яндекс уже использовал номер регистрации ' . $operator_request_id . '. При следующей попытке будет сформирован новый номер.'
+						: 'Номер попытки уже использовался в Яндекс.Доставке. Удалите локальную запись и повторите создание — будет сформирован следующий номер.',
+					raw_reference: array_merge( $details, array( 'yandex_operator_request_id' => $operator_request_id ) )
 				);
 			}
 			return new ShipmentCreateResult( false, error_code: (string) ( $details['error_code'] ?? 'yandex_api_error' ), error_message: $exception->getMessage(), raw_reference: $details );
@@ -156,15 +199,20 @@ final class YandexShipmentRegistrationService {
 		if ( '' === trim( $info->operator_request_id ) ) {
 			return array( 'success' => false, 'message' => 'Яндекс не вернул номер заказа для проверки принадлежности отправления.' );
 		}
-		if ( $info->operator_request_id !== $expected_operator_request_id ) {
+		if ( ! $this->operator_request_id_belongs_to_order( $info->operator_request_id, $expected_operator_request_id ) ) {
 			return array( 'success' => false, 'message' => 'Отправление Яндекс создано для другого заказа.' );
 		}
 		if ( array() !== $this->repository->find( $order ) ) {
 			return array( 'success' => false, 'message' => 'По заказу уже сохранено отправление Яндекс.' );
 		}
 
+		$parsed = $this->repository->parse_operator_request_id( $info->operator_request_id, $expected_operator_request_id );
 		$shipment = $this->persistence_mapper->build_manual_attach_fields( $order, $info, $this->now() );
+		if ( null !== $parsed ) {
+			$shipment['yandex_registration_sequence_index'] = $parsed['index'];
+		}
 		$this->repository->save( $order, $shipment );
+		$this->repository->sync_sequence_from_operator_request_id( $order, $info->operator_request_id, $expected_operator_request_id, $this->now() );
 		$this->add_order_note( $order, 'Отправление Яндекс добавлено в заказ. Request ID: ' . $info->request_id . '.' );
 
 		return array(
@@ -325,6 +373,7 @@ final class YandexShipmentRegistrationService {
 
 		return array(
 			'operator_request_id' => (string) ( $request->meta['yandex_operator_request_id'] ?? $request->meta['order_num'] ?? $request->order_id ),
+			'temporary_barcode_prefix' => (string) ( $request->meta['yandex_temporary_barcode_prefix'] ?? $this->repository->temporary_barcode_prefix( (string) ( $request->meta['yandex_operator_request_id'] ?? $request->meta['order_num'] ?? $request->order_id ) ) ),
 			'source_platform_station_id' => (string) ( $request->meta['yandex_source_platform_station_id'] ?? $request->meta['source_platform_station_id'] ?? '' ),
 			'ready_from' => $this->date_time( $request->meta['yandex_ready_from'] ?? null ),
 			'ready_to' => $this->date_time( $request->meta['yandex_ready_to'] ?? $request->meta['yandex_ready_from'] ?? null ),
@@ -386,6 +435,8 @@ final class YandexShipmentRegistrationService {
 	/** @return array<string,mixed> */
 	private function fields_from_result( YandexDeliveryShipmentRegistrationResult $result ): array {
 		$fields = $this->fields_from_info( $result->request_info );
+		$fields['yandex_operator_request_id'] = '' !== $result->request_info->operator_request_id ? $result->request_info->operator_request_id : (string) ( $result->payload['info']['operator_request_id'] ?? '' );
+		$fields['operator_request_id'] = $fields['yandex_operator_request_id'];
 		$fields['yandex_selected_offer_id'] = $result->selected_offer->offer_id;
 		$fields['yandex_offer_expires_at'] = $result->selected_offer->expires_at;
 		$fields['yandex_offer_pricing'] = $result->selected_offer->pricing;
@@ -529,8 +580,12 @@ final class YandexShipmentRegistrationService {
 			}
 		}
 		$operator_request_id = trim( (string) ( $shipment['yandex_operator_request_id'] ?? $shipment['order_num'] ?? '' ) );
+		$temporary_prefix = trim( (string) ( $shipment['yandex_temporary_barcode_prefix'] ?? '' ) );
+		if ( '' === $temporary_prefix && '' !== $operator_request_id ) {
+			$temporary_prefix = $this->repository->temporary_barcode_prefix( $operator_request_id );
+		}
 		$stored_places = is_array( $shipment['places'] ?? null ) ? $shipment['places'] : array();
-		if ( '' === $operator_request_id || array() === $stored_places ) {
+		if ( '' === $temporary_prefix || array() === $stored_places ) {
 			return array();
 		}
 
@@ -540,7 +595,7 @@ final class YandexShipmentRegistrationService {
 				continue;
 			}
 			$place_number = max( 1, (int) ( $place['place_number'] ?? $place['number'] ?? ( $index + 1 ) ) );
-			$places[] = array( 'barcode' => $operator_request_id . '-' . (string) $place_number );
+			$places[] = array( 'barcode' => $temporary_prefix . '-' . (string) $place_number );
 		}
 
 		return $places;
@@ -582,6 +637,43 @@ final class YandexShipmentRegistrationService {
 		}
 
 		return (string) $this->repository->order_id( $order );
+	}
+
+	private function operator_request_id_belongs_to_order( string $operator_request_id, string $base ): bool {
+		return null !== $this->repository->parse_operator_request_id( $operator_request_id, $base );
+	}
+
+	private function is_duplicate_operator_error( YandexDeliveryApiException $exception ): bool {
+		$haystack = strtolower(
+			$exception->getMessage()
+			. ' ' . (string) ( $exception->details()['yandex_error_message'] ?? '' )
+			. ' ' . (string) ( $exception->details()['error_body'] ?? '' )
+			. ' ' . (string) ( $exception->details()['yandex_error_code'] ?? '' )
+		);
+
+		return str_contains( $haystack, 'already was request with such code' )
+			|| ( str_contains( $haystack, 'such code' ) && str_contains( $haystack, 'employer' ) )
+			|| str_contains( $haystack, 'duplicate' );
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function request_with_meta( ShipmentCreateRequest $request, array $meta ): ShipmentCreateRequest {
+		return new ShipmentCreateRequest(
+			$request->order_id,
+			$request->carrier_key,
+			$request->delivery_type,
+			$request->rate_id,
+			$request->recipient_address,
+			$request->pickup_point,
+			$request->places,
+			$request->declared_value,
+			$request->insurance_enabled,
+			$request->services,
+			$request->recipient,
+			array_merge( $request->meta, $meta )
+		);
 	}
 
 	private function manual_attach_api_error_message( YandexDeliveryApiException $exception ): string {

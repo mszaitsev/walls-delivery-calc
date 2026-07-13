@@ -1,3 +1,12 @@
+## Yandex Operator Request Sequence 0.108.12
+
+- `YandexShipmentRepository` owns the persistent registration sequence meta `_wdc_yandex_delivery_registration_sequence`. Shape: `last_index`, `last_operator_request_id`, `allocated_ids`, `current_attempt` (`operator_request_id`, `sequence_index`, `started_at`, `order_id`, `registration_phase`, `lock_token`) and `updated_at`.
+- `YandexShipmentRegistrationService::create_for_order()` reserves the next `operator_request_id` immediately before the first real `offers/create` call, injects it into `ShipmentCreateRequest` meta and releases only the short registration lock after the attempt. Preview/draft code uses a peeked id; it does not update sequence meta.
+- ID format is deterministic: index `0` is the WooCommerce order number (`1010`), index `1` is `1010/1`, index `2` is `1010/2`. Reservation is not rolled back after HTTP starts, including transport errors or duplicate-code responses.
+- `YandexDeliveryShipmentPayloadBuilder` remains a formatter. It receives the ready `operator_request_id` and a safe temporary barcode prefix; suffixed operator ids are converted to slash-free temporary barcodes such as `1010-1-1` for place 1.
+- Manual attach validates ownership through the same strict family parser: exact base number or `base/{positive integer}` only. After successful `request/info` and canonical persistence, `sync_sequence_from_operator_request_id()` raises `last_index` if the attached shipment used a higher suffix.
+- Duplicate-code API errors are mapped to `yandex_operator_request_id_duplicate` with a Russian message and no automatic second `offers/create`.
+
 ## Yandex Remove Guard and Polling Transport Errors 0.108.11
 
 - `YandexShipmentRegistrationService::remove_local()` now enforces server-side removal through `YandexShipmentButtonPolicy::resolve()`. It no longer deletes active `CREATED` or `cancellation_started` shipments if an admin AJAX request is crafted manually.

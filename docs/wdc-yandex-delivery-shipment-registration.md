@@ -1,5 +1,34 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.12
+
+Яндекс требует уникальный `request.info.operator_request_id` внутри аккаунта, поэтому регистрация теперь использует устойчивую последовательность попыток на уровне заказа. Для заказа `1010` первая реальная попытка отправляет `1010`, вторая — `1010/1`, третья — `1010/2`. Состояние хранится отдельно от текущей shipment-записи в meta `_wdc_yandex_delivery_registration_sequence`:
+
+```php
+array(
+    'last_index' => 2,
+    'last_operator_request_id' => '1010/2',
+    'allocated_ids' => array( '1010', '1010/1', '1010/2' ),
+    'current_attempt' => array(
+        'operator_request_id' => '1010/2',
+        'sequence_index' => 2,
+        'started_at' => '...',
+        'order_id' => 1010,
+        'registration_phase' => 'offers_create',
+        'lock_token' => '...',
+    ),
+    'updated_at' => '...',
+)
+```
+
+Preview только вычисляет следующий номер и не расходует sequence. Номер резервируется в `YandexShipmentRegistrationService::create_for_order()` непосредственно перед первым реальным `offers/create`, после успешной локальной validation и duplicate guard. После старта HTTP попытки reservation не откатывается: если Яндекс принял запрос, а PHP получил timeout/500/malformed/duplicate-code, повторное использование того же кода опаснее, чем пропуск индекса. Reconciliation, polling, update status и cancel продолжают работать с уже сохранённым `request_id` и не увеличивают sequence; local remove удаляет только текущий shipment/lookup meta и не трогает историю выделенных operator ids.
+
+Manual attach больше не сравнивает `operator_request_id` только с точным номером заказа. Для заказа `1010` допустимы ровно `1010` и `1010/{positive integer}`; `10101`, `1010/0`, `1010/x`, `1010/1/2` и чужие номера отклоняются. После успешного `request/info`, проверки ownership и persistence attach синхронизирует sequence вверх: если прикреплён `1010/4`, следующий create/preview предложит `1010/5`; меньшие suffix не уменьшают локальный счётчик.
+
+Payload builder не вычисляет sequence сам: он получает готовый `operator_request_id` из context. Временные barcodes грузомест сделаны независимыми от слеша в operator id: `1010/1` превращается в префикс `1010-1`, поэтому place 1 получает `1010-1-1`, а `items[].place_barcode` использует то же значение. Это сохраняет mapping temporary → real barcode и не меняет реальные barcodes, возвращаемые Яндексом.
+
+Если API всё же вернёт duplicate-code для уже зарезервированного номера, автоматический retry `offers/create` не выполняется. Индекс остаётся использованным, diagnostics сохраняются, а пользователь получает русское сообщение, например `Яндекс уже использовал номер регистрации 1013. При следующей попытке будет сформирован новый номер.`
+
 ## Статус 0.108.11
 
 Local remove теперь защищён не только кнопками, но и backend-ом. `YandexShipmentRegistrationService::remove_local()` перед удалением получает сохранённый shipment и вызывает `YandexShipmentButtonPolicy::resolve()`. Если policy возвращает `remove=false`, repository не удаляется, lookup meta остаётся, а AJAX получает русскую ошибку `Текущее отправление Яндекс нельзя удалить из заказа.` Это блокирует ручной AJAX remove для активного `CREATED` и для `cancellation_started`; `reconciliation_required` и terminal статусы (`CANCELLED`, `DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER`, `REJECTED`) удаляются локально по той же policy.
