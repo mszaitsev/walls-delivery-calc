@@ -19,7 +19,7 @@ final class YandexShipmentButtonPolicy {
 			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => true );
 		}
 		if ( '' !== $request_id && 'cancellation_started' === $local_status ) {
-			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => true );
+			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => ! empty( $shipment['yandex_cancel_poll_exhausted'] ) );
 		}
 		$status = strtoupper( trim( (string) ( $shipment['yandex_status'] ?? $local_status ) ) );
 		$terminal = self::is_terminal_status( $status );

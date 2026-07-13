@@ -758,9 +758,9 @@ final class YandexShipmentRegistrationService {
 			. ' ' . (string) ( $exception->details()['yandex_error_code'] ?? '' )
 		);
 
-		return str_contains( $haystack, 'already was request with such code' )
-			|| ( str_contains( $haystack, 'such code' ) && str_contains( $haystack, 'employer' ) )
-			|| str_contains( $haystack, 'duplicate' );
+		$haystack = preg_replace( '/\s+/', ' ', $haystack ) ?? $haystack;
+
+		return str_contains( $haystack, 'already was request with such code within this employer' );
 	}
 
 	/**

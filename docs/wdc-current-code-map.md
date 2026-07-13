@@ -1,3 +1,9 @@
+## Yandex Locality, Exact Duplicate Retry and Cancel Remove Policy 0.108.15
+
+- `OrderShipmentsMetabox::normalize_yandex_courier_address()` still calls the existing `AddressSuggestionService::suggest()` stack. Yandex locality is now extracted from canonical normalized item fields first (`locality`, `city_name`, `city`, `place`, `settlement`), then from normalized `data` settlement/city fields. Region fallback is allowed only for federal cities represented as region-level addresses, so ordinary regions such as Moscow Oblast are not sent as locality.
+- `YandexShipmentRegistrationService::is_duplicate_operator_error()` only treats the production phrase `already was request with such code within this employer` as the deterministic duplicate-code condition that may auto-skip to the next sequence id. Generic `duplicate`, duplicate barcodes, HTTP 500 and transport failures do not trigger retry.
+- `YandexShipmentButtonPolicy` hides local remove for active `cancellation_started` while cancel polling is still running. The same policy exposes remove only after `yandex_cancel_poll_exhausted=true`; server-side `remove_local()` continues to delegate to that single policy.
+
 ## Yandex Duplicate Auto-Skip, Cancel Polling and Courier Address Verification 0.108.14
 
 - `YandexShipmentRegistrationService::create_for_order()` keeps one registration lock for the whole create click. If `offers/create` returns the exact Yandex duplicate-code response for `operator_request_id`, the service reserves the next sequence id under the same lock, rebuilds the payload and slash-free temporary barcode prefix, and retries only `offers/create`.
@@ -33,7 +39,7 @@
 
 ## Yandex Pending Reconciliation Persistence 0.108.10
 
-- `YandexShipmentButtonPolicy` now separates local lifecycle states: `reconciliation_required` exposes update + local remove immediately, and `cancellation_started` also exposes update + local remove after reload/exhaustion while cancel/create/manual attach remain blocked.
+- `YandexShipmentButtonPolicy` now separates local lifecycle states: `reconciliation_required` exposes update + local remove immediately. Since 0.108.15, `cancellation_started` exposes update only while polling is active and adds local remove only after cancel polling exhaustion.
 - `OrderShipmentsMetabox` registers the shared `wdc_mark_shipment_poll_exhausted` AJAX action. It calls an optional carrier method (`mark_polling_exhausted`) and then returns the same carrier UI payload used by normal status rendering.
 - `YandexShipmentRegistrationService::mark_polling_exhausted()` persists `yandex_reconciliation_poll_exhausted=true`, `yandex_reconciliation_attempts`, `yandex_reconciliation_poll_exhausted_at` and the Russian timeout `status_title` without calling Yandex HTTP and without clearing request id, lookup meta or selected offer audit.
 - Manual status update after exhaustion preserves the exhausted state while `request/info` is still incomplete; a later canonical `request/info` clears exhausted fields and converts the shipment to normal `created`.
@@ -100,7 +106,7 @@
 
 - `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` now preserves confirmed Yandex requests when `offers/confirm` succeeds but `request/info` fails. The framework-level result carries `raw_reference['yandex_reconciliation']`, and `ShipmentCreationService` persists a local `reconciliation_required` shipment instead of only saving `last_error`.
 - `src/Shipments/Application/ShipmentCreationService.php` stores pending reconciliation shipments through the existing `OrderShipmentRepository`: `yandex_request_id`, `request_id`, `external_id`, selected offer id/expires_at, sanitized diagnostics and local status `reconciliation_required`. The existing duplicate guard prevents a second create; status update is the recovery path.
-- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` treats `reconciliation_required` and `cancellation_started` as protected local lifecycle states: create/cancel/manual attach are hidden, status update remains available, and local remove is available with the Yandex local-only warning.
+- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` treats `reconciliation_required` and `cancellation_started` as protected local lifecycle states: create/cancel/manual attach are hidden and status update remains available. Reconciliation is locally removable immediately; cancellation is locally removable only after `yandex_cancel_poll_exhausted`.
 - `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` handles asynchronous cancel: it saves `yandex_cancel_state`, `yandex_cancel_requested=true` and local `status=cancellation_started` immediately after `request/cancel`; a later successful `request/info` with `CANCELLED` clears the active flag and writes the final note once.
 - Yandex API lifecycle request ids are resolved only from `yandex_request_id`, `request_id`, then `external_id`. Courier order numbers may still be shown as tracking identifiers, but they are no longer used for `request/info`, `request/history` or `request/cancel`.
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` reuses existing prepared/shared/CDEK shipment allocation rows for Yandex drafts before falling back to a single place. The reused rows keep `item_key`/order-item identity, place number and per-place quantity, so split quantity and same-SKU different order items survive into `yandex_item_rows`.

@@ -331,6 +331,13 @@ $editable_rows = $editable_method->invoke(
 );
 yd_framework_assert( 2 === count( $editable_rows ) && 1 === (int) $editable_rows[0]['place_number'] && 2 === (int) $editable_rows[1]['place_number'], 'Generic modal editable place helper must keep all draft places and place numbers.' );
 yd_framework_assert( '' === $editable_rows[0]['weight_g'] && '' === $editable_rows[0]['length_cm'] && '' === $editable_rows[1]['weight_g'] && '' === $editable_rows[1]['height_cm'] && array( 'a' ) === $editable_rows[0]['items'], 'Generic modal editable place helper must clear only factual weight/dimensions and preserve allocation data.' );
+$locality_method = $metabox_reflection->getMethod( 'yandex_locality_from_normalized_item' );
+$locality_method->setAccessible( true );
+yd_framework_assert( 'Москва' === $locality_method->invoke( $metabox_without_constructor, array( 'data' => array( 'region_with_type' => 'г Москва', 'street_with_type' => 'Ходынский бульвар', 'house' => '9' ) ) ), 'Yandex DaData locality must resolve federal city Moscow when city fields are absent.' );
+yd_framework_assert( 'Новосибирск' === $locality_method->invoke( $metabox_without_constructor, array( 'data' => array( 'city_with_type' => 'г Новосибирск', 'region_with_type' => 'Новосибирская обл', 'street_with_type' => 'Красный проспект', 'house' => '10' ) ) ), 'Yandex DaData locality must resolve a normal city from city_with_type.' );
+yd_framework_assert( 'Кольцово' === $locality_method->invoke( $metabox_without_constructor, array( 'data' => array( 'settlement_with_type' => 'рп Кольцово', 'city' => '', 'region_with_type' => 'Новосибирская обл', 'street_with_type' => 'Технопарковая ул', 'house' => '1' ) ) ), 'Yandex DaData locality must resolve settlements from settlement fields.' );
+yd_framework_assert( 'Химки' === $locality_method->invoke( $metabox_without_constructor, array( 'locality' => 'Химки', 'data' => array( 'city' => '', 'region_with_type' => 'Московская обл', 'street_with_type' => 'Ленинградская ул', 'house' => '1' ) ) ), 'Yandex DaData locality must use canonical normalized locality even when raw data city is absent.' );
+yd_framework_assert( '' === $locality_method->invoke( $metabox_without_constructor, array( 'data' => array( 'city' => '', 'settlement' => '', 'region_with_type' => 'Московская обл', 'street_with_type' => 'Ленина ул', 'house' => '1' ) ) ), 'Yandex DaData locality must not substitute ordinary region as locality.' );
 
 $metabox_buttons = new ShipmentMetaboxButtonPolicy();
 $empty_yandex_payload = $adapter->status_payload( $order, array() );
@@ -350,7 +357,10 @@ yd_framework_assert( ! empty( $reconciliation_exhausted_buttons['show_update'] )
 
 $cancel_started_yandex = array( 'status' => 'cancellation_started', 'yandex_request_id' => 'REQ-META-CANCEL' );
 $cancel_started_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $cancel_started_yandex, $adapter->status_payload( $order, $cancel_started_yandex ) );
-yd_framework_assert( ! empty( $cancel_started_yandex_buttons['has_shipment'] ) && empty( $cancel_started_yandex_buttons['show_create'] ) && ! empty( $cancel_started_yandex_buttons['show_update'] ) && empty( $cancel_started_yandex_buttons['show_cancel'] ) && ! empty( $cancel_started_yandex_buttons['show_remove'] ), 'Metabox capabilities must treat Yandex cancellation_started as existing shipment with status update and local remove.' );
+yd_framework_assert( ! empty( $cancel_started_yandex_buttons['has_shipment'] ) && empty( $cancel_started_yandex_buttons['show_create'] ) && ! empty( $cancel_started_yandex_buttons['show_update'] ) && empty( $cancel_started_yandex_buttons['show_cancel'] ) && empty( $cancel_started_yandex_buttons['show_remove'] ), 'Metabox capabilities must hide local remove for active Yandex cancellation_started before exhaustion.' );
+$cancel_started_exhausted_yandex = array( 'status' => 'cancellation_started', 'yandex_request_id' => 'REQ-META-CANCEL', 'yandex_cancel_poll_exhausted' => true );
+$cancel_started_exhausted_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $cancel_started_exhausted_yandex, $adapter->status_payload( $order, $cancel_started_exhausted_yandex ) );
+yd_framework_assert( ! empty( $cancel_started_exhausted_buttons['show_update'] ) && ! empty( $cancel_started_exhausted_buttons['show_remove'] ) && empty( $cancel_started_exhausted_buttons['show_cancel'] ) && empty( $cancel_started_exhausted_buttons['show_create'] ), 'Metabox capabilities must allow local remove for Yandex cancellation_started only after poll exhaustion.' );
 
 $cancelled_yandex = array( 'status' => 'created', 'yandex_status' => 'CANCELLED', 'yandex_request_id' => 'REQ-META-CANCELLED' );
 $cancelled_yandex_buttons = $metabox_buttons->resolve( YandexDeliverySettings::CARRIER_KEY, $cancelled_yandex, $adapter->status_payload( $order, $cancelled_yandex ) );
@@ -451,7 +461,9 @@ yd_framework_assert( ! empty( $cancel_pending['success'] ) && 'CREATED' === (str
 $cancel_pending_shipment = $cancel_pending_repository->find_by_carrier( $cancel_pending_order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( 'cancellation_started' === (string) ( $cancel_pending_shipment['status'] ?? '' ) && ! empty( $cancel_pending_shipment['yandex_cancel_requested'] ) && 'cancellation_started' === (string) ( $cancel_pending_shipment['yandex_cancel_reason'] ?? '' ), 'Non-terminal info after cancel must keep local cancellation_started state.' );
 $cancel_pending_policy = ( new YandexShipmentButtonPolicy() )->resolve( $cancel_pending_shipment );
-yd_framework_assert( empty( $cancel_pending_policy['cancel'] ) && ! empty( $cancel_pending_policy['update'] ) && ! empty( $cancel_pending_policy['remove'] ), 'Cancel pending button policy must block repeat cancel and allow local remove after reload/exhaustion.' );
+yd_framework_assert( empty( $cancel_pending_policy['cancel'] ) && ! empty( $cancel_pending_policy['update'] ) && empty( $cancel_pending_policy['remove'] ), 'Cancel pending button policy must block repeat cancel and local remove before exhaustion.' );
+$cancel_pending_remove = $cancel_pending_adapter->remove_from_order( $cancel_pending_order );
+yd_framework_assert( empty( $cancel_pending_remove['success'] ) && array() !== $cancel_pending_repository->find_by_carrier( $cancel_pending_order, YandexDeliverySettings::CARRIER_KEY ), 'Server-side remove must reject cancellation_started before polling exhaustion.' );
 yd_framework_assert( ! str_contains( implode( "\n", $cancel_pending_order->notes ), 'отменено' ), 'Cancel pending note must not claim final cancellation.' );
 $cancel_completed = $cancel_pending_adapter->update_status( $cancel_pending_order );
 yd_framework_assert( ! empty( $cancel_completed['success'] ) && 'CANCELLED' === (string) ( $cancel_completed['status'] ?? '' ), 'Subsequent update_status must complete async cancellation when request/info returns CANCELLED.' );
@@ -482,6 +494,25 @@ $cancel_exhausted_shipment = $cancel_fail_repository->find_by_carrier( $cancel_i
 $cancel_exhausted_payload = $cancel_fail_adapter->status_payload( $cancel_info_fail_order, $cancel_exhausted_shipment );
 yd_framework_assert( ! empty( $cancel_exhausted['success'] ) && ! empty( $cancel_exhausted_shipment['yandex_cancel_poll_exhausted'] ) && 14 === (int) ( $cancel_exhausted_shipment['yandex_cancel_poll_attempts'] ?? 0 ) && 'Статус отмены пока не получен. Повторите обновление позднее.' === (string) ( $cancel_exhausted_shipment['status_title'] ?? '' ), 'Cancel polling exhaustion must persist cancellation-specific exhausted state.' );
 yd_framework_assert( ! empty( $cancel_exhausted_payload['can_update_status'] ) && ! empty( $cancel_exhausted_payload['can_remove_from_order'] ) && empty( $cancel_exhausted_payload['can_cancel'] ) && empty( $cancel_exhausted_payload['can_create'] ) && empty( $cancel_exhausted_payload['polling_continue'] ), 'Cancel exhaustion payload must expose update/remove and stop polling without repeating cancel.' );
+$cancel_exhausted_remove = $cancel_fail_adapter->remove_from_order( $cancel_info_fail_order );
+yd_framework_assert( ! empty( $cancel_exhausted_remove['success'] ) && array() === $cancel_fail_repository->find_by_carrier( $cancel_info_fail_order, YandexDeliverySettings::CARRIER_KEY ), 'Server-side remove must allow cancellation_started after polling exhaustion.' );
+
+$cancel_exhausted_update_order = new YdFrameworkOrder( 778, '778' );
+list( $cancel_exhausted_update_repository, $cancel_exhausted_update_adapter, $cancel_exhausted_update_creation, $cancel_exhausted_update_registration, $cancel_exhausted_update_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-CANCEL-EXHAUSTED-UPDATE' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-CANCEL-EXHAUSTED-UPDATE' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-CANCEL-EXHAUSTED-UPDATE', 'CREATED', 'YD-CANCEL-EXHAUSTED-UPDATE', '778' ) ),
+		yd_framework_response( array( 'status' => 'CREATED', 'description' => 'Заказ отменяется', 'reason' => 'cancellation_started' ) ),
+		yd_framework_error_response( 503, array( 'message' => 'info unavailable after cancel' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-CANCEL-EXHAUSTED-UPDATE', 'CANCELLED', 'YD-CANCEL-EXHAUSTED-UPDATE', '778' ) ),
+	)
+);
+yd_framework_assert( $cancel_exhausted_update_creation->create( $cancel_exhausted_update_order, yd_framework_request( 778, '778' ) )->success, 'Cancel exhausted update scenario must start from successful create.' );
+yd_framework_assert( ! empty( $cancel_exhausted_update_adapter->cancel_in_carrier( $cancel_exhausted_update_order )['accepted'] ), 'Cancel exhausted update scenario must persist accepted cancellation.' );
+$cancel_exhausted_update_adapter->mark_polling_exhausted( $cancel_exhausted_update_order, 14, 'cancellation' );
+$cancel_exhausted_update_result = $cancel_exhausted_update_adapter->update_status( $cancel_exhausted_update_order );
+yd_framework_assert( ! empty( $cancel_exhausted_update_result['cancelled_and_removed'] ) && array() === $cancel_exhausted_update_repository->find_by_carrier( $cancel_exhausted_update_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $cancel_exhausted_update_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 0 === (int) ( $cancel_exhausted_update_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Manual update after cancel exhaustion must auto-remove local shipment on CANCELLED and preserve sequence meta.' );
 
 $draft_factory = new OrderShipmentDraftFactory(
 	new DeliveryServiceRepository(),
@@ -806,6 +837,17 @@ yd_framework_assert( ! empty( $duplicate_result->success ) && 4 === count( $dupl
 yd_framework_assert( '1013' === (string) ( $duplicate_first_body['info']['operator_request_id'] ?? '' ) && '1013/1' === (string) ( $duplicate_second_body['info']['operator_request_id'] ?? '' ) && '1013-1-1' === (string) ( $duplicate_second_body['places'][0]['barcode'] ?? '' ), 'Duplicate auto-skip must rebuild payload and temporary barcode prefix with the next operator_request_id.' );
 yd_framework_assert( '1013/1' === (string) ( $duplicate_shipment['yandex_operator_request_id'] ?? '' ) && 1 === (int) ( $duplicate_shipment['yandex_registration_sequence_index'] ?? -1 ) && 1 === (int) ( $duplicate_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Final shipment and sequence state must persist the auto-skipped operator_request_id.' );
 
+$duplicate_exact_order = new YdFrameworkOrder( 1015, '1015' );
+list( $duplicate_exact_repository, $duplicate_exact_adapter, $duplicate_exact_creation, $duplicate_exact_registration, $duplicate_exact_http ) = yd_framework_stack(
+	array(
+		yd_framework_error_response( 409, array( 'message' => 'There already was request with such code within this employer' ) ),
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-DUP-EXACT' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-DUP-EXACT' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-DUP-EXACT', 'CREATED', 'YD-DUP-EXACT', '1015/1' ) ),
+	)
+);
+yd_framework_assert( $duplicate_exact_creation->create( $duplicate_exact_order, yd_framework_request( 1015, '1015' ) )->success && 4 === count( $duplicate_exact_http->requests ), 'Exact Yandex duplicate-code phrase without request_id must trigger bounded offers/create retry.' );
+
 $duplicate_limit_order = new YdFrameworkOrder( 1014, '1014' );
 $duplicate_limit_responses = array();
 for ( $i = 0; $i < 10; ++$i ) {
@@ -814,6 +856,21 @@ for ( $i = 0; $i < 10; ++$i ) {
 list( $duplicate_limit_repository, $duplicate_limit_adapter, $duplicate_limit_creation, $duplicate_limit_registration, $duplicate_limit_http ) = yd_framework_stack( $duplicate_limit_responses );
 $duplicate_limit_result = $duplicate_limit_creation->create( $duplicate_limit_order, yd_framework_request( 1014, '1014' ) );
 yd_framework_assert( empty( $duplicate_limit_result->success ) && 'yandex_operator_request_id_duplicate_limit' === $duplicate_limit_result->error_code && str_contains( $duplicate_limit_result->error_message, 'после 10 попыток' ) && 10 === count( $duplicate_limit_http->requests ) && 9 === (int) ( $duplicate_limit_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Duplicate auto-skip must be bounded to 10 occupied ids without confirm or infinite retry.' );
+
+foreach ( array(
+	'generic-duplicate' => array( 409, array( 'message' => 'duplicate validation error' ) ),
+	'duplicate-barcode' => array( 409, array( 'message' => 'duplicate item barcode' ) ),
+	'http-500' => array( 500, array( 'message' => 'internal server error' ) ),
+) as $case => $fixture ) {
+	$no_retry_order = new YdFrameworkOrder( 1200, '1200' );
+	list( $no_retry_repository, $no_retry_adapter, $no_retry_creation, $no_retry_registration, $no_retry_http ) = yd_framework_stack( array( yd_framework_error_response( $fixture[0], $fixture[1] ) ) );
+	$no_retry_result = $no_retry_creation->create( $no_retry_order, yd_framework_request( 1200, '1200' ) );
+	yd_framework_assert( empty( $no_retry_result->success ) && 1 === count( $no_retry_http->requests ) && 0 === (int) ( $no_retry_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Non-exact duplicate retry must not run for case ' . $case . '.' );
+}
+$network_order = new YdFrameworkOrder( 1201, '1201' );
+list( $network_repository, $network_adapter, $network_creation, $network_registration, $network_http ) = yd_framework_stack( array() );
+$network_result = $network_creation->create( $network_order, yd_framework_request( 1201, '1201' ) );
+yd_framework_assert( empty( $network_result->success ) && 1 === count( $network_http->requests ) && 0 === (int) ( $network_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Transport/runtime failure must not trigger automatic duplicate retry.' );
 
 $manual_family_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
 foreach ( array( '1010', '1010/1', '1010/12' ) as $valid_operator_id ) {

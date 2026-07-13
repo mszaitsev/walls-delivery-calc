@@ -1337,7 +1337,7 @@ final class OrderShipmentsMetabox {
 		}
 
 		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
-		$locality = trim( (string) ( $data['settlement_with_type'] ?? $data['city_with_type'] ?? $data['settlement'] ?? $data['city'] ?? '' ) );
+		$locality = $this->yandex_locality_from_normalized_item( $item );
 		$street = trim( (string) ( $data['street_with_type'] ?? $data['street'] ?? '' ) );
 		$house = trim( (string) ( $data['house'] ?? '' ) );
 		$room = trim( (string) ( $data['flat'] ?? $data['room'] ?? $data['room_number'] ?? $data['premise'] ?? '' ) );
@@ -1377,6 +1377,53 @@ final class OrderShipmentsMetabox {
 			),
 			'order_id' => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $item
+	 */
+	private function yandex_locality_from_normalized_item( array $item ): string {
+		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
+		foreach ( array(
+			$item['locality'] ?? null,
+			$item['city_name'] ?? null,
+			$item['city'] ?? null,
+			$item['place'] ?? null,
+			$item['settlement'] ?? null,
+			$data['locality'] ?? null,
+			$data['city_name'] ?? null,
+			$data['place'] ?? null,
+			$data['settlement_with_type'] ?? null,
+			$data['city_with_type'] ?? null,
+			$data['settlement'] ?? null,
+			$data['city'] ?? null,
+		) as $value ) {
+			$locality = $this->clean_yandex_locality( (string) $value );
+			if ( '' !== $locality ) {
+				return $locality;
+			}
+		}
+
+		return $this->federal_city_locality( $data );
+	}
+
+	private function clean_yandex_locality( string $value ): string {
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+		$value = preg_replace( '/^(г\.?|город|пгт|рп|рабочий\s+пос[её]лок|пос[её]лок|с\.?|село|д\.?|деревня)\s+/iu', '', $value ) ?? $value;
+		return trim( $value );
+	}
+
+	/** @param array<string,mixed> $data */
+	private function federal_city_locality( array $data ): string {
+		$region = $this->clean_yandex_locality( (string) ( $data['region_with_type'] ?? $data['region'] ?? '' ) );
+		$normalized = function_exists( 'mb_strtolower' ) ? mb_strtolower( $region ) : strtolower( $region );
+		foreach ( array( 'москва', 'санкт-петербург', 'севастополь' ) as $city ) {
+			if ( $city === $normalized ) {
+				return $region;
+			}
+		}
+
+		return '';
 	}
 
 	/**
