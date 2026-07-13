@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.110.0
+
+В общей модалке подготовки отправления Яндекс появился временный selector `ПВЗ отправления Яндекс`. Начальное значение берётся из настроек службы (`source_platform_station_id`) и по-прежнему попадает в payload как `source.platform_station.platform_id`. Менеджер может открыть существующую карту выбора ПВЗ и выбрать другую точку сдачи; выбор обновляет hidden `yandex_source_platform_station_id`, ставит `yandex_source_station_overridden=1`, пересобирает preview и используется при создании отправления.
+
+Карта переиспользует общий admin pickup picker/search endpoint, но вызывает его как `carrier_key=yandex_delivery` + `purpose=source_dropoff`. Источник точек — `YandexDeliveryPickupPointV2Repository`; реальный признак сдачи отправлений — `available_for_dropoff`. В карту попадают только активные точки Яндекса с непустым `platform_station_id`, координатами и `available_for_dropoff=true`. Backend preview/create повторно проверяет temporary override: неизвестная, inactive или pickup-only точка возвращает русскую validation error до любого Yandex shipment HTTP.
+
+Override не сохраняется в настройки, WooCommerce order meta, `_wdc_shipments`, local/session storage или cache. Он живёт только в текущем DOM/FormData экземпляре модалки; reset возвращает default из настроек, а reload снова строит draft с default. Canonical source snapshot уже созданного отправления может сохраняться в request/info для аудита, но это не является preference для следующей регистрации. ПВЗ назначения (`yandex_pickup_platform_station_id`) и courier destination не меняются.
+
 ## Статус 0.109.3
 
 В общем блоке `Отправления` Яндекс больше не показывает `request_id` как основную tracking-строку, если canonical `request/info` уже дал `sharing_url`. `YandexShipmentAdapter` формирует structured `tracking_presentation`: label `Отслеживание посылки`, visible text `ссылка`, link URL and clipboard value = полный `sharing_url`. `OrderShipmentsMetabox` выводит ссылку через общий renderer (`target="_blank"`, `rel="noopener noreferrer"`, `esc_url()`), а runtime refresh/manual attach/reconciliation используют тот же общий copy-button без отдельного Yandex clipboard handler.

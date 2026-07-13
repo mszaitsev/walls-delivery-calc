@@ -597,6 +597,7 @@ final class OrderShipmentDraftFactory {
 				'order_num' => $this->order_number( $order ),
 				'yandex_operator_request_id' => $this->yandex_next_operator_request_id( $order ),
 				'yandex_source_platform_station_id' => $this->yandex_settings instanceof YandexDeliverySettings ? $this->yandex_settings->source_platform_station_id() : '',
+				'yandex_source_location_id' => $this->yandex_settings instanceof YandexDeliverySettings ? $this->yandex_settings->source_location_id() : 0,
 				'yandex_ready_from' => $ready,
 				'yandex_ready_to' => $ready,
 				'yandex_recipient_first_name' => method_exists( $order, 'get_shipping_first_name' ) ? (string) $order->get_shipping_first_name() : '',
@@ -701,6 +702,7 @@ final class OrderShipmentDraftFactory {
 		$item_rows = $shipment_data->item_rows;
 		$pickup_code = sanitize_text_field( wp_unslash( $data['pickup_point_code'] ?? $data['yandex_pickup_platform_station_id'] ?? $base->meta['yandex_pickup_platform_station_id'] ?? '' ) );
 		$source_station = sanitize_text_field( wp_unslash( $data['yandex_source_platform_station_id'] ?? $base->meta['yandex_source_platform_station_id'] ?? '' ) );
+		$source_station_overridden = ! empty( $data['yandex_source_station_overridden'] );
 		$ready_from = sanitize_text_field( wp_unslash( $data['yandex_ready_from'] ?? $base->meta['yandex_ready_from'] ?? '' ) );
 		$ready_to = sanitize_text_field( wp_unslash( $data['yandex_ready_to'] ?? $base->meta['yandex_ready_to'] ?? $ready_from ) );
 		$full_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->recipient_address->raw_address ) );
@@ -730,6 +732,7 @@ final class OrderShipmentDraftFactory {
 					'delivery_type' => $delivery_type,
 					'yandex_operator_request_id' => (string) ( $base->meta['yandex_operator_request_id'] ?? $base->meta['order_num'] ?? $base->order_id ),
 					'yandex_source_platform_station_id' => $source_station,
+					'yandex_source_station_overridden' => $source_station_overridden ? '1' : '0',
 					'yandex_ready_from' => $ready_from,
 					'yandex_ready_to' => $ready_to,
 					'yandex_recipient_first_name' => sanitize_text_field( wp_unslash( $data['recipient_first_name'] ?? $base->meta['yandex_recipient_first_name'] ?? '' ) ),

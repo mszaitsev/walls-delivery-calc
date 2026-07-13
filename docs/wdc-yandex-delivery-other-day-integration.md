@@ -12,7 +12,7 @@ Technical `location/detect` failures use marker `999999999`. This marker is not 
 Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector, checkout pricing-calculator integration and order-admin recalculation are implemented through 0.105.8. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_v2 import/enrichment/mapping pipeline, checkout rates, the admin source platform station selector, checkout pricing-calculator integration and order-admin recalculation are implemented. Yandex pricing-calculator uses the shared generic PackagingBuilder for multi-place request payloads, and checkout buyer PVZ selection for `yandex_pickup` is implemented through the common pickup picker. Since 0.110.0 the shipment preparation modal also has a temporary source drop-off override: it starts from the configured source station, uses the shared pickup map with `purpose=source_dropoff`, filters by local `available_for_dropoff`, and submits only the current FormData value to `source.platform_station.platform_id` without saving a new preference. Destination pickup selection and checkout tariff data remain separate.
 
 Date: 2026-06-30.
 

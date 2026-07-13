@@ -173,6 +173,59 @@ final class YandexDeliveryPickupPointV2Repository {
 		return $rows[0] ?? null;
 	}
 
+	/** @return array<string,mixed>|null */
+	public function source_dropoff_point_by_platform_station_id( string $platform_station_id ): ?array {
+		$row = $this->find( $platform_station_id );
+
+		return is_array( $row ) && $this->is_source_dropoff_row( $row ) ? $row : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function search_source_dropoff_points( array $filters = array() ): array {
+		$limit = max( 1, min( 2000, (int) ( $filters['limit'] ?? 100 ) ) );
+		$query = $this->source_dropoff_query( (string) ( $filters['query'] ?? '' ) );
+
+		if ( $this->has_test_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->{$this->test_rows_property()},
+					fn( array $row ): bool => $this->is_source_dropoff_row( $row )
+						&& $this->has_coordinates( $row )
+						&& $this->source_dropoff_matches_query( $row, $query )
+				)
+			);
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['locality'] ?? '' ) . (string) ( $a['name'] ?? '' ) . (string) ( $a['platform_station_id'] ?? '' ), (string) ( $b['locality'] ?? '' ) . (string) ( $b['name'] ?? '' ) . (string) ( $b['platform_station_id'] ?? '' ) )
+			);
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$this->create_schema_if_needed();
+		$where = array(
+			'active = 1',
+			'available_for_dropoff = 1',
+			"platform_station_id <> ''",
+			'latitude IS NOT NULL',
+			'longitude IS NOT NULL',
+		);
+		$args = array();
+		if ( '' !== $query ) {
+			$like = '%' . $this->wpdb->esc_like( $query ) . '%';
+			$where[] = '(platform_station_id LIKE %s OR name LIKE %s OR locality LIKE %s OR full_address LIKE %s)';
+			array_push( $args, $like, $like, $like, $like );
+		}
+		$args[] = $limit;
+		$sql = 'SELECT platform_station_id, operator_station_id, operator_id, type, name, yandex_geo_id, region, locality, full_address, latitude, longitude, schedule_text, available_for_dropoff, active FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY locality ASC, name ASC, platform_station_id ASC LIMIT %d';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$args ), ARRAY_A );
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
 	/**
 	 * @param array<string,mixed> $filters
 	 * @return array<int,array<string,mixed>>
@@ -524,6 +577,35 @@ final class YandexDeliveryPickupPointV2Repository {
 
 	private function is_source_dropoff_row( array $row ): bool {
 		return ! empty( $row['active'] ) && ! empty( $row['available_for_dropoff'] ) && '' !== trim( (string) ( $row['platform_station_id'] ?? '' ) );
+	}
+
+	private function has_coordinates( array $row ): bool {
+		return is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null );
+	}
+
+	private function source_dropoff_query( string $query ): string {
+		$query = function_exists( 'mb_strtolower' ) ? mb_strtolower( $query ) : strtolower( $query );
+
+		return trim( preg_replace( '/\s+/u', ' ', $query ) ?? $query );
+	}
+
+	private function source_dropoff_matches_query( array $row, string $query ): bool {
+		if ( '' === $query ) {
+			return true;
+		}
+		$haystack = $this->source_dropoff_query(
+			implode(
+				' ',
+				array(
+					(string) ( $row['platform_station_id'] ?? '' ),
+					(string) ( $row['name'] ?? '' ),
+					(string) ( $row['locality'] ?? '' ),
+					(string) ( $row['full_address'] ?? '' ),
+				)
+			)
+		);
+
+		return str_contains( $haystack, $query );
 	}
 
 	private function is_destination_candidate_row( array $row ): bool {

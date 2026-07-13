@@ -1,3 +1,11 @@
+## Yandex source drop-off selector 0.110.0
+
+- Default source station is read from `YandexDeliverySettings::source_platform_station_id()` and placed into the shared shipment modal as the existing `yandex_source_platform_station_id` field.
+- `OrderShipmentsMetabox` renders `ПВЗ отправления Яндекс`, uses the shared pickup-map modal, and sends `carrier_key=yandex_delivery&purpose=source_dropoff` to the existing admin pickup search AJAX action.
+- Source drop-off points are loaded from `YandexDeliveryPickupPointV2Repository`; the canonical capability is `available_for_dropoff`. Map rows must also be active, have `platform_station_id` and coordinates.
+- The temporary override is DOM/FormData-only (`yandex_source_station_overridden=1`). It is used by preview/create through `OrderShipmentDraftFactory`, but is not persisted as a preference.
+- Backend validation rejects forged unknown, inactive or non-drop-off overrides before Yandex shipment HTTP calls. Destination pickup fields (`yandex_pickup_platform_station_id`) and courier destination fields are separate and unchanged.
+
 ## Yandex tracking link presentation 0.109.3
 
 - `YandexShipmentAdapter::status_payload()` now adds a backward-compatible `tracking_presentation` array for Yandex shipments. A valid persisted `sharing_url` becomes label `Отслеживание посылки`, visible text `ссылка`, `url=sharing_url` and `copy_value=sharing_url`; invalid/empty URLs fall back to the existing request-id tracking identifier.

@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -50,6 +51,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_DPD_COURIER_CONTACT_HISTORY = 'wdc_dpd_courier_contact_history';
 	private const ACTION_CDEK_BARCODE_PDF = 'wdc_cdek_barcode_pdf';
 	private const ACTION_DPD_DOCUMENTS_ZIP = 'wdc_dpd_documents_zip';
+	private ?YandexDeliveryPickupPointV2Repository $yandex_pickup_points = null;
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -307,6 +309,8 @@ final class OrderShipmentsMetabox {
 		$pickup_address = $recipient_address_context;
 		$courier_original_address = (string) ( $meta['courier_original_address'] ?? '' );
 		$yandex_source_platform_station_id = trim( (string) ( $meta['yandex_source_platform_station_id'] ?? '' ) );
+		$yandex_source_location_id = (int) ( $meta['yandex_source_location_id'] ?? 0 );
+		$yandex_source_dropoff = $this->yandex_source_dropoff_presentation( $yandex_source_platform_station_id );
 		$yandex_pickup_platform_station_id = trim( (string) ( $meta['yandex_pickup_platform_station_id'] ?? $pickup_code ) );
 		$yandex_pickup_address = trim( (string) ( $meta['pickup_point_address'] ?? $pickup_row['address'] ?? $recipient_address_context ) );
 		$yandex_ready_from = trim( (string) ( $meta['yandex_ready_from'] ?? '' ) );
@@ -553,12 +557,29 @@ final class OrderShipmentsMetabox {
 										<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Календарь магазина недоступен, дата отправки DPD рассчитана по fallback-правилу.', 'walls-delivery-calc' ); ?></p>
 									<?php endif; ?>
 								<?php elseif ( $is_yandex ) : ?>
-									<div data-wdc-yandex-source-station>
-										<input type="hidden" name="yandex_source_platform_station_id" value="<?php echo esc_attr( $yandex_source_platform_station_id ); ?>">
-										<p><strong><?php echo esc_html__( 'Станция приема Яндекс', 'walls-delivery-calc' ); ?>:</strong> <span><?php echo esc_html( '' !== $yandex_source_platform_station_id ? $yandex_source_platform_station_id : '-' ); ?></span></p>
+									<div data-wdc-yandex-source-station data-wdc-yandex-source-dropoff data-default-id="<?php echo esc_attr( $yandex_source_platform_station_id ); ?>" data-default-title="<?php echo esc_attr( (string) $yandex_source_dropoff['title'] ); ?>" data-default-address="<?php echo esc_attr( (string) $yandex_source_dropoff['address'] ); ?>" data-default-work-time="<?php echo esc_attr( (string) $yandex_source_dropoff['work_time'] ); ?>" data-default-lat="<?php echo esc_attr( (string) $yandex_source_dropoff['lat'] ); ?>" data-default-lng="<?php echo esc_attr( (string) $yandex_source_dropoff['lng'] ); ?>">
+										<input type="hidden" name="yandex_source_platform_station_id" value="<?php echo esc_attr( $yandex_source_platform_station_id ); ?>" data-wdc-yandex-source-station-id>
+										<input type="hidden" name="yandex_source_station_overridden" value="0" data-wdc-yandex-source-station-overridden>
+										<input type="hidden" name="yandex_source_dropoff_title" value="<?php echo esc_attr( (string) $yandex_source_dropoff['title'] ); ?>" data-wdc-yandex-source-dropoff-title-input>
+										<input type="hidden" name="yandex_source_dropoff_address" value="<?php echo esc_attr( (string) $yandex_source_dropoff['address'] ); ?>" data-wdc-yandex-source-dropoff-address-input>
+										<input type="hidden" name="yandex_source_dropoff_work_time" value="<?php echo esc_attr( (string) $yandex_source_dropoff['work_time'] ); ?>" data-wdc-yandex-source-dropoff-work-time-input>
+										<input type="hidden" value="<?php echo esc_attr( (string) $yandex_source_location_id ); ?>" data-wdc-yandex-source-location-id>
+										<input type="hidden" value="<?php echo esc_attr( (string) $yandex_source_dropoff['lat'] ); ?>" data-wdc-yandex-source-lat>
+										<input type="hidden" value="<?php echo esc_attr( (string) $yandex_source_dropoff['lng'] ); ?>" data-wdc-yandex-source-lng>
+										<p><strong><?php echo esc_html__( 'ПВЗ отправления Яндекс', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-yandex-source-dropoff-title><?php echo esc_html( '' !== (string) $yandex_source_dropoff['title'] ? (string) $yandex_source_dropoff['title'] : '-' ); ?></span></p>
+										<p class="description" data-wdc-yandex-source-dropoff-address><?php echo esc_html( '' !== (string) $yandex_source_dropoff['address'] ? (string) $yandex_source_dropoff['address'] : ( '' !== $yandex_source_platform_station_id ? $yandex_source_platform_station_id : '-' ) ); ?></p>
+										<p class="description" data-wdc-yandex-source-dropoff-work-time <?php echo '' !== (string) $yandex_source_dropoff['work_time'] ? '' : 'hidden'; ?>><?php echo esc_html( (string) $yandex_source_dropoff['work_time'] ); ?></p>
 										<?php if ( '' === $yandex_source_platform_station_id ) : ?>
-											<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Не указана исходная станция Яндекс. Предпросмотр будет заблокирован.', 'walls-delivery-calc' ); ?></p>
+											<p class="description wdc-shipment-warning" data-wdc-yandex-source-dropoff-warning><?php echo esc_html__( 'Не указана исходная станция Яндекс. Предпросмотр будет заблокирован.', 'walls-delivery-calc' ); ?></p>
+										<?php elseif ( ! empty( $yandex_source_dropoff['invalid'] ) ) : ?>
+											<p class="description wdc-shipment-warning" data-wdc-yandex-source-dropoff-warning><?php echo esc_html__( 'Сохранённый ПВЗ отправления Яндекс недоступен. Выберите другой ПВЗ.', 'walls-delivery-calc' ); ?></p>
+										<?php else : ?>
+											<p class="description wdc-shipment-warning" data-wdc-yandex-source-dropoff-warning hidden></p>
 										<?php endif; ?>
+										<p>
+											<button type="button" class="button" data-wdc-open-yandex-source-dropoff-picker><?php echo esc_html__( 'Выбрать другой ПВЗ', 'walls-delivery-calc' ); ?></button>
+											<button type="button" class="button" data-wdc-reset-yandex-source-dropoff hidden><?php echo esc_html__( 'Вернуть ПВЗ из настроек', 'walls-delivery-calc' ); ?></button>
+										</p>
 									</div>
 									<div data-wdc-yandex-ready-interval>
 										<input type="hidden" name="yandex_ready_from" value="<?php echo esc_attr( $yandex_ready_from ); ?>">
@@ -829,6 +850,7 @@ final class OrderShipmentsMetabox {
 		if ( '' === $source_station ) {
 			throw new \InvalidArgumentException( __( 'Не указана исходная станция Яндекс.', 'walls-delivery-calc' ) );
 		}
+		$this->validate_yandex_source_station( $source_station, ! empty( $request->meta['yandex_source_station_overridden'] ) );
 		$delivery_type = (string) ( $request->delivery_type ?: ( $request->meta['delivery_type'] ?? '' ) );
 		if ( DeliveryType::PICKUP === $delivery_type ) {
 			$destination_station = trim( (string) ( $request->meta['yandex_pickup_platform_station_id'] ?? $request->pickup_point?->point_code ?? '' ) );
@@ -849,6 +871,29 @@ final class OrderShipmentsMetabox {
 			if ( '' === trim( (string) ( $details['house'] ?? '' ) ) ) {
 				throw new \InvalidArgumentException( __( 'Не удалось определить номер дома. Проверьте полный адрес.', 'walls-delivery-calc' ) );
 			}
+		}
+	}
+
+	private function validate_yandex_source_station( string $platform_station_id, bool $overridden ): void {
+		$platform_station_id = trim( $platform_station_id );
+		if ( '' === $platform_station_id ) {
+			throw new \InvalidArgumentException( __( 'Не указана исходная станция Яндекс.', 'walls-delivery-calc' ) );
+		}
+		$row = $this->yandex_pickup_points()->find( $platform_station_id );
+		if ( ! is_array( $row ) ) {
+			if ( $overridden ) {
+				throw new \InvalidArgumentException( __( 'ПВЗ отправления Яндекс не найден.', 'walls-delivery-calc' ) );
+			}
+			return;
+		}
+		if ( empty( $row['active'] ) ) {
+			throw new \InvalidArgumentException( $overridden ? __( 'Выбранный ПВЗ Яндекс сейчас недоступен.', 'walls-delivery-calc' ) : __( 'Сохранённый ПВЗ отправления Яндекс недоступен. Выберите другой ПВЗ.', 'walls-delivery-calc' ) );
+		}
+		if ( empty( $row['available_for_dropoff'] ) ) {
+			throw new \InvalidArgumentException( $overridden ? __( 'Выбранный ПВЗ Яндекс не принимает отправления.', 'walls-delivery-calc' ) : __( 'Сохранённый ПВЗ отправления Яндекс недоступен. Выберите другой ПВЗ.', 'walls-delivery-calc' ) );
+		}
+		if ( '' === trim( (string) ( $row['platform_station_id'] ?? '' ) ) ) {
+			throw new \InvalidArgumentException( __( 'ПВЗ отправления Яндекс не найден.', 'walls-delivery-calc' ) );
 		}
 	}
 
@@ -1661,6 +1706,20 @@ final class OrderShipmentsMetabox {
 		$mode = 'location' === sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) ) ? 'location' : 'search';
 		$limit = max( 1, min( 'location' === $mode ? 2000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 2000 : 50 ) ) ) );
 		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
+		$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? '' ) );
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key && 'source_dropoff' === $purpose ) {
+			$rows = $this->yandex_pickup_points()->search_source_dropoff_points(
+				array(
+					'query' => $query,
+					'limit' => $limit,
+				)
+			);
+			wp_send_json_success(
+				array(
+					'points' => array_map( array( $this, 'yandex_source_dropoff_ajax_row' ), $rows ),
+				)
+			);
+		}
 		if ( DpdSettings::CARRIER_KEY === $carrier_key && $this->dpd_pickup_points instanceof DpdPickupPointService ) {
 			$city_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['city_id'] ?? '' ) );
 			$location_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['location_id'] ?? '' ) );
@@ -2340,6 +2399,51 @@ final class OrderShipmentsMetabox {
 		return 1 === preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
 	}
 
+	private function yandex_pickup_points(): YandexDeliveryPickupPointV2Repository {
+		if ( ! $this->yandex_pickup_points instanceof YandexDeliveryPickupPointV2Repository ) {
+			$this->yandex_pickup_points = new YandexDeliveryPickupPointV2Repository();
+		}
+
+		return $this->yandex_pickup_points;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function yandex_source_dropoff_presentation( string $platform_station_id ): array {
+		$platform_station_id = trim( $platform_station_id );
+		$fallback = array(
+			'id' => $platform_station_id,
+			'title' => $platform_station_id,
+			'address' => '',
+			'work_time' => '',
+			'lat' => '',
+			'lng' => '',
+			'invalid' => false,
+			'found' => false,
+		);
+		if ( '' === $platform_station_id ) {
+			return $fallback;
+		}
+		$row = $this->yandex_pickup_points()->find( $platform_station_id );
+		if ( ! is_array( $row ) ) {
+			return $fallback;
+		}
+
+		$title = trim( (string) ( $row['name'] ?? '' ) );
+		$address = trim( (string) ( $row['full_address'] ?? '' ) );
+		return array(
+			'id' => $platform_station_id,
+			'title' => '' !== $title ? $title : ( '' !== $address ? $address : $platform_station_id ),
+			'address' => $address,
+			'work_time' => trim( (string) ( $row['schedule_text'] ?? '' ) ),
+			'lat' => is_numeric( $row['latitude'] ?? null ) ? (string) (float) $row['latitude'] : '',
+			'lng' => is_numeric( $row['longitude'] ?? null ) ? (string) (float) $row['longitude'] : '',
+			'invalid' => empty( $row['active'] ) || empty( $row['available_for_dropoff'] ),
+			'found' => true,
+		);
+	}
+
 	private function map_provider(): string {
 		$provider = ( new SettingsRepository() )->get_string( 'pickup_map_provider', 'leaflet' );
 
@@ -2363,6 +2467,41 @@ final class OrderShipmentsMetabox {
 			'address' => (string) ( $row['address'] ?? '' ),
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function yandex_source_dropoff_ajax_row( array $row ): array {
+		$station_id = (string) ( $row['platform_station_id'] ?? '' );
+		$title = (string) ( $row['name'] ?? '' );
+		$address = (string) ( $row['full_address'] ?? '' );
+
+		return array(
+			'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+			'carrier' => YandexDeliverySettings::CARRIER_KEY,
+			'service_key' => YandexDeliverySettings::SERVICE_KEY,
+			'pickup_family' => YandexDeliverySettings::CARRIER_KEY . ':source_dropoff',
+			'point_code' => $station_id,
+			'platform_station_id' => $station_id,
+			'display_code' => $station_id,
+			'point_type' => 'source_dropoff',
+			'type' => (string) ( $row['type'] ?? 'pickup_point' ),
+			'point_title' => '' !== $title ? $title : ( '' !== $address ? $address : $station_id ),
+			'display_title' => '' !== $title ? $title : ( '' !== $address ? $address : $station_id ),
+			'region_name' => (string) ( $row['region'] ?? '' ),
+			'city_name' => (string) ( $row['locality'] ?? '' ),
+			'city' => (string) ( $row['locality'] ?? '' ),
+			'address' => $address,
+			'work_time' => (string) ( $row['schedule_text'] ?? '' ),
+			'schedule_text' => (string) ( $row['schedule_text'] ?? '' ),
+			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
+			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
+			'drop_off' => true,
+			'available_for_dropoff' => true,
+			'marker_type' => 'source_dropoff',
 		);
 	}
 

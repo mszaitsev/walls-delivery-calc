@@ -855,7 +855,8 @@
       locationId: fieldValue(form, '[data-wdc-pickup-location-id]'),
       cityId: fieldValue(form, '[data-wdc-pickup-location-city-id]'),
       lat: fieldValue(form, '[data-wdc-pickup-location-lat]'),
-      lng: fieldValue(form, '[data-wdc-pickup-location-lng]')
+      lng: fieldValue(form, '[data-wdc-pickup-location-lng]'),
+      purpose: ''
     }, override || {});
   }
 
@@ -1719,6 +1720,7 @@
     data.append('city_id', context.cityId || '');
     data.append('lat', context.lat || '');
     data.append('lng', context.lng || '');
+    data.append('purpose', context.purpose || '');
     return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
       method: 'POST',
       credentials: 'same-origin',
@@ -1786,6 +1788,81 @@
     const display = form.querySelector('[data-wdc-sender-shipment-point-display]');
     if (display) display.textContent = [code, address].filter(Boolean).join(', ') || '-';
     requestPreview(form);
+  }
+
+  function yandexSourceDropoffContext(form) {
+    const locationId = fieldValue(form, '[data-wdc-yandex-source-location-id]');
+    return {
+      carrierKey: 'yandex_delivery',
+      serviceKey: 'yandex_delivery',
+      pickupFamily: 'yandex_delivery:source_dropoff',
+      purpose: 'source_dropoff',
+      city: '',
+      cityId: '',
+      region: '',
+      postcode: '',
+      address: locationId ? '' : (fieldValue(form, '[data-wdc-yandex-source-dropoff-address-input]') || fieldValue(form, '[data-wdc-yandex-source-station-id]')),
+      fiasId: '',
+      garId: '',
+      locationId: locationId,
+      lat: fieldValue(form, '[data-wdc-yandex-source-lat]'),
+      lng: fieldValue(form, '[data-wdc-yandex-source-lng]')
+    };
+  }
+
+  function setYandexSourceDropoffWarning(form, message) {
+    const warning = form.querySelector('[data-wdc-yandex-source-dropoff-warning]');
+    if (!warning) return;
+    warning.textContent = message || '';
+    warning.hidden = !message;
+  }
+
+  function updateYandexSourceDropoffDraft(form, point, overridden) {
+    const code = pickupCode(point) || String(point && point.platform_station_id || '');
+    const title = pickupPointTitle(point) || code;
+    const address = String(point && point.address || '');
+    const workTime = String(point && (point.work_time || point.schedule_text) || '');
+    const idInput = form.querySelector('[data-wdc-yandex-source-station-id]');
+    const overriddenInput = form.querySelector('[data-wdc-yandex-source-station-overridden]');
+    const titleInput = form.querySelector('[data-wdc-yandex-source-dropoff-title-input]');
+    const addressInput = form.querySelector('[data-wdc-yandex-source-dropoff-address-input]');
+    const workTimeInput = form.querySelector('[data-wdc-yandex-source-dropoff-work-time-input]');
+    const latInput = form.querySelector('[data-wdc-yandex-source-lat]');
+    const lngInput = form.querySelector('[data-wdc-yandex-source-lng]');
+    if (idInput) idInput.value = code;
+    if (overriddenInput) overriddenInput.value = overridden ? '1' : '0';
+    if (titleInput) titleInput.value = title;
+    if (addressInput) addressInput.value = address;
+    if (workTimeInput) workTimeInput.value = workTime;
+    if (latInput) latInput.value = point && point.lat !== null && point.lat !== undefined ? String(point.lat) : '';
+    if (lngInput) lngInput.value = point && point.lng !== null && point.lng !== undefined ? String(point.lng) : '';
+    const titleDisplay = form.querySelector('[data-wdc-yandex-source-dropoff-title]');
+    const addressDisplay = form.querySelector('[data-wdc-yandex-source-dropoff-address]');
+    const workTimeDisplay = form.querySelector('[data-wdc-yandex-source-dropoff-work-time]');
+    if (titleDisplay) titleDisplay.textContent = title || '-';
+    if (addressDisplay) addressDisplay.textContent = address || code || '-';
+    if (workTimeDisplay) {
+      workTimeDisplay.textContent = workTime;
+      workTimeDisplay.hidden = !workTime;
+    }
+    const reset = form.querySelector('[data-wdc-reset-yandex-source-dropoff]');
+    if (reset) reset.hidden = !overridden;
+    setYandexSourceDropoffWarning(form, '');
+    requestPreview(form);
+  }
+
+  function resetYandexSourceDropoff(form) {
+    const box = form.querySelector('[data-wdc-yandex-source-dropoff]');
+    if (!box) return;
+    updateYandexSourceDropoffDraft(form, {
+      point_code: box.dataset.defaultId || '',
+      platform_station_id: box.dataset.defaultId || '',
+      display_title: box.dataset.defaultTitle || box.dataset.defaultId || '',
+      address: box.dataset.defaultAddress || '',
+      work_time: box.dataset.defaultWorkTime || '',
+      lat: box.dataset.defaultLat || '',
+      lng: box.dataset.defaultLng || ''
+    }, false);
   }
 
   function senderPickupContext(form) {
@@ -1871,6 +1948,7 @@
         '<div class="wdc-pickup-popup__section"><strong>' + escapeHtml(codeLabel) + ':</strong><span>' + escapeHtml(displayCode || '') + '</span></div>',
         '<div class="wdc-pickup-popup__section"><strong>Город:</strong><span>' + escapeHtml(point.city_name || point.city || '') + '</span></div>',
         '<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml(point.address || '') + '</span></div>',
+        point.drop_off || point.available_for_dropoff ? '<div class="wdc-pickup-popup__section"><strong>Приём отправлений:</strong><span>да</span></div>' : '',
         '</div>'
       ].join('');
     }
@@ -2468,6 +2546,30 @@
           }
         });
       }
+      return;
+    }
+
+    const openYandexSourceDropoffPicker = event.target.closest('[data-wdc-open-yandex-source-dropoff-picker]');
+    if (openYandexSourceDropoffPicker) {
+      const form = findShipmentForm(openYandexSourceDropoffPicker);
+      if (form) {
+        const context = yandexSourceDropoffContext(form);
+        createPickupPicker(form, {
+          sender: true,
+          title: 'Выбор ПВЗ отправления Яндекс',
+          context: context,
+          onChoose: function (point) {
+            updateYandexSourceDropoffDraft(form, point, true);
+          }
+        });
+      }
+      return;
+    }
+
+    const resetYandexSourceDropoffButton = event.target.closest('[data-wdc-reset-yandex-source-dropoff]');
+    if (resetYandexSourceDropoffButton) {
+      const form = findShipmentForm(resetYandexSourceDropoffButton);
+      if (form) resetYandexSourceDropoff(form);
       return;
     }
 
