@@ -8,8 +8,6 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 defined( 'ABSPATH' ) || exit;
 
 final class YandexShipmentButtonPolicy {
-	private const TERMINAL_STATUSES = array( 'CANCELLED', 'DELIVERED', 'RETURNED', 'RETURNED_TO_SENDER', 'REJECTED' );
-
 	public function __construct( private ?YandexStatusMapping $status_mapping = null ) {
 	}
 
@@ -54,9 +52,5 @@ final class YandexShipmentButtonPolicy {
 		}
 
 		return '';
-	}
-
-	public static function is_terminal_status( string $status ): bool {
-		return in_array( strtoupper( trim( $status ) ), self::TERMINAL_STATUSES, true );
 	}
 }

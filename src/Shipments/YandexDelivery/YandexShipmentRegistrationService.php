@@ -164,13 +164,14 @@ final class YandexShipmentRegistrationService {
 			$info = $this->client->request_info( $request_id, $this->temporary_places_for_request_info( $shipment ) );
 			$was_reconciliation = ! empty( $shipment['yandex_reconciliation_required'] ) || 'reconciliation_required' === (string) ( $shipment['status'] ?? '' );
 			$was_cancel_pending = ! empty( $shipment['yandex_cancel_requested'] ) || 'cancellation_started' === (string) ( $shipment['status'] ?? '' );
-			$local_status = $was_cancel_pending && ! $this->is_terminal_status( $info->status ) ? 'cancellation_started' : 'created';
+			$is_terminal = $this->is_terminal_status( $info->status );
+			$local_status = $was_cancel_pending && ! $is_terminal ? 'cancellation_started' : 'created';
 			$updated = $this->merge_info( $shipment, $info, $local_status );
-			if ( $was_cancel_pending && ! $this->is_terminal_status( $info->status ) ) {
+			if ( $was_cancel_pending && ! $is_terminal ) {
 				$updated['yandex_cancel_requested'] = true;
 				$updated['status_title'] = 'Запрос на отмену отправления Яндекс отправлен';
 			}
-			if ( $was_cancel_pending && $this->is_terminal_status( $info->status ) ) {
+			if ( $was_cancel_pending && $is_terminal ) {
 				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
 				if ( $this->is_cancelled_status( $info->status ) ) {
 					$order_status_mapping = $this->apply_order_status_mapping( $order, $updated );
@@ -261,6 +262,10 @@ final class YandexShipmentRegistrationService {
 	/** @return array<string,mixed> */
 	public function cancel( object $order ): array {
 		$shipment = $this->repository->find( $order );
+		$policy = $this->button_policy->resolve( $shipment );
+		if ( empty( $policy['cancel'] ) ) {
+			return array( 'success' => false, 'message' => 'Текущее отправление Яндекс нельзя отменить.' );
+		}
 		$request_id = $this->request_id( $shipment );
 		if ( '' === $request_id ) {
 			return array( 'success' => false, 'message' => 'request_id Яндекс.Доставки не найден.' );
@@ -290,9 +295,10 @@ final class YandexShipmentRegistrationService {
 					'poll_purpose' => 'cancellation',
 				);
 			}
-			$updated = $this->merge_info( $cancel_started, $info, $this->is_terminal_status( $info->status ) ? 'created' : 'cancellation_started' );
+			$is_terminal = $this->is_terminal_status( $info->status );
+			$updated = $this->merge_info( $cancel_started, $info, $is_terminal ? 'created' : 'cancellation_started' );
 			$updated['yandex_cancel_state'] = $cancel_state->raw;
-			if ( $this->is_terminal_status( $info->status ) ) {
+			if ( $is_terminal ) {
 				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
 				if ( $this->is_cancelled_status( $info->status ) ) {
 					$this->repository->save( $order, $updated );
@@ -311,9 +317,9 @@ final class YandexShipmentRegistrationService {
 			}
 			$this->note_unknown_status_once( $order, $shipment, $updated );
 			$this->repository->save( $order, $updated );
-			$order_status_mapping = $this->is_terminal_status( $info->status ) ? $this->apply_order_status_mapping( $order, $updated ) : array( 'status' => 'skipped', 'changed' => false, 'reason' => 'cancellation_pending' );
+			$order_status_mapping = $is_terminal ? $this->apply_order_status_mapping( $order, $updated ) : array( 'status' => 'skipped', 'changed' => false, 'reason' => 'cancellation_pending' );
 
-			return array( 'success' => true, 'accepted' => true, 'cancellation_started' => ! $this->is_terminal_status( $info->status ), 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => true, 'poll_interval_ms' => 5000, 'poll_max_attempts' => 14, 'poll_purpose' => 'cancellation', 'order_status_mapping' => $order_status_mapping );
+			return array( 'success' => true, 'accepted' => true, 'cancellation_started' => ! $is_terminal, 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => true, 'poll_interval_ms' => 5000, 'poll_max_attempts' => 14, 'poll_purpose' => 'cancellation', 'order_status_mapping' => $order_status_mapping );
 		} catch ( YandexDeliveryApiException $exception ) {
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
@@ -632,7 +638,15 @@ final class YandexShipmentRegistrationService {
 	}
 
 	private function is_terminal_status( string $status ): bool {
-		return YandexShipmentButtonPolicy::is_terminal_status( $status );
+		$universal_status = $this->status_mapping instanceof YandexStatusMapping
+			? $this->status_mapping->universal_status_for( $status )
+			: DeliveryStatus::UNKNOWN;
+
+		return in_array(
+			$universal_status,
+			array( DeliveryStatus::DELIVERED, DeliveryStatus::RETURNED_TO_SENDER, DeliveryStatus::CANCELLED, DeliveryStatus::REJECTED ),
+			true
+		);
 	}
 
 	private function is_cancelled_status( string $status ): bool {
@@ -667,6 +681,9 @@ final class YandexShipmentRegistrationService {
 		$status = strtoupper( trim( $status ) );
 		$updated['yandex_cancel_requested'] = false;
 		$updated['status'] = 'created';
+		$updated['yandex_cancel_poll_exhausted'] = false;
+		$updated['yandex_cancel_poll_attempts'] = 0;
+		$updated['yandex_cancel_poll_exhausted_at'] = '';
 		if ( $this->is_cancelled_status( $status ) ) {
 			$updated['yandex_cancel_completed'] = true;
 			if ( empty( $previous['yandex_cancel_completed_noted'] ) ) {

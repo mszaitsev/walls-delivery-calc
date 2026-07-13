@@ -1,5 +1,9 @@
 # WDC Shipment Statuses
 
+Version: 0.109.1.
+
+Version 0.109.1 narrows Yandex cancel lifecycle decisions to the universal status mapping. `YandexShipmentRegistrationService::cancel()` now enforces `YandexShipmentButtonPolicy` server-side before calling Yandex, and cancel polling treats only universal `delivered`, `returned_to_sender`, `cancelled` and `rejected` as terminal. Admin overrides therefore affect both buttons and cancel polling. Raw `CANCELLED` is the only status that triggers Yandex local auto-delete, and the universal→WooCommerce mapping is applied before deletion. The Yandex default for `PARTICULARLY_DELIVERED` is now `in_transit`; saved overrides remain user settings.
+
 Version: 0.109.0.
 
 Version 0.109.0 adds Yandex Delivery to carrier raw-status mapping. The Yandex catalog is implemented in `YandexStatusMapping` and uses the existing `DeliveryStatus` universal registry; it does not add new universal statuses. Overrides are stored in `wdc_core_settings[yandex_delivery_status_mapping]` and edited on the Yandex delivery-service tab alongside DPD/CDEK carrier mappings. Canonical Yandex `request/info` persistence saves both raw carrier diagnostics (`yandex_status`, description, reason, timestamp, snapshot) and the resolved universal status. The shared `ShipmentOrderStatusMappingService` applies universal→WooCommerce mapping for canonical current status updates, while `request/history` mapping is informational only.

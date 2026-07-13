@@ -39,7 +39,7 @@ final class YandexStatusMapping {
 			'DELIVERY_TRANSMITTED_TO_RECIPIENT' => self::status( 'DELIVERY_TRANSMITTED_TO_RECIPIENT', 'Заказ выдан получателю', 'both', DeliveryStatus::DELIVERED ),
 			'DELIVERY_ATTEMPT_FAILED' => self::status( 'DELIVERY_ATTEMPT_FAILED', 'Неудачная попытка вручения заказа', 'courier', DeliveryStatus::HANDED_TO_COURIER ),
 			'DELIVERY_STORAGE_PERIOD_EXPIRED' => self::status( 'DELIVERY_STORAGE_PERIOD_EXPIRED', 'Срок хранения заказа в точке выдачи истёк', 'pickup', DeliveryStatus::RETURNING_TO_SENDER ),
-			'PARTICULARLY_DELIVERED' => self::status( 'PARTICULARLY_DELIVERED', 'Заказ частично доставлен', 'pickup', DeliveryStatus::DELIVERED ),
+			'PARTICULARLY_DELIVERED' => self::status( 'PARTICULARLY_DELIVERED', 'Заказ частично доставлен', 'pickup', DeliveryStatus::IN_TRANSIT ),
 			'DELIVERY_DELIVERED' => self::status( 'DELIVERY_DELIVERED', 'Заказ доставлен получателю', 'both', DeliveryStatus::DELIVERED ),
 			'CANCELLED' => self::status( 'CANCELLED', 'Отмена', 'both', DeliveryStatus::CANCELLED ),
 			'SORTING_CENTER_RETURN_PREPARING' => self::status( 'SORTING_CENTER_RETURN_PREPARING', 'Заказ готовится к возврату', 'both', DeliveryStatus::RETURNING_TO_SENDER ),

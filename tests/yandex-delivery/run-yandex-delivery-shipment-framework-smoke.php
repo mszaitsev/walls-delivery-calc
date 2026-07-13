@@ -295,6 +295,7 @@ yd_framework_assert( DeliveryStatus::IN_TRANSIT === $status_mapping->universal_s
 yd_framework_assert( DeliveryStatus::HANDED_TO_COURIER === $status_mapping->universal_status_for( 'DELIVERY_TRANSPORTATION_RECIPIENT' ), 'Courier last-mile status must default to handed_to_courier.' );
 yd_framework_assert( DeliveryStatus::READY_FOR_PICKUP === $status_mapping->universal_status_for( 'DELIVERY_ARRIVED_PICKUP_POINT' ), 'Pickup arrival must default to ready_for_pickup.' );
 yd_framework_assert( DeliveryStatus::DELIVERED === $status_mapping->universal_status_for( 'DELIVERY_DELIVERED' ), 'DELIVERY_DELIVERED must default to delivered.' );
+yd_framework_assert( DeliveryStatus::IN_TRANSIT === $status_mapping->universal_status_for( 'PARTICULARLY_DELIVERED' ), 'PARTICULARLY_DELIVERED must default to in_transit because partial delivery is not full delivery.' );
 yd_framework_assert( DeliveryStatus::RETURNING_TO_SENDER === $status_mapping->universal_status_for( 'DELIVERY_STORAGE_PERIOD_EXPIRED' ), 'Expired pickup storage must default to returning_to_sender.' );
 yd_framework_assert( DeliveryStatus::RETURNED_TO_SENDER === $status_mapping->universal_status_for( 'SORTING_CENTER_RETURN_RETURNED' ), 'Return completed at sorting center must default to returned_to_sender.' );
 yd_framework_assert( DeliveryStatus::CANCELLED === $status_mapping->universal_status_for( 'CANCELLED' ), 'CANCELLED must default to cancelled.' );
@@ -305,9 +306,13 @@ $override = YandexStatusMapping::default_mapping();
 $override['CREATED'] = DeliveryStatus::IN_TRANSIT;
 $override_mapping->save_mapping( $override );
 yd_framework_assert( DeliveryStatus::IN_TRANSIT === $override_mapping->universal_status_for( 'CREATED' ), 'Admin override CREATED -> in_transit must be respected by mapper.' );
+$override['PARTICULARLY_DELIVERED'] = DeliveryStatus::DELIVERED;
+$override_mapping->save_mapping( $override );
+yd_framework_assert( DeliveryStatus::DELIVERED === $override_mapping->universal_status_for( 'PARTICULARLY_DELIVERED' ), 'Admin override PARTICULARLY_DELIVERED -> delivered must remain possible.' );
 yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === $override_mapping->sanitize_mapping( array( 'CREATED' => 'not_a_real_status' ) )['CREATED'], 'Invalid universal status override must fall back to default.' );
 yd_framework_assert( ! isset( $override_mapping->sanitize_mapping( array( 'UNKNOWN_YANDEX_CODE' => DeliveryStatus::DELIVERED ) )['UNKNOWN_YANDEX_CODE'] ), 'Unknown Yandex carrier status code must not be saved.' );
 $override_mapping->save_mapping( YandexStatusMapping::default_mapping() );
+yd_framework_assert( DeliveryStatus::IN_TRANSIT === $override_mapping->universal_status_for( 'PARTICULARLY_DELIVERED' ), 'Reset to Yandex defaults must restore PARTICULARLY_DELIVERED -> in_transit.' );
 $admin_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' ) ?: '';
 yd_framework_assert( str_contains( $admin_source, 'save_yandex_delivery_statuses' ) && str_contains( $admin_source, 'render_yandex_delivery_statuses_tab' ) && str_contains( $admin_source, 'YandexStatusMapping::MAPPING_KEY' ) && str_contains( $admin_source, 'Сбросить к дефолтным значениям' ), 'Delivery services admin must expose Yandex status mapping tab, save action and reset control.' );
 $policy_by_universal = new YandexShipmentButtonPolicy( $status_mapping );
@@ -324,6 +329,46 @@ $override_mapping->save_mapping( array_merge( YandexStatusMapping::default_mappi
 $overridden_created_policy = $override_policy->resolve( array( 'yandex_request_id' => 'REQ-OVERRIDE', 'status' => 'created', 'yandex_status' => 'CREATED' ) );
 yd_framework_assert( empty( $overridden_created_policy['cancel'] ) && ! empty( $overridden_created_policy['remove'] ), 'Yandex button policy must respect admin override and not raw CREATED.' );
 $override_mapping->save_mapping( YandexStatusMapping::default_mapping() );
+
+$pending_cancel_order = new YdFrameworkOrder( 971, '971' );
+list( $pending_cancel_repository, $pending_cancel_adapter, $pending_cancel_creation, $pending_cancel_registration, $pending_cancel_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'status' => 'CREATED', 'description' => 'Заказ отменяется', 'reason' => 'cancellation_started' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-PENDING-CANCEL', 'CREATED', 'YD-PENDING-CANCEL', '971' ) ),
+	)
+);
+$pending_cancel_repository->save_for_carrier(
+	$pending_cancel_order,
+	YandexDeliverySettings::CARRIER_KEY,
+	array(
+		'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+		'status' => 'created',
+		'yandex_request_id' => 'REQ-PENDING-CANCEL',
+		'request_id' => 'REQ-PENDING-CANCEL',
+		'universal_status_code' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
+		'universal_status_label' => DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ),
+	)
+);
+$pending_cancel_result = $pending_cancel_adapter->cancel_in_carrier( $pending_cancel_order );
+yd_framework_assert( ! empty( $pending_cancel_result['success'] ) && 2 === count( $pending_cancel_http->requests ) && str_contains( $pending_cancel_http->requests[0]['url'], '/request/cancel' ), 'Server-side cancel guard must allow pending_creation_in_carrier and call Yandex cancel once.' );
+
+foreach ( array( DeliveryStatus::IN_TRANSIT, DeliveryStatus::READY_FOR_PICKUP, DeliveryStatus::HANDED_TO_COURIER, DeliveryStatus::DELIVERED, DeliveryStatus::RETURNED_TO_SENDER, DeliveryStatus::REJECTED, DeliveryStatus::UNKNOWN ) as $blocked_cancel_status ) {
+	$blocked_cancel_order = new YdFrameworkOrder( 972, '972' );
+	list( $blocked_cancel_repository, $blocked_cancel_adapter, $blocked_cancel_creation, $blocked_cancel_registration, $blocked_cancel_http ) = yd_framework_stack( array() );
+	$blocked_cancel_shipment = array(
+		'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+		'status' => 'created',
+		'yandex_request_id' => 'REQ-BLOCKED-CANCEL-' . $blocked_cancel_status,
+		'request_id' => 'REQ-BLOCKED-CANCEL-' . $blocked_cancel_status,
+		'universal_status_code' => $blocked_cancel_status,
+		'universal_status_label' => DeliveryStatus::label( $blocked_cancel_status ),
+	);
+	$blocked_cancel_repository->save_for_carrier( $blocked_cancel_order, YandexDeliverySettings::CARRIER_KEY, $blocked_cancel_shipment );
+	$blocked_cancel_result = $blocked_cancel_adapter->cancel_in_carrier( $blocked_cancel_order );
+	$blocked_cancel_after = $blocked_cancel_repository->find_by_carrier( $blocked_cancel_order, YandexDeliverySettings::CARRIER_KEY );
+	yd_framework_assert( empty( $blocked_cancel_result['success'] ) && 'Текущее отправление Яндекс нельзя отменить.' === (string) ( $blocked_cancel_result['message'] ?? '' ) && array() === $blocked_cancel_http->requests && $blocked_cancel_after === $blocked_cancel_shipment, 'Server-side cancel guard must reject forged cancel without API for universal status ' . $blocked_cancel_status );
+}
+
 $settings_repository = new SettingsRepository();
 $settings_repository->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
 $settings_repository->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::CREATED_IN_CARRIER => 'wc-shipped' ) );
@@ -737,7 +782,12 @@ yd_framework_assert( str_contains( $request_id_http->requests[3]['url'], 'reques
 $safe_cancel_body = json_decode( (string) ( $request_id_http->requests[4]['args']['body'] ?? '{}' ), true );
 yd_framework_assert( 'REQ-SAFE' === (string) ( $safe_cancel_body['request_id'] ?? '' ), 'Cancel must use yandex_request_id and not courier_order_id tracking.' );
 
-foreach ( array( 'DELIVERED', 'RETURNED', 'RETURNED_TO_SENDER', 'REJECTED' ) as $terminal_status ) {
+foreach ( array(
+	'DELIVERY_DELIVERED' => DeliveryStatus::DELIVERED,
+	'RETURN_RETURNED' => DeliveryStatus::RETURNED_TO_SENDER,
+	'SORTING_CENTER_RETURN_RETURNED' => DeliveryStatus::RETURNED_TO_SENDER,
+	'VALIDATING_ERROR' => DeliveryStatus::REJECTED,
+) as $terminal_status => $expected_universal_status ) {
 	$terminal_order = new YdFrameworkOrder( 777 );
 	list( $terminal_repository, $terminal_adapter, $terminal_creation, $terminal_registration, $terminal_http ) = yd_framework_stack(
 		array(
@@ -753,10 +803,100 @@ foreach ( array( 'DELIVERED', 'RETURNED', 'RETURNED_TO_SENDER', 'REJECTED' ) as 
 	$terminal_shipment = $terminal_repository->find_by_carrier( $terminal_order, YandexDeliverySettings::CARRIER_KEY );
 	$terminal_policy = ( new YandexShipmentButtonPolicy() )->resolve( $terminal_shipment );
 	yd_framework_assert( ! empty( $terminal_cancel['success'] ) && $terminal_status === (string) ( $terminal_cancel['status'] ?? '' ), 'Cancel follow-up info must surface non-CANCELLED terminal status.' );
-	yd_framework_assert( 'created' === (string) ( $terminal_shipment['status'] ?? '' ) && $terminal_status === (string) ( $terminal_shipment['yandex_status'] ?? '' ) && empty( $terminal_shipment['yandex_cancel_requested'] ), 'Non-CANCELLED terminal status must close cancellation_started lifecycle.' );
-	yd_framework_assert( empty( $terminal_policy['cancel'] ) && ! empty( $terminal_policy['remove'] ), 'Terminal Yandex status must use existing button policy to hide cancel and allow remove.' );
+	yd_framework_assert( 'created' === (string) ( $terminal_shipment['status'] ?? '' ) && $terminal_status === (string) ( $terminal_shipment['yandex_status'] ?? '' ) && $expected_universal_status === (string) ( $terminal_shipment['universal_status_code'] ?? '' ) && empty( $terminal_shipment['yandex_cancel_requested'] ), 'Non-CANCELLED terminal universal status must close cancellation_started lifecycle.' );
+	yd_framework_assert( empty( $terminal_policy['cancel'] ) && ! empty( $terminal_policy['remove'] ) && 5 === count( $terminal_http->requests ), 'Terminal universal status must hide cancel, allow remove and avoid repeated request/cancel.' );
 	yd_framework_assert( ! str_contains( implode( "\n", $terminal_order->notes ), 'Отправление Яндекс отменено.' ) && str_contains( implode( "\n", $terminal_order->notes ), 'Получен терминальный статус Яндекс: ' . $terminal_status ), 'Non-CANCELLED terminal cancel resolution must not write successful-cancel note.' );
 }
+
+$cancelled_mapping_order = new YdFrameworkOrder( 973, '973' );
+list( $cancelled_mapping_repository, $cancelled_mapping_adapter, $cancelled_mapping_creation, $cancelled_mapping_registration, $cancelled_mapping_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( array( 'offers' => array( yd_framework_offer( 'OFFER-CANCELLED-MAPPING' ) ) ) ),
+		yd_framework_response( array( 'request_id' => 'REQ-CANCELLED-MAPPING' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-CANCELLED-MAPPING', 'CREATED', 'YD-CANCELLED-MAPPING', '973' ) ),
+		yd_framework_response( array( 'status' => 'CREATED', 'description' => 'Заказ отменяется', 'reason' => 'cancellation_started' ) ),
+		yd_framework_response( yd_framework_info( 'REQ-CANCELLED-MAPPING', 'CANCELLED', 'YD-CANCELLED-MAPPING', '973' ) ),
+	)
+);
+$cancelled_mapping_settings = new SettingsRepository();
+$cancelled_mapping_settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
+$cancelled_mapping_settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::CANCELLED => 'wc-completed' ) );
+yd_framework_assert( $cancelled_mapping_creation->create( $cancelled_mapping_order, yd_framework_request( 973, '973' ) )->success, 'CANCELLED mapping scenario must start from successful create.' );
+$cancelled_mapping_result = $cancelled_mapping_adapter->cancel_in_carrier( $cancelled_mapping_order );
+yd_framework_assert( ! empty( $cancelled_mapping_result['cancelled_and_removed'] ) && 'completed' === $cancelled_mapping_order->get_status() && array() === $cancelled_mapping_repository->find_by_carrier( $cancelled_mapping_order, YandexDeliverySettings::CARRIER_KEY ) && '' === (string) $cancelled_mapping_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 0 === (int) ( $cancelled_mapping_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ) && 5 === count( $cancelled_mapping_http->requests ), 'Raw CANCELLED must apply universal-to-Woo mapping before local auto-delete and preserve sequence meta.' );
+
+$override_nonterminal_order = new YdFrameworkOrder( 974, '974' );
+list( $override_nonterminal_repository, $override_nonterminal_adapter, $override_nonterminal_creation, $override_nonterminal_registration, $override_nonterminal_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( yd_framework_info( 'REQ-OVERRIDE-NONTERMINAL', 'DELIVERY_DELIVERED', 'YD-OVERRIDE-NONTERMINAL', '974' ) ),
+	)
+);
+$override_nonterminal_repository->save_for_carrier(
+	$override_nonterminal_order,
+	YandexDeliverySettings::CARRIER_KEY,
+	array(
+		'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+		'status' => 'cancellation_started',
+		'yandex_request_id' => 'REQ-OVERRIDE-NONTERMINAL',
+		'request_id' => 'REQ-OVERRIDE-NONTERMINAL',
+		'yandex_cancel_requested' => true,
+		'yandex_status' => 'CREATED',
+		'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+	)
+);
+$override_nonterminal_yandex_mapping = new YandexStatusMapping( new SettingsRepository() );
+$override_nonterminal_yandex_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'DELIVERY_DELIVERED' => DeliveryStatus::IN_TRANSIT ) ) );
+$override_nonterminal_result = $override_nonterminal_adapter->update_status( $override_nonterminal_order );
+$override_nonterminal_shipment = $override_nonterminal_repository->find_by_carrier( $override_nonterminal_order, YandexDeliverySettings::CARRIER_KEY );
+yd_framework_assert( ! empty( $override_nonterminal_result['success'] ) && 'cancellation_started' === (string) ( $override_nonterminal_shipment['status'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $override_nonterminal_shipment['universal_status_code'] ?? '' ) && ! empty( $override_nonterminal_shipment['yandex_cancel_requested'] ) && 1 === count( $override_nonterminal_http->requests ), 'Admin override DELIVERY_DELIVERED -> in_transit must keep cancellation polling pending and call only request/info.' );
+
+$override_terminal_order = new YdFrameworkOrder( 975, '975' );
+list( $override_terminal_repository, $override_terminal_adapter, $override_terminal_creation, $override_terminal_registration, $override_terminal_http ) = yd_framework_stack(
+	array(
+		yd_framework_response( yd_framework_info( 'REQ-OVERRIDE-TERMINAL', 'CREATED', 'YD-OVERRIDE-TERMINAL', '975' ) ),
+	)
+);
+$override_terminal_repository->save_for_carrier(
+	$override_terminal_order,
+	YandexDeliverySettings::CARRIER_KEY,
+	array(
+		'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+		'status' => 'cancellation_started',
+		'yandex_request_id' => 'REQ-OVERRIDE-TERMINAL',
+		'request_id' => 'REQ-OVERRIDE-TERMINAL',
+		'yandex_cancel_requested' => true,
+		'yandex_status' => 'CREATED',
+		'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+	)
+);
+$override_terminal_yandex_mapping = new YandexStatusMapping( new SettingsRepository() );
+$override_terminal_yandex_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'CREATED' => DeliveryStatus::DELIVERED ) ) );
+$override_terminal_result = $override_terminal_adapter->update_status( $override_terminal_order );
+$override_terminal_shipment = $override_terminal_repository->find_by_carrier( $override_terminal_order, YandexDeliverySettings::CARRIER_KEY );
+$override_terminal_payload = $override_terminal_adapter->status_payload( $override_terminal_order, $override_terminal_shipment );
+yd_framework_assert( ! empty( $override_terminal_result['success'] ) && 'created' === (string) ( $override_terminal_shipment['status'] ?? '' ) && DeliveryStatus::DELIVERED === (string) ( $override_terminal_shipment['universal_status_code'] ?? '' ) && empty( $override_terminal_shipment['yandex_cancel_requested'] ) && empty( $override_terminal_payload['can_cancel'] ) && ! empty( $override_terminal_payload['can_remove_from_order'] ) && 1 === count( $override_terminal_http->requests ), 'Admin override CREATED -> delivered must make cancel polling terminal without auto-delete because raw status is not CANCELLED.' );
+
+$partial_default_order = new YdFrameworkOrder( 976, '976' );
+list( $partial_default_repository, $partial_default_adapter, $partial_default_creation, $partial_default_registration, $partial_default_http ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-PARTIAL-DEFAULT', 'PARTICULARLY_DELIVERED', 'YD-PARTIAL-DEFAULT', '976' ) ) ) );
+$partial_default_settings = new SettingsRepository();
+$partial_default_settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
+$partial_default_settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::IN_TRANSIT => 'wc-shipped' ) );
+$partial_default_attach = $partial_default_adapter->attach_manual( $partial_default_order, array( 'barcode' => 'REQ-PARTIAL-DEFAULT' ) );
+$partial_default_shipment = $partial_default_repository->find_by_carrier( $partial_default_order, YandexDeliverySettings::CARRIER_KEY );
+$partial_default_payload = $partial_default_adapter->status_payload( $partial_default_order, $partial_default_shipment );
+yd_framework_assert( ! empty( $partial_default_attach['success'] ) && DeliveryStatus::IN_TRANSIT === (string) ( $partial_default_shipment['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::IN_TRANSIT ) === (string) ( $partial_default_payload['shipment_status_label'] ?? '' ) && empty( $partial_default_payload['can_cancel'] ) && ! empty( $partial_default_payload['can_remove_from_order'] ) && 'shipped' === $partial_default_order->get_status(), 'PARTICULARLY_DELIVERED default must persist in_transit, render universal status and feed Woo mapping.' );
+
+$partial_override_order = new YdFrameworkOrder( 977, '977' );
+list( $partial_override_repository, $partial_override_adapter, $partial_override_creation, $partial_override_registration, $partial_override_http ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-PARTIAL-OVERRIDE', 'PARTICULARLY_DELIVERED', 'YD-PARTIAL-OVERRIDE', '977' ) ) ) );
+$partial_override_yandex_mapping = new YandexStatusMapping( new SettingsRepository() );
+$partial_override_yandex_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'PARTICULARLY_DELIVERED' => DeliveryStatus::DELIVERED ) ) );
+$partial_override_settings = new SettingsRepository();
+$partial_override_settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
+$partial_override_settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::DELIVERED => 'wc-completed' ) );
+$partial_override_attach = $partial_override_adapter->attach_manual( $partial_override_order, array( 'barcode' => 'REQ-PARTIAL-OVERRIDE' ) );
+$partial_override_shipment = $partial_override_repository->find_by_carrier( $partial_override_order, YandexDeliverySettings::CARRIER_KEY );
+$partial_override_payload = $partial_override_adapter->status_payload( $partial_override_order, $partial_override_shipment );
+yd_framework_assert( ! empty( $partial_override_attach['success'] ) && DeliveryStatus::DELIVERED === (string) ( $partial_override_shipment['universal_status_code'] ?? '' ) && empty( $partial_override_payload['can_cancel'] ) && ! empty( $partial_override_payload['can_remove_from_order'] ) && 'completed' === $partial_override_order->get_status(), 'Admin override PARTICULARLY_DELIVERED -> delivered must affect persistence, button policy and Woo mapping.' );
 
 $attach_order = new YdFrameworkOrder( 777 );
 list( $attach_repository, $attach_adapter, $attach_creation, $attach_registration, $attach_http ) = yd_framework_stack(

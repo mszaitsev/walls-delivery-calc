@@ -758,7 +758,7 @@ Initial default mapping:
 | `DELIVERY_ARRIVED_PICKUP_POINT`, `CONFIRMATION_CODE_RECEIVED` | `ready_for_pickup` | pickup/postamat destination flow |
 | `DELIVERY_ATTEMPT_FAILED` | `in_transit` | not terminal in WDC model |
 | `DELIVERY_TRANSMITTED_TO_RECIPIENT`, `DELIVERY_DELIVERED` | `delivered` | terminal success |
-| `PARTICULARLY_DELIVERED` | `delivered` with warning marker | partial delivery must remain visible in raw carrier status |
+| `PARTICULARLY_DELIVERED` | `in_transit` by default | partial delivery must remain visible in raw carrier status and does not mean the whole order is delivered |
 | `CANCELLED` | `cancelled` | terminal cancel |
 | `DELIVERY_STORAGE_PERIOD_EXPIRED`, `SORTING_CENTER_RETURN_PREPARING`, `SORTING_CENTER_RETURN_PREPARING_SENDER`, `RETURN_PREPARING`, `RETURN_TRANSPORTATION_STARTED`, `RETURN_ARRIVED_DELIVERY`, `RETURN_TRANSMITTED_FULFILMENT`, `RETURN_READY_FOR_PICKUP` | `returning_to_sender` | active return process |
 | `SORTING_CENTER_RETURN_ARRIVED`, `SORTING_CENTER_RETURN_RETURNED`, `RETURN_RETURNED` | `returned_to_sender` | returned to sender/merchant |
