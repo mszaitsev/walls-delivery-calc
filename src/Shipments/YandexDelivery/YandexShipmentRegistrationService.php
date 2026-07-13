@@ -8,6 +8,8 @@ use DateTimeInterface;
 use DateTimeZone;
 use Throwable;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiException;
+use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryEarliestOfferSelector;
+use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryOffer;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryRequestInfo;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayloadBuilder;
@@ -23,6 +25,8 @@ use WallsShop\WDC\Shipments\Cdek\CdekShipmentAllocationAdapter;
 defined( 'ABSPATH' ) || exit;
 
 final class YandexShipmentRegistrationService {
+	private const DUPLICATE_OPERATOR_RETRY_LIMIT = 10;
+
 	public function __construct(
 		private CoreYandexShipmentRegistrationService $registration,
 		private YandexDeliveryShipmentPayloadBuilder $payload_builder,
@@ -45,19 +49,36 @@ final class YandexShipmentRegistrationService {
 		} catch ( \RuntimeException $exception ) {
 			return new ShipmentCreateResult( false, error_code: 'yandex_registration_locked', error_message: $exception->getMessage() );
 		}
-		$operator_request_id = $attempt['operator_request_id'];
-		$reserved = $this->request_with_meta(
-			$request,
-			array(
-				'yandex_operator_request_id' => $operator_request_id,
-				'yandex_registration_sequence_index' => $attempt['index'],
-				'yandex_registration_attempt_started_at' => $attempt['started_at'],
-				'yandex_temporary_barcode_prefix' => $this->repository->temporary_barcode_prefix( $operator_request_id ),
-			)
-		);
-		$this->add_order_note( $order, 'Начата регистрация отправления Яндекс. Номер попытки: ' . $operator_request_id . '.' );
 		try {
-			return $this->create( $reserved );
+			$base = (string) ( $request->meta['order_num'] ?? $this->repository->base_operator_request_id( $order ) );
+			for ( $duplicate_attempt = 0; $duplicate_attempt < self::DUPLICATE_OPERATOR_RETRY_LIMIT; $duplicate_attempt++ ) {
+				$operator_request_id = $attempt['operator_request_id'];
+				$reserved = $this->request_with_meta(
+					$request,
+					array(
+						'yandex_operator_request_id' => $operator_request_id,
+						'yandex_registration_sequence_index' => $attempt['index'],
+						'yandex_registration_attempt_started_at' => $attempt['started_at'],
+						'yandex_temporary_barcode_prefix' => $this->repository->temporary_barcode_prefix( $operator_request_id ),
+					)
+				);
+				$this->add_order_note( $order, 'Начата регистрация отправления Яндекс. Номер попытки: ' . $operator_request_id . '.' );
+				$result = $this->create( $reserved );
+				if ( 'yandex_operator_request_id_duplicate' !== $result->error_code ) {
+					return $result;
+				}
+				if ( $duplicate_attempt >= self::DUPLICATE_OPERATOR_RETRY_LIMIT - 1 ) {
+					return new ShipmentCreateResult(
+						false,
+						error_code: 'yandex_operator_request_id_duplicate_limit',
+						error_message: 'Не удалось подобрать свободный номер регистрации Яндекс после 10 попыток. Повторите создание позднее.',
+						raw_reference: $result->raw_reference
+					);
+				}
+				$attempt = $this->repository->reserve_operator_request_id_under_lock( $order, $base, $this->now(), $attempt['lock_token'] );
+			}
+
+			return new ShipmentCreateResult( false, error_code: 'yandex_operator_request_id_duplicate_limit', error_message: 'Не удалось подобрать свободный номер регистрации Яндекс после 10 попыток. Повторите создание позднее.' );
 		} finally {
 			$this->repository->release_registration_lock( $order, $attempt['lock_token'] );
 		}
@@ -65,7 +86,7 @@ final class YandexShipmentRegistrationService {
 
 	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult {
 		try {
-			$result = $this->registration->register( $this->allocation( $request ), $this->context( $request ) );
+			$result = $this->register_request( $request );
 			$fields = $this->fields_from_result( $result );
 			$fields['yandex_registration_sequence_index'] = (int) ( $request->meta['yandex_registration_sequence_index'] ?? $fields['yandex_registration_sequence_index'] ?? 0 );
 			$fields['yandex_registration_attempt_started_at'] = (string) ( $request->meta['yandex_registration_attempt_started_at'] ?? '' );
@@ -147,6 +168,10 @@ final class YandexShipmentRegistrationService {
 			}
 			if ( $was_cancel_pending && $this->is_terminal_status( $info->status ) ) {
 				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
+				if ( $this->is_cancelled_status( $info->status ) ) {
+					$this->repository->delete( $order );
+					return array( 'success' => true, 'message' => 'Отправление Яндекс отменено.', 'status' => $info->status, 'cancelled_and_removed' => true );
+				}
 			} elseif ( $was_reconciliation ) {
 				$this->add_order_note( $order, 'Данные отправления Яндекс восстановлены. Статус: ' . $info->status . '.' );
 			} elseif ( (string) ( $shipment['yandex_last_noted_status'] ?? '' ) !== $info->status ) {
@@ -175,6 +200,9 @@ final class YandexShipmentRegistrationService {
 				$this->repository->save( $order, $updated );
 				return array( 'success' => true, 'pending' => true, 'retryable' => true, 'message' => $updated['yandex_registration_error_message'], 'status' => '' );
 			}
+			if ( ! empty( $shipment['yandex_cancel_requested'] ) && 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) && $this->is_temporary_request_info_error( $exception ) ) {
+				return array( 'success' => true, 'pending' => true, 'retryable' => true, 'message' => 'Статус отмены Яндекс ещё не подготовлен.', 'status' => '' );
+			}
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
 	}
@@ -196,12 +224,6 @@ final class YandexShipmentRegistrationService {
 		}
 
 		$expected_operator_request_id = $this->expected_operator_request_id( $order );
-		if ( '' === trim( $info->operator_request_id ) ) {
-			return array( 'success' => false, 'message' => 'Яндекс не вернул номер заказа для проверки принадлежности отправления.' );
-		}
-		if ( ! $this->operator_request_id_belongs_to_order( $info->operator_request_id, $expected_operator_request_id ) ) {
-			return array( 'success' => false, 'message' => 'Отправление Яндекс создано для другого заказа.' );
-		}
 		if ( array() !== $this->repository->find( $order ) ) {
 			return array( 'success' => false, 'message' => 'По заказу уже сохранено отправление Яндекс.' );
 		}
@@ -212,7 +234,9 @@ final class YandexShipmentRegistrationService {
 			$shipment['yandex_registration_sequence_index'] = $parsed['index'];
 		}
 		$this->repository->save( $order, $shipment );
-		$this->repository->sync_sequence_from_operator_request_id( $order, $info->operator_request_id, $expected_operator_request_id, $this->now() );
+		if ( null !== $parsed ) {
+			$this->repository->sync_sequence_from_operator_request_id( $order, $info->operator_request_id, $expected_operator_request_id, $this->now() );
+		}
 		$this->add_order_note( $order, 'Отправление Яндекс добавлено в заказ. Request ID: ' . $info->request_id . '.' );
 
 		return array(
@@ -243,12 +267,28 @@ final class YandexShipmentRegistrationService {
 					$this->repository->save( $order, $cancel_started );
 					$this->add_order_note( $order, 'Запрос на отмену отправления Яндекс отправлен. Текущий статус пока не получен.' );
 				}
-				return array( 'success' => true, 'accepted' => true, 'message' => 'Запрос на отмену отправлен, но актуальный статус пока не получен.', 'details' => $info_exception->details() );
+				return array(
+					'success' => true,
+					'accepted' => true,
+					'cancellation_started' => true,
+					'request_id' => $request_id,
+					'message' => 'Запрос на отмену отправления Яндекс отправлен.',
+					'details' => $info_exception->details(),
+					'auto_poll' => true,
+					'poll_interval_ms' => 5000,
+					'poll_max_attempts' => 14,
+					'poll_purpose' => 'cancellation',
+				);
 			}
 			$updated = $this->merge_info( $cancel_started, $info, $this->is_terminal_status( $info->status ) ? 'created' : 'cancellation_started' );
 			$updated['yandex_cancel_state'] = $cancel_state->raw;
 			if ( $this->is_terminal_status( $info->status ) ) {
 				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
+				if ( $this->is_cancelled_status( $info->status ) ) {
+					$this->repository->save( $order, $updated );
+					$this->repository->delete( $order );
+					return array( 'success' => true, 'accepted' => false, 'cancelled_and_removed' => true, 'message' => 'Отправление Яндекс отменено.', 'status' => $info->status );
+				}
 			} else {
 				$updated['yandex_cancel_requested'] = true;
 				$updated['status'] = 'cancellation_started';
@@ -260,7 +300,7 @@ final class YandexShipmentRegistrationService {
 			}
 			$this->repository->save( $order, $updated );
 
-			return array( 'success' => true, 'accepted' => true, 'message' => 'Отмена Яндекс.Доставки запрошена.', 'status' => $info->status );
+			return array( 'success' => true, 'accepted' => true, 'cancellation_started' => ! $this->is_terminal_status( $info->status ), 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => true, 'poll_interval_ms' => 5000, 'poll_max_attempts' => 14, 'poll_purpose' => 'cancellation' );
 		} catch ( YandexDeliveryApiException $exception ) {
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
@@ -296,9 +336,27 @@ final class YandexShipmentRegistrationService {
 	}
 
 	/** @return array<string,mixed> */
-	public function mark_polling_exhausted( object $order, int $attempts ): array {
+	public function mark_polling_exhausted( object $order, int $attempts, string $purpose = 'registration' ): array {
 		$shipment = $this->repository->find( $order );
 		$request_id = $this->request_id( $shipment );
+		if ( 'cancellation' === $purpose ) {
+			if ( '' === $request_id || 'cancellation_started' !== (string) ( $shipment['status'] ?? '' ) ) {
+				return array( 'success' => false, 'message' => 'Отмена Яндекс не ожидает polling.' );
+			}
+			$updated = array_merge(
+				$shipment,
+				array(
+					'yandex_cancel_poll_exhausted' => true,
+					'yandex_cancel_poll_attempts' => max( 0, $attempts ),
+					'yandex_cancel_poll_exhausted_at' => $this->now(),
+					'status' => 'cancellation_started',
+					'status_title' => 'Статус отмены пока не получен. Повторите обновление позднее.',
+					'updated_at' => $this->now(),
+				)
+			);
+			$this->repository->save( $order, $updated );
+			return array( 'success' => true, 'message' => 'Статус отмены пока не получен. Повторите обновление позднее.', 'shipment' => $updated );
+		}
 		if ( '' === $request_id || ! $this->is_reconciliation_pending( $shipment ) ) {
 			return array( 'success' => false, 'message' => 'Pending-отправление Яндекс не найдено.' );
 		}
@@ -337,6 +395,55 @@ final class YandexShipmentRegistrationService {
 		}
 
 		return ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $request->places, $rows );
+	}
+
+	private function register_request( ShipmentCreateRequest $request ): YandexDeliveryShipmentRegistrationResult {
+		$allocation = $this->allocation( $request );
+		$context = $this->context( $request );
+		$payload = $this->payload_builder->build( $allocation, $context );
+		$offers = $this->client->create_offers( $payload );
+		$selected = ( new YandexDeliveryEarliestOfferSelector() )->select( $offers, (string) ( $payload['last_mile_policy'] ?? '' ) );
+		if ( ! $selected instanceof YandexDeliveryOffer ) {
+			throw new YandexDeliveryApiException(
+				'Yandex offers/create returned no matching offers.',
+				array( 'error_code' => 'empty_matching_offers', 'last_mile_policy' => (string) ( $payload['last_mile_policy'] ?? '' ) )
+			);
+		}
+		$confirmed = $this->client->confirm_offer( $selected );
+		try {
+			$info = $this->client->request_info( $confirmed->request_id, is_array( $payload['places'] ?? null ) ? $payload['places'] : array() );
+		} catch ( YandexDeliveryApiException $exception ) {
+			throw new YandexDeliveryApiException(
+				$exception->getMessage(),
+				array_merge(
+					$exception->details(),
+					array(
+						'error_code' => 'request_info_after_confirm_failed',
+						'registration_phase' => 'request_info',
+						'confirmed_request_id' => $confirmed->request_id,
+						'selected_offer_id' => $selected->offer_id,
+						'selected_offer_expires_at' => $selected->expires_at,
+						'selected_offer_pricing' => $selected->pricing,
+						'selected_offer_pricing_total' => (string) ( $selected->raw['offer_details']['pricing_total'] ?? $selected->raw['pricing_total'] ?? '' ),
+						'selected_offer_pricing_total_kopecks' => $selected->pricing_total_kopecks,
+						'selected_offer_delivery_interval' => array(
+							'min' => $selected->delivery_interval_min,
+							'max' => $selected->delivery_interval_max,
+							'policy' => $selected->last_mile_policy,
+						),
+						'selected_offer_pickup_interval' => array(
+							'min' => $selected->pickup_interval_min,
+							'max' => $selected->pickup_interval_max,
+						),
+						'selected_offer_snapshot' => $selected->raw,
+					)
+				),
+				0,
+				$exception
+			);
+		}
+
+		return new YandexDeliveryShipmentRegistrationResult( $payload, $offers, $selected, $confirmed, $info );
 	}
 
 	/** @param array<int,ShipmentPlace> $places @return array<int,array<string,mixed>> */

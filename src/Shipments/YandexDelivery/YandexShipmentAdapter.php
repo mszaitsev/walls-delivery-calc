@@ -35,10 +35,11 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'manual_attach_help' => 'Введите request_id отправления, созданного напрямую в кабинете Яндекс.Доставки.',
 			'cancel_button_label' => 'Отменить отправление в Яндекс',
 			'remove_button_label' => 'Удалить из заказа',
-			'remove_confirmation_message' => 'Удаление уберёт запись только из заказа WooCommerce и не отменит отправление в Яндекс.Доставке. Продолжить?',
+			'remove_confirmation_message' => 'Удаление уберёт запись только из заказа WooCommerce. Статус отправления в Яндекс.Доставке останется без изменений. Продолжить?',
 			'update_status_button_label' => 'Обновить статус',
 			'created_toast' => 'Отправление Яндекс создано.',
 			'polling_timeout_message' => 'Статус отправления пока не получен. Повторите обновление статуса позднее.',
+			'cancellation_polling_timeout_message' => 'Статус отмены пока не получен. Повторите обновление позднее.',
 			'error_fallback_message' => 'Не удалось получить статус Яндекс.Доставки.',
 			'auto_poll_registration' => '1',
 			'registration_poll_interval_ms' => '5000',
@@ -64,6 +65,8 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		unset( $order );
 		$policy = $this->buttons->resolve( $shipment );
 		$status = trim( (string) ( $shipment['yandex_status'] ?? '' ) );
+		$cancel_pending = array() !== $shipment && 'cancellation_started' === (string) ( $shipment['status'] ?? '' );
+		$reconciliation_pending = array() !== $shipment && ! empty( $shipment['yandex_reconciliation_required'] );
 
 		return array(
 			'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
@@ -83,10 +86,12 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'yandex_sharing_url' => (string) ( $shipment['yandex_sharing_url'] ?? '' ),
 			'yandex_places' => is_array( $shipment['yandex_places'] ?? null ) ? $shipment['yandex_places'] : array(),
 			'yandex_items' => is_array( $shipment['yandex_items'] ?? null ) ? $shipment['yandex_items'] : array(),
-			'registration_polling' => array() !== $shipment && ! empty( $shipment['yandex_reconciliation_required'] ),
-			'polling_continue' => array() !== $shipment && ! empty( $shipment['yandex_reconciliation_required'] ) && empty( $shipment['yandex_reconciliation_poll_exhausted'] ),
-			'registration_terminal' => array() !== $shipment && empty( $shipment['yandex_reconciliation_required'] ),
-			'registration_success' => '' !== $status && empty( $shipment['yandex_reconciliation_required'] ),
+			'registration_polling' => $reconciliation_pending || $cancel_pending,
+			'polling_continue' => ( $reconciliation_pending && empty( $shipment['yandex_reconciliation_poll_exhausted'] ) ) || ( $cancel_pending && empty( $shipment['yandex_cancel_poll_exhausted'] ) ),
+			'poll_purpose' => $cancel_pending ? 'cancellation' : 'registration',
+			'cancellation_pending' => $cancel_pending,
+			'registration_terminal' => array() !== $shipment && ! $reconciliation_pending && ! $cancel_pending,
+			'registration_success' => '' !== $status && ! $reconciliation_pending && ! $cancel_pending,
 			'registration_error' => false,
 			'registration_poll_interval_ms' => 5000,
 			'registration_poll_max_attempts' => 14,
@@ -119,7 +124,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function remove_from_order( object $order, string $shipment_key = '' ): array { unset( $shipment_key ); return $this->registration->remove_local( $order ); }
 
 	/** @return array<string,mixed> */
-	public function mark_polling_exhausted( object $order, int $attempts ): array { return $this->registration->mark_polling_exhausted( $order, $attempts ); }
+	public function mark_polling_exhausted( object $order, int $attempts, string $purpose = 'registration' ): array { return $this->registration->mark_polling_exhausted( $order, $attempts, $purpose ); }
 
 	/** @param array<string,mixed> $shipment @return array<int,array<string,mixed>> */
 	public function label_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }

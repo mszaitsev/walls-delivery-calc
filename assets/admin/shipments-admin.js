@@ -552,6 +552,24 @@
     });
   }
 
+  function syncYandexAddressFields(form, snapshot) {
+    const fields = snapshot && snapshot.fields ? snapshot.fields : {};
+    const mapped = {
+      postal_code: fields.postal_code || '',
+      region: fields.region || '',
+      locality: fields.locality || '',
+      street: fields.street || '',
+      house: fields.house || '',
+      room: fields.room || ''
+    };
+    Object.keys(mapped).forEach((key) => {
+      const input = form.querySelector('[data-wdc-yandex-address-field="' + key + '"]');
+      if (input) input.value = mapped[key] || '';
+    });
+    const full = form.querySelector('[data-wdc-yandex-address-field="full_address"]');
+    if (full) full.value = fields.full_address || snapshot.display || '';
+  }
+
   function updateDpdContactHistory(value, operation) {
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.dpdCourierContactHistoryAction || 'wdc_dpd_courier_contact_history');
@@ -1209,6 +1227,16 @@
         if (settings.pollingToken && shipmentPollingTokens.get(box) !== settings.pollingToken) {
           return null;
         }
+        if (payload.data && payload.data.cancelled_and_removed) {
+          stopShipmentRegistrationPolling(box);
+          resetShipmentUi(box);
+          if (message) {
+            message.dataset.status = 'success';
+            message.textContent = payload.data.message || 'Отправление Яндекс отменено.';
+          }
+          showShipmentToast(box, payload.data.message || 'Отправление Яндекс отменено.', 'success', { append: true });
+          return payload;
+        }
         const statusPayload = shipmentStatusFromResponse(payload.data);
         const isPending = !!(payload.data && payload.data.pending);
         renderShipmentStatus(box, statusPayload);
@@ -1303,6 +1331,7 @@
     data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
     data.append('shipment_key', button && button.dataset ? button.dataset.shipmentKey || 'russian_post_domestic' : 'russian_post_domestic');
     data.append('attempts', String(attempts || 0));
+    data.append('purpose', button && button.dataset ? button.dataset.pollPurpose || 'registration' : 'registration');
     return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
       method: 'POST',
       credentials: 'same-origin',
@@ -1353,6 +1382,7 @@
     let attempts = 0;
     const interval = Math.max(1000, parseInt(settings.interval, 10) || 5000);
     const maxAttempts = Math.max(0, parseInt(settings.maxAttempts, 10) || 0);
+    if (button && button.dataset) button.dataset.pollPurpose = settings.purpose || settings.mode || 'registration';
     const stop = function () {
       stopShipmentRegistrationPolling(box);
     };
@@ -1465,8 +1495,23 @@
           }
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
         }
-        resetShipmentUi(box);
-        showShipmentToast(box, payload.data.message || getPresentation(box).cancelSuccessToast, 'success');
+        if (payload.data && payload.data.cancelled_and_removed) {
+          stopShipmentRegistrationPolling(box);
+          resetShipmentUi(box);
+          showShipmentToast(box, payload.data.message || getPresentation(box).cancelSuccessToast, 'success');
+          return payload;
+        }
+        renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
+        renderShipmentTechnicalInfo(box, payload.data || {});
+        showShipmentToast(box, payload.data.message || 'Запрос на отмену отправления отправлен.', 'success');
+        if (payload.data && payload.data.auto_poll) {
+          startShipmentRegistrationPolling(button, {
+            interval: payload.data.poll_interval_ms || 5000,
+            maxAttempts: payload.data.poll_max_attempts || 14,
+            mode: 'cancellation',
+            purpose: payload.data.poll_purpose || 'cancellation'
+          });
+        }
         return payload;
       })
       .catch((error) => {
@@ -2403,6 +2448,7 @@
           const snapshot = payload.data.normalized_address || {};
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
           syncDpdAddressFields(form, snapshot);
+          syncYandexAddressFields(form, snapshot);
           if (display) display.value = snapshot.display || '';
           const cityCode = snapshot && snapshot.fields ? String(snapshot.fields.cdek_city_code || '') : '';
           const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
@@ -2580,12 +2626,13 @@
     }
     if (event.target.matches('[data-wdc-courier-original-address]')) {
       const form = findShipmentForm(event.target);
-      if (form) {
+          if (form) {
         const snapshotInput = form.querySelector('[data-wdc-normalized-address-json]');
         const display = form.querySelector('[data-wdc-normalized-address-display]');
         const status = form.querySelector('[data-wdc-normalized-status]');
         if (snapshotInput) snapshotInput.value = '';
         syncDpdAddressFields(form, {});
+        syncYandexAddressFields(form, {});
         if (display) display.value = '';
         if (status) status.textContent = 'Адрес изменен, нужно обработать адрес заново.';
         updateCreateAvailability(form);

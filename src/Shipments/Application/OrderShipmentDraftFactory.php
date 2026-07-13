@@ -804,17 +804,17 @@ final class OrderShipmentDraftFactory {
 
 	/** @return array<string,mixed> */
 	private function yandex_courier_details_from_order( object $order, string $full_address ): array {
-		$address_1 = method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() ) : '';
-
 		return array(
 			'country' => 'Россия',
-			'region' => method_exists( $order, 'get_shipping_state' ) ? trim( (string) $order->get_shipping_state() ) : '',
-			'locality' => method_exists( $order, 'get_shipping_city' ) ? trim( (string) $order->get_shipping_city() ) : '',
-			'street' => $this->street_from_address_line( $address_1 ),
-			'house' => $this->house_from_address_line( $address_1 ),
-			'room' => method_exists( $order, 'get_shipping_address_2' ) ? trim( (string) $order->get_shipping_address_2() ) : '',
+			'region' => '',
+			'locality' => '',
+			'street' => '',
+			'house' => '',
+			'room' => '',
 			'full_address' => $full_address,
-			'postal_code' => method_exists( $order, 'get_shipping_postcode' ) ? trim( (string) $order->get_shipping_postcode() ) : '',
+			'postal_code' => '',
+			'address_verified' => false,
+			'normalization_source' => '',
 		);
 	}
 
@@ -823,42 +823,28 @@ final class OrderShipmentDraftFactory {
 	 */
 	private function yandex_courier_details_from_admin_data( array $data, ShipmentCreateRequest $base, string $full_address ): array {
 		$base_details = is_array( $base->meta['yandex_courier_details'] ?? null ) ? $base->meta['yandex_courier_details'] : array();
+		$snapshot = $this->normalized_address_from_admin_data( $data, $full_address, YandexDeliverySettings::SERVICE_KEY );
+		$fields = is_array( $snapshot['fields'] ?? null ) ? $snapshot['fields'] : array();
+		$verified = ! empty( $snapshot['success'] )
+			&& 'dadata+yandex' === (string) ( $snapshot['source'] ?? '' )
+			&& '' !== trim( (string) ( $fields['locality'] ?? '' ) )
+			&& '' !== trim( (string) ( $fields['street'] ?? '' ) )
+			&& '' !== trim( (string) ( $fields['house'] ?? '' ) )
+			&& '' !== trim( (string) ( $fields['full_address'] ?? '' ) );
 
 		return array(
-			'country' => sanitize_text_field( wp_unslash( $data['yandex_country'] ?? $base_details['country'] ?? 'Россия' ) ),
-			'region' => sanitize_text_field( wp_unslash( $data['yandex_region'] ?? $base_details['region'] ?? $base->recipient_address->region_name ) ),
-			'locality' => sanitize_text_field( wp_unslash( $data['yandex_locality'] ?? $base_details['locality'] ?? $base->recipient_address->city ) ),
-			'street' => sanitize_text_field( wp_unslash( $data['yandex_street'] ?? $base_details['street'] ?? $base->recipient_address->street ) ),
-			'house' => sanitize_text_field( wp_unslash( $data['yandex_house'] ?? $base_details['house'] ?? '' ) ),
-			'room' => sanitize_text_field( wp_unslash( $data['yandex_room'] ?? $base_details['room'] ?? $base->recipient_address->apartment ) ),
-			'full_address' => $full_address,
-			'postal_code' => preg_replace( '/\D+/', '', (string) wp_unslash( $data['yandex_postal_code'] ?? $base_details['postal_code'] ?? $base->recipient_address->postcode ) ) ?: '',
+			'country' => sanitize_text_field( wp_unslash( $data['yandex_country'] ?? $fields['country'] ?? $base_details['country'] ?? 'Россия' ) ),
+			'region' => sanitize_text_field( wp_unslash( $data['yandex_region'] ?? $fields['region'] ?? $base_details['region'] ?? '' ) ),
+			'locality' => sanitize_text_field( wp_unslash( $data['yandex_locality'] ?? $fields['locality'] ?? $base_details['locality'] ?? '' ) ),
+			'street' => sanitize_text_field( wp_unslash( $data['yandex_street'] ?? $fields['street'] ?? $base_details['street'] ?? '' ) ),
+			'house' => sanitize_text_field( wp_unslash( $data['yandex_house'] ?? $fields['house'] ?? $base_details['house'] ?? '' ) ),
+			'room' => sanitize_text_field( wp_unslash( $data['yandex_room'] ?? $fields['room'] ?? $base_details['room'] ?? '' ) ),
+			'full_address' => $verified && '' !== (string) ( $fields['full_address'] ?? '' ) ? (string) $fields['full_address'] : $full_address,
+			'postal_code' => preg_replace( '/\D+/', '', (string) wp_unslash( $data['yandex_postal_code'] ?? $fields['postal_code'] ?? $base_details['postal_code'] ?? '' ) ) ?: '',
+			'address_verified' => $verified,
+			'normalization_source' => (string) ( $snapshot['source'] ?? '' ),
+			'normalized_full_address' => (string) ( $fields['full_address'] ?? $snapshot['display'] ?? '' ),
 		);
-	}
-
-	private function street_from_address_line( string $address ): string {
-		$parts = array_values( array_filter( array_map( 'trim', explode( ',', $address ) ), static fn ( string $part ): bool => '' !== $part ) );
-		if ( count( $parts ) > 1 ) {
-			array_pop( $parts );
-			return implode( ', ', $parts );
-		}
-		if ( preg_match( '/^(.+?)\s+(\d[^\s]*)$/u', trim( $address ), $matches ) ) {
-			return trim( (string) $matches[1] );
-		}
-
-		return $address;
-	}
-
-	private function house_from_address_line( string $address ): string {
-		$parts = array_values( array_filter( array_map( 'trim', explode( ',', $address ) ), static fn ( string $part ): bool => '' !== $part ) );
-		if ( count( $parts ) > 1 ) {
-			return (string) end( $parts );
-		}
-		if ( preg_match( '/^(.+?)\s+(\d[^\s]*)$/u', trim( $address ), $matches ) ) {
-			return trim( (string) $matches[2] );
-		}
-
-		return '';
 	}
 
 	private function default_weight_g( object $order, array $items ): int {

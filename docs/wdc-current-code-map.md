@@ -1,3 +1,12 @@
+## Yandex Duplicate Auto-Skip, Cancel Polling and Courier Address Verification 0.108.14
+
+- `YandexShipmentRegistrationService::create_for_order()` keeps one registration lock for the whole create click. If `offers/create` returns the exact Yandex duplicate-code response for `operator_request_id`, the service reserves the next sequence id under the same lock, rebuilds the payload and slash-free temporary barcode prefix, and retries only `offers/create`.
+- Duplicate auto-skip is bounded to 10 occupied ids. `offers/confirm` is called exactly once for the first successful `offers/create`; unknown transport/API/malformed errors are not retried automatically and keep the reserved sequence id consumed.
+- Yandex cancel now persists `cancellation_started` instead of clearing the metabox. The cancel response returns accepted polling metadata (`poll_purpose=cancellation`, 5000 ms × 14), and the shared JS polling helper continues with status requests only.
+- A canonical `CANCELLED` status after cancel removes the local `_wdc_shipments['yandex_delivery']` entry and `_wdc_yandex_delivery_request_id` automatically while preserving `_wdc_yandex_delivery_registration_sequence`. Cancel polling exhaustion is persisted with `yandex_cancel_poll_exhausted`, attempts, timestamp and a Russian timeout status title; update and local remove remain available.
+- Manual attach no longer compares `request.info.operator_request_id` with the WooCommerce order number. Any valid `request_id` can be linked; sequence sync is still performed only when the attached operator id belongs to the current order-number family.
+- Yandex courier shipment modal uses the existing shared shipment address normalize AJAX and `AddressSuggestionService`/DaData token pool/counter. It renders the full order address and a `Проверить адрес` button; structured Yandex fields stay empty until a successful `dadata+yandex` verification snapshot is returned. The old street/house heuristic split is removed.
+
 ## Yandex Compact Registration Sequence State 0.108.13
 
 - `YandexShipmentRepository` keeps `_wdc_yandex_delivery_registration_sequence` compact: `last_index`, `last_operator_request_id`, optional `current_attempt` (`operator_request_id`, `sequence_index`, `started_at`, `order_id`, `registration_phase`, `lock_token`) and `updated_at`.
@@ -12,8 +21,8 @@
 - `YandexShipmentRegistrationService::create_for_order()` reserves the next `operator_request_id` immediately before the first real `offers/create` call, injects it into `ShipmentCreateRequest` meta and releases only the short registration lock after the attempt. Preview/draft code uses a peeked id; it does not update sequence meta.
 - ID format is deterministic: index `0` is the WooCommerce order number (`1010`), index `1` is `1010/1`, index `2` is `1010/2`. Reservation is not rolled back after HTTP starts, including transport errors or duplicate-code responses.
 - `YandexDeliveryShipmentPayloadBuilder` remains a formatter. It receives the ready `operator_request_id` and a safe temporary barcode prefix; suffixed operator ids are converted to slash-free temporary barcodes such as `1010-1-1` for place 1.
-- Manual attach validates ownership through the same strict family parser: exact base number or `base/{positive integer}` only. After successful `request/info` and canonical persistence, `sync_sequence_from_operator_request_id()` raises `last_index` if the attached shipment used a higher suffix.
-- Duplicate-code API errors are mapped to `yandex_operator_request_id_duplicate` with a Russian message and no automatic second `offers/create`.
+- Manual attach sequence sync still uses the strict family parser: exact base number or `base/{positive integer}` only. Foreign operator ids are allowed for attach but do not change sequence.
+- Duplicate-code API errors are mapped to `yandex_operator_request_id_duplicate`; the framework-level create flow may auto-skip them as described in 0.108.14.
 
 ## Yandex Remove Guard and Polling Transport Errors 0.108.11
 
@@ -24,7 +33,7 @@
 
 ## Yandex Pending Reconciliation Persistence 0.108.10
 
-- `YandexShipmentButtonPolicy` now separates local lifecycle states: `reconciliation_required` with a saved request id exposes update + local remove immediately, while `cancellation_started` keeps update only and does not allow local remove by default.
+- `YandexShipmentButtonPolicy` now separates local lifecycle states: `reconciliation_required` exposes update + local remove immediately, and `cancellation_started` also exposes update + local remove after reload/exhaustion while cancel/create/manual attach remain blocked.
 - `OrderShipmentsMetabox` registers the shared `wdc_mark_shipment_poll_exhausted` AJAX action. It calls an optional carrier method (`mark_polling_exhausted`) and then returns the same carrier UI payload used by normal status rendering.
 - `YandexShipmentRegistrationService::mark_polling_exhausted()` persists `yandex_reconciliation_poll_exhausted=true`, `yandex_reconciliation_attempts`, `yandex_reconciliation_poll_exhausted_at` and the Russian timeout `status_title` without calling Yandex HTTP and without clearing request id, lookup meta or selected offer audit.
 - Manual status update after exhaustion preserves the exhausted state while `request/info` is still incomplete; a later canonical `request/info` clears exhausted fields and converts the shipment to normal `created`.
@@ -91,7 +100,7 @@
 
 - `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` now preserves confirmed Yandex requests when `offers/confirm` succeeds but `request/info` fails. The framework-level result carries `raw_reference['yandex_reconciliation']`, and `ShipmentCreationService` persists a local `reconciliation_required` shipment instead of only saving `last_error`.
 - `src/Shipments/Application/ShipmentCreationService.php` stores pending reconciliation shipments through the existing `OrderShipmentRepository`: `yandex_request_id`, `request_id`, `external_id`, selected offer id/expires_at, sanitized diagnostics and local status `reconciliation_required`. The existing duplicate guard prevents a second create; status update is the recovery path.
-- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` treats `reconciliation_required` and `cancellation_started` as protected local lifecycle states: create/cancel/remove/manual attach are hidden, status update remains available.
+- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` treats `reconciliation_required` and `cancellation_started` as protected local lifecycle states: create/cancel/manual attach are hidden, status update remains available, and local remove is available with the Yandex local-only warning.
 - `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` handles asynchronous cancel: it saves `yandex_cancel_state`, `yandex_cancel_requested=true` and local `status=cancellation_started` immediately after `request/cancel`; a later successful `request/info` with `CANCELLED` clears the active flag and writes the final note once.
 - Yandex API lifecycle request ids are resolved only from `yandex_request_id`, `request_id`, then `external_id`. Courier order numbers may still be shown as tracking identifiers, but they are no longer used for `request/info`, `request/history` or `request/cancel`.
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` reuses existing prepared/shared/CDEK shipment allocation rows for Yandex drafts before falling back to a single place. The reused rows keep `item_key`/order-item identity, place number and per-place quantity, so split quantity and same-SKU different order items survive into `yandex_item_rows`.

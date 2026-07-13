@@ -10,6 +10,7 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
@@ -63,6 +64,7 @@ final class OrderShipmentsMetabox {
 		private ?CdekDeliveryPointService $cdek_delivery_points = null,
 		private ?DpdPickupPointService $dpd_pickup_points = null,
 		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
+		private ?AddressSuggestionService $address_suggestions = null,
 		private string $plugin_url = '',
 		private string $version = '1',
 		private ?CdekBarcodePrintService $cdek_barcode_print = null,
@@ -311,6 +313,8 @@ final class OrderShipmentsMetabox {
 		$yandex_ready_to = trim( (string) ( $meta['yandex_ready_to'] ?? $yandex_ready_from ) );
 		$yandex_courier_details = is_array( $meta['yandex_courier_details'] ?? null ) ? $meta['yandex_courier_details'] : array();
 		$yandex_courier_full_address = trim( (string) ( $yandex_courier_details['full_address'] ?? $courier_original_address ) );
+		$yandex_courier_verified = ! empty( $yandex_courier_details['address_verified'] );
+		$yandex_courier_fields = $yandex_courier_verified ? $yandex_courier_details : array();
 		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
 		$normalized_display = (string) ( $normalized_address['display'] ?? '' );
 		$normalized_is_cdek = 'dadata+cdek_location' === (string) ( $normalized_address['source'] ?? '' );
@@ -443,14 +447,18 @@ final class OrderShipmentsMetabox {
 								<div data-wdc-courier-section <?php echo DeliveryType::COURIER === $delivery_type ? '' : 'hidden'; ?>>
 									<?php if ( $is_yandex ) : ?>
 										<div data-wdc-yandex-courier-destination>
-											<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input name="yandex_postal_code" value="<?php echo esc_attr( (string) ( $yandex_courier_details['postal_code'] ?? $recipient_postcode ) ); ?>"></label>
-											<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input name="yandex_region" value="<?php echo esc_attr( (string) ( $yandex_courier_details['region'] ?? $region ) ); ?>"></label>
-											<label><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?><input name="yandex_locality" value="<?php echo esc_attr( (string) ( $yandex_courier_details['locality'] ?? $city ) ); ?>"></label>
-											<label><?php echo esc_html__( 'Улица', 'walls-delivery-calc' ); ?><input name="yandex_street" value="<?php echo esc_attr( (string) ( $yandex_courier_details['street'] ?? '' ) ); ?>"></label>
-											<label><?php echo esc_html__( 'Дом', 'walls-delivery-calc' ); ?><input name="yandex_house" value="<?php echo esc_attr( (string) ( $yandex_courier_details['house'] ?? '' ) ); ?>"></label>
-											<label><?php echo esc_html__( 'Квартира', 'walls-delivery-calc' ); ?><input name="yandex_room" value="<?php echo esc_attr( (string) ( $yandex_courier_details['room'] ?? $address['apartment'] ?? '' ) ); ?>"></label>
-											<label><?php echo esc_html__( 'Полный адрес', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" rows="3" data-wdc-courier-original-address><?php echo esc_textarea( $yandex_courier_full_address ); ?></textarea></label>
-											<input type="hidden" name="yandex_country" value="<?php echo esc_attr( (string) ( $yandex_courier_details['country'] ?? 'Россия' ) ); ?>">
+											<label><?php echo esc_html__( 'Полный адрес доставки', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" rows="3" data-wdc-courier-original-address data-wdc-yandex-full-address><?php echo esc_textarea( $yandex_courier_full_address ); ?></textarea></label>
+											<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Проверить адрес', 'walls-delivery-calc' ); ?></button>
+											<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $normalized_json ); ?>" data-wdc-normalized-address-json>
+											<input type="hidden" name="yandex_country" value="<?php echo esc_attr( (string) ( $yandex_courier_fields['country'] ?? 'Россия' ) ); ?>">
+											<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input name="yandex_postal_code" value="<?php echo esc_attr( (string) ( $yandex_courier_fields['postal_code'] ?? '' ) ); ?>" data-wdc-yandex-address-field="postal_code"></label>
+											<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input name="yandex_region" value="<?php echo esc_attr( (string) ( $yandex_courier_fields['region'] ?? '' ) ); ?>" data-wdc-yandex-address-field="region"></label>
+											<label><?php echo esc_html__( 'Населённый пункт', 'walls-delivery-calc' ); ?><input name="yandex_locality" value="<?php echo esc_attr( (string) ( $yandex_courier_fields['locality'] ?? '' ) ); ?>" data-wdc-yandex-address-field="locality"></label>
+											<label><?php echo esc_html__( 'Улица', 'walls-delivery-calc' ); ?><input name="yandex_street" value="<?php echo esc_attr( (string) ( $yandex_courier_fields['street'] ?? '' ) ); ?>" data-wdc-yandex-address-field="street"></label>
+											<label><?php echo esc_html__( 'Дом', 'walls-delivery-calc' ); ?><input name="yandex_house" value="<?php echo esc_attr( (string) ( $yandex_courier_fields['house'] ?? '' ) ); ?>" data-wdc-yandex-address-field="house"></label>
+											<label><?php echo esc_html__( 'Квартира', 'walls-delivery-calc' ); ?><input name="yandex_room" value="<?php echo esc_attr( (string) ( $yandex_courier_fields['room'] ?? '' ) ); ?>" data-wdc-yandex-address-field="room"></label>
+											<label><?php echo esc_html__( 'Нормализованный полный адрес', 'walls-delivery-calc' ); ?><textarea rows="3" readonly data-wdc-normalized-address-display data-wdc-yandex-address-field="full_address"><?php echo esc_textarea( (string) ( $yandex_courier_fields['normalized_full_address'] ?? '' ) ); ?></textarea></label>
+											<p class="description" data-wdc-normalized-status><?php echo esc_html( $yandex_courier_verified ? __( 'Адрес Яндекс проверен через DaData.', 'walls-delivery-calc' ) : __( 'Проверьте адрес доставки через DaData.', 'walls-delivery-calc' ) ); ?></p>
 										</div>
 									<?php else : ?>
 									<input type="hidden" name="recipient_location_city" value="<?php echo esc_attr( (string) ( $pickup_context['city_name'] ?? $pickup_context['city_value'] ?? $city ) ); ?>">
@@ -826,6 +834,20 @@ final class OrderShipmentsMetabox {
 			if ( '' === $destination_station ) {
 				throw new \InvalidArgumentException( __( 'Не выбран ПВЗ назначения Яндекс.', 'walls-delivery-calc' ) );
 			}
+		} elseif ( DeliveryType::COURIER === $delivery_type ) {
+			$details = is_array( $request->meta['yandex_courier_details'] ?? null ) ? $request->meta['yandex_courier_details'] : array();
+			if ( empty( $details['address_verified'] ) || 'dadata+yandex' !== (string) ( $details['normalization_source'] ?? '' ) ) {
+				throw new \InvalidArgumentException( __( 'Проверьте адрес доставки через DaData.', 'walls-delivery-calc' ) );
+			}
+			if ( '' === trim( (string) ( $details['locality'] ?? '' ) ) ) {
+				throw new \InvalidArgumentException( __( 'Не удалось определить населённый пункт. Проверьте полный адрес.', 'walls-delivery-calc' ) );
+			}
+			if ( '' === trim( (string) ( $details['street'] ?? '' ) ) ) {
+				throw new \InvalidArgumentException( __( 'Не удалось определить улицу. Проверьте полный адрес.', 'walls-delivery-calc' ) );
+			}
+			if ( '' === trim( (string) ( $details['house'] ?? '' ) ) ) {
+				throw new \InvalidArgumentException( __( 'Не удалось определить номер дома. Проверьте полный адрес.', 'walls-delivery-calc' ) );
+			}
 		}
 	}
 
@@ -929,6 +951,7 @@ final class OrderShipmentsMetabox {
 			}
 			$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
 			$attempts = max( 0, (int) ( $_POST['attempts'] ?? 0 ) );
+			$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? 'registration' ) );
 			$adapter = $this->carrier_adapter( $shipment_key );
 			if ( null === $adapter ) {
 				throw new \InvalidArgumentException( __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) );
@@ -936,7 +959,7 @@ final class OrderShipmentsMetabox {
 			if ( ! method_exists( $adapter, 'mark_polling_exhausted' ) ) {
 				throw new \InvalidArgumentException( __( 'Служба доставки не поддерживает сохранение состояния polling.', 'walls-delivery-calc' ) );
 			}
-			$result = $adapter->mark_polling_exhausted( $order, $attempts );
+			$result = $adapter->mark_polling_exhausted( $order, $attempts, $purpose );
 			if ( ! (bool) ( $result['success'] ?? false ) ) {
 				throw new \InvalidArgumentException( (string) ( $result['message'] ?? __( 'Не удалось сохранить состояние polling.', 'walls-delivery-calc' ) ) );
 			}
@@ -998,6 +1021,13 @@ final class OrderShipmentsMetabox {
 				$this->carrier_ui_payload( $order, $shipment_key ),
 				array(
 				'message' => (string) ( $result['message'] ?? __( 'Отправление отменено.', 'walls-delivery-calc' ) ),
+				'accepted' => ! empty( $result['accepted'] ),
+				'cancellation_started' => ! empty( $result['cancellation_started'] ),
+				'cancelled_and_removed' => ! empty( $result['cancelled_and_removed'] ),
+				'auto_poll' => ! empty( $result['auto_poll'] ),
+				'poll_interval_ms' => (int) ( $result['poll_interval_ms'] ?? 0 ),
+				'poll_max_attempts' => (int) ( $result['poll_max_attempts'] ?? 0 ),
+				'poll_purpose' => (string) ( $result['poll_purpose'] ?? '' ),
 				)
 			)
 		);
@@ -1206,6 +1236,10 @@ final class OrderShipmentsMetabox {
 		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
 		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $_POST['delivery_type'] ?? '' ) ) );
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type ) {
+			$result = $this->normalize_yandex_courier_address( $order, $original_address );
+			wp_send_json_success( array( 'normalized_address' => $result ) );
+		}
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type ) {
 			if ( ! $this->cdek_address_preparation instanceof CdekRecipientAddressPreparationService ) {
 				wp_send_json_error( array( 'message' => __( 'Нормализация адреса СДЭК недоступна.', 'walls-delivery-calc' ) ), 500 );
@@ -1236,6 +1270,135 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success( array( 'normalized_address' => $result ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function normalize_yandex_courier_address( object $order, string $original_address ): array {
+		$original_address = trim( $original_address );
+		if ( '' === $original_address ) {
+			return array(
+				'success' => false,
+				'message' => __( 'Введите полный адрес доставки.', 'walls-delivery-calc' ),
+				'source' => 'dadata+yandex',
+				'fields' => array(),
+				'display' => '',
+				'original_hash' => hash( 'sha256', $original_address ),
+				'service_key' => YandexDeliverySettings::SERVICE_KEY,
+			);
+		}
+		if ( ! $this->address_suggestions instanceof AddressSuggestionService ) {
+			return array(
+				'success' => false,
+				'message' => __( 'Проверка адреса через DaData недоступна.', 'walls-delivery-calc' ),
+				'source' => 'dadata+yandex',
+				'fields' => array(),
+				'display' => '',
+				'original_hash' => hash( 'sha256', $original_address ),
+				'service_key' => YandexDeliverySettings::SERVICE_KEY,
+			);
+		}
+
+		$response = $this->address_suggestions->suggest( 'address', $original_address, $this->yandex_address_suggestion_context( $order ) );
+		if ( empty( $response['success'] ) ) {
+			return array(
+				'success' => false,
+				'message' => $this->dadata_error_message( (string) ( $response['error_code'] ?? '' ) ),
+				'source' => 'dadata+yandex',
+				'fields' => array(),
+				'display' => '',
+				'original_hash' => hash( 'sha256', $original_address ),
+				'service_key' => YandexDeliverySettings::SERVICE_KEY,
+			);
+		}
+
+		$items = is_array( $response['items'] ?? null ) ? $response['items'] : array();
+		$item = null;
+		foreach ( $items as $candidate ) {
+			if ( is_array( $candidate ) && ! empty( $candidate['isDeliverable'] ) ) {
+				$item = $candidate;
+				break;
+			}
+		}
+		if ( null === $item && isset( $items[0] ) && is_array( $items[0] ) ) {
+			$item = $items[0];
+		}
+		if ( null === $item ) {
+			return array(
+				'success' => false,
+				'message' => __( 'Адрес распознан недостаточно точно. Уточните его и проверьте повторно.', 'walls-delivery-calc' ),
+				'source' => 'dadata+yandex',
+				'fields' => array(),
+				'display' => '',
+				'original_hash' => hash( 'sha256', $original_address ),
+				'service_key' => YandexDeliverySettings::SERVICE_KEY,
+			);
+		}
+
+		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
+		$locality = trim( (string) ( $data['settlement_with_type'] ?? $data['city_with_type'] ?? $data['settlement'] ?? $data['city'] ?? '' ) );
+		$street = trim( (string) ( $data['street_with_type'] ?? $data['street'] ?? '' ) );
+		$house = trim( (string) ( $data['house'] ?? '' ) );
+		$room = trim( (string) ( $data['flat'] ?? $data['room'] ?? $data['room_number'] ?? $data['premise'] ?? '' ) );
+		$full_address = trim( (string) ( $item['unrestrictedValue'] ?? $item['value'] ?? $item['label'] ?? $original_address ) );
+		$message = '';
+		if ( '' === $locality ) {
+			$message = __( 'Не удалось определить населённый пункт. Проверьте полный адрес.', 'walls-delivery-calc' );
+		} elseif ( '' === $street ) {
+			$message = __( 'Не удалось определить улицу. Проверьте полный адрес.', 'walls-delivery-calc' );
+		} elseif ( '' === $house ) {
+			$message = __( 'Не удалось определить номер дома. Проверьте полный адрес.', 'walls-delivery-calc' );
+		} elseif ( empty( $item['isDeliverable'] ) ) {
+			$message = __( 'Адрес распознан недостаточно точно. Уточните его и проверьте повторно.', 'walls-delivery-calc' );
+		}
+		$fields = array(
+			'country' => 'Россия',
+			'postal_code' => preg_replace( '/\D+/', '', (string) ( $data['postal_code'] ?? '' ) ) ?: '',
+			'region' => trim( (string) ( $data['region_with_type'] ?? $data['region'] ?? '' ) ),
+			'locality' => $locality,
+			'street' => $street,
+			'house' => $house,
+			'room' => $room,
+			'full_address' => $full_address,
+		);
+
+		return array(
+			'success' => '' === $message,
+			'message' => '' === $message ? __( 'Адрес Яндекс проверен через DaData.', 'walls-delivery-calc' ) : $message,
+			'source' => 'dadata+yandex',
+			'service_key' => YandexDeliverySettings::SERVICE_KEY,
+			'original_hash' => hash( 'sha256', $original_address ),
+			'display' => $full_address,
+			'fields' => $fields,
+			'quality' => array(
+				'level' => (string) ( $item['level'] ?? '' ),
+				'is_deliverable' => ! empty( $item['isDeliverable'] ),
+			),
+			'order_id' => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
+		);
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function yandex_address_suggestion_context( object $order ): array {
+		return array_filter(
+			array(
+				'country_code' => 'RU',
+				'location_city_fias_id' => method_exists( $order, 'get_meta' ) ? (string) $order->get_meta( '_wdc_platform_location_fias_id', true ) : '',
+			),
+			static fn( string $value ): bool => '' !== trim( $value )
+		);
+	}
+
+	private function dadata_error_message( string $code ): string {
+		return match ( $code ) {
+			'no_available_dadata_token' => __( 'Не настроен токен DaData для проверки адреса.', 'walls-delivery-calc' ),
+			'dadata_daily_limit_exhausted' => __( 'Лимит DaData исчерпан. Повторите проверку позднее.', 'walls-delivery-calc' ),
+			'dadata_timeout' => __( 'DaData не ответила вовремя. Повторите проверку адреса.', 'walls-delivery-calc' ),
+			default => __( 'Не удалось проверить адрес через DaData.', 'walls-delivery-calc' ),
+		};
 	}
 
 	/**

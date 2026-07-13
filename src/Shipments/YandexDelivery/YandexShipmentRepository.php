@@ -79,6 +79,12 @@ final class YandexShipmentRepository {
 	public function reserve_operator_request_id( object $order, string $base, string $now ): array {
 		$base = '' !== trim( $base ) ? trim( $base ) : $this->base_operator_request_id( $order );
 		$lock_token = $this->acquire_registration_lock( $order, $now );
+		return $this->reserve_operator_request_id_under_lock( $order, $base, $now, $lock_token );
+	}
+
+	/** @return array{index:int,operator_request_id:string,started_at:string,lock_token:string} */
+	public function reserve_operator_request_id_under_lock( object $order, string $base, string $now, string $lock_token ): array {
+		$base = '' !== trim( $base ) ? trim( $base ) : $this->base_operator_request_id( $order );
 		$next = $this->peek_next_operator_request_id( $order, $base );
 		$sequence = array(
 			'last_index' => $next['index'],
