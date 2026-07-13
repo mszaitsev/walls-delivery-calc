@@ -746,10 +746,6 @@ final class YandexShipmentRegistrationService {
 		return (string) $this->repository->order_id( $order );
 	}
 
-	private function operator_request_id_belongs_to_order( string $operator_request_id, string $base ): bool {
-		return null !== $this->repository->parse_operator_request_id( $operator_request_id, $base );
-	}
-
 	private function is_duplicate_operator_error( YandexDeliveryApiException $exception ): bool {
 		$haystack = strtolower(
 			$exception->getMessage()
