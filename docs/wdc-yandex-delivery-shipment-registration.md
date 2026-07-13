@@ -1,5 +1,19 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.109.0
+
+Яндекс.Доставка подключена к общей статусной инфраструктуре WDC. Единый каталог `YandexStatusMapping` содержит полный union raw-кодов из официальной модели, включая `DELIVERY_TRACK_RECIEVED`, и не включает reason-коды отмены/переноса (`SHOP_CANCELLED`, `CLIENT_REQUEST` и т.п.) как отдельные carrier statuses. Для каждого кода задано описание, применимость (`courier`, `pickup`, `both`) и default universal status.
+
+Настройки сопоставления находятся в существующей админке службы доставки на вкладке `Яндекс.Доставка`. Таблица использует тот же save/reset flow, что DPD/CDEK: `wdc_core_settings[yandex_delivery_status_mapping]` хранит только валидные коды из catalog и только валидные `DeliveryStatus` значения. Если override отсутствует, используется default mapping из catalog.
+
+После любого canonical `request/info` сохраняются raw поля `yandex_status`, `yandex_status_description`, `yandex_status_reason`, `yandex_status_timestamp`, full request/info snapshot и результат сопоставления `universal_status_code`/`universal_status_label`. Эти поля применяются при normal create, reconciliation, manual attach, manual status update, auto polling и cancel polling. `request/history` сохраняет raw events и добавляет universal status к каждой записи, но не меняет WooCommerce status при чтении истории.
+
+Основной статус в блоке `Отправления` — universal status WDC (`Создан в ТК`, `в пути`, `ожидает самовывоза...`), raw Yandex code остаётся диагностикой (`Статус Яндекс.Доставки: CREATED`). Автоматическая смена WooCommerce order status выполняется через существующий `ShipmentOrderStatusMappingService`; Yandex service не вызывает `update_status()` напрямую.
+
+Button policy canonical shipment больше не использует raw terminal list как источник истины. Если resolved universal status — `pending_creation_in_carrier` или `created_in_carrier`, доступны update + cancel, local remove скрыт. Для `in_transit`, `ready_for_pickup`, `handed_to_courier`, `delivered`, `returning_to_sender`, `returned_to_sender`, `cancelled`, `rejected`, `unknown` cancel скрыт, update доступен при наличии `request_id`, local remove доступен. Технические состояния остаются особыми: `reconciliation_required` всегда update + local remove без cancel; `cancellation_started` до exhaustion скрывает remove, после `yandex_cancel_poll_exhausted=true` показывает update + remove.
+
+Если Яндекс вернул неизвестный raw status, shipment не падает: raw code сохраняется, universal status становится `unknown`, WooCommerce status не меняется без явной общей mapping-политики, а order note один раз фиксирует `Яндекс вернул неизвестный статус: {CODE}.`
+
 ## Статус 0.108.15
 
 Yandex courier address verification still goes through the shared DaData stack (`AddressSuggestionService`, existing client, token pool and usage counter), but locality extraction now follows the actual normalized item contract. The shipment modal reads canonical normalized fields first (`locality`, `city_name`, `city`, `place`, `settlement`), then normalized `data` settlement/city fields (`settlement_with_type`, `city_with_type`, `settlement`, `city`). Region fallback is restricted to federal cities represented at region level, such as Москва, Санкт-Петербург and Севастополь; ordinary regions are not used as locality.

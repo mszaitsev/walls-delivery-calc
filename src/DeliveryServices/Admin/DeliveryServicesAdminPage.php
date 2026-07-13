@@ -75,6 +75,7 @@ use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexStatusMapping;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -132,6 +133,7 @@ final class DeliveryServicesAdminPage {
 		private ?YandexRegionMappingV2Repository $yandex_region_mapping_v2_repository = null,
 		private ?YandexGeoV2RegionEnrichmentRunner $yandex_geo_v2_region_enrichment_runner = null,
 		private ?YandexDeliveryGeoPipelineV2Runner $yandex_delivery_geo_pipeline_v2_runner = null,
+		private ?YandexStatusMapping $yandex_status_mapping = null,
 	) {
 	}
 
@@ -723,6 +725,7 @@ final class DeliveryServicesAdminPage {
 				'save_status_mapping',
 				'save_cdek_statuses',
 				'save_dpd_statuses',
+				'save_yandex_delivery_statuses',
 				'save_cdek_settings',
 				'save_cdek_calculation',
 				'check_cdek_connection',
@@ -789,6 +792,7 @@ final class DeliveryServicesAdminPage {
 					'run_dpd_pickup_all_import',
 					'reset_dpd_pickup_result',
 					'save_yandex_delivery_settings',
+					'save_yandex_delivery_statuses',
 					'check_yandex_delivery_connection'
 				), true ) ) {
 				$data = array();
@@ -860,6 +864,16 @@ final class DeliveryServicesAdminPage {
 						$mapping = $this->dpd_status_mapping->sanitize_mapping( wp_unslash( $_POST[ DpdStatusMapping::MAPPING_KEY ] ) );
 					}
 					$this->dpd_status_mapping->save_mapping( $mapping );
+				}
+			}
+			if ( 'save_yandex_delivery_statuses' === $action && $this->yandex_status_mapping instanceof YandexStatusMapping ) {
+				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $this->is_yandex_delivery_service( $service ) ) {
+					$mapping = YandexStatusMapping::default_mapping();
+					if ( empty( $_POST['yandex_delivery_statuses_reset'] ) && isset( $_POST[ YandexStatusMapping::MAPPING_KEY ] ) && is_array( $_POST[ YandexStatusMapping::MAPPING_KEY ] ) ) {
+						$mapping = $this->yandex_status_mapping->sanitize_mapping( wp_unslash( $_POST[ YandexStatusMapping::MAPPING_KEY ] ) );
+					}
+					$this->yandex_status_mapping->save_mapping( $mapping );
 				}
 			}
 			if ( 'save_tariffs' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
@@ -1136,6 +1150,7 @@ final class DeliveryServicesAdminPage {
 			'save_status_mapping',
 			'save_cdek_statuses',
 			'save_dpd_statuses',
+			'save_yandex_delivery_statuses',
 			'save_cdek_settings',
 			'save_cdek_calculation',
 			'check_cdek_connection',
@@ -1171,6 +1186,7 @@ final class DeliveryServicesAdminPage {
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
 				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
 				'save_yandex_delivery_settings', 'check_yandex_delivery_connection' => 'yandex_delivery_settings',
+				'save_yandex_delivery_statuses' => 'yandex_delivery_statuses',
 				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
 				'save_dpd_tariff_settings' => 'dpd_tariff',
 				'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' => 'dpd_pickup',
@@ -1374,6 +1390,7 @@ final class DeliveryServicesAdminPage {
 		if ( $this->is_yandex_delivery_service( $service ) ) {
 			$tabs['yandex_delivery_settings'] = 'Данные для входа';
 			$tabs['yandex_delivery_pickup'] = 'Яндекс ПВЗ/география';
+			$tabs['yandex_delivery_statuses'] = 'Яндекс.Доставка';
 		}
 		if ( $this->is_dpd_service( $service ) ) {
 			$tabs['tariffs'] = 'Тарифы';
@@ -1404,6 +1421,7 @@ final class DeliveryServicesAdminPage {
 			'dpd_settings' => $this->render_dpd_settings_tab( $service ),
 			'yandex_delivery_settings' => $this->render_yandex_delivery_settings_tab( $service ),
 			'yandex_delivery_pickup' => $this->render_yandex_delivery_pickup_v2_tab( $service ),
+			'yandex_delivery_statuses' => $this->render_yandex_delivery_statuses_tab( $service ),
 			'dpd_geography' => $this->render_dpd_geography_tab( $service ),
 			'dpd_pickup' => $this->render_dpd_pickup_tab( $service ),
 			'dpd_tariff' => $this->render_dpd_tariff_tab( $service ),
@@ -3194,6 +3212,48 @@ final class DeliveryServicesAdminPage {
 			</table>
 			<?php submit_button( __( 'Сохранить статусы DPD', 'walls-delivery-calc' ) ); ?>
 			<button class="button" type="submit" name="dpd_statuses_reset" value="1"><?php echo esc_html__( 'Сбросить к дефолтным значениям', 'walls-delivery-calc' ); ?></button>
+		</form>
+		<?php
+	}
+
+	private function render_yandex_delivery_statuses_tab( DeliveryService $service ): void {
+		if ( ! $this->is_yandex_delivery_service( $service ) || ! $this->yandex_status_mapping instanceof YandexStatusMapping ) {
+			return;
+		}
+		$mapping = $this->yandex_status_mapping->mapping();
+		$defaults = YandexStatusMapping::default_mapping();
+		?>
+		<form method="post" style="max-width: 1180px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_yandex_delivery_statuses">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<p class="description"><?php echo esc_html__( 'Единый справочник raw-статусов Яндекс.Доставки. Сопоставление сохраняет универсальный статус отправления WDC; raw-статус остаётся диагностическим значением.', 'walls-delivery-calc' ); ?></p>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php echo esc_html__( 'Код Яндекс', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Описание', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Применимость', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Универсальный статус отправления', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Дефолтное значение', 'walls-delivery-calc' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( YandexStatusMapping::statuses() as $code => $status ) : ?>
+						<?php $code = (string) $code; ?>
+						<tr>
+							<td><code><?php echo esc_html( $code ); ?></code></td>
+							<td><strong><?php echo esc_html( $status['description'] ); ?></strong></td>
+							<td><?php echo esc_html( $this->yandex_status_mapping->mode_label( $status['mode'] ) ); ?></td>
+							<td><?php $this->render_delivery_status_select( YandexStatusMapping::MAPPING_KEY, $code, (string) ( $mapping[ $code ] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( DeliveryStatus::label( (string) ( $defaults[ $code ] ?? DeliveryStatus::UNKNOWN ) ) . ' (' . (string) ( $defaults[ $code ] ?? DeliveryStatus::UNKNOWN ) . ')' ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+			<?php submit_button( __( 'Сохранить статусы Яндекс.Доставки', 'walls-delivery-calc' ) ); ?>
+			<button class="button" type="submit" name="yandex_delivery_statuses_reset" value="1"><?php echo esc_html__( 'Сбросить к дефолтным значениям', 'walls-delivery-calc' ); ?></button>
 		</form>
 		<?php
 	}

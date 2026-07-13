@@ -1,3 +1,11 @@
+## Yandex status mapping 0.109.0
+
+- `src/Shipments/YandexDelivery/YandexStatusMapping.php` is the single Yandex Delivery raw-status catalog and mapping service. It stores overrides in `wdc_core_settings[yandex_delivery_status_mapping]`, exposes defaults for every documented code and deliberately excludes `state.reason` cancellation/reschedule reasons from carrier status settings.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the Yandex service tab `Яндекс.Доставка` for status mapping. It reuses the same delivery-service admin save/nonce/settings flow as DPD and CDEK, with one row per Yandex code, applicability (`До двери`, `ПВЗ/постамат`, `Оба сценария`) and a universal `DeliveryStatus` select.
+- `YandexShipmentPersistenceMapper::fields_from_info()` now maps each canonical `request/info` state to `universal_status_code`/`universal_status_label` while preserving raw `yandex_status`, description, reason, timestamp and full request/info snapshot. `after_persist()` applies the shared `ShipmentOrderStatusMappingService` after synchronous create.
+- `YandexShipmentRegistrationService` applies the same mapper result for reconciliation, manual attach, manual status update, cancel polling and terminal `CANCELLED` before local auto-delete. `request/history` rows keep raw Yandex statuses and receive resolved universal status fields without changing WooCommerce order status.
+- `YandexShipmentButtonPolicy` keeps special technical rules for `reconciliation_required` and `cancellation_started`, but canonical shipments use resolved universal status instead of raw Yandex codes. `pending_creation_in_carrier` and `created_in_carrier` allow cancel; every other universal status hides cancel and allows local remove.
+
 ## Yandex Locality, Exact Duplicate Retry and Cancel Remove Policy 0.108.15
 
 - `OrderShipmentsMetabox::normalize_yandex_courier_address()` still calls the existing `AddressSuggestionService::suggest()` stack. Yandex locality is now extracted from canonical normalized item fields first (`locality`, `city_name`, `city`, `place`, `settlement`), then from normalized `data` settlement/city fields. Region fallback is allowed only for federal cities represented as region-level addresses, so ordinary regions such as Moscow Oblast are not sent as locality.

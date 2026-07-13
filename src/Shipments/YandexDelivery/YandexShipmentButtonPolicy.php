@@ -3,10 +3,15 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\YandexDelivery;
 
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
+
 defined( 'ABSPATH' ) || exit;
 
 final class YandexShipmentButtonPolicy {
 	private const TERMINAL_STATUSES = array( 'CANCELLED', 'DELIVERED', 'RETURNED', 'RETURNED_TO_SENDER', 'REJECTED' );
+
+	public function __construct( private ?YandexStatusMapping $status_mapping = null ) {
+	}
 
 	/** @param array<string,mixed> $shipment @return array<string,bool> */
 	public function resolve( array $shipment ): array {
@@ -21,15 +26,21 @@ final class YandexShipmentButtonPolicy {
 		if ( '' !== $request_id && 'cancellation_started' === $local_status ) {
 			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => false, 'remove' => ! empty( $shipment['yandex_cancel_poll_exhausted'] ) );
 		}
-		$status = strtoupper( trim( (string) ( $shipment['yandex_status'] ?? $local_status ) ) );
-		$terminal = self::is_terminal_status( $status );
+		$universal_status = sanitize_key( (string) ( $shipment['universal_status_code'] ?? '' ) );
+		if ( ! DeliveryStatus::is_valid( $universal_status ) ) {
+			$raw_status = (string) ( $shipment['yandex_status'] ?? '' );
+			$universal_status = $this->status_mapping instanceof YandexStatusMapping
+				? $this->status_mapping->universal_status_for( $raw_status )
+				: DeliveryStatus::UNKNOWN;
+		}
+		$can_cancel = in_array( $universal_status, array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::CREATED_IN_CARRIER ), true );
 
 		return array(
 			'create' => false,
 			'manual_attach' => false,
 			'update' => '' !== $request_id,
-			'cancel' => '' !== $request_id && ! $terminal,
-			'remove' => $terminal || '' === $request_id,
+			'cancel' => '' !== $request_id && $can_cancel,
+			'remove' => ! $can_cancel || '' === $request_id,
 		);
 	}
 

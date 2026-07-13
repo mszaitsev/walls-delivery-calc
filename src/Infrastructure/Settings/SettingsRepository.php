@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexStatusMapping;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -110,6 +111,7 @@ final class SettingsRepository {
 			'shipment_status_order_status_mapping' => array(),
 			'cdek_status_mapping' => CdekStatusMappingService::default_mapping(),
 			'dpd_status_mapping' => DpdStatusMapping::default_mapping(),
+			'yandex_delivery_status_mapping' => YandexStatusMapping::default_mapping(),
 			'packaging_weight_tiers'       => array(),
 			),
 			CdekSettings::defaults(),

@@ -20,6 +20,8 @@ use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentAllocationAdapter;
 
 defined( 'ABSPATH' ) || exit;
@@ -33,7 +35,9 @@ final class YandexShipmentRegistrationService {
 		private YandexDeliveryShipmentClient $client,
 		private YandexShipmentRepository $repository,
 		private YandexShipmentPersistenceMapper $persistence_mapper,
-		private YandexShipmentButtonPolicy $button_policy
+		private YandexShipmentButtonPolicy $button_policy,
+		private ?YandexStatusMapping $status_mapping = null,
+		private ?ShipmentOrderStatusMappingService $order_status_mapping = null
 	) {
 	}
 
@@ -169,8 +173,9 @@ final class YandexShipmentRegistrationService {
 			if ( $was_cancel_pending && $this->is_terminal_status( $info->status ) ) {
 				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
 				if ( $this->is_cancelled_status( $info->status ) ) {
+					$order_status_mapping = $this->apply_order_status_mapping( $order, $updated );
 					$this->repository->delete( $order );
-					return array( 'success' => true, 'message' => 'Отправление Яндекс отменено.', 'status' => $info->status, 'cancelled_and_removed' => true );
+					return array( 'success' => true, 'message' => 'Отправление Яндекс отменено.', 'status' => $info->status, 'cancelled_and_removed' => true, 'order_status_mapping' => $order_status_mapping );
 				}
 			} elseif ( $was_reconciliation ) {
 				$this->add_order_note( $order, 'Данные отправления Яндекс восстановлены. Статус: ' . $info->status . '.' );
@@ -178,9 +183,11 @@ final class YandexShipmentRegistrationService {
 				$updated['yandex_last_noted_status'] = $info->status;
 				$this->add_order_note( $order, 'Статус отправления Яндекс обновлён: ' . $info->status );
 			}
+			$this->note_unknown_status_once( $order, $shipment, $updated );
 			$this->repository->save( $order, $updated );
+			$order_status_mapping = $this->apply_order_status_mapping( $order, $updated );
 
-			return array( 'success' => true, 'message' => 'Статус Яндекс.Доставки обновлён.', 'status' => $info->status );
+			return array( 'success' => true, 'message' => 'Статус Яндекс.Доставки обновлён.', 'status' => $info->status, 'order_status_mapping' => $order_status_mapping );
 		} catch ( YandexDeliveryApiException $exception ) {
 			if ( $this->is_reconciliation_pending( $shipment ) && $this->is_temporary_request_info_error( $exception ) ) {
 				$was_exhausted = ! empty( $shipment['yandex_reconciliation_poll_exhausted'] );
@@ -233,7 +240,9 @@ final class YandexShipmentRegistrationService {
 		if ( null !== $parsed ) {
 			$shipment['yandex_registration_sequence_index'] = $parsed['index'];
 		}
+		$this->note_unknown_status_once( $order, array(), $shipment );
 		$this->repository->save( $order, $shipment );
+		$order_status_mapping = $this->apply_order_status_mapping( $order, $shipment );
 		if ( null !== $parsed ) {
 			$this->repository->sync_sequence_from_operator_request_id( $order, $info->operator_request_id, $expected_operator_request_id, $this->now() );
 		}
@@ -245,6 +254,7 @@ final class YandexShipmentRegistrationService {
 			'tracking_number' => '' !== $info->courier_order_id ? $info->courier_order_id : $info->request_id,
 			'backlog_order_id' => $info->request_id,
 			'shipment' => $shipment,
+			'order_status_mapping' => $order_status_mapping,
 		);
 	}
 
@@ -286,8 +296,9 @@ final class YandexShipmentRegistrationService {
 				$this->apply_terminal_cancel_resolution( $order, $shipment, $updated, $info->status );
 				if ( $this->is_cancelled_status( $info->status ) ) {
 					$this->repository->save( $order, $updated );
+					$order_status_mapping = $this->apply_order_status_mapping( $order, $updated );
 					$this->repository->delete( $order );
-					return array( 'success' => true, 'accepted' => false, 'cancelled_and_removed' => true, 'message' => 'Отправление Яндекс отменено.', 'status' => $info->status );
+					return array( 'success' => true, 'accepted' => false, 'cancelled_and_removed' => true, 'message' => 'Отправление Яндекс отменено.', 'status' => $info->status, 'order_status_mapping' => $order_status_mapping );
 				}
 			} else {
 				$updated['yandex_cancel_requested'] = true;
@@ -298,9 +309,11 @@ final class YandexShipmentRegistrationService {
 					$this->add_order_note( $order, 'Запрос на отмену отправления Яндекс отправлен. Текущий статус: ' . $info->status . '.' );
 				}
 			}
+			$this->note_unknown_status_once( $order, $shipment, $updated );
 			$this->repository->save( $order, $updated );
+			$order_status_mapping = $this->is_terminal_status( $info->status ) ? $this->apply_order_status_mapping( $order, $updated ) : array( 'status' => 'skipped', 'changed' => false, 'reason' => 'cancellation_pending' );
 
-			return array( 'success' => true, 'accepted' => true, 'cancellation_started' => ! $this->is_terminal_status( $info->status ), 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => true, 'poll_interval_ms' => 5000, 'poll_max_attempts' => 14, 'poll_purpose' => 'cancellation' );
+			return array( 'success' => true, 'accepted' => true, 'cancellation_started' => ! $this->is_terminal_status( $info->status ), 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => true, 'poll_interval_ms' => 5000, 'poll_max_attempts' => 14, 'poll_purpose' => 'cancellation', 'order_status_mapping' => $order_status_mapping );
 		} catch ( YandexDeliveryApiException $exception ) {
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
@@ -315,7 +328,7 @@ final class YandexShipmentRegistrationService {
 		}
 		try {
 			$history = $this->client->request_history( $request_id );
-			return array( 'success' => true, 'events' => $history->events );
+			return array( 'success' => true, 'events' => $this->map_history_events( $history->events ) );
 		} catch ( YandexDeliveryApiException $exception ) {
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
@@ -718,6 +731,57 @@ final class YandexShipmentRegistrationService {
 		}
 
 		return '';
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function apply_order_status_mapping( object $order, array $shipment ): array {
+		if ( ! $this->order_status_mapping instanceof ShipmentOrderStatusMappingService ) {
+			return array( 'status' => 'skipped', 'changed' => false, 'reason' => 'service_unavailable' );
+		}
+		$universal_status = sanitize_key( (string) ( $shipment['universal_status_code'] ?? '' ) );
+		if ( '' === $universal_status || ! DeliveryStatus::is_valid( $universal_status ) ) {
+			return array( 'status' => 'skipped', 'changed' => false, 'reason' => 'empty_universal_status' );
+		}
+
+		return $this->order_status_mapping->apply( $order, $shipment, $universal_status );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $events
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function map_history_events( array $events ): array {
+		return array_map(
+			function ( array $event ): array {
+				$code = strtoupper( trim( (string) ( $event['status'] ?? '' ) ) );
+				$universal = $this->status_mapping instanceof YandexStatusMapping ? $this->status_mapping->universal_status_for( $code ) : DeliveryStatus::UNKNOWN;
+				$event['universal_status_code'] = $universal;
+				$event['universal_status_label'] = DeliveryStatus::label( $universal );
+				return $event;
+			},
+			$events
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $previous
+	 * @param array<string,mixed> $updated
+	 */
+	private function note_unknown_status_once( object $order, array $previous, array &$updated ): void {
+		$code = strtoupper( trim( (string) ( $updated['yandex_status'] ?? '' ) ) );
+		if ( '' === $code || DeliveryStatus::UNKNOWN !== (string) ( $updated['universal_status_code'] ?? '' ) ) {
+			return;
+		}
+		if ( $this->status_mapping instanceof YandexStatusMapping && $this->status_mapping->known( $code ) ) {
+			return;
+		}
+		if ( $code === (string) ( $previous['yandex_unknown_status_noted_code'] ?? '' ) ) {
+			$updated['yandex_unknown_status_noted_code'] = $code;
+			return;
+		}
+
+		$updated['yandex_unknown_status_noted_code'] = $code;
+		$this->add_order_note( $order, 'Яндекс вернул неизвестный статус: ' . $code . '.' );
 	}
 
 	private function add_order_note( object $order, string $message ): void {

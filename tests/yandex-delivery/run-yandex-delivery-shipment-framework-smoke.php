@@ -16,6 +16,7 @@ function sanitize_key( mixed $value ): string { return strtolower( preg_replace(
 function wp_unslash( mixed $value ): mixed { return $value; }
 function current_time( string $type ): string { return gmdate( 'Y-m-d H:i:s' ); }
 function get_current_user_id(): int { return 7; }
+function wc_get_order_statuses(): array { return array( 'wc-processing' => 'Processing', 'wc-shipped' => 'Shipped', 'wc-completed' => 'Completed' ); }
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
@@ -45,6 +46,7 @@ use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
@@ -52,6 +54,7 @@ use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
 use WallsShop\WDC\Shipments\Application\ShipmentModalRequestMapper;
+use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentAdapter;
@@ -59,6 +62,7 @@ use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentButtonPolicy;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRegistrationService;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRepository;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexStatusMapping;
 
 final class YdFrameworkFakeHttp implements YandexDeliveryHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,args:array<string,mixed>}> */
@@ -80,6 +84,7 @@ final class YdFrameworkOrder {
 	public array $meta = array();
 	/** @var array<int,string> */
 	public array $notes = array();
+	public string $status = 'processing';
 	public function __construct( private int $id, private string $order_number = '' ) {}
 	public function get_id(): int { return $this->id; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
@@ -87,6 +92,8 @@ final class YdFrameworkOrder {
 	public function delete_meta_data( string $key ): void { unset( $this->meta[ $key ] ); }
 	public function save(): void {}
 	public function add_order_note( string $note ): void { $this->notes[] = $note; }
+	public function get_status(): string { return $this->status; }
+	public function update_status( string $status ): void { $this->status = $status; }
 	public function get_order_number(): string { return '' !== $this->order_number ? $this->order_number : 'ORDER-' . (string) $this->id; }
 	public function get_items(): array { return array( new YdFrameworkOrderItem( 101, 'Item A', 'SKU-A', 3 ) ); }
 	public function get_shipping_first_name(): string { return 'Михаил'; }
@@ -221,10 +228,12 @@ function yd_framework_stack( array $responses ): array {
 	$core_registration = new CoreYandexRegistrationService( $payload_builder, $client, new YandexDeliveryEarliestOfferSelector() );
 	$base_repository = new OrderShipmentRepository();
 	$yandex_repository = new YandexShipmentRepository( $base_repository );
-	$mapper = new YandexShipmentPersistenceMapper( $yandex_repository );
-	$button_policy = new YandexShipmentButtonPolicy();
-	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy );
-	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy );
+	$status_mapping = new YandexStatusMapping( new SettingsRepository() );
+	$order_status_mapping = new ShipmentOrderStatusMappingService( new SettingsRepository() );
+	$mapper = new YandexShipmentPersistenceMapper( $yandex_repository, $status_mapping, $order_status_mapping );
+	$button_policy = new YandexShipmentButtonPolicy( $status_mapping );
+	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
+	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
 	$registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
 	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
 
@@ -247,22 +256,84 @@ $payload_builder = new YandexDeliveryShipmentPayloadBuilder();
 $core_registration = new CoreYandexRegistrationService( $payload_builder, $client, new YandexDeliveryEarliestOfferSelector() );
 $base_repository = new OrderShipmentRepository();
 $yandex_repository = new YandexShipmentRepository( $base_repository );
-$mapper = new YandexShipmentPersistenceMapper( $yandex_repository );
-$button_policy = new YandexShipmentButtonPolicy();
-$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy );
-$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy );
+$status_mapping = new YandexStatusMapping( new SettingsRepository() );
+$order_status_mapping = new ShipmentOrderStatusMappingService( new SettingsRepository() );
+$mapper = new YandexShipmentPersistenceMapper( $yandex_repository, $status_mapping, $order_status_mapping );
+$button_policy = new YandexShipmentButtonPolicy( $status_mapping );
+$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
+$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
 $creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
 $order = new YdFrameworkOrder( 777 );
 $request = yd_framework_request();
 
 yd_framework_assert( $registry->get( YandexDeliverySettings::CARRIER_KEY ) instanceof YandexShipmentAdapter, 'Yandex adapter must be registered through CarrierShipmentAdapterRegistry.' );
-yd_framework_assert( array() === ( new YandexShipmentButtonPolicy() )->resolve( array( 'yandex_request_id' => 'REQ-777', 'yandex_status' => 'CREATED' ) ) ? false : true, 'Yandex button policy must resolve created shipments.' );
+yd_framework_assert( array() === ( new YandexShipmentButtonPolicy( $status_mapping ) )->resolve( array( 'yandex_request_id' => 'REQ-777', 'yandex_status' => 'CREATED' ) ) ? false : true, 'Yandex button policy must resolve created shipments.' );
+
+$expected_yandex_statuses = array(
+	'DRAFT', 'VALIDATING', 'VALIDATING_ERROR', 'CREATED', 'DELIVERY_PROCESSING_STARTED', 'DELIVERY_TRACK_RECIEVED', 'SORTING_CENTER_PROCESSING_STARTED',
+	'SORTING_CENTER_TRACK_RECEIVED', 'SORTING_CENTER_TRACK_LOADED', 'DELIVERY_LOADED', 'SORTING_CENTER_LOADED', 'SORTING_CENTER_AT_START', 'SORTING_CENTER_PREPARED',
+	'SORTING_CENTER_TRANSMITTED', 'DELIVERY_AT_START', 'DELIVERY_AT_START_SORT', 'DELIVERY_TRANSPORTATION_RECIPIENT', 'DELIVERY_TRANSPORTATION',
+	'DELIVERY_ARRIVED_PICKUP_POINT', 'CONFIRMATION_CODE_RECEIVED', 'DELIVERY_TRANSMITTED_TO_RECIPIENT', 'DELIVERY_ATTEMPT_FAILED',
+	'DELIVERY_STORAGE_PERIOD_EXPIRED', 'PARTICULARLY_DELIVERED', 'DELIVERY_DELIVERED', 'CANCELLED', 'SORTING_CENTER_RETURN_PREPARING',
+	'SORTING_CENTER_RETURN_PREPARING_SENDER', 'SORTING_CENTER_RETURN_ARRIVED', 'SORTING_CENTER_RETURN_RETURNED', 'RETURN_PREPARING',
+	'RETURN_TRANSPORTATION_STARTED', 'RETURN_ARRIVED_DELIVERY', 'RETURN_TRANSMITTED_FULFILMENT', 'RETURN_READY_FOR_PICKUP', 'RETURN_RETURNED',
+	'DELIVERY_TIME_INTERVALS_UPDATED',
+);
+$catalog = YandexStatusMapping::statuses();
+yd_framework_assert( array() === array_diff( $expected_yandex_statuses, array_keys( $catalog ) ) && count( $expected_yandex_statuses ) === count( $catalog ) && count( $catalog ) === count( array_unique( array_keys( $catalog ) ) ), 'Yandex status catalog must contain the full documented union without duplicates.' );
+foreach ( $catalog as $code => $row ) {
+	yd_framework_assert( $code === $row['code'] && '' !== $row['description'] && in_array( $row['mode'], array( 'courier', 'pickup', 'both' ), true ) && DeliveryStatus::is_valid( $row['default'] ), 'Every Yandex status catalog row must have code, description, mode and valid default universal status.' );
+}
+yd_framework_assert( isset( $catalog['DELIVERY_TRACK_RECIEVED'] ) && ! isset( $catalog['DELIVERY_TRACK_RECEIVED'] ), 'Yandex catalog must keep official DELIVERY_TRACK_RECIEVED typo.' );
+foreach ( array( 'SHOP_CANCELLED', 'USER_CHANGED_MIND', 'DELIVERY_PROBLEMS', 'BROKEN_ITEM', 'ORDER_WAS_LOST', 'DIMENSIONS_EXCEEDED', 'ORDER_IS_DAMAGED', 'EXTRA_RESCHEDULING', 'PICKUP_EXPIRED', 'LAST_MILE_CHANGED_BY_USER', 'CLIENT_REQUEST', 'DELIVERY_DATE_UPDATED_BY_DELIVERY', 'DELIVERY_DATE_UPDATED_BY_SHOP' ) as $reason_code ) {
+	yd_framework_assert( ! isset( $catalog[ $reason_code ] ), 'Yandex reason codes must not be carrier statuses: ' . $reason_code );
+}
+yd_framework_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $status_mapping->universal_status_for( 'DRAFT' ), 'DRAFT must default to pending_creation_in_carrier.' );
+yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === $status_mapping->universal_status_for( 'CREATED' ), 'CREATED must default to created_in_carrier.' );
+yd_framework_assert( DeliveryStatus::IN_TRANSIT === $status_mapping->universal_status_for( 'SORTING_CENTER_AT_START' ), 'SORTING_CENTER_AT_START must default to in_transit.' );
+yd_framework_assert( DeliveryStatus::HANDED_TO_COURIER === $status_mapping->universal_status_for( 'DELIVERY_TRANSPORTATION_RECIPIENT' ), 'Courier last-mile status must default to handed_to_courier.' );
+yd_framework_assert( DeliveryStatus::READY_FOR_PICKUP === $status_mapping->universal_status_for( 'DELIVERY_ARRIVED_PICKUP_POINT' ), 'Pickup arrival must default to ready_for_pickup.' );
+yd_framework_assert( DeliveryStatus::DELIVERED === $status_mapping->universal_status_for( 'DELIVERY_DELIVERED' ), 'DELIVERY_DELIVERED must default to delivered.' );
+yd_framework_assert( DeliveryStatus::RETURNING_TO_SENDER === $status_mapping->universal_status_for( 'DELIVERY_STORAGE_PERIOD_EXPIRED' ), 'Expired pickup storage must default to returning_to_sender.' );
+yd_framework_assert( DeliveryStatus::RETURNED_TO_SENDER === $status_mapping->universal_status_for( 'SORTING_CENTER_RETURN_RETURNED' ), 'Return completed at sorting center must default to returned_to_sender.' );
+yd_framework_assert( DeliveryStatus::CANCELLED === $status_mapping->universal_status_for( 'CANCELLED' ), 'CANCELLED must default to cancelled.' );
+yd_framework_assert( DeliveryStatus::REJECTED === $status_mapping->universal_status_for( 'VALIDATING_ERROR' ), 'VALIDATING_ERROR must default to rejected.' );
+yd_framework_assert( DeliveryStatus::UNKNOWN === $status_mapping->universal_status_for( 'YANDEX_NEW_UNKNOWN_STATUS' ), 'Unknown Yandex raw status must resolve to unknown.' );
+$override_mapping = new YandexStatusMapping( new SettingsRepository() );
+$override = YandexStatusMapping::default_mapping();
+$override['CREATED'] = DeliveryStatus::IN_TRANSIT;
+$override_mapping->save_mapping( $override );
+yd_framework_assert( DeliveryStatus::IN_TRANSIT === $override_mapping->universal_status_for( 'CREATED' ), 'Admin override CREATED -> in_transit must be respected by mapper.' );
+yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === $override_mapping->sanitize_mapping( array( 'CREATED' => 'not_a_real_status' ) )['CREATED'], 'Invalid universal status override must fall back to default.' );
+yd_framework_assert( ! isset( $override_mapping->sanitize_mapping( array( 'UNKNOWN_YANDEX_CODE' => DeliveryStatus::DELIVERED ) )['UNKNOWN_YANDEX_CODE'] ), 'Unknown Yandex carrier status code must not be saved.' );
+$override_mapping->save_mapping( YandexStatusMapping::default_mapping() );
+$admin_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' ) ?: '';
+yd_framework_assert( str_contains( $admin_source, 'save_yandex_delivery_statuses' ) && str_contains( $admin_source, 'render_yandex_delivery_statuses_tab' ) && str_contains( $admin_source, 'YandexStatusMapping::MAPPING_KEY' ) && str_contains( $admin_source, 'Сбросить к дефолтным значениям' ), 'Delivery services admin must expose Yandex status mapping tab, save action and reset control.' );
+$policy_by_universal = new YandexShipmentButtonPolicy( $status_mapping );
+foreach ( array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::CREATED_IN_CARRIER ) as $universal_status ) {
+	$resolved = $policy_by_universal->resolve( array( 'yandex_request_id' => 'REQ-POLICY', 'status' => 'created', 'universal_status_code' => $universal_status ) );
+	yd_framework_assert( ! empty( $resolved['cancel'] ) && empty( $resolved['remove'] ), 'Yandex policy must allow cancel and hide remove for early universal status ' . $universal_status );
+}
+foreach ( array( DeliveryStatus::IN_TRANSIT, DeliveryStatus::READY_FOR_PICKUP, DeliveryStatus::HANDED_TO_COURIER, DeliveryStatus::DELIVERED, DeliveryStatus::RETURNING_TO_SENDER, DeliveryStatus::RETURNED_TO_SENDER, DeliveryStatus::CANCELLED, DeliveryStatus::REJECTED, DeliveryStatus::UNKNOWN ) as $universal_status ) {
+	$resolved = $policy_by_universal->resolve( array( 'yandex_request_id' => 'REQ-POLICY', 'status' => 'created', 'universal_status_code' => $universal_status ) );
+	yd_framework_assert( empty( $resolved['cancel'] ) && ! empty( $resolved['remove'] ), 'Yandex policy must hide cancel and allow remove for non-early universal status ' . $universal_status );
+}
+$override_policy = new YandexShipmentButtonPolicy( $override_mapping );
+$override_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'CREATED' => DeliveryStatus::IN_TRANSIT ) ) );
+$overridden_created_policy = $override_policy->resolve( array( 'yandex_request_id' => 'REQ-OVERRIDE', 'status' => 'created', 'yandex_status' => 'CREATED' ) );
+yd_framework_assert( empty( $overridden_created_policy['cancel'] ) && ! empty( $overridden_created_policy['remove'] ), 'Yandex button policy must respect admin override and not raw CREATED.' );
+$override_mapping->save_mapping( YandexStatusMapping::default_mapping() );
+$settings_repository = new SettingsRepository();
+$settings_repository->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
+$settings_repository->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::CREATED_IN_CARRIER => 'wc-shipped' ) );
 
 $result = $creation->create( $order, $request );
 yd_framework_assert( $result->success && 'REQ-777' === $result->external_id && '880191690' === $result->tracking_number, 'ShipmentCreationService must create Yandex shipment through adapter and registration service.' );
+yd_framework_assert( 'shipped' === $order->get_status(), 'Yandex synchronous create must apply universal-to-Woo status mapping through the shared service.' );
 $shipment = $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY );
 yd_framework_assert( 'REQ-777' === (string) ( $shipment['yandex_request_id'] ?? '' ) && 'OFFER-1' === (string) ( $shipment['yandex_selected_offer_id'] ?? '' ) && 'CREATED' === (string) ( $shipment['yandex_status'] ?? '' ), 'Repository must persist request_id, selected_offer_id and Yandex status.' );
+yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $shipment['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $shipment['universal_status_label'] ?? '' ) && 'state CREATED' === (string) ( $shipment['yandex_status_description'] ?? '' ), 'Repository must persist mapped universal Yandex status fields and raw API status description.' );
 yd_framework_assert( '2026-07-11T16:23:01.000000Z' === (string) ( $shipment['yandex_offer_expires_at'] ?? '' ), 'Repository must persist selected offer expires_at.' );
 yd_framework_assert( '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing'] ?? '' ) && '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing_total'] ?? '' ) && 29880 === (int) ( $shipment['yandex_offer_pricing_total_kopecks'] ?? 0 ), 'Repository must persist selected offer pricing audit fields.' );
 yd_framework_assert( '2026-07-21T07:00:00.000000Z' === (string) ( $shipment['yandex_offer_delivery_interval']['min'] ?? '' ) && '2026-07-13T05:00:00.000000Z' === (string) ( $shipment['yandex_offer_pickup_interval']['max'] ?? '' ) && 'OFFER-1' === (string) ( $shipment['yandex_selected_offer_snapshot']['offer_id'] ?? '' ), 'Repository must persist selected offer interval snapshot audit fields.' );
@@ -281,6 +352,7 @@ yd_framework_assert( 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_deliv
 $payload = $adapter->status_payload( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
 yd_framework_assert( ! empty( $payload['can_update_status'] ) && ! empty( $payload['can_cancel'] ) && empty( $payload['can_attach_manual'] ), 'Yandex button policy must expose status/cancel and hide manual attach.' );
 yd_framework_assert( 'CREATED' === (string) ( $payload['carrier_status_title'] ?? '' ), 'Yandex status payload must expose status value without duplicating carrier label.' );
+yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $payload['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $payload['shipment_status_label'] ?? '' ), 'Yandex status payload must expose universal status as primary shipment status.' );
 $active_remove = $adapter->remove_from_order( $order );
 yd_framework_assert( empty( $active_remove['success'] ) && 'Текущее отправление Яндекс нельзя удалить из заказа.' === (string) ( $active_remove['message'] ?? '' ) && array() !== $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) && 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Server-side Yandex remove guard must reject active CREATED shipment and keep persistence.' );
 
@@ -543,10 +615,12 @@ yd_framework_assert( true === (bool) ( $draft_dpd_array['modal_capabilities']['r
 $preview_http = new YdFrameworkFakeHttp( array() );
 $preview_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $preview_http ) );
 $preview_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
-$preview_mapper = new YandexShipmentPersistenceMapper( $preview_repository );
+$preview_status_mapping = new YandexStatusMapping( new SettingsRepository() );
+$preview_mapper = new YandexShipmentPersistenceMapper( $preview_repository, $preview_status_mapping );
 $preview_adapter = new YandexShipmentAdapter(
-	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, $preview_repository, $preview_mapper, new YandexShipmentButtonPolicy() ),
-	new YandexShipmentButtonPolicy()
+	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, $preview_repository, $preview_mapper, new YandexShipmentButtonPolicy( $preview_status_mapping ), $preview_status_mapping ),
+	new YandexShipmentButtonPolicy( $preview_status_mapping ),
+	$preview_status_mapping
 );
 $preview_payload = $preview_adapter->build_safe_payload_preview( yd_framework_request() );
 yd_framework_assert( array() === $preview_http->requests && empty( $preview_payload['live_api_call'] ), 'Yandex modal payload preview must not call offers/create, confirm or request/info HTTP.' );
@@ -744,6 +818,8 @@ yd_framework_assert( '1010' === (string) ( $first_sequence_shipment['yandex_oper
 $sequence_meta_1 = $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
 yd_framework_assert( 0 === (int) ( $sequence_meta_1['last_index'] ?? -1 ) && '1010' === (string) ( $sequence_meta_1['last_operator_request_id'] ?? '' ) && ! array_key_exists( 'allocated_ids', $sequence_meta_1 ) && '1010' === (string) ( $sequence_meta_1['current_attempt']['operator_request_id'] ?? '' ), 'First reservation must persist compact sequence meta for base operator id.' );
 $first_sequence_shipment['yandex_status'] = 'CANCELLED';
+$first_sequence_shipment['universal_status_code'] = DeliveryStatus::CANCELLED;
+$first_sequence_shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::CANCELLED );
 $first_sequence_shipment['status_title'] = 'CANCELLED';
 $sequence_repository_1->save_for_carrier( $sequence_order, YandexDeliverySettings::CARRIER_KEY, $first_sequence_shipment );
 yd_framework_assert( ! empty( $sequence_adapter_1->remove_from_order( $sequence_order )['success'] ), 'Terminal sequence shipment must be locally removable before a new attempt.' );
@@ -763,6 +839,8 @@ $second_sequence_body = json_decode( (string) ( $sequence_http_2->requests[0]['a
 yd_framework_assert( $second_sequence_result->success && '1010/1' === (string) ( $second_sequence_body['info']['operator_request_id'] ?? '' ) && '1010-1-1' === (string) ( $second_sequence_body['places'][0]['barcode'] ?? '' ) && '1010-1-1' === (string) ( $second_sequence_body['items'][0]['place_barcode'] ?? '' ), 'Second Yandex attempt must use 1010/1 and a slash-free stable temporary barcode.' );
 yd_framework_assert( '1010/1' === (string) ( $second_sequence_shipment['yandex_operator_request_id'] ?? '' ) && 1 === (int) ( $second_sequence_shipment['yandex_registration_sequence_index'] ?? -1 ) && 'YD-SEQ-1' === (string) ( $second_sequence_shipment['yandex_place_barcode_map']['1010-1-1'] ?? '' ), 'Second attempt persistence must store sequence index and map temporary barcode to real barcode.' );
 $second_sequence_shipment['yandex_status'] = 'CANCELLED';
+$second_sequence_shipment['universal_status_code'] = DeliveryStatus::CANCELLED;
+$second_sequence_shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::CANCELLED );
 $sequence_repository_2->save_for_carrier( $sequence_order, YandexDeliverySettings::CARRIER_KEY, $second_sequence_shipment );
 yd_framework_assert( ! empty( $sequence_adapter_2->remove_from_order( $sequence_order )['success'] ), 'Second terminal sequence shipment must be removable.' );
 
@@ -797,10 +875,11 @@ yd_framework_assert( 99 === (int) ( $stress_meta['last_index'] ?? -1 ) && '2020/
 
 $lock_order = new YdFrameworkOrder( 1012, '1012' );
 $lock_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
-$lock_first = $lock_repository->reserve_operator_request_id( $lock_order, '1012', '2026-07-13 12:00:00' );
+$lock_now = current_time( 'mysql' );
+$lock_first = $lock_repository->reserve_operator_request_id( $lock_order, '1012', $lock_now );
 $lock_blocked = false;
 try {
-	$lock_repository->reserve_operator_request_id( $lock_order, '1012', '2026-07-13 12:00:01' );
+	$lock_repository->reserve_operator_request_id( $lock_order, '1012', $lock_now );
 } catch ( RuntimeException $exception ) {
 	$lock_blocked = str_contains( $exception->getMessage(), 'уже выполняется' );
 }

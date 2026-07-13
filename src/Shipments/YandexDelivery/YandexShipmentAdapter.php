@@ -7,6 +7,7 @@ use Throwable;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -14,7 +15,8 @@ defined( 'ABSPATH' ) || exit;
 final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private YandexShipmentRegistrationService $registration,
-		private YandexShipmentButtonPolicy $buttons
+		private YandexShipmentButtonPolicy $buttons,
+		private ?YandexStatusMapping $status_mapping = null
 	) {
 	}
 
@@ -65,6 +67,11 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		unset( $order );
 		$policy = $this->buttons->resolve( $shipment );
 		$status = trim( (string) ( $shipment['yandex_status'] ?? '' ) );
+		$universal = sanitize_key( (string) ( $shipment['universal_status_code'] ?? '' ) );
+		if ( ! DeliveryStatus::is_valid( $universal ) && $this->status_mapping instanceof YandexStatusMapping ) {
+			$universal = $this->status_mapping->universal_status_for( $status );
+		}
+		$universal_label = DeliveryStatus::is_valid( $universal ) ? DeliveryStatus::label( $universal ) : '';
 		$cancel_pending = array() !== $shipment && 'cancellation_started' === (string) ( $shipment['status'] ?? '' );
 		$reconciliation_pending = array() !== $shipment && ! empty( $shipment['yandex_reconciliation_required'] );
 
@@ -76,8 +83,11 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'can_update_status' => ! empty( $policy['update'] ),
 			'can_cancel' => ! empty( $policy['cancel'] ),
 			'can_remove_from_order' => ! empty( $policy['remove'] ),
-			'shipment_status_label' => '' !== $status ? $status : ( array() === $shipment ? 'не создано' : 'зарегистрировано' ),
+			'universal_status_code' => $universal,
+			'universal_status_label' => $universal_label,
+			'shipment_status_label' => '' !== $universal_label ? $universal_label : ( array() === $shipment ? 'не создано' : 'зарегистрировано' ),
 			'carrier_status_title' => $this->carrier_status_title( $shipment, $status ),
+			'carrier_status_description' => (string) ( $shipment['yandex_status_description'] ?? '' ),
 			'tracking_checked_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'updated_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'barcode' => $this->tracking_identifier( $shipment ),

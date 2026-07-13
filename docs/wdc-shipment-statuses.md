@@ -1,5 +1,9 @@
 # WDC Shipment Statuses
 
+Version: 0.109.0.
+
+Version 0.109.0 adds Yandex Delivery to carrier raw-status mapping. The Yandex catalog is implemented in `YandexStatusMapping` and uses the existing `DeliveryStatus` universal registry; it does not add new universal statuses. Overrides are stored in `wdc_core_settings[yandex_delivery_status_mapping]` and edited on the Yandex delivery-service tab alongside DPD/CDEK carrier mappings. Canonical Yandex `request/info` persistence saves both raw carrier diagnostics (`yandex_status`, description, reason, timestamp, snapshot) and the resolved universal status. The shared `ShipmentOrderStatusMappingService` applies universal→WooCommerce mapping for canonical current status updates, while `request/history` mapping is informational only.
+
 Version: 0.39.2.
 
 Version 0.39.2 changes WooCommerce order notes for shipment status flows. A successful shipment status refresh only updates `_wdc_shipments` and the metabox payload; it does not create an order note. WDC creates a note only when `ShipmentOrderStatusMappingService` automatically changes the WooCommerce order status. The note is compact:
