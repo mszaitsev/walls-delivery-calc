@@ -1,5 +1,11 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.110.2
+
+Ручной поиск адреса в карте `ПВЗ отправления Яндекс` больше не ограничивается городом настроенного source station. Initial load карты по-прежнему использует `source_location_id` для загрузки drop-off точек исходной географии, но address-search строит отдельный context: `carrier=yandex_delivery`, `purpose=source_dropoff`, `country_code=RU`, без `location_id`, `source_location_id`, FIAS/KLADR/GAR или prefix исходного города. Поэтому запросы вроде `Москва, Ходынский бульвар, 9` и `Казань, Баумана 1` уходят в DaData ровно в пользовательском виде, а не как `Новосибирск, Москва, ...`.
+
+Backend `/wdc/v1/points/address-search` дополнительно защищён от старого JS/forged request: для `yandex_delivery + source_dropoff` он принудительно вызывает общий `PickupAddressSearchService` с `location_id=0` и `include_points=false`. После получения координат сохраняется flow 0.110.1: search marker остаётся невыбираемым, selectable markers заменяются nearby drop-off точками Яндекса вокруг найденного адреса с радиусами `10 км -> 25 км -> 50 км`, без возврата к global fallback.
+
 ## Статус 0.110.1
 
 Карта выбора `ПВЗ отправления Яндекс` теперь загружает точки только в релевантной географии. При открытии picker отправляет `mode=location`, `source_location_id` и текущий/default `source_platform_station_id`; backend получает все mapped/manual `yandex_geo_id` через `YandexLocationMappingV2Repository::geo_ids_for_location()` и возвращает только map-ready drop-off точки этих geo_id. Если `source_location_id` отсутствует, fallback ограничен default station: используется его `yandex_geo_id` или nearby-поиск вокруг его координат. Глобальный список первых 2000 точек больше не используется.

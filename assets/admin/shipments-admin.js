@@ -1825,6 +1825,24 @@
     return context && context.carrierKey === 'yandex_delivery' && context.purpose === 'source_dropoff';
   }
 
+  function pickupAddressSearchContext(context) {
+    const carrier = context.carrierKey || context.carrier || '';
+    const result = {
+      carrier: carrier,
+      carrier_key: carrier,
+      service_key: context.serviceKey || '',
+      pickup_family: context.pickupFamily || '',
+      purpose: context.purpose || '',
+      country_code: 'RU'
+    };
+    if (!isYandexSourceDropoffContext(context)) {
+      result.location_id = context.locationId || '';
+    } else {
+      result.include_points = false;
+    }
+    return result;
+  }
+
   function setYandexSourceDropoffWarning(form, message) {
     const warning = form.querySelector('[data-wdc-yandex-source-dropoff-warning]');
     if (!warning) return;
@@ -2103,14 +2121,7 @@
       controller = new AbortController();
       if ((mode || 'search') === 'search' && window.WDCPickupApi && typeof window.WDCPickupApi.addressSearch === 'function') {
         status.textContent = 'Ищем адрес...';
-        window.WDCPickupApi.addressSearch(value, {
-          carrier: context.carrierKey || '',
-          carrier_key: context.carrierKey || '',
-          service_key: context.serviceKey || '',
-          pickup_family: context.pickupFamily || '',
-          country_code: 'RU',
-          location_id: context.locationId || ''
-        }, controller.signal)
+        window.WDCPickupApi.addressSearch(value, pickupAddressSearchContext(context), controller.signal)
           .then((result) => {
             searchMarker = addressMarkerFromResult(result);
             if (isYandexSourceDropoffContext(context)) {

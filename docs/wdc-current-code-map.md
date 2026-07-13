@@ -1,3 +1,10 @@
+## Yandex source drop-off address search scope 0.110.2
+
+- Initial map loading for the shipment-modal source selector still uses `mode=location`, `source_location_id` and `source_platform_station_id`.
+- Manual address search uses a separate JS context for `carrier_key=yandex_delivery&purpose=source_dropoff`: only carrier/purpose/country are sent to `/wdc/v1/points/address-search`; `location_id`, `source_location_id`, city, FIAS/KLADR/GAR and source-location display fields are intentionally omitted.
+- `PickupPointsRestController::address_search()` defensively forces `location_id=0` for forged/old Yandex source-dropoff address-search requests and passes `include_points=false`; `PickupAddressSearchService` therefore does not prefix the query with the configured source city and does not return Russian Post points.
+- The geocoded coordinate still feeds the existing nearby source-dropoff reload (`10 -> 25 -> 50` km), replacing selectable markers while preserving the non-selectable search marker.
+
 ## Yandex source drop-off map scope 0.110.1
 
 - The shipment modal Yandex source picker uses `mode=location` for initial load and sends `source_location_id` plus `source_platform_station_id`; backend resolves mapped/manual `yandex_geo_id` values through `YandexLocationMappingV2Repository::geo_ids_for_location()`.
