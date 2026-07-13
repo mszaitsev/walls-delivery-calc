@@ -6,24 +6,28 @@ namespace WallsShop\WDC\Shipments\Application;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
-use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class ShipmentCreationService {
 	/**
-	 * @param array<int,ShipmentCarrierAdapterInterface> $adapters
+	 * @param array<int,CarrierShipmentAdapterInterface> $adapters
+	 * @param array<int,CarrierShipmentPersistenceMapperInterface> $persistence_mappers
 	 */
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private array $adapters,
 		private ?Logger $logger = null,
 		private ?RussianPostShipmentActualCostLookupService $actual_cost_lookup = null,
-		private ?CarrierShipmentAdapterRegistry $registry = null
+		private ?CarrierShipmentAdapterRegistry $registry = null,
+		private array $persistence_mappers = array()
 	) {
 	}
 
@@ -33,7 +37,7 @@ final class ShipmentCreationService {
 	public function safe_preview( ShipmentCreateRequest $request ): array {
 		$adapter = $this->adapter_for( $request );
 
-		if ( ! $adapter instanceof ShipmentCarrierAdapterInterface ) {
+		if ( ! $adapter instanceof CarrierShipmentAdapterInterface ) {
 			return array();
 		}
 		try {
@@ -69,14 +73,51 @@ final class ShipmentCreationService {
 			);
 		}
 		$adapter = $this->adapter_for( $request );
-		if ( ! $adapter instanceof ShipmentCarrierAdapterInterface ) {
+		if ( ! $adapter instanceof CarrierShipmentAdapterInterface ) {
 			return new ShipmentCreateResult( false, error_code: 'unsupported_carrier', error_message: 'Для выбранной службы нет адаптера создания отправлений.' );
 		}
 
 		$preview = $this->safe_preview( $request );
-		$result = $adapter->create( $request );
+		$result = method_exists( $adapter, 'create_for_order' ) ? $adapter->create_for_order( $order, $request ) : $adapter->create( $request );
 		$now = $this->now();
 		if ( ! $result->success ) {
+			$mapper = $this->persistence_mapper_for( $request->carrier_key );
+			$failed_fields = $mapper instanceof CarrierShipmentPersistenceMapperInterface ? $mapper->build_failed_fields( $request, $result, $preview, $now ) : null;
+			if ( is_array( $failed_fields ) && array() !== $failed_fields ) {
+				$shipment = $this->common_shipment_envelope( $request, $result, $preview, $failed_fields, $now );
+				$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
+				$mapper->after_persist( $order, $shipment );
+				if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key && ! empty( $shipment['yandex_reconciliation_required'] ) ) {
+					$request_id = (string) ( $shipment['request_id'] ?? $shipment['external_id'] ?? '' );
+					$operator_request_id = (string) ( $shipment['yandex_operator_request_id'] ?? '' );
+					$this->add_order_note( $order, sprintf( 'Отправление Яндекс создано. Номер заказа в Яндекс: %s. Request ID: %s. Ожидается получение статуса.', '' !== $operator_request_id ? $operator_request_id : (string) ( $request->meta['order_num'] ?? $request->order_id ), $request_id ) );
+					return new ShipmentCreateResult(
+						true,
+						external_id: $request_id,
+						tracking_number: $request_id,
+						backlog_order_id: $request_id,
+						raw_reference: array(
+							'yandex_accepted_reconciliation' => array(
+								'accepted' => true,
+								'reconciliation_required' => true,
+								'request_id' => $request_id,
+								'error_code' => $result->error_code,
+							),
+						)
+					);
+				}
+				$this->repository->save_last_error(
+					$order,
+					array(
+						'carrier_key' => $request->carrier_key,
+						'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
+						'error_code' => $result->error_code,
+						'error_message' => $result->error_message,
+						'updated_at' => $now,
+					)
+				);
+				return $result;
+			}
 			$this->repository->save_last_error(
 				$order,
 				array(
@@ -96,10 +137,15 @@ final class ShipmentCreationService {
 		$backlog_order_id = trim( $result->backlog_order_id );
 		$is_cdek = CdekSettings::CARRIER_KEY === $request->carrier_key;
 		$is_dpd = DpdSettings::CARRIER_KEY === $request->carrier_key;
-		$request_snapshot = ( $is_cdek || $is_dpd ) && is_array( $raw['request'] ?? null )
+		$mapper = $this->persistence_mapper_for( $request->carrier_key );
+		$mapped_fields = $mapper instanceof CarrierShipmentPersistenceMapperInterface ? $mapper->build_created_fields( $request, $result, $preview, $now ) : array();
+		$is_mapped = array() !== $mapped_fields;
+		$request_snapshot = $is_mapped && is_array( $mapped_fields['request_snapshot'] ?? null )
+			? $mapped_fields['request_snapshot']
+			: ( ( $is_cdek || $is_dpd ) && is_array( $raw['request'] ?? null )
 			? ( $is_dpd ? $raw['request'] : array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => $raw['request'], 'errors' => array() ) )
-			: $preview;
-		$response_snapshot = ( $is_cdek || $is_dpd ) && is_array( $raw['response'] ?? null ) ? $raw : $raw;
+			: $preview );
+		$response_snapshot = $is_mapped && array_key_exists( 'response_snapshot', $mapped_fields ) ? $mapped_fields['response_snapshot'] : ( ( $is_cdek || $is_dpd ) && is_array( $raw['response'] ?? null ) ? $raw : $raw );
 		$shipment = array(
 			'carrier_key' => $request->carrier_key,
 			'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
@@ -134,12 +180,18 @@ final class ShipmentCreationService {
 			'created_by_context' => 'admin_manual',
 			'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 			'group_name' => (string) ( $raw['group_name'] ?? '' ),
-			'status' => $is_dpd ? 'pending_creation_in_carrier' : ( $is_cdek ? 'registration_pending' : 'created' ),
+			'status' => $is_mapped ? (string) ( $mapped_fields['status'] ?? 'created' ) : ( $is_dpd ? 'pending_creation_in_carrier' : ( $is_cdek ? 'registration_pending' : 'created' ) ),
 			'universal_status_code' => $is_dpd ? 'pending_creation_in_carrier' : '',
-			'status_title' => $is_dpd ? 'Заявка DPD создана' : ( $is_cdek ? 'Заявка на регистрацию принята' : '' ),
+			'status_title' => $is_mapped ? (string) ( $mapped_fields['status_title'] ?? '' ) : ( $is_dpd ? 'Заявка DPD создана' : ( $is_cdek ? 'Заявка на регистрацию принята' : '' ) ),
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
+		if ( $is_mapped ) {
+			$shipment = array_merge( $shipment, $mapped_fields );
+			foreach ( array( 'cdek_number', 'cdek_request_uuid', 'cdek_request_state', 'cdek_order_status_code', 'cdek_order_status_name', 'cdek_planned_delivery_date', 'cdek_actual_cost_kopecks', 'dpd_order_number', 'dpd_request_number', 'dpd_parcel_numbers', 'dpd_status', 'dpd_pickup_date', 'dpd_date_flag', 'dpd_service_code', 'dpd_sender_terminal_code', 'dpd_receiver_terminal_code', 'dpd_date_pickup', 'dpd_cargo_value' ) as $foreign_key ) {
+				unset( $shipment[ $foreign_key ] );
+			}
+		}
 		if ( $is_dpd ) {
 			foreach ( array( 'cdek_number', 'cdek_request_uuid', 'cdek_request_state', 'cdek_order_status_code', 'cdek_order_status_name', 'cdek_planned_delivery_date', 'cdek_actual_cost_kopecks' ) as $cdek_key ) {
 				unset( $shipment[ $cdek_key ] );
@@ -153,6 +205,9 @@ final class ShipmentCreationService {
 			$shipment = array_merge( $shipment, $actual_cost );
 		}
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
+		if ( $mapper instanceof CarrierShipmentPersistenceMapperInterface ) {
+			$mapper->after_persist( $order, $shipment );
+		}
 		if ( ! $is_cdek ) {
 			$this->add_order_note( $order, $this->success_note( $request, $result, $raw ) );
 		}
@@ -160,10 +215,10 @@ final class ShipmentCreationService {
 		return $result;
 	}
 
-	private function adapter_for( ShipmentCreateRequest $request ): ?ShipmentCarrierAdapterInterface {
+	private function adapter_for( ShipmentCreateRequest $request ): ?CarrierShipmentAdapterInterface {
 		if ( $this->registry instanceof CarrierShipmentAdapterRegistry ) {
 			$adapter = $this->registry->get( $request->carrier_key );
-			if ( $adapter instanceof ShipmentCarrierAdapterInterface && $adapter->supports( $request ) ) {
+			if ( $adapter instanceof CarrierShipmentAdapterInterface && $adapter->supports( $request ) ) {
 				return $adapter;
 			}
 		}
@@ -175,6 +230,50 @@ final class ShipmentCreationService {
 		}
 
 		return null;
+	}
+
+	private function persistence_mapper_for( string $carrier_key ): ?CarrierShipmentPersistenceMapperInterface {
+		foreach ( $this->persistence_mappers as $mapper ) {
+			if ( $mapper instanceof CarrierShipmentPersistenceMapperInterface && $mapper->carrier_key() === $carrier_key ) {
+				return $mapper;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param array<string,mixed> $preview
+	 * @param array<string,mixed> $carrier_fields
+	 * @return array<string,mixed>
+	 */
+	private function common_shipment_envelope( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, array $carrier_fields, string $now ): array {
+		$request_snapshot = is_array( $carrier_fields['request_snapshot'] ?? null ) ? $carrier_fields['request_snapshot'] : $preview;
+		$response_snapshot = array_key_exists( 'response_snapshot', $carrier_fields ) ? $carrier_fields['response_snapshot'] : $result->raw_reference;
+
+		return array_merge(
+			array(
+				'carrier_key' => $request->carrier_key,
+				'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
+				'order_id' => $request->order_id,
+				'service_title' => (string) ( $request->meta['service_title'] ?? '' ),
+				'delivery_type' => $request->delivery_type,
+				'places' => array_map( static fn ( $place ): array => $place->to_array(), $request->places ),
+				'request_snapshot' => $request_snapshot,
+				'response_snapshot' => $response_snapshot,
+				'barcode' => $result->tracking_number,
+				'tracking_number' => $result->tracking_number,
+				'external_id' => $result->external_id,
+				'created_by' => function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0,
+				'created_by_context' => 'admin_manual',
+				'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
+				'status' => (string) ( $carrier_fields['status'] ?? 'created' ),
+				'status_title' => (string) ( $carrier_fields['status_title'] ?? '' ),
+				'created_at' => $now,
+				'updated_at' => $now,
+			),
+			$carrier_fields
+		);
 	}
 
 	private function order_id( object $order ): int {
@@ -241,6 +340,15 @@ final class ShipmentCreationService {
 			return sprintf(
 				'DPD отправление создано вручную. Номер: %s. Мест: %d',
 				$result->tracking_number,
+				count( $request->places )
+			);
+		}
+		if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
+			$operator_request_id = (string) ( $raw['yandex']['yandex_operator_request_id'] ?? $raw['yandex']['operator_request_id'] ?? $request->meta['yandex_operator_request_id'] ?? $request->meta['order_num'] ?? $request->order_id );
+			return sprintf(
+				'Отправление Яндекс создано. Номер заказа в Яндекс: %s. Request ID: %s. Мест: %d',
+				$operator_request_id,
+				$result->external_id,
 				count( $request->places )
 			);
 		}

@@ -42,6 +42,20 @@ final class YandexDeliveryShipmentRegistrationService {
 						'registration_phase' => 'request_info',
 						'confirmed_request_id' => $confirmed->request_id,
 						'selected_offer_id' => $selected->offer_id,
+						'selected_offer_expires_at' => $selected->expires_at,
+						'selected_offer_pricing' => $selected->pricing,
+						'selected_offer_pricing_total' => (string) ( $selected->raw['offer_details']['pricing_total'] ?? $selected->raw['pricing_total'] ?? '' ),
+						'selected_offer_pricing_total_kopecks' => $selected->pricing_total_kopecks,
+						'selected_offer_delivery_interval' => array(
+							'min' => $selected->delivery_interval_min,
+							'max' => $selected->delivery_interval_max,
+							'policy' => $selected->last_mile_policy,
+						),
+						'selected_offer_pickup_interval' => array(
+							'min' => $selected->pickup_interval_min,
+							'max' => $selected->pickup_interval_max,
+						),
+						'selected_offer_snapshot' => $selected->raw,
 					)
 				),
 				0,

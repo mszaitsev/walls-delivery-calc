@@ -29,9 +29,9 @@ $places = array(
 	new ShipmentPlace( 2, 1200, 21, 16, 11, Money::from_kopecks( 0 ) ),
 );
 $rows = array(
-	array( 'item_key' => 'order-item-a', 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'order-item-a', 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'order-item-b', 'place_number' => 2, 'name' => 'Item B', 'ware_key' => 'B', 'amount' => 1, 'cost' => 200, 'weight' => 400 ),
+	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'order-item-a', 'ordered_quantity' => 1, 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'order-item-b', 'ordered_quantity' => 1, 'place_number' => 2, 'name' => 'Item B', 'ware_key' => 'B', 'amount' => 1, 'cost' => 200, 'weight' => 400 ),
 );
 $allocation = ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $places, $rows );
 shipment_allocation_assert( 2 === count( $allocation->places ), 'CDEK source must keep two shipment places.' );
@@ -41,8 +41,8 @@ shipment_allocation_assert( 10000 === $allocation->places[0]->items[0]->unit_pri
 shipment_allocation_assert( 10000 === $allocation->places[0]->items[0]->assessed_unit_price_kopecks, 'CDEK adapter must fill assessed price from the same current CDEK cost without changing CDEK behavior.' );
 
 $same_sku = ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( array( $places[0] ), array(
-	array( 'item_key' => 'order-item-1', 'place_number' => 1, 'name' => 'Item A 1', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'order-item-2', 'place_number' => 1, 'name' => 'Item A 2', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'order-item-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A 1', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	array( 'item_key' => 'order-item-2', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A 2', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
 ) );
 shipment_allocation_assert( 'SAME-SKU' === $same_sku->places[0]->items[0]->sku && 'SAME-SKU' === $same_sku->places[0]->items[1]->sku, 'Same-SKU fixture must use identical SKU values.' );
 shipment_allocation_assert( $same_sku->places[0]->items[0]->source_item_id !== $same_sku->places[0]->items[1]->source_item_id && $same_sku->places[0]->items[0]->identity['order_item_id'] !== $same_sku->places[0]->items[1]->identity['order_item_id'], 'Same SKU with different source identity must remain distinct allocation rows.' );
@@ -61,17 +61,17 @@ shipment_allocation_expect_exception(
 	'CDEK adapter must reject empty allocation rows.'
 );
 shipment_allocation_expect_exception(
-	static fn() => ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $places, array( array( 'item_key' => 'only-place-1', 'place_number' => 1, 'name' => 'Only place 1', 'ware_key' => 'P1', 'amount' => 1, 'cost' => 100, 'weight' => 300 ) ) ),
+	static fn() => ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $places, array( array( 'item_key' => 'only-place-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Only place 1', 'ware_key' => 'P1', 'amount' => 1, 'cost' => 100, 'weight' => 300 ) ) ),
 	'Shipment place 2 must contain at least one allocation row',
 	'CDEK adapter must reject partially empty places.'
 );
 shipment_allocation_expect_exception(
-	static fn() => ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( array( $places[0] ), array( array( 'item_key' => 'bad', 'place_number' => 99, 'name' => 'Bad', 'ware_key' => 'BAD', 'amount' => 1, 'cost' => 100, 'weight' => 300 ) ) ),
+	static fn() => ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( array( $places[0] ), array( array( 'item_key' => 'bad', 'ordered_quantity' => 1, 'place_number' => 99, 'name' => 'Bad', 'ware_key' => 'BAD', 'amount' => 1, 'cost' => 100, 'weight' => 300 ) ) ),
 	'unknown shipment place',
 	'Unknown place must be reported instead of silently remapped.'
 );
 shipment_allocation_expect_exception(
-	static fn() => ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( array( $places[0] ), array( array( 'item_key' => 'bad', 'place_number' => 1, 'name' => 'Bad', 'ware_key' => 'BAD', 'amount' => 0, 'cost' => 100, 'weight' => 300 ) ) ),
+	static fn() => ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( array( $places[0] ), array( array( 'item_key' => 'bad', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Bad', 'ware_key' => 'BAD', 'amount' => 0, 'cost' => 100, 'weight' => 300 ) ) ),
 	'amount must be greater than 0',
 	'Zero amount must be reported instead of becoming quantity 1.'
 );

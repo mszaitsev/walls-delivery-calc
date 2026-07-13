@@ -20,7 +20,7 @@ use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostExtractor;
 use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostLookupService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
-use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
@@ -157,7 +157,7 @@ final class RussianPostShipmentPriceOrder {
 	}
 }
 
-final class RussianPostShipmentPriceAdapter implements ShipmentCarrierAdapterInterface {
+final class RussianPostShipmentPriceAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct( private bool $success = true ) {
 	}
 
@@ -181,6 +181,46 @@ final class RussianPostShipmentPriceAdapter implements ShipmentCarrierAdapterInt
 			backlog_order_id: '2285075494',
 			raw_reference: array( 'group_name' => '' )
 		);
+	}
+
+	public function presentation(): array {
+		return array( 'carrier_label' => 'Почта России' );
+	}
+
+	public function status_payload( object $order, array $shipment ): array {
+		return array();
+	}
+
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		return array( 'success' => false );
+	}
+
+	public function attach_manual( object $order, array $payload ): array {
+		return array( 'success' => false );
+	}
+
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array {
+		return array( 'success' => false );
+	}
+
+	public function remove_from_order( object $order, string $shipment_key = '' ): array {
+		return array( 'success' => false );
+	}
+
+	public function label_actions( object $order, array $shipment ): array {
+		return array();
+	}
+
+	public function supports_status_auto_sync(): bool {
+		return false;
+	}
+
+	public function tracking_identifier( array $shipment ): string {
+		return (string) ( $shipment['barcode'] ?? '' );
+	}
+
+	public function auto_sync_throttle_microseconds(): int {
+		return 0;
 	}
 }
 

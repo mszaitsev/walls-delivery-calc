@@ -18,6 +18,10 @@ final class YandexDeliveryShipmentPayloadBuilder {
 		if ( '' === $operator_request_id ) {
 			throw new \InvalidArgumentException( 'operator_request_id is required.' );
 		}
+		$temporary_barcode_prefix = trim( (string) ( $context['temporary_barcode_prefix'] ?? '' ) );
+		if ( '' === $temporary_barcode_prefix ) {
+			$temporary_barcode_prefix = $this->temporary_barcode_prefix( $operator_request_id );
+		}
 		$source_platform_id = trim( (string) ( $context['source_platform_station_id'] ?? '' ) );
 		if ( '' === $source_platform_id ) {
 			throw new \InvalidArgumentException( 'source_platform_station_id is required.' );
@@ -34,7 +38,7 @@ final class YandexDeliveryShipmentPayloadBuilder {
 		$places = array();
 		$items = array();
 		foreach ( $allocation->places as $place ) {
-			$barcode = $operator_request_id . '-' . $place->place_number;
+			$barcode = $temporary_barcode_prefix . '-' . $place->place_number;
 			$barcodes[ $place->place_number ] = $barcode;
 			$places[] = array(
 				'barcode' => $barcode,
@@ -181,5 +185,12 @@ final class YandexDeliveryShipmentPayloadBuilder {
 		$digits = preg_replace( '/\D+/', '', $phone ) ?? '';
 		if ( 11 === strlen( $digits ) && '8' === $digits[0] ) { return '+7' . substr( $digits, 1 ); }
 		return 10 === strlen( $digits ) ? '+7' . $digits : ( '' !== $digits && '+' === $phone[0] ? '+' . $digits : $digits );
+	}
+
+	private function temporary_barcode_prefix( string $operator_request_id ): string {
+		$prefix = preg_replace( '/[^A-Za-z0-9_-]+/', '-', trim( $operator_request_id ) ) ?? '';
+		$prefix = trim( $prefix, '-' );
+
+		return '' !== $prefix ? $prefix : 'yandex';
 	}
 }

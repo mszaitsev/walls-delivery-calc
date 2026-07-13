@@ -9,12 +9,12 @@ use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
-use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
 
-final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
+final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private CdekApiClient $client,
 		private CdekCreateRequestBuilder $builder,

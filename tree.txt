@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 0000001A A0AC:74BD
+Volume serial number is 00000099 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -155,6 +155,7 @@ C:.
 |   |   wdc-russian-post-international.md
 |   |   wdc-russian-post-pickup-points.md
 |   |   wdc-russian-post-shipments.md
+|   |   wdc-shipment-framework-technical-debt.md
 |   |   wdc-shipment-statuses.md
 |   |   wdc-shipments-foundation.md
 |   |   wdc-yandex-delivery-other-day-integration.md
@@ -665,7 +666,10 @@ C:.
 |   |   |       RussianPostShipmentActualCostLookupService.php
 |   |   |       ShipmentBacklogService.php
 |   |   |       ShipmentCreationService.php
+|   |   |       ShipmentMetaboxButtonPolicy.php
+|   |   |       ShipmentModalRequestMapper.php
 |   |   |       ShipmentOrderStatusMappingService.php
+|   |   |       ShipmentPreparationData.php
 |   |   |       ShipmentServiceSettings.php
 |   |   |       ShipmentStatusAutoSyncCron.php
 |   |   |       ShipmentStatusAutoSyncService.php
@@ -682,7 +686,7 @@ C:.
 |   |   |
 |   |   +---Contracts
 |   |   |       CarrierShipmentAdapterInterface.php
-|   |   |       ShipmentCarrierAdapterInterface.php
+|   |   |       CarrierShipmentPersistenceMapperInterface.php
 |   |   |
 |   |   +---Dpd
 |   |   |       DpdEventNormalizer.php
@@ -703,8 +707,15 @@ C:.
 |   |   |       RussianPostShipmentProductMapper.php
 |   |   |       RussianPostTrackingStatusMapper.php
 |   |   |
-|   |   \---Storage
-|   |           OrderShipmentRepository.php
+|   |   +---Storage
+|   |   |       OrderShipmentRepository.php
+|   |   |
+|   |   \---YandexDelivery
+|   |           YandexShipmentAdapter.php
+|   |           YandexShipmentButtonPolicy.php
+|   |           YandexShipmentPersistenceMapper.php
+|   |           YandexShipmentRegistrationService.php
+|   |           YandexShipmentRepository.php
 |   |
 |   \---WooCommerce
 |           HPOSCompatibility.php
@@ -838,6 +849,7 @@ C:.
             run-yandex-delivery-pickup-v2-runner-smoke.php
             run-yandex-delivery-pricing-calculator-smoke.php
             run-yandex-delivery-region-mapping-v2-smoke.php
+            run-yandex-delivery-shipment-framework-smoke.php
             run-yandex-delivery-shipment-http-smoke.php
             run-yandex-delivery-shipment-payload-smoke.php
             run-yandex-delivery-source-station-smoke.php

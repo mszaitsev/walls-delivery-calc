@@ -1,3 +1,130 @@
+## Yandex Locality, Exact Duplicate Retry and Cancel Remove Policy 0.108.15
+
+- `OrderShipmentsMetabox::normalize_yandex_courier_address()` still calls the existing `AddressSuggestionService::suggest()` stack. Yandex locality is now extracted from canonical normalized item fields first (`locality`, `city_name`, `city`, `place`, `settlement`), then from normalized `data` settlement/city fields. Region fallback is allowed only for federal cities represented as region-level addresses, so ordinary regions such as Moscow Oblast are not sent as locality.
+- `YandexShipmentRegistrationService::is_duplicate_operator_error()` only treats the production phrase `already was request with such code within this employer` as the deterministic duplicate-code condition that may auto-skip to the next sequence id. Generic `duplicate`, duplicate barcodes, HTTP 500 and transport failures do not trigger retry.
+- `YandexShipmentButtonPolicy` hides local remove for active `cancellation_started` while cancel polling is still running. The same policy exposes remove only after `yandex_cancel_poll_exhausted=true`; server-side `remove_local()` continues to delegate to that single policy.
+
+## Yandex Duplicate Auto-Skip, Cancel Polling and Courier Address Verification 0.108.14
+
+- `YandexShipmentRegistrationService::create_for_order()` keeps one registration lock for the whole create click. If `offers/create` returns the exact Yandex duplicate-code response for `operator_request_id`, the service reserves the next sequence id under the same lock, rebuilds the payload and slash-free temporary barcode prefix, and retries only `offers/create`.
+- Duplicate auto-skip is bounded to 10 occupied ids. `offers/confirm` is called exactly once for the first successful `offers/create`; unknown transport/API/malformed errors are not retried automatically and keep the reserved sequence id consumed.
+- Yandex cancel now persists `cancellation_started` instead of clearing the metabox. The cancel response returns accepted polling metadata (`poll_purpose=cancellation`, 5000 ms × 14), and the shared JS polling helper continues with status requests only.
+- A canonical `CANCELLED` status after cancel removes the local `_wdc_shipments['yandex_delivery']` entry and `_wdc_yandex_delivery_request_id` automatically while preserving `_wdc_yandex_delivery_registration_sequence`. Cancel polling exhaustion is persisted with `yandex_cancel_poll_exhausted`, attempts, timestamp and a Russian timeout status title; update and local remove remain available.
+- Manual attach no longer compares `request.info.operator_request_id` with the WooCommerce order number. Any valid `request_id` can be linked; sequence sync is still performed only when the attached operator id belongs to the current order-number family.
+- Yandex courier shipment modal uses the existing shared shipment address normalize AJAX and `AddressSuggestionService`/DaData token pool/counter. It renders the full order address and a `Проверить адрес` button; structured Yandex fields stay empty until a successful `dadata+yandex` verification snapshot is returned. The old street/house heuristic split is removed.
+
+## Yandex Compact Registration Sequence State 0.108.13
+
+- `YandexShipmentRepository` keeps `_wdc_yandex_delivery_registration_sequence` compact: `last_index`, `last_operator_request_id`, optional `current_attempt` (`operator_request_id`, `sequence_index`, `started_at`, `order_id`, `registration_phase`, `lock_token`) and `updated_at`.
+- The repository no longer reads, writes or normalizes a growing `allocated_ids` list. `save_registration_sequence()` canonicalizes the state, so old 0.108.12 metadata is compacted without re-saving history.
+- `peek_next_operator_request_id()` computes `next_index = last_index + 1`; empty state uses `last_index=-1`, so the first reservation remains index 0 / base order number.
+- Manual attach sync only raises the compact state when the attached suffix is higher. Lower suffixes leave `last_index` and `last_operator_request_id` unchanged.
+- If an old state only contains `allocated_ids`, the repository may derive the maximum valid suffix once, then stores only the compact canonical shape.
+
+## Yandex Operator Request Sequence 0.108.12
+
+- `YandexShipmentRepository` owns the persistent registration sequence meta `_wdc_yandex_delivery_registration_sequence`. Current canonical shape is compact: `last_index`, `last_operator_request_id`, optional `current_attempt` (`operator_request_id`, `sequence_index`, `started_at`, `order_id`, `registration_phase`, `lock_token`) and `updated_at`.
+- `YandexShipmentRegistrationService::create_for_order()` reserves the next `operator_request_id` immediately before the first real `offers/create` call, injects it into `ShipmentCreateRequest` meta and releases only the short registration lock after the attempt. Preview/draft code uses a peeked id; it does not update sequence meta.
+- ID format is deterministic: index `0` is the WooCommerce order number (`1010`), index `1` is `1010/1`, index `2` is `1010/2`. Reservation is not rolled back after HTTP starts, including transport errors or duplicate-code responses.
+- `YandexDeliveryShipmentPayloadBuilder` remains a formatter. It receives the ready `operator_request_id` and a safe temporary barcode prefix; suffixed operator ids are converted to slash-free temporary barcodes such as `1010-1-1` for place 1.
+- Manual attach sequence sync still uses the strict family parser: exact base number or `base/{positive integer}` only. Foreign operator ids are allowed for attach but do not change sequence.
+- Duplicate-code API errors are mapped to `yandex_operator_request_id_duplicate`; the framework-level create flow may auto-skip them as described in 0.108.14.
+
+## Yandex Remove Guard and Polling Transport Errors 0.108.11
+
+- `YandexShipmentRegistrationService::remove_local()` now enforces server-side removal through `YandexShipmentButtonPolicy::resolve()`. It no longer deletes active `CREATED` or `cancellation_started` shipments if an admin AJAX request is crafted manually.
+- `reconciliation_required` remains locally removable, and terminal Yandex statuses remain removable through the same policy. The backend error for a blocked delete is `Текущее отправление Яндекс нельзя удалить из заказа.`
+- `assets/admin/shipments-admin.js::requestShipmentStatus()` no longer converts transport/HTTP/JSON failures inside bounded registration polling into successful `null` payloads. It rejects to `startShipmentRegistrationPolling()`, where the failure counts as an attempt and polling continues until success/terminal/error or exhaustion.
+- DPD keeps its existing `mode=dpd` stop-on-error semantics, and CDEK polling remains on its separate code path.
+
+## Yandex Pending Reconciliation Persistence 0.108.10
+
+- `YandexShipmentButtonPolicy` now separates local lifecycle states: `reconciliation_required` exposes update + local remove immediately. Since 0.108.15, `cancellation_started` exposes update only while polling is active and adds local remove only after cancel polling exhaustion.
+- `OrderShipmentsMetabox` registers the shared `wdc_mark_shipment_poll_exhausted` AJAX action. It calls an optional carrier method (`mark_polling_exhausted`) and then returns the same carrier UI payload used by normal status rendering.
+- `YandexShipmentRegistrationService::mark_polling_exhausted()` persists `yandex_reconciliation_poll_exhausted=true`, `yandex_reconciliation_attempts`, `yandex_reconciliation_poll_exhausted_at` and the Russian timeout `status_title` without calling Yandex HTTP and without clearing request id, lookup meta or selected offer audit.
+- Manual status update after exhaustion preserves the exhausted state while `request/info` is still incomplete; a later canonical `request/info` clears exhausted fields and converts the shipment to normal `created`.
+- `assets/admin/shipments-admin.js` saves exhaustion through the backend, suppresses repeated pending toasts during auto polling, stops polling before local remove, and ignores stale polling responses after local remove/reset.
+
+## Yandex Async Reconciliation Polling 0.108.9
+
+- Production `offers/confirm` can create the Yandex shipment before the immediate `request/info` response contains `state.status`. `ShipmentCreationService` now persists the Yandex reconciliation shipment and returns an accepted successful create response instead of surfacing the temporary `request_info_status_missing` as a failed creation.
+- `YandexShipmentPersistenceMapper::build_failed_fields()` stores the confirmed `request_id`, lookup meta data, `status=reconciliation_required`, empty `yandex_status`, safe diagnostics and selected offer audit (`yandex_selected_offer_id`, `yandex_offer_expires_at`, pricing, delivery/pickup intervals and selected offer snapshot).
+- `YandexShipmentRegistrationService::update_status()` treats `request_info_status_missing` / `request_info_request_missing` during reconciliation as retryable pending success with Russian messages. A later canonical `request/info` clears reconciliation flags, keeps offer audit, stores request/info snapshots/barcodes and moves the local status back to `created`.
+- `YandexShipmentAdapter::status_payload()` exposes `polling_continue`, `registration_poll_interval_ms=5000`, `registration_poll_max_attempts=14`, status values without duplicating `Статус Яндекс.Доставки`, and local-remove capability after polling exhaustion.
+- `assets/admin/shipments-admin.js` has a shared `startShipmentRegistrationPolling()` helper. DPD keeps its existing wrapper/semantics, while Yandex uses bounded 5-second polling of the existing status AJAX endpoint and never repeats `offers/create` or `offers/confirm`. After exhaustion the UI shows a Russian message and exposes local remove with the carrier presentation warning that removal does not cancel the Yandex shipment.
+
+## Shared Manual Place Inputs and Yandex Manual Attach Texts 0.108.8
+
+- `OrderShipmentsMetabox::editable_place_rows()` is the shared presentation boundary for shipment modal places. It keeps every draft place row and place number, preserves allocation metadata such as `items`, and clears only editable factual `weight_g`, `length_cm`, `width_cm`, `height_cm` values before rendering the modal for any carrier.
+- Calculated package/order dimensions remain in the draft/meta for diagnostics and item allocation, but are not written into editable inputs. Submitted `places[]` are still parsed only by `ShipmentModalRequestMapper::parse($data)`, so empty factual fields remain invalid and are rejected by existing `ShipmentPlace`/allocation validation instead of falling back to calculated defaults.
+- `OrderShipmentsMetabox` renders the calculated weight as text only: compact `⚖️{weight}` for one initial place, or as a common total hint above multiple places. The hint is not an input value and is not submitted in `FormData`.
+- `YandexShipmentButtonPolicy` exposes manual attach only when `_wdc_shipments[yandex_delivery]` is absent. `YandexShipmentAdapter::attach_manual()` delegates to `YandexShipmentRegistrationService::attach_manual()`.
+- `YandexShipmentAdapter::presentation()` now labels the generic manual attach button as `Ввести номер Яндекс вручную`, uses the field label `Request ID Яндекс`, and sets the placeholder to `***-udp`.
+- `YandexShipmentRegistrationService::attach_manual()` accepts the generic manual attach input as Yandex `request_id`, checks duplicates before HTTP, calls only `request/info`, validates `operator_request_id` against the WooCommerce order number, and persists canonical request/info fields through `YandexShipmentPersistenceMapper`.
+- `YandexShipmentPersistenceMapper::build_manual_attach_fields()` creates the Yandex shipment envelope for `admin_manual_attach`, stores request/courier/sharing/status/destination/recipient/items/places/request-info snapshots, and `YandexShipmentRepository` keeps `_wdc_yandex_delivery_request_id` synchronized.
+
+## Shipment Modal Preview Gate 0.108.6
+
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` exposes `modal_capabilities.requires_successful_preview=true` for Yandex and DPD. The capability is carrier-neutral and does not add Yandex-specific JS branching.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` renders `data-wdc-requires-successful-preview`, wraps `ajax_create()` in JSON-safe validation/throwable handling, and maps technical allocation validation messages to Russian public messages at the AJAX boundary.
+- `assets/admin/shipments-admin.js` uses `requiresSuccessfulPreview` to keep `Создать отправление` disabled until preview has loaded and has no errors. Shipment AJAX calls use `parseShipmentJsonResponse()` rather than direct `response.json()`, so malformed HTML responses become controlled Russian messages.
+
+## Yandex Shipment Modal Preparation 0.108.5
+
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` returns one concrete Yandex service variant for the modal instead of an empty services list. The variant reflects the saved order delivery type only: `pickup` is shown as `Яндекс до ПВЗ`, `courier` as `Яндекс до двери`; `tariffs` remains empty because Yandex registration chooses an offer after payload preview/create.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` reuses the existing shared modal but hides tariff and Russian Post postoffice controls when modal capabilities say they are not required. For Yandex it renders read-only source platform station, pickup destination snapshot or courier structured address, ready interval hidden fields, and all draft places; factual weight/dimension inputs are cleared by the shared modal presentation rule.
+- `assets/admin/shipments-admin.js` supports no-tariff modal carriers via `data-wdc-requires-tariff="0"`, keeps dimensions decimal-compatible, and parses preview AJAX responses through `parseShipmentJsonResponse()` so HTML/fatal responses become a controlled user message instead of `Unexpected token`.
+- `OrderShipmentsMetabox::ajax_preview()` wraps preview mapping/building in JSON-safe error handling. Yandex preview validates source station/destination station locally, calls only the adapter safe preview path, and does not perform offers/create, confirm or request/info.
+
+## Shipment Metabox Capability Policy 0.108.4
+
+- `src/Shipments/Application/ShipmentMetaboxButtonPolicy.php` is the carrier-neutral resolver used by the order shipment metabox. It prefers adapter-provided capabilities (`has_shipment`, `can_create`, `can_attach_manual`, `can_update_status`, `can_cancel`, `can_remove_from_order`) key-by-key and falls back to the previous legacy status/barcode rules only when a capability is absent.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` no longer decides cancel/create/update/remove visibility through hardcoded Yandex/CDEK/DPD status branches. Yandex `reconciliation_required` and `cancellation_started` are existing shipments because the adapter says so.
+- `assets/admin/shipments-admin.js` copies `can_create` and `can_attach_manual` from AJAX status payloads and uses them for runtime button visibility; it no longer infers create/manual visibility only from `!has_shipment`.
+- `src/Shipments/Application/ShipmentModalRequestMapper.php` keeps integer-gram weight strict and rounds decimal centimeter dimensions upward before existing `ShipmentPlace`/allocation validation.
+
+## Shipment Modal Contract and Yandex Persistence Mapper 0.108.3
+
+- The shared shipment modal item allocation contract is now `shipment_items[]`. The table still visually uses existing CDEK CSS classes where they are styling-only, but submitted field names and generic JS hooks use shipment-neutral names.
+- `src/Shipments/Application/ShipmentModalRequestMapper.php` parses modal `places[]` plus `shipment_items[]` into `ShipmentPreparationData` (`places`, `item_rows`). It accepts `cdek_items[]` only as a temporary CDEK fallback and validates the result through the existing `CdekShipmentAllocationAdapter`/`ShipmentAllocation` path; it does not create a second allocation validator or repair damaged data.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` uses the common mapper for CDEK and Yandex admin submit paths. CDEK currently writes both canonical `shipment_item_rows` and migration `cdek_item_rows`; Yandex writes canonical `shipment_item_rows`.
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` reads `meta['shipment_item_rows']` first and keeps `yandex_item_rows`/`cdek_item_rows` only as temporary fallback migration keys.
+- `src/Shipments/YandexDelivery/YandexShipmentPersistenceMapper.php` owns Yandex-specific persistence fields, canonical request/info snapshots, reconciliation pending fields and post-persist lookup meta sync. `ShipmentCreationService` keeps the common envelope and delegates Yandex-specific fields to the mapper.
+- `src/Shipments/Contracts/CarrierShipmentAdapterInterface.php` is the canonical carrier adapter interface. The empty `ShipmentCarrierAdapterInterface` alias was removed.
+- `assets/admin/shipments-admin.js` generic shipment allocation functions now use names such as `updateShipmentPlaceOptions`, `rebalanceShipmentItemGroup`, `splitShipmentItemRow` and `addManualShipmentItemRow`; CDEK-only functions such as label polling/download remain CDEK-named.
+
+## Yandex Shipment Framework Final Hardening 0.108.2
+
+- The real multi-place source for shipment registration is the existing shipment modal submission: `places[]` plus `cdek_items[]`. `OrderShipmentDraftFactory::create_cdek_request_from_admin_data()` already uses this source for CDEK, and `create_yandex_request_from_admin_data()` now uses the same source for Yandex.
+- The previously probed order-meta keys `_wdc_shipment_places`, `_wdc_cdek_shipment_places`, `_wdc_prepared_shipment_places` and matching item-row keys are not canonical production data for the modal flow and are no longer searched by Yandex draft creation.
+- Initial `create_yandex_request_from_order()` mirrors CDEK: it builds the safe one-place base draft used to render the modal. Multi-place allocation becomes canonical only after admin modal data is submitted back through `create_request_from_admin_data()`.
+- Yandex modal item rows are parsed without silent repair: `amount=0`, missing `place_number`, missing `item_key` or zero `weight` remain invalid and are rejected by the existing `CdekShipmentAllocationAdapter`/`ShipmentAllocation` validation before HTTP.
+- `YandexShipmentButtonPolicy::is_terminal_status()` is the shared terminal-status helper for Yandex shipment lifecycle. `YandexShipmentRegistrationService` uses it when a pending cancellation receives `CANCELLED`, `DELIVERED`, `RETURNED`, `RETURNED_TO_SENDER` or `REJECTED` from `request/info`.
+- Non-`CANCELLED` terminal statuses close `cancellation_started` and clear `yandex_cancel_requested` without writing the successful-cancel note; the note records that the terminal Yandex status ended the wait for cancellation.
+
+## Yandex Shipment Framework Lifecycle 0.108.1
+
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` now preserves confirmed Yandex requests when `offers/confirm` succeeds but `request/info` fails. The framework-level result carries `raw_reference['yandex_reconciliation']`, and `ShipmentCreationService` persists a local `reconciliation_required` shipment instead of only saving `last_error`.
+- `src/Shipments/Application/ShipmentCreationService.php` stores pending reconciliation shipments through the existing `OrderShipmentRepository`: `yandex_request_id`, `request_id`, `external_id`, selected offer id/expires_at, sanitized diagnostics and local status `reconciliation_required`. The existing duplicate guard prevents a second create; status update is the recovery path.
+- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` treats `reconciliation_required` and `cancellation_started` as protected local lifecycle states: create/cancel/manual attach are hidden and status update remains available. Reconciliation is locally removable immediately; cancellation is locally removable only after `yandex_cancel_poll_exhausted`.
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` handles asynchronous cancel: it saves `yandex_cancel_state`, `yandex_cancel_requested=true` and local `status=cancellation_started` immediately after `request/cancel`; a later successful `request/info` with `CANCELLED` clears the active flag and writes the final note once.
+- Yandex API lifecycle request ids are resolved only from `yandex_request_id`, `request_id`, then `external_id`. Courier order numbers may still be shown as tracking identifiers, but they are no longer used for `request/info`, `request/history` or `request/cancel`.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` reuses existing prepared/shared/CDEK shipment allocation rows for Yandex drafts before falling back to a single place. The reused rows keep `item_key`/order-item identity, place number and per-place quantity, so split quantity and same-SKU different order items survive into `yandex_item_rows`.
+- `src/Shipments/YandexDelivery/YandexShipmentRepository.php` keeps `_wdc_yandex_delivery_request_id` synchronized on create, reconciliation, status/cancel updates and remove.
+- `tests/yandex-delivery/run-yandex-delivery-shipment-framework-smoke.php` covers reconciliation persistence/recovery, async cancellation, request_id safety, lookup meta, offer expiry persistence, multi-place draft/admin data and the existing successful create/status/cancel/history path.
+
+## Yandex Shipment Framework Integration 0.108.0
+
+- `src/Shipments/YandexDelivery/YandexShipmentAdapter.php` implements the existing `CarrierShipmentAdapterInterface` for carrier `yandex_delivery`. It stays thin: preview builds the pure offers/create payload, `create()` delegates to the Yandex framework registration service, status/cancel/remove delegate to the same service, and labels/documents remain empty.
+- `src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php` is the carrier-specific bridge from the common shipment request to the already existing Yandex HTTP registration flow. It converts existing `ShipmentCreateRequest::places` plus `meta['yandex_item_rows']`/`meta['cdek_item_rows']` through `CdekShipmentAllocationAdapter`, builds the Yandex context, calls `YandexDeliveryShipmentRegistrationService`, and persists only canonical request/info fields.
+- `src/Shipments/YandexDelivery/YandexShipmentRepository.php` wraps `OrderShipmentRepository` for `_wdc_shipments[yandex_delivery]` and maintains `_wdc_yandex_delivery_request_id` as an HPOS-safe lookup/index field.
+- `src/Shipments/YandexDelivery/YandexShipmentButtonPolicy.php` mirrors the modern DPD approach: absent shipment shows create, created shipment shows status/cancel, terminal Yandex statuses hide cancel and allow local remove, and manual attach is disabled.
+- `src/Core/Plugin.php` registers Yandex payload/client/selector/core registration services, the Yandex framework repository/button policy/registration service/adapter, passes `YandexDeliverySettings` into `OrderShipmentDraftFactory`, and adds the adapter to `CarrierShipmentAdapterRegistry` and `ShipmentCreationService`.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` now recognizes `yandex_delivery` and creates a normal `ShipmentCreateRequest` with ready interval, source station, destination mode, pickup station/courier details, recipient fields and allocation item rows preserving order item identity. It does not create a new allocation algorithm.
+- `src/Shipments/Application/ShipmentCreationService.php` still owns duplicate checks and repository persistence. For Yandex it stores request/info snapshot and Yandex canonical fields, while intentionally not storing the offers/create payload body.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` still renders the existing shipment block/modal; it now respects `can_attach_manual=false` from carrier status payloads so Yandex can hide manual attach without carrier-specific metabox branching.
+- `tests/yandex-delivery/run-yandex-delivery-shipment-framework-smoke.php` covers registry integration, create through `ShipmentCreationService`, duplicate guard, status update, cancel, history, repository persistence, button policy and request/info canonical storage.
+
 ## Yandex Delivery Order Recalculation 0.105.11
 
 - `OrderQuoteRequestMapper` converts an explicitly selected `yandex_delivery:pickup` point into checkout-compatible `pickup_selection` and family-scoped `pickup_selections` for the existing Yandex carrier.

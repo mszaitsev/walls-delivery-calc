@@ -2,6 +2,7 @@
   const timers = new WeakMap();
   const toastTimers = new WeakMap();
   const shipmentPollingTimers = new WeakMap();
+  const shipmentPollingTokens = new WeakMap();
   const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
 
   function findShipmentContainer(element) {
@@ -37,7 +38,7 @@
     return data;
   }
 
-  function nextCdekItemIndex(form) {
+  function nextShipmentItemIndex(form) {
     const rows = shipmentItemRows(form);
     return rows.reduce((max, row) => {
       const value = parseInt(row.getAttribute('data-wdc-row-index') || '0', 10) || 0;
@@ -45,11 +46,11 @@
     }, 0) + 1;
   }
 
-  function rewriteCdekItemNames(row, index) {
+  function rewriteShipmentItemNames(row, index) {
     if (!row) return;
     row.setAttribute('data-wdc-row-index', String(index));
     row.querySelectorAll('[name]').forEach((input) => {
-      input.name = input.name.replace(/cdek_items\[[^\]]+\]/, 'cdek_items[' + index + ']');
+      input.name = input.name.replace(/shipment_items\[[^\]]+\]/, 'shipment_items[' + index + ']');
     });
   }
 
@@ -72,16 +73,28 @@
     return parseFloat(String(value || '0').replace(',', '.')) || 0;
   }
 
+  function parseShipmentJsonResponse(response) {
+    return response.text().then((text) => {
+      try {
+        return text ? JSON.parse(text) : null;
+      } catch (error) {
+        const controlled = new Error('Сервер вернул некорректный ответ при подготовке отправления. Проверьте журнал ошибок.');
+        controlled.httpStatus = response && response.status ? response.status : 0;
+        throw controlled;
+      }
+    });
+  }
+
   function shipmentItemRows(form) {
-    return form ? Array.from(form.querySelectorAll('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]')) : [];
+    return form ? Array.from(form.querySelectorAll('[data-wdc-shipment-item-row]')) : [];
   }
 
   function placeSelect(row) {
-    return row ? row.querySelector('[data-wdc-shipment-place-select], [data-wdc-cdek-place-select]') : null;
+    return row ? row.querySelector('[data-wdc-shipment-place-select]') : null;
   }
 
   function shipmentQtyInput(row) {
-    return row ? row.querySelector('[data-wdc-shipment-item-qty], [data-wdc-cdek-qty]') : null;
+    return row ? row.querySelector('[data-wdc-shipment-item-qty]') : null;
   }
 
   function switchShipmentTab(form, tabName) {
@@ -92,10 +105,10 @@
     form.querySelectorAll('[data-wdc-shipment-tab-panel]').forEach((panel) => {
       panel.hidden = panel.getAttribute('data-wdc-shipment-tab-panel') !== tabName;
     });
-    if (tabName === 'places') updateCdekPlaceOptions(form);
+    if (tabName === 'places') updateShipmentPlaceOptions(form);
   }
 
-  function updateCdekPlaceOptions(form) {
+  function updateShipmentPlaceOptions(form) {
     if (!form) return;
     const places = Array.from(form.querySelectorAll('[data-wdc-place]'));
     const options = places.map((row, index) => {
@@ -117,7 +130,7 @@
       const hint = row.querySelector('[data-wdc-weight-hint]');
       if (hint) hint.hidden = places.length !== 1;
     });
-    form.querySelectorAll('[data-wdc-shipment-place-select], [data-wdc-cdek-place-select]').forEach((select) => {
+    form.querySelectorAll('[data-wdc-shipment-place-select]').forEach((select) => {
       const current = select.value || '1';
       select.innerHTML = '';
       options.forEach((option) => {
@@ -128,12 +141,12 @@
       });
       select.value = options.some((option) => option.number === current) ? current : '1';
     });
-    updateCdekSplitAvailability(form, options.length);
-    updateCdekItemsSummary(form, options);
+    updateShipmentSplitAvailability(form, options.length);
+    updateShipmentItemsSummary(form, options);
   }
 
-  function updateCdekItemsSummary(form, places) {
-    const summary = form && form.querySelector('[data-wdc-shipment-items-summary], [data-wdc-cdek-items-summary]');
+  function updateShipmentItemsSummary(form, places) {
+    const summary = form && form.querySelector('[data-wdc-shipment-items-summary]');
     if (!summary) return;
     const totals = {};
     (places || []).forEach((place) => {
@@ -210,7 +223,7 @@
     }
   }
 
-  function rebalanceCdekGroup(form, groupKey, changedRow) {
+  function rebalanceShipmentItemGroup(form, groupKey, changedRow) {
     if (!form || !groupKey) return;
     const rows = shipmentItemRows(form).filter((row) => row.getAttribute('data-group-key') === groupKey);
     const base = rows.find((row) => row.hasAttribute('data-wdc-base-row'));
@@ -246,14 +259,14 @@
     if (select) select.value = String(original.place_number || 1);
   }
 
-  function mergeCdekSplitRows(form) {
+  function mergeShipmentSplitRows(form) {
     if (!form) return;
     shipmentItemRows(form).filter((row) => row.hasAttribute('data-wdc-split-row')).forEach((row) => {
       const groupKey = row.getAttribute('data-group-key') || '';
       row.remove();
-      rebalanceCdekGroup(form, groupKey);
+      rebalanceShipmentItemGroup(form, groupKey);
     });
-    form.querySelectorAll('[data-wdc-shipment-place-select], [data-wdc-cdek-place-select]').forEach((select) => {
+    form.querySelectorAll('[data-wdc-shipment-place-select]').forEach((select) => {
       select.value = '1';
     });
     shipmentItemRows(form).filter((row) => row.hasAttribute('data-wdc-base-row')).forEach((row) => {
@@ -271,7 +284,7 @@
       if (groupKey) affectedGroups.add(groupKey);
       if (row.hasAttribute('data-wdc-split-row')) {
         row.remove();
-        rebalanceCdekGroup(form, groupKey);
+        rebalanceShipmentItemGroup(form, groupKey);
         return;
       }
       select.value = '1';
@@ -279,23 +292,23 @@
     affectedGroups.forEach((groupKey) => {
       const base = shipmentItemRows(form).find((row) => row.hasAttribute('data-wdc-base-row') && row.getAttribute('data-group-key') === groupKey);
       if (base) restoreOriginalBaseRow(base, false);
-      rebalanceCdekGroup(form, groupKey);
+      rebalanceShipmentItemGroup(form, groupKey);
     });
   }
 
-  function updateCdekSplitAvailability(form, placeCount) {
+  function updateShipmentSplitAvailability(form, placeCount) {
     if (!form) return;
-    if (placeCount <= 1) mergeCdekSplitRows(form);
-    form.querySelectorAll('[data-wdc-shipment-item-split], [data-wdc-cdek-split]').forEach((button) => {
-      const row = button.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+    if (placeCount <= 1) mergeShipmentSplitRows(form);
+    form.querySelectorAll('[data-wdc-shipment-item-split]').forEach((button) => {
+      const row = button.closest('[data-wdc-shipment-item-row]');
       const qty = parseInt(row && row.getAttribute('data-ordered-quantity') || '1', 10) || 1;
       button.hidden = placeCount <= 1 || qty <= 1;
       button.disabled = button.hidden;
     });
   }
 
-  function splitCdekItemRow(button) {
-    const row = button && button.closest ? button.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]') : null;
+  function splitShipmentItemRow(button) {
+    const row = button && button.closest ? button.closest('[data-wdc-shipment-item-row]') : null;
     const form = findShipmentForm(button);
     if (!row || !form) return;
     const rowQtyInput = shipmentQtyInput(row);
@@ -303,14 +316,13 @@
     if (currentQty <= 1) return;
     const clone = row.cloneNode(true);
     const groupKey = row.getAttribute('data-group-key') || row.getAttribute('data-item-key') || '';
-    const index = nextCdekItemIndex(form);
-    rewriteCdekItemNames(clone, index);
+    const index = nextShipmentItemIndex(form);
+    rewriteShipmentItemNames(clone, index);
     clone.removeAttribute('data-wdc-base-row');
     clone.setAttribute('data-wdc-split-row', '1');
     clone.setAttribute('data-group-key', groupKey);
-    clone.querySelectorAll('[data-wdc-shipment-item-split], [data-wdc-cdek-split]').forEach((splitButton) => {
+    clone.querySelectorAll('[data-wdc-shipment-item-split]').forEach((splitButton) => {
       splitButton.removeAttribute('data-wdc-shipment-item-split');
-      splitButton.removeAttribute('data-wdc-cdek-split');
       splitButton.classList.remove('wdc-icon-action--split');
       splitButton.remove();
     });
@@ -321,48 +333,47 @@
     const parent = clone.querySelector('input[name$="[split_parent]"]') || document.createElement('input');
     if (itemKey) itemKey.value = groupKey + ':split:' + index;
     parent.type = 'hidden';
-    parent.name = 'cdek_items[' + index + '][split_parent]';
+    parent.name = 'shipment_items[' + index + '][split_parent]';
     parent.value = groupKey;
     clone.appendChild(parent);
     const actionCell = clone.querySelector('[data-wdc-shipment-item-actions], .wdc-cdek-item-actions') || clone.querySelector('td:last-child');
     if (actionCell) {
-      actionCell.innerHTML = '<button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-shipment-split data-wdc-remove-cdek-split title="Удалить строку" aria-label="Удалить строку">❌</button>';
+      actionCell.innerHTML = '<button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-shipment-split title="Удалить строку" aria-label="Удалить строку">❌</button>';
     }
     row.after(clone);
-    rebalanceCdekGroup(form, groupKey);
-    updateCdekPlaceOptions(form);
+    rebalanceShipmentItemGroup(form, groupKey);
+    updateShipmentPlaceOptions(form);
     schedulePreview(form);
   }
 
-  function addManualCdekItemRow(button) {
+  function addManualShipmentItemRow(button) {
     const form = findShipmentForm(button);
-    const table = form && form.querySelector('[data-wdc-shipment-items-table], [data-wdc-cdek-items-table]');
+    const table = form && form.querySelector('[data-wdc-shipment-items-table]');
     const body = table && table.querySelector('tbody');
     if (!form || !body) return;
-    const index = nextCdekItemIndex(form);
+    const index = nextShipmentItemIndex(form);
     const rowKey = 'manual-' + index;
     const row = document.createElement('tr');
     row.setAttribute('data-wdc-shipment-item-row', '1');
-    row.setAttribute('data-wdc-cdek-item-row', '1');
     row.setAttribute('data-wdc-manual-row', '1');
     row.setAttribute('data-item-key', rowKey);
     row.setAttribute('data-group-key', rowKey);
     row.setAttribute('data-ordered-quantity', '999');
     row.setAttribute('data-wdc-row-index', String(index));
     row.innerHTML = [
-      '<td class="wdc-cdek-item-product"><input type="text" name="cdek_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="cdek_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="cdek_items[' + index + '][ordered_quantity]" value="999"></td>',
-      '<td class="wdc-cdek-item-sku wdc-product-search-cell"><input type="text" name="cdek_items[' + index + '][ware_key]" value="" placeholder="Артикул" autocomplete="off" data-wdc-product-search-input><div class="wdc-product-search-results" data-wdc-product-search-results hidden></div></td>',
-      '<td><input class="wdc-cdek-input-qty" type="number" min="1" max="999" step="1" name="cdek_items[' + index + '][amount]" value="1" data-wdc-shipment-item-qty data-wdc-cdek-qty data-wdc-integer-input></td>',
-      '<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',
-      '<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="cdek_items[' + index + '][weight]" value="1" data-wdc-integer-input></td>',
-      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][length_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><select name="cdek_items[' + index + '][place_number]" data-wdc-shipment-place-select data-wdc-cdek-place-select><option value="1">1</option></select></td>',
-      '<td class="wdc-cdek-item-actions" data-wdc-shipment-item-actions><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-manual-shipment-item data-wdc-remove-manual-cdek-item title="Удалить строку" aria-label="Удалить строку">❌</button></td>'
+      '<td class="wdc-cdek-item-product"><input type="text" name="shipment_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="shipment_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="shipment_items[' + index + '][ordered_quantity]" value="999"></td>',
+      '<td class="wdc-cdek-item-sku wdc-product-search-cell"><input type="text" name="shipment_items[' + index + '][ware_key]" value="" placeholder="Артикул" autocomplete="off" data-wdc-product-search-input><div class="wdc-product-search-results" data-wdc-product-search-results hidden></div></td>',
+      '<td><input class="wdc-cdek-input-qty" type="number" min="1" max="999" step="1" name="shipment_items[' + index + '][amount]" value="1" data-wdc-shipment-item-qty data-wdc-integer-input></td>',
+      '<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',
+      '<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="shipment_items[' + index + '][weight]" value="1" data-wdc-integer-input></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][length_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><select name="shipment_items[' + index + '][place_number]" data-wdc-shipment-place-select><option value="1">1</option></select></td>',
+      '<td class="wdc-cdek-item-actions" data-wdc-shipment-item-actions><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-manual-shipment-item title="Удалить строку" aria-label="Удалить строку">❌</button></td>'
     ].join('');
     body.appendChild(row);
-    updateCdekPlaceOptions(form);
+    updateShipmentPlaceOptions(form);
     schedulePreview(form);
   }
 
@@ -384,7 +395,7 @@
   }
 
   function renderProductSearchResults(input, items) {
-    const row = input.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+    const row = input.closest('[data-wdc-shipment-item-row]');
     const results = row && row.querySelector('[data-wdc-product-search-results]');
     if (!results) return;
     if (!items.length) {
@@ -413,7 +424,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         const items = payload && payload.success && payload.data && Array.isArray(payload.data.items) ? payload.data.items : [];
         renderProductSearchResults(input, items);
@@ -440,7 +451,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обновить предпросмотр.');
@@ -541,6 +552,24 @@
     });
   }
 
+  function syncYandexAddressFields(form, snapshot) {
+    const fields = snapshot && snapshot.fields ? snapshot.fields : {};
+    const mapped = {
+      postal_code: fields.postal_code || '',
+      region: fields.region || '',
+      locality: fields.locality || '',
+      street: fields.street || '',
+      house: fields.house || '',
+      room: fields.room || ''
+    };
+    Object.keys(mapped).forEach((key) => {
+      const input = form.querySelector('[data-wdc-yandex-address-field="' + key + '"]');
+      if (input) input.value = mapped[key] || '';
+    });
+    const full = form.querySelector('[data-wdc-yandex-address-field="full_address"]');
+    if (full) full.value = fields.full_address || snapshot.display || '';
+  }
+
   function updateDpdContactHistory(value, operation) {
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.dpdCourierContactHistoryAction || 'wdc_dpd_courier_contact_history');
@@ -551,7 +580,7 @@
       method: 'POST',
       credentials: 'same-origin',
       body: data
-    }).then((response) => response.json()).then((payload) => {
+    }).then(parseShipmentJsonResponse).then((payload) => {
       if (payload && payload.success && payload.data && Array.isArray(payload.data.history)) {
         setDpdContactHistory(payload.data.history);
       }
@@ -664,21 +693,27 @@
     const submit = form.querySelector('[data-wdc-create-shipment]');
     if (!submit) return;
     const tariff = form.querySelector('[data-wdc-tariff-select]');
+    const requiresTariff = form.dataset.wdcRequiresTariff !== '0';
+    const requiresSuccessfulPreview = form.dataset.wdcRequiresSuccessfulPreview === '1';
     const hasTariffs = !!(tariff && !tariff.disabled && tariff.options.length);
     const deliveryType = selectedDeliveryType(form);
     const pickupMissing = deliveryType === 'pickup' && !!form.querySelector('[data-wdc-pickup-warning]');
     const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
-    const latestPreviewReady = !isDpd || (form.dataset.wdcPreviewLoaded === '1' && form.dataset.wdcPreviewHasErrors !== '1');
+    const latestPreviewReady = !requiresSuccessfulPreview || (form.dataset.wdcPreviewLoaded === '1' && form.dataset.wdcPreviewHasErrors !== '1');
     const datePickup = fieldValue(form, '[data-wdc-dpd-date-pickup]');
     const dateReady = !isDpd || /^\d{4}-\d{2}-\d{2}$/.test(datePickup);
     const contactReady = !isDpd || !!fieldValue(form, '[data-wdc-dpd-contact-fio]');
     const senderTerminalReady = !isDpd || !!firstFieldValue(form, ['[name="pickup_terminal_code"]', '[name="sender_shipment_point"]', '[name="shipment_point"]', '[data-wdc-sender-shipment-point]']);
     const receiverTerminalReady = !isDpd || deliveryType !== 'pickup' || !!firstFieldValue(form, ['[name="pickup_point_code"]', '[name="delivery_point"]']);
     const placesReady = Array.from(form.querySelectorAll('[data-wdc-place]')).some((row) => {
-      return ['weight_g', 'length_cm', 'width_cm', 'height_cm'].every((suffix) => {
-        const input = row.querySelector('input[name$="[' + suffix + ']"]');
-        return parseInt(input && input.value ? input.value : '0', 10) > 0;
-      });
+      const weight = row.querySelector('input[name$="[weight_g]"]');
+      const length = row.querySelector('input[name$="[length_cm]"]');
+      const width = row.querySelector('input[name$="[width_cm]"]');
+      const height = row.querySelector('input[name$="[height_cm]"]');
+      return (parseInt(weight && weight.value ? weight.value : '0', 10) || 0) > 0
+        && parseDecimalValue(length && length.value ? length.value : '0') > 0
+        && parseDecimalValue(width && width.value ? width.value : '0') > 0
+        && parseDecimalValue(height && height.value ? height.value : '0') > 0;
     });
     const normalizedJson = form.querySelector('[data-wdc-normalized-address-json]');
     let courierReady = true;
@@ -691,7 +726,7 @@
         courierReady = false;
       }
     }
-    submit.disabled = !hasTariffs || !latestPreviewReady || pickupMissing || !courierReady || !dateReady || !contactReady || !senderTerminalReady || !receiverTerminalReady || !placesReady;
+    submit.disabled = (requiresTariff && !hasTariffs) || !latestPreviewReady || pickupMissing || !courierReady || !dateReady || !contactReady || !senderTerminalReady || !receiverTerminalReady || !placesReady;
   }
   function schedulePreview(form) {
     markPreviewPending(form);
@@ -898,6 +933,8 @@
     if (dpdPlacesRow) dpdPlacesRow.hidden = !String(status.dpd_places_summary || '').trim();
     updateShipmentButtons(box, {
       hasShipment: !!status.has_shipment,
+      canCreate: Object.prototype.hasOwnProperty.call(status, 'can_create') ? !!status.can_create : undefined,
+      canAttachManual: Object.prototype.hasOwnProperty.call(status, 'can_attach_manual') ? !!status.can_attach_manual : undefined,
       canCancel: !!status.can_cancel,
       canRemove: !!status.can_remove_from_order,
       canUpdate: !!status.can_update_status,
@@ -911,7 +948,7 @@
   function shipmentStatusFromResponse(data) {
     const payload = data || {};
     const status = Object.assign({}, payload.status || {});
-    ['carrier_key', 'presentation', 'label_actions', 'has_shipment', 'can_update_status', 'can_cancel', 'can_remove_from_order'].forEach(function (key) {
+    ['carrier_key', 'presentation', 'label_actions', 'has_shipment', 'can_create', 'can_attach_manual', 'can_update_status', 'can_cancel', 'can_remove_from_order'].forEach(function (key) {
       if (Object.prototype.hasOwnProperty.call(payload, key) && !Object.prototype.hasOwnProperty.call(status, key)) {
         status[key] = payload[key];
       }
@@ -998,6 +1035,7 @@
       cancelButtonLabel: 'Отменить отправление',
       removeButtonLabel: 'Удалить из заказа',
       updateStatusButtonLabel: 'Обновить статус',
+      manualAttachFieldLabel: 'Номер отслеживания',
       manualAttachPlaceholder: 'Номер отслеживания',
       manualAttachHelp: 'Введите номер отслеживания для поиска и привязки отправления.',
       createdToast: 'Отправление создано.',
@@ -1006,9 +1044,12 @@
       removeSuccessToast: 'Данные отправления удалены из заказа.',
       errorFallbackMessage: 'Не удалось получить статус отправления.',
       pollingTimeoutMessage: 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».',
+      removeConfirmationMessage: '',
       registrationErrorToast: 'Регистрация завершилась ошибкой.',
       registrationSuccessToast: 'Регистрация завершена успешно.',
-      autoPollRegistration: '0'
+      autoPollRegistration: '0',
+      registrationPollIntervalMs: '5000',
+      registrationPollMaxAttempts: '14'
     };
     if (!box || !box.dataset) return defaults;
     return Object.keys(defaults).reduce(function (result, key) {
@@ -1035,7 +1076,7 @@
       ['[data-wdc-cancel-shipment]', text.cancelButtonLabel],
       ['[data-wdc-remove-shipment-from-order]', text.removeButtonLabel],
       ['[data-wdc-update-shipment-status]', text.updateStatusButtonLabel],
-      ['[data-wdc-manual-attach-label]', text.manualAttachPlaceholder],
+      ['[data-wdc-manual-attach-label]', text.manualAttachFieldLabel],
       ['[data-wdc-manual-attach-help]', text.manualAttachHelp]
     ];
     pairs.forEach(function (pair) {
@@ -1049,6 +1090,8 @@
   function updateShipmentButtons(box, state) {
     if (!box) return;
     const hasShipment = !!(state && state.hasShipment);
+    const canCreate = state && Object.prototype.hasOwnProperty.call(state, 'canCreate') ? !!state.canCreate : !hasShipment;
+    const canAttachManual = state && Object.prototype.hasOwnProperty.call(state, 'canAttachManual') ? !!state.canAttachManual : !hasShipment;
     const canCancel = !!(state && state.canCancel);
     const canRemove = !!(state && state.canRemove);
     const canUpdate = !!(state && state.canUpdate);
@@ -1063,16 +1106,16 @@
     const dpdDocumentsDownload = box.querySelector('[data-wdc-dpd-documents-download]');
     if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
-      setVisible(openButton, !hasShipment);
-      openButton.disabled = hasShipment;
+      setVisible(openButton, canCreate);
+      openButton.disabled = !canCreate;
     }
     if (updateButton) {
       setVisible(updateButton, canUpdate);
       updateButton.disabled = !canUpdate;
     }
     if (manualButton) {
-      setVisible(manualButton, !hasShipment);
-      manualButton.disabled = hasShipment;
+      setVisible(manualButton, canAttachManual);
+      manualButton.disabled = !canAttachManual;
     }
     if (cancelButton) {
       setVisible(cancelButton, canCancel);
@@ -1176,22 +1219,43 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : text.errorFallbackMessage);
         }
-        renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
+        if (settings.pollingToken && shipmentPollingTokens.get(box) !== settings.pollingToken) {
+          return null;
+        }
+        if (payload.data && payload.data.cancelled_and_removed) {
+          stopShipmentRegistrationPolling(box);
+          resetShipmentUi(box);
+          if (message) {
+            message.dataset.status = 'success';
+            message.textContent = payload.data.message || 'Отправление Яндекс отменено.';
+          }
+          showShipmentToast(box, payload.data.message || 'Отправление Яндекс отменено.', 'success', { append: true });
+          return payload;
+        }
+        const statusPayload = shipmentStatusFromResponse(payload.data);
+        const isPending = !!(payload.data && payload.data.pending);
+        renderShipmentStatus(box, statusPayload);
         if (message) {
-          message.dataset.status = 'success';
+          message.dataset.status = isPending ? 'warning' : 'success';
           message.textContent = payload.data.message || text.updatedToast;
         }
-        if (settings.auto) {
-          showShipmentToast(box, payload.data.message || text.updatedToast, 'success', { append: true });
+        if (settings.auto && !isPending) {
+          const autoMessage = statusPayload && statusPayload.carrier_key === 'yandex_delivery' && statusPayload.carrier_status_title
+            ? 'Статус отправления Яндекс получен: ' + statusPayload.carrier_status_title + '.'
+            : (payload.data.message || text.updatedToast);
+          showShipmentToast(box, autoMessage, 'success', { append: true });
         }
         return payload;
       })
       .catch((error) => {
+        if (settings.pollingToken && shipmentPollingTokens.get(box) !== settings.pollingToken) {
+          return null;
+        }
         if (message) {
           message.dataset.status = settings.auto ? 'warning' : 'error';
           message.textContent = settings.auto
@@ -1199,6 +1263,9 @@
             : error.message;
         }
         if (settings.auto) {
+          if (settings.pollingToken) {
+            throw error;
+          }
           showShipmentToast(box, text.createdToast + ' Статус пока не обновлен: ' + error.message, 'warning', { append: true });
           return null;
         }
@@ -1221,7 +1288,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отправить заявку DPD.');
@@ -1243,28 +1310,125 @@
   }
 
   function startDpdRegistrationPolling(button) {
+    startShipmentRegistrationPolling(button, { interval: 10000, maxAttempts: 0, mode: 'dpd' });
+  }
+
+  function stopShipmentRegistrationPolling(box) {
+    if (!box) return;
+    const timer = shipmentPollingTimers.get(box);
+    if (timer) window.clearTimeout(timer);
+    shipmentPollingTimers.delete(box);
+    shipmentPollingTokens.delete(box);
+    setShipmentPollingIndicator(box, false);
+  }
+
+  function markShipmentPollingExhausted(button, attempts, token) {
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const text = getPresentation(box);
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.markPollExhaustedAction || 'wdc_mark_shipment_poll_exhausted');
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
+    data.append('shipment_key', button && button.dataset ? button.dataset.shipmentKey || 'russian_post_domestic' : 'russian_post_domestic');
+    data.append('attempts', String(attempts || 0));
+    data.append('purpose', button && button.dataset ? button.dataset.pollPurpose || 'registration' : 'registration');
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then(parseShipmentJsonResponse)
+      .then((payload) => {
+        if (token && shipmentPollingTokens.get(box) !== token) {
+          return null;
+        }
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : text.pollingTimeoutMessage);
+        }
+        renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
+        renderShipmentTechnicalInfo(box, payload.data || {});
+        const message = box && box.querySelector('[data-wdc-shipment-status-message]');
+        if (message) {
+          message.dataset.status = 'warning';
+          message.textContent = payload.data.message || text.pollingTimeoutMessage;
+        }
+        showShipmentToast(box, payload.data.message || text.pollingTimeoutMessage, 'warning');
+        return payload;
+      })
+      .catch((error) => {
+        if (token && shipmentPollingTokens.get(box) !== token) {
+          return null;
+        }
+        if (window.console && window.console.warn) {
+          window.console.warn('Не удалось сохранить состояние автоматической проверки отправления.', error);
+        }
+        updateShipmentButtons(box, { hasShipment: true, canCreate: false, canAttachManual: false, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false, canDownloadDpdDocuments: false });
+        const message = box && box.querySelector('[data-wdc-shipment-status-message]');
+        if (message) {
+          message.dataset.status = 'warning';
+          message.textContent = text.pollingTimeoutMessage;
+        }
+        showShipmentToast(box, text.pollingTimeoutMessage, 'warning');
+        return null;
+      });
+  }
+
+  function startShipmentRegistrationPolling(button, options) {
+    const settings = Object.assign({ interval: 5000, maxAttempts: 14, mode: 'generic' }, options || {});
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     if (!box || shipmentPollingTimers.has(box)) return;
+    const text = getPresentation(box);
+    const token = {};
+    let attempts = 0;
+    const interval = Math.max(1000, parseInt(settings.interval, 10) || 5000);
+    const maxAttempts = Math.max(0, parseInt(settings.maxAttempts, 10) || 0);
+    if (button && button.dataset) button.dataset.pollPurpose = settings.purpose || settings.mode || 'registration';
+    const stop = function () {
+      stopShipmentRegistrationPolling(box);
+    };
+    const exhausted = function () {
+      const timer = shipmentPollingTimers.get(box);
+      if (timer) window.clearTimeout(timer);
+      shipmentPollingTimers.delete(box);
+      setShipmentPollingIndicator(box, false);
+      markShipmentPollingExhausted(button, attempts, token).finally(function () {
+        if (shipmentPollingTokens.get(box) === token) {
+          shipmentPollingTokens.delete(box);
+        }
+      });
+    };
     setShipmentPollingIndicator(box, true);
+    shipmentPollingTokens.set(box, token);
     const tick = function () {
-      requestShipmentStatus(button, { auto: true })
+      attempts += 1;
+      requestShipmentStatus(button, { auto: true, pollingToken: token })
         .then((payload) => {
+          if (shipmentPollingTokens.get(box) !== token) return;
           const status = payload && payload.data && payload.data.status ? payload.data.status : {};
           if (status.registration_terminal || status.registration_success || status.registration_error || !status.polling_continue) {
-            const timer = shipmentPollingTimers.get(box);
-            if (timer) window.clearTimeout(timer);
-            shipmentPollingTimers.delete(box);
-            setShipmentPollingIndicator(box, false);
+            stop();
             return;
           }
-          shipmentPollingTimers.set(box, window.setTimeout(tick, 10000));
+          if (maxAttempts > 0 && attempts >= maxAttempts) {
+            exhausted();
+            return;
+          }
+          shipmentPollingTimers.set(box, window.setTimeout(tick, interval));
         })
         .catch(() => {
-          shipmentPollingTimers.delete(box);
-          setShipmentPollingIndicator(box, false);
+          if (shipmentPollingTokens.get(box) !== token) return;
+          if (maxAttempts > 0 && attempts >= maxAttempts) {
+            exhausted();
+            return;
+          }
+          if (settings.mode === 'dpd') {
+            stop();
+            return;
+          }
+          shipmentPollingTimers.set(box, window.setTimeout(tick, interval));
         });
     };
-    shipmentPollingTimers.set(box, window.setTimeout(tick, 10000));
+    shipmentPollingTimers.set(box, window.setTimeout(tick, interval));
   }
 
   function startCdekPolling(button) {
@@ -1323,7 +1487,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           if (payload && payload.data && payload.data.temporary_can_remove) {
@@ -1331,8 +1495,23 @@
           }
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
         }
-        resetShipmentUi(box);
-        showShipmentToast(box, payload.data.message || getPresentation(box).cancelSuccessToast, 'success');
+        if (payload.data && payload.data.cancelled_and_removed) {
+          stopShipmentRegistrationPolling(box);
+          resetShipmentUi(box);
+          showShipmentToast(box, payload.data.message || getPresentation(box).cancelSuccessToast, 'success');
+          return payload;
+        }
+        renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
+        renderShipmentTechnicalInfo(box, payload.data || {});
+        showShipmentToast(box, payload.data.message || 'Запрос на отмену отправления отправлен.', 'success');
+        if (payload.data && payload.data.auto_poll) {
+          startShipmentRegistrationPolling(button, {
+            interval: payload.data.poll_interval_ms || 5000,
+            maxAttempts: payload.data.poll_max_attempts || 14,
+            mode: 'cancellation',
+            purpose: payload.data.poll_purpose || 'cancellation'
+          });
+        }
         return payload;
       })
       .catch((error) => {
@@ -1344,6 +1523,11 @@
 
   function requestShipmentRemoveFromOrder(button) {
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const confirmation = getPresentation(box).removeConfirmationMessage;
+    if (confirmation && !window.confirm(confirmation)) {
+      return Promise.resolve(null);
+    }
+    stopShipmentRegistrationPolling(box);
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.removeFromOrderAction || 'wdc_remove_shipment_from_order');
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
@@ -1355,7 +1539,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось удалить данные отправления.');
@@ -1387,7 +1571,7 @@
       credentials: 'same-origin',
       body: data
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось сохранить номер отслеживания.');
@@ -1400,6 +1584,8 @@
         setTrackingDisplay(box, payload.data.tracking_number || payload.data.status && payload.data.status.barcode || '');
         updateShipmentButtons(box, {
           hasShipment: !!statusPayload.has_shipment,
+          canCreate: Object.prototype.hasOwnProperty.call(statusPayload, 'can_create') ? !!statusPayload.can_create : undefined,
+          canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload, 'can_attach_manual') ? !!statusPayload.can_attach_manual : undefined,
           canCancel: !!statusPayload.can_cancel,
           canRemove: !!statusPayload.can_remove_from_order,
           canUpdate: !!statusPayload.can_update_status,
@@ -1492,7 +1678,7 @@
       body: data,
       signal: signal
     })
-      .then((response) => response.json())
+      .then(parseShipmentJsonResponse)
       .then((payload) => {
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось найти ПВЗ.');
@@ -1924,7 +2110,7 @@
         credentials: 'same-origin',
         body: data
       })
-        .then((response) => response.json())
+        .then(parseShipmentJsonResponse)
         .then((payload) => {
           if (!payload || !payload.success) {
             throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'СДЭК не смог сформировать этикетку.');
@@ -2129,7 +2315,7 @@
       container.appendChild(clone);
       renumberPlaces(container);
       updateRemoveButtons(container);
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) updateDeclaredValueFields(form);
       if (form) schedulePreview(form);
       return;
@@ -2151,7 +2337,7 @@
       if (row) row.remove();
       renumberPlaces(container);
       updateRemoveButtons(container);
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) requestPreview(form);
       return;
     }
@@ -2162,43 +2348,43 @@
       return;
     }
 
-    const split = event.target.closest('[data-wdc-shipment-item-split], [data-wdc-cdek-split]');
+    const split = event.target.closest('[data-wdc-shipment-item-split]');
     if (split) {
-      splitCdekItemRow(split);
+      splitShipmentItemRow(split);
       return;
     }
 
-    const removeSplit = event.target.closest('[data-wdc-remove-shipment-split], [data-wdc-remove-cdek-split]');
+    const removeSplit = event.target.closest('[data-wdc-remove-shipment-split]');
     if (removeSplit) {
-      const row = removeSplit.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+      const row = removeSplit.closest('[data-wdc-shipment-item-row]');
       const form = findShipmentForm(removeSplit);
       const groupKey = row && row.getAttribute('data-group-key');
       if (row) row.remove();
-      if (form) rebalanceCdekGroup(form, groupKey);
-      if (form) updateCdekPlaceOptions(form);
+      if (form) rebalanceShipmentItemGroup(form, groupKey);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) schedulePreview(form);
       return;
     }
 
     const addManualItem = event.target.closest('[data-wdc-add-manual-shipment-item], [data-wdc-add-manual-cdek-item]');
     if (addManualItem) {
-      addManualCdekItemRow(addManualItem);
+      addManualShipmentItemRow(addManualItem);
       return;
     }
 
-    const removeManualItem = event.target.closest('[data-wdc-remove-manual-shipment-item], [data-wdc-remove-manual-cdek-item]');
+    const removeManualItem = event.target.closest('[data-wdc-remove-manual-shipment-item]');
     if (removeManualItem) {
-      const row = removeManualItem.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+      const row = removeManualItem.closest('[data-wdc-shipment-item-row]');
       const form = findShipmentForm(removeManualItem);
       if (row) row.remove();
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) schedulePreview(form);
       return;
     }
 
     const productChoice = event.target.closest('[data-wdc-product-search-choice]');
     if (productChoice) {
-      const row = productChoice.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
+      const row = productChoice.closest('[data-wdc-shipment-item-row]');
       const form = findShipmentForm(productChoice);
       let product = null;
       try {
@@ -2209,7 +2395,7 @@
       applyProductToManualRow(row, product);
       const results = row && row.querySelector('[data-wdc-product-search-results]');
       if (results) results.hidden = true;
-      if (form) updateCdekPlaceOptions(form);
+      if (form) updateShipmentPlaceOptions(form);
       if (form) schedulePreview(form);
       return;
     }
@@ -2254,7 +2440,7 @@
         credentials: 'same-origin',
         body: data
       })
-        .then((response) => response.json())
+        .then(parseShipmentJsonResponse)
         .then((payload) => {
           if (!payload || !payload.success) {
             throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обработать адрес.');
@@ -2262,6 +2448,7 @@
           const snapshot = payload.data.normalized_address || {};
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
           syncDpdAddressFields(form, snapshot);
+          syncYandexAddressFields(form, snapshot);
           if (display) display.value = snapshot.display || '';
           const cityCode = snapshot && snapshot.fields ? String(snapshot.fields.cdek_city_code || '') : '';
           const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
@@ -2361,7 +2548,7 @@
         credentials: 'same-origin',
         body: data
       })
-        .then((response) => response.json())
+        .then(parseShipmentJsonResponse)
         .then((payload) => {
           if (!payload || !payload.success) {
             throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось создать отправление.');
@@ -2390,6 +2577,8 @@
           const text = getPresentation(box);
           updateShipmentButtons(box, {
             hasShipment: !!statusPayload.has_shipment,
+            canCreate: Object.prototype.hasOwnProperty.call(statusPayload, 'can_create') ? !!statusPayload.can_create : undefined,
+            canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload, 'can_attach_manual') ? !!statusPayload.can_attach_manual : undefined,
             canCancel: !!statusPayload.can_cancel,
             canRemove: !!statusPayload.can_remove_from_order,
             canUpdate: !!statusPayload.can_update_status,
@@ -2397,11 +2586,15 @@
             canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents
           });
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
+          const pollInterval = parseInt(statusPayload.registration_poll_interval_ms || text.registrationPollIntervalMs || '5000', 10) || 5000;
+          const pollMaxAttempts = parseInt(statusPayload.registration_poll_max_attempts || text.registrationPollMaxAttempts || '14', 10) || 14;
           if (payload.data && payload.data.registration_attempt_id) {
             submitDpdRegistration(form, payload.data.registration_attempt_id, box, updateButton);
           } else if (updateButton && !updateButton.disabled) {
             if (text.autoPollRegistration === '1' && statusPayload.carrier_key === 'dpd' && statusPayload.polling_continue) {
               startDpdRegistrationPolling(updateButton);
+            } else if (text.autoPollRegistration === '1' && statusPayload.polling_continue) {
+              startShipmentRegistrationPolling(updateButton, { interval: pollInterval, maxAttempts: pollMaxAttempts, mode: 'registration' });
             } else if (text.autoPollRegistration === '1') {
               startCdekPolling(updateButton);
             } else {
@@ -2433,12 +2626,13 @@
     }
     if (event.target.matches('[data-wdc-courier-original-address]')) {
       const form = findShipmentForm(event.target);
-      if (form) {
+          if (form) {
         const snapshotInput = form.querySelector('[data-wdc-normalized-address-json]');
         const display = form.querySelector('[data-wdc-normalized-address-display]');
         const status = form.querySelector('[data-wdc-normalized-status]');
         if (snapshotInput) snapshotInput.value = '';
         syncDpdAddressFields(form, {});
+        syncYandexAddressFields(form, {});
         if (display) display.value = '';
         if (status) status.textContent = 'Адрес изменен, нужно обработать адрес заново.';
         updateCreateAvailability(form);
@@ -2449,13 +2643,13 @@
     if (event.target.matches('[data-wdc-integer-input]')) {
       cleanIntegerInput(event.target);
       const integerForm = findShipmentForm(event.target);
-      const row = event.target.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
-      if (integerForm && row && event.target.matches('[data-wdc-shipment-item-qty], [data-wdc-cdek-qty]')) {
-        rebalanceCdekGroup(integerForm, row.getAttribute('data-group-key') || '', row);
+      const row = event.target.closest('[data-wdc-shipment-item-row]');
+      if (integerForm && row && event.target.matches('[data-wdc-shipment-item-qty]')) {
+        rebalanceShipmentItemGroup(integerForm, row.getAttribute('data-group-key') || '', row);
       }
       if (integerForm) {
         updateScenarioSections(integerForm);
-        updateCdekPlaceOptions(integerForm);
+        updateShipmentPlaceOptions(integerForm);
         schedulePreview(integerForm);
       }
       return;
@@ -2464,7 +2658,7 @@
       cleanDecimalInput(event.target, parseInt(event.target.getAttribute('data-wdc-decimal-input') || '2', 10) || 2);
       const decimalForm = findShipmentForm(event.target);
       if (decimalForm) {
-        updateCdekPlaceOptions(decimalForm);
+        updateShipmentPlaceOptions(decimalForm);
         schedulePreview(decimalForm);
       }
       return;
@@ -2479,7 +2673,7 @@
     const form = findShipmentForm(event.target);
     if (form) {
       updateScenarioSections(form);
-      updateCdekPlaceOptions(form);
+      updateShipmentPlaceOptions(form);
       schedulePreview(form);
     }
   });
@@ -2538,7 +2732,7 @@
       updateDeclaredValueFields(form);
     }
     updateScenarioSections(form);
-    updateCdekPlaceOptions(form);
+    updateShipmentPlaceOptions(form);
     schedulePreview(form);
   });
 
@@ -2549,6 +2743,6 @@
   });
   forms.forEach((form) => {
     initializeForm(form, false);
-    updateCdekPlaceOptions(form);
+    updateShipmentPlaceOptions(form);
   });
 })();

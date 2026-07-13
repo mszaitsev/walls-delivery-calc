@@ -9,11 +9,11 @@ use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
-use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 
 defined( 'ABSPATH' ) || exit;
 
-final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
+final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private DpdShipmentPayloadBuilder $builder,
 		private ?DpdApiClient $client = null,
@@ -74,7 +74,7 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			return new ShipmentCreateResult( false, error_code: 'dpd_validation_failed', error_message: implode( "\n", $errors ), raw_reference: array( 'errors' => $errors ) );
 		}
 		if ( ! $this->client instanceof DpdApiClient ) {
-			return new ShipmentCreateResult( false, error_code: 'dpd_api_unavailable', error_message: 'DPD API client is unavailable.' );
+			return new ShipmentCreateResult( false, error_code: 'dpd_api_unavailable', error_message: 'API-клиент DPD недоступен.' );
 		}
 
 		$payload = $this->builder->build( $request );
