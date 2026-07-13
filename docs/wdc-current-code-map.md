@@ -1,3 +1,9 @@
+## Yandex tracking link presentation 0.109.3
+
+- `YandexShipmentAdapter::status_payload()` now adds a backward-compatible `tracking_presentation` array for Yandex shipments. A valid persisted `sharing_url` becomes label `Отслеживание посылки`, visible text `ссылка`, `url=sharing_url` and `copy_value=sharing_url`; invalid/empty URLs fall back to the existing request-id tracking identifier.
+- `OrderShipmentsMetabox` still renders the common shipment block, but can now render structured tracking values as escaped links with `target="_blank" rel="noopener noreferrer"`. Plain string tracking for DPD/CDEK/Russian Post remains unchanged.
+- `assets/admin/shipments-admin.js` mirrors the same contract for AJAX refresh/manual attach/reconciliation updates and keeps using the shared copy button through `data-tracking-number`, now populated from `copy_value` when provided.
+
 ## Yandex raw CANCELLED cancel lifecycle 0.109.2
 
 - `YandexShipmentRegistrationService::update_status()` and `cancel()` now compute cancel lifecycle with two flags: `$is_cancelled = $this->is_cancelled_status( $info->status )` and `$is_terminal = $is_cancelled || $this->is_terminal_status( $info->status )`.

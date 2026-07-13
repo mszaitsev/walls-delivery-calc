@@ -1,5 +1,11 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.109.3
+
+В общем блоке `Отправления` Яндекс больше не показывает `request_id` как основную tracking-строку, если canonical `request/info` уже дал `sharing_url`. `YandexShipmentAdapter` формирует structured `tracking_presentation`: label `Отслеживание посылки`, visible text `ссылка`, link URL and clipboard value = полный `sharing_url`. `OrderShipmentsMetabox` выводит ссылку через общий renderer (`target="_blank"`, `rel="noopener noreferrer"`, `esc_url()`), а runtime refresh/manual attach/reconciliation используют тот же общий copy-button без отдельного Yandex clipboard handler.
+
+`request_id` остаётся сохранённым API identifier и lookup value для create/reconciliation/update/cancel/manual attach. Если `sharing_url` отсутствует, пустой или не проходит URL validation по `http/https`, UI возвращается к прежнему fallback `Request ID Яндекс: {request_id}` и копирует именно request_id. После reconciliation/status update, когда `sharing_url` появляется, AJAX refresh заменяет fallback на ссылку без перезагрузки страницы.
+
 ## Статус 0.109.2
 
 Raw `CANCELLED` теперь обрабатывается как специальное подтверждение успешной отмены Яндекса независимо от admin mapping. В двух cancel lifecycle paths — immediate `request/info` внутри `cancel()` и последующий `update_status()` во время polling/ручного обновления — код считает отдельно `$is_cancelled` и `$is_terminal`, где `$is_terminal = $is_cancelled || terminal(universal mapping)`. При override `CANCELLED -> in_transit` shipment получает universal `in_transit`, shared universal→WooCommerce mapping успевает выполниться, затем локальная запись Яндекса и lookup meta удаляются, а registration sequence сохраняется.

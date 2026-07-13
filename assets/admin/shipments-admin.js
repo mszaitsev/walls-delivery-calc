@@ -918,8 +918,7 @@
       '[data-wdc-status-updated]': status.updated_at || '',
       '[data-wdc-planned-delivery-date]': status.planned_delivery_date || status.cdek_planned_delivery_date || '',
       '[data-wdc-dpd-places-summary]': status.dpd_places_summary || '',
-      '[data-wdc-dpd-places-label]': status.dpd_places_label || 'Грузоместа DPD',
-      '[data-wdc-tracking-number]': status.barcode || ''
+      '[data-wdc-dpd-places-label]': status.dpd_places_label || 'Грузоместа DPD'
     };
     Object.keys(fields).forEach((selector) => {
       const element = box.querySelector(selector);
@@ -941,7 +940,7 @@
       canPrintBarcode: !!status.can_print_barcode,
       canDownloadDpdDocuments: !!status.can_download_dpd_documents
     });
-    setTrackingDisplay(box, status.barcode || '');
+    setTrackingDisplay(box, trackingPresentation(status));
     renderShipmentPrice(box, status);
   }
 
@@ -1001,17 +1000,65 @@
     if (value) value.textContent = backlogOrderId;
   }
 
+  function trackingPresentation(status) {
+    const raw = status && status.tracking_presentation && typeof status.tracking_presentation === 'object'
+      ? status.tracking_presentation
+      : null;
+    if (!raw) {
+      const value = String(status && status.barcode || '').trim();
+      return { displayText: value, copyValue: value, url: '' };
+    }
+    const url = safeTrackingUrl(raw.url || '');
+    const displayText = String(raw.display_text || raw.displayText || (url ? 'ссылка' : '')).trim();
+    return {
+      label: String(raw.label || '').trim(),
+      displayText: displayText,
+      copyValue: String(raw.copy_value || raw.copyValue || url || displayText).trim(),
+      url: url
+    };
+  }
+
   function setTrackingDisplay(box, trackingNumber) {
     if (!box) return;
-    const value = String(trackingNumber || '').trim();
+    const tracking = trackingNumber && typeof trackingNumber === 'object'
+      ? trackingNumber
+      : { displayText: String(trackingNumber || '').trim(), copyValue: String(trackingNumber || '').trim(), url: '' };
+    const value = String(tracking.displayText || tracking.display_text || tracking.copyValue || tracking.copy_value || '').trim();
+    const copyValue = String(tracking.copyValue || tracking.copy_value || value || '').trim();
+    const url = safeTrackingUrl(tracking.url || '');
     const row = box.querySelector('[data-wdc-tracking-row]');
+    const label = box.querySelector('[data-wdc-tracking-label]');
     const number = box.querySelector('[data-wdc-tracking-number]');
     const copy = box.querySelector('[data-wdc-copy-tracking]');
-    if (number) number.textContent = value;
-    if (row) row.hidden = !value;
+    if (label && tracking.label) label.textContent = String(tracking.label);
+    if (number) {
+      number.textContent = '';
+      if (url) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = value || 'ссылка';
+        number.appendChild(link);
+      } else {
+        number.textContent = value;
+      }
+    }
+    if (row) row.hidden = !value && !copyValue;
     if (copy) {
-      copy.disabled = !value;
-      copy.dataset.trackingNumber = value;
+      copy.disabled = !copyValue;
+      copy.dataset.trackingNumber = copyValue;
+    }
+  }
+
+  function safeTrackingUrl(url) {
+    const value = String(url || '').trim();
+    if (!value) return '';
+    try {
+      const parsed = new URL(value, window.location.href);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? value : '';
+    } catch (error) {
+      return '';
     }
   }
 
@@ -1581,7 +1628,7 @@
         const statusPayload = shipmentStatusFromResponse(payload.data);
         renderShipmentStatus(box, statusPayload);
         renderShipmentTechnicalInfo(box, payload.data || {});
-        setTrackingDisplay(box, payload.data.tracking_number || payload.data.status && payload.data.status.barcode || '');
+        setTrackingDisplay(box, trackingPresentation(statusPayload));
         updateShipmentButtons(box, {
           hasShipment: !!statusPayload.has_shipment,
           canCreate: Object.prototype.hasOwnProperty.call(statusPayload, 'can_create') ? !!statusPayload.can_create : undefined,

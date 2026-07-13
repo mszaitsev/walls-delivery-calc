@@ -91,6 +91,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'tracking_checked_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'updated_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'barcode' => $this->tracking_identifier( $shipment ),
+			'tracking_presentation' => $this->tracking_presentation( $shipment ),
 			'yandex_request_id' => (string) ( $shipment['yandex_request_id'] ?? '' ),
 			'yandex_courier_order_id' => (string) ( $shipment['yandex_courier_order_id'] ?? '' ),
 			'yandex_sharing_url' => (string) ( $shipment['yandex_sharing_url'] ?? '' ),
@@ -151,6 +152,45 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		}
 
 		return '';
+	}
+
+	/** @param array<string,mixed> $shipment @return array<string,string> */
+	private function tracking_presentation( array $shipment ): array {
+		$raw_sharing_url = trim( (string) ( $shipment['sharing_url'] ?? '' ) );
+		if ( '' === $raw_sharing_url ) {
+			$raw_sharing_url = trim( (string) ( $shipment['yandex_sharing_url'] ?? '' ) );
+		}
+		$sharing_url = $this->valid_sharing_url( $raw_sharing_url );
+		if ( '' !== $sharing_url ) {
+			return array(
+				'label' => 'Отслеживание посылки',
+				'display_text' => 'ссылка',
+				'url' => $sharing_url,
+				'copy_value' => $sharing_url,
+			);
+		}
+
+		$request_id = $this->tracking_identifier( $shipment );
+		if ( '' === $request_id ) {
+			return array();
+		}
+
+		return array(
+			'label' => 'Request ID Яндекс',
+			'display_text' => $request_id,
+			'url' => '',
+			'copy_value' => $request_id,
+		);
+	}
+
+	private function valid_sharing_url( string $url ): string {
+		$url = trim( $url );
+		if ( '' === $url || false === filter_var( $url, FILTER_VALIDATE_URL ) ) {
+			return '';
+		}
+		$scheme = strtolower( (string) parse_url( $url, PHP_URL_SCHEME ) );
+
+		return in_array( $scheme, array( 'http', 'https' ), true ) ? $url : '';
 	}
 
 	public function auto_sync_throttle_microseconds(): int { return 0; }
