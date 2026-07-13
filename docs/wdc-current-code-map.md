@@ -1,6 +1,14 @@
+## Yandex Compact Registration Sequence State 0.108.13
+
+- `YandexShipmentRepository` keeps `_wdc_yandex_delivery_registration_sequence` compact: `last_index`, `last_operator_request_id`, optional `current_attempt` (`operator_request_id`, `sequence_index`, `started_at`, `order_id`, `registration_phase`, `lock_token`) and `updated_at`.
+- The repository no longer reads, writes or normalizes a growing `allocated_ids` list. `save_registration_sequence()` canonicalizes the state, so old 0.108.12 metadata is compacted without re-saving history.
+- `peek_next_operator_request_id()` computes `next_index = last_index + 1`; empty state uses `last_index=-1`, so the first reservation remains index 0 / base order number.
+- Manual attach sync only raises the compact state when the attached suffix is higher. Lower suffixes leave `last_index` and `last_operator_request_id` unchanged.
+- If an old state only contains `allocated_ids`, the repository may derive the maximum valid suffix once, then stores only the compact canonical shape.
+
 ## Yandex Operator Request Sequence 0.108.12
 
-- `YandexShipmentRepository` owns the persistent registration sequence meta `_wdc_yandex_delivery_registration_sequence`. Shape: `last_index`, `last_operator_request_id`, `allocated_ids`, `current_attempt` (`operator_request_id`, `sequence_index`, `started_at`, `order_id`, `registration_phase`, `lock_token`) and `updated_at`.
+- `YandexShipmentRepository` owns the persistent registration sequence meta `_wdc_yandex_delivery_registration_sequence`. Current canonical shape is compact: `last_index`, `last_operator_request_id`, optional `current_attempt` (`operator_request_id`, `sequence_index`, `started_at`, `order_id`, `registration_phase`, `lock_token`) and `updated_at`.
 - `YandexShipmentRegistrationService::create_for_order()` reserves the next `operator_request_id` immediately before the first real `offers/create` call, injects it into `ShipmentCreateRequest` meta and releases only the short registration lock after the attempt. Preview/draft code uses a peeked id; it does not update sequence meta.
 - ID format is deterministic: index `0` is the WooCommerce order number (`1010`), index `1` is `1010/1`, index `2` is `1010/2`. Reservation is not rolled back after HTTP starts, including transport errors or duplicate-code responses.
 - `YandexDeliveryShipmentPayloadBuilder` remains a formatter. It receives the ready `operator_request_id` and a safe temporary barcode prefix; suffixed operator ids are converted to slash-free temporary barcodes such as `1010-1-1` for place 1.

@@ -80,15 +80,9 @@ final class YandexShipmentRepository {
 		$base = '' !== trim( $base ) ? trim( $base ) : $this->base_operator_request_id( $order );
 		$lock_token = $this->acquire_registration_lock( $order, $now );
 		$next = $this->peek_next_operator_request_id( $order, $base );
-		$sequence = $this->registration_sequence( $order, $base );
-		$allocated = is_array( $sequence['allocated_ids'] ?? null ) ? array_values( array_map( 'strval', $sequence['allocated_ids'] ) ) : array();
-		if ( ! in_array( $next['operator_request_id'], $allocated, true ) ) {
-			$allocated[] = $next['operator_request_id'];
-		}
 		$sequence = array(
 			'last_index' => $next['index'],
 			'last_operator_request_id' => $next['operator_request_id'],
-			'allocated_ids' => $allocated,
 			'current_attempt' => array(
 				'operator_request_id' => $next['operator_request_id'],
 				'sequence_index' => $next['index'],
@@ -128,22 +122,20 @@ final class YandexShipmentRepository {
 		$now = '' !== $now ? $now : ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) );
 		$sequence = $this->registration_sequence( $order, $base );
 		$current_last = (int) ( $sequence['last_index'] ?? -1 );
-		$last_index = max( $current_last, $parsed['index'] );
-		$last_id = $last_index === $parsed['index'] ? $parsed['operator_request_id'] : (string) ( $sequence['last_operator_request_id'] ?? $this->operator_request_id_for_index( $base, $last_index ) );
-		$allocated = is_array( $sequence['allocated_ids'] ?? null ) ? array_values( array_map( 'strval', $sequence['allocated_ids'] ) ) : array();
-		if ( ! in_array( $parsed['operator_request_id'], $allocated, true ) ) {
-			$allocated[] = $parsed['operator_request_id'];
+		if ( $parsed['index'] <= $current_last ) {
+			return;
 		}
 
-		$this->save_registration_sequence(
-			$order,
-			array(
-				'last_index' => $last_index,
-				'last_operator_request_id' => $last_id,
-				'allocated_ids' => $allocated,
-				'updated_at' => $now,
-			)
+		$updated = array(
+			'last_index' => $parsed['index'],
+			'last_operator_request_id' => $parsed['operator_request_id'],
+			'updated_at' => $now,
 		);
+		if ( is_array( $sequence['current_attempt'] ?? null ) && array() !== $sequence['current_attempt'] ) {
+			$updated['current_attempt'] = $sequence['current_attempt'];
+		}
+
+		$this->save_registration_sequence( $order, $updated );
 	}
 
 	/** @return array{index:int,operator_request_id:string}|null */
@@ -177,7 +169,8 @@ final class YandexShipmentRepository {
 
 	/** @return array<string,mixed> */
 	public function registration_sequence( object $order, string $base = '' ): array {
-		$sequence = $this->order_meta_array( $order, self::REGISTRATION_SEQUENCE_META_KEY );
+		$raw_sequence = $this->order_meta_array( $order, self::REGISTRATION_SEQUENCE_META_KEY );
+		$sequence = $raw_sequence;
 		if ( array() === $sequence ) {
 			$index = $this->sequence_index_from_current_shipment( $order, $base );
 			if ( $index >= 0 ) {
@@ -186,15 +179,21 @@ final class YandexShipmentRepository {
 				$sequence = array(
 					'last_index' => $index,
 					'last_operator_request_id' => $id,
-					'allocated_ids' => array( $id ),
 					'updated_at' => '',
 				);
 			}
+		} elseif ( ! array_key_exists( 'last_index', $sequence ) && is_array( $sequence['allocated_ids'] ?? null ) ) {
+			$base = '' !== trim( $base ) ? trim( $base ) : $this->base_operator_request_id( $order );
+			$legacy_index = $this->max_sequence_index_from_legacy_ids( array_values( array_map( 'strval', $sequence['allocated_ids'] ) ), $base );
+			if ( $legacy_index >= 0 ) {
+				$sequence['last_index'] = $legacy_index;
+				$sequence['last_operator_request_id'] = $this->operator_request_id_for_index( $base, $legacy_index );
+			}
 		}
-		$sequence['last_index'] = (int) ( $sequence['last_index'] ?? -1 );
-		$sequence['last_operator_request_id'] = (string) ( $sequence['last_operator_request_id'] ?? '' );
-		$sequence['allocated_ids'] = is_array( $sequence['allocated_ids'] ?? null ) ? array_values( array_map( 'strval', $sequence['allocated_ids'] ) ) : array();
-		$sequence['updated_at'] = (string) ( $sequence['updated_at'] ?? '' );
+		$sequence = $this->canonical_sequence( $sequence );
+		if ( $sequence !== $raw_sequence && array() !== $raw_sequence && method_exists( $order, 'update_meta_data' ) && method_exists( $order, 'save' ) ) {
+			$this->save_registration_sequence( $order, $sequence );
+		}
 
 		return $sequence;
 	}
@@ -211,8 +210,42 @@ final class YandexShipmentRepository {
 		if ( ! method_exists( $order, 'update_meta_data' ) || ! method_exists( $order, 'save' ) ) {
 			return;
 		}
-		$order->update_meta_data( self::REGISTRATION_SEQUENCE_META_KEY, $sequence );
+		$order->update_meta_data( self::REGISTRATION_SEQUENCE_META_KEY, $this->canonical_sequence( $sequence ) );
 		$order->save();
+	}
+
+	/**
+	 * @param array<string,mixed> $sequence
+	 * @return array<string,mixed>
+	 */
+	private function canonical_sequence( array $sequence ): array {
+		$canonical = array(
+			'last_index' => (int) ( $sequence['last_index'] ?? -1 ),
+			'last_operator_request_id' => (string) ( $sequence['last_operator_request_id'] ?? '' ),
+		);
+		if ( is_array( $sequence['current_attempt'] ?? null ) && array() !== $sequence['current_attempt'] ) {
+			$canonical['current_attempt'] = $sequence['current_attempt'];
+		}
+		$canonical['updated_at'] = (string) ( $sequence['updated_at'] ?? '' );
+
+		return $canonical;
+	}
+
+	/** @param array<int,string> $ids */
+	private function max_sequence_index_from_legacy_ids( array $ids, string $base ): int {
+		$base = '' !== trim( $base ) ? trim( $base ) : '';
+		if ( '' === $base ) {
+			return -1;
+		}
+		$max = -1;
+		foreach ( $ids as $id ) {
+			$parsed = $this->parse_operator_request_id( $id, $base );
+			if ( null !== $parsed ) {
+				$max = max( $max, $parsed['index'] );
+			}
+		}
+
+		return $max;
 	}
 
 	private function acquire_registration_lock( object $order, string $now ): string {

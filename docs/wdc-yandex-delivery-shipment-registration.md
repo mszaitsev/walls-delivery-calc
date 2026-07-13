@@ -1,5 +1,29 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.108.13
+
+Sequence state Яндекс упрощён: `_wdc_yandex_delivery_registration_sequence` больше не хранит историю всех выделенных `operator_request_id`. Canonical shape теперь компактный:
+
+```php
+array(
+    'last_index' => 2,
+    'last_operator_request_id' => '1010/2',
+    'current_attempt' => array(
+        'operator_request_id' => '1010/2',
+        'sequence_index' => 2,
+        'started_at' => '...',
+        'order_id' => 1010,
+        'registration_phase' => 'offers_create',
+        'lock_token' => '...',
+    ),
+    'updated_at' => '...',
+)
+```
+
+`allocated_ids` удалён из production state и не заменён другим массивом истории. История попыток остаётся в order notes, snapshots текущего shipment и данных `request/info`; sequence meta хранит только последний выделенный индекс и текущий attempt context. Следующий номер считается как `last_index + 1`: при пустом state `last_index=-1`, поэтому первая попытка остаётся `1010`, затем идут `1010/1`, `1010/2`.
+
+Manual attach sync по-прежнему повышает state только вверх: attach `1010/4` при `last_index=1` сохранит `last_index=4`, а attach `1010/3` при `last_index=5` не уменьшит и не перепишет `last_operator_request_id`. Старый state 0.108.12 с `allocated_ids` игнорируется и при следующем read/save нормализуется без этого ключа; если старый state содержит только `allocated_ids`, repository может один раз взять максимальный валидный suffix и затем сохранить compact shape.
+
 ## Статус 0.108.12
 
 Яндекс требует уникальный `request.info.operator_request_id` внутри аккаунта, поэтому регистрация теперь использует устойчивую последовательность попыток на уровне заказа. Для заказа `1010` первая реальная попытка отправляет `1010`, вторая — `1010/1`, третья — `1010/2`. Состояние хранится отдельно от текущей shipment-записи в meta `_wdc_yandex_delivery_registration_sequence`:
@@ -8,7 +32,6 @@
 array(
     'last_index' => 2,
     'last_operator_request_id' => '1010/2',
-    'allocated_ids' => array( '1010', '1010/1', '1010/2' ),
     'current_attempt' => array(
         'operator_request_id' => '1010/2',
         'sequence_index' => 2,

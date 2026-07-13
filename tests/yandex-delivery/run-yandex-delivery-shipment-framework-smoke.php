@@ -712,12 +712,13 @@ $first_sequence_body = json_decode( (string) ( $sequence_http_1->requests[0]['ar
 yd_framework_assert( $first_sequence_result->success && '1010' === (string) ( $first_sequence_body['info']['operator_request_id'] ?? '' ) && '1010-1' === (string) ( $first_sequence_body['places'][0]['barcode'] ?? '' ), 'First Yandex registration attempt must use base order number and safe temporary place barcode.' );
 yd_framework_assert( '1010' === (string) ( $first_sequence_shipment['yandex_operator_request_id'] ?? '' ) && 0 === (int) ( $first_sequence_shipment['yandex_registration_sequence_index'] ?? -1 ), 'First Yandex shipment persistence must store operator_request_id and sequence index 0.' );
 $sequence_meta_1 = $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
-yd_framework_assert( 0 === (int) ( $sequence_meta_1['last_index'] ?? -1 ) && '1010' === (string) ( $sequence_meta_1['last_operator_request_id'] ?? '' ) && in_array( '1010', (array) ( $sequence_meta_1['allocated_ids'] ?? array() ), true ), 'First reservation must persist sequence meta for base operator id.' );
+yd_framework_assert( 0 === (int) ( $sequence_meta_1['last_index'] ?? -1 ) && '1010' === (string) ( $sequence_meta_1['last_operator_request_id'] ?? '' ) && ! array_key_exists( 'allocated_ids', $sequence_meta_1 ) && '1010' === (string) ( $sequence_meta_1['current_attempt']['operator_request_id'] ?? '' ), 'First reservation must persist compact sequence meta for base operator id.' );
 $first_sequence_shipment['yandex_status'] = 'CANCELLED';
 $first_sequence_shipment['status_title'] = 'CANCELLED';
 $sequence_repository_1->save_for_carrier( $sequence_order, YandexDeliverySettings::CARRIER_KEY, $first_sequence_shipment );
 yd_framework_assert( ! empty( $sequence_adapter_1->remove_from_order( $sequence_order )['success'] ), 'Terminal sequence shipment must be locally removable before a new attempt.' );
-yd_framework_assert( 0 === (int) ( $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ), 'Local remove must not clear Yandex registration sequence.' );
+$sequence_after_remove = $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
+yd_framework_assert( 0 === (int) ( $sequence_after_remove['last_index'] ?? -1 ) && ! array_key_exists( 'allocated_ids', $sequence_after_remove ), 'Local remove must not clear Yandex registration sequence or restore allocated history.' );
 
 list( $sequence_repository_2, $sequence_adapter_2, $sequence_creation_2, $sequence_registration_2, $sequence_http_2 ) = yd_framework_stack(
 	array(
@@ -745,12 +746,24 @@ list( $sequence_repository_3, $sequence_adapter_3, $sequence_creation_3, $sequen
 $third_sequence_result = $sequence_creation_3->create( $sequence_order, yd_framework_request( 1010, '1010' ) );
 $third_sequence_body = json_decode( (string) ( $sequence_http_3->requests[0]['args']['body'] ?? '{}' ), true );
 yd_framework_assert( $third_sequence_result->success && '1010/2' === (string) ( $third_sequence_body['info']['operator_request_id'] ?? '' ), 'Third Yandex attempt must use 1010/2.' );
+$third_sequence_meta = $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
+yd_framework_assert( 2 === (int) ( $third_sequence_meta['last_index'] ?? -1 ) && '1010/2' === (string) ( $third_sequence_meta['last_operator_request_id'] ?? '' ) && ! array_key_exists( 'allocated_ids', $third_sequence_meta ), 'Third reservation must keep compact sequence state without allocated history.' );
 
 $sequence_repo_probe = new YandexShipmentRepository( new OrderShipmentRepository() );
 $preview_sequence_before = $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
 $peek_1 = $sequence_repo_probe->peek_next_operator_request_id( $sequence_order, '1010' );
 $peek_2 = $sequence_repo_probe->peek_next_operator_request_id( $sequence_order, '1010' );
 yd_framework_assert( '1010/3' === $peek_1['operator_request_id'] && $peek_1 === $peek_2 && $preview_sequence_before === $sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true ), 'Preview/peek must not consume Yandex sequence index.' );
+
+$stress_order = new YdFrameworkOrder( 2020, '2020' );
+$stress_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
+for ( $i = 0; $i < 100; $i++ ) {
+	$attempt = $stress_repository->reserve_operator_request_id( $stress_order, '2020', '2026-07-13 12:' . str_pad( (string) ( $i % 60 ), 2, '0', STR_PAD_LEFT ) . ':00' );
+	yd_framework_assert( $i === (int) $attempt['index'], 'Stress sequence reservation must allocate monotonically increasing index.' );
+	$stress_repository->release_registration_lock( $stress_order, $attempt['lock_token'] );
+}
+$stress_meta = $stress_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
+yd_framework_assert( 99 === (int) ( $stress_meta['last_index'] ?? -1 ) && '2020/99' === (string) ( $stress_meta['last_operator_request_id'] ?? '' ) && ! array_key_exists( 'allocated_ids', $stress_meta ) && strlen( serialize( $stress_meta ) ) < 700 && '2020/100' === $stress_repository->peek_next_operator_request_id( $stress_order, '2020' )['operator_request_id'], '100 Yandex attempts must keep compact sequence state and compute the next id.' );
 
 $lock_order = new YdFrameworkOrder( 1012, '1012' );
 $lock_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
@@ -796,6 +809,38 @@ $manual_sync_repository_seed->sync_sequence_from_operator_request_id( $manual_sy
 list( $manual_sync_repository, $manual_sync_adapter, $manual_sync_creation, $manual_sync_registration, $manual_sync_http ) = yd_framework_stack( array( yd_framework_response( yd_framework_info( 'REQ-MANUAL-4', 'CANCELLED', 'YD-MANUAL-4', '1010/4' ) ) ) );
 $manual_sync_attach = $manual_sync_adapter->attach_manual( $manual_sync_order, array( 'barcode' => 'REQ-MANUAL-4' ) );
 yd_framework_assert( ! empty( $manual_sync_attach['success'] ) && 4 === (int) ( $manual_sync_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true )['last_index'] ?? -1 ) && '1010/5' === $manual_sync_repository_seed->peek_next_operator_request_id( $manual_sync_order, '1010' )['operator_request_id'], 'Manual attach of 1010/4 must sync sequence upward and next preview must use 1010/5.' );
+$manual_sync_before_lower = $manual_sync_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
+$manual_sync_repository_seed->sync_sequence_from_operator_request_id( $manual_sync_order, '1010/3', '1010', '2026-07-13 12:10:00' );
+yd_framework_assert( $manual_sync_before_lower === $manual_sync_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true ), 'Manual attach sync with a lower suffix must not decrease or rewrite compact sequence state.' );
+
+$legacy_sequence_order = new YdFrameworkOrder( 3030, '3030' );
+$legacy_sequence_order->update_meta_data(
+	YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY,
+	array(
+		'last_index' => 2,
+		'last_operator_request_id' => '3030/2',
+		'allocated_ids' => array( '3030', '3030/1', '3030/2' ),
+		'current_attempt' => array(
+			'operator_request_id' => '3030/2',
+			'sequence_index' => 2,
+			'started_at' => '2026-07-13 12:00:00',
+			'order_id' => 3030,
+			'registration_phase' => 'offers_create',
+			'lock_token' => 'legacy-token',
+		),
+		'updated_at' => '2026-07-13 12:00:00',
+	)
+);
+$legacy_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
+$legacy_sequence = $legacy_repository->registration_sequence( $legacy_sequence_order, '3030' );
+$legacy_saved_sequence = $legacy_sequence_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true );
+yd_framework_assert( 2 === (int) ( $legacy_sequence['last_index'] ?? -1 ) && '3030/2' === (string) ( $legacy_sequence['last_operator_request_id'] ?? '' ) && ! array_key_exists( 'allocated_ids', $legacy_sequence ) && ! array_key_exists( 'allocated_ids', $legacy_saved_sequence ), 'Old 0.108.12 Yandex sequence state must be normalized without allocated_ids on read/save.' );
+
+$legacy_allocated_only_order = new YdFrameworkOrder( 4040, '4040' );
+$legacy_allocated_only_order->update_meta_data( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, array( 'allocated_ids' => array( '4040', '4040/4', 'other' ), 'updated_at' => '2026-07-13 12:00:00' ) );
+$legacy_allocated_only_repository = new YandexShipmentRepository( new OrderShipmentRepository() );
+$legacy_allocated_only_sequence = $legacy_allocated_only_repository->registration_sequence( $legacy_allocated_only_order, '4040' );
+yd_framework_assert( 4 === (int) ( $legacy_allocated_only_sequence['last_index'] ?? -1 ) && '4040/4' === (string) ( $legacy_allocated_only_sequence['last_operator_request_id'] ?? '' ) && ! array_key_exists( 'allocated_ids', $legacy_allocated_only_order->get_meta( YandexShipmentRepository::REGISTRATION_SEQUENCE_META_KEY, true ) ), 'Legacy allocated-only Yandex state may be compacted to max valid suffix once.' );
 
 $remove = $adapter->remove_from_order( $order );
 yd_framework_assert( ! empty( $remove['success'] ) && '' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Yandex remove_local must delete lookup meta.' );
