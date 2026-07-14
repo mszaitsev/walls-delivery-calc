@@ -574,6 +574,8 @@ final class YandexShipmentRegistrationService {
 		$fields['yandex_offer_pricing'] = $result->selected_offer->pricing;
 		$fields['yandex_offer_pricing_total'] = (string) ( $result->selected_offer->raw['offer_details']['pricing_total'] ?? $result->selected_offer->raw['pricing_total'] ?? '' );
 		$fields['yandex_offer_pricing_total_kopecks'] = $result->selected_offer->pricing_total_kopecks;
+		$fields['actual_cost_kopecks'] = $result->selected_offer->pricing_total_kopecks;
+		$fields['actual_cost_source'] = 'yandex_selected_offer';
 		$fields['yandex_offer_delivery_interval'] = array(
 			'min' => $result->selected_offer->delivery_interval_min,
 			'max' => $result->selected_offer->delivery_interval_max,
@@ -598,6 +600,10 @@ final class YandexShipmentRegistrationService {
 		$fields = $this->fields_from_info( $info );
 		if ( array() === $fields['yandex_place_barcode_map'] && is_array( $shipment['yandex_place_barcode_map'] ?? null ) ) {
 			$fields['yandex_place_barcode_map'] = $shipment['yandex_place_barcode_map'];
+		}
+		if ( '' === (string) ( $fields['yandex_self_pickup_node_code'] ?? '' ) && '' !== (string) ( $shipment['yandex_self_pickup_node_code'] ?? '' ) ) {
+			$fields['yandex_self_pickup_node_code'] = (string) $shipment['yandex_self_pickup_node_code'];
+			$fields['yandex_self_pickup_node_type'] = (string) ( $shipment['yandex_self_pickup_node_type'] ?? $fields['yandex_self_pickup_node_type'] ?? '' );
 		}
 
 		return array_merge(

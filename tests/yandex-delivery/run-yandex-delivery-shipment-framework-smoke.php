@@ -38,6 +38,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayloadBuilder;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentRegistrationService as CoreYandexRegistrationService;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
@@ -59,6 +60,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentAdapter;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentButtonPolicy;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentDocumentService;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRegistrationService;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRepository;
@@ -172,6 +174,7 @@ function yd_framework_info( string $request_id, string $status, string $real_bar
 		'state' => array( 'status' => $status, 'description' => 'state ' . $status, 'timestamp' => '2026-07-11T16:10:40.000000Z' ),
 		'full_items_price' => 10000,
 		'sharing_url' => 'https://dostavka.yandex.ru/route/example',
+		'self_pickup_node_code' => array( 'type' => 'pickup', 'code' => '00000' ),
 		'courier_order_id' => '880191690',
 	);
 }
@@ -381,9 +384,11 @@ yd_framework_assert( 'REQ-777' === (string) ( $shipment['yandex_request_id'] ?? 
 yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $shipment['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $shipment['universal_status_label'] ?? '' ) && 'state CREATED' === (string) ( $shipment['yandex_status_description'] ?? '' ), 'Repository must persist mapped universal Yandex status fields and raw API status description.' );
 yd_framework_assert( '2026-07-11T16:23:01.000000Z' === (string) ( $shipment['yandex_offer_expires_at'] ?? '' ), 'Repository must persist selected offer expires_at.' );
 yd_framework_assert( '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing'] ?? '' ) && '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing_total'] ?? '' ) && 29880 === (int) ( $shipment['yandex_offer_pricing_total_kopecks'] ?? 0 ), 'Repository must persist selected offer pricing audit fields.' );
+yd_framework_assert( 29880 === (int) ( $shipment['actual_cost_kopecks'] ?? 0 ) && 'yandex_selected_offer' === (string) ( $shipment['actual_cost_source'] ?? '' ), 'Normal Yandex create must persist selected offer pricing_total as common actual-cost kopecks without scale drift.' );
 yd_framework_assert( '2026-07-21T07:00:00.000000Z' === (string) ( $shipment['yandex_offer_delivery_interval']['min'] ?? '' ) && '2026-07-13T05:00:00.000000Z' === (string) ( $shipment['yandex_offer_pickup_interval']['max'] ?? '' ) && 'OFFER-1' === (string) ( $shipment['yandex_selected_offer_snapshot']['offer_id'] ?? '' ), 'Repository must persist selected offer interval snapshot audit fields.' );
 yd_framework_assert( 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Successful create must persist Yandex request_id lookup meta.' );
 yd_framework_assert( 'YD-REAL-1' === (string) ( $shipment['yandex_place_barcode_map']['ORDER-777-1'] ?? '' ) && 'YD-REAL-1' === (string) ( $shipment['yandex_places'][0]['barcode'] ?? '' ) && 'ITEM-YD-1' === (string) ( $shipment['yandex_items'][0]['barcode'] ?? '' ), 'Repository must persist request/info items, places and temporary-to-real barcode map.' );
+yd_framework_assert( '00000' === (string) ( $shipment['yandex_self_pickup_node_code'] ?? '' ) && 'pickup' === (string) ( $shipment['yandex_self_pickup_node_type'] ?? '' ), 'Repository must persist Yandex self_pickup_node_code.code as a string with leading zeros.' );
 yd_framework_assert( array() === (array) ( $shipment['request_snapshot']['body'] ?? array( 'not-empty' ) ) && is_array( $shipment['response_snapshot'] ?? null ), 'Yandex persistence must not store offers/create payload body and must store canonical request/info snapshot.' );
 yd_framework_assert( $base_repository->has_created_for_carrier( $order, YandexDeliverySettings::CARRIER_KEY ), 'Existing repository duplicate guard must see created Yandex shipment.' );
 
@@ -398,6 +403,26 @@ $payload = $adapter->status_payload( $order, $base_repository->find_by_carrier( 
 yd_framework_assert( ! empty( $payload['can_update_status'] ) && ! empty( $payload['can_cancel'] ) && empty( $payload['can_attach_manual'] ), 'Yandex button policy must expose status/cancel and hide manual attach.' );
 yd_framework_assert( 'CREATED' === (string) ( $payload['carrier_status_title'] ?? '' ), 'Yandex status payload must expose status value without duplicating carrier label.' );
 yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $payload['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $payload['shipment_status_label'] ?? '' ), 'Yandex status payload must expose universal status as primary shipment status.' );
+yd_framework_assert( 29880 === (int) ( $payload['actual_cost_kopecks'] ?? 0 ) && '298.80 руб.' === (string) ( $payload['actual_cost_label'] ?? '' ) && 'neutral' === (string) ( $payload['actual_cost_compare_status'] ?? '' ), 'Yandex status payload must expose actual offer cost through the shared neutral cost contract when Base API cost is absent.' );
+yd_framework_assert( '00000' === (string) ( $payload['yandex_self_pickup_node_code'] ?? '' ) && 'pickup' === (string) ( $payload['yandex_self_pickup_node_type'] ?? '' ), 'Yandex status payload must expose pickup code for static/runtime metabox rendering.' );
+$order->update_meta_data( OrderShippingMetaPersister::CALCULATION_META_KEY, array( 'api' => array( 'api_base_price_kopecks' => 29010 ) ) );
+$green_payload = $adapter->status_payload( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
+yd_framework_assert( 'ok' === (string) ( $green_payload['actual_cost_compare_status'] ?? '' ), 'Yandex actual cost at or under the shared +3% threshold must be green/ok.' );
+$order->update_meta_data( OrderShippingMetaPersister::CALCULATION_META_KEY, array( 'api' => array( 'api_base_price_kopecks' => 29009 ) ) );
+$red_payload = $adapter->status_payload( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
+yd_framework_assert( 'warning' === (string) ( $red_payload['actual_cost_compare_status'] ?? '' ), 'Yandex actual cost over the shared +3% threshold must be red/warning.' );
+$order->delete_meta_data( OrderShippingMetaPersister::CALCULATION_META_KEY );
+$label_actions = $adapter->label_actions( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
+yd_framework_assert( 1 === count( $label_actions ) && 'download_yandex_label' === (string) ( $label_actions[0]['key'] ?? '' ) && 'Скачать ярлык' === (string) ( $label_actions[0]['label'] ?? '' ), 'Yandex adapter must expose a shared label_actions download button for allowed universal statuses with request_id.' );
+foreach ( array( DeliveryStatus::CREATED_IN_CARRIER, DeliveryStatus::IN_TRANSIT, DeliveryStatus::READY_FOR_PICKUP, DeliveryStatus::HANDED_TO_COURIER, DeliveryStatus::DELIVERED, DeliveryStatus::RETURNING_TO_SENDER, DeliveryStatus::RETURNED_TO_SENDER ) as $label_status ) {
+	$actions = $adapter->label_actions( $order, array( 'yandex_request_id' => 'REQ-LABEL-' . $label_status, 'universal_status_code' => $label_status ) );
+	yd_framework_assert( 1 === count( $actions ), 'Yandex label action must be visible for universal status ' . $label_status );
+}
+foreach ( array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::CANCELLED, DeliveryStatus::REJECTED, DeliveryStatus::UNKNOWN ) as $label_status ) {
+	$actions = $adapter->label_actions( $order, array( 'yandex_request_id' => 'REQ-LABEL-' . $label_status, 'universal_status_code' => $label_status ) );
+	yd_framework_assert( array() === $actions, 'Yandex label action must be hidden for universal status ' . $label_status );
+}
+yd_framework_assert( array() === $adapter->label_actions( $order, array( 'yandex_request_id' => 'REQ-RECONCILE', 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER, 'yandex_reconciliation_required' => true ) ) && array() === $adapter->label_actions( $order, array( 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER ) ), 'Yandex label action must be hidden during reconciliation and without server-side request_id.' );
 $tracking_presentation = (array) ( $payload['tracking_presentation'] ?? array() );
 yd_framework_assert( 'Отслеживание посылки' === (string) ( $tracking_presentation['label'] ?? '' ) && 'ссылка' === (string) ( $tracking_presentation['display_text'] ?? '' ) && 'https://dostavka.yandex.ru/route/example' === (string) ( $tracking_presentation['url'] ?? '' ) && 'https://dostavka.yandex.ru/route/example' === (string) ( $tracking_presentation['copy_value'] ?? '' ) && 'REQ-777' !== (string) ( $tracking_presentation['display_text'] ?? '' ), 'Yandex status payload must present sharing_url as tracking link text and clipboard value instead of request_id when available.' );
 $invalid_tracking_payload = $adapter->status_payload( $order, array( 'yandex_request_id' => 'REQ-INVALID-URL', 'sharing_url' => 'javascript:alert(1)' ) );
@@ -429,6 +454,7 @@ yd_framework_assert( str_contains( $metabox_source, 'editable_place_rows' ) && s
 yd_framework_assert( str_contains( $metabox_source, 'shipment_attach_validation_failed' ) && str_contains( $metabox_source, 'shipment_attach_unexpected_error' ) && str_contains( $metabox_source, "'request_id' => \$barcode" ), 'Generic manual attach AJAX must stay JSON-safe and pass request_id alias to carrier adapters.' );
 yd_framework_assert( str_contains( $metabox_source, 'wdc_mark_shipment_poll_exhausted' ) && str_contains( $metabox_source, 'ajax_mark_poll_exhausted' ) && str_contains( $metabox_source, 'mark_polling_exhausted' ), 'Shared metabox must expose a carrier-neutral AJAX hook to persist exhausted registration polling.' );
 yd_framework_assert( str_contains( $metabox_source, 'tracking_presentation' ) && str_contains( $metabox_source, 'render_tracking_value' ) && str_contains( $metabox_source, 'target="_blank"' ) && str_contains( $metabox_source, 'rel="noopener noreferrer"' ) && str_contains( $metabox_source, 'esc_url( $tracking' ), 'Shared metabox must render structured tracking URLs as escaped links that open in a new tab.' );
+yd_framework_assert( str_contains( $metabox_source, 'data-wdc-yandex-self-pickup-code-row' ) && str_contains( $metabox_source, 'data-wdc-yandex-label-download' ) && str_contains( $metabox_source, 'admin_post_yandex_label_pdf' ) && str_contains( $metabox_source, 'ACTION_YANDEX_LABEL_PDF' ), 'Shared metabox must render Yandex pickup-code row and protected Yandex label download action without a separate metabox.' );
 yd_framework_assert( str_contains( $metabox_source, "__( '⚖️%d'" ) && ! str_contains( $metabox_source, 'Расчётный вес товаров: %d г' ), 'Shared modal must preserve compact calculated weight hint format.' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 yd_framework_assert( str_contains( $js_source, 'can_create' ) && str_contains( $js_source, 'can_attach_manual' ) && str_contains( $js_source, 'setVisible(openButton, canCreate)' ) && str_contains( $js_source, 'setVisible(manualButton, canAttachManual)' ), 'Runtime shipment buttons must consume adapter create/manual capabilities.' );
@@ -437,6 +463,7 @@ yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresTariff !
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresSuccessfulPreview === '1'" ) && str_contains( $js_source, 'const latestPreviewReady = !requiresSuccessfulPreview' ), 'Shipment admin JS must block create by carrier-neutral preview capability instead of checking a Yandex/DPD branch.' );
 yd_framework_assert( str_contains( $js_source, "data.append('barcode', input ? input.value || '' : '')" ) && str_contains( $js_source, 'canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload' ) && str_contains( $js_source, 'manualAttachFieldLabel' ), 'Runtime manual attach must send the generic barcode field and consume adapter manual-attach capability after success.' );
 yd_framework_assert( str_contains( $js_source, 'function trackingPresentation' ) && str_contains( $js_source, 'document.createElement' ) && str_contains( $js_source, "link.target = '_blank'" ) && str_contains( $js_source, "link.rel = 'noopener noreferrer'" ) && str_contains( $js_source, 'copy.dataset.trackingNumber = copyValue' ), 'Runtime shipment status renderer must support link display with a separate clipboard value through the shared copy button.' );
+yd_framework_assert( str_contains( $js_source, 'function renderYandexSelfPickupCode' ) && str_contains( $js_source, 'data-wdc-yandex-self-pickup-code' ) && str_contains( $js_source, 'download_yandex_label' ) && str_contains( $js_source, 'function requestYandexLabelDownload' ), 'Runtime shipment renderer must update Yandex pickup code and label download button from normalized status payload.' );
 yd_framework_assert( str_contains( $js_source, 'function startShipmentRegistrationPolling' ) && str_contains( $js_source, 'function markShipmentPollingExhausted' ) && str_contains( $js_source, 'markPollExhaustedAction' ) && str_contains( $js_source, 'shipmentPollingTokens' ) && str_contains( $js_source, 'removeConfirmationMessage' ), 'Runtime registration polling must be carrier-neutral, bounded, persist exhaustion and protect stale responses.' );
 yd_framework_assert( str_contains( $js_source, 'settings.auto && !isPending' ) && str_contains( $js_source, 'if (settings.pollingToken)' ) && str_contains( $js_source, 'throw error;' ) && str_contains( $js_source, 'stopShipmentRegistrationPolling(box)' ), 'Runtime polling must suppress pending toast spam, propagate transport errors during bounded polling and stop polling before local remove.' );
 yd_framework_assert( str_contains( $js_source, 'function syncYandexAddressFields' ) && str_contains( $js_source, 'data-wdc-yandex-address-field="' ) && str_contains( $js_source, 'Адрес изменен, нужно обработать адрес заново.' ), 'Runtime Yandex courier address check must fill structured fields from normalized DaData response and clear verification when the full address changes.' );
@@ -990,9 +1017,24 @@ $attached = $attach_repository->find_by_carrier( $attach_order, YandexDeliverySe
 yd_framework_assert( ! empty( $attach_result['success'] ) && 1 === count( $attach_http->requests ) && str_contains( $attach_http->requests[0]['url'], '/request/info' ) && str_contains( $attach_http->requests[0]['url'], 'request_id=REQ-MANUAL' ), 'Manual attach must verify Yandex request_id with a single request/info call.' );
 yd_framework_assert( ! str_contains( implode( "\n", array_column( $attach_http->requests, 'url' ) ), '/offers/create' ) && ! str_contains( implode( "\n", array_column( $attach_http->requests, 'url' ) ), '/offers/confirm' ), 'Manual attach must not call offers/create or offers/confirm.' );
 yd_framework_assert( 'REQ-MANUAL' === (string) ( $attached['yandex_request_id'] ?? '' ) && 'ORDER-777' === (string) ( $attached['yandex_operator_request_id'] ?? '' ) && 'CREATED' === (string) ( $attached['yandex_status'] ?? '' ), 'Manual attach must persist canonical Yandex request/info fields.' );
+yd_framework_assert( ! isset( $attached['actual_cost_kopecks'] ) && ! isset( $attached['yandex_offer_pricing_total_kopecks'] ), 'Manual attach must not invent actual delivery cost from request/info, checkout or base price.' );
 yd_framework_assert( 'REQ-MANUAL' === (string) $attach_order->get_meta( '_wdc_yandex_delivery_request_id', true ) && 'admin_manual_attach' === (string) ( $attached['created_by_context'] ?? '' ), 'Manual attach must persist lookup meta and admin_manual_attach context.' );
 $attached_payload = $attach_adapter->status_payload( $attach_order, $attached );
 yd_framework_assert( empty( $attached_payload['can_create'] ) && empty( $attached_payload['can_attach_manual'] ) && ! empty( $attached_payload['can_update_status'] ) && ! empty( $attached_payload['can_cancel'] ), 'Attached CREATED Yandex shipment must hide create/manual attach and expose update/cancel.' );
+yd_framework_assert( '' === (string) ( $attached_payload['actual_cost_label'] ?? '' ) && '00000' === (string) ( $attached_payload['yandex_self_pickup_node_code'] ?? '' ), 'Manual attach must keep price row hidden and expose pickup code from request/info.' );
+$attached_label_actions = $attach_adapter->label_actions( $attach_order, $attached );
+yd_framework_assert( 1 === count( $attached_label_actions ) && 'download_yandex_label' === (string) ( $attached_label_actions[0]['key'] ?? '' ), 'Manual attach without price must still expose Yandex label download when universal status allows it.' );
+$label_success_http = new YdFrameworkFakeHttp( array( new YandexDeliveryApiResponse( 200, "%PDF-1.4\nmanual attach label", array( 'content-type' => 'application/pdf' ) ) ) );
+$label_service = new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_success_http ) ) );
+$label_result = $label_service->label_pdf_for_order( $attach_order );
+$label_request_body = json_decode( (string) ( $label_success_http->requests[0]['args']['body'] ?? '{}' ), true );
+yd_framework_assert( ! empty( $label_result['success'] ) && "%PDF-" === substr( (string) ( $label_result['body'] ?? '' ), 0, 5 ) && array( 'REQ-MANUAL' ) === (array) ( $label_request_body['request_ids'] ?? array() ) && 'yandex-label-ORDER-777.pdf' === (string) ( $label_result['filename'] ?? '' ), 'Yandex label document service must stream PDF for persisted request_id and sanitize filename.' );
+$label_empty_http = new YdFrameworkFakeHttp( array( new YandexDeliveryApiResponse( 200, '', array( 'content-type' => 'application/pdf' ) ) ) );
+$label_empty = ( new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_empty_http ) ) ) )->label_pdf_for_order( $attach_order );
+yd_framework_assert( empty( $label_empty['success'] ) && 'Яндекс.Доставка вернула пустой файл ярлыка.' === (string) ( $label_empty['message'] ?? '' ), 'Yandex label document service must reject empty PDF body.' );
+$label_non_pdf_http = new YdFrameworkFakeHttp( array( new YandexDeliveryApiResponse( 200, '{"message":"not pdf"}', array( 'content-type' => 'application/json' ) ) ) );
+$label_non_pdf = ( new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_non_pdf_http ) ) ) )->label_pdf_for_order( $attach_order );
+yd_framework_assert( empty( $label_non_pdf['success'] ) && 'Яндекс.Доставка вернула ответ, который не является PDF-файлом.' === (string) ( $label_non_pdf['message'] ?? '' ), 'Yandex label document service must reject JSON/non-PDF response bodies.' );
 $attached_tracking = (array) ( $attached_payload['tracking_presentation'] ?? array() );
 yd_framework_assert( 'https://dostavka.yandex.ru/route/example' === (string) ( $attached['sharing_url'] ?? '' ) && 'Отслеживание посылки' === (string) ( $attached_tracking['label'] ?? '' ) && 'ссылка' === (string) ( $attached_tracking['display_text'] ?? '' ) && 'https://dostavka.yandex.ru/route/example' === (string) ( $attached_tracking['copy_value'] ?? '' ), 'Manual attach must persist sharing_url and immediately expose the Yandex tracking link/copy presentation.' );
 $duplicate_attach = $attach_adapter->attach_manual( $attach_order, array( 'request_id' => 'REQ-DUPLICATE' ) );

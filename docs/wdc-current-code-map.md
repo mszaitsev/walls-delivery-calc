@@ -1,3 +1,11 @@
+## Yandex shipment documents, selected-offer price and pickup code 0.111.0
+
+- `YandexShipmentRegistrationService::fields_from_result()` stores selected offer pricing audit fields and now also fills the common `actual_cost_kopecks` contract from `YandexDeliveryOffer::pricing_total_kopecks`; `merge_info()` preserves this value because `request/info` does not expose delivery service price.
+- `YandexShipmentAdapter::status_payload()` reuses the same actual-cost/base-cost comparison shape used by DPD/CDEK (`actual_cost_label`, `actual_cost_compare_status`, `actual_cost_compare_message`) and exposes `label_actions()` key `download_yandex_label` by universal status.
+- `YandexDeliveryApiClient::generateLabels()` and `YandexDeliveryShipmentClient::generate_labels()` call `POST /api/b2b/platform/request/generate-labels` and return binary PDF via `YandexDeliveryBinaryDocument`; JSON decoding is used only for API error diagnostics.
+- `YandexShipmentDocumentService` is the server-side download service used by `OrderShipmentsMetabox::admin_post_yandex_label_pdf()`; request id is read from persisted shipment data, not from the client.
+- `YandexDeliveryRequestInfo` parses `self_pickup_node_code.code` and `type`; `YandexShipmentPersistenceMapper` stores them as `yandex_self_pickup_node_code` / `yandex_self_pickup_node_type`; the metabox and runtime JS render `Код для получения` after tracking when the code is non-empty.
+
 ## Yandex source drop-off address search scope 0.110.2
 
 - Initial map loading for the shipment-modal source selector still uses `mode=location`, `source_location_id` and `source_platform_station_id`.

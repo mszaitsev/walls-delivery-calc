@@ -14,6 +14,7 @@ final class YandexDeliveryEndpoints {
 	public const REQUEST_INFO_PATH = '/api/b2b/platform/request/info';
 	public const REQUEST_HISTORY_PATH = '/api/b2b/platform/request/history';
 	public const REQUEST_CANCEL_PATH = '/api/b2b/platform/request/cancel';
+	public const REQUEST_GENERATE_LABELS_PATH = '/api/b2b/platform/request/generate-labels';
 
 	private const TEST_HOST = 'https://b2b.taxi.tst.yandex.net';
 	private const PRODUCTION_HOST = 'https://b2b-authproxy.taxi.yandex.net';

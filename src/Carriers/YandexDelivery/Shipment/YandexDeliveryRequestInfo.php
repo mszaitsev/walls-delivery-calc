@@ -31,6 +31,8 @@ final class YandexDeliveryRequestInfo {
 		public readonly array $available_actions = array(),
 		public readonly array $delivery_policy = array(),
 		public readonly int $full_items_price_kopecks = 0,
+		public readonly string $self_pickup_node_code = '',
+		public readonly string $self_pickup_node_type = '',
 		public readonly array $raw = array()
 	) {
 	}
@@ -62,8 +64,22 @@ final class YandexDeliveryRequestInfo {
 			is_array( $request['available_actions'] ?? null ) ? $request['available_actions'] : array(),
 			is_array( $request['delivery_policy'] ?? null ) ? $request['delivery_policy'] : array(),
 			max( 0, (int) ( $body['full_items_price'] ?? 0 ) ),
+			self::self_pickup_node_code( $body ),
+			self::self_pickup_node_type( $body ),
 			$body
 		);
+	}
+
+	/** @param array<string,mixed> $body */
+	private static function self_pickup_node_code( array $body ): string {
+		$node = is_array( $body['self_pickup_node_code'] ?? null ) ? $body['self_pickup_node_code'] : array();
+		return trim( (string) ( $node['code'] ?? '' ) );
+	}
+
+	/** @param array<string,mixed> $body */
+	private static function self_pickup_node_type( array $body ): string {
+		$node = is_array( $body['self_pickup_node_code'] ?? null ) ? $body['self_pickup_node_code'] : array();
+		return trim( (string) ( $node['type'] ?? '' ) );
 	}
 
 	/**

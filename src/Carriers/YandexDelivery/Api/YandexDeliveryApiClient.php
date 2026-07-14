@@ -189,6 +189,54 @@ final class YandexDeliveryApiClient {
 
 	/**
 	 * @param array<string,mixed> $payload
+	 */
+	public function generateLabels( array $payload ): YandexDeliveryApiResponse {
+		return $this->authorizedBinaryRequest( 'POST', YandexDeliveryEndpoints::REQUEST_GENERATE_LABELS_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 */
+	private function authorizedBinaryRequest( string $method, string $path, array $payload = array() ): YandexDeliveryApiResponse {
+		$credentials = $this->settings->credentials();
+		if ( ! $credentials->is_complete() ) {
+			throw new YandexDeliveryApiException(
+				'Данные для входа Яндекс.Доставки не заполнены.',
+				array_merge( $this->settings->diagnostic_context(), array( 'error_code' => 'credentials_missing' ) )
+			);
+		}
+
+		$response = $this->rawRequest(
+			$method,
+			$path,
+			$payload,
+			$credentials,
+			array(
+				'headers' => array(
+					'Accept' => 'application/pdf',
+				),
+			)
+		);
+		if ( $response->status_code < 200 || $response->status_code >= 300 ) {
+			$data = $response->json();
+			$message = is_array( $data ) && array() !== $data ? $this->extractErrorMessage( $data, $response->status_code ) : $response->body;
+			throw new YandexDeliveryApiException(
+				$this->safeMessage( $message, $response->status_code ),
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => $path,
+					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'error_body' => $this->safeMessage( $response->body, $response->status_code ),
+					'yandex_error_code' => is_array( $data ) ? $this->extractErrorCode( $data ) : '',
+				)
+			);
+		}
+
+		return $response;
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
 	 * @return array<string,mixed>
 	 */
 	private function authorizedJsonRequest( string $method, string $path, array $payload = array(), array $query = array() ): array {
@@ -271,7 +319,12 @@ final class YandexDeliveryApiClient {
 			$args['headers']['Content-Type'] = 'application/json';
 			$args['body'] = $this->encodePayloadBody( $payload );
 		}
+		$extra_headers = is_array( $extra_args['headers'] ?? null ) ? $extra_args['headers'] : array();
+		unset( $extra_args['headers'] );
 		$args = array_merge( $args, $extra_args );
+		if ( array() !== $extra_headers ) {
+			$args['headers'] = array_merge( $args['headers'], $extra_headers );
+		}
 		$url = YandexDeliveryEndpoints::url( $this->settings->environment(), $path );
 		if ( array() !== $query ) {
 			$url .= ( str_contains( $url, '?' ) ? '&' : '?' ) . http_build_query( $query, '', '&', PHP_QUERY_RFC3986 );

@@ -67,6 +67,8 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 			'yandex_offer_pricing' => (string) ( $reconciliation['selected_offer_pricing'] ?? '' ),
 			'yandex_offer_pricing_total' => (string) ( $reconciliation['selected_offer_pricing_total'] ?? '' ),
 			'yandex_offer_pricing_total_kopecks' => max( 0, (int) ( $reconciliation['selected_offer_pricing_total_kopecks'] ?? 0 ) ),
+			'actual_cost_kopecks' => max( 0, (int) ( $reconciliation['selected_offer_pricing_total_kopecks'] ?? 0 ) ),
+			'actual_cost_source' => 'yandex_selected_offer',
 			'yandex_offer_delivery_interval' => is_array( $reconciliation['selected_offer_delivery_interval'] ?? null ) ? $reconciliation['selected_offer_delivery_interval'] : array(),
 			'yandex_offer_pickup_interval' => is_array( $reconciliation['selected_offer_pickup_interval'] ?? null ) ? $reconciliation['selected_offer_pickup_interval'] : array(),
 			'yandex_selected_offer_snapshot' => is_array( $reconciliation['selected_offer_snapshot'] ?? null ) ? $reconciliation['selected_offer_snapshot'] : array(),
@@ -142,6 +144,8 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 			'yandex_request_info_snapshot' => $info->raw,
 			'yandex_available_actions' => $info->available_actions,
 			'yandex_full_items_price_kopecks' => $info->full_items_price_kopecks,
+			'yandex_self_pickup_node_code' => $info->self_pickup_node_code,
+			'yandex_self_pickup_node_type' => $info->self_pickup_node_type,
 		);
 	}
 
