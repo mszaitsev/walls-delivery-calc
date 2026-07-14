@@ -61,6 +61,7 @@ use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentAdapter;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentButtonPolicy;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentDocumentService;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentLabelPolicy;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRegistrationService;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRepository;
@@ -1025,16 +1026,47 @@ yd_framework_assert( '' === (string) ( $attached_payload['actual_cost_label'] ??
 $attached_label_actions = $attach_adapter->label_actions( $attach_order, $attached );
 yd_framework_assert( 1 === count( $attached_label_actions ) && 'download_yandex_label' === (string) ( $attached_label_actions[0]['key'] ?? '' ), 'Manual attach without price must still expose Yandex label download when universal status allows it.' );
 $label_success_http = new YdFrameworkFakeHttp( array( new YandexDeliveryApiResponse( 200, "%PDF-1.4\nmanual attach label", array( 'content-type' => 'application/pdf' ) ) ) );
-$label_service = new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_success_http ) ) );
+$label_service = new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_success_http ) ), new YandexShipmentLabelPolicy( new YandexStatusMapping( new SettingsRepository() ) ) );
 $label_result = $label_service->label_pdf_for_order( $attach_order );
 $label_request_body = json_decode( (string) ( $label_success_http->requests[0]['args']['body'] ?? '{}' ), true );
 yd_framework_assert( ! empty( $label_result['success'] ) && "%PDF-" === substr( (string) ( $label_result['body'] ?? '' ), 0, 5 ) && array( 'REQ-MANUAL' ) === (array) ( $label_request_body['request_ids'] ?? array() ) && 'yandex-label-ORDER-777.pdf' === (string) ( $label_result['filename'] ?? '' ), 'Yandex label document service must stream PDF for persisted request_id and sanitize filename.' );
 $label_empty_http = new YdFrameworkFakeHttp( array( new YandexDeliveryApiResponse( 200, '', array( 'content-type' => 'application/pdf' ) ) ) );
-$label_empty = ( new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_empty_http ) ) ) )->label_pdf_for_order( $attach_order );
+$label_empty = ( new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_empty_http ) ), new YandexShipmentLabelPolicy( new YandexStatusMapping( new SettingsRepository() ) ) ) )->label_pdf_for_order( $attach_order );
 yd_framework_assert( empty( $label_empty['success'] ) && 'Яндекс.Доставка вернула пустой файл ярлыка.' === (string) ( $label_empty['message'] ?? '' ), 'Yandex label document service must reject empty PDF body.' );
 $label_non_pdf_http = new YdFrameworkFakeHttp( array( new YandexDeliveryApiResponse( 200, '{"message":"not pdf"}', array( 'content-type' => 'application/json' ) ) ) );
-$label_non_pdf = ( new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_non_pdf_http ) ) ) )->label_pdf_for_order( $attach_order );
+$label_non_pdf = ( new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_non_pdf_http ) ), new YandexShipmentLabelPolicy( new YandexStatusMapping( new SettingsRepository() ) ) ) )->label_pdf_for_order( $attach_order );
 yd_framework_assert( empty( $label_non_pdf['success'] ) && 'Яндекс.Доставка вернула ответ, который не является PDF-файлом.' === (string) ( $label_non_pdf['message'] ?? '' ), 'Yandex label document service must reject JSON/non-PDF response bodies.' );
+
+$label_guard_repository = new OrderShipmentRepository();
+$label_guard_yandex_repository = new YandexShipmentRepository( $label_guard_repository );
+$label_guard_policy = new YandexShipmentLabelPolicy( new YandexStatusMapping( new SettingsRepository() ) );
+$label_guard_index = 0;
+foreach ( array(
+	'reconciliation_required' => array( 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER, 'yandex_reconciliation_required' => true ),
+	DeliveryStatus::PENDING_CREATION_IN_CARRIER => array( 'universal_status_code' => DeliveryStatus::PENDING_CREATION_IN_CARRIER ),
+	DeliveryStatus::CANCELLED => array( 'universal_status_code' => DeliveryStatus::CANCELLED ),
+	DeliveryStatus::REJECTED => array( 'universal_status_code' => DeliveryStatus::REJECTED ),
+	DeliveryStatus::UNKNOWN => array( 'universal_status_code' => DeliveryStatus::UNKNOWN ),
+) as $guard_case => $guard_fields ) {
+	++$label_guard_index;
+	$guard_order = new YdFrameworkOrder( 1100 + $label_guard_index, 'LABEL-' . (string) $guard_case );
+	$guard_shipment = array_merge( array( 'carrier_key' => YandexDeliverySettings::CARRIER_KEY, 'yandex_request_id' => 'REQ-LABEL-GUARD-' . (string) $guard_case ), $guard_fields );
+	$label_guard_repository->save_for_carrier( $guard_order, YandexDeliverySettings::CARRIER_KEY, $guard_shipment );
+	$guard_http = new YdFrameworkFakeHttp( array() );
+	$guard_result = ( new YandexShipmentDocumentService( $label_guard_yandex_repository, new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( $settings, $guard_http ) ), $label_guard_policy ) )->label_pdf_for_order( $guard_order );
+	yd_framework_assert( empty( $guard_result['success'] ) && 'Для текущего статуса отправления ярлык Яндекс недоступен.' === (string) ( $guard_result['message'] ?? '' ) && array() === $guard_http->requests, 'Server-side Yandex label guard must block API for ' . (string) $guard_case );
+}
+
+$override_label_mapping = new YandexStatusMapping( new SettingsRepository() );
+foreach ( array( DeliveryStatus::UNKNOWN, DeliveryStatus::CANCELLED ) as $override_universal ) {
+	$override_label_mapping->save_mapping( array_merge( YandexStatusMapping::default_mapping(), array( 'CREATED' => $override_universal ) ) );
+	$override_order = new YdFrameworkOrder( 1190 + ( DeliveryStatus::CANCELLED === $override_universal ? 1 : 0 ), 'LABEL-OVERRIDE-' . $override_universal );
+	$label_guard_repository->save_for_carrier( $override_order, YandexDeliverySettings::CARRIER_KEY, array( 'carrier_key' => YandexDeliverySettings::CARRIER_KEY, 'yandex_request_id' => 'REQ-LABEL-OVERRIDE-' . $override_universal, 'yandex_status' => 'CREATED' ) );
+	$override_http = new YdFrameworkFakeHttp( array() );
+	$override_result = ( new YandexShipmentDocumentService( $label_guard_yandex_repository, new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( $settings, $override_http ) ), new YandexShipmentLabelPolicy( $override_label_mapping ) ) )->label_pdf_for_order( $override_order );
+	yd_framework_assert( empty( $override_result['success'] ) && array() === $override_http->requests && array() === ( new YandexShipmentAdapter( $attach_registration, new YandexShipmentButtonPolicy( $override_label_mapping ), $override_label_mapping, new YandexShipmentLabelPolicy( $override_label_mapping ) ) )->label_actions( $override_order, $label_guard_yandex_repository->find( $override_order ) ), 'Server-side and UI Yandex label policy must both follow admin override CREATED -> ' . $override_universal );
+}
+$override_label_mapping->save_mapping( YandexStatusMapping::default_mapping() );
 $attached_tracking = (array) ( $attached_payload['tracking_presentation'] ?? array() );
 yd_framework_assert( 'https://dostavka.yandex.ru/route/example' === (string) ( $attached['sharing_url'] ?? '' ) && 'Отслеживание посылки' === (string) ( $attached_tracking['label'] ?? '' ) && 'ссылка' === (string) ( $attached_tracking['display_text'] ?? '' ) && 'https://dostavka.yandex.ru/route/example' === (string) ( $attached_tracking['copy_value'] ?? '' ), 'Manual attach must persist sharing_url and immediately expose the Yandex tracking link/copy presentation.' );
 $duplicate_attach = $attach_adapter->attach_manual( $attach_order, array( 'request_id' => 'REQ-DUPLICATE' ) );

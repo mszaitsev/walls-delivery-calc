@@ -11,7 +11,8 @@ defined( 'ABSPATH' ) || exit;
 final class YandexShipmentDocumentService {
 	public function __construct(
 		private YandexShipmentRepository $repository,
-		private YandexDeliveryShipmentClient $client
+		private YandexDeliveryShipmentClient $client,
+		private YandexShipmentLabelPolicy $label_policy
 	) {
 	}
 
@@ -23,9 +24,12 @@ final class YandexShipmentDocumentService {
 		if ( array() === $shipment ) {
 			return $this->failure( 'Отправление Яндекс не найдено.' );
 		}
-		$request_id = $this->request_id( $shipment );
+		$request_id = $this->label_policy->request_id( $shipment );
 		if ( '' === $request_id ) {
 			return $this->failure( 'Для отправления не найден Request ID Яндекс.' );
+		}
+		if ( ! $this->label_policy->can_download( $shipment ) ) {
+			return $this->failure( 'Для текущего статуса отправления ярлык Яндекс недоступен.' );
 		}
 
 		try {
@@ -56,18 +60,6 @@ final class YandexShipmentDocumentService {
 			'filename' => $this->filename( $order ),
 			'http_code' => $pdf->http_code,
 		);
-	}
-
-	/** @param array<string,mixed> $shipment */
-	private function request_id( array $shipment ): string {
-		foreach ( array( 'yandex_request_id', 'request_id', 'external_id' ) as $key ) {
-			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
-			if ( '' !== $value ) {
-				return $value;
-			}
-		}
-
-		return '';
 	}
 
 	private function filename( object $order ): string {

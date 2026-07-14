@@ -715,6 +715,7 @@ C:.
 |   |           YandexShipmentAdapter.php
 |   |           YandexShipmentButtonPolicy.php
 |   |           YandexShipmentDocumentService.php
+|   |           YandexShipmentLabelPolicy.php
 |   |           YandexShipmentPersistenceMapper.php
 |   |           YandexShipmentRegistrationService.php
 |   |           YandexShipmentRepository.php

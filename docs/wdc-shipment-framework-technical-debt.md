@@ -1,5 +1,13 @@
 # Shipment Framework technical debt
 
+## 0.111.1 focused debt register
+
+1. Shipment actual cost comparison is duplicated across carriers
+   - Current problem: DPD and Yandex now implement the same actual-cost comparison locally: read saved Base API cost, compare actual cost against `base + 3%`, format `actual_cost_label`, and produce `actual_cost_compare_status` / `actual_cost_compare_message`.
+   - Target architecture: extract this into a carrier-neutral service, for example `ShipmentActualCostComparisonService`, and reuse it from every shipment adapter/service that exposes actual carrier cost.
+   - Affected classes/files: `DpdShipmentAdapter`, `YandexShipmentAdapter`, future carrier actual-cost presenters and shipment price smokes.
+   - Migration sequence: preserve existing output contract and threshold semantics, introduce the neutral service with equality tests, migrate one carrier at a time, then remove duplicated helpers.
+
 ## 0.108.5 focused debt register
 
 1. Carrier-specific modal fields remain partly hardcoded

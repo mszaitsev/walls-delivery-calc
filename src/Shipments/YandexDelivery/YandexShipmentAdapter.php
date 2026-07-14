@@ -17,8 +17,10 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private YandexShipmentRegistrationService $registration,
 		private YandexShipmentButtonPolicy $buttons,
-		private ?YandexStatusMapping $status_mapping = null
+		private ?YandexStatusMapping $status_mapping = null,
+		private ?YandexShipmentLabelPolicy $label_policy = null
 	) {
+		$this->label_policy ??= new YandexShipmentLabelPolicy( $this->status_mapping );
 	}
 
 	public function carrier_key(): string { return YandexDeliverySettings::CARRIER_KEY; }
@@ -143,7 +145,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	/** @param array<string,mixed> $shipment @return array<int,array<string,mixed>> */
 	public function label_actions( object $order, array $shipment ): array {
 		unset( $order );
-		if ( '' === $this->request_id( $shipment ) || ! $this->can_download_label( $shipment ) ) {
+		if ( ! $this->label_policy->can_download( $shipment ) ) {
 			return array();
 		}
 
@@ -208,43 +210,6 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		$scheme = strtolower( (string) parse_url( $url, PHP_URL_SCHEME ) );
 
 		return in_array( $scheme, array( 'http', 'https' ), true ) ? $url : '';
-	}
-
-	/** @param array<string,mixed> $shipment */
-	private function request_id( array $shipment ): string {
-		foreach ( array( 'yandex_request_id', 'request_id', 'external_id' ) as $key ) {
-			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
-			if ( '' !== $value ) {
-				return $value;
-			}
-		}
-
-		return '';
-	}
-
-	/** @param array<string,mixed> $shipment */
-	private function can_download_label( array $shipment ): bool {
-		if ( array() === $shipment || ! empty( $shipment['yandex_reconciliation_required'] ) ) {
-			return false;
-		}
-		$universal = sanitize_key( (string) ( $shipment['universal_status_code'] ?? '' ) );
-		if ( ! DeliveryStatus::is_valid( $universal ) && $this->status_mapping instanceof YandexStatusMapping ) {
-			$universal = $this->status_mapping->universal_status_for( (string) ( $shipment['yandex_status'] ?? '' ) );
-		}
-
-		return in_array(
-			$universal,
-			array(
-				DeliveryStatus::CREATED_IN_CARRIER,
-				DeliveryStatus::IN_TRANSIT,
-				DeliveryStatus::READY_FOR_PICKUP,
-				DeliveryStatus::HANDED_TO_COURIER,
-				DeliveryStatus::DELIVERED,
-				DeliveryStatus::RETURNING_TO_SENDER,
-				DeliveryStatus::RETURNED_TO_SENDER,
-			),
-			true
-		);
 	}
 
 	/**
