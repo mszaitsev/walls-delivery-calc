@@ -3,6 +3,7 @@
   const toastTimers = new WeakMap();
   const shipmentPollingTimers = new WeakMap();
   const shipmentPollingTokens = new WeakMap();
+  const cancellationPollingToasts = new WeakMap();
   const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
 
   function findShipmentContainer(element) {
@@ -939,10 +940,12 @@
       canRemove: !!status.can_remove_from_order,
       canUpdate: !!status.can_update_status,
       canPrintBarcode: !!status.can_print_barcode,
-      canDownloadDpdDocuments: !!status.can_download_dpd_documents
+      canDownloadDpdDocuments: !!status.can_download_dpd_documents,
+      canDownloadYandexLabel: !!status.can_download_yandex_label
     });
     setTrackingDisplay(box, trackingPresentation(status));
     renderShipmentPrice(box, status);
+    renderYandexSelfPickupCode(box, status);
   }
 
   function shipmentStatusFromResponse(data) {
@@ -961,6 +964,11 @@
     if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_download_dpd_documents')) {
       status.can_download_dpd_documents = payload.label_actions.some(function (action) {
         return action && action.key === 'download_documents' && !!action.visible;
+      });
+    }
+    if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_download_yandex_label')) {
+      status.can_download_yandex_label = payload.label_actions.some(function (action) {
+        return action && action.key === 'download_yandex_label' && !!action.visible;
       });
     }
     return status;
@@ -992,6 +1000,16 @@
       : (compare === 'warning' ? 'wdc-shipment-price-warning' : 'wdc-shipment-price-neutral');
     row.classList.add(className);
     row.title = String(status && status.actual_cost_compare_message || '');
+  }
+
+  function renderYandexSelfPickupCode(box, status) {
+    if (!box) return;
+    const row = box.querySelector('[data-wdc-yandex-self-pickup-code-row]');
+    const value = box.querySelector('[data-wdc-yandex-self-pickup-code]');
+    if (!row || !value) return;
+    const code = String(status && status.yandex_self_pickup_node_code || '').trim();
+    value.textContent = code;
+    row.hidden = !code;
   }
 
   function renderShipmentTechnicalInfo(box, data) {
@@ -1145,6 +1163,7 @@
     const canUpdate = !!(state && state.canUpdate);
     const canPrintBarcode = !!(state && state.canPrintBarcode);
     const canDownloadDpdDocuments = !!(state && state.canDownloadDpdDocuments);
+    const canDownloadYandexLabel = !!(state && state.canDownloadYandexLabel);
     const openButton = box.querySelector('[data-wdc-open-shipment-modal]');
     const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
@@ -1152,6 +1171,7 @@
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
     const barcodeDownload = box.querySelector('[data-wdc-cdek-barcode-download]');
     const dpdDocumentsDownload = box.querySelector('[data-wdc-dpd-documents-download]');
+    const yandexLabelDownload = box.querySelector('[data-wdc-yandex-label-download]');
     if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
       setVisible(openButton, canCreate);
@@ -1189,6 +1209,14 @@
         dpdDocumentsDownload.setAttribute('aria-disabled', 'true');
       }
     }
+    if (yandexLabelDownload) {
+      setVisible(yandexLabelDownload, canDownloadYandexLabel);
+      if (canDownloadYandexLabel) {
+        yandexLabelDownload.removeAttribute('aria-disabled');
+      } else {
+        yandexLabelDownload.setAttribute('aria-disabled', 'true');
+      }
+    }
   }
 
   function resetShipmentUi(box) {
@@ -1208,6 +1236,7 @@
     });
     setTrackingDisplay(box, '');
     renderShipmentPrice(box, {});
+    renderYandexSelfPickupCode(box, {});
     const updatedRow = box.querySelector('[data-wdc-updated-row]');
     if (updatedRow) updatedRow.hidden = true;
     const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
@@ -1218,13 +1247,13 @@
       message.dataset.status = '';
     }
     setCdekPollingIndicator(box, false);
-    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, canPrintBarcode: false, canDownloadDpdDocuments: false });
+    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, canPrintBarcode: false, canDownloadDpdDocuments: false, canDownloadYandexLabel: false });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;
   }
 
   function showShipmentToast(box, text, type, options) {
-    const settings = Object.assign({ append: false }, options || {});
+    const settings = Object.assign({ append: false, persist: false }, options || {});
     const host = box || document.body;
     let toast = host.querySelector ? host.querySelector('[data-wdc-shipment-toast]') : null;
     if (!toast) {
@@ -1242,15 +1271,61 @@
       toast.textContent = text;
     }
     toast.hidden = false;
-    toastTimers.set(toast, window.setTimeout(function () {
-      toast.hidden = true;
-    }, 10000));
+    if (settings.persist) {
+      toastTimers.delete(toast);
+    } else {
+      toastTimers.set(toast, window.setTimeout(function () {
+        toast.hidden = true;
+      }, 10000));
+    }
+    return toast;
+  }
+
+  function isCancellationPollingPurpose(value) {
+    return String(value || '') === 'cancellation';
+  }
+
+  function cancellationPollingProgressMessage(attempt, maxAttempts) {
+    return 'Запрос на отмену отправления Яндекс отправлен.\nПроведено: ' + String(attempt || 0) + '/' + String(maxAttempts || 14) + ' проверок отмены';
+  }
+
+  function cancellationPollingExhaustedMessage(attempt, maxAttempts) {
+    return 'Статус отмены пока не получен.\nПроведено: ' + String(attempt || maxAttempts || 14) + '/' + String(maxAttempts || 14) + ' проверок отмены.\nПовторите обновление статуса позднее.';
+  }
+
+  function initCancellationPollingToast(box, token, maxAttempts) {
+    if (!box || !token) return;
+    const toast = showShipmentToast(box, cancellationPollingProgressMessage(0, maxAttempts), 'success', { persist: true });
+    cancellationPollingToasts.set(box, {
+      token: token,
+      maxAttempts: maxAttempts || 14,
+      toast: toast
+    });
+  }
+
+  function updateCancellationPollingToast(box, token, text, type, persist) {
+    const state = box && cancellationPollingToasts.get(box);
+    if (!state || state.token !== token || shipmentPollingTokens.get(box) !== token) return;
+    state.toast = showShipmentToast(box, text, type || 'success', { persist: persist !== false });
+    cancellationPollingToasts.set(box, state);
+  }
+
+  function clearCancellationPollingToast(box) {
+    const state = box && cancellationPollingToasts.get(box);
+    if (state && state.toast) {
+      const previous = toastTimers.get(state.toast);
+      if (previous) window.clearTimeout(previous);
+      state.toast.hidden = true;
+      toastTimers.delete(state.toast);
+    }
+    if (box) cancellationPollingToasts.delete(box);
   }
 
   function requestShipmentStatus(button, options) {
     const settings = Object.assign({ auto: false }, options || {});
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     const text = getPresentation(box);
+    const isCancellationPolling = settings.auto && isCancellationPollingPurpose(settings.pollPurpose);
     const message = box && box.querySelector('[data-wdc-shipment-status-message]');
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.updateStatusAction);
@@ -1276,13 +1351,18 @@
           return null;
         }
         if (payload.data && payload.data.cancelled_and_removed) {
+          if (isCancellationPolling) {
+            updateCancellationPollingToast(box, settings.pollingToken, payload.data.message || 'Отправление Яндекс отменено.', 'success', false);
+          }
           stopShipmentRegistrationPolling(box);
           resetShipmentUi(box);
           if (message) {
             message.dataset.status = 'success';
             message.textContent = payload.data.message || 'Отправление Яндекс отменено.';
           }
-          showShipmentToast(box, payload.data.message || 'Отправление Яндекс отменено.', 'success', { append: true });
+          if (!isCancellationPolling) {
+            showShipmentToast(box, payload.data.message || 'Отправление Яндекс отменено.', 'success', { append: true });
+          }
           return payload;
         }
         const statusPayload = shipmentStatusFromResponse(payload.data);
@@ -1292,7 +1372,16 @@
           message.dataset.status = isPending ? 'warning' : 'success';
           message.textContent = payload.data.message || text.updatedToast;
         }
-        if (settings.auto && !isPending) {
+        if (isCancellationPolling) {
+          const terminal = !!(statusPayload && (statusPayload.registration_terminal || !statusPayload.polling_continue));
+          if (terminal) {
+            const rawStatus = String(statusPayload && statusPayload.carrier_status_title || statusPayload && statusPayload.yandex_status || '').trim();
+            const terminalMessage = rawStatus ? 'Отмена не выполнена. Получен статус Яндекс: ' + rawStatus + '.' : (payload.data.message || text.updatedToast);
+            updateCancellationPollingToast(box, settings.pollingToken, terminalMessage, 'warning', false);
+          } else {
+            updateCancellationPollingToast(box, settings.pollingToken, cancellationPollingProgressMessage(settings.attempt || 0, settings.maxAttempts || 14), 'success', true);
+          }
+        } else if (settings.auto && !isPending) {
           const autoMessage = statusPayload && statusPayload.carrier_key === 'yandex_delivery' && statusPayload.carrier_status_title
             ? 'Статус отправления Яндекс получен: ' + statusPayload.carrier_status_title + '.'
             : (payload.data.message || text.updatedToast);
@@ -1309,6 +1398,9 @@
           message.textContent = settings.auto
             ? text.createdToast + ' Статус пока не обновлен: ' + error.message
             : error.message;
+        }
+        if (isCancellationPolling) {
+          updateCancellationPollingToast(box, settings.pollingToken, cancellationPollingProgressMessage(settings.attempt || 0, settings.maxAttempts || 14), 'warning', true);
         }
         if (settings.auto) {
           if (settings.pollingToken) {
@@ -1400,7 +1492,11 @@
           message.dataset.status = 'warning';
           message.textContent = payload.data.message || text.pollingTimeoutMessage;
         }
-        showShipmentToast(box, payload.data.message || text.pollingTimeoutMessage, 'warning');
+        if ('cancellation' === (button && button.dataset ? button.dataset.pollPurpose || '' : '')) {
+          updateCancellationPollingToast(box, token, cancellationPollingExhaustedMessage(attempts, attempts || 14), 'warning', false);
+        } else {
+          showShipmentToast(box, payload.data.message || text.pollingTimeoutMessage, 'warning');
+        }
         return payload;
       })
       .catch((error) => {
@@ -1410,13 +1506,17 @@
         if (window.console && window.console.warn) {
           window.console.warn('Не удалось сохранить состояние автоматической проверки отправления.', error);
         }
-        updateShipmentButtons(box, { hasShipment: true, canCreate: false, canAttachManual: false, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false, canDownloadDpdDocuments: false });
+        updateShipmentButtons(box, { hasShipment: true, canCreate: false, canAttachManual: false, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false, canDownloadDpdDocuments: false, canDownloadYandexLabel: false });
         const message = box && box.querySelector('[data-wdc-shipment-status-message]');
         if (message) {
           message.dataset.status = 'warning';
           message.textContent = text.pollingTimeoutMessage;
         }
-        showShipmentToast(box, text.pollingTimeoutMessage, 'warning');
+        if ('cancellation' === (button && button.dataset ? button.dataset.pollPurpose || '' : '')) {
+          updateCancellationPollingToast(box, token, cancellationPollingExhaustedMessage(attempts, attempts || 14), 'warning', false);
+        } else {
+          showShipmentToast(box, text.pollingTimeoutMessage, 'warning');
+        }
         return null;
       });
   }
@@ -1447,9 +1547,12 @@
     };
     setShipmentPollingIndicator(box, true);
     shipmentPollingTokens.set(box, token);
+    if (isCancellationPollingPurpose(settings.purpose || settings.mode)) {
+      initCancellationPollingToast(box, token, maxAttempts || 14);
+    }
     const tick = function () {
       attempts += 1;
-      requestShipmentStatus(button, { auto: true, pollingToken: token })
+      requestShipmentStatus(button, { auto: true, pollingToken: token, pollPurpose: settings.purpose || settings.mode || 'registration', attempt: attempts, maxAttempts: maxAttempts || 14 })
         .then((payload) => {
           if (shipmentPollingTokens.get(box) !== token) return;
           const status = payload && payload.data && payload.data.status ? payload.data.status : {};
@@ -1539,7 +1642,7 @@
       .then((payload) => {
         if (!payload || !payload.success) {
           if (payload && payload.data && payload.data.temporary_can_remove) {
-            updateShipmentButtons(box, { hasShipment: true, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false, canDownloadDpdDocuments: false });
+            updateShipmentButtons(box, { hasShipment: true, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false, canDownloadDpdDocuments: false, canDownloadYandexLabel: false });
           }
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
         }
@@ -1551,7 +1654,6 @@
         }
         renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
         renderShipmentTechnicalInfo(box, payload.data || {});
-        showShipmentToast(box, payload.data.message || 'Запрос на отмену отправления отправлен.', 'success');
         if (payload.data && payload.data.auto_poll) {
           startShipmentRegistrationPolling(button, {
             interval: payload.data.poll_interval_ms || 5000,
@@ -1559,6 +1661,8 @@
             mode: 'cancellation',
             purpose: payload.data.poll_purpose || 'cancellation'
           });
+        } else {
+          showShipmentToast(box, payload.data.message || 'Запрос на отмену отправления отправлен.', 'success');
         }
         return payload;
       })
@@ -1575,6 +1679,7 @@
     if (confirmation && !window.confirm(confirmation)) {
       return Promise.resolve(null);
     }
+    clearCancellationPollingToast(box);
     stopShipmentRegistrationPolling(box);
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.removeFromOrderAction || 'wdc_remove_shipment_from_order');
@@ -1638,7 +1743,8 @@
           canRemove: !!statusPayload.can_remove_from_order,
           canUpdate: !!statusPayload.can_update_status,
           canPrintBarcode: !!statusPayload.can_print_barcode,
-          canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents
+          canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents,
+          canDownloadYandexLabel: !!statusPayload.can_download_yandex_label
         });
         showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
         return payload;
@@ -2442,6 +2548,91 @@
       });
   }
 
+  function setYandexLabelButtonState(link, busy, label) {
+    if (!link) return;
+    const originalText = link.getAttribute('data-wdc-original-label') || link.textContent || 'Скачать ярлык';
+    link.setAttribute('data-wdc-original-label', originalText);
+    if (busy) {
+      link.setAttribute('aria-disabled', 'true');
+      link.classList.add('is-busy', 'wdc-cdek-barcode-download--busy');
+      link.textContent = label || 'Скачиваем ярлык...';
+    } else {
+      link.classList.remove('is-busy', 'wdc-cdek-barcode-download--busy');
+      link.removeAttribute('aria-disabled');
+      link.textContent = originalText;
+    }
+  }
+
+  function yandexLabelFilenameFromDisposition(disposition) {
+    const fallback = 'yandex-label.pdf';
+    if (!disposition) return fallback;
+    const utfMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    if (utfMatch && utfMatch[1]) {
+      try {
+        return decodeURIComponent(utfMatch[1].replace(/["']/g, '')) || fallback;
+      } catch (error) {
+        return fallback;
+      }
+    }
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+    return match && match[1] ? match[1] : fallback;
+  }
+
+  function triggerYandexLabelDownload(downloadUrl) {
+    downloadUrl = String(downloadUrl || '').replace(/&amp;/g, '&');
+    if (!downloadUrl) return Promise.reject(new Error('Не удалось получить ярлык Яндекс.Доставки.'));
+    return fetch(downloadUrl, {
+      method: 'GET',
+      credentials: 'same-origin'
+    })
+      .then((response) => {
+        if (!response.ok) {
+          return response.text().catch(function () { return ''; }).then(function (text) {
+            const message = String(text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            throw new Error(message || 'Не удалось получить ярлык Яндекс.Доставки.');
+          });
+        }
+        const contentType = response.headers.get('Content-Type') || response.headers.get('content-type') || '';
+        if (contentType && contentType.toLowerCase().indexOf('application/pdf') === -1) {
+          throw new Error('Яндекс.Доставка вернула ответ, который не является PDF-файлом.');
+        }
+        const filename = yandexLabelFilenameFromDisposition(response.headers.get('Content-Disposition') || response.headers.get('content-disposition') || '');
+        return response.blob().then((blob) => ({ blob, filename }));
+      })
+      .then((download) => {
+        if (!download.blob || download.blob.size <= 0) {
+          throw new Error('Яндекс.Доставка вернула пустой файл ярлыка.');
+        }
+        const objectUrl = URL.createObjectURL(download.blob);
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = download.filename || 'yandex-label.pdf';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(function () {
+          URL.revokeObjectURL(objectUrl);
+        }, 30000);
+      });
+  }
+
+  function requestYandexLabelDownload(link) {
+    if (!link || link.classList.contains('is-busy')) return;
+    const box = link.closest('[data-wdc-shipments-metabox]');
+    setYandexLabelButtonState(link, true, 'Скачиваем ярлык...');
+    triggerYandexLabelDownload(link.dataset.downloadUrl || link.href || '')
+      .then(function () {
+        window.clearTimeout(link._wdcYandexLabelResetTimer);
+        link._wdcYandexLabelResetTimer = window.setTimeout(function () {
+          setYandexLabelButtonState(link, false);
+        }, CDEK_BARCODE_RESET_MS);
+      })
+      .catch(function (error) {
+        setYandexLabelButtonState(link, false);
+        showShipmentToast(box, error && error.message ? error.message : 'Не удалось получить ярлык Яндекс.Доставки.', 'error');
+      });
+  }
+
   document.addEventListener('click', function (event) {
     const dateStep = event.target.closest('[data-wdc-date-step]');
     if (dateStep) {
@@ -2480,6 +2671,12 @@
     if (dpdDocumentsDownload) {
       event.preventDefault();
       requestDpdDocumentsDownload(dpdDocumentsDownload);
+      return;
+    }
+    const yandexLabelDownload = event.target.closest('[data-wdc-yandex-label-download]');
+    if (yandexLabelDownload) {
+      event.preventDefault();
+      requestYandexLabelDownload(yandexLabelDownload);
       return;
     }
     const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
@@ -2813,7 +3010,8 @@
             canRemove: !!statusPayload.can_remove_from_order,
             canUpdate: !!statusPayload.can_update_status,
             canPrintBarcode: !!statusPayload.can_print_barcode,
-            canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents
+            canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents,
+            canDownloadYandexLabel: !!statusPayload.can_download_yandex_label
           });
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           const pollInterval = parseInt(statusPayload.registration_poll_interval_ms || text.registrationPollIntervalMs || '5000', 10) || 5000;

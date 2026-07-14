@@ -1,5 +1,9 @@
 # WDC Shipment Statuses
 
+Version: 0.111.0.
+
+Version 0.111.0 keeps Yandex shipment documents and pickup-code presentation inside the normalized shipment status payload. `YandexShipmentAdapter::status_payload()` now includes `yandex_self_pickup_node_code` for runtime metabox refresh and uses universal status to expose the `download_yandex_label` label action. The primary status mapping model is unchanged: raw Yandex statuses still resolve through `YandexStatusMapping`, while PDF label visibility is a presentation/action concern derived from the resolved universal status and persisted request id.
+
 Version: 0.109.2.
 
 Version 0.109.2 keeps raw `CANCELLED` as a special Yandex API lifecycle signal. During cancellation, raw `CANCELLED` always completes polling and local auto-delete even if admin status mapping resolves it to a non-terminal universal status. The universal status is still resolved and passed through `ShipmentOrderStatusMappingService` before delete. Other raw statuses remain controlled by universal mapping only, and immediate terminal `request/info` responses after cancel return `auto_poll=false`.

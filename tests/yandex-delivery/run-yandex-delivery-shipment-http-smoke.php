@@ -53,8 +53,8 @@ function yd_shipment_http_settings(): YandexDeliverySettings {
 	$settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'SRC-1' ) );
 	return $settings;
 }
-function yd_shipment_http_response( array $body, int $code = 200 ): YandexDeliveryApiResponse {
-	return new YandexDeliveryApiResponse( $code, json_encode( $body, JSON_UNESCAPED_UNICODE ) ?: '{}' );
+function yd_shipment_http_response( array $body, int $code = 200, array $headers = array() ): YandexDeliveryApiResponse {
+	return new YandexDeliveryApiResponse( $code, json_encode( $body, JSON_UNESCAPED_UNICODE ) ?: '{}', $headers );
 }
 function yd_offer( string $id, string $policy, string $min, string $max, string $pickup_max, string $price, array $extra = array() ): array {
 	return array_merge(
@@ -95,6 +95,7 @@ function yd_info_response( string $request_id = 'REQ-1', array $places = array( 
 		'state' => array( 'status' => 'CREATED', 'description' => 'Заказ создан в операторе', 'timestamp_unix' => 1783786240, 'timestamp' => '2026-07-11T16:10:40.000000Z' ),
 		'full_items_price' => 10000,
 		'sharing_url' => 'https://dostavka.yandex.ru/route/example',
+		'self_pickup_node_code' => array( 'type' => 'pickup', 'code' => '00000' ),
 		'courier_order_id' => '880191690',
 	);
 }
@@ -129,10 +130,18 @@ $info = $client->request_info( $confirmed->request_id, $payload['places'] );
 yd_shipment_http_assert( 'REQ-1' === $info->request_id && '880191690' === $info->courier_order_id && 'https://dostavka.yandex.ru/route/example' === $info->sharing_url && 'CREATED' === $info->status, 'RequestInfo must parse top-level ids, sharing URL and state.status.' );
 yd_shipment_http_assert( 'custom_location' === $info->destination['type'] && 'Михайлов Михаил' === $info->recipient['first_name'] && 'YD6A526A61E86E2204C' === $info->places[0]['barcode'] && 'YD6A526A61E86E2204C' === $info->items[0]['place_barcode'], 'RequestInfo must parse nested request destination, recipient, items and places with real barcodes.' );
 yd_shipment_http_assert( 'ORDER-123-1' === array_key_first( $info->place_barcode_map ) && 'YD6A526A61E86E2204C' === $info->place_barcode_map['ORDER-123-1'] && 'e52b919d1905097519e2615d15a3faa6' === $info->items[0]['barcode'], 'Temporary-to-real barcode map and item barcode must be preserved.' );
+yd_shipment_http_assert( '00000' === $info->self_pickup_node_code && 'pickup' === $info->self_pickup_node_type, 'RequestInfo must preserve self_pickup_node_code.code as a string with leading zeros.' );
 $history = $client->request_history( 'REQ-1' );
 yd_shipment_http_assert( 2 === count( $history->events ) && 'CANCELLED' === $history->events[1]['status'] && 'SHOP_CANCELLED' === $history->events[1]['reason'] && '2026-07-11T15:43:00.000000Z' === $history->events[1]['timestamp_utc'], 'state_history must be parsed with reason and UTC timestamp.' );
 $cancel = $client->cancel_request( 'REQ-1' );
 yd_shipment_http_assert( 'REQ-1' === $cancel->request_id && 'CREATED' === $cancel->status && 'Заказ отменяется' === $cancel->description && 'cancellation_started' === $cancel->reason, 'Async cancel response must be preserved as operation state.' );
+
+$label_fake = new YdShipmentHttpFake( array( new YandexDeliveryApiResponse( 200, "%PDF-1.4\n% yandex label", array( 'content-type' => 'application/pdf' ) ) ) );
+$label_client = new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_shipment_http_settings(), $label_fake ) );
+$label = $label_client->generate_labels( array( 'abc-udp' ) );
+yd_shipment_http_assert( "%PDF-" === substr( $label->body, 0, 5 ) && 'application/pdf' === strtolower( $label->content_type ), 'Yandex generate-labels must return binary PDF response without JSON decoding.' );
+$label_body = json_decode( (string) ( $label_fake->requests[0]['args']['body'] ?? '{}' ), true );
+yd_shipment_http_assert( YandexDeliveryEndpoints::REQUEST_GENERATE_LABELS_PATH === ( parse_url( $label_fake->requests[0]['url'], PHP_URL_PATH ) ?: '' ) && 'POST' === $label_fake->requests[0]['method'] && array( 'abc-udp' ) === (array) ( $label_body['request_ids'] ?? array() ) && 'one' === (string) ( $label_body['generate_type'] ?? '' ) && 'ru' === (string) ( $label_body['language'] ?? '' ), 'generate-labels must call documented endpoint with request_ids array/generate_type/language body.' );
 
 $urls = array_column( $fake->requests, 'url' );
 $paths = array_map( static fn( string $url ): string => parse_url( $url, PHP_URL_PATH ) ?: '', $urls );

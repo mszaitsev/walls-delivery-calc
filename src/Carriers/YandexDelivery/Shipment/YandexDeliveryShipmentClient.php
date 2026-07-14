@@ -89,4 +89,41 @@ final class YandexDeliveryShipmentClient {
 
 		return $state;
 	}
+
+	/**
+	 * @param array<int,string> $request_ids
+	 */
+	public function generate_labels( array $request_ids, string $generate_type = 'one', string $language = 'ru' ): YandexDeliveryBinaryDocument {
+		$request_ids = array_values( array_filter( array_map( static fn ( mixed $value ): string => trim( (string) $value ), $request_ids ), static fn ( string $value ): bool => '' !== $value ) );
+		if ( array() === $request_ids ) {
+			throw new YandexDeliveryApiException( 'Yandex request_id is required.', array( 'error_code' => 'request_id_missing' ) );
+		}
+
+		$response = $this->api->generateLabels(
+			array(
+				'request_ids' => $request_ids,
+				'generate_type' => '' !== trim( $generate_type ) ? trim( $generate_type ) : 'one',
+				'language' => '' !== trim( $language ) ? trim( $language ) : 'ru',
+			)
+		);
+
+		return new YandexDeliveryBinaryDocument(
+			$response->body,
+			$this->header_value( $response->headers, 'content-type' ),
+			$response->status_code,
+			$response->headers
+		);
+	}
+
+	/** @param array<string,mixed> $headers */
+	private function header_value( array $headers, string $name ): string {
+		$name = strtolower( $name );
+		foreach ( $headers as $key => $value ) {
+			if ( strtolower( (string) $key ) === $name ) {
+				return is_array( $value ) ? implode( ', ', array_map( 'strval', $value ) ) : (string) $value;
+			}
+		}
+
+		return '';
+	}
 }

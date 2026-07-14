@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -16,8 +17,10 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private YandexShipmentRegistrationService $registration,
 		private YandexShipmentButtonPolicy $buttons,
-		private ?YandexStatusMapping $status_mapping = null
+		private ?YandexStatusMapping $status_mapping = null,
+		private ?YandexShipmentLabelPolicy $label_policy = null
 	) {
+		$this->label_policy ??= new YandexShipmentLabelPolicy( $this->status_mapping );
 	}
 
 	public function carrier_key(): string { return YandexDeliverySettings::CARRIER_KEY; }
@@ -64,7 +67,6 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 
 	/** @param array<string,mixed> $shipment @return array<string,mixed> */
 	public function status_payload( object $order, array $shipment ): array {
-		unset( $order );
 		$policy = $this->buttons->resolve( $shipment );
 		$status = trim( (string) ( $shipment['yandex_status'] ?? '' ) );
 		$universal = sanitize_key( (string) ( $shipment['universal_status_code'] ?? '' ) );
@@ -106,6 +108,9 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'registration_error' => false,
 			'registration_poll_interval_ms' => 5000,
 			'registration_poll_max_attempts' => 14,
+		) + $this->actual_cost_payload( $shipment, $order ) + array(
+			'yandex_self_pickup_node_code' => (string) ( $shipment['yandex_self_pickup_node_code'] ?? '' ),
+			'yandex_self_pickup_node_type' => (string) ( $shipment['yandex_self_pickup_node_type'] ?? '' ),
 		);
 	}
 
@@ -138,7 +143,21 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function mark_polling_exhausted( object $order, int $attempts, string $purpose = 'registration' ): array { return $this->registration->mark_polling_exhausted( $order, $attempts, $purpose ); }
 
 	/** @param array<string,mixed> $shipment @return array<int,array<string,mixed>> */
-	public function label_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }
+	public function label_actions( object $order, array $shipment ): array {
+		unset( $order );
+		if ( ! $this->label_policy->can_download( $shipment ) ) {
+			return array();
+		}
+
+		return array(
+			array(
+				'key' => 'download_yandex_label',
+				'label' => 'Скачать ярлык',
+				'type' => 'download',
+				'visible' => true,
+			),
+		);
+	}
 
 	public function supports_status_auto_sync(): bool { return true; }
 
@@ -191,6 +210,86 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		$scheme = strtolower( (string) parse_url( $url, PHP_URL_SCHEME ) );
 
 		return in_array( $scheme, array( 'http', 'https' ), true ) ? $url : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	private function actual_cost_payload( array $shipment, object $order ): array {
+		$actual_kopecks = $this->positive_int_or_null( $shipment['actual_cost_kopecks'] ?? $shipment['yandex_offer_pricing_total_kopecks'] ?? null );
+		if ( null === $actual_kopecks ) {
+			return array(
+				'actual_cost_kopecks' => null,
+				'actual_cost_label' => '',
+				'actual_cost_compare_status' => '',
+				'actual_cost_compare_message' => '',
+				'base_api_cost_kopecks' => null,
+			);
+		}
+
+		$base_kopecks = $this->base_api_cost_kopecks( $order );
+		$status = 'neutral';
+		$message = 'нет базовой стоимости для сравнения';
+		if ( null !== $base_kopecks ) {
+			$threshold = (int) floor( $base_kopecks * 1.03 );
+			$status = $actual_kopecks <= $threshold ? 'ok' : 'warning';
+			$message = 'Базовая стоимость API: ' . $this->format_rubles( $base_kopecks ) . ' руб.';
+		}
+
+		return array(
+			'actual_cost_kopecks' => $actual_kopecks,
+			'actual_cost_label' => $this->format_rubles( $actual_kopecks ) . ' руб.',
+			'actual_cost_compare_status' => $status,
+			'actual_cost_compare_message' => $message,
+			'base_api_cost_kopecks' => $base_kopecks,
+		);
+	}
+
+	private function base_api_cost_kopecks( object $order ): ?int {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return null;
+		}
+		$value = $order->get_meta( OrderShippingMetaPersister::CALCULATION_META_KEY, true );
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			$value = is_array( $decoded ) ? $decoded : array();
+		}
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+		$api = is_array( $value['api'] ?? null ) ? $value['api'] : array();
+		foreach ( array( 'api_base_price_kopecks', 'api_base_cost_kopecks', 'base_api_cost_kopecks' ) as $key ) {
+			$kopecks = $this->positive_int_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
+			if ( null !== $kopecks ) {
+				return $kopecks;
+			}
+		}
+		foreach ( array( 'api_base_price_rub', 'api_price_with_vat_rub', 'base_api_cost_rub' ) as $key ) {
+			$rubles = $this->numeric_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
+			if ( null !== $rubles && $rubles > 0 ) {
+				return (int) round( $rubles * 100 );
+			}
+		}
+
+		return null;
+	}
+
+	private function positive_int_or_null( mixed $value ): ?int {
+		if ( ! is_numeric( $value ) ) {
+			return null;
+		}
+		$integer = (int) $value;
+
+		return $integer > 0 ? $integer : null;
+	}
+
+	private function numeric_or_null( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value : null;
+	}
+
+	private function format_rubles( int $kopecks ): string {
+		return number_format( $kopecks / 100, 2, '.', '' );
 	}
 
 	public function auto_sync_throttle_microseconds(): int { return 0; }

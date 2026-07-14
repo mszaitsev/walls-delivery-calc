@@ -343,6 +343,7 @@ C:.
 |   |       |       YandexDeliveryPricingResult.php
 |   |       |
 |   |       \---Shipment
+|   |               YandexDeliveryBinaryDocument.php
 |   |               YandexDeliveryConfirmedRequest.php
 |   |               YandexDeliveryEarliestOfferSelector.php
 |   |               YandexDeliveryOffer.php
@@ -713,6 +714,8 @@ C:.
 |   |   \---YandexDelivery
 |   |           YandexShipmentAdapter.php
 |   |           YandexShipmentButtonPolicy.php
+|   |           YandexShipmentDocumentService.php
+|   |           YandexShipmentLabelPolicy.php
 |   |           YandexShipmentPersistenceMapper.php
 |   |           YandexShipmentRegistrationService.php
 |   |           YandexShipmentRepository.php

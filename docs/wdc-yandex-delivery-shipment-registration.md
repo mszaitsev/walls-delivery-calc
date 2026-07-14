@@ -1,5 +1,13 @@
 # Регистрация отправлений Яндекс.Доставки
 
+## Статус 0.111.0
+
+Регистрация теперь завершает три shipment-facing поля Яндекс.Доставки. Фактическая стоимость отправления берётся только из выбранного offer (`pricing_total`) и сохраняется как integer kopecks в общем actual-cost contract; `request/info` не содержит поздней цены доставки, поэтому status/reconciliation/cancel merges сохраняют выбранную offer price, а manual attach цену не создаёт и не показывает `0 ₽`. Сравнение с Base API cost использует общий порог `+3%` включительно.
+
+Ярлык отправления скачивается через существующий label-action/download flow: adapter отдаёт `download_yandex_label`, metabox проверяет nonce/capability/order, server-side читает persisted request_id и `YandexDeliveryShipmentClient::generate_labels()` отправляет `request_ids` массивом в `/api/b2b/platform/request/generate-labels`. Ответ обрабатывается как binary PDF (`%PDF-`), без JSON decoder для успешного тела.
+
+`request/info.self_pickup_node_code.code` сохраняется строкой в `yandex_self_pickup_node_code`, поэтому ведущие нули (`00000`) не теряются. В общем блоке «Отправления» код показывается сразу после tracking-link строкой `Код для получения`, только когда API вернул непустое значение.
+
 ## Статус 0.110.2
 
 Ручной поиск адреса в карте `ПВЗ отправления Яндекс` больше не ограничивается городом настроенного source station. Initial load карты по-прежнему использует `source_location_id` для загрузки drop-off точек исходной географии, но address-search строит отдельный context: `carrier=yandex_delivery`, `purpose=source_dropoff`, `country_code=RU`, без `location_id`, `source_location_id`, FIAS/KLADR/GAR или prefix исходного города. Поэтому запросы вроде `Москва, Ходынский бульвар, 9` и `Казань, Баумана 1` уходят в DaData ровно в пользовательском виде, а не как `Новосибирск, Москва, ...`.
