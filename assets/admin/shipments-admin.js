@@ -3,6 +3,7 @@
   const toastTimers = new WeakMap();
   const shipmentPollingTimers = new WeakMap();
   const shipmentPollingTokens = new WeakMap();
+  const cancellationPollingToasts = new WeakMap();
   const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
 
   function findShipmentContainer(element) {
@@ -1252,7 +1253,7 @@
   }
 
   function showShipmentToast(box, text, type, options) {
-    const settings = Object.assign({ append: false }, options || {});
+    const settings = Object.assign({ append: false, persist: false }, options || {});
     const host = box || document.body;
     let toast = host.querySelector ? host.querySelector('[data-wdc-shipment-toast]') : null;
     if (!toast) {
@@ -1270,15 +1271,61 @@
       toast.textContent = text;
     }
     toast.hidden = false;
-    toastTimers.set(toast, window.setTimeout(function () {
-      toast.hidden = true;
-    }, 10000));
+    if (settings.persist) {
+      toastTimers.delete(toast);
+    } else {
+      toastTimers.set(toast, window.setTimeout(function () {
+        toast.hidden = true;
+      }, 10000));
+    }
+    return toast;
+  }
+
+  function isCancellationPollingPurpose(value) {
+    return String(value || '') === 'cancellation';
+  }
+
+  function cancellationPollingProgressMessage(attempt, maxAttempts) {
+    return 'Запрос на отмену отправления Яндекс отправлен.\nПроведено: ' + String(attempt || 0) + '/' + String(maxAttempts || 14) + ' проверок отмены';
+  }
+
+  function cancellationPollingExhaustedMessage(attempt, maxAttempts) {
+    return 'Статус отмены пока не получен.\nПроведено: ' + String(attempt || maxAttempts || 14) + '/' + String(maxAttempts || 14) + ' проверок отмены.\nПовторите обновление статуса позднее.';
+  }
+
+  function initCancellationPollingToast(box, token, maxAttempts) {
+    if (!box || !token) return;
+    const toast = showShipmentToast(box, cancellationPollingProgressMessage(0, maxAttempts), 'success', { persist: true });
+    cancellationPollingToasts.set(box, {
+      token: token,
+      maxAttempts: maxAttempts || 14,
+      toast: toast
+    });
+  }
+
+  function updateCancellationPollingToast(box, token, text, type, persist) {
+    const state = box && cancellationPollingToasts.get(box);
+    if (!state || state.token !== token || shipmentPollingTokens.get(box) !== token) return;
+    state.toast = showShipmentToast(box, text, type || 'success', { persist: persist !== false });
+    cancellationPollingToasts.set(box, state);
+  }
+
+  function clearCancellationPollingToast(box) {
+    const state = box && cancellationPollingToasts.get(box);
+    if (state && state.toast) {
+      const previous = toastTimers.get(state.toast);
+      if (previous) window.clearTimeout(previous);
+      state.toast.hidden = true;
+      toastTimers.delete(state.toast);
+    }
+    if (box) cancellationPollingToasts.delete(box);
   }
 
   function requestShipmentStatus(button, options) {
     const settings = Object.assign({ auto: false }, options || {});
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     const text = getPresentation(box);
+    const isCancellationPolling = settings.auto && isCancellationPollingPurpose(settings.pollPurpose);
     const message = box && box.querySelector('[data-wdc-shipment-status-message]');
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.updateStatusAction);
@@ -1304,13 +1351,18 @@
           return null;
         }
         if (payload.data && payload.data.cancelled_and_removed) {
+          if (isCancellationPolling) {
+            updateCancellationPollingToast(box, settings.pollingToken, payload.data.message || 'Отправление Яндекс отменено.', 'success', false);
+          }
           stopShipmentRegistrationPolling(box);
           resetShipmentUi(box);
           if (message) {
             message.dataset.status = 'success';
             message.textContent = payload.data.message || 'Отправление Яндекс отменено.';
           }
-          showShipmentToast(box, payload.data.message || 'Отправление Яндекс отменено.', 'success', { append: true });
+          if (!isCancellationPolling) {
+            showShipmentToast(box, payload.data.message || 'Отправление Яндекс отменено.', 'success', { append: true });
+          }
           return payload;
         }
         const statusPayload = shipmentStatusFromResponse(payload.data);
@@ -1320,7 +1372,16 @@
           message.dataset.status = isPending ? 'warning' : 'success';
           message.textContent = payload.data.message || text.updatedToast;
         }
-        if (settings.auto && !isPending) {
+        if (isCancellationPolling) {
+          const terminal = !!(statusPayload && (statusPayload.registration_terminal || !statusPayload.polling_continue));
+          if (terminal) {
+            const rawStatus = String(statusPayload && statusPayload.carrier_status_title || statusPayload && statusPayload.yandex_status || '').trim();
+            const terminalMessage = rawStatus ? 'Отмена не выполнена. Получен статус Яндекс: ' + rawStatus + '.' : (payload.data.message || text.updatedToast);
+            updateCancellationPollingToast(box, settings.pollingToken, terminalMessage, 'warning', false);
+          } else {
+            updateCancellationPollingToast(box, settings.pollingToken, cancellationPollingProgressMessage(settings.attempt || 0, settings.maxAttempts || 14), 'success', true);
+          }
+        } else if (settings.auto && !isPending) {
           const autoMessage = statusPayload && statusPayload.carrier_key === 'yandex_delivery' && statusPayload.carrier_status_title
             ? 'Статус отправления Яндекс получен: ' + statusPayload.carrier_status_title + '.'
             : (payload.data.message || text.updatedToast);
@@ -1337,6 +1398,9 @@
           message.textContent = settings.auto
             ? text.createdToast + ' Статус пока не обновлен: ' + error.message
             : error.message;
+        }
+        if (isCancellationPolling) {
+          updateCancellationPollingToast(box, settings.pollingToken, cancellationPollingProgressMessage(settings.attempt || 0, settings.maxAttempts || 14), 'warning', true);
         }
         if (settings.auto) {
           if (settings.pollingToken) {
@@ -1428,7 +1492,11 @@
           message.dataset.status = 'warning';
           message.textContent = payload.data.message || text.pollingTimeoutMessage;
         }
-        showShipmentToast(box, payload.data.message || text.pollingTimeoutMessage, 'warning');
+        if ('cancellation' === (button && button.dataset ? button.dataset.pollPurpose || '' : '')) {
+          updateCancellationPollingToast(box, token, cancellationPollingExhaustedMessage(attempts, attempts || 14), 'warning', false);
+        } else {
+          showShipmentToast(box, payload.data.message || text.pollingTimeoutMessage, 'warning');
+        }
         return payload;
       })
       .catch((error) => {
@@ -1444,7 +1512,11 @@
           message.dataset.status = 'warning';
           message.textContent = text.pollingTimeoutMessage;
         }
-        showShipmentToast(box, text.pollingTimeoutMessage, 'warning');
+        if ('cancellation' === (button && button.dataset ? button.dataset.pollPurpose || '' : '')) {
+          updateCancellationPollingToast(box, token, cancellationPollingExhaustedMessage(attempts, attempts || 14), 'warning', false);
+        } else {
+          showShipmentToast(box, text.pollingTimeoutMessage, 'warning');
+        }
         return null;
       });
   }
@@ -1475,9 +1547,12 @@
     };
     setShipmentPollingIndicator(box, true);
     shipmentPollingTokens.set(box, token);
+    if (isCancellationPollingPurpose(settings.purpose || settings.mode)) {
+      initCancellationPollingToast(box, token, maxAttempts || 14);
+    }
     const tick = function () {
       attempts += 1;
-      requestShipmentStatus(button, { auto: true, pollingToken: token })
+      requestShipmentStatus(button, { auto: true, pollingToken: token, pollPurpose: settings.purpose || settings.mode || 'registration', attempt: attempts, maxAttempts: maxAttempts || 14 })
         .then((payload) => {
           if (shipmentPollingTokens.get(box) !== token) return;
           const status = payload && payload.data && payload.data.status ? payload.data.status : {};
@@ -1579,7 +1654,6 @@
         }
         renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
         renderShipmentTechnicalInfo(box, payload.data || {});
-        showShipmentToast(box, payload.data.message || 'Запрос на отмену отправления отправлен.', 'success');
         if (payload.data && payload.data.auto_poll) {
           startShipmentRegistrationPolling(button, {
             interval: payload.data.poll_interval_ms || 5000,
@@ -1587,6 +1661,8 @@
             mode: 'cancellation',
             purpose: payload.data.poll_purpose || 'cancellation'
           });
+        } else {
+          showShipmentToast(box, payload.data.message || 'Запрос на отмену отправления отправлен.', 'success');
         }
         return payload;
       })
@@ -1603,6 +1679,7 @@
     if (confirmation && !window.confirm(confirmation)) {
       return Promise.resolve(null);
     }
+    clearCancellationPollingToast(box);
     stopShipmentRegistrationPolling(box);
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.removeFromOrderAction || 'wdc_remove_shipment_from_order');
