@@ -7,6 +7,11 @@
    - Preserved contract: carrier-specific actual-cost sources and persisted shipment keys stay unchanged; metabox still reads only `actual_cost_label`, `actual_cost_compare_status` and `actual_cost_compare_message`. Since 0.114.1 carrier boundaries again treat actual cost zero as unknown and the base resolver returns only positive base values.
    - Regression coverage: `tests/shipments/run-shipment-actual-cost-presentation-smoke.php` covers hidden actual cost, carrier zero actual values, neutral missing/zero base, exact +3%, +3% plus one kopeck, non-round bases, formatting, strict input and source assertions.
 
+2. Common document/action layer is missing
+   - Status: resolved in 0.115.0. `ShipmentDocumentAction`, `ShipmentBinaryDocument`, `CarrierShipmentDocumentProviderInterface`, `ShipmentDocumentProviderRegistry` and `ShipmentDocumentDownloadService` now own the normalized document action and protected download shell. CDEK, DPD, Yandex and Russian Post have carrier-specific providers; carrier APIs, payloads, filenames and PDF/ZIP validation remain carrier-owned.
+   - Preserved contract: CDEK BARCODE preparation, DPD document ZIP composition and Yandex `generate-labels` semantics are unchanged. The metabox no longer owns per-carrier admin-post download handlers.
+   - Follow-up debt: `CarrierShipmentAdapterInterface::label_actions()` remains as the older technical facade name for the document/action list. Rename it to `document_actions()` in a separate interface cleanup stage.
+
 ## 0.108.5 focused debt register
 
 1. Carrier-specific modal fields remain partly hardcoded

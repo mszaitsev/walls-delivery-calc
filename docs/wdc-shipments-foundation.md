@@ -183,3 +183,9 @@ The shipment modal is intentionally compact for manual preparation: parcel/place
 The pickup section shows the selected OPS/PVZ index and address plus `Выбрать другой ПВЗ`. The picker opens as a second modal above the shipment modal, searches local `wp_wdc_pickup_points_russian_post` rows by `postcode`, `city_name` and `address` through `wdc_search_russian_post_pickup_points`, renders found points on the configured map provider, and shows a table with index, city, address and choose action.
 
 Selecting a point updates only shipment draft fields: `pickup_point_code`, `pickup_point_postcode`, `pickup_point_found`, `pickup_point_row`, `recipient_address` and the visible pickup index/address. It immediately calls `requestPreview(form)` so the preview/create payload uses the selected point. The selector does not write WooCommerce order meta and does not change checkout or tariff state.
+## Shipment Document Actions 0.115.0
+
+- Common shipment document actions are represented by `ShipmentDocumentAction` and streamed as `ShipmentBinaryDocument`.
+- `ShipmentDocumentDownloadService` owns the protected `admin_post_wdc_download_shipment_document` shell: capability, nonce, order lookup, persisted shipment lookup, provider/action resolution, server-side policy and binary response headers.
+- Carrier providers remain responsible for API endpoints, identifiers, payloads, PDF/ZIP validation and filenames. The common layer does not know CDEK UUIDs, DPD event codes, Yandex request IDs or Russian Post backlog rules.
+- Russian Post uses persisted `backlog_order_id` as the canonical backlog form identifier and supports only single-shipment pre-batch printable PDF download.

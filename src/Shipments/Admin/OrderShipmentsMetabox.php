@@ -7,7 +7,6 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
-use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -31,9 +30,11 @@ use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+use WallsShop\WDC\Shipments\Documents\ShipmentDocumentAction;
+use WallsShop\WDC\Shipments\Documents\ShipmentDocumentDownloadService;
+use WallsShop\WDC\Shipments\Documents\ShipmentDocumentProviderRegistry;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
-use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentDocumentService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -51,9 +52,6 @@ final class OrderShipmentsMetabox {
 	private const AJAX_SEARCH_PRODUCTS = 'wdc_search_products_for_shipment_item';
 	private const AJAX_CDEK_BARCODE_PREPARE = 'wdc_cdek_barcode_prepare';
 	private const AJAX_DPD_COURIER_CONTACT_HISTORY = 'wdc_dpd_courier_contact_history';
-	private const ACTION_CDEK_BARCODE_PDF = 'wdc_cdek_barcode_pdf';
-	private const ACTION_DPD_DOCUMENTS_ZIP = 'wdc_dpd_documents_zip';
-	private const ACTION_YANDEX_LABEL_PDF = 'wdc_yandex_label_pdf';
 	private ?YandexDeliveryPickupPointV2Repository $yandex_pickup_points = null;
 	private ?YandexLocationMappingV2Repository $yandex_location_mapping = null;
 
@@ -75,9 +73,9 @@ final class OrderShipmentsMetabox {
 		private string $version = '1',
 		private ?CdekBarcodePrintService $cdek_barcode_print = null,
 		private ?CarrierShipmentAdapterRegistry $carrier_adapters = null,
-		private ?DpdShipmentDocumentService $dpd_documents = null,
-		private ?YandexShipmentDocumentService $yandex_documents = null,
-		private ?ShipmentMetaboxButtonPolicy $button_policy = null
+		private ?ShipmentMetaboxButtonPolicy $button_policy = null,
+		private ?ShipmentDocumentProviderRegistry $document_providers = null,
+		private ?ShipmentDocumentDownloadService $document_downloads = null
 	) {
 	}
 
@@ -96,9 +94,6 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PRODUCTS, array( $this, 'ajax_search_products' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CDEK_BARCODE_PREPARE, array( $this, 'ajax_cdek_barcode_prepare' ) );
 		add_action( 'wp_ajax_' . self::AJAX_DPD_COURIER_CONTACT_HISTORY, array( $this, 'ajax_dpd_courier_contact_history' ) );
-		add_action( 'admin_post_' . self::ACTION_CDEK_BARCODE_PDF, array( $this, 'admin_post_cdek_barcode_pdf' ) );
-		add_action( 'admin_post_' . self::ACTION_DPD_DOCUMENTS_ZIP, array( $this, 'admin_post_dpd_documents_zip' ) );
-		add_action( 'admin_post_' . self::ACTION_YANDEX_LABEL_PDF, array( $this, 'admin_post_yandex_label_pdf' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -356,16 +351,7 @@ final class OrderShipmentsMetabox {
 		$show_update = ! empty( $button_policy['show_update'] );
 		$show_cancel = ! empty( $button_policy['show_cancel'] );
 		$show_remove = ! empty( $button_policy['show_remove'] );
-		$label_actions = $this->label_actions_for_carrier( $order, $carrier_key, $shipment );
-		$show_cdek_barcode = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_label' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
-		$show_dpd_documents = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_documents' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
-		$show_yandex_label = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_yandex_label' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
-		$has_cdek_barcode_service = $is_cdek && $this->cdek_barcode_print instanceof CdekBarcodePrintService;
-		$has_dpd_documents_service = $is_dpd && $this->dpd_documents instanceof DpdShipmentDocumentService;
-		$has_yandex_label_service = $is_yandex && $this->yandex_documents instanceof YandexShipmentDocumentService;
-		$cdek_barcode_download_url = $has_cdek_barcode_service ? $this->cdek_barcode_url( $order_id, 'download' ) : '';
-		$dpd_documents_download_url = $has_dpd_documents_service ? $this->dpd_documents_url( $order_id ) : '';
-		$yandex_label_download_url = $has_yandex_label_service ? $this->yandex_label_url( $order_id ) : '';
+		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox data-carrier-key="<?php echo esc_attr( $carrier_key ); ?>" data-has-shipment="<?php echo $has_created ? '1' : '0'; ?>" <?php $this->render_presentation_attrs( $presentation ); ?>>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
@@ -382,9 +368,7 @@ final class OrderShipmentsMetabox {
 			<p class="wdc-shipments-actions">
 				<button type="button" class="button button-primary" data-wdc-open-shipment-modal <?php echo $show_primary_actions ? '' : 'hidden'; ?> <?php disabled( ! $show_primary_actions ); ?>><?php echo esc_html( $presentation['create_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_update ? '' : 'hidden'; ?> <?php disabled( ! $show_update ); ?>><?php echo esc_html( $presentation['update_status_button_label'] ); ?></button>
-				<a class="button" data-wdc-cdek-barcode-download data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-prepare-action="<?php echo esc_attr( self::AJAX_CDEK_BARCODE_PREPARE ); ?>" data-download-url="<?php echo esc_url( $cdek_barcode_download_url ); ?>" href="<?php echo esc_url( $cdek_barcode_download_url ); ?>" <?php echo $show_cdek_barcode ? '' : 'hidden'; ?>><?php echo esc_html__( 'Скачать этикетку', 'walls-delivery-calc' ); ?></a>
-				<a class="button" data-wdc-dpd-documents-download data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-download-url="<?php echo esc_url( $dpd_documents_download_url ); ?>" href="<?php echo esc_url( $dpd_documents_download_url ); ?>" <?php echo $show_dpd_documents ? '' : 'hidden'; ?>><?php echo esc_html__( 'Скачать документы', 'walls-delivery-calc' ); ?></a>
-				<a class="button" data-wdc-yandex-label-download data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-download-url="<?php echo esc_url( $yandex_label_download_url ); ?>" href="<?php echo esc_url( $yandex_label_download_url ); ?>" <?php echo $show_yandex_label ? '' : 'hidden'; ?>><?php echo esc_html__( 'Скачать ярлык', 'walls-delivery-calc' ); ?></a>
+				<?php $this->render_document_action_links( $document_actions, $order_id ); ?>
 				<button type="button" class="button" data-wdc-open-manual-tracking <?php echo $show_manual_attach ? '' : 'hidden'; ?> <?php disabled( ! $show_manual_attach ); ?>><?php echo esc_html( $presentation['manual_attach_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_cancel ? '' : 'hidden'; ?> <?php disabled( ! $can_cancel ); ?>><?php echo esc_html( $presentation['cancel_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-remove-shipment-from-order data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_remove ? '' : 'hidden'; ?> <?php disabled( ! $show_remove ); ?>><?php echo esc_html( $presentation['remove_button_label'] ); ?></button>
@@ -1178,122 +1162,6 @@ final class OrderShipmentsMetabox {
 		}
 	}
 
-	public function admin_post_cdek_barcode_pdf(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
-			wp_die( esc_html__( 'Недостаточно прав.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
-		}
-		$order_id = (int) ( $_GET['order_id'] ?? 0 );
-		$nonce = sanitize_text_field( wp_unslash( (string) ( $_GET['_wpnonce'] ?? '' ) ) );
-		if ( $order_id <= 0 || ! wp_verify_nonce( $nonce, self::ACTION_CDEK_BARCODE_PDF . '_' . $order_id ) ) {
-			wp_die( esc_html__( 'Неверный запрос.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
-		}
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) ) {
-			wp_die( esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ), '', array( 'response' => 404 ) );
-		}
-		if ( ! $this->cdek_barcode_print instanceof CdekBarcodePrintService ) {
-			wp_die( esc_html__( 'Печать этикетки СДЭК недоступна.', 'walls-delivery-calc' ), '', array( 'response' => 500 ) );
-		}
-
-		$result = $this->cdek_barcode_print->download_ready_pdf_for_order( $order );
-		if ( empty( $result['success'] ) ) {
-			wp_die( esc_html( (string) ( $result['message'] ?? 'Не удалось получить этикетку СДЭК.' ) ), '', array( 'response' => 400 ) );
-		}
-
-		$filename = sanitize_file_name( (string) ( $result['filename'] ?? 'cdek-barcode.pdf' ) );
-		if ( '' === $filename ) {
-			$filename = 'cdek-barcode.pdf';
-		}
-		if ( function_exists( 'nocache_headers' ) ) {
-			nocache_headers();
-		}
-		header( 'Content-Type: application/pdf' );
-		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-		header( 'Content-Length: ' . strlen( (string) ( $result['body'] ?? '' ) ) );
-		echo (string) ( $result['body'] ?? '' );
-		exit;
-	}
-
-	public function admin_post_dpd_documents_zip(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
-			wp_die( esc_html__( 'Недостаточно прав.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
-		}
-		$order_id = (int) ( $_GET['order_id'] ?? 0 );
-		$carrier = sanitize_key( wp_unslash( (string) ( $_GET['carrier'] ?? '' ) ) );
-		$nonce = sanitize_text_field( wp_unslash( (string) ( $_GET['_wpnonce'] ?? '' ) ) );
-		if ( DpdSettings::CARRIER_KEY !== $carrier || $order_id <= 0 || ! wp_verify_nonce( $nonce, self::ACTION_DPD_DOCUMENTS_ZIP . '_' . $order_id ) ) {
-			wp_die( esc_html__( 'Неверный запрос.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
-		}
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) ) {
-			wp_die( esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ), '', array( 'response' => 404 ) );
-		}
-		if ( ! $this->dpd_documents instanceof DpdShipmentDocumentService ) {
-			wp_die( esc_html__( 'Документы DPD недоступны.', 'walls-delivery-calc' ), '', array( 'response' => 500 ) );
-		}
-
-		$result = $this->dpd_documents->create_zip_for_order( $order );
-		if ( empty( $result['success'] ) ) {
-			wp_die( esc_html( (string) ( $result['message'] ?? 'Не удалось скачать документы DPD.' ) ), '', array( 'response' => 400 ) );
-		}
-
-		$path = (string) ( $result['path'] ?? '' );
-		$filename = sanitize_file_name( (string) ( $result['filename'] ?? 'dpd-documents.zip' ) );
-		if ( '' === $filename ) {
-			$filename = 'dpd-documents.zip';
-		}
-		if ( ! is_file( $path ) ) {
-			wp_die( esc_html__( 'ZIP-файл документов DPD не найден.', 'walls-delivery-calc' ), '', array( 'response' => 500 ) );
-		}
-		if ( function_exists( 'nocache_headers' ) ) {
-			nocache_headers();
-		}
-		header( 'Content-Type: application/zip' );
-		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-		header( 'Content-Length: ' . filesize( $path ) );
-		readfile( $path );
-		$this->dpd_documents->delete_temp_file( $path );
-		exit;
-	}
-
-	public function admin_post_yandex_label_pdf(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
-			wp_die( esc_html__( 'Недостаточно прав.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
-		}
-		$order_id = (int) ( $_GET['order_id'] ?? 0 );
-		$carrier = sanitize_key( wp_unslash( (string) ( $_GET['carrier'] ?? '' ) ) );
-		$nonce = sanitize_text_field( wp_unslash( (string) ( $_GET['_wpnonce'] ?? '' ) ) );
-		if ( YandexDeliverySettings::CARRIER_KEY !== $carrier || $order_id <= 0 || ! wp_verify_nonce( $nonce, self::ACTION_YANDEX_LABEL_PDF . '_' . $order_id ) ) {
-			wp_die( esc_html__( 'Неверный запрос.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
-		}
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) ) {
-			wp_die( esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ), '', array( 'response' => 404 ) );
-		}
-		if ( ! $this->yandex_documents instanceof YandexShipmentDocumentService ) {
-			wp_die( esc_html__( 'Ярлыки Яндекс.Доставки недоступны.', 'walls-delivery-calc' ), '', array( 'response' => 500 ) );
-		}
-
-		$result = $this->yandex_documents->label_pdf_for_order( $order );
-		if ( empty( $result['success'] ) ) {
-			wp_die( esc_html( (string) ( $result['message'] ?? 'Не удалось получить ярлык Яндекс.Доставки.' ) ), '', array( 'response' => 400 ) );
-		}
-
-		$body = (string) ( $result['body'] ?? '' );
-		$filename = sanitize_file_name( (string) ( $result['filename'] ?? 'yandex-label.pdf' ) );
-		if ( '' === $filename ) {
-			$filename = 'yandex-label.pdf';
-		}
-		if ( function_exists( 'nocache_headers' ) ) {
-			nocache_headers();
-		}
-		header( 'Content-Type: application/pdf' );
-		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-		header( 'Content-Length: ' . strlen( $body ) );
-		echo $body;
-		exit;
-	}
-
 	public function ajax_cdek_barcode_prepare(): void {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
@@ -1313,7 +1181,7 @@ final class OrderShipmentsMetabox {
 		}
 
 		if ( 'READY' === (string) ( $result['status'] ?? '' ) ) {
-			$result['download_url'] = $this->cdek_barcode_url( $order_id, 'download' );
+			$result['download_url'] = $this->document_download_url( $order_id, CdekSettings::CARRIER_KEY, 'download_label' );
 		}
 
 		wp_send_json_success( $result );
@@ -2170,7 +2038,7 @@ final class OrderShipmentsMetabox {
 				'presentation' => $presentation,
 			)
 		);
-		$label_actions = null !== $adapter ? $adapter->label_actions( $order, $shipment ) : array();
+		$label_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		if ( array() !== $label_actions ) {
 			$status['label_actions'] = $label_actions;
 		}
@@ -2342,10 +2210,60 @@ final class OrderShipmentsMetabox {
 	 * @param array<string,mixed> $shipment
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function label_actions_for_carrier( object $order, string $carrier_key, array $shipment ): array {
-		$adapter = $this->carrier_adapter( $carrier_key );
+	private function document_actions_for_carrier( object $order, string $carrier_key, array $shipment ): array {
+		if ( ! $this->document_providers instanceof ShipmentDocumentProviderRegistry || ! $this->document_downloads instanceof ShipmentDocumentDownloadService ) {
+			return array();
+		}
+		$provider = $this->document_providers->get( $carrier_key );
+		if ( null === $provider ) {
+			return array();
+		}
+		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+		$actions = array();
+		foreach ( $provider->actions( $order, $shipment ) as $action ) {
+			if ( ! $action instanceof ShipmentDocumentAction || ! $action->visible ) {
+				continue;
+			}
+			$row = $action->to_array();
+			$row['download_url'] = $this->document_downloads->download_url( $order_id, $carrier_key, $action->key );
+			$actions[] = $row;
+		}
 
-		return null !== $adapter ? $adapter->label_actions( $order, $shipment ) : array();
+		return $actions;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $actions
+	 */
+	private function render_document_action_links( array $actions, int $order_id ): void {
+		foreach ( $actions as $action ) {
+			if ( empty( $action['visible'] ) ) {
+				continue;
+			}
+			$data = is_array( $action['data'] ?? null ) ? $action['data'] : array();
+			$url = (string) ( $action['download_url'] ?? '' );
+			$attrs = array(
+				'class' => 'button',
+				'data-wdc-shipment-document-download' => '1',
+				'data-order-id' => (string) $order_id,
+				'data-action-key' => (string) ( $action['key'] ?? '' ),
+				'data-download-url' => $url,
+				'href' => $url,
+			);
+			if ( is_array( $data['attrs'] ?? null ) ) {
+				foreach ( $data['attrs'] as $name => $value ) {
+					$name = (string) $name;
+					if ( str_starts_with( $name, 'data-' ) ) {
+						$attrs[ $name ] = (string) $value;
+					}
+				}
+			}
+			echo '<a';
+			foreach ( $attrs as $name => $value ) {
+				echo ' ' . esc_attr( $name ) . '="' . ( in_array( $name, array( 'href', 'data-download-url' ), true ) ? esc_url( $value ) : esc_attr( $value ) ) . '"';
+			}
+			echo '>' . esc_html( (string) ( $action['label'] ?? 'Скачать документ' ) ) . '</a>';
+		}
 	}
 
 	/**
@@ -2400,43 +2318,12 @@ final class OrderShipmentsMetabox {
 		};
 	}
 
-	private function cdek_barcode_url( int $order_id, string $mode ): string {
-		return add_query_arg(
-			array(
-				'action' => self::ACTION_CDEK_BARCODE_PDF,
-				'order_id' => $order_id,
-				'mode' => 'download',
-				'_wpnonce' => wp_create_nonce( self::ACTION_CDEK_BARCODE_PDF . '_' . $order_id ),
-			),
-			admin_url( 'admin-post.php' )
-		);
-	}
+	private function document_download_url( int $order_id, string $carrier_key, string $action_key ): string {
+		if ( $this->document_downloads instanceof ShipmentDocumentDownloadService ) {
+			return $this->document_downloads->download_url( $order_id, $carrier_key, $action_key );
+		}
 
-	/**
-	 * @param array<string,mixed> $meta
-	 */
-	private function dpd_documents_url( int $order_id ): string {
-		return add_query_arg(
-			array(
-				'action' => self::ACTION_DPD_DOCUMENTS_ZIP,
-				'order_id' => $order_id,
-				'carrier' => DpdSettings::CARRIER_KEY,
-				'_wpnonce' => wp_create_nonce( self::ACTION_DPD_DOCUMENTS_ZIP . '_' . $order_id ),
-			),
-			admin_url( 'admin-post.php' )
-		);
-	}
-
-	private function yandex_label_url( int $order_id ): string {
-		return add_query_arg(
-			array(
-				'action' => self::ACTION_YANDEX_LABEL_PDF,
-				'order_id' => $order_id,
-				'carrier' => YandexDeliverySettings::CARRIER_KEY,
-				'_wpnonce' => wp_create_nonce( self::ACTION_YANDEX_LABEL_PDF . '_' . $order_id ),
-			),
-			admin_url( 'admin-post.php' )
-		);
+		return '';
 	}
 
 	private function pickup_destination_index( string $pickup_code, string $postcode, array $meta ): string {
