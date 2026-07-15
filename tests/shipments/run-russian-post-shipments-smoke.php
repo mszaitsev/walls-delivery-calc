@@ -21,6 +21,7 @@ use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
@@ -615,7 +616,7 @@ $failed_preview_payload = $builder->build( $failed_preview_request );
 shipments_smoke_assert( '630099' === $failed_preview_payload[0]['index-to'] && ! array_key_exists( 'raw-address', $failed_preview_payload[0] ), 'Failed courier normalization preview must use safe fallback without raw-address.' );
 
 $guard_adapter = new ShipmentsSmokeAdapter();
-$creation_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $guard_adapter ) );
+$creation_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $guard_adapter ), null, null, null, array( new RussianPostShipmentPersistenceMapper() ) );
 $wrong_order_result = $creation_service->create(
 	new ShipmentsSmokeOrder( array( 'id' => 935 ) ),
 	new ShipmentCreateRequest(
@@ -637,7 +638,7 @@ shipments_smoke_assert( ! $wrong_order_result->success && 'shipment_order_mismat
 
 $persisted_order = new ShipmentsSmokePersistedOrder( 123 );
 $persisted_adapter = new ShipmentsSmokeAdapter();
-$persisted_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $persisted_adapter ) );
+$persisted_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $persisted_adapter ), null, null, null, array( new RussianPostShipmentPersistenceMapper() ) );
 $persisted_result = $persisted_service->create( $persisted_order, $request );
 $persisted_shipments = $persisted_order->get_meta( OrderShipmentRepository::META_KEY, true );
 $persisted_shipment = is_array( $persisted_shipments ) ? ( $persisted_shipments[ RussianPostDomesticSettings::CARRIER_KEY ] ?? array() ) : array();
@@ -903,7 +904,7 @@ shipments_smoke_assert( '630099' === (string) ( $selected_payload[0]['index-to']
 shipments_smoke_assert( '630099-new' === $selected_request->pickup_point?->point_code, 'Shipment create request must keep selected pickup point code.' );
 
 $selected_adapter = new ShipmentsSmokeAdapter();
-$selected_creation_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $selected_adapter ) );
+$selected_creation_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $selected_adapter ), null, null, null, array( new RussianPostShipmentPersistenceMapper() ) );
 $selected_preview = $selected_creation_service->safe_preview( $selected_request );
 shipments_smoke_assert( '630099-new' === (string) ( $selected_preview['delivery-point-index'] ?? '' ) && $selected_adapter->preview_request instanceof ShipmentCreateRequest, 'Preview after admin pickup selection must receive selected pickup draft.' );
 $selected_result = $selected_creation_service->create( $shipment_order, $selected_request );

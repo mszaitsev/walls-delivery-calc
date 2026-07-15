@@ -65,6 +65,8 @@ dpd_lifecycle_assert( str_contains( $event_source, 'is_valid_pending_client_even
 dpd_lifecycle_assert( str_contains( $event_source, 'event_is_later' ) && str_contains( $event_source, 'select_pending_client_events' ), 'Pending DPD registration fallback must choose the latest valid event by clientOrderNr.' );
 dpd_lifecycle_assert( str_contains( $adapter_source, 'begin_registration' ) && str_contains( $adapter_source, 'submit_registration' ) && str_contains( $adapter_source, 'supports_status_auto_sync(): bool' ), 'DPD adapter must expose two-stage registration and remain no autosync.' );
 dpd_lifecycle_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter::class ), $this->container->get( ShipmentStatusAutoSyncCron' ) && ! str_contains( $plugin_source, 'dpd_cron' ), 'DPD scheduled sync/cron must not be registered.' );
-dpd_lifecycle_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentCreationService.php' ), 'unset( $shipment[ $cdek_key ]' ), 'ShipmentCreationService must strip cdek_* keys from DPD shipments.' );
+$creation_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentCreationService.php' );
+$dpd_mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentPersistenceMapper.php' );
+dpd_lifecycle_assert( ! str_contains( $creation_source, 'dpd_order_number' ) && ! str_contains( $creation_source, 'cdek_request_uuid' ) && str_contains( $dpd_mapper_source, 'dpd_order_number' ) && str_contains( $dpd_mapper_source, 'dpd_request_number' ), 'ShipmentCreationService must delegate DPD persistence fields to DpdShipmentPersistenceMapper.' );
 echo "DPD shipment lifecycle smoke passed
 ";

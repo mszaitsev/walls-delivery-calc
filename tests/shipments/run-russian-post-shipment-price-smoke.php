@@ -21,6 +21,7 @@ use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostLookupServi
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
@@ -282,7 +283,8 @@ $GLOBALS['rp_shipment_price_remote_get_response'] = array(
 	'body' => '[{"barcode":"80080822636157","total-rate-wo-vat":32785,"total-vat":7213}]',
 );
 $create_order = new RussianPostShipmentPriceOrder();
-$creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), null, rp_shipment_price_lookup_service() );
+$lookup_service = rp_shipment_price_lookup_service();
+$creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), null, null, null, array( new RussianPostShipmentPersistenceMapper( $lookup_service ) ) );
 $create_result = $creation->create( $create_order, rp_shipment_price_request() );
 $created_shipment = $create_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 rp_shipment_price_assert( $create_result->success, 'Automatic shipment create must remain successful.' );
