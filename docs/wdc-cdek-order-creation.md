@@ -2,6 +2,8 @@
 
 Version: 0.53.2.
 
+0.115.0 note: CDEK BARCODE PDF download now goes through the common shipment document action endpoint. `CdekShipmentDocumentProvider` exposes the existing `download_label` action and delegates PDF generation/validation to `CdekBarcodePrintService`; BARCODE preparation, print UUID cache, filename and PDF semantics are unchanged.
+
 0.114.0 note: CDEK still stores actual shipment cost from `delivery_detail.total_sum` as `cdek_actual_cost_kopecks`. Status payload price formatting and Base API comparison now use the shared `ShipmentActualCostComparisonService`; persisted keys, CDEK API calls, BARCODE/document behavior and lifecycle are unchanged. Since 0.114.1 a zero actual cost is treated as unknown at the presentation boundary and keeps the price row hidden.
 
 0.53.2 update: BARCODE print status detection now follows print-form readiness priority instead of order-status timestamp logic. A non-empty PDF `entity.url` marks the form as `READY`, and statuses are checked in priority order `READY`, `INVALID`, `REMOVED`, `PROCESSING`, `ACCEPTED`; this handles CDEK print responses where all status rows share the same `date_time`.

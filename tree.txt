@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000069 A0AC:74BD
+Volume serial number is 00000008 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -683,12 +683,20 @@ C:.
 |   |   |       CdekOrderStatusService.php
 |   |   |       CdekRecipientAddressPreparationService.php
 |   |   |       CdekShipmentAdapter.php
+|   |   |       CdekShipmentDocumentProvider.php
 |   |   |       CdekShipmentPersistenceMapper.php
 |   |   |       CdekStatusMappingService.php
 |   |   |
 |   |   +---Contracts
 |   |   |       CarrierShipmentAdapterInterface.php
 |   |   |       CarrierShipmentPersistenceMapperInterface.php
+|   |   |
+|   |   +---Documents
+|   |   |       CarrierShipmentDocumentProviderInterface.php
+|   |   |       ShipmentBinaryDocument.php
+|   |   |       ShipmentDocumentAction.php
+|   |   |       ShipmentDocumentDownloadService.php
+|   |   |       ShipmentDocumentProviderRegistry.php
 |   |   |
 |   |   +---Dpd
 |   |   |       DpdEventNormalizer.php
@@ -697,6 +705,7 @@ C:.
 |   |   |       DpdOrderRegistrationService.php
 |   |   |       DpdShipmentAdapter.php
 |   |   |       DpdShipmentButtonPolicy.php
+|   |   |       DpdShipmentDocumentProvider.php
 |   |   |       DpdShipmentDocumentService.php
 |   |   |       DpdShipmentEnrichmentService.php
 |   |   |       DpdShipmentPersistenceMapper.php
@@ -712,6 +721,8 @@ C:.
 |   |   |       RussianPostAddressNormalizer.php
 |   |   |       RussianPostCreateRequestBuilder.php
 |   |   |       RussianPostShipmentAdapter.php
+|   |   |       RussianPostShipmentDocumentProvider.php
+|   |   |       RussianPostShipmentDocumentService.php
 |   |   |       RussianPostShipmentPersistenceMapper.php
 |   |   |       RussianPostShipmentProductMapper.php
 |   |   |       RussianPostTrackingStatusMapper.php
@@ -722,6 +733,7 @@ C:.
 |   |   \---YandexDelivery
 |   |           YandexShipmentAdapter.php
 |   |           YandexShipmentButtonPolicy.php
+|   |           YandexShipmentDocumentProvider.php
 |   |           YandexShipmentDocumentService.php
 |   |           YandexShipmentLabelPolicy.php
 |   |           YandexShipmentPersistenceMapper.php
@@ -840,10 +852,12 @@ C:.
     +---shipments
     |       run-carrier-adapter-registry-smoke.php
     |       run-russian-post-cancel-shipment-smoke.php
+    |       run-russian-post-documents-smoke.php
     |       run-russian-post-shipment-price-smoke.php
     |       run-russian-post-shipments-smoke.php
     |       run-shipment-actual-cost-presentation-smoke.php
     |       run-shipment-allocation-smoke.php
+    |       run-shipment-document-actions-smoke.php
     |       run-shipment-persistence-mappers-smoke.php
     |       run-shipment-status-smoke.php
     |

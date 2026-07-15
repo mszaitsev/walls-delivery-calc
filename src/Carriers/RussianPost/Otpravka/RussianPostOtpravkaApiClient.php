@@ -9,6 +9,7 @@ final class RussianPostOtpravkaApiClient {
 	private const PASSPORT_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/unloading-passport/zip';
 	private const BACKLOG_ENDPOINT = 'https://otpravka-api.pochta.ru/2.0/user/backlog';
 	private const BACKLOG_DELETE_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/backlog';
+	private const BACKLOG_FORMS_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/forms/backlog';
 	private const BACKLOG_SEARCH_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/backlog/search';
 	private const SHIPMENT_SEARCH_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/shipment/search';
 	private const CLEAN_ADDRESS_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/clean/address';
@@ -123,6 +124,62 @@ final class RussianPostOtpravkaApiClient {
 			'error_code' => $code >= 200 && $code < 300 ? '' : 'http_' . $code,
 			'error_message' => $code >= 200 && $code < 300 ? '' : $this->excerpt( $body ),
 			'duration_ms' => $this->duration_ms( $started ),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function download_backlog_forms( int|string $backlog_id ): array {
+		$id = trim( (string) $backlog_id );
+		if ( '' === $id ) {
+			return array( 'success' => false, 'http_code' => 0, 'body' => '', 'content_type' => '', 'error_code' => 'missing_backlog_id', 'error_message' => 'Для отправления не найден идентификатор Почты России.' );
+		}
+		$started = microtime( true );
+		if ( '' === $this->settings->access_token() || '' === $this->settings->basic_key() ) {
+			return $this->credentials_result( $started );
+		}
+
+		$url = self::BACKLOG_FORMS_ENDPOINT . '/' . rawurlencode( $id ) . '/forms';
+		if ( is_callable( $this->curl_downloader ) ) {
+			$response = (array) call_user_func( $this->curl_downloader, $url, 'BACKLOG_FORMS', $this->settings->access_token(), $this->settings->basic_key(), $this->settings->timeout() );
+			return $this->backlog_forms_result( $response, $started, $url );
+		}
+
+		$response = wp_remote_request(
+			$url,
+			array(
+				'method' => 'GET',
+				'timeout' => $this->settings->timeout(),
+				'headers' => array(
+					'Authorization' => 'AccessToken ' . $this->settings->access_token(),
+					'X-User-Authorization' => 'Basic ' . $this->settings->basic_key(),
+					'Content-Type' => 'application/json;charset=UTF-8',
+				),
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'body' => '',
+				'content_type' => '',
+				'error_code' => 'wp_http_error',
+				'error_message' => $response->get_error_message(),
+				'url' => $url,
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		return $this->backlog_forms_result(
+			array(
+				'http_code' => (int) wp_remote_retrieve_response_code( $response ),
+				'body' => (string) wp_remote_retrieve_body( $response ),
+				'content_type' => (string) wp_remote_retrieve_header( $response, 'content-type' ),
+			),
+			$started,
+			$url
 		);
 	}
 
@@ -522,6 +579,66 @@ final class RussianPostOtpravkaApiClient {
 		}
 
 		return substr( $body, 0, 1000 );
+	}
+
+	/**
+	 * @param array<string,mixed> $response
+	 * @return array<string,mixed>
+	 */
+	private function backlog_forms_result( array $response, float $started, string $url ): array {
+		$code = (int) ( $response['http_code'] ?? 0 );
+		$body = (string) ( $response['body'] ?? '' );
+		$content_type = (string) ( $response['content_type'] ?? '' );
+		$is_pdf = '' !== $body && str_starts_with( ltrim( $body ), '%PDF-' );
+		if ( $code >= 200 && $code < 300 && $is_pdf ) {
+			return array(
+				'success' => true,
+				'http_code' => $code,
+				'body' => $body,
+				'content_type' => '' !== $content_type ? $content_type : 'application/pdf',
+				'url' => $url,
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		$error_message = 'Почта России не вернула PDF печатной формы.';
+		$decoded = '' !== trim( $body ) && ( str_contains( strtolower( $content_type ), 'json' ) || str_starts_with( ltrim( $body ), '{' ) || str_starts_with( ltrim( $body ), '[' ) )
+			? json_decode( $body, true )
+			: null;
+		if ( is_array( $decoded ) ) {
+			$error_message = $this->api_error_message( $decoded, $error_message );
+		}
+
+		return array(
+			'success' => false,
+			'http_code' => $code,
+			'body' => '',
+			'content_type' => $content_type,
+			'error_code' => $code >= 200 && $code < 300 ? 'invalid_pdf' : 'http_' . $code,
+			'error_message' => $error_message,
+			'url' => $url,
+			'response_excerpt' => $this->excerpt( $body ),
+			'duration_ms' => $this->duration_ms( $started ),
+		);
+	}
+
+	/** @param array<string,mixed> $data */
+	private function api_error_message( array $data, string $fallback ): string {
+		foreach ( array( 'message', 'errorMessage', 'error', 'desc', 'description' ) as $key ) {
+			if ( isset( $data[ $key ] ) && '' !== trim( (string) $data[ $key ] ) ) {
+				return trim( (string) $data[ $key ] );
+			}
+		}
+		foreach ( $data as $value ) {
+			if ( is_array( $value ) ) {
+				$found = $this->api_error_message( $value, '' );
+				if ( '' !== $found ) {
+					return $found;
+				}
+			}
+		}
+
+		return $fallback;
 	}
 
 	/**
