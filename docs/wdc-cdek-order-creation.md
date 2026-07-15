@@ -2,6 +2,8 @@
 
 Version: 0.53.2.
 
+0.114.0 note: CDEK still stores actual shipment cost from `delivery_detail.total_sum` as `cdek_actual_cost_kopecks`. Status payload price formatting and Base API comparison now use the shared `ShipmentActualCostComparisonService`; persisted keys, CDEK API calls, BARCODE/document behavior and lifecycle are unchanged. Since 0.114.1 a zero actual cost is treated as unknown at the presentation boundary and keeps the price row hidden.
+
 0.53.2 update: BARCODE print status detection now follows print-form readiness priority instead of order-status timestamp logic. A non-empty PDF `entity.url` marks the form as `READY`, and statuses are checked in priority order `READY`, `INVALID`, `REMOVED`, `PROCESSING`, `ACCEPTED`; this handles CDEK print responses where all status rows share the same `date_time`.
 
 0.53.1 update: CDEK BARCODE preparation now detects print forms that stay in `ACCEPTED`/`PROCESSING` for too long. Pending print UUIDs keep `created_at`, `last_checked_at`, `checked_count` and `cdek_number`; after 60 seconds or more than 30 checks WDC drops the stale cache entry, creates a fresh BARCODE request and lets the existing frontend polling continue on the new UUID. READY print forms are still cached for 50 minutes.

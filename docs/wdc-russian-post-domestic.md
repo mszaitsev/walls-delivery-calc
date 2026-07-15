@@ -6,7 +6,7 @@ Version 0.44.9 hardens the admin tool that fills `russianpost_courier_calc_posta
 
 Version 0.39.5 also pulls actual Russian Post cost after ordinary shipment creation from the order metabox. After successful create, WDC calls `backlog/search` by barcode, uses the same shared extractor as manual tracking attach, stores source `backlog_search_after_create`, and keeps create successful if the lookup fails or returns no totals.
 
-Version 0.39.4 adds actual registered shipment cost display for Russian Post manual tracking attachment. When `backlog/search` returns `total-rate-wo-vat` and `total-vat`, WDC stores their sum in `_wdc_shipments`, shows `Цена` after `Отслеживание` in the order metabox, and compares it with checkout `Базовая стоимость API`; values up to 3% over base are green/ok, more than 3% are red/warning, and missing base cost is neutral.
+Version 0.39.4 adds actual registered shipment cost display for Russian Post manual tracking attachment. When `backlog/search` returns `total-rate-wo-vat` and `total-vat`, WDC stores their sum in `_wdc_shipments`, shows `Цена` after `Отслеживание` in the order metabox, and compares it with checkout `Базовая стоимость API`; since 0.114.0 the shared `ShipmentActualCostComparisonService` performs this comparison for all shipment carriers with integer kopecks. Values up to and including exactly 3% over base are green/ok, more than 3% are red/warning, and missing or zero base cost is neutral. Since 0.114.1 zero actual cost is also treated as unknown and hidden.
 
 Version 0.39.3 speeds up the admin tool that fills `russianpost_courier_calc_postal_code` for courier Russian Post tariff calculation. The `WDC -> Локации` button `Подобрать индексы для курьерской Почты России` still probes candidate postcodes sequentially and uses the same candidate order, but each backend step now targets about 6 Russian Post requests/sec, stops after 18 probes or 3 seconds, and exposes step timing/RPS diagnostics in JSON. The browser keeps one active AJAX step at a time and waits only a short delay before the next step.
 
@@ -285,7 +285,7 @@ Manual tracking attachment:
 - saved lookup source is `backlog_search` or `shipment_search`;
 - returned `id`, when present, is saved as `backlog_order_id`;
 - when `backlog_search` returns `total-rate-wo-vat` and `total-vat`, WDC stores `russian_post_actual_cost_kopecks`, `russian_post_actual_cost_rub`, and `russian_post_actual_cost_source=backlog_search`;
-- the metabox shows `Цена: {amount} руб.` after `Отслеживание` and compares it with `_wdc_delivery_calculation_data.api.api_base_price_rub` / `Базовая стоимость API`; up to 3% over base is ok, more than 3% is warning;
+- the metabox shows `Цена: {amount} руб.` after `Отслеживание` and compares it with `_wdc_delivery_calculation_data.api.api_base_price_rub` / `Базовая стоимость API` through the shared actual-cost presentation service; up to and including exactly 3% over base is ok, more than 3% is warning;
 - if only `shipment_search` finds the parcel or the total fields are absent, the actual price fields are not filled and the price row is omitted;
 - if shipment search returns barcode but no `id`, WDC still saves tracking and runs Tracking API by barcode;
 - cancellation remains disabled when `backlog_order_id` is absent.
