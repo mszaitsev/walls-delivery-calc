@@ -162,19 +162,21 @@ final class ShipmentStatusUpdateService {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, ?object $order ): array {
-		$actual_kopecks = $this->non_negative_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
+		$actual_kopecks = $this->positive_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
 		$base_kopecks = $this->base_costs()->resolve_from_order( $order );
 		$presentation = $this->actual_costs()->compare( $actual_kopecks, $base_kopecks )->to_array();
 
 		return $presentation + array( 'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks );
 	}
 
-	private function non_negative_int_or_null( mixed $value ): ?int {
+	private function positive_int_or_null( mixed $value ): ?int {
 		if ( is_int( $value ) ) {
-			return $value >= 0 ? $value : null;
+			return $value > 0 ? $value : null;
 		}
 		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
-			return (int) $value;
+			$integer = (int) $value;
+
+			return $integer > 0 ? $integer : null;
 		}
 
 		return null;

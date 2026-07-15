@@ -2,7 +2,7 @@
 
 Version: 0.66.2.
 
-0.114.0 note: DPD actual-cost status presentation now delegates formatting, neutral/ok/warning status and Base API comparison to the shared `ShipmentActualCostComparisonService`. DPD still gets and stores actual cost through the existing enrichment/event flow; create lifecycle, documents and payload semantics are unchanged.
+0.114.0 note: DPD actual-cost status presentation now delegates formatting, neutral/ok/warning status and Base API comparison to the shared `ShipmentActualCostComparisonService`. DPD still gets and stores actual cost through the existing enrichment/event flow; create lifecycle, documents and payload semantics are unchanged. Since 0.114.1 a zero actual cost is treated as unknown at the presentation boundary and keeps the price row hidden.
 
 0.66.2 UI update: the DPD modal automatically requests preview when opened. The manual `Предпросмотр payload` button remains available and uses the same request path. Create button state is recalculated after every preview response and is enabled only when the latest preview has no errors and local DPD readiness checks pass. DPD courier normalization syncs hidden structured address fields and immediately refreshes preview; `ФИО курьера` input/blur also refreshes preview. `Комментарии курьеру` is visible only for courier delivery.
 

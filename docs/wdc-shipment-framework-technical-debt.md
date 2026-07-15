@@ -4,8 +4,8 @@
 
 1. Shipment actual cost comparison is duplicated across carriers
    - Status: resolved in 0.114.0. `ShipmentActualCostComparisonService` now owns formatting/status/message and the exact integer +3% comparison for CDEK, DPD, Russian Post and Yandex; `ShipmentBaseApiCostResolver` owns the repeated Base API cost read from order calculation meta.
-   - Preserved contract: carrier-specific actual-cost sources and persisted shipment keys stay unchanged; metabox still reads only `actual_cost_label`, `actual_cost_compare_status` and `actual_cost_compare_message`.
-   - Regression coverage: `tests/shipments/run-shipment-actual-cost-presentation-smoke.php` covers hidden actual cost, neutral missing/zero base, exact +3%, +3% plus one kopeck, non-round bases, formatting, strict input and source assertions.
+   - Preserved contract: carrier-specific actual-cost sources and persisted shipment keys stay unchanged; metabox still reads only `actual_cost_label`, `actual_cost_compare_status` and `actual_cost_compare_message`. Since 0.114.1 carrier boundaries again treat actual cost zero as unknown and the base resolver returns only positive base values.
+   - Regression coverage: `tests/shipments/run-shipment-actual-cost-presentation-smoke.php` covers hidden actual cost, carrier zero actual values, neutral missing/zero base, exact +3%, +3% plus one kopeck, non-round bases, formatting, strict input and source assertions.
 
 ## 0.108.5 focused debt register
 

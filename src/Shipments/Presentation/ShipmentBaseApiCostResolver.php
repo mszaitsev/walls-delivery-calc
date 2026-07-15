@@ -24,7 +24,7 @@ final class ShipmentBaseApiCostResolver {
 
 		$api = is_array( $value['api'] ?? null ) ? $value['api'] : array();
 		foreach ( array( 'api_base_price_kopecks', 'api_base_cost_kopecks', 'base_api_cost_kopecks' ) as $key ) {
-			$kopecks = $this->non_negative_int_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
+			$kopecks = $this->positive_int_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
 			if ( null !== $kopecks ) {
 				return $kopecks;
 			}
@@ -32,7 +32,7 @@ final class ShipmentBaseApiCostResolver {
 
 		foreach ( array( 'api_base_price_rub', 'api_price_with_vat_rub', 'base_api_cost_rub' ) as $key ) {
 			$rubles = $this->numeric_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
-			if ( null !== $rubles && $rubles >= 0 ) {
+			if ( null !== $rubles && $rubles > 0 ) {
 				return (int) round( $rubles * 100 );
 			}
 		}
@@ -40,12 +40,14 @@ final class ShipmentBaseApiCostResolver {
 		return null;
 	}
 
-	private function non_negative_int_or_null( mixed $value ): ?int {
+	private function positive_int_or_null( mixed $value ): ?int {
 		if ( is_int( $value ) ) {
-			return $value >= 0 ? $value : null;
+			return $value > 0 ? $value : null;
 		}
 		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
-			return (int) $value;
+			$integer = (int) $value;
+
+			return $integer > 0 ? $integer : null;
 		}
 
 		return null;
