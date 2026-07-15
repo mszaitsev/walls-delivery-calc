@@ -2,7 +2,7 @@
 
 ## Статус 0.111.0
 
-Регистрация теперь завершает три shipment-facing поля Яндекс.Доставки. Фактическая стоимость отправления берётся только из выбранного offer (`pricing_total`) и сохраняется как integer kopecks в общем actual-cost contract; `request/info` не содержит поздней цены доставки, поэтому status/reconciliation/cancel merges сохраняют выбранную offer price, а manual attach цену не создаёт и не показывает `0 ₽`. Сравнение с Base API cost использует общий порог `+3%` включительно.
+Регистрация теперь завершает три shipment-facing поля Яндекс.Доставки. Фактическая стоимость отправления берётся только из выбранного offer (`pricing_total`) и сохраняется как integer kopecks в общем actual-cost contract; `request/info` не содержит поздней цены доставки, поэтому status/reconciliation/cancel merges сохраняют выбранную offer price, а manual attach цену не создаёт и не показывает `0 ₽`. С 0.114.0 сравнение с Base API cost выполняет общий `ShipmentActualCostComparisonService`: ровно `+3%` включительно считается `ok`, отсутствие Base API cost даёт neutral, отсутствие actual cost скрывает строку цены.
 
 Ярлык отправления скачивается через существующий label-action/download flow: adapter отдаёт `download_yandex_label`, metabox проверяет nonce/capability/order, server-side читает persisted request_id и `YandexDeliveryShipmentClient::generate_labels()` отправляет `request_ids` массивом в `/api/b2b/platform/request/generate-labels`. Ответ обрабатывается как binary PDF (`%PDF-`), без JSON decoder для успешного тела.
 

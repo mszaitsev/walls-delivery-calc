@@ -3,10 +3,9 @@
 ## 0.111.1 focused debt register
 
 1. Shipment actual cost comparison is duplicated across carriers
-   - Current problem: DPD and Yandex now implement the same actual-cost comparison locally: read saved Base API cost, compare actual cost against `base + 3%`, format `actual_cost_label`, and produce `actual_cost_compare_status` / `actual_cost_compare_message`.
-   - Target architecture: extract this into a carrier-neutral service, for example `ShipmentActualCostComparisonService`, and reuse it from every shipment adapter/service that exposes actual carrier cost.
-   - Affected classes/files: `DpdShipmentAdapter`, `YandexShipmentAdapter`, future carrier actual-cost presenters and shipment price smokes.
-   - Migration sequence: preserve existing output contract and threshold semantics, introduce the neutral service with equality tests, migrate one carrier at a time, then remove duplicated helpers.
+   - Status: resolved in 0.114.0. `ShipmentActualCostComparisonService` now owns formatting/status/message and the exact integer +3% comparison for CDEK, DPD, Russian Post and Yandex; `ShipmentBaseApiCostResolver` owns the repeated Base API cost read from order calculation meta.
+   - Preserved contract: carrier-specific actual-cost sources and persisted shipment keys stay unchanged; metabox still reads only `actual_cost_label`, `actual_cost_compare_status` and `actual_cost_compare_message`.
+   - Regression coverage: `tests/shipments/run-shipment-actual-cost-presentation-smoke.php` covers hidden actual cost, neutral missing/zero base, exact +3%, +3% plus one kopeck, non-round bases, formatting, strict input and source assertions.
 
 ## 0.108.5 focused debt register
 

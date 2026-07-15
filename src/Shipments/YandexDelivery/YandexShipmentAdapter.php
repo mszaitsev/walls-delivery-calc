@@ -8,8 +8,9 @@ use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
-use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
+use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -18,9 +19,13 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		private YandexShipmentRegistrationService $registration,
 		private YandexShipmentButtonPolicy $buttons,
 		private ?YandexStatusMapping $status_mapping = null,
-		private ?YandexShipmentLabelPolicy $label_policy = null
+		private ?YandexShipmentLabelPolicy $label_policy = null,
+		private ?ShipmentActualCostComparisonService $actual_costs = null,
+		private ?ShipmentBaseApiCostResolver $base_costs = null
 	) {
 		$this->label_policy ??= new YandexShipmentLabelPolicy( $this->status_mapping );
+		$this->actual_costs ??= new ShipmentActualCostComparisonService();
+		$this->base_costs ??= new ShipmentBaseApiCostResolver();
 	}
 
 	public function carrier_key(): string { return YandexDeliverySettings::CARRIER_KEY; }
@@ -217,79 +222,38 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, object $order ): array {
-		$actual_kopecks = $this->positive_int_or_null( $shipment['actual_cost_kopecks'] ?? $shipment['yandex_offer_pricing_total_kopecks'] ?? null );
-		if ( null === $actual_kopecks ) {
-			return array(
-				'actual_cost_kopecks' => null,
-				'actual_cost_label' => '',
-				'actual_cost_compare_status' => '',
-				'actual_cost_compare_message' => '',
-				'base_api_cost_kopecks' => null,
-			);
-		}
+		$actual_kopecks = $this->non_negative_int_or_null( $shipment['actual_cost_kopecks'] ?? $shipment['yandex_offer_pricing_total_kopecks'] ?? null );
+		$base_kopecks = $this->base_costs()->resolve_from_order( $order );
+		$presentation = $this->actual_costs()->compare( $actual_kopecks, $base_kopecks )->to_array();
 
-		$base_kopecks = $this->base_api_cost_kopecks( $order );
-		$status = 'neutral';
-		$message = 'нет базовой стоимости для сравнения';
-		if ( null !== $base_kopecks ) {
-			$threshold = (int) floor( $base_kopecks * 1.03 );
-			$status = $actual_kopecks <= $threshold ? 'ok' : 'warning';
-			$message = 'Базовая стоимость API: ' . $this->format_rubles( $base_kopecks ) . ' руб.';
-		}
-
-		return array(
-			'actual_cost_kopecks' => $actual_kopecks,
-			'actual_cost_label' => $this->format_rubles( $actual_kopecks ) . ' руб.',
-			'actual_cost_compare_status' => $status,
-			'actual_cost_compare_message' => $message,
-			'base_api_cost_kopecks' => $base_kopecks,
-		);
+		return $presentation + array( 'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks );
 	}
 
-	private function base_api_cost_kopecks( object $order ): ?int {
-		if ( ! method_exists( $order, 'get_meta' ) ) {
-			return null;
+	private function non_negative_int_or_null( mixed $value ): ?int {
+		if ( is_int( $value ) ) {
+			return $value >= 0 ? $value : null;
 		}
-		$value = $order->get_meta( OrderShippingMetaPersister::CALCULATION_META_KEY, true );
-		if ( is_string( $value ) && '' !== trim( $value ) ) {
-			$decoded = json_decode( $value, true );
-			$value = is_array( $decoded ) ? $decoded : array();
-		}
-		if ( ! is_array( $value ) ) {
-			return null;
-		}
-		$api = is_array( $value['api'] ?? null ) ? $value['api'] : array();
-		foreach ( array( 'api_base_price_kopecks', 'api_base_cost_kopecks', 'base_api_cost_kopecks' ) as $key ) {
-			$kopecks = $this->positive_int_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
-			if ( null !== $kopecks ) {
-				return $kopecks;
-			}
-		}
-		foreach ( array( 'api_base_price_rub', 'api_price_with_vat_rub', 'base_api_cost_rub' ) as $key ) {
-			$rubles = $this->numeric_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
-			if ( null !== $rubles && $rubles > 0 ) {
-				return (int) round( $rubles * 100 );
-			}
+		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
+			return (int) $value;
 		}
 
 		return null;
 	}
 
-	private function positive_int_or_null( mixed $value ): ?int {
-		if ( ! is_numeric( $value ) ) {
-			return null;
+	private function actual_costs(): ShipmentActualCostComparisonService {
+		if ( ! isset( $this->actual_costs ) || ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
+			$this->actual_costs = new ShipmentActualCostComparisonService();
 		}
-		$integer = (int) $value;
 
-		return $integer > 0 ? $integer : null;
+		return $this->actual_costs;
 	}
 
-	private function numeric_or_null( mixed $value ): ?float {
-		return is_numeric( $value ) ? (float) $value : null;
-	}
+	private function base_costs(): ShipmentBaseApiCostResolver {
+		if ( ! isset( $this->base_costs ) || ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
+			$this->base_costs = new ShipmentBaseApiCostResolver();
+		}
 
-	private function format_rubles( int $kopecks ): string {
-		return number_format( $kopecks / 100, 2, '.', '' );
+		return $this->base_costs;
 	}
 
 	public function auto_sync_throttle_microseconds(): int { return 0; }
