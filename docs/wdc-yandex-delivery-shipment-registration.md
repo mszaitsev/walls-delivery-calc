@@ -196,13 +196,15 @@ Preview остаётся dry-run/local: он строит `ShipmentCreateRequest
 
 Для Яндекса это важно в промежуточных состояниях: `reconciliation_required` и `cancellation_started` считаются существующим shipment, поэтому повторное создание/manual attach/cancel скрыты, а status update остаётся доступен. Local remove доступен для reconciliation сразу, а для cancellation только после poll exhaustion. Терминальный `CANCELLED` после cancel polling очищает локальную запись автоматически; другие terminal статусы скрывают cancel и разрешают remove по adapter policy. Отдельные Яндекс-кнопки, разметка или carrier-specific UI не добавлялись.
 
-`ShipmentModalRequestMapper` теперь округляет дробные габариты грузомест вверх до целого сантиметра (`19.9` -> `20`, `19,1` -> `20`), чтобы carrier payload не занижал размеры. Вес остаётся строгим целым значением в граммах; decimal/invalid weight не исправляется и блокируется существующей validation. `CdekShipmentAllocationAdapter` в этом этапе не менялся.
+`ShipmentModalRequestMapper` округляет дробные габариты грузомест вверх до целого сантиметра (`19.9` -> `20`, `19,1` -> `20`), чтобы carrier payload не занижал размеры. Вес остаётся строгим целым значением в граммах; decimal/invalid weight не исправляется и блокируется существующей validation.
 
 ## Статус 0.108.3
 
-Общая shipment modal получила canonical контракт для товарного allocation: `shipment_items[]`. Это теперь основной submit-формат для распределения товаров по грузоместам; `cdek_items[]` оставлен только как временный fallback для CDEK/common parser migration и зафиксирован как технический долг. Яндекс не создаёт свой `yandex_items` контракт для модалки и пишет в `ShipmentCreateRequest::meta` canonical `shipment_item_rows`.
+Общая shipment modal использует canonical контракт для товарного allocation: `shipment_items[]`. Это единственный submit-формат для распределения товаров по грузоместам; `cdek_items[]` больше не принимается production parser-ом. Яндекс не создаёт свой `yandex_items` контракт для модалки и пишет в `ShipmentCreateRequest::meta` canonical `shipment_item_rows`.
 
-Разбор данных модалки вынесен в `ShipmentModalRequestMapper`, который возвращает `ShipmentPreparationData` с двумя нейтральными полями: `places` и `item_rows`. Его используют CDEK и Яндекс admin submit paths. Mapper не исправляет `amount`, `place_number`, `weight`, `item_key` или стоимость: после базовой sanitization результат проходит через существующий `CdekShipmentAllocationAdapter` / `ShipmentAllocation` validator. Поэтому повреждённые rows отклоняются до Yandex HTTP, а split quantity и одинаковые SKU с разными `item_key` остаются различимыми.
+С 0.112.1 Yandex registration требует именно canonical `shipment_item_rows`: `ShipmentPlace::items` не является fallback source, потому что такой rebuild теряет order-item identity, split allocation и отдельную assessed value. Если rows отсутствуют, preview/create падают на neutral validation до `offers/create`.
+
+Разбор данных модалки вынесен в `ShipmentModalRequestMapper`, который возвращает `ShipmentPreparationData` с двумя нейтральными полями: `places` и `item_rows`. Его используют CDEK и Яндекс admin submit paths. Mapper не исправляет `amount`, `place_number`, `weight`, `item_key` или стоимость: после базовой sanitization результат проходит через `ShipmentAllocationBuilder` / `ShipmentAllocation` validator. Поэтому повреждённые rows отклоняются до Yandex HTTP, а split quantity и одинаковые SKU с разными `item_key` остаются различимыми.
 
 Yandex-specific persistence вынесен из общего `ShipmentCreationService` в `YandexShipmentPersistenceMapper`. Общий сервис сохраняет common shipment envelope и вызывает mapper для Yandex fields: canonical request/info snapshot, selected offer, offer expiration, request ids, barcodes, reconciliation pending fields and lookup meta sync через `YandexShipmentRepository`. Reconciliation после successful confirm по-прежнему сохраняет pending shipment и не повторяет confirm.
 
@@ -210,11 +212,11 @@ Yandex-specific persistence вынесен из общего `ShipmentCreationSe
 
 ## Статус 0.108.2
 
-Проведён повторный аудит источника allocation для существующей shipment modal. Канонический production flow для CDEK использует не order meta, а отправленные из общей модалки поля `places[]` и `cdek_items[]`; `OrderShipmentDraftFactory::create_cdek_request_from_admin_data()` превращает их в `ShipmentCreateRequest::places` и `meta['cdek_item_rows']`. Для Яндекса используется тот же источник: `create_yandex_request_from_admin_data()` читает `places[]` и `cdek_items[]`, сохраняет split quantity, `place_number`, `item_key` и одинаковые SKU разных order items как разные строки.
+Проведён повторный аудит источника allocation для существующей shipment modal. Канонический production flow для CDEK и Яндекса использует не order meta, а отправленные из общей модалки поля `places[]` и `shipment_items[]`; `OrderShipmentDraftFactory::create_*_request_from_admin_data()` превращает их в `ShipmentCreateRequest::places` и `meta['shipment_item_rows']`. Строки сохраняют split quantity, `place_number`, `item_key` и одинаковые SKU разных order items как разные строки.
 
 Поиски `_wdc_shipment_places`, `_wdc_cdek_shipment_places`, `_wdc_prepared_shipment_places` и аналогичных item-row meta удалены: существующий modal workflow их не пишет, поэтому они не являются каноническим источником. Начальный draft из заказа остаётся одногрузоместным, как у CDEK, и нужен для открытия модалки; многоместное распределение становится каноническим после submit общей shipment modal.
 
-Yandex parser allocation rows больше не исправляет повреждённые значения. `amount=0`, отсутствующий `place_number`, пустой `item_key` или нулевой `weight` проходят в rows как есть и отклоняются существующим `CdekShipmentAllocationAdapter` / `ShipmentAllocation` validator до HTTP. Отдельный validator не добавлялся.
+Yandex parser allocation rows больше не исправляет повреждённые значения. `amount=0`, отсутствующий `place_number`, пустой `item_key` или нулевой `weight` проходят в rows как есть и отклоняются `ShipmentAllocationBuilder` / `ShipmentAllocation` validator до HTTP. Отдельный carrier-specific validator не добавлялся.
 
 Cancellation lifecycle теперь использует universal mapping, а не raw terminal helper из `YandexShipmentButtonPolicy`. Если shipment находится в `cancellation_started`, raw status из `request/info` сначала сопоставляется через `YandexStatusMapping`; universal `delivered`, `returned_to_sender`, `cancelled` и `rejected` завершают cancel polling. Только raw `CANCELLED` означает успешную отмену с auto-delete; другой terminal universal status оставляет shipment в заказе, сбрасывает `yandex_cancel_requested`, скрывает повторный cancel и пишет note без утверждения «отправление отменено».
 
@@ -241,7 +243,7 @@ Carrier-specific слой:
 - `YandexShipmentRepository` сохраняет данные через общий `OrderShipmentRepository`;
 - `YandexShipmentButtonPolicy` управляет кнопками create/status/cancel/remove без проверок в metabox.
 
-Создание отправления идёт так: общий `OrderShipmentDraftFactory` строит `ShipmentCreateRequest` для `yandex_delivery`, adapter переиспользует существующий `ShipmentAllocation` через `CdekShipmentAllocationAdapter`, Yandex payload builder строит offers/create payload, HTTP service выполняет `offers/create` -> earliest offer -> `offers/confirm` -> обязательный `request/info`. Каноническое состояние shipment — именно `request/info`, а не исходный payload.
+Создание отправления идёт так: общий `OrderShipmentDraftFactory` строит `ShipmentCreateRequest` для `yandex_delivery`, registration service строит `ShipmentAllocation` через neutral `ShipmentAllocationBuilder`, Yandex payload builder строит offers/create payload, HTTP service выполняет `offers/create` -> earliest offer -> `offers/confirm` -> обязательный `request/info`. Каноническое состояние shipment — именно `request/info`, а не исходный payload.
 
 После успешной регистрации в `_wdc_shipments[yandex_delivery]` сохраняются `request_id`, `courier_order_id`, `sharing_url`, статус Яндекса, `operator_request_id`, `selected_offer_id`, `delivery_policy`, snapshots destination/recipient/items/places, temporary-to-real barcode map and full request/info snapshot. Body `offers/create` не сохраняется намеренно.
 
@@ -267,7 +269,7 @@ Offer DTO читает production shape `offer_details`: `delivery_interval.poli
 
 ## Статус 0.106.2
 
-Этап 0.106.2 закрывает validation-блокеры перед реальным HTTP-flow, не добавляя HTTP/API/UI/persistence. Registration allocation не может быть пустым: `ShipmentAllocation` должен содержать хотя бы один item суммарно, а каждое `ShipmentAllocationPlace` должно содержать хотя бы один `ShipmentAllocationItem`. `CdekShipmentAllocationAdapter` отклоняет пустые `cdek_item_rows` и ситуацию, когда одно из мест не имеет allocation rows.
+Этап 0.106.2 закрывает validation-блокеры перед реальным HTTP-flow, не добавляя HTTP/API/UI/persistence. Registration allocation не может быть пустым: `ShipmentAllocation` должен содержать хотя бы один item суммарно, а каждое `ShipmentAllocationPlace` должно содержать хотя бы один `ShipmentAllocationItem`. В актуальном коде `ShipmentAllocationBuilder` отклоняет пустые `shipment_item_rows` и ситуацию, когда одно из мест не имеет allocation rows.
 
 Yandex destination теперь строгий: `destination.mode` принимает только `pickup` или `courier`. Для pickup обязателен непустой `platform_station_id`. Для courier обязательны структурированные `details.locality`, `details.street`, `details.house` и `details.full_address`; `country`, `region`, `room`, `postal_code`, `geoId` и `geo_id` остаются необязательными scalar-полями. Координаты не требуются и не добавляются искусственно.
 
@@ -275,9 +277,9 @@ Recipient validation обязательна до построения payload: �
 
 ## Статус 0.106.1
 
-Этап 0.106.1 готовит foundation к реальному HTTP-flow без добавления HTTP. `items[]` приведены к подтверждённой production-структуре: цены и НДС передаются только внутри `billing_details`, а не на верхнем уровне товарной строки. `ShipmentAllocationItem` хранит две нейтральные цены: `unit_price_kopecks` и `assessed_unit_price_kopecks`, потому что для Яндекса обычная цена и оценочная стоимость могут различаться; текущий CDEK adapter заполняет их одинаковым значением из существующего `cost`, не меняя CDEK payload.
+Этап 0.106.1 готовит foundation к реальному HTTP-flow без добавления HTTP. `items[]` приведены к подтверждённой production-структуре: цены и НДС передаются только внутри `billing_details`, а не на верхнем уровне товарной строки. `ShipmentAllocationItem` хранит две нейтральные цены: `unit_price_kopecks` и `assessed_unit_price_kopecks`, потому что для Яндекса обычная цена и оценочная стоимость могут различаться; актуальный modal mapper заполняет assessed значением из `assessed_cost`, а при его отсутствии явно использует `cost`.
 
-`CdekShipmentAllocationAdapter` больше не исправляет повреждённые данные молча. Строка с неизвестным `place_number`, пустым `item_key`, `amount <= 0`, невалидным весом или отрицательной стоимостью приводит к `InvalidArgumentException`. Yandex builder также вызывает `ShipmentAllocation::validate()` перед построением payload.
+`ShipmentAllocationBuilder` не исправляет повреждённые данные молча. Строка с неизвестным `place_number`, пустым `item_key`, `amount <= 0`, невалидным весом или отрицательной стоимостью приводит к `InvalidArgumentException`. Yandex builder также вызывает `ShipmentAllocation::validate()` перед построением payload.
 
 ## Статус 0.106.0
 
@@ -291,9 +293,11 @@ Recipient validation обязательна до построения payload: �
 
 ## Allocation
 
-Фактическое распределение ранее существовало только в CDEK: `ShipmentCreateRequest::places` содержит характеристики `ShipmentPlace`, а CDEK editor хранит строки в `meta['cdek_item_rows']` с `item_key`, `place_number` и `amount`. `item_key` — identity исходной order item; SKU (`ware_key`) лишь дополнительный атрибут. Разделение quantity представлено несколькими строками с тем же `item_key` и разными `place_number`.
+Фактическое распределение хранится в `ShipmentCreateRequest::places` и `meta['shipment_item_rows']` с `item_key`, `place_number`, `amount`, `unit_price_kopecks` и `assessed_unit_price_kopecks`. `item_key` — identity исходной order item; SKU (`sku`) лишь дополнительный атрибут. Разделение quantity представлено несколькими строками с тем же `item_key` и разными `place_number`.
 
-Нейтральный read-model `Shipments/Allocation` и `CdekShipmentAllocationAdapter` адаптируют эти уже существующие данные без перерасчёта packing. CDEK request builder и payload не менялись. Новый слой не содержит carrier-полей; он хранит place dimensions/weight и source item identity, quantity, name, SKU, unit price, assessed unit price и item weight.
+Нейтральный read-model `Shipments/Allocation` и `ShipmentAllocationBuilder` адаптируют эти данные без перерасчёта packing. CDEK request builder сохраняет прежнюю payload semantics: API `cost` берётся из assessed value. Новый слой не содержит carrier-полей; он хранит place dimensions/weight и source item identity, quantity, name, SKU, unit price, assessed unit price и item weight.
+
+`ShipmentAllocationBuilder` принимает `unit_price_kopecks` и `assessed_unit_price_kopecks` только как integer или строку из цифр. Decimal, comma decimal, scientific notation, negative, empty, boolean и null значения отклоняются без cast/clamp/round.
 
 ## Yandex payload
 

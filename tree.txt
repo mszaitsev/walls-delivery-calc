@@ -657,6 +657,7 @@ C:.
 |   |   |
 |   |   +---Allocation
 |   |   |       ShipmentAllocation.php
+|   |   |       ShipmentAllocationBuilder.php
 |   |   |       ShipmentAllocationItem.php
 |   |   |       ShipmentAllocationPlace.php
 |   |   |
@@ -682,7 +683,6 @@ C:.
 |   |   |       CdekOrderStatusService.php
 |   |   |       CdekRecipientAddressPreparationService.php
 |   |   |       CdekShipmentAdapter.php
-|   |   |       CdekShipmentAllocationAdapter.php
 |   |   |       CdekStatusMappingService.php
 |   |   |
 |   |   +---Contracts

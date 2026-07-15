@@ -381,6 +381,7 @@ final class OrderShipmentDraftFactory {
 				'order_num' => $this->order_number( $order ),
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
+				'shipment_item_rows' => $this->shipment_item_rows_from_order( $order, $items ),
 			)
 		);
 	}
@@ -405,7 +406,7 @@ final class OrderShipmentDraftFactory {
 		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->normalized_address_from_admin_data( $data, $original_address, CdekSettings::SERVICE_KEY ) : array();
 		$shipment_data = $this->shipment_modal_mapper()->parse( $data );
 		$places = $shipment_data->places;
-		$cdek_items = $shipment_data->item_rows;
+		$item_rows = $shipment_data->item_rows;
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
@@ -453,8 +454,7 @@ final class OrderShipmentDraftFactory {
 					'pickup_point_postcode' => DeliveryType::PICKUP === $delivery_type ? (string) ( $pickup_row['postcode'] ?? $base->meta['pickup_point_postcode'] ?? '' ) : (string) ( $base->meta['pickup_point_postcode'] ?? '' ),
 					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? '' !== $pickup_code : ! empty( $base->meta['pickup_point_found'] ),
 					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->safe_pickup_row( $pickup_row ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
-					'shipment_item_rows' => $cdek_items,
-					'cdek_item_rows' => $cdek_items,
+					'shipment_item_rows' => $item_rows,
 				)
 			)
 		);
@@ -792,9 +792,10 @@ final class OrderShipmentDraftFactory {
 				'ordered_quantity' => $item->quantity,
 				'place_number' => 1,
 				'name' => $item->name,
-				'ware_key' => $item->sku,
+				'sku' => $item->sku,
 				'amount' => $item->quantity,
-				'cost' => $item->unit_price->get_rubles(),
+				'unit_price_kopecks' => $item->unit_price->get_kopecks(),
+				'assessed_unit_price_kopecks' => $item->unit_price->get_kopecks(),
 				'weight' => max( 1, $item->weight_g ),
 				'length_cm' => $item->length_cm,
 				'width_cm' => $item->width_cm,

@@ -4,10 +4,10 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Cdek;
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
-use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationBuilder;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -121,7 +121,7 @@ final class CdekCreateRequestBuilder {
 			}
 			$amount = (int) ( $row['amount'] ?? 0 );
 			$weight = (int) ( $row['weight'] ?? 0 );
-			$cost = (float) ( $row['cost'] ?? -1 );
+			$cost = is_numeric( $row['assessed_unit_price_kopecks'] ?? null ) ? (int) $row['assessed_unit_price_kopecks'] : -1;
 			if ( $amount <= 0 ) {
 				$errors[] = 'Количество товара СДЭК должно быть больше 0.';
 			}
@@ -137,6 +137,11 @@ final class CdekCreateRequestBuilder {
 		}
 		if ( $item_rows_count > 126 ) {
 			$errors[] = 'В заказе больше 126 товарных строк СДЭК.';
+		}
+		try {
+			( new ShipmentAllocationBuilder() )->build( $this->item_rows( $request ), $request->places );
+		} catch ( \InvalidArgumentException $exception ) {
+			$errors[] = $exception->getMessage();
 		}
 		foreach ( $request->places as $place ) {
 			if ( $place instanceof ShipmentPlace && ( $place_weights[ $place->place_number ] ?? 0 ) > $place->weight_g ) {
@@ -267,9 +272,9 @@ final class CdekCreateRequestBuilder {
 		foreach ( $this->item_rows( $request ) as $row ) {
 			$rows_by_place[ (int) $row['place_number'] ][] = array(
 				'name' => (string) $row['name'],
-				'ware_key' => substr( preg_replace( '/[^A-Za-z0-9_\-.]/', '', (string) $row['ware_key'] ) ?: 'item' . (string) ( $row['item_id'] ?? '' ), 0, 20 ),
+				'ware_key' => substr( preg_replace( '/[^A-Za-z0-9_\-.]/', '', (string) $row['sku'] ) ?: 'item' . (string) ( $row['item_id'] ?? '' ), 0, 20 ),
 				'payment' => array( 'value' => 0 ),
-				'cost' => (float) $row['cost'],
+				'cost' => $this->rubles_from_kopecks( (int) $row['assessed_unit_price_kopecks'] ),
 				'weight' => (int) $row['weight'],
 				'amount' => (int) $row['amount'],
 			);
@@ -296,31 +301,13 @@ final class CdekCreateRequestBuilder {
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function item_rows( ShipmentCreateRequest $request ): array {
-		$rows = is_array( $request->meta['cdek_item_rows'] ?? null ) ? $request->meta['cdek_item_rows'] : array();
-		if ( array() !== $rows ) {
-			return array_values( array_filter( $rows, 'is_array' ) );
-		}
-		$fallback = array();
-		foreach ( $request->places as $place ) {
-			if ( ! $place instanceof ShipmentPlace ) {
-				continue;
-			}
-			foreach ( $place->items as $index => $item ) {
-				if ( ! $item instanceof PackageItem ) {
-					continue;
-				}
-				$fallback[] = array(
-					'place_number' => $place->place_number,
-					'name' => $item->name,
-					'ware_key' => '' !== $item->sku ? $item->sku : 'item' . (string) ( $index + 1 ),
-					'cost' => $item->unit_price->get_rubles(),
-					'weight' => $item->weight_g,
-					'amount' => $item->quantity,
-				);
-			}
-		}
+		$rows = is_array( $request->meta['shipment_item_rows'] ?? null ) ? $request->meta['shipment_item_rows'] : array();
 
-		return $fallback;
+		return array_values( array_filter( $rows, 'is_array' ) );
+	}
+
+	private function rubles_from_kopecks( int $kopecks ): float {
+		return round( $kopecks / 100, 2 );
 	}
 
 	private function delivery_mode( ShipmentCreateRequest $request ): int {

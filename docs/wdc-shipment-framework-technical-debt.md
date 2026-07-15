@@ -35,24 +35,15 @@
    - Migration sequence: keep shipment picker AJAX/action separate from checkout repricing actions, add smoke that platform_station_id changes without touching order delivery price meta.
 
 5. CDEK assessed price ambiguity
-   - Current problem: the canonical modal/parser can read `assessed_cost` / `assessed_unit_price`, but `CdekShipmentAllocationAdapter` still uses `cost` simultaneously for `unit_price_kopecks` and `assessed_unit_price_kopecks`. A separate assessed price is therefore not yet carried into the neutral `ShipmentAllocation`.
-   - Target architecture: the common modal contract, persistence snapshot and allocation adapter carry unit price and assessed/declared value as distinct carrier-neutral values, and each carrier maps them explicitly.
-   - Affected classes/files: `ShipmentModalRequestMapper`, `CdekShipmentAllocationAdapter`, `ShipmentAllocationItem`, CDEK/Yandex payload builders and smoke fixtures.
-   - Migration sequence: first add/verify separate assessed value in neutral allocation without changing CDEK payload, then migrate CDEK/Yandex adapters with regression payload equality. This is intentionally not part of 0.108.5 to preserve current CDEK business behavior.
+   - Status: resolved in 0.112.0. The modal mapper normalizes unit and assessed values into separate canonical kopeck fields, `ShipmentAllocationBuilder` carries both values, CDEK maps API item `cost` from assessed value, and Yandex keeps both fields under `billing_details`.
 
 ## Earlier shipment framework debt
 
 1. CDEK modal fallback `cdek_items[]`
-   - Current problem: the shared modal now submits canonical `shipment_items[]`, but `ShipmentModalRequestMapper` still accepts `cdek_items[]` for the CDEK migration window.
-   - Target architecture: only `shipment_items[]` is accepted by shared modal submit parsing.
-   - Affected classes/files: `ShipmentModalRequestMapper`, CDEK smoke fixtures, any future external admin submit callers.
-   - Migration sequence: confirm all CDEK admin submit tests use `shipment_items[]`, remove fallback, add a source assertion that `cdek_items[]` is absent from common submit code.
+   - Status: resolved in 0.112.0. The shared modal submit contract accepts only `shipment_items[]`; production source assertions cover the removed fallback.
 
 2. CDEK meta `cdek_item_rows`
-   - Current problem: `OrderShipmentDraftFactory` writes canonical `shipment_item_rows` and temporary `cdek_item_rows` because CDEK builders still read the CDEK-specific key.
-   - Target architecture: CDEK builders read canonical `shipment_item_rows` first and carrier-specific meta is kept only for fields that are truly CDEK-specific.
-   - Affected classes/files: `OrderShipmentDraftFactory`, `CdekCreateRequestBuilder`, CDEK order-creation smoke.
-   - Migration sequence: switch CDEK builder to canonical-first, keep fallback for one patch, then remove `cdek_item_rows` writes and tests.
+   - Status: resolved in 0.112.0. `OrderShipmentDraftFactory` writes only `shipment_item_rows`, and `CdekCreateRequestBuilder` reads only that canonical key.
 
 3. Non-Yandex carrier persistence in `ShipmentCreationService`
    - Current problem: DPD, CDEK and Russian Post carrier-specific persistence fields are still built inside `ShipmentCreationService`.
@@ -79,18 +70,18 @@
    - Migration sequence: document current state, add persistence equality smoke, then move special flow behind DPD-specific services without changing UI.
 
 7. Compatibility meta keys `yandex_item_rows` / `cdek_item_rows`
-   - Current problem: Yandex registration reads `shipment_item_rows` first but keeps `yandex_item_rows` and `cdek_item_rows` fallbacks; CDEK still persists `cdek_item_rows`.
-   - Target architecture: `shipment_item_rows` is the only shared allocation meta key.
-   - Affected classes/files: `YandexShipmentRegistrationService`, `OrderShipmentDraftFactory`, `CdekCreateRequestBuilder`, shipment framework smokes.
-   - Migration sequence: remove `yandex_item_rows` fallback after all Yandex drafts write canonical rows; then migrate CDEK builder and remove `cdek_item_rows`.
+   - Status: resolved in 0.112.1. Yandex registration and CDEK creation now use only `shipment_item_rows`; Yandex also no longer rebuilds rows from `ShipmentPlace::items` when canonical rows are missing.
 
-8. Adapter interface alias
+8. CDEK-named allocation adapter used as neutral builder
+   - Status: resolved in 0.112.1. `CdekShipmentAllocationAdapter` was removed, and `ShipmentAllocationBuilder` is the neutral builder for canonical rows and places. Its money boundary now rejects non-integer kopeck values instead of silently casting decimals or scientific notation.
+
+9. Adapter interface alias
    - Current problem: resolved in 0.108.3. The empty `ShipmentCarrierAdapterInterface` alias was removed.
    - Target architecture: `CarrierShipmentAdapterInterface` remains the only adapter contract.
    - Affected classes/files: production adapters and tests now import `CarrierShipmentAdapterInterface`.
    - Migration sequence: keep source assertions/grep in smoke or review checklist to prevent reintroducing alias interfaces.
 
-9. Unified carrier regression suite
+10. Unified carrier regression suite
    - Current problem: carrier regression exists as multiple targeted smokes, but a full post-refactor suite is still manual to assemble.
    - Target architecture: one documented command/profile runs all shipment framework, Yandex, CDEK, DPD, Russian Post, Packaging and checkout regressions.
    - Affected classes/files: `tests/*`, development workflow docs.

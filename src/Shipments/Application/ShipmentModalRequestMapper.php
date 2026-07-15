@@ -5,7 +5,7 @@ namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
-use WallsShop\WDC\Shipments\Cdek\CdekShipmentAllocationAdapter;
+use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationBuilder;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -16,7 +16,7 @@ final class ShipmentModalRequestMapper {
 	public function parse( array $data ): ShipmentPreparationData {
 		$places = $this->places( $data );
 		$item_rows = $this->item_rows( $data );
-		( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $places, $item_rows );
+		( new ShipmentAllocationBuilder() )->build( $item_rows, $places );
 
 		return new ShipmentPreparationData( $places, $item_rows );
 	}
@@ -54,9 +54,7 @@ final class ShipmentModalRequestMapper {
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function item_rows( array $data ): array {
-		$rows = is_array( $data['shipment_items'] ?? null )
-			? $data['shipment_items']
-			: ( is_array( $data['cdek_items'] ?? null ) ? $data['cdek_items'] : array() );
+		$rows = is_array( $data['shipment_items'] ?? null ) ? $data['shipment_items'] : array();
 		if ( array() === $rows ) {
 			throw new \InvalidArgumentException( 'shipment items must not be empty' );
 		}
@@ -70,10 +68,10 @@ final class ShipmentModalRequestMapper {
 				'ordered_quantity' => (int) ( $row['ordered_quantity'] ?? $row['quantity'] ?? $row['amount'] ?? 0 ),
 				'place_number' => (int) ( $row['place_number'] ?? 0 ),
 				'name' => $this->text( $row['name'] ?? '' ),
-				'ware_key' => $this->text( $row['ware_key'] ?? $row['sku'] ?? '' ),
+				'sku' => $this->text( $row['sku'] ?? $row['ware_key'] ?? '' ),
 				'amount' => (int) ( $row['amount'] ?? $row['quantity'] ?? 0 ),
-				'cost' => $this->decimal_string( $row['cost'] ?? $row['unit_price'] ?? '' ),
-				'assessed_cost' => $this->decimal_string( $row['assessed_cost'] ?? $row['assessed_unit_price'] ?? '' ),
+				'unit_price_kopecks' => $this->rubles_to_kopecks( $row['cost'] ?? '' ),
+				'assessed_unit_price_kopecks' => $this->assessed_kopecks( $row['assessed_cost'] ?? null, $row['cost'] ?? '' ),
 				'weight' => (int) ( $row['weight'] ?? $row['weight_g'] ?? 0 ),
 				'length_cm' => $this->decimal_string( $row['length_cm'] ?? '' ),
 				'width_cm' => $this->decimal_string( $row['width_cm'] ?? '' ),
@@ -112,5 +110,23 @@ final class ShipmentModalRequestMapper {
 		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
 
 		return trim( str_replace( ',', '.', (string) $value ) );
+	}
+
+	private function assessed_kopecks( mixed $assessed, mixed $unit ): int {
+		$value = $this->decimal_string( $assessed );
+		if ( '' === $value ) {
+			return $this->rubles_to_kopecks( $unit );
+		}
+
+		return $this->rubles_to_kopecks( $value );
+	}
+
+	private function rubles_to_kopecks( mixed $value ): int {
+		$value = $this->decimal_string( $value );
+		if ( '' === $value || ! is_numeric( $value ) ) {
+			return -1;
+		}
+
+		return (int) round( (float) $value * 100 );
 	}
 }
