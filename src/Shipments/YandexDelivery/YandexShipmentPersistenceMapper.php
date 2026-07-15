@@ -152,12 +152,39 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 	public function after_persist( object $order, array $shipment ): void {
 		$this->repository->sync_lookup_meta( $order, $shipment );
 		$this->note_unknown_status( $order, $shipment );
+		$this->note_created( $order, $shipment );
 		if ( $this->order_status_mapping instanceof ShipmentOrderStatusMappingService && '' !== (string) ( $shipment['yandex_status'] ?? '' ) ) {
 			$this->order_status_mapping->apply( $order, $shipment, (string) ( $shipment['universal_status_code'] ?? '' ) );
 		}
 		if ( method_exists( $order, 'save' ) ) {
 			$order->save();
 		}
+	}
+
+	public function result_after_failed_persist( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $shipment ): ?ShipmentCreateResult {
+		unset( $request );
+		if ( empty( $shipment['yandex_reconciliation_required'] ) ) {
+			return null;
+		}
+		$request_id = (string) ( $shipment['request_id'] ?? $shipment['external_id'] ?? '' );
+		if ( '' === $request_id ) {
+			return null;
+		}
+
+		return new ShipmentCreateResult(
+			true,
+			external_id: $request_id,
+			tracking_number: $request_id,
+			backlog_order_id: $request_id,
+			raw_reference: array(
+				'yandex_accepted_reconciliation' => array(
+					'accepted' => true,
+					'reconciliation_required' => true,
+					'request_id' => $request_id,
+					'error_code' => $result->error_code,
+				),
+			)
+		);
 	}
 
 	private function universal_status_for( string $status ): string {
@@ -188,6 +215,37 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 		if ( method_exists( $order, 'add_order_note' ) ) {
 			$order->add_order_note( 'Яндекс вернул неизвестный статус: ' . $code . '.' );
 		}
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function note_created( object $order, array $shipment ): void {
+		if ( ! method_exists( $order, 'add_order_note' ) ) {
+			return;
+		}
+		$request_id = (string) ( $shipment['request_id'] ?? $shipment['external_id'] ?? '' );
+		if ( ! empty( $shipment['yandex_reconciliation_required'] ) ) {
+			$operator_request_id = (string) ( $shipment['yandex_operator_request_id'] ?? '' );
+			$order->add_order_note(
+				sprintf(
+					'Отправление Яндекс создано. Номер заказа в Яндекс: %s. Request ID: %s. Ожидается получение статуса.',
+					'' !== $operator_request_id ? $operator_request_id : (string) ( $shipment['order_num'] ?? '' ),
+					$request_id
+				)
+			);
+			return;
+		}
+		if ( YandexDeliverySettings::CARRIER_KEY !== (string) ( $shipment['carrier_key'] ?? '' ) || '' === $request_id ) {
+			return;
+		}
+		$operator_request_id = (string) ( $shipment['yandex_operator_request_id'] ?? $shipment['operator_request_id'] ?? $shipment['order_num'] ?? '' );
+		$order->add_order_note(
+			sprintf(
+				'Отправление Яндекс создано. Номер заказа в Яндекс: %s. Request ID: %s. Мест: %d',
+				$operator_request_id,
+				$request_id,
+				count( is_array( $shipment['places'] ?? null ) ? $shipment['places'] : array() )
+			)
+		);
 	}
 
 	/** @return array<string,mixed> */

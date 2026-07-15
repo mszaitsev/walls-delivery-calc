@@ -259,7 +259,7 @@ function yd_framework_stack( array $responses ): array {
 	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
 	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
 	$registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
+	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, $registry, array( $mapper ) );
 
 	return array( $base_repository, $adapter, $creation, $framework_registration, $fake );
 }
@@ -287,7 +287,7 @@ $button_policy = new YandexShipmentButtonPolicy( $status_mapping );
 $framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
 $adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, null, $registry, array( $mapper ) );
+$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, $registry, array( $mapper ) );
 $order = new YdFrameworkOrder( 777 );
 $request = yd_framework_request();
 
