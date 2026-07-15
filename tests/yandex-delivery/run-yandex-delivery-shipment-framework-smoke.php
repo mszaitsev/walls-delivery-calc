@@ -219,7 +219,7 @@ function yd_framework_request( int $order_id = 777, string $order_num = 'ORDER-7
 			'yandex_ready_from' => '2026-07-12 12:00:00+07:00',
 			'yandex_ready_to' => '2026-07-12 12:00:00+07:00',
 			'yandex_pickup_platform_station_id' => 'PVZ-1',
-			'shipment_item_rows' => array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'SKU-A', 'amount' => 1, 'cost' => 100, 'weight' => 500 ) ),
+			'shipment_item_rows' => array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'sku' => 'SKU-A', 'amount' => 1, 'unit_price_kopecks' => 10000, 'assessed_unit_price_kopecks' => 10000, 'weight' => 500 ) ),
 		)
 	);
 }
@@ -752,7 +752,7 @@ yd_framework_assert( 1000 === $admin_request->places[0]->weight_g && 800 === $ad
 yd_framework_assert( 20 === $admin_request->places[0]->length_cm && 20 === $admin_request->places[0]->width_cm && 19 === $admin_request->places[0]->height_cm, 'Shipment modal mapper must round decimal dimensions up without changing integer dimensions.' );
 $admin_rows = $admin_request->meta['shipment_item_rows'];
 yd_framework_assert( 2 === (int) $admin_rows[0]['amount'] && 1 === (int) $admin_rows[1]['amount'] && 2 === (int) $admin_rows[1]['place_number'], 'Yandex admin data must preserve split quantity across places.' );
-yd_framework_assert( 'order-item-a' === (string) $admin_rows[0]['item_key'] && 'order-item-b' === (string) $admin_rows[2]['item_key'] && $admin_rows[0]['ware_key'] === $admin_rows[2]['ware_key'], 'Yandex admin data identity must keep same SKU order items distinct by item_key.' );
+yd_framework_assert( 'order-item-a' === (string) $admin_rows[0]['item_key'] && 'order-item-b' === (string) $admin_rows[2]['item_key'] && $admin_rows[0]['sku'] === $admin_rows[2]['sku'], 'Yandex admin data identity must keep same SKU order items distinct by item_key.' );
 $fallback_order = new YdFrameworkOrder( 782 );
 $fallback_order->update_meta_data( '_wdc_platform_carrier_key', YandexDeliverySettings::CARRIER_KEY );
 $fallback_order->update_meta_data( '_wdc_platform_rate_id', YandexDeliverySettings::CARRIER_KEY . ':pickup' );

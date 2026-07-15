@@ -9,9 +9,9 @@ use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayload
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Shipments\Allocation\ShipmentAllocation;
+use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationBuilder;
 use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationItem;
 use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationPlace;
-use WallsShop\WDC\Shipments\Cdek\CdekShipmentAllocationAdapter;
 
 function yandex_shipment_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) { throw new RuntimeException( $message ); }
@@ -25,13 +25,26 @@ function yandex_shipment_expect_exception( callable $callback, string $message_p
 	}
 }
 function yandex_shipment_payload( array $places, array $rows, array $destination ): array {
-	$allocation = ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $places, $rows );
+	$allocation = ( new ShipmentAllocationBuilder() )->build( $rows, $places );
 	return ( new YandexDeliveryShipmentPayloadBuilder() )->build( $allocation, array(
 		'operator_request_id' => 'ORDER-123', 'source_platform_station_id' => 'SOURCE-1',
 		'ready_from' => new DateTimeImmutable( '2026-07-12 12:00:00+07:00' ), 'ready_to' => new DateTimeImmutable( '2026-07-12 13:00:00+07:00' ),
 		'recipient' => array( 'first_name' => 'Михаил', 'last_name' => 'Михайлов', 'phone' => '8 (913) 123-45-67', 'email' => 'buyer@example.test' ),
 		'destination' => $destination,
 	) );
+}
+function yandex_shipment_row( string $item_key, int $place_number, string $name, string $sku, int $amount, int $unit_kopecks, int $weight, ?int $assessed_kopecks = null ): array {
+	return array(
+		'item_key' => $item_key,
+		'ordered_quantity' => $amount,
+		'place_number' => $place_number,
+		'name' => $name,
+		'sku' => $sku,
+		'amount' => $amount,
+		'unit_price_kopecks' => $unit_kopecks,
+		'assessed_unit_price_kopecks' => $assessed_kopecks ?? $unit_kopecks,
+		'weight' => $weight,
+	);
 }
 function yandex_context_payload( ShipmentAllocation $allocation, array $overrides = array() ): array {
 	$context = array_merge( array(
@@ -47,8 +60,8 @@ function yandex_context_payload( ShipmentAllocation $allocation, array $override
 }
 $pickup = array( 'mode' => 'pickup', 'platform_station_id' => 'PVZ-1' );
 $one = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), array(
-	array( 'item_key' => 'A', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'B', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item B', 'ware_key' => 'B', 'amount' => 1, 'cost' => 200, 'weight' => 400 ),
+	yandex_shipment_row( 'A', 1, 'Item A', 'A', 2, 10000, 300 ),
+	yandex_shipment_row( 'B', 1, 'Item B', 'B', 1, 20000, 400 ),
 ), $pickup );
 yandex_shipment_assert( 1 === count( $one['places'] ) && 2 === count( $one['items'] ) && 2 === $one['items'][0]['count'] && 3 === array_sum( array_column( $one['items'], 'count' ) ), 'One-place allocation must preserve two item rows and quantities.' );
 yandex_shipment_assert( 'ORDER-123-1' === $one['places'][0]['barcode'] && 'ORDER-123-1' === $one['items'][0]['place_barcode'] && 'platform_station' === $one['destination']['type'] && 'self_pickup' === $one['last_mile_policy'], 'Pickup payload must use deterministic place barcode and pickup destination.' );
@@ -59,9 +72,9 @@ yandex_shipment_assert( '2026-07-12T05:00:00.000000Z' === $one['source']['interv
 
 $two_places = array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 1200, 21, 16, 11, Money::from_kopecks( 0 ) ) );
 $split = yandex_shipment_payload( $two_places, array(
-	array( 'item_key' => 'A', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'A', 'ordered_quantity' => 1, 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'B', 'ordered_quantity' => 1, 'place_number' => 2, 'name' => 'Item B', 'ware_key' => 'B', 'amount' => 1, 'cost' => 200, 'weight' => 400 ),
+	yandex_shipment_row( 'A', 1, 'Item A', 'A', 1, 10000, 300 ),
+	yandex_shipment_row( 'A', 2, 'Item A', 'A', 1, 10000, 300 ),
+	yandex_shipment_row( 'B', 2, 'Item B', 'B', 1, 20000, 400 ),
 ), array( 'mode' => 'courier', 'details' => array( 'country' => 'Россия', 'region' => 'Москва', 'locality' => 'Москва', 'street' => 'Ходынский бульвар', 'house' => '9', 'room' => '15', 'full_address' => '125252, Москва, Ходынский бульвар, 9, кв. 15', 'postal_code' => '125252' ) ) );
 yandex_shipment_assert( 2 === count( $split['places'] ) && 'ORDER-123-1' !== $split['places'][1]['barcode'], 'Two places must have unique temporary barcodes.' );
 yandex_shipment_assert( 3 === count( $split['items'] ) && 2 === array_sum( array_map( static fn( array $item ): int => 'A' === $item['article'] ? $item['count'] : 0, $split['items'] ) ) && $split['items'][0]['place_barcode'] !== $split['items'][1]['place_barcode'], 'Split item must never be merged across places.' );
@@ -69,22 +82,28 @@ yandex_shipment_assert( 'custom_location' === $split['destination']['type'] && '
 yandex_shipment_assert( ! array_key_exists( 'latitude', $split['destination']['custom_location']['details'] ) && ! array_key_exists( 'longitude', $split['destination']['custom_location']['details'] ), 'Courier structured address must not require coordinates.' );
 
 $same_place = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), array(
-	array( 'item_key' => 'A', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'A', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
+	yandex_shipment_row( 'A', 1, 'Item A', 'A', 1, 10000, 300 ),
+	yandex_shipment_row( 'A', 1, 'Item A', 'A', 2, 10000, 300 ),
 ), $pickup );
 yandex_shipment_assert( 1 === count( $same_place['items'] ) && 3 === $same_place['items'][0]['count'], 'Same-place duplicate allocation rows may aggregate only inside that barcode.' );
 
 $same_identity_across_places = yandex_shipment_payload( $two_places, array(
-	array( 'item_key' => 'A', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'A', 'ordered_quantity' => 1, 'place_number' => 2, 'name' => 'Item A', 'ware_key' => 'A', 'amount' => 2, 'cost' => 100, 'weight' => 300 ),
+	yandex_shipment_row( 'A', 1, 'Item A', 'A', 1, 10000, 300 ),
+	yandex_shipment_row( 'A', 2, 'Item A', 'A', 2, 10000, 300 ),
 ), $pickup );
 yandex_shipment_assert( 2 === count( $same_identity_across_places['items'] ) && $same_identity_across_places['items'][0]['place_barcode'] !== $same_identity_across_places['items'][1]['place_barcode'], 'Same item across different places must remain separate Yandex rows.' );
 
 $same_sku_payload = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), array(
-	array( 'item_key' => 'order-item-1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item 1', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
-	array( 'item_key' => 'order-item-2', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Item 2', 'ware_key' => 'SAME-SKU', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	yandex_shipment_row( 'order-item-1', 1, 'Item 1', 'SAME-SKU', 1, 10000, 300 ),
+	yandex_shipment_row( 'order-item-2', 1, 'Item 2', 'SAME-SKU', 1, 10000, 300 ),
 ), $pickup );
 yandex_shipment_assert( 2 === count( $same_sku_payload['items'] ) && 'SAME-SKU' === $same_sku_payload['items'][0]['article'] && 'SAME-SKU' === $same_sku_payload['items'][1]['article'], 'Different source identities with the same SKU must not be merged.' );
+
+$different_assessed_payload = yandex_shipment_payload( array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), array(
+	yandex_shipment_row( 'A', 1, 'Item A', 'A', 1, 10000, 300, 12000 ),
+	yandex_shipment_row( 'A', 1, 'Item A', 'A', 1, 10000, 300, 15000 ),
+), $pickup );
+yandex_shipment_assert( 2 === count( $different_assessed_payload['items'] ) && 12000 === $different_assessed_payload['items'][0]['billing_details']['assessed_unit_price'] && 15000 === $different_assessed_payload['items'][1]['billing_details']['assessed_unit_price'], 'Same item rows with different assessed values must not be aggregated.' );
 
 $priced_payload = ( new YandexDeliveryShipmentPayloadBuilder() )->build( new ShipmentAllocation( array( new ShipmentAllocationPlace( 1, 1000, 20, 15, 10, array( new ShipmentAllocationItem( 'priced', array( 'order_item_id' => 'priced' ), 'Priced item', 'PRICE', 1, 10000, 15000, 300 ) ) ) ) ), array(
 	'operator_request_id' => 'ORDER-123', 'source_platform_station_id' => 'SOURCE-1',

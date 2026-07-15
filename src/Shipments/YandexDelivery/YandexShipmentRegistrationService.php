@@ -22,7 +22,7 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
-use WallsShop\WDC\Shipments\Cdek\CdekShipmentAllocationAdapter;
+use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationBuilder;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -409,17 +409,11 @@ final class YandexShipmentRegistrationService {
 
 	private function allocation( ShipmentCreateRequest $request ): \WallsShop\WDC\Shipments\Allocation\ShipmentAllocation {
 		$rows = is_array( $request->meta['shipment_item_rows'] ?? null ) ? $request->meta['shipment_item_rows'] : array();
-		if ( array() === $rows && is_array( $request->meta['yandex_item_rows'] ?? null ) ) {
-			$rows = $request->meta['yandex_item_rows'];
-		}
-		if ( array() === $rows && is_array( $request->meta['cdek_item_rows'] ?? null ) ) {
-			$rows = $request->meta['cdek_item_rows'];
-		}
 		if ( array() === $rows ) {
 			$rows = $this->rows_from_places( $request->places );
 		}
 
-		return ( new CdekShipmentAllocationAdapter() )->from_cdek_rows( $request->places, $rows );
+		return ( new ShipmentAllocationBuilder() )->build( $rows, $request->places );
 	}
 
 	private function register_request( ShipmentCreateRequest $request ): YandexDeliveryShipmentRegistrationResult {
@@ -488,9 +482,10 @@ final class YandexShipmentRegistrationService {
 					'ordered_quantity' => $item->quantity,
 					'place_number' => $place->place_number,
 					'name' => $item->name,
-					'ware_key' => $item->sku,
+					'sku' => $item->sku,
 					'amount' => $item->quantity,
-					'cost' => $item->unit_price->get_rubles(),
+					'unit_price_kopecks' => $item->unit_price->get_kopecks(),
+					'assessed_unit_price_kopecks' => $item->unit_price->get_kopecks(),
 					'weight' => max( 1, $item->weight_g ),
 				);
 			}

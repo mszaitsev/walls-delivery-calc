@@ -1,38 +1,34 @@
 <?php
 declare(strict_types=1);
 
-namespace WallsShop\WDC\Shipments\Cdek;
+namespace WallsShop\WDC\Shipments\Allocation;
 
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
-use WallsShop\WDC\Shipments\Allocation\ShipmentAllocation;
-use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationItem;
-use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationPlace;
 
-/**
- * Converts the existing CDEK shipment-editor rows to the carrier-neutral allocation view.
- * It deliberately does not alter CDEK request construction.
- */
-final class CdekShipmentAllocationAdapter {
+defined( 'ABSPATH' ) || exit;
+
+final class ShipmentAllocationBuilder {
 	/**
-	 * @param array<int,ShipmentPlace> $places
-	 * @param array<int,array<string,mixed>> $item_rows Existing meta['cdek_item_rows'] rows.
+	 * @param array<int,array<string,mixed>> $item_rows
+	 * @param array<int,ShipmentPlace>      $places
 	 */
-	public function from_cdek_rows( array $places, array $item_rows ): ShipmentAllocation {
-		$this->assert_valid_source( $places, $item_rows );
+	public function build( array $item_rows, array $places ): ShipmentAllocation {
+		$this->assert_valid_source( $item_rows, $places );
 
 		$rows_by_place = array();
-		foreach ( $item_rows as $row_index => $row ) {
+		foreach ( $item_rows as $row ) {
 			$place_number = (int) $row['place_number'];
 			$source_item_id = trim( (string) ( $row['item_key'] ?? '' ) );
-			$price_kopecks = (int) round( (float) str_replace( ',', '.', (string) $row['cost'] ) * 100 );
+			$unit_price_kopecks = $this->kopecks( $row['unit_price_kopecks'] ?? null );
+			$assessed_unit_price_kopecks = $this->kopecks( $row['assessed_unit_price_kopecks'] ?? null );
 			$rows_by_place[ $place_number ][] = new ShipmentAllocationItem(
 				$source_item_id,
 				array( 'order_item_id' => $source_item_id ),
 				(string) ( $row['name'] ?? '' ),
-				(string) ( $row['ware_key'] ?? '' ),
+				(string) ( $row['sku'] ?? '' ),
 				(int) $row['amount'],
-				$price_kopecks,
-				$price_kopecks,
+				$unit_price_kopecks,
+				$assessed_unit_price_kopecks,
 				(int) $row['weight']
 			);
 		}
@@ -59,10 +55,10 @@ final class CdekShipmentAllocationAdapter {
 	}
 
 	/**
-	 * @param array<int,ShipmentPlace> $places
 	 * @param array<int,array<string,mixed>> $item_rows
+	 * @param array<int,ShipmentPlace>      $places
 	 */
-	private function assert_valid_source( array $places, array $item_rows ): void {
+	private function assert_valid_source( array $item_rows, array $places ): void {
 		$errors = array();
 		$known_places = array();
 		foreach ( $places as $place ) {
@@ -79,12 +75,12 @@ final class CdekShipmentAllocationAdapter {
 			$errors[] = 'Shipment allocation source must contain at least one place.';
 		}
 		if ( array() === $item_rows ) {
-			$errors[] = 'CDEK allocation rows must not be empty.';
+			$errors[] = 'Shipment allocation rows must not be empty.';
 		}
 
 		$row_counts_by_place = array();
 		foreach ( $item_rows as $row_index => $row ) {
-			$label = 'CDEK allocation row ' . (string) ( $row_index + 1 );
+			$label = 'Shipment allocation row ' . (string) ( $row_index + 1 );
 			if ( ! is_array( $row ) ) {
 				$errors[] = $label . ' must be an array.';
 				continue;
@@ -107,9 +103,10 @@ final class CdekShipmentAllocationAdapter {
 			if ( (int) ( $row['weight'] ?? 0 ) <= 0 ) {
 				$errors[] = $label . ' weight must be greater than 0.';
 			}
-			$cost = str_replace( ',', '.', (string) ( $row['cost'] ?? '' ) );
-			if ( '' === $cost || ! is_numeric( $cost ) || (float) $cost < 0 ) {
-				$errors[] = $label . ' cost must be greater than or equal to 0.';
+			foreach ( array( 'unit_price_kopecks', 'assessed_unit_price_kopecks' ) as $key ) {
+				if ( ! is_numeric( $row[ $key ] ?? null ) || (int) $row[ $key ] < 0 ) {
+					$errors[] = $label . ' ' . $key . ' must be greater than or equal to 0.';
+				}
 			}
 		}
 		foreach ( array_keys( $known_places ) as $place_number ) {
@@ -121,5 +118,9 @@ final class CdekShipmentAllocationAdapter {
 		if ( array() !== $errors ) {
 			throw new \InvalidArgumentException( implode( "\n", array_values( array_unique( $errors ) ) ) );
 		}
+	}
+
+	private function kopecks( mixed $value ): int {
+		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
 	}
 }

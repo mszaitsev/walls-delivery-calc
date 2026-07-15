@@ -52,6 +52,19 @@ function cdek_order_assert( bool $condition, string $message ): void {
 		throw new RuntimeException( $message );
 	}
 }
+function cdek_order_item_row( string $item_key, int $place_number, string $name, string $sku, int $amount, int $unit_kopecks, int $weight, ?int $assessed_kopecks = null ): array {
+	return array(
+		'item_key' => $item_key,
+		'ordered_quantity' => $amount,
+		'place_number' => $place_number,
+		'name' => $name,
+		'sku' => $sku,
+		'amount' => $amount,
+		'unit_price_kopecks' => $unit_kopecks,
+		'assessed_unit_price_kopecks' => $assessed_kopecks ?? $unit_kopecks,
+		'weight' => $weight,
+	);
+}
 
 function current_time( string $type ): string { return '2026-06-13 12:00:00'; }
 function wp_salt( string $scheme = '' ): string { return 'cdek-order-smoke-' . $scheme; }
@@ -282,8 +295,8 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			'cdek_postal_code' => $overrides['cdek_postal_code'] ?? '',
 			'cdek_delivery_address' => $overrides['cdek_delivery_address'] ?? '',
 			'cdek_courier_comment' => $overrides['cdek_courier_comment'] ?? '',
-			'cdek_item_rows' => $overrides['cdek_item_rows'] ?? array(
-				array( 'item_key' => '1', 'ordered_quantity' => 5, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-1', 'amount' => 5, 'cost' => $overrides['unit_cost'] ?? 1000, 'weight' => 100 ),
+			'shipment_item_rows' => $overrides['shipment_item_rows'] ?? array(
+				cdek_order_item_row( '1', 1, 'Товар', 'SKU-1', 5, (int) round( (float) ( $overrides['unit_cost'] ?? 1000 ) * 100 ), 100 ),
 			),
 		)
 	);
@@ -496,8 +509,8 @@ cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryT
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'tariff_code' => '' ) ) ), 'Missing tariff_code must fail validation.' );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '' ) ) ), 'Missing delivery_point for pickup must fail validation.' );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::COURIER, 1, array( 'place_weight' => 100 ) ) ), 'Package weight below item weight must fail validation.' );
-$too_many = array_fill( 0, 127, array( 'item_key' => 'x', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'T', 'ware_key' => 'W', 'amount' => 1, 'cost' => 1, 'weight' => 1 ) );
-cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'cdek_item_rows' => $too_many ) ) ), 'More than 126 item rows must fail validation.' );
+$too_many = array_fill( 0, 127, cdek_order_item_row( 'x', 1, 'T', 'W', 1, 100, 1 ) );
+cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_item_rows' => $too_many ) ) ), 'More than 126 item rows must fail validation.' );
 
 $split = CdekCreateRequestBuilder::split_item_rows( array( array( 'item_key' => 'A', 'ordered_quantity' => 5, 'amount' => 5 ) ), 'A', 1 );
 cdek_order_assert( 4 === (int) $split[0]['amount'] && 1 === (int) $split[1]['amount'], 'Split must create original 4 + duplicate 1.' );
@@ -957,8 +970,8 @@ $admin_request = $drafts->create_request_from_admin_data(
 );
 cdek_order_assert( 'NEW1' === (string) ( $admin_request->meta['delivery_point'] ?? '' ) && 'NEW1' === (string) ( $admin_request->meta['pickup_point_code'] ?? '' ) && $admin_request->pickup_point instanceof PickupPointSelection && 'NEW1' === $admin_request->pickup_point->point_code, 'Choosing another CDEK pickup point in modal must update delivery_point and point_code.' );
 cdek_order_assert( 'NSK70' === (string) ( $admin_request->meta['shipment_point'] ?? '' ) && 'Новосибирск, новый ПВЗ' === (string) ( $admin_request->meta['shipment_point_address'] ?? '' ), 'Choosing another sender CDEK pickup point in modal must update temporary shipment_point and address.' );
-$decimal_rows = is_array( $admin_request->meta['cdek_item_rows'] ?? null ) ? $admin_request->meta['cdek_item_rows'] : array();
-cdek_order_assert( 800.5 === (float) ( $decimal_rows[0]['cost'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ) && $decimal_rows === (array) ( $admin_request->meta['shipment_item_rows'] ?? array() ), 'Shipment modal item rows must parse canonical shipment_items and also keep CDEK meta rows during migration.' );
+$decimal_rows = is_array( $admin_request->meta['shipment_item_rows'] ?? null ) ? $admin_request->meta['shipment_item_rows'] : array();
+cdek_order_assert( 80050 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0 ) && 80050 === (int) ( $decimal_rows[0]['assessed_unit_price_kopecks'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ) && ! array_key_exists( 'cdek_item_rows', $admin_request->meta ), 'Shipment modal item rows must parse canonical shipment_items into canonical kopeck rows only.' );
 
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
@@ -989,7 +1002,7 @@ $_POST = array(
 	'recipient_email' => 'buyer@example.com',
 	'tariff_object' => '136',
 	'places' => array( array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 10 ) ),
-	'cdek_items' => array( array( 'item_key' => '1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-1', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
+	'shipment_items' => array( array( 'item_key' => '1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-1', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
 );
 try {
 	$metabox->ajax_create();
@@ -1056,7 +1069,12 @@ cdek_order_assert( str_contains( $metabox_source, 'Content-Disposition: attachme
 $draft_factory_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 cdek_order_assert( str_contains( $draft_factory_source, 'product_dimension_cm' ) && str_contains( $draft_factory_source, "\$length_cm" ) && str_contains( $draft_factory_source, "\$height_cm" ), 'Shipment draft factory must load item dimensions from WooCommerce product/variation data.' );
 $modal_mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentModalRequestMapper.php' );
+$cdek_builder_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekCreateRequestBuilder.php' );
+$yandex_registration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php' );
 cdek_order_assert( str_contains( $draft_factory_source, 'ShipmentModalRequestMapper' ) && str_contains( $modal_mapper_source, 'decimal_string' ) && str_contains( $modal_mapper_source, "str_replace( ',', '.'" ) && str_contains( $modal_mapper_source, "'length_cm' => \$this->decimal_string" ), 'Shared shipment modal mapper must parse item cost/dimensions as decimals with comma and dot support.' );
+cdek_order_assert( ! str_contains( $modal_mapper_source, '$data[\'cdek_items\']' ) && ! str_contains( $modal_html, 'data-wdc-cdek-item-row' ), 'Production modal/parser must not keep CDEK item allocation aliases.' );
+cdek_order_assert( ! str_contains( $draft_factory_source, 'cdek_item_rows' ) && ! str_contains( $cdek_builder_source, 'cdek_item_rows' ) && ! str_contains( $yandex_registration_source, 'yandex_item_rows' ) && ! str_contains( $yandex_registration_source, 'cdek_item_rows' ), 'Production code must use only shipment_item_rows for internal shipment item meta.' );
+cdek_order_assert( ! str_contains( $yandex_registration_source, 'CdekShipmentAllocationAdapter' ) && ! str_contains( $yandex_registration_source, 'from_cdek_rows' ) && str_contains( $yandex_registration_source, 'ShipmentAllocationBuilder' ), 'Yandex registration must use the neutral ShipmentAllocationBuilder.' );
 $shipments_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 cdek_order_assert( str_contains( $shipments_css, '.wdc-icon-action' ) && str_contains( $shipments_css, 'border: 0' ) && str_contains( $shipments_css, 'background: transparent' ) && str_contains( $shipments_css, 'min-width: min(520px, 70vw)' ) && str_contains( $shipments_css, 'overflow-x: hidden' ), 'Shipment package table CSS must use borderless icons and a wider product search dropdown without horizontal scrolling.' );
 cdek_order_assert( str_contains( $shipments_css, 'th:nth-child(2)' ) && str_contains( $shipments_css, 'width: 92px' ) && str_contains( $shipments_css, '.wdc-cdek-input-weight' ) && str_contains( $shipments_css, 'width: 76px' ) && str_contains( $shipments_css, 'width: 54px' ), 'Shipment package table CSS must keep SKU compact, weight wider, and dimensions/place compact.' );
