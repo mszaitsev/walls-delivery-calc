@@ -15,8 +15,6 @@ use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayloadBuilder;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentRegistrationResult;
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentRegistrationService as CoreYandexShipmentRegistrationService;
-use WallsShop\WDC\Domain\Package\PackageItem;
-use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
@@ -409,9 +407,6 @@ final class YandexShipmentRegistrationService {
 
 	private function allocation( ShipmentCreateRequest $request ): \WallsShop\WDC\Shipments\Allocation\ShipmentAllocation {
 		$rows = is_array( $request->meta['shipment_item_rows'] ?? null ) ? $request->meta['shipment_item_rows'] : array();
-		if ( array() === $rows ) {
-			$rows = $this->rows_from_places( $request->places );
-		}
 
 		return ( new ShipmentAllocationBuilder() )->build( $rows, $request->places );
 	}
@@ -463,35 +458,6 @@ final class YandexShipmentRegistrationService {
 		}
 
 		return new YandexDeliveryShipmentRegistrationResult( $payload, $offers, $selected, $confirmed, $info );
-	}
-
-	/** @param array<int,ShipmentPlace> $places @return array<int,array<string,mixed>> */
-	private function rows_from_places( array $places ): array {
-		$rows = array();
-		foreach ( $places as $place ) {
-			if ( ! $place instanceof ShipmentPlace ) {
-				continue;
-			}
-			foreach ( $place->items as $index => $item ) {
-				if ( ! $item instanceof PackageItem ) {
-					continue;
-				}
-				$item_key = 'place-' . $place->place_number . '-item-' . ( $index + 1 );
-				$rows[] = array(
-					'item_key' => $item_key,
-					'ordered_quantity' => $item->quantity,
-					'place_number' => $place->place_number,
-					'name' => $item->name,
-					'sku' => $item->sku,
-					'amount' => $item->quantity,
-					'unit_price_kopecks' => $item->unit_price->get_kopecks(),
-					'assessed_unit_price_kopecks' => $item->unit_price->get_kopecks(),
-					'weight' => max( 1, $item->weight_g ),
-				);
-			}
-		}
-
-		return $rows;
 	}
 
 	/** @return array<string,mixed> */

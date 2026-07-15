@@ -223,6 +223,26 @@ function yd_framework_request( int $order_id = 777, string $order_num = 'ORDER-7
 		)
 	);
 }
+function yd_framework_request_without_item_rows( int $order_id = 1777, string $order_num = 'ORDER-1777' ): ShipmentCreateRequest {
+	$request = yd_framework_request( $order_id, $order_num );
+	$meta = $request->meta;
+	unset( $meta['shipment_item_rows'] );
+
+	return new ShipmentCreateRequest(
+		$request->order_id,
+		$request->carrier_key,
+		$request->delivery_type,
+		$request->rate_id,
+		$request->recipient_address,
+		$request->pickup_point,
+		$request->places,
+		$request->declared_value,
+		$request->insurance_enabled,
+		$request->services,
+		$request->recipient,
+		$meta
+	);
+}
 
 /** @return array{0:OrderShipmentRepository,1:YandexShipmentAdapter,2:ShipmentCreationService,3:YandexShipmentRegistrationService,4:YdFrameworkFakeHttp} */
 function yd_framework_stack( array $responses ): array {
@@ -441,6 +461,8 @@ yd_framework_assert( ! empty( $cancel['cancelled_and_removed'] ) && empty( $canc
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 yd_framework_assert( str_contains( $source, 'create_yandex_request_from_order' ) && str_contains( $source, 'shipment_item_rows' ) && ! str_contains( $source, 'shipment_item_rows_from_rows' ), 'OrderShipmentDraftFactory must provide canonical shipment item rows without a second Yandex parser.' );
 yd_framework_assert( str_contains( $source, "'address_verified' => false" ) && str_contains( $source, "'dadata+yandex'" ) && ! str_contains( $source, 'street_from_address_line' ) && ! str_contains( $source, 'house_from_address_line' ), 'Yandex courier draft must keep structured address empty until DaData verification and must not use heuristic street/house parsing.' );
+$yandex_registration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/YandexDelivery/YandexShipmentRegistrationService.php' );
+yd_framework_assert( ! str_contains( $yandex_registration_source, 'rows_from_places' ) && ! str_contains( $yandex_registration_source, 'PackageItem' ), 'Yandex registration service must not rebuild canonical rows from ShipmentPlace items.' );
 $removed_manual_place_capability = 'requires_manual' . '_place_dimensions';
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 yd_framework_assert( str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, 'data-wdc-open-shipment-modal' ), 'Existing shipment metabox/modal must be reused through shared capability-driven button policy.' );
@@ -471,6 +493,16 @@ yd_framework_assert( str_contains( $js_source, 'const cancellationPollingToasts 
 yd_framework_assert( str_contains( $js_source, '} else if (settings.auto && !isPending)' ) && str_contains( $js_source, 'Статус отправления Яндекс получен:' ), 'Generic auto status toast must remain outside the Yandex cancellation polling branch to avoid duplicate cancel-pending toasts.' );
 yd_framework_assert( str_contains( $js_source, 'function syncYandexAddressFields' ) && str_contains( $js_source, 'data-wdc-yandex-address-field="' ) && str_contains( $js_source, 'Адрес изменен, нужно обработать адрес заново.' ), 'Runtime Yandex courier address check must fill structured fields from normalized DaData response and clear verification when the full address changes.' );
 yd_framework_assert( ! str_contains( $js_source, 'response.json()' ) && ! str_contains( $js_source, 'Unexpected token' ) && ! str_contains( $js_source, 'Server returned' ) && ! str_contains( $js_source, 'DPD registration failed' ), 'Shipment admin runtime must not expose raw JSON parser or English fallback messages.' );
+
+list( , $missing_rows_adapter, , $missing_rows_registration, $missing_rows_http ) = yd_framework_stack( array(
+	yd_framework_response( array( 'offers' => array( yd_framework_offer( 'UNUSED-OFFER' ) ) ) ),
+) );
+$missing_rows_request = yd_framework_request_without_item_rows();
+$missing_rows_preview = $missing_rows_adapter->build_safe_payload_preview( $missing_rows_request );
+yd_framework_assert( array() === ( $missing_rows_preview['body'] ?? array() ) && str_contains( implode( "\n", $missing_rows_preview['errors'] ?? array() ), 'Shipment allocation rows must not be empty' ) && 0 === count( $missing_rows_http->requests ), 'Yandex preview without shipment_item_rows must fail validation and must not call HTTP.' );
+$missing_rows_create = $missing_rows_registration->create( $missing_rows_request );
+yd_framework_assert( ! $missing_rows_create->success && 'yandex_shipment_registration_failed' === $missing_rows_create->error_code && str_contains( $missing_rows_create->error_message, 'Shipment allocation rows must not be empty' ) && 0 === count( $missing_rows_http->requests ), 'Yandex create without shipment_item_rows must fail before offers/create, confirm or request/info.' );
+yd_framework_assert( 1 === count( $missing_rows_request->places ) && 1 === count( $missing_rows_request->places[0]->items ), 'Missing rows regression fixture must contain PackageItem inside ShipmentPlace.' );
 
 $metabox_reflection = new ReflectionClass( \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox::class );
 $metabox_without_constructor = $metabox_reflection->newInstanceWithoutConstructor();

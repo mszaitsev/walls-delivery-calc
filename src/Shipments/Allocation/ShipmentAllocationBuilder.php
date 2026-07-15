@@ -104,8 +104,8 @@ final class ShipmentAllocationBuilder {
 				$errors[] = $label . ' weight must be greater than 0.';
 			}
 			foreach ( array( 'unit_price_kopecks', 'assessed_unit_price_kopecks' ) as $key ) {
-				if ( ! is_numeric( $row[ $key ] ?? null ) || (int) $row[ $key ] < 0 ) {
-					$errors[] = $label . ' ' . $key . ' must be greater than or equal to 0.';
+				if ( ! $this->valid_kopecks( $row[ $key ] ?? null ) ) {
+					$errors[] = $label . ' ' . $key . ' must be a non-negative integer.';
 				}
 			}
 		}
@@ -121,6 +121,14 @@ final class ShipmentAllocationBuilder {
 	}
 
 	private function kopecks( mixed $value ): int {
-		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
+		return (int) $value;
+	}
+
+	private function valid_kopecks( mixed $value ): bool {
+		if ( is_int( $value ) ) {
+			return $value >= 0;
+		}
+
+		return is_string( $value ) && 1 === preg_match( '/^\d+$/', $value );
 	}
 }

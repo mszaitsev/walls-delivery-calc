@@ -70,10 +70,10 @@
    - Migration sequence: document current state, add persistence equality smoke, then move special flow behind DPD-specific services without changing UI.
 
 7. Compatibility meta keys `yandex_item_rows` / `cdek_item_rows`
-   - Status: resolved in 0.112.0. Yandex registration and CDEK creation now use only `shipment_item_rows`.
+   - Status: resolved in 0.112.1. Yandex registration and CDEK creation now use only `shipment_item_rows`; Yandex also no longer rebuilds rows from `ShipmentPlace::items` when canonical rows are missing.
 
 8. CDEK-named allocation adapter used as neutral builder
-   - Status: resolved in 0.112.0. `CdekShipmentAllocationAdapter` was removed, and `ShipmentAllocationBuilder` is the neutral builder for canonical rows and places.
+   - Status: resolved in 0.112.1. `CdekShipmentAllocationAdapter` was removed, and `ShipmentAllocationBuilder` is the neutral builder for canonical rows and places. Its money boundary now rejects non-integer kopeck values instead of silently casting decimals or scientific notation.
 
 9. Adapter interface alias
    - Current problem: resolved in 0.108.3. The empty `ShipmentCarrierAdapterInterface` alias was removed.

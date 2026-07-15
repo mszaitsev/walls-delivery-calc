@@ -23,7 +23,7 @@ function shipment_allocation_expect_exception( callable $callback, string $messa
 		shipment_allocation_assert( str_contains( $exception->getMessage(), $message_part ), $message );
 	}
 }
-function shipment_allocation_row( string $item_key, int $place_number, string $name, string $sku, int $amount, int $unit_kopecks, int $weight, ?int $assessed_kopecks = null ): array {
+function shipment_allocation_row( string $item_key, int $place_number, string $name, string $sku, int $amount, mixed $unit_kopecks, int $weight, mixed $assessed_kopecks = null ): array {
 	return array(
 		'item_key' => $item_key,
 		'ordered_quantity' => $amount,
@@ -67,6 +67,40 @@ shipment_allocation_assert( 99500 === $assessed->places[0]->items[0]->unit_price
 
 $manual_item = new ShipmentAllocationItem( 'order-item-priced', array( 'order_item_id' => 'order-item-priced' ), 'Priced item', 'PRICE', 1, 10000, 15000, 100 );
 shipment_allocation_assert( 10000 === $manual_item->unit_price_kopecks && 15000 === $manual_item->assessed_unit_price_kopecks && array() === $manual_item->validate(), 'Neutral allocation item must support different unit and assessed prices.' );
+
+foreach ( array( 0, '0', 100, '100' ) as $accepted_kopecks ) {
+	$accepted = ( new ShipmentAllocationBuilder() )->build( array(
+		shipment_allocation_row( 'accepted-' . (string) $accepted_kopecks, 1, 'Accepted', 'ACC', 1, $accepted_kopecks, 300, $accepted_kopecks ),
+	), array( $places[0] ) );
+	shipment_allocation_assert( (int) $accepted_kopecks === $accepted->places[0]->items[0]->unit_price_kopecks && (int) $accepted_kopecks === $accepted->places[0]->items[0]->assessed_unit_price_kopecks, 'Builder must accept integer kopecks and digit strings.' );
+}
+
+$invalid_kopecks = array( -1, '-1', 100.5, '100.5', '100,5', '1e3', '', null, true, false );
+foreach ( $invalid_kopecks as $index => $invalid ) {
+	shipment_allocation_expect_exception(
+		static fn() => ( new ShipmentAllocationBuilder() )->build( array(
+			shipment_allocation_row( 'bad-unit-' . (string) $index, 1, 'Bad unit', 'BAD-U', 1, $invalid, 300, 100 ),
+		), array( $places[0] ) ),
+		'unit_price_kopecks must be a non-negative integer',
+		'Builder must reject invalid unit_price_kopecks without silent cast.'
+	);
+	shipment_allocation_expect_exception(
+		static function () use ( $index, $invalid, $places ): void {
+			$row = shipment_allocation_row( 'bad-assessed-' . (string) $index, 1, 'Bad assessed', 'BAD-A', 1, 100, 300, 100 );
+			$row['assessed_unit_price_kopecks'] = $invalid;
+			( new ShipmentAllocationBuilder() )->build( array( $row ), array( $places[0] ) );
+		},
+		'assessed_unit_price_kopecks must be a non-negative integer',
+		'Builder must reject invalid assessed_unit_price_kopecks without silent cast.'
+	);
+}
+shipment_allocation_expect_exception(
+	static fn() => ( new ShipmentAllocationBuilder() )->build( array(
+		shipment_allocation_row( 'decimal-cast', 1, 'Decimal cast', 'DEC', 1, '100.9', 300, 100 ),
+	), array( $places[0] ) ),
+	'unit_price_kopecks must be a non-negative integer',
+	'Decimal kopecks must not be converted to integer 100.'
+);
 
 $empty_allocation = new ShipmentAllocation( array() );
 shipment_allocation_assert( in_array( 'places must not be empty', $empty_allocation->validate(), true ) && in_array( 'allocation must contain at least one item', $empty_allocation->validate(), true ), 'Allocation without places and items must be invalid.' );
