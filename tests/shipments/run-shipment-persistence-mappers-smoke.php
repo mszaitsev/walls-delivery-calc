@@ -8,6 +8,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
@@ -17,9 +18,12 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentPersistenceMapper;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentRepository;
 
 function shipment_persistence_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) { throw new RuntimeException( $message ); }
@@ -41,12 +45,36 @@ final class ShipmentPersistenceOrder {
 }
 
 final class ShipmentPersistenceAdapter implements CarrierShipmentAdapterInterface {
+	public int $preview_calls = 0;
+	public int $create_calls = 0;
 	public function __construct( private string $carrier_key, private ShipmentCreateResult $result, private array $preview ) {}
 	public function carrier_key(): string { return $this->carrier_key; }
 	public function supports( ShipmentCreateRequest $request ): bool { return $request->carrier_key === $this->carrier_key; }
 	public function presentation(): array { return array(); }
-	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { unset( $request ); return $this->preview; }
-	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { unset( $request ); return $this->result; }
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { unset( $request ); $this->preview_calls++; return $this->preview; }
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { unset( $request ); $this->create_calls++; return $this->result; }
+	public function status_payload( object $order, array $shipment ): array { unset( $order ); return $shipment; }
+	public function update_status( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
+	public function attach_manual( object $order, array $payload ): array { unset( $order, $payload ); return array(); }
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
+	public function remove_from_order( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
+	public function label_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }
+	public function supports_status_auto_sync(): bool { return false; }
+	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ); }
+	public function auto_sync_throttle_microseconds(): int { return 0; }
+}
+
+final class ShipmentPersistenceOrderAwareAdapter implements CarrierShipmentAdapterInterface {
+	public int $preview_calls = 0;
+	public int $create_calls = 0;
+	public int $create_for_order_calls = 0;
+	public function __construct( private string $carrier_key, private ShipmentCreateResult $result, private array $preview ) {}
+	public function carrier_key(): string { return $this->carrier_key; }
+	public function supports( ShipmentCreateRequest $request ): bool { return $request->carrier_key === $this->carrier_key; }
+	public function presentation(): array { return array(); }
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { unset( $request ); $this->preview_calls++; return $this->preview; }
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { unset( $request ); $this->create_calls++; return $this->result; }
+	public function create_for_order( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult { unset( $order, $request ); $this->create_for_order_calls++; return $this->result; }
 	public function status_payload( object $order, array $shipment ): array { unset( $order ); return $shipment; }
 	public function update_status( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
 	public function attach_manual( object $order, array $payload ): array { unset( $order, $payload ); return array(); }
@@ -79,6 +107,40 @@ function shipment_persistence_saved( ShipmentPersistenceOrder $order, string $ca
 	return is_array( $shipments[ $carrier_key ] ?? null ) ? $shipments[ $carrier_key ] : array();
 }
 
+$production_adapter_keys = array( RussianPostDomesticSettings::CARRIER_KEY, CdekSettings::CARRIER_KEY, DpdSettings::CARRIER_KEY, YandexDeliverySettings::CARRIER_KEY );
+$production_mappers = array(
+	new RussianPostShipmentPersistenceMapper(),
+	new CdekShipmentPersistenceMapper(),
+	new DpdShipmentPersistenceMapper(),
+	new YandexShipmentPersistenceMapper( new YandexShipmentRepository( new OrderShipmentRepository() ) ),
+);
+$mapper_keys = array();
+foreach ( $production_mappers as $mapper ) {
+	shipment_persistence_assert( $mapper instanceof CarrierShipmentPersistenceMapperInterface, 'Every production mapper must implement CarrierShipmentPersistenceMapperInterface.' );
+	$key = $mapper->carrier_key();
+	shipment_persistence_assert( '' !== trim( $key ), 'Every production mapper key must be non-empty.' );
+	$mapper_keys[] = $key;
+}
+sort( $production_adapter_keys );
+sort( $mapper_keys );
+shipment_persistence_assert( $production_adapter_keys === $mapper_keys && count( $mapper_keys ) === count( array_unique( $mapper_keys ) ), 'Production shipment adapter keys must match persistence mapper keys without duplicates.' );
+
+$missing_adapter = new ShipmentPersistenceAdapter( 'test_carrier', new ShipmentCreateResult( true, external_id: 'REMOTE', tracking_number: 'REMOTE' ), array( 'method' => 'LOCAL' ) );
+$missing_order = new ShipmentPersistenceOrder( 1001 );
+$missing_result = ( new ShipmentCreationService( new OrderShipmentRepository(), array( $missing_adapter ) ) )->create( $missing_order, shipment_persistence_request( 'test_carrier' ) );
+shipment_persistence_assert( ! $missing_result->success && 'shipment_persistence_mapper_missing' === $missing_result->error_code && 0 === $missing_adapter->preview_calls && 0 === $missing_adapter->create_calls && array() === shipment_persistence_saved( $missing_order, 'test_carrier' ) && array() === $missing_order->notes, 'Missing mapper must block preview/create, repository save and success notes.' );
+
+$missing_order_adapter = new ShipmentPersistenceOrderAwareAdapter( 'test_order_carrier', new ShipmentCreateResult( true, external_id: 'REMOTE', tracking_number: 'REMOTE' ), array( 'method' => 'LOCAL' ) );
+$missing_order_aware = new ShipmentPersistenceOrder( 1001 );
+$missing_order_result = ( new ShipmentCreationService( new OrderShipmentRepository(), array( $missing_order_adapter ) ) )->create( $missing_order_aware, shipment_persistence_request( 'test_order_carrier' ) );
+shipment_persistence_assert( ! $missing_order_result->success && 'shipment_persistence_mapper_missing' === $missing_order_result->error_code && 0 === $missing_order_adapter->preview_calls && 0 === $missing_order_adapter->create_calls && 0 === $missing_order_adapter->create_for_order_calls && array() === shipment_persistence_saved( $missing_order_aware, 'test_order_carrier' ), 'Missing mapper must block create_for_order before carrier side effects.' );
+
+$duplicate_without_mapper_adapter = new ShipmentPersistenceAdapter( 'test_duplicate_carrier', new ShipmentCreateResult( true, external_id: 'REMOTE', tracking_number: 'REMOTE' ), array( 'method' => 'LOCAL' ) );
+$duplicate_without_mapper_order = new ShipmentPersistenceOrder( 1001 );
+$duplicate_without_mapper_order->update_meta_data( OrderShipmentRepository::META_KEY, array( 'test_duplicate_carrier' => array( 'carrier_key' => 'test_duplicate_carrier', 'tracking_number' => 'EXISTING', 'status' => 'created' ) ) );
+$duplicate_without_mapper_result = ( new ShipmentCreationService( new OrderShipmentRepository(), array( $duplicate_without_mapper_adapter ) ) )->create( $duplicate_without_mapper_order, shipment_persistence_request( 'test_duplicate_carrier' ) );
+shipment_persistence_assert( ! $duplicate_without_mapper_result->success && 'shipment_persistence_mapper_missing' === $duplicate_without_mapper_result->error_code && 0 === $duplicate_without_mapper_adapter->preview_calls && 0 === $duplicate_without_mapper_adapter->create_calls && 'EXISTING' === (string) shipment_persistence_saved( $duplicate_without_mapper_order, 'test_duplicate_carrier' )['tracking_number'], 'Duplicate branch without mapper must return controlled missing-mapper failure without TypeError or carrier call.' );
+
 $cdek_preview = array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => array( 'preview' => 'cdek' ), 'errors' => array() );
 $cdek_raw = array(
 	'http_code' => 202,
@@ -96,7 +158,7 @@ $cdek_raw = array(
 $cdek_request = shipment_persistence_request( CdekSettings::CARRIER_KEY );
 $cdek_order = new ShipmentPersistenceOrder( 1001 );
 $cdek_result = new ShipmentCreateResult( true, external_id: 'entity-uuid', tracking_number: '100500', backlog_order_id: 'request-uuid', raw_reference: $cdek_raw );
-( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( CdekSettings::CARRIER_KEY, $cdek_result, $cdek_preview ) ), null, null, null, array( new CdekShipmentPersistenceMapper() ) ) )->create( $cdek_order, $cdek_request );
+( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( CdekSettings::CARRIER_KEY, $cdek_result, $cdek_preview ) ), null, null, array( new CdekShipmentPersistenceMapper() ) ) )->create( $cdek_order, $cdek_request );
 $cdek_expected = array(
 	'carrier_key' => CdekSettings::CARRIER_KEY,
 	'service_key' => CdekSettings::CARRIER_KEY . ':service',
@@ -141,7 +203,7 @@ $dpd_raw = array(
 $dpd_request = shipment_persistence_request( DpdSettings::CARRIER_KEY, array( 'service_code' => 'PCL', 'pickup_terminal_code' => 'SRC', 'delivery_terminal_code' => 'DST', 'date_pickup' => '2026-07-16', 'declared_value_rub' => 1000 ) );
 $dpd_order = new ShipmentPersistenceOrder( 1001 );
 $dpd_result = new ShipmentCreateResult( true, external_id: 'DPD-1', tracking_number: 'DPD-1', backlog_order_id: 'REQ-1', raw_reference: $dpd_raw );
-( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( DpdSettings::CARRIER_KEY, $dpd_result, $dpd_preview ) ), null, null, null, array( new DpdShipmentPersistenceMapper() ) ) )->create( $dpd_order, $dpd_request );
+( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( DpdSettings::CARRIER_KEY, $dpd_result, $dpd_preview ) ), null, null, array( new DpdShipmentPersistenceMapper() ) ) )->create( $dpd_order, $dpd_request );
 $dpd_expected = array(
 	'carrier_key' => DpdSettings::CARRIER_KEY,
 	'service_key' => DpdSettings::CARRIER_KEY . ':service',
@@ -181,7 +243,7 @@ $rp_raw = array( 'orders' => array( array( 'barcode' => 'RP1' ) ), 'barcodes' =>
 $rp_request = shipment_persistence_request( RussianPostDomesticSettings::CARRIER_KEY );
 $rp_order = new ShipmentPersistenceOrder( 1001 );
 $rp_result = new ShipmentCreateResult( true, external_id: '777', tracking_number: 'RP1', backlog_order_id: '777', raw_reference: $rp_raw );
-( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( RussianPostDomesticSettings::CARRIER_KEY, $rp_result, $rp_preview ) ), null, null, null, array( new RussianPostShipmentPersistenceMapper() ) ) )->create( $rp_order, $rp_request );
+( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( RussianPostDomesticSettings::CARRIER_KEY, $rp_result, $rp_preview ) ), null, null, array( new RussianPostShipmentPersistenceMapper() ) ) )->create( $rp_order, $rp_request );
 $rp_expected = array(
 	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 	'service_key' => RussianPostDomesticSettings::CARRIER_KEY . ':service',

@@ -46,7 +46,7 @@
    - Status: resolved in 0.112.0. `OrderShipmentDraftFactory` writes only `shipment_item_rows`, and `CdekCreateRequestBuilder` reads only that canonical key.
 
 3. Non-Yandex carrier persistence in `ShipmentCreationService`
-   - Status: resolved in 0.113.0. CDEK, DPD and Russian Post now use `CarrierShipmentPersistenceMapperInterface` implementations, and `ShipmentCreationService` persists only the common envelope plus mapper fields.
+   - Status: resolved in 0.113.1. CDEK, DPD and Russian Post now use `CarrierShipmentPersistenceMapperInterface` implementations, `ShipmentCreationService` persists only the common envelope plus mapper fields, and create is blocked before preview/API/repository side effects when a registered adapter has no mapper. The common service no longer accepts the obsolete Russian Post actual-cost lookup dependency.
 
 4. Carrier-specific modal fields in `OrderShipmentsMetabox`
    - Current problem: the shared metabox still contains hardcoded CDEK/DPD/Russian Post/Yandex field blocks.

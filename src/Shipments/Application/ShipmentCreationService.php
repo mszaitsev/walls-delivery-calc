@@ -21,11 +21,9 @@ final class ShipmentCreationService {
 		private OrderShipmentRepository $repository,
 		private array $adapters,
 		private ?Logger $logger = null,
-		?RussianPostShipmentActualCostLookupService $actual_cost_lookup = null,
 		private ?CarrierShipmentAdapterRegistry $registry = null,
 		private array $persistence_mappers = array()
 	) {
-		unset( $actual_cost_lookup );
 	}
 
 	/**
@@ -60,9 +58,21 @@ final class ShipmentCreationService {
 			);
 		}
 
+		$adapter = $this->adapter_for( $request );
+		if ( ! $adapter instanceof CarrierShipmentAdapterInterface ) {
+			return new ShipmentCreateResult( false, error_code: 'unsupported_carrier', error_message: 'Для выбранной службы нет адаптера создания отправлений.' );
+		}
+		$mapper = $this->persistence_mapper_for( $request->carrier_key );
+		if ( ! $mapper instanceof CarrierShipmentPersistenceMapperInterface ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_persistence_mapper_missing',
+				error_message: 'Для выбранной службы не настроено сохранение отправления.'
+			);
+		}
+
 		if ( $this->repository->has_created_for_carrier( $order, $request->carrier_key ) ) {
 			$existing = $this->repository->find_by_carrier( $order, $request->carrier_key );
-			$mapper = $this->persistence_mapper_for( $request->carrier_key );
 			$message = method_exists( $mapper, 'duplicate_error_message' )
 				? (string) $mapper->duplicate_error_message( $existing )
 				: 'По заказу уже создано отправление: ' . (string) ( $existing['tracking_number'] ?? $existing['barcode'] ?? '' );
@@ -73,17 +83,12 @@ final class ShipmentCreationService {
 				raw_reference: array( 'existing' => $existing )
 			);
 		}
-		$adapter = $this->adapter_for( $request );
-		if ( ! $adapter instanceof CarrierShipmentAdapterInterface ) {
-			return new ShipmentCreateResult( false, error_code: 'unsupported_carrier', error_message: 'Для выбранной службы нет адаптера создания отправлений.' );
-		}
 
 		$preview = $this->safe_preview( $request );
 		$result = method_exists( $adapter, 'create_for_order' ) ? $adapter->create_for_order( $order, $request ) : $adapter->create( $request );
 		$now = $this->now();
 		if ( ! $result->success ) {
-			$mapper = $this->persistence_mapper_for( $request->carrier_key );
-			$failed_fields = $mapper instanceof CarrierShipmentPersistenceMapperInterface ? $mapper->build_failed_fields( $request, $result, $preview, $now ) : null;
+			$failed_fields = $mapper->build_failed_fields( $request, $result, $preview, $now );
 			if ( is_array( $failed_fields ) && array() !== $failed_fields ) {
 				$shipment = $this->common_shipment_envelope( $request, $result, $preview, $failed_fields, $now );
 				$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
@@ -121,13 +126,10 @@ final class ShipmentCreationService {
 			return $result;
 		}
 
-		$mapper = $this->persistence_mapper_for( $request->carrier_key );
-		$mapped_fields = $mapper instanceof CarrierShipmentPersistenceMapperInterface ? $mapper->build_created_fields( $request, $result, $preview, $now ) : array();
+		$mapped_fields = $mapper->build_created_fields( $request, $result, $preview, $now );
 		$shipment = $this->common_shipment_envelope( $request, $result, $preview, $mapped_fields, $now );
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
-		if ( $mapper instanceof CarrierShipmentPersistenceMapperInterface ) {
-			$mapper->after_persist( $order, $shipment );
-		}
+		$mapper->after_persist( $order, $shipment );
 
 		return $result;
 	}

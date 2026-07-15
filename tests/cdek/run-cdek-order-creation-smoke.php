@@ -522,7 +522,7 @@ cdek_order_assert( 3 === (int) $split[0]['amount'] && 2 === (int) $split[1]['amo
 $http = new CdekOrderFakeHttp();
 $client = new CdekApiClient( new CdekOAuthTokenService( $settings, $http ), $settings, $http );
 $repository = new OrderShipmentRepository();
-$creation = new ShipmentCreationService( $repository, array( new CdekShipmentAdapter( $client, $builder ) ), null, null, null, array( new CdekShipmentPersistenceMapper() ) );
+$creation = new ShipmentCreationService( $repository, array( new CdekShipmentAdapter( $client, $builder ) ), null, null, array( new CdekShipmentPersistenceMapper() ) );
 $order = new CdekOrderFakeOrder();
 $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
@@ -557,7 +557,7 @@ $http_post_invalid = new CdekOrderFakeHttp();
 $http_post_invalid->post_responses[] = array( 'entity' => array( 'uuid' => 'invalid-uuid' ), 'requests' => array( array( 'request_uuid' => 'invalid-request-uuid', 'state' => 'INVALID', 'errors' => array( array( 'code' => 'v2_bad', 'message' => 'bad request' ) ) ) ) );
 $invalid_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $http_post_invalid ), $settings, $http_post_invalid );
 $invalid_repository = new OrderShipmentRepository();
-$invalid_creation = new ShipmentCreationService( $invalid_repository, array( new CdekShipmentAdapter( $invalid_client, $builder ) ), null, null, null, array( new CdekShipmentPersistenceMapper() ) );
+$invalid_creation = new ShipmentCreationService( $invalid_repository, array( new CdekShipmentAdapter( $invalid_client, $builder ) ), null, null, array( new CdekShipmentPersistenceMapper() ) );
 $invalid_post_order = new CdekOrderFakeOrder();
 $invalid_post_result = $invalid_creation->create( $invalid_post_order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( ! $invalid_post_result->success && 'cdek_registration_invalid' === $invalid_post_result->error_code, 'POST /v2/orders INVALID must fail ShipmentCreateResult.' );
@@ -977,7 +977,7 @@ cdek_order_assert( 80050 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
 $ajax_repository = new OrderShipmentRepository();
-$ajax_creation = new ShipmentCreationService( $ajax_repository, array( new CdekShipmentAdapter( $ajax_client, $builder ) ), null, null, null, array( new CdekShipmentPersistenceMapper() ) );
+$ajax_creation = new ShipmentCreationService( $ajax_repository, array( new CdekShipmentAdapter( $ajax_client, $builder ) ), null, null, array( new CdekShipmentPersistenceMapper() ) );
 $rp_tracking = ( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor();
 $status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper() );
 $ajax_status = new CdekOrderStatusService( $ajax_repository, $ajax_client );

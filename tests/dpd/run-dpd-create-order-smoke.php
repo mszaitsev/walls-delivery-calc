@@ -201,7 +201,7 @@ dpd_create_assert( ! $invalid->success && 'dpd_validation_failed' === $invalid->
 
 $repository = new OrderShipmentRepository();
 $order = new DpdCreateFakeOrder( 660 );
-$creation = new ShipmentCreationService( $repository, array( $adapter ), null, null, null, array( new DpdShipmentPersistenceMapper() ) );
+$creation = new ShipmentCreationService( $repository, array( $adapter ), null, null, array( new DpdShipmentPersistenceMapper() ) );
 $created = $creation->create( $order, $request );
 $stored = $repository->find_by_carrier( $order, DpdSettings::CARRIER_KEY );
 dpd_create_assert( $created->success && array() !== $stored, 'Successful mocked DPD response must create shipment record.' );
@@ -212,7 +212,7 @@ $duplicate = $creation->create( $order, $request );
 dpd_create_assert( ! $duplicate->success && 'shipment_already_created' === $duplicate->error_code && 'DPD отправление уже создано для этого заказа.' === $duplicate->error_message, 'Duplicate active DPD shipment must block second create.' );
 
 $error_soap = new DpdCreateFakeSoap( array( 'orderNumberInternal' => 'WC-661', 'status' => 'Error', 'errorMessage' => 'Не заполнен параметр Улица' ) );
-$error_creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new DpdShipmentAdapter( $builder, new DpdApiClient( $settings, $error_soap ) ) ), null, null, null, array( new DpdShipmentPersistenceMapper() ) );
+$error_creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new DpdShipmentAdapter( $builder, new DpdApiClient( $settings, $error_soap ) ) ), null, null, array( new DpdShipmentPersistenceMapper() ) );
 $error_order = new DpdCreateFakeOrder( 660 );
 $error_result = $error_creation->create( $error_order, dpd_create_request() );
 dpd_create_assert( ! $error_result->success && 'dpd_business_error' === $error_result->error_code, 'DPD API business error must be shown as create failure.' );

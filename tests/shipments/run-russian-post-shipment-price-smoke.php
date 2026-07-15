@@ -284,7 +284,7 @@ $GLOBALS['rp_shipment_price_remote_get_response'] = array(
 );
 $create_order = new RussianPostShipmentPriceOrder();
 $lookup_service = rp_shipment_price_lookup_service();
-$creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), null, null, null, array( new RussianPostShipmentPersistenceMapper( $lookup_service ) ) );
+$creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), null, null, array( new RussianPostShipmentPersistenceMapper( $lookup_service ) ) );
 $create_result = $creation->create( $create_order, rp_shipment_price_request() );
 $created_shipment = $create_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 rp_shipment_price_assert( $create_result->success, 'Automatic shipment create must remain successful.' );

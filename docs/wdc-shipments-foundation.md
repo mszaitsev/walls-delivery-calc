@@ -59,7 +59,7 @@ Version 0.37.2 separates Russian Post cancellation from local WooCommerce shipme
 - `OrderShipmentDraftFactory::draft_array()` may expose small carrier-neutral modal capabilities such as `requires_tariff=false`; the metabox uses them without adding a second modal architecture.
 - `src/Shipments/Application/ShipmentMetaboxButtonPolicy.php` resolves common metabox button capabilities from carrier status payload first and falls back to legacy status/barcode rules only when a capability is absent.
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` builds shipment drafts from HPOS-safe WooCommerce order APIs and saved WDC order meta.
-- `src/Shipments/Application/ShipmentCreationService.php` performs idempotency checks, adapter dispatch, common shipment envelope creation, mapper dispatch and repository save. Carrier-specific create fields, snapshots and order notes live in `CarrierShipmentPersistenceMapperInterface` implementations.
+- `src/Shipments/Application/ShipmentCreationService.php` performs order/request mismatch validation, adapter dispatch, mandatory persistence-mapper preflight, duplicate checks, common shipment envelope creation and repository save. Carrier-specific create fields, snapshots and order notes live in `CarrierShipmentPersistenceMapperInterface` implementations; a missing mapper blocks create before preview/API/repository side effects.
 - `src/Shipments/Application/ShipmentStatusUpdateService.php` manually refreshes shipment status through Russian Post Tracking API and saves carrier-neutral status state.
 - `src/Shipments/Application/ShipmentServiceSettings.php` owns per-service shipment settings.
 - `src/Shipments/Storage/OrderShipmentRepository.php` stores shipment state in order meta through WooCommerce CRUD.
