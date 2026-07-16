@@ -201,3 +201,57 @@
       });
   }
 
+  registerShipmentCarrierHooks({
+    handleClick: function (event) {
+      const yandexLabelDownload = event.target.closest('[data-wdc-yandex-label-download]');
+      if (yandexLabelDownload) {
+        event.preventDefault();
+        requestYandexLabelDownload(yandexLabelDownload);
+        return true;
+      }
+
+      const openYandexSourceDropoffPicker = event.target.closest('[data-wdc-open-yandex-source-dropoff-picker]');
+      if (openYandexSourceDropoffPicker) {
+        const form = findShipmentForm(openYandexSourceDropoffPicker);
+        if (form) {
+          const context = yandexSourceDropoffContext(form);
+          createPickupPicker(form, {
+            sender: true,
+            title: 'Выбор ПВЗ отправления Яндекс',
+            context: context,
+            onChoose: function (point) {
+              updateYandexSourceDropoffDraft(form, point, true);
+            }
+          });
+        }
+        return true;
+      }
+
+      const resetYandexSourceDropoffButton = event.target.closest('[data-wdc-reset-yandex-source-dropoff]');
+      if (resetYandexSourceDropoffButton) {
+        const form = findShipmentForm(resetYandexSourceDropoffButton);
+        if (form) resetYandexSourceDropoff(form);
+        return true;
+      }
+
+      return false;
+    },
+    afterAddressNormalized: function (context) {
+      const form = context && context.form;
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'yandex_delivery') return false;
+      const snapshot = context.snapshot || {};
+      syncYandexAddressFields(form, snapshot);
+      if (context.status) {
+        context.status.textContent = snapshot.success
+          ? 'Адрес обработан.'
+          : (snapshot.message || 'Адрес не подтвержден, создание отправления заблокировано.');
+      }
+      return true;
+    },
+    afterAddressReset: function (context) {
+      const form = context && context.form;
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'yandex_delivery') return false;
+      syncYandexAddressFields(form, {});
+      return true;
+    }
+  });

@@ -17,6 +17,16 @@
     }, true);
   }
 
+  function dispatchShipmentCarrierHook(name) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    for (let i = 0; i < shipmentCarrierHooks.length; i += 1) {
+      const hooks = shipmentCarrierHooks[i];
+      if (!hooks || typeof hooks[name] !== 'function') continue;
+      if (hooks[name].apply(hooks, args) === true) return true;
+    }
+    return false;
+  }
+
   function findShipmentContainer(element) {
     if (!element || !element.closest) return null;
     const direct = element.closest(formSelector);

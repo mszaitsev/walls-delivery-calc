@@ -42,6 +42,17 @@ shipment_admin_js_structure_assert( str_contains( $source['dpd'], 'requestDpdDoc
 shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'requestYandexLabelDownload' ) && str_contains( $source['yandex'], 'yandexSourceDropoffContext' ), 'Yandex extension must own Yandex label and source drop-off hooks.' );
 shipment_admin_js_structure_assert( str_contains( $source['russian_post'], 'Russian Post' ), 'Russian Post extension module must exist even when current behavior is shared.' );
 shipment_admin_js_structure_assert( str_contains( $source['events'], 'function initializeShipmentAdmin' ) && str_contains( $source['events'], 'document.addEventListener' ), 'Events module must own DOM event wiring for the modular runtime.' );
+shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex)\\b/i', $source['events'] ), 'Events module must remain carrier-neutral.' );
+shipment_admin_js_structure_assert( str_contains( $source['core'], 'function dispatchShipmentCarrierHook' ) && str_contains( $source['core'], 'registerShipmentCarrierHooks' ), 'Core module must expose the small carrier hook registry.' );
+
+shipment_admin_js_structure_assert( str_contains( $source['dpd'], 'data-wdc-dpd-contact-choice' ) && str_contains( $source['dpd'], 'data-wdc-dpd-contact-remove' ) && str_contains( $source['dpd'], 'data-wdc-dpd-documents-download' ) && str_contains( $source['dpd'], 'data-wdc-dpd-date-pickup' ), 'DPD extension must own DPD DOM selectors.' );
+shipment_admin_js_structure_assert( str_contains( $source['cdek'], 'data-wdc-cdek-barcode-download' ), 'CDEK extension must own CDEK barcode selector.' );
+shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'data-wdc-yandex-label-download' ) && str_contains( $source['yandex'], 'data-wdc-open-yandex-source-dropoff-picker' ) && str_contains( $source['yandex'], 'data-wdc-reset-yandex-source-dropoff' ), 'Yandex extension must own Yandex document/source selectors.' );
+
+shipment_admin_js_structure_assert( str_contains( $source['events'], 'afterAddressNormalized' ) && ! str_contains( $source['events'], 'syncDpdAddressFields' ) && ! str_contains( $source['events'], 'syncYandexAddressFields' ) && ! str_contains( $source['events'], 'data-wdc-cdek-city-code' ), 'Events module must dispatch address normalization hooks without carrier post-processing.' );
+shipment_admin_js_structure_assert( str_contains( $source['dpd'], 'syncDpdAddressFields' ) && str_contains( $source['dpd'], 'afterAddressNormalized' ), 'DPD extension must own DPD address normalization hook.' );
+shipment_admin_js_structure_assert( str_contains( $source['cdek'], 'data-wdc-cdek-city-code' ) && str_contains( $source['cdek'], 'afterAddressNormalized' ), 'CDEK extension must own CDEK city-code address hook.' );
+shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'syncYandexAddressFields' ) && str_contains( $source['yandex'], 'afterAddressNormalized' ), 'Yandex extension must own Yandex address normalization hook.' );
 
 $metabox_source = (string) file_get_contents( $root . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 foreach ( array( 'wdc-shipments-admin-core', 'wdc-shipments-admin-preview', 'wdc-shipments-admin-status', 'wdc-shipments-admin-polling', 'wdc-shipments-admin-picker', 'wdc-shipments-admin-yandex', 'wdc-shipments-admin-events' ) as $handle ) {

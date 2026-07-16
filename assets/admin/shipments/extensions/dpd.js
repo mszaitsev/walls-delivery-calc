@@ -70,6 +70,122 @@
         }
       }
       return dateReady && contactReady && senderTerminalReady && receiverTerminalReady && courierReady;
+    },
+    handleClick: function (event) {
+      const dateInput = event.target.closest('[data-wdc-dpd-date-pickup]');
+      if (dateInput) {
+        openNativeDatePicker(dateInput);
+        return false;
+      }
+
+      const dpdContactChoice = event.target.closest('[data-wdc-dpd-contact-choice]');
+      if (dpdContactChoice) {
+        event.preventDefault();
+        const form = findShipmentForm(dpdContactChoice);
+        const input = form && form.querySelector('[data-wdc-dpd-contact-fio]');
+        if (input) {
+          input.value = dpdContactChoice.dataset.value || '';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const list = dpdContactChoice.closest('[data-wdc-dpd-contact-history]');
+        if (list) list.hidden = true;
+        return true;
+      }
+
+      const dpdContactRemove = event.target.closest('[data-wdc-dpd-contact-remove]');
+      if (dpdContactRemove) {
+        event.preventDefault();
+        updateDpdContactHistory(dpdContactRemove.dataset.value || '', 'remove').catch(function () {});
+        return true;
+      }
+
+      const dpdDocumentsDownload = event.target.closest('[data-wdc-dpd-documents-download]');
+      if (dpdDocumentsDownload) {
+        event.preventDefault();
+        requestDpdDocumentsDownload(dpdDocumentsDownload);
+        return true;
+      }
+
+      return false;
+    },
+    handleSenderPickupClick: function (event, button) {
+      const form = findShipmentForm(button);
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'dpd') return false;
+      const context = senderPickupContext(form);
+      createPickupPicker(form, {
+        sender: true,
+        title: 'Выбор ПВЗ отправителя DPD',
+        context: context,
+        onChoose: function (point) {
+          updateSenderPickupDraft(form, point);
+        }
+      });
+      return true;
+    },
+    handleInput: function (event) {
+      if (event.target.matches('[data-wdc-dpd-contact-fio]')) {
+        const form = findShipmentForm(event.target);
+        if (form) {
+          updateCreateAvailability(form);
+          schedulePreview(form);
+        }
+        return true;
+      }
+      if (event.target.matches('[data-wdc-dpd-courier-instructions]')) {
+        if (event.target.value.length > 250) event.target.value = event.target.value.slice(0, 250);
+        const form = findShipmentForm(event.target);
+        if (form) schedulePreview(form);
+        return true;
+      }
+      return false;
+    },
+    handlePointerDown: function (event) {
+      if (!event.target.matches('[data-wdc-dpd-date-pickup]')) return false;
+      openNativeDatePicker(event.target);
+      return true;
+    },
+    handleFocus: function (event) {
+      if (event.target.matches('[data-wdc-dpd-date-pickup]')) {
+        openNativeDatePicker(event.target);
+        return true;
+      }
+      if (event.target.matches('[data-wdc-dpd-contact-fio]')) {
+        showDpdContactHistory(event.target);
+        return true;
+      }
+      return false;
+    },
+    afterAddressNormalized: function (context) {
+      const form = context && context.form;
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'dpd') return false;
+      const snapshot = context.snapshot || {};
+      syncDpdAddressFields(form, snapshot);
+      if (context.status) {
+        context.status.textContent = snapshot.success
+          ? 'Данные для DPD корректны'
+          : (snapshot.message || 'Адрес не подтвержден DPD, предпросмотр payload заблокирован.');
+      }
+      return true;
+    },
+    afterAddressReset: function (context) {
+      const form = context && context.form;
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'dpd') return false;
+      syncDpdAddressFields(form, {});
+      return true;
+    },
+    handleCreateResponse: function (context) {
+      const payload = context && context.payload ? context.payload : {};
+      const statusPayload = context && context.statusPayload ? context.statusPayload : {};
+      const text = context && context.presentation ? context.presentation : {};
+      if (payload.data && payload.data.registration_attempt_id) {
+        submitDpdRegistration(context.form, payload.data.registration_attempt_id, context.box, context.updateButton);
+        return true;
+      }
+      if (text.autoPollRegistration === '1' && statusPayload.carrier_key === 'dpd' && statusPayload.polling_continue && context.updateButton && !context.updateButton.disabled) {
+        startDpdRegistrationPolling(context.updateButton);
+        return true;
+      }
+      return false;
     }
   });
 

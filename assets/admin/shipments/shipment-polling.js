@@ -342,6 +342,10 @@
     window.setTimeout(tick, interval);
   }
 
+  function startDefaultRegistrationPolling(button) {
+    startCdekPolling(button);
+  }
+
   function requestShipmentCancel(button) {
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     const data = new FormData();

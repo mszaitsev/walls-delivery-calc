@@ -1,54 +1,11 @@
 function initializeShipmentAdmin() {
   document.addEventListener('click', function (event) {
+    if (dispatchShipmentCarrierHook('handleClick', event)) return;
+
     const dateStep = event.target.closest('[data-wdc-date-step]');
     if (dateStep) {
       event.preventDefault();
       stepDateInput(dateStep);
-      return;
-    }
-
-    const dateInput = event.target.closest('[data-wdc-dpd-date-pickup]');
-    if (dateInput) {
-      openNativeDatePicker(dateInput);
-    }
-
-    const dpdContactChoice = event.target.closest('[data-wdc-dpd-contact-choice]');
-    if (dpdContactChoice) {
-      event.preventDefault();
-      const form = findShipmentForm(dpdContactChoice);
-      const input = form && form.querySelector('[data-wdc-dpd-contact-fio]');
-      if (input) {
-        input.value = dpdContactChoice.dataset.value || '';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      const list = dpdContactChoice.closest('[data-wdc-dpd-contact-history]');
-      if (list) list.hidden = true;
-      return;
-    }
-
-    const dpdContactRemove = event.target.closest('[data-wdc-dpd-contact-remove]');
-    if (dpdContactRemove) {
-      event.preventDefault();
-      updateDpdContactHistory(dpdContactRemove.dataset.value || '', 'remove').catch(function () {});
-      return;
-    }
-
-    const dpdDocumentsDownload = event.target.closest('[data-wdc-dpd-documents-download]');
-    if (dpdDocumentsDownload) {
-      event.preventDefault();
-      requestDpdDocumentsDownload(dpdDocumentsDownload);
-      return;
-    }
-    const yandexLabelDownload = event.target.closest('[data-wdc-yandex-label-download]');
-    if (yandexLabelDownload) {
-      event.preventDefault();
-      requestYandexLabelDownload(yandexLabelDownload);
-      return;
-    }
-    const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
-    if (cdekBarcodeDownload) {
-      event.preventDefault();
-      requestCdekBarcodeDownload(cdekBarcodeDownload);
       return;
     }
 
@@ -135,7 +92,7 @@ function initializeShipmentAdmin() {
       return;
     }
 
-    const addManualItem = event.target.closest('[data-wdc-add-manual-shipment-item], [data-wdc-add-manual-cdek-item]');
+    const addManualItem = event.target.closest('[data-wdc-add-manual-shipment-item]');
     if (addManualItem) {
       addManualShipmentItemRow(addManualItem);
       return;
@@ -178,42 +135,7 @@ function initializeShipmentAdmin() {
 
     const openSenderPickupPicker = event.target.closest('[data-wdc-open-sender-pickup-picker]');
     if (openSenderPickupPicker) {
-      const form = findShipmentForm(openSenderPickupPicker);
-      if (form) {
-        const context = senderPickupContext(form);
-        createPickupPicker(form, {
-          sender: true,
-          title: context.pickupFamily === 'dpd:pickup' ? 'Выбор ПВЗ отправителя DPD' : 'Выбор ПВЗ отправителя СДЭК',
-          context: context,
-          onChoose: function (point) {
-            updateSenderPickupDraft(form, point);
-          }
-        });
-      }
-      return;
-    }
-
-    const openYandexSourceDropoffPicker = event.target.closest('[data-wdc-open-yandex-source-dropoff-picker]');
-    if (openYandexSourceDropoffPicker) {
-      const form = findShipmentForm(openYandexSourceDropoffPicker);
-      if (form) {
-        const context = yandexSourceDropoffContext(form);
-        createPickupPicker(form, {
-          sender: true,
-          title: 'Выбор ПВЗ отправления Яндекс',
-          context: context,
-          onChoose: function (point) {
-            updateYandexSourceDropoffDraft(form, point, true);
-          }
-        });
-      }
-      return;
-    }
-
-    const resetYandexSourceDropoffButton = event.target.closest('[data-wdc-reset-yandex-source-dropoff]');
-    if (resetYandexSourceDropoffButton) {
-      const form = findShipmentForm(resetYandexSourceDropoffButton);
-      if (form) resetYandexSourceDropoff(form);
+      dispatchShipmentCarrierHook('handleSenderPickupClick', event, openSenderPickupPicker);
       return;
     }
 
@@ -240,19 +162,17 @@ function initializeShipmentAdmin() {
           }
           const snapshot = payload.data.normalized_address || {};
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
-          syncDpdAddressFields(form, snapshot);
-          syncYandexAddressFields(form, snapshot);
           if (display) display.value = snapshot.display || '';
-          const cityCode = snapshot && snapshot.fields ? String(snapshot.fields.cdek_city_code || '') : '';
-          const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
-          const cityCodeRow = form.querySelector('[data-wdc-cdek-city-code-row]');
-          const cityCodeValue = form.querySelector('[data-wdc-cdek-city-code]');
-          if (cityCodeValue) cityCodeValue.textContent = cityCode;
-          if (cityCodeRow) cityCodeRow.hidden = isDpd || !cityCode;
-          if (status) {
+          const handled = dispatchShipmentCarrierHook('afterAddressNormalized', {
+            form: form,
+            snapshot: snapshot,
+            status: status,
+            display: display
+          });
+          if (!handled && status) {
             status.textContent = snapshot.success
-              ? (isDpd ? 'Данные для DPD корректны' : (cityCode ? '✅ Данные для СДЭК корректны' : 'Адрес обработан.'))
-              : (snapshot.message || (isDpd ? 'Адрес не подтвержден DPD, предпросмотр payload заблокирован.' : 'Адрес не подтвержден, создание отправления заблокировано.'));
+              ? 'Адрес обработан.'
+              : (snapshot.message || 'Адрес не подтвержден.');
           }
           updateCreateAvailability(form);
           requestPreview(form);
@@ -368,29 +288,25 @@ function initializeShipmentAdmin() {
             updateButton.disabled = false;
           }
           const text = getPresentation(box);
-          updateShipmentButtons(box, {
-            hasShipment: !!statusPayload.has_shipment,
-            canCreate: Object.prototype.hasOwnProperty.call(statusPayload, 'can_create') ? !!statusPayload.can_create : undefined,
-            canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload, 'can_attach_manual') ? !!statusPayload.can_attach_manual : undefined,
-            canCancel: !!statusPayload.can_cancel,
-            canRemove: !!statusPayload.can_remove_from_order,
-            canUpdate: !!statusPayload.can_update_status,
-            canPrintBarcode: !!statusPayload.can_print_barcode,
-            canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents,
-            canDownloadYandexLabel: !!statusPayload.can_download_yandex_label
-          });
+          updateShipmentButtons(box, shipmentButtonStateFromStatus(statusPayload));
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           const pollInterval = parseInt(statusPayload.registration_poll_interval_ms || text.registrationPollIntervalMs || '5000', 10) || 5000;
           const pollMaxAttempts = parseInt(statusPayload.registration_poll_max_attempts || text.registrationPollMaxAttempts || '14', 10) || 14;
-          if (payload.data && payload.data.registration_attempt_id) {
-            submitDpdRegistration(form, payload.data.registration_attempt_id, box, updateButton);
-          } else if (updateButton && !updateButton.disabled) {
-            if (text.autoPollRegistration === '1' && statusPayload.carrier_key === 'dpd' && statusPayload.polling_continue) {
-              startDpdRegistrationPolling(updateButton);
-            } else if (text.autoPollRegistration === '1' && statusPayload.polling_continue) {
+          if (dispatchShipmentCarrierHook('handleCreateResponse', {
+            form: form,
+            payload: payload,
+            box: box,
+            updateButton: updateButton,
+            statusPayload: statusPayload,
+            presentation: text
+          })) {
+            return;
+          }
+          if (updateButton && !updateButton.disabled) {
+            if (text.autoPollRegistration === '1' && statusPayload.polling_continue) {
               startShipmentRegistrationPolling(updateButton, { interval: pollInterval, maxAttempts: pollMaxAttempts, mode: 'registration' });
             } else if (text.autoPollRegistration === '1') {
-              startCdekPolling(updateButton);
+              startDefaultRegistrationPolling(updateButton);
             } else {
               requestShipmentStatus(updateButton, { auto: true });
             }
@@ -404,20 +320,6 @@ function initializeShipmentAdmin() {
   });
 
   document.addEventListener('input', function (event) {
-    if (event.target.matches('[data-wdc-dpd-contact-fio]')) {
-      const form = findShipmentForm(event.target);
-      if (form) {
-        updateCreateAvailability(form);
-        schedulePreview(form);
-      }
-      return;
-    }
-    if (event.target.matches('[data-wdc-dpd-courier-instructions]')) {
-      if (event.target.value.length > 250) event.target.value = event.target.value.slice(0, 250);
-      const form = findShipmentForm(event.target);
-      if (form) schedulePreview(form);
-      return;
-    }
     if (event.target.matches('[data-wdc-courier-original-address]')) {
       const form = findShipmentForm(event.target);
           if (form) {
@@ -425,15 +327,19 @@ function initializeShipmentAdmin() {
         const display = form.querySelector('[data-wdc-normalized-address-display]');
         const status = form.querySelector('[data-wdc-normalized-status]');
         if (snapshotInput) snapshotInput.value = '';
-        syncDpdAddressFields(form, {});
-        syncYandexAddressFields(form, {});
         if (display) display.value = '';
+        dispatchShipmentCarrierHook('afterAddressReset', {
+          form: form,
+          status: status,
+          display: display
+        });
         if (status) status.textContent = 'Адрес изменен, нужно обработать адрес заново.';
         updateCreateAvailability(form);
         schedulePreview(form);
       }
       return;
     }
+    if (dispatchShipmentCarrierHook('handleInput', event)) return;
     if (event.target.matches('[data-wdc-integer-input]')) {
       cleanIntegerInput(event.target);
       const integerForm = findShipmentForm(event.target);
@@ -473,18 +379,11 @@ function initializeShipmentAdmin() {
   });
 
   document.addEventListener('pointerdown', function (event) {
-    if (event.target.matches('[data-wdc-dpd-date-pickup]')) {
-      openNativeDatePicker(event.target);
-    }
+    dispatchShipmentCarrierHook('handlePointerDown', event);
   });
 
   document.addEventListener('focus', function (event) {
-    if (event.target.matches('[data-wdc-dpd-date-pickup]')) {
-      openNativeDatePicker(event.target);
-    }
-    if (event.target.matches('[data-wdc-dpd-contact-fio]')) {
-      showDpdContactHistory(event.target);
-    }
+    dispatchShipmentCarrierHook('handleFocus', event);
   }, true);
 
   document.addEventListener('keydown', function (event) {
@@ -517,6 +416,7 @@ function initializeShipmentAdmin() {
   });
 
   document.addEventListener('change', function (event) {
+    if (dispatchShipmentCarrierHook('handleChange', event)) return;
     const form = findShipmentForm(event.target);
     if (!form) return;
     if (event.target.matches('[data-wdc-service-select]')) {

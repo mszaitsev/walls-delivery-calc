@@ -2,6 +2,7 @@
 - `assets/admin/shipments-admin.js` is now the bootstrap entrypoint only; DOM event wiring lives in `assets/admin/shipments/shipment-events.js`.
 - `assets/admin/shipments/shipment-core.js`, `shipment-preview.js`, `shipment-status.js`, `shipment-polling.js`, `shipment-allocation.js` and `shipment-picker.js` own generic helpers, preview/create availability, status/button rendering, polling/AJAX lifecycle, places/items allocation and pickup/map interaction respectively.
 - Carrier-specific runtime hooks live in `assets/admin/shipments/extensions/`: CDEK barcode/delivery-mode hooks, DPD address/contact/documents/two-stage submit hooks, Yandex source drop-off/label hooks, and a Russian Post extension placeholder for the currently shared behavior.
+- Since 0.117.1 `shipment-events.js` is carrier-neutral: it delegates click/input/focus/change/address-normalization/create-response hooks through `registerShipmentCarrierHooks()` / `dispatchShipmentCarrierHook()`, while carrier selectors and post-processing remain in their extensions.
 - `OrderShipmentsMetabox::enqueue_assets()` registers the modules in dependency order and keeps the existing localized `wdc-shipments-admin` handle for the final bootstrap; no DOM, selector, input-name, payload or carrier API contract changed.
 
 ## Shipment modal extensions 0.116.1

@@ -318,6 +318,20 @@
     }
   }
 
+  function shipmentButtonStateFromStatus(statusPayload) {
+    return {
+      hasShipment: !!statusPayload.has_shipment,
+      canCreate: Object.prototype.hasOwnProperty.call(statusPayload, 'can_create') ? !!statusPayload.can_create : undefined,
+      canAttachManual: Object.prototype.hasOwnProperty.call(statusPayload, 'can_attach_manual') ? !!statusPayload.can_attach_manual : undefined,
+      canCancel: !!statusPayload.can_cancel,
+      canRemove: !!statusPayload.can_remove_from_order,
+      canUpdate: !!statusPayload.can_update_status,
+      canPrintBarcode: !!statusPayload.can_print_barcode,
+      canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents,
+      canDownloadYandexLabel: !!statusPayload.can_download_yandex_label
+    };
+  }
+
   function resetShipmentUi(box) {
     if (!box) return;
     const fields = {

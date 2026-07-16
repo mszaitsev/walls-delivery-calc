@@ -138,3 +138,48 @@
     poll();
   }
 
+  registerShipmentCarrierHooks({
+    handleClick: function (event) {
+      const addManualItemAlias = event.target.closest('[data-wdc-add-manual-cdek-item]');
+      if (addManualItemAlias) {
+        addManualShipmentItemRow(addManualItemAlias);
+        return true;
+      }
+
+      const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
+      if (!cdekBarcodeDownload) return false;
+      event.preventDefault();
+      requestCdekBarcodeDownload(cdekBarcodeDownload);
+      return true;
+    },
+    handleSenderPickupClick: function (event, button) {
+      const form = findShipmentForm(button);
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return false;
+      const context = senderPickupContext(form);
+      createPickupPicker(form, {
+        sender: true,
+        title: 'Выбор ПВЗ отправителя СДЭК',
+        context: context,
+        onChoose: function (point) {
+          updateSenderPickupDraft(form, point);
+        }
+      });
+      return true;
+    },
+    afterAddressNormalized: function (context) {
+      const form = context && context.form;
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return false;
+      const snapshot = context.snapshot || {};
+      const cityCode = snapshot && snapshot.fields ? String(snapshot.fields.cdek_city_code || '') : '';
+      const cityCodeRow = form.querySelector('[data-wdc-cdek-city-code-row]');
+      const cityCodeValue = form.querySelector('[data-wdc-cdek-city-code]');
+      if (cityCodeValue) cityCodeValue.textContent = cityCode;
+      if (cityCodeRow) cityCodeRow.hidden = !cityCode;
+      if (context.status) {
+        context.status.textContent = snapshot.success
+          ? (cityCode ? '✅ Данные для СДЭК корректны' : 'Адрес обработан.')
+          : (snapshot.message || 'Адрес не подтвержден, создание отправления заблокировано.');
+      }
+      return true;
+    }
+  });
