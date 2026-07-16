@@ -10,6 +10,307 @@ function shipment_admin_js_structure_assert( bool $condition, string $message ):
 	}
 }
 
+function shipment_admin_js_is_identifier_char( string $char ): bool {
+	return '' !== $char && 1 === preg_match( '/[A-Za-z0-9_$]/', $char );
+}
+
+function shipment_admin_js_statement_end( string $source, int $offset ): int {
+	$length        = strlen( $source );
+	$quote         = '';
+	$escape        = false;
+	$line_comment  = false;
+	$block_comment = false;
+	$brace_depth   = 0;
+	$paren_depth   = 0;
+	$bracket_depth = 0;
+
+	for ( $i = $offset; $i < $length; $i++ ) {
+		$char = $source[ $i ];
+		$next = $source[ $i + 1 ] ?? '';
+
+		if ( $line_comment ) {
+			if ( "\n" === $char ) {
+				$line_comment = false;
+			}
+			continue;
+		}
+
+		if ( $block_comment ) {
+			if ( '*' === $char && '/' === $next ) {
+				$block_comment = false;
+				$i++;
+			}
+			continue;
+		}
+
+		if ( '' !== $quote ) {
+			if ( $escape ) {
+				$escape = false;
+				continue;
+			}
+			if ( '\\' === $char ) {
+				$escape = true;
+				continue;
+			}
+			if ( $char === $quote ) {
+				$quote = '';
+			}
+			continue;
+		}
+
+		if ( '/' === $char && '/' === $next ) {
+			$line_comment = true;
+			$i++;
+			continue;
+		}
+		if ( '/' === $char && '*' === $next ) {
+			$block_comment = true;
+			$i++;
+			continue;
+		}
+		if ( "'" === $char || '"' === $char || '`' === $char ) {
+			$quote = $char;
+			continue;
+		}
+
+		if ( '{' === $char ) {
+			$brace_depth++;
+			continue;
+		}
+		if ( '}' === $char ) {
+			$brace_depth = max( 0, $brace_depth - 1 );
+			continue;
+		}
+		if ( '(' === $char ) {
+			$paren_depth++;
+			continue;
+		}
+		if ( ')' === $char ) {
+			$paren_depth = max( 0, $paren_depth - 1 );
+			continue;
+		}
+		if ( '[' === $char ) {
+			$bracket_depth++;
+			continue;
+		}
+		if ( ']' === $char ) {
+			$bracket_depth = max( 0, $bracket_depth - 1 );
+			continue;
+		}
+		if ( ';' === $char && 0 === $brace_depth && 0 === $paren_depth && 0 === $bracket_depth ) {
+			return $i;
+		}
+	}
+
+	return $length;
+}
+
+function shipment_admin_js_split_declarations( string $statement ): array {
+	$parts         = array();
+	$start         = 0;
+	$length        = strlen( $statement );
+	$quote         = '';
+	$escape        = false;
+	$line_comment  = false;
+	$block_comment = false;
+	$brace_depth   = 0;
+	$paren_depth   = 0;
+	$bracket_depth = 0;
+
+	for ( $i = 0; $i < $length; $i++ ) {
+		$char = $statement[ $i ];
+		$next = $statement[ $i + 1 ] ?? '';
+
+		if ( $line_comment ) {
+			if ( "\n" === $char ) {
+				$line_comment = false;
+			}
+			continue;
+		}
+		if ( $block_comment ) {
+			if ( '*' === $char && '/' === $next ) {
+				$block_comment = false;
+				$i++;
+			}
+			continue;
+		}
+		if ( '' !== $quote ) {
+			if ( $escape ) {
+				$escape = false;
+				continue;
+			}
+			if ( '\\' === $char ) {
+				$escape = true;
+				continue;
+			}
+			if ( $char === $quote ) {
+				$quote = '';
+			}
+			continue;
+		}
+		if ( '/' === $char && '/' === $next ) {
+			$line_comment = true;
+			$i++;
+			continue;
+		}
+		if ( '/' === $char && '*' === $next ) {
+			$block_comment = true;
+			$i++;
+			continue;
+		}
+		if ( "'" === $char || '"' === $char || '`' === $char ) {
+			$quote = $char;
+			continue;
+		}
+		if ( '{' === $char ) {
+			$brace_depth++;
+			continue;
+		}
+		if ( '}' === $char ) {
+			$brace_depth = max( 0, $brace_depth - 1 );
+			continue;
+		}
+		if ( '(' === $char ) {
+			$paren_depth++;
+			continue;
+		}
+		if ( ')' === $char ) {
+			$paren_depth = max( 0, $paren_depth - 1 );
+			continue;
+		}
+		if ( '[' === $char ) {
+			$bracket_depth++;
+			continue;
+		}
+		if ( ']' === $char ) {
+			$bracket_depth = max( 0, $bracket_depth - 1 );
+			continue;
+		}
+		if ( ',' === $char && 0 === $brace_depth && 0 === $paren_depth && 0 === $bracket_depth ) {
+			$parts[] = substr( $statement, $start, $i - $start );
+			$start   = $i + 1;
+		}
+	}
+
+	$parts[] = substr( $statement, $start );
+
+	return $parts;
+}
+
+function shipment_admin_js_top_level_declarations( string $source ): array {
+	$length        = strlen( $source );
+	$quote         = '';
+	$escape        = false;
+	$line_comment  = false;
+	$block_comment = false;
+	$brace_depth   = 0;
+	$result        = array(
+		'functions' => array(),
+		'lexical'   => array(),
+	);
+
+	for ( $i = 0; $i < $length; $i++ ) {
+		$char = $source[ $i ];
+		$next = $source[ $i + 1 ] ?? '';
+
+		if ( $line_comment ) {
+			if ( "\n" === $char ) {
+				$line_comment = false;
+			}
+			continue;
+		}
+		if ( $block_comment ) {
+			if ( '*' === $char && '/' === $next ) {
+				$block_comment = false;
+				$i++;
+			}
+			continue;
+		}
+		if ( '' !== $quote ) {
+			if ( $escape ) {
+				$escape = false;
+				continue;
+			}
+			if ( '\\' === $char ) {
+				$escape = true;
+				continue;
+			}
+			if ( $char === $quote ) {
+				$quote = '';
+			}
+			continue;
+		}
+		if ( '/' === $char && '/' === $next ) {
+			$line_comment = true;
+			$i++;
+			continue;
+		}
+		if ( '/' === $char && '*' === $next ) {
+			$block_comment = true;
+			$i++;
+			continue;
+		}
+		if ( "'" === $char || '"' === $char || '`' === $char ) {
+			$quote = $char;
+			continue;
+		}
+
+		if ( 0 === $brace_depth ) {
+			foreach ( array( 'const', 'let' ) as $keyword ) {
+				$keyword_length = strlen( $keyword );
+				if (
+					substr( $source, $i, $keyword_length ) === $keyword
+					&& ! shipment_admin_js_is_identifier_char( $source[ $i - 1 ] ?? '' )
+					&& ! shipment_admin_js_is_identifier_char( $source[ $i + $keyword_length ] ?? '' )
+				) {
+					$end       = shipment_admin_js_statement_end( $source, $i + $keyword_length );
+					$statement = substr( $source, $i + $keyword_length, $end - ( $i + $keyword_length ) );
+					foreach ( shipment_admin_js_split_declarations( $statement ) as $part ) {
+						if ( 1 === preg_match( '/^\\s*([A-Za-z_$][A-Za-z0-9_$]*)\\b/', $part, $match ) ) {
+							$result['lexical'][ $match[1] ][] = $keyword;
+						} elseif ( 1 === preg_match( '/^\\s*[\\[{]/', $part ) ) {
+							shipment_admin_js_structure_assert( false, 'Admin JS top-level lexical scanner does not support destructuring declarations.' );
+						}
+					}
+					$i = $end;
+					continue 2;
+				}
+			}
+
+			$keyword = 'function';
+			if (
+				substr( $source, $i, strlen( $keyword ) ) === $keyword
+				&& ! shipment_admin_js_is_identifier_char( $source[ $i - 1 ] ?? '' )
+				&& ! shipment_admin_js_is_identifier_char( $source[ $i + strlen( $keyword ) ] ?? '' )
+				&& 1 === preg_match( '/^function\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(/', substr( $source, $i ), $match )
+			) {
+				$result['functions'][ $match[1] ][] = 'function';
+			}
+		}
+
+		if ( '{' === $char ) {
+			$brace_depth++;
+			continue;
+		}
+		if ( '}' === $char ) {
+			$brace_depth = max( 0, $brace_depth - 1 );
+			continue;
+		}
+	}
+
+	return $result;
+}
+
+function shipment_admin_js_duplicate_binding_message( array $bindings ): string {
+	$lines = array();
+	foreach ( $bindings as $name => $owners ) {
+		if ( count( $owners ) > 1 ) {
+			$lines[] = $name . ': ' . implode( ', ', $owners );
+		}
+	}
+	return implode( '; ', $lines );
+}
+
 $root = dirname( __DIR__, 2 );
 $files = array(
 	'bootstrap'    => $root . '/assets/admin/shipments-admin.js',
@@ -61,6 +362,12 @@ shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'syncYandex
 shipment_admin_js_structure_assert( ! str_contains( $source['polling'], 'submitDpdRegistration' ) && ! str_contains( $source['polling'], 'startDpdRegistrationPolling' ), 'Polling module must not own DPD lifecycle wrappers.' );
 shipment_admin_js_structure_assert( str_contains( $source['dpd'], 'submitDpdRegistration' ) && str_contains( $source['dpd'], 'startDpdRegistrationPolling' ) && str_contains( $source['dpd'], 'dpd_places_summary' ) && str_contains( $source['dpd'], 'renderStatus' ), 'DPD extension must own DPD lifecycle and places status presentation.' );
 shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'cancellationPollingProgressMessage' ) && str_contains( $source['yandex'], 'cancellationPollingExhaustedMessage' ) && str_contains( $source['yandex'], 'yandex_self_pickup_node_code' ) && str_contains( $source['yandex'], 'renderStatus' ) && str_contains( $source['yandex'], 'handlePollingStatus' ) && str_contains( $source['yandex'], 'handlePollingExhausted' ), 'Yandex extension must own cancellation polling and self-pickup status presentation.' );
+shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'function isYandexPollingContext' ) && str_contains( $source['yandex'], 'button.dataset.shipmentKey' ) && str_contains( $source['yandex'], "trim() === 'yandex_delivery'" ), 'Yandex extension must identify polling ownership through the canonical yandex_delivery shipment key.' );
+foreach ( array( 'handlePollingStart', 'handlePollingStatus', 'handlePollingError', 'handlePollingExhausted', 'cancelledAndRemoved' ) as $hook_name ) {
+	shipment_admin_js_structure_assert( 1 === preg_match( '/' . preg_quote( $hook_name, '/' ) . ': function \\(context\\) \\{\\s*if \\(!isYandexPollingContext\\(context\\)\\) return false;/s', $source['yandex'] ), 'Yandex polling hook must start with carrier guard: ' . $hook_name );
+}
+shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'handlePollingStop: function (context)' ) && str_contains( $source['yandex'], 'if (isYandexPollingContext(context))' ) && str_contains( $source['yandex'], 'cancellationPollingToasts.has(box)' ), 'Yandex polling stop hook must clear only Yandex-owned cancellation toast state.' );
+shipment_admin_js_structure_assert( ! str_contains( $source['yandex'], "statusPayload.carrier_key !== 'yandex_delivery' && !isCancellationPollingPurpose" ), 'Yandex cancellation purpose must not be treated as carrier identity.' );
 shipment_admin_js_structure_assert( str_contains( $source['cdek'], 'startCdekPolling' ) && str_contains( $source['cdek'], 'handleDefaultRegistrationPolling' ), 'CDEK extension must own the CDEK default registration polling wrapper.' );
 shipment_admin_js_structure_assert( str_contains( $source['status'], 'label_actions' ) && str_contains( $source['status'], 'data-wdc-shipment-document-download' ) && ! str_contains( $source['status'], 'can_download_dpd_documents' ) && ! str_contains( $source['status'], 'can_download_yandex_label' ) && ! str_contains( $source['status'], 'data-wdc-cdek-barcode-download' ) && ! str_contains( $source['status'], 'data-wdc-dpd-documents-download' ) && ! str_contains( $source['status'], 'data-wdc-yandex-label-download' ), 'Status module must drive document visibility through normalized label_actions and generic document selectors.' );
 
@@ -74,6 +381,33 @@ $duplicates = array_filter(
 shipment_admin_js_structure_assert( array() === $duplicates, 'Admin JS bundle must not contain duplicate function declarations: ' . implode( ', ', array_keys( $duplicates ) ) );
 shipment_admin_js_structure_assert( 1 === ( $function_counts['submitDpdRegistration'] ?? 0 ), 'submitDpdRegistration must be declared exactly once in the production admin JS bundle.' );
 shipment_admin_js_structure_assert( 1 === ( $function_counts['startDpdRegistrationPolling'] ?? 0 ), 'startDpdRegistrationPolling must be declared exactly once in the production admin JS bundle.' );
+
+$top_level_lexical_bindings = array();
+$top_level_functions        = array();
+foreach ( $files as $key => $file ) {
+	$declarations = shipment_admin_js_top_level_declarations( $source[ $key ] );
+	$owner        = basename( $file );
+	foreach ( $declarations['lexical'] as $name => $kinds ) {
+		foreach ( array_unique( $kinds ) as $kind ) {
+			$top_level_lexical_bindings[ $name ][] = $owner . ' (' . $kind . ')';
+		}
+	}
+	foreach ( $declarations['functions'] as $name => $kinds ) {
+		$top_level_functions[ $name ][] = $owner . ' (function)';
+	}
+}
+
+$duplicate_lexical = array_filter(
+	$top_level_lexical_bindings,
+	static fn ( array $owners ): bool => count( $owners ) > 1
+);
+shipment_admin_js_structure_assert( array() === $duplicate_lexical, 'Admin JS bundle must not contain duplicate top-level const/let declarations. ' . shipment_admin_js_duplicate_binding_message( $duplicate_lexical ) );
+
+$function_lexical_collisions = array();
+foreach ( array_intersect( array_keys( $top_level_functions ), array_keys( $top_level_lexical_bindings ) ) as $name ) {
+	$function_lexical_collisions[ $name ] = array_merge( $top_level_functions[ $name ], $top_level_lexical_bindings[ $name ] );
+}
+shipment_admin_js_structure_assert( array() === $function_lexical_collisions, 'Admin JS bundle must not contain function/lexical top-level name collisions. ' . shipment_admin_js_duplicate_binding_message( $function_lexical_collisions ) );
 
 $metabox_source = (string) file_get_contents( $root . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 foreach ( array( 'wdc-shipments-admin-core', 'wdc-shipments-admin-preview', 'wdc-shipments-admin-status', 'wdc-shipments-admin-polling', 'wdc-shipments-admin-picker', 'wdc-shipments-admin-yandex', 'wdc-shipments-admin-events' ) as $handle ) {

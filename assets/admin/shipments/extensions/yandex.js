@@ -207,6 +207,32 @@
     return String(value || '') === 'cancellation';
   }
 
+  function isYandexShipmentKey(value) {
+    return String(value || '').trim() === 'yandex_delivery';
+  }
+
+  function isYandexPollingContext(context) {
+    const source = context || {};
+    const button = source.button;
+    const statusPayload = source.statusPayload && typeof source.statusPayload === 'object'
+      ? source.statusPayload
+      : {};
+    const payloadData = source.payload && source.payload.data && typeof source.payload.data === 'object'
+      ? source.payload.data
+      : {};
+    const payloadStatus = payloadData.status && typeof payloadData.status === 'object'
+      ? payloadData.status
+      : {};
+    const keys = [
+      statusPayload.carrier_key,
+      payloadData.carrier_key,
+      payloadStatus.carrier_key,
+      button && button.dataset ? button.dataset.shipmentKey : ''
+    ];
+
+    return keys.some(isYandexShipmentKey);
+  }
+
   function cancellationPollingProgressMessage(attempt, maxAttempts) {
     const current = Math.max(0, parseInt(attempt, 10) || 0);
     const total = Math.max(1, parseInt(maxAttempts, 10) || 14);
@@ -354,17 +380,16 @@
       return false;
     },
     handlePollingStart: function (context) {
+      if (!isYandexPollingContext(context)) return false;
       const settings = context && context.settings ? context.settings : {};
       if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
       initCancellationPollingToast(context.box, context.token, context.maxAttempts || 14);
       return true;
     },
     handlePollingStatus: function (context) {
+      if (!isYandexPollingContext(context)) return false;
       const statusPayload = context && context.statusPayload ? context.statusPayload : {};
       const settings = context && context.settings ? context.settings : {};
-      if (statusPayload.carrier_key !== 'yandex_delivery' && !isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) {
-        return false;
-      }
 
       if (isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) {
         const rawStatus = String(statusPayload.yandex_status || statusPayload.carrier_status_title || '').trim();
@@ -399,6 +424,7 @@
       return false;
     },
     handlePollingError: function (context) {
+      if (!isYandexPollingContext(context)) return false;
       const settings = context && context.settings ? context.settings : {};
       if (!isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) return false;
       updateCancellationPollingToast(
@@ -411,6 +437,7 @@
       return true;
     },
     handlePollingExhausted: function (context) {
+      if (!isYandexPollingContext(context)) return false;
       const button = context && context.button;
       if (!button || !button.dataset || !isCancellationPollingPurpose(button.dataset.pollPurpose || '')) return false;
       updateCancellationPollingToast(
@@ -423,13 +450,22 @@
       return true;
     },
     cancelledAndRemoved: function (context) {
+      if (!isYandexPollingContext(context)) return false;
       const settings = context && context.settings ? context.settings : {};
       if (!isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) return false;
       updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
       return true;
     },
     handlePollingStop: function (context) {
-      clearCancellationPollingToast(context && context.box);
+      const box = context && context.box;
+      if (!box) return false;
+      if (isYandexPollingContext(context)) {
+        clearCancellationPollingToast(box);
+        return false;
+      }
+      if (cancellationPollingToasts.has(box)) {
+        clearCancellationPollingToast(box);
+      }
       return false;
     }
   });
