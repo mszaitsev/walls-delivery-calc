@@ -267,7 +267,10 @@ function shipment_admin_js_top_level_declarations( string $source ): array {
 					$statement = substr( $source, $i + $keyword_length, $end - ( $i + $keyword_length ) );
 					foreach ( shipment_admin_js_split_declarations( $statement ) as $part ) {
 						if ( 1 === preg_match( '/^\\s*([A-Za-z_$][A-Za-z0-9_$]*)\\b/', $part, $match ) ) {
-							$result['lexical'][ $match[1] ][] = $keyword;
+							$result['lexical'][ $match[1] ][] = array(
+								'kind'   => $keyword,
+								'offset' => $i,
+							);
 						} elseif ( 1 === preg_match( '/^\\s*[\\[{]/', $part ) ) {
 							shipment_admin_js_structure_assert( false, 'Admin JS top-level lexical scanner does not support destructuring declarations.' );
 						}
@@ -301,6 +304,30 @@ function shipment_admin_js_top_level_declarations( string $source ): array {
 	return $result;
 }
 
+function shipment_admin_js_line_for_offset( string $source, int $offset ): int {
+	return substr_count( substr( $source, 0, max( 0, $offset ) ), "\n" ) + 1;
+}
+
+function shipment_admin_js_lexical_owners( string $source, string $owner ): array {
+	$declarations = shipment_admin_js_top_level_declarations( $source );
+	$bindings     = array();
+	foreach ( $declarations['lexical'] as $name => $occurrences ) {
+		foreach ( $occurrences as $occurrence ) {
+			$kind                 = (string) ( $occurrence['kind'] ?? 'const' );
+			$line                 = shipment_admin_js_line_for_offset( $source, (int) ( $occurrence['offset'] ?? 0 ) );
+			$bindings[ $name ][] = $owner . ':' . $line . ' (' . $kind . ')';
+		}
+	}
+	return $bindings;
+}
+
+function shipment_admin_js_duplicate_bindings( array $bindings ): array {
+	return array_filter(
+		$bindings,
+		static fn ( array $owners ): bool => count( $owners ) > 1
+	);
+}
+
 function shipment_admin_js_duplicate_binding_message( array $bindings ): string {
 	$lines = array();
 	foreach ( $bindings as $name => $owners ) {
@@ -310,6 +337,34 @@ function shipment_admin_js_duplicate_binding_message( array $bindings ): string 
 	}
 	return implode( '; ', $lines );
 }
+
+function shipment_admin_js_scanner_self_test(): void {
+	$duplicate_const = shipment_admin_js_duplicate_bindings( shipment_admin_js_lexical_owners( "const duplicate = 1;\nconst duplicate = 2;\n", 'fixture-const.js' ) );
+	shipment_admin_js_structure_assert( isset( $duplicate_const['duplicate'] ) && 2 === count( $duplicate_const['duplicate'] ), 'Scanner self-test must detect duplicate top-level const declarations.' );
+
+	$duplicate_let = shipment_admin_js_duplicate_bindings( shipment_admin_js_lexical_owners( "let duplicate = 1;\nlet duplicate = 2;\n", 'fixture-let.js' ) );
+	shipment_admin_js_structure_assert( isset( $duplicate_let['duplicate'] ) && 2 === count( $duplicate_let['duplicate'] ), 'Scanner self-test must detect duplicate top-level let declarations.' );
+
+	$const_let = shipment_admin_js_duplicate_bindings( shipment_admin_js_lexical_owners( "const collision = 1;\nlet collision = 2;\n", 'fixture-const-let.js' ) );
+	shipment_admin_js_structure_assert( isset( $const_let['collision'] ) && 2 === count( $const_let['collision'] ), 'Scanner self-test must detect const/let top-level collisions.' );
+
+	$function_collision_declarations = shipment_admin_js_top_level_declarations( "function collision() {}\nconst collision = 1;\n" );
+	shipment_admin_js_structure_assert( isset( $function_collision_declarations['functions']['collision'], $function_collision_declarations['lexical']['collision'] ), 'Scanner self-test must detect function/lexical top-level collisions.' );
+
+	$local_declarations = shipment_admin_js_top_level_declarations( "function one() {\n    const local = 1;\n}\n\nfunction two() {\n    const local = 2;\n}\n" );
+	shipment_admin_js_structure_assert( ! isset( $local_declarations['lexical']['local'] ), 'Scanner self-test must ignore local const declarations.' );
+
+	$multi_declarations = shipment_admin_js_top_level_declarations( "const a = 1,\n      b = 2;\n" );
+	shipment_admin_js_structure_assert( isset( $multi_declarations['lexical']['a'], $multi_declarations['lexical']['b'] ), 'Scanner self-test must detect comma-separated top-level declarations.' );
+
+	$comment_declarations = shipment_admin_js_top_level_declarations( "// const fake = 1\n\n/*\nconst fake2 = 2;\n*/\n\nconst real = 1;\n" );
+	shipment_admin_js_structure_assert( isset( $comment_declarations['lexical']['real'] ) && ! isset( $comment_declarations['lexical']['fake'], $comment_declarations['lexical']['fake2'] ), 'Scanner self-test must ignore comments.' );
+
+	$string_declarations = shipment_admin_js_top_level_declarations( "const text = \"const fake\";\n\nconst real = 1;\n" );
+	shipment_admin_js_structure_assert( isset( $string_declarations['lexical']['text'], $string_declarations['lexical']['real'] ) && ! isset( $string_declarations['lexical']['fake'] ), 'Scanner self-test must ignore strings.' );
+}
+
+shipment_admin_js_scanner_self_test();
 
 $root = dirname( __DIR__, 2 );
 $files = array(
@@ -387,9 +442,9 @@ $top_level_functions        = array();
 foreach ( $files as $key => $file ) {
 	$declarations = shipment_admin_js_top_level_declarations( $source[ $key ] );
 	$owner        = basename( $file );
-	foreach ( $declarations['lexical'] as $name => $kinds ) {
-		foreach ( array_unique( $kinds ) as $kind ) {
-			$top_level_lexical_bindings[ $name ][] = $owner . ' (' . $kind . ')';
+	foreach ( shipment_admin_js_lexical_owners( $source[ $key ], $owner ) as $name => $owners ) {
+		foreach ( $owners as $occurrence_owner ) {
+			$top_level_lexical_bindings[ $name ][] = $occurrence_owner;
 		}
 	}
 	foreach ( $declarations['functions'] as $name => $kinds ) {
@@ -397,10 +452,7 @@ foreach ( $files as $key => $file ) {
 	}
 }
 
-$duplicate_lexical = array_filter(
-	$top_level_lexical_bindings,
-	static fn ( array $owners ): bool => count( $owners ) > 1
-);
+$duplicate_lexical = shipment_admin_js_duplicate_bindings( $top_level_lexical_bindings );
 shipment_admin_js_structure_assert( array() === $duplicate_lexical, 'Admin JS bundle must not contain duplicate top-level const/let declarations. ' . shipment_admin_js_duplicate_binding_message( $duplicate_lexical ) );
 
 $function_lexical_collisions = array();
