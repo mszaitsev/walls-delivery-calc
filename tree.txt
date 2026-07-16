@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000008 A0AC:74BD
+Volume serial number is 00000023 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -684,6 +684,7 @@ C:.
 |   |   |       CdekRecipientAddressPreparationService.php
 |   |   |       CdekShipmentAdapter.php
 |   |   |       CdekShipmentDocumentProvider.php
+|   |   |       CdekShipmentModalExtension.php
 |   |   |       CdekShipmentPersistenceMapper.php
 |   |   |       CdekStatusMappingService.php
 |   |   |
@@ -708,9 +709,14 @@ C:.
 |   |   |       DpdShipmentDocumentProvider.php
 |   |   |       DpdShipmentDocumentService.php
 |   |   |       DpdShipmentEnrichmentService.php
+|   |   |       DpdShipmentModalExtension.php
 |   |   |       DpdShipmentPersistenceMapper.php
 |   |   |       DpdShipmentRepository.php
 |   |   |       DpdStatusMapping.php
+|   |   |
+|   |   +---Modal
+|   |   |       CarrierShipmentModalExtensionInterface.php
+|   |   |       ShipmentModalExtensionRegistry.php
 |   |   |
 |   |   +---Presentation
 |   |   |       ShipmentActualCostComparisonService.php
@@ -723,6 +729,7 @@ C:.
 |   |   |       RussianPostShipmentAdapter.php
 |   |   |       RussianPostShipmentDocumentProvider.php
 |   |   |       RussianPostShipmentDocumentService.php
+|   |   |       RussianPostShipmentModalExtension.php
 |   |   |       RussianPostShipmentPersistenceMapper.php
 |   |   |       RussianPostShipmentProductMapper.php
 |   |   |       RussianPostTrackingStatusMapper.php
@@ -736,6 +743,7 @@ C:.
 |   |           YandexShipmentDocumentProvider.php
 |   |           YandexShipmentDocumentService.php
 |   |           YandexShipmentLabelPolicy.php
+|   |           YandexShipmentModalExtension.php
 |   |           YandexShipmentPersistenceMapper.php
 |   |           YandexShipmentRegistrationService.php
 |   |           YandexShipmentRepository.php
@@ -858,6 +866,7 @@ C:.
     |       run-shipment-actual-cost-presentation-smoke.php
     |       run-shipment-allocation-smoke.php
     |       run-shipment-document-actions-smoke.php
+    |       run-shipment-modal-extensions-smoke.php
     |       run-shipment-persistence-mappers-smoke.php
     |       run-shipment-status-smoke.php
     |
