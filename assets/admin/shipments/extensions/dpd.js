@@ -173,20 +173,6 @@
       syncDpdAddressFields(form, {});
       return true;
     },
-    handleCreateResponse: function (context) {
-      const payload = context && context.payload ? context.payload : {};
-      const statusPayload = context && context.statusPayload ? context.statusPayload : {};
-      const text = context && context.presentation ? context.presentation : {};
-      if (payload.data && payload.data.registration_attempt_id) {
-        submitDpdRegistration(context.form, payload.data.registration_attempt_id, context.box, context.updateButton);
-        return true;
-      }
-      if (text.autoPollRegistration === '1' && statusPayload.carrier_key === 'dpd' && statusPayload.polling_continue && context.updateButton && !context.updateButton.disabled) {
-        startDpdRegistrationPolling(context.updateButton);
-        return true;
-      }
-      return false;
-    },
     renderStatus: function (context) {
       const box = context && context.box;
       const status = context && context.status ? context.status : {};
@@ -225,42 +211,6 @@
         setDpdContactHistory(payload.data.history);
       }
     });
-  }
-  function submitDpdRegistration(form, attemptId, box, updateButton) {
-    const data = collectShipmentData(form);
-    data.append('action', window.wdcShipmentsAdmin.createAction);
-    data.append('nonce', window.wdcShipmentsAdmin.nonce);
-    data.append('dpd_registration_stage', 'submit');
-    data.append('registration_attempt_id', attemptId || '');
-    setShipmentPollingIndicator(box, true);
-    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
-      method: 'POST',
-      credentials: 'same-origin',
-      body: data
-    })
-      .then(parseShipmentJsonResponse)
-      .then((payload) => {
-        if (!payload || !payload.success) {
-          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отправить заявку DPD.');
-        }
-        renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
-        renderShipmentTechnicalInfo(box, payload.data || {});
-        if (updateButton) updateButton.disabled = false;
-        if (payload.data && payload.data.polling_continue) {
-          startDpdRegistrationPolling(updateButton);
-        } else {
-          setShipmentPollingIndicator(box, false);
-        }
-        return payload;
-      })
-      .catch((error) => {
-        setShipmentPollingIndicator(box, false);
-        showShipmentToast(box, error.message, 'error', { append: true });
-      });
-  }
-
-  function startDpdRegistrationPolling(button) {
-    startShipmentRegistrationPolling(button, { interval: 10000, maxAttempts: 0, mode: 'registration', stopOnError: true });
   }
 
   function setDpdDocumentsButtonState(link, busy, label) {

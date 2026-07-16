@@ -45,7 +45,7 @@ dpd_buttons_assert( str_contains( (string) ( $payload['dpd_places_summary'] ?? '
 $presentation = $adapter->presentation();
 dpd_buttons_assert( 'Внести номер DPD вручную' === $presentation['manual_attach_button_label'] && 'Номер DPD' === $presentation['manual_attach_placeholder'], 'DPD manual attach UI text must be configured.' );
 $source = wdc_shipment_admin_js_bundle_source();
-dpd_buttons_assert( str_contains( $source, 'temporary_can_remove' ) && str_contains( $source, 'startDpdRegistrationPolling' ) && str_contains( $source, 'registration_attempt_id' ), 'Admin JS must include DPD temporary remove and two-stage polling markers.' );
+dpd_buttons_assert( str_contains( $source, 'temporary_can_remove' ) && str_contains( $source, 'continueShipmentLifecycle' ) && str_contains( $source, 'continueLifecycleAction' ) && ! str_contains( $source, 'startDpdRegistrationPolling' ) && ! str_contains( $source, 'submitDpdRegistration' ), 'Admin JS must keep DPD temporary remove while using the neutral lifecycle continuation contract.' );
 $css_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 dpd_buttons_assert( str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, "\$can_cancel = ! empty( \$button_policy['can_cancel'] )" ), 'Initial metabox render must use DPD status payload for cancel button visibility.' );

@@ -662,7 +662,7 @@ dpd_checkout_assert( 2 === count( $max_rates ) && ( $max_rates[0]->meta['checkou
 dpd_checkout_assert( ! ( new CarrierShipmentAdapterRegistry() )->has( DpdSettings::CARRIER_KEY ), 'Empty shipment registry must not contain DPD before explicit adapter registration.' );
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-dpd_checkout_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $plugin_source, 'array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ) ), $this->container->get( Logger::class )' ), 'Plugin must register DPD checkout carrier and manual live-create adapter without adding auto-create.' );
+dpd_checkout_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && str_contains( $plugin_source, 'DpdShipmentAdapter::class' ) && str_contains( $plugin_source, 'DpdShipmentPersistenceMapper::class' ) && ! str_contains( $plugin_source, 'wdc_dpd_auto_create' ) && ! str_contains( $plugin_source, 'dpd_auto_create' ), 'Plugin must register DPD checkout carrier and manual live-create adapter without adding auto-create.' );
 dpd_checkout_assert( str_contains( $plugin_source, 'DpdPackagingBuilderFactory::class' ) && str_contains( $plugin_source, '->create()' ), 'DPD runtime must receive the DPD-configured PackagingBuilder factory.' );
 
 echo "DPD checkout runtime smoke test passed.\n";

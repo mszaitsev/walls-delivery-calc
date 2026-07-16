@@ -291,7 +291,7 @@ final class YandexShipmentRegistrationService {
 					'auto_poll' => true,
 					'poll_interval_ms' => 5000,
 					'poll_max_attempts' => 14,
-					'poll_purpose' => 'cancellation',
+					'purpose' => 'cancellation',
 				);
 			}
 			$is_cancelled = $this->is_cancelled_status( $info->status );
@@ -323,7 +323,7 @@ final class YandexShipmentRegistrationService {
 				return array( 'success' => true, 'accepted' => false, 'cancellation_started' => false, 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => false, 'order_status_mapping' => $order_status_mapping );
 			}
 
-			return array( 'success' => true, 'accepted' => true, 'cancellation_started' => true, 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => true, 'poll_interval_ms' => 5000, 'poll_max_attempts' => 14, 'poll_purpose' => 'cancellation', 'order_status_mapping' => $order_status_mapping );
+			return array( 'success' => true, 'accepted' => true, 'cancellation_started' => true, 'request_id' => $request_id, 'message' => 'Запрос на отмену отправления Яндекс отправлен.', 'status' => $info->status, 'auto_poll' => true, 'poll_interval_ms' => 5000, 'poll_max_attempts' => 14, 'purpose' => 'cancellation', 'order_status_mapping' => $order_status_mapping );
 		} catch ( YandexDeliveryApiException $exception ) {
 			return array( 'success' => false, 'message' => $exception->getMessage(), 'details' => $exception->details() );
 		}
