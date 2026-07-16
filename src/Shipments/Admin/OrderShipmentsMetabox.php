@@ -30,6 +30,7 @@ use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentLifecycleContinuationInterface;
 use WallsShop\WDC\Shipments\Documents\ShipmentDocumentAction;
 use WallsShop\WDC\Shipments\Documents\ShipmentDocumentDownloadService;
 use WallsShop\WDC\Shipments\Documents\ShipmentDocumentProviderRegistry;
@@ -43,6 +44,7 @@ defined( 'ABSPATH' ) || exit;
 final class OrderShipmentsMetabox {
 	private const NONCE_ACTION = 'wdc_shipments_admin';
 	private const AJAX_CREATE = 'wdc_create_shipment';
+	private const AJAX_CONTINUE_LIFECYCLE = 'wdc_continue_shipment_lifecycle';
 	private const AJAX_PREVIEW = 'wdc_preview_shipment';
 	private const AJAX_UPDATE_STATUS = 'wdc_update_shipment_status';
 	private const AJAX_MARK_POLL_EXHAUSTED = 'wdc_mark_shipment_poll_exhausted';
@@ -86,6 +88,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'add_meta_boxes', array( $this, 'add_meta_box' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this, 'ajax_create' ) );
+		add_action( 'wp_ajax_' . self::AJAX_CONTINUE_LIFECYCLE, array( $this, 'ajax_continue_lifecycle' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
 		add_action( 'wp_ajax_' . self::AJAX_UPDATE_STATUS, array( $this, 'ajax_update_status' ) );
 		add_action( 'wp_ajax_' . self::AJAX_MARK_POLL_EXHAUSTED, array( $this, 'ajax_mark_poll_exhausted' ) );
@@ -151,6 +154,7 @@ final class OrderShipmentsMetabox {
 				'restNonce' => wp_create_nonce( 'wp_rest' ),
 				'nonce' => wp_create_nonce( self::NONCE_ACTION ),
 				'createAction' => self::AJAX_CREATE,
+				'continueLifecycleAction' => self::AJAX_CONTINUE_LIFECYCLE,
 				'previewAction' => self::AJAX_PREVIEW,
 				'updateStatusAction' => self::AJAX_UPDATE_STATUS,
 				'markPollExhaustedAction' => self::AJAX_MARK_POLL_EXHAUSTED,
@@ -453,10 +457,7 @@ final class OrderShipmentsMetabox {
 				if ( null === $adapter ) {
 					throw new \InvalidArgumentException( __( 'Адаптер DPD недоступен.', 'walls-delivery-calc' ) );
 				}
-				$stage = sanitize_key( wp_unslash( $_POST['dpd_registration_stage'] ?? 'begin' ) );
-				$result = 'submit' === $stage && method_exists( $adapter, 'submit_registration' )
-					? $adapter->submit_registration( $order, $request, sanitize_text_field( wp_unslash( $_POST['registration_attempt_id'] ?? '' ) ) )
-					: ( method_exists( $adapter, 'begin_registration' ) ? $adapter->begin_registration( $order, $request ) : array( 'success' => false, 'message' => __( 'Регистрация DPD недоступна.', 'walls-delivery-calc' ) ) );
+				$result = method_exists( $adapter, 'begin_registration' ) ? $adapter->begin_registration( $order, $request ) : array( 'success' => false, 'message' => __( 'Регистрация DPD недоступна.', 'walls-delivery-calc' ) );
 				if ( empty( $result['success'] ) ) {
 					$this->discard_preview_buffer( $buffer_level );
 					wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось зарегистрировать отправление DPD.', 'walls-delivery-calc' ) ), 'preview' => $preview, 'error_code' => 'shipment_create_validation_failed' ), 400 );
@@ -527,6 +528,67 @@ final class OrderShipmentsMetabox {
 				),
 				500
 			);
+		}
+	}
+
+	public function ajax_continue_lifecycle(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		try {
+			$order_id = (int) ( $_POST['order_id'] ?? 0 );
+			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+			if ( ! is_object( $order ) || $order_id <= 0 ) {
+				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_lifecycle_invalid_request' ), 404 );
+			}
+			$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? $_POST['shipment_key'] ?? '' ) );
+			$attempt_id = sanitize_text_field( wp_unslash( $_POST['attempt_id'] ?? '' ) );
+			if ( '' === $carrier_key || '' === $attempt_id ) {
+				throw new \InvalidArgumentException( __( 'Не найден контекст продолжения регистрации отправления.', 'walls-delivery-calc' ) );
+			}
+			$adapter = $this->carrier_adapter( $carrier_key );
+			if ( ! $adapter instanceof CarrierShipmentLifecycleContinuationInterface ) {
+				throw new \InvalidArgumentException( __( 'Выбранная служба не поддерживает продолжение регистрации отправления.', 'walls-delivery-calc' ) );
+			}
+			$result = $adapter->continue_lifecycle( $order, $attempt_id );
+			if ( empty( $result['success'] ) ) {
+				wp_send_json_error(
+					array_merge(
+						$this->carrier_ui_payload( $order, $carrier_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
+						array(
+							'message' => (string) ( $result['message'] ?? __( 'Не удалось продолжить регистрацию отправления.', 'walls-delivery-calc' ) ),
+							'lifecycle' => is_array( $result['lifecycle'] ?? null ) ? $result['lifecycle'] : array(),
+						)
+					),
+					400
+				);
+			}
+			wp_send_json_success(
+				array_merge(
+					$this->carrier_ui_payload( $order, $carrier_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
+					$result,
+					array(
+						'message' => (string) ( $result['message'] ?? __( 'Регистрация отправления продолжена.', 'walls-delivery-calc' ) ),
+						'lifecycle' => is_array( $result['lifecycle'] ?? null ) ? $result['lifecycle'] : array(),
+					)
+				)
+			);
+		} catch ( \InvalidArgumentException $exception ) {
+			wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $exception->getMessage() ), 'error_code' => 'shipment_lifecycle_validation_failed' ), 400 );
+		} catch ( \Throwable $exception ) {
+			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
+				throw $exception;
+			}
+			error_log(
+				sprintf(
+					'[walls-delivery-calc] shipment lifecycle continuation failed. class=%s message=%s location=%s:%d',
+					$exception::class,
+					$exception->getMessage(),
+					$exception->getFile(),
+					$exception->getLine()
+				)
+			);
+			wp_send_json_error( array( 'message' => __( 'Не удалось продолжить регистрацию отправления. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ), 'error_code' => 'shipment_lifecycle_unexpected_error' ), 500 );
 		}
 	}
 

@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Shipments\Lifecycle\ShipmentLifecycleResult;
 
 use function sanitize_text_field;
 
@@ -49,19 +50,39 @@ final class DpdOrderRegistrationService {
 		);
 		$shipment = array_merge( $shipment, $sent_places );
 		$this->repository->save( $order, $shipment );
-		return array( 'success' => true, 'message' => 'Ждём регистрацию DPD.', 'registration_attempt_id' => $token, 'shipment' => $shipment, 'status' => array( 'registration_polling' => true, 'polling_continue' => true ) );
+		$lifecycle = new ShipmentLifecycleResult(
+			ShipmentLifecycleResult::PHASE_SUBMISSION_REQUIRED,
+			accepted: true,
+			submit_required: true,
+			poll_required: false,
+			attempt_id: $token,
+			message: 'Ждём регистрацию DPD.',
+			poll_interval_ms: 10000,
+			poll_max_attempts: 0,
+			stop_on_error: true
+		);
+		return array( 'success' => true, 'message' => 'Ждём регистрацию DPD.', 'shipment' => $shipment, 'lifecycle' => $lifecycle->to_array(), 'status' => array( 'lifecycle' => $lifecycle->to_array() ) );
 	}
 
 	/** @return array<string,mixed> */
-	public function submit( object $order, ShipmentCreateRequest $request, string $attempt_id ): array {
+	public function submit( object $order, string $attempt_id ): array {
 		$shipment = $this->repository->find( $order );
-		if ( array() === $shipment || $attempt_id !== (string) ( $shipment['dpd_registration_attempt_id'] ?? '' ) ) { return array( 'success' => false, 'message' => 'Локальная попытка регистрации DPD не найдена.' ); }
-		$payload = $this->builder->build( $request );
+		if ( array() === $shipment || $attempt_id !== (string) ( $shipment['dpd_registration_attempt_id'] ?? '' ) ) { return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не найдена.' ); }
+		if ( '' !== trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) || 'ok' === (string) ( $shipment['dpd_registration_state'] ?? '' ) ) {
+			return array_merge( array( 'success' => true, 'message' => 'Номер DPD уже сохранен.', 'shipment' => $shipment ), $this->lifecycle_payload( new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: true, message: 'Номер DPD уже сохранен.' ) ) );
+		}
+		if ( in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'duplicate', 'error', 'cancelled', 'transport_error' ), true ) ) {
+			return $this->failed_lifecycle_result( (string) ( $shipment['dpd_registration_error'] ?? $shipment['status_title'] ?? 'Регистрация DPD уже завершена ошибкой.' ), $shipment );
+		}
+		$payload = is_array( $shipment['request_snapshot']['body'] ?? null ) ? $shipment['request_snapshot']['body'] : array();
+		if ( array() === $payload ) {
+			return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не содержит payload.' );
+		}
 		$shipment = array_merge( $shipment, $this->sent_places_fields( $payload ), array( 'request_snapshot' => array( 'method' => 'SOAP', 'path' => 'order2/createOrder2', 'body' => $this->sanitize_value( $payload ) ) ) );
 		$this->repository->save( $order, $shipment );
 		$response = $this->client->createOrder2( $payload );
 		$updated = $this->apply_registration_response( $order, $shipment, $response, 'createOrder2' );
-		return array_merge( array( 'success' => true ), $updated );
+		return array_merge( array( 'success' => true ), $updated, $this->lifecycle_payload( $this->lifecycle_from_registration_result( $updated ) ) );
 	}
 
 	/** @return array<string,mixed> */
@@ -72,7 +93,8 @@ final class DpdOrderRegistrationService {
 		if ( '' !== $dpd_order ) { return array( 'success' => true, 'message' => 'Номер DPD уже сохранен.', 'shipment' => $shipment ); }
 		$payload = array( 'order' => array( array_filter( array( 'orderNumberInternal' => (string) ( $shipment['order_num'] ?? $this->repository->order_id( $order ) ), 'datePickup' => (string) ( $shipment['dpd_date_pickup'] ?? '' ) ) ) ) );
 		$response = $this->client->getOrderStatus( $payload );
-		return array_merge( array( 'success' => true ), $this->apply_registration_response( $order, $shipment, $response, 'getOrderStatus' ) );
+		$updated = $this->apply_registration_response( $order, $shipment, $response, 'getOrderStatus' );
+		return array_merge( array( 'success' => true ), $updated, $this->lifecycle_payload( $this->lifecycle_from_registration_result( $updated ) ) );
 	}
 
 	/** @return array<string,mixed> */
@@ -160,6 +182,46 @@ final class DpdOrderRegistrationService {
 		$this->repository->save( $order, $shipment );
 
 		return $this->repository->find( $order );
+	}
+
+	/** @param array<string,mixed> $result */
+	private function lifecycle_from_registration_result( array $result ): ShipmentLifecycleResult {
+		$message = (string) ( $result['message'] ?? '' );
+		if ( ! empty( $result['registration_success'] ) ) {
+			return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: true, message: $message );
+		}
+		if ( ! empty( $result['registration_error'] ) ) {
+			return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_FAILED, accepted: false, message: $message );
+		}
+		if ( ! empty( $result['registration_polling'] ) || ! empty( $result['polling_continue'] ) ) {
+			return new ShipmentLifecycleResult(
+				ShipmentLifecycleResult::PHASE_POLLING_REQUIRED,
+				accepted: true,
+				submit_required: false,
+				poll_required: true,
+				message: $message,
+				poll_interval_ms: 10000,
+				poll_max_attempts: 0,
+				stop_on_error: true
+			);
+		}
+
+		return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_TERMINAL, accepted: true, message: $message );
+	}
+
+	/** @return array<string,mixed> */
+	private function lifecycle_payload( ShipmentLifecycleResult $lifecycle ): array {
+		return array( 'lifecycle' => $lifecycle->to_array() );
+	}
+
+	/** @return array<string,mixed> */
+	private function failed_lifecycle_result( string $message, array $shipment = array() ): array {
+		return array(
+			'success' => false,
+			'message' => $message,
+			'shipment' => $shipment,
+			'lifecycle' => ( new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_FAILED, accepted: false, message: $message ) )->to_array(),
+		);
 	}
 
 	/** @param array<string,mixed> $payload @return array<string,mixed> */

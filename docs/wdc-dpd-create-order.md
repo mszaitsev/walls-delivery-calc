@@ -1,6 +1,8 @@
 # WDC DPD Create Order
 
-Version: 0.66.2.
+Version: 0.118.0.
+
+0.118.0 note: DPD two-stage shipment creation now uses the common shipment lifecycle contract. The first create request still saves the same local pending attempt, including `dpd_registration_attempt_id`, `dpd_registration_state`, snapshots, terminals, date and places, but the AJAX response exposes only neutral `lifecycle.phase=submission_required`. The shared `wdc_continue_shipment_lifecycle` endpoint then delegates to DPD continuation, which performs the existing submit call and returns `polling_required`, `completed` or `failed` through `ShipmentLifecycleResult`. The persisted DPD shipment shape and API payload are unchanged.
 
 0.115.0 note: DPD document ZIP download now goes through the common shipment document action endpoint. `DpdShipmentDocumentProvider` exposes the existing `download_documents` action and delegates invoice/label PDF requests and ZIP composition to `DpdShipmentDocumentService`; eligibility, MIME, filename and DPD API payloads are unchanged.
 
@@ -131,7 +133,7 @@ Failed DPD create requests are not saved as shipment records. The existing last-
 
 Manual DPD creation is now intentionally split into two AJAX stages on the current WooCommerce order page. Stage 1 validates the draft and saves a local `_wdc_shipments[dpd]` pending record before any external SOAP request, including `orderNumberInternal`, `datePickup`, service/delivery data, places, sanitized request snapshot, `registration_started_at`, `dpd_registration_state=submitting`, `status=pending_creation_in_carrier` and `created_by_context=admin_manual`. This immediately blocks duplicate creates and lets the UI close the modal, show `Ждём регистрацию` and start the spinner.
 
-Stage 2 submits the same form plus `registration_attempt_id` and calls `order2/createOrder2` with the WSDL `orders` wrapper and the fixed 10-second timeout. `OK` with `orderNum` stores the DPD number and `_wdc_dpd_order_number`; `OrderPending` and timeout/uncertain results leave the local pending shipment for `getOrderStatus`; `OrderDuplicate`, `OrderError`, `OrderCancelled` and explicit transport/SOAP errors store a terminal local registration state without inventing a DPD number. No Action Scheduler, cron or background queue is used for DPD create.
+Stage 2 is triggered through the shared lifecycle continuation endpoint with order/carrier/attempt context, not a DPD-specific JS submit wrapper. DPD then calls `order2/createOrder2` with the WSDL `orders` wrapper and the fixed 10-second timeout. `OK` with `orderNum` stores the DPD number and `_wdc_dpd_order_number`; `OrderPending` and timeout/uncertain results leave the local pending shipment for `getOrderStatus`; `OrderDuplicate`, `OrderError`, `OrderCancelled` and explicit transport/SOAP errors store a terminal local registration state without inventing a DPD number. No Action Scheduler, cron or background queue is used for DPD create.
 
 ## 0.67.2 Sent Places And Immediate Refresh
 

@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000051 A0AC:74BD
+Volume serial number is 00000043 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -705,6 +705,7 @@ C:.
 |   |   |
 |   |   +---Contracts
 |   |   |       CarrierShipmentAdapterInterface.php
+|   |   |       CarrierShipmentLifecycleContinuationInterface.php
 |   |   |       CarrierShipmentPersistenceMapperInterface.php
 |   |   |
 |   |   +---Documents
@@ -728,6 +729,9 @@ C:.
 |   |   |       DpdShipmentPersistenceMapper.php
 |   |   |       DpdShipmentRepository.php
 |   |   |       DpdStatusMapping.php
+|   |   |
+|   |   +---Lifecycle
+|   |   |       ShipmentLifecycleResult.php
 |   |   |
 |   |   +---Modal
 |   |   |       CarrierShipmentModalExtensionInterface.php
@@ -883,6 +887,7 @@ C:.
     |       run-shipment-admin-js-structure-smoke.php
     |       run-shipment-allocation-smoke.php
     |       run-shipment-document-actions-smoke.php
+    |       run-shipment-lifecycle-contract-smoke.php
     |       run-shipment-modal-extensions-smoke.php
     |       run-shipment-persistence-mappers-smoke.php
     |       run-shipment-status-smoke.php

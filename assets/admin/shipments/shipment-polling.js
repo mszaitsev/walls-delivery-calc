@@ -115,6 +115,88 @@
     setShipmentPollingIndicator(box, false);
   }
 
+  function normalizeShipmentLifecycle(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const phase = String(source.phase || 'completed');
+    return {
+      phase: phase,
+      accepted: source.accepted !== false,
+      submitRequired: source.submit_required === true || source.submitRequired === true,
+      pollRequired: source.poll_required === true || source.pollRequired === true,
+      attemptId: String(source.attempt_id || source.attemptId || ''),
+      message: String(source.message || ''),
+      pollIntervalMs: Math.max(0, parseInt(source.poll_interval_ms || source.pollIntervalMs || 5000, 10) || 0),
+      pollMaxAttempts: Math.max(0, parseInt(source.poll_max_attempts || source.pollMaxAttempts || 14, 10) || 0),
+      pollPurpose: String(source.poll_purpose || source.pollPurpose || 'registration'),
+      stopOnError: source.stop_on_error === true || source.stopOnError === true
+    };
+  }
+
+  function continueShipmentLifecycle(context) {
+    const source = context || {};
+    const lifecycle = normalizeShipmentLifecycle(source.lifecycle);
+    const button = source.updateButton || source.button || null;
+    const box = source.box || (button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null);
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.continueLifecycleAction || 'wdc_continue_shipment_lifecycle');
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
+    data.append('carrier_key', button && button.dataset ? button.dataset.shipmentKey || '' : '');
+    data.append('attempt_id', lifecycle.attemptId);
+    if (button) button.disabled = true;
+    setShipmentPollingIndicator(box, true);
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then(parseShipmentJsonResponse)
+      .then((payload) => {
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось продолжить регистрацию отправления.');
+        }
+        const statusPayload = shipmentStatusFromResponse(payload.data);
+        renderShipmentStatus(box, statusPayload);
+        renderShipmentTechnicalInfo(box, payload.data || {});
+        if (button) button.disabled = false;
+        setShipmentPollingIndicator(box, false);
+        handleShipmentLifecycleResult({
+          payload: payload,
+          lifecycle: payload.data ? payload.data.lifecycle : null,
+          box: box,
+          updateButton: button,
+          statusPayload: statusPayload
+        });
+        return payload;
+      })
+      .catch((error) => {
+        setShipmentPollingIndicator(box, false);
+        if (button) button.disabled = false;
+        showShipmentToast(box, error.message, 'error', { append: true });
+        return null;
+      });
+  }
+
+  function handleShipmentLifecycleResult(context) {
+    const source = context || {};
+    const lifecycle = normalizeShipmentLifecycle(source.lifecycle || (source.payload && source.payload.data ? source.payload.data.lifecycle : null));
+    const button = source.updateButton || source.button || null;
+    if (lifecycle.submitRequired) {
+      continueShipmentLifecycle(Object.assign({}, source, { lifecycle: lifecycle }));
+      return true;
+    }
+    if (lifecycle.pollRequired && button && !button.disabled) {
+      startShipmentRegistrationPolling(button, {
+        interval: lifecycle.pollIntervalMs || 5000,
+        maxAttempts: lifecycle.pollMaxAttempts,
+        purpose: lifecycle.pollPurpose || 'registration',
+        stopOnError: lifecycle.stopOnError
+      });
+      return true;
+    }
+    return false;
+  }
+
   function markShipmentPollingExhausted(button, attempts, token) {
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     const text = getPresentation(box);
@@ -189,7 +271,7 @@
   }
 
   function startShipmentRegistrationPolling(button, options) {
-    const settings = Object.assign({ interval: 5000, maxAttempts: 14, mode: 'generic' }, options || {});
+    const settings = Object.assign({ interval: 5000, maxAttempts: 14, purpose: 'registration' }, options || {});
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     if (!box || shipmentPollingTimers.has(box)) return;
     const text = getPresentation(box);
@@ -197,7 +279,7 @@
     let attempts = 0;
     const interval = Math.max(1000, parseInt(settings.interval, 10) || 5000);
     const maxAttempts = Math.max(0, parseInt(settings.maxAttempts, 10) || 0);
-    if (button && button.dataset) button.dataset.pollPurpose = settings.purpose || settings.mode || 'registration';
+    if (button && button.dataset) button.dataset.pollPurpose = settings.purpose || 'registration';
     const stop = function () {
       stopShipmentRegistrationPolling(box);
     };
@@ -223,11 +305,18 @@
     });
     const tick = function () {
       attempts += 1;
-      requestShipmentStatus(button, { auto: true, pollingToken: token, pollPurpose: settings.purpose || settings.mode || 'registration', attempt: attempts, maxAttempts: maxAttempts || 14 })
+      requestShipmentStatus(button, { auto: true, pollingToken: token, pollPurpose: settings.purpose || 'registration', attempt: attempts, maxAttempts: maxAttempts || 14 })
         .then((payload) => {
           if (shipmentPollingTokens.get(box) !== token) return;
           const status = payload && payload.data && payload.data.status ? payload.data.status : {};
-          if (status.registration_terminal || status.registration_success || status.registration_error || !status.polling_continue) {
+          const lifecycleSource = status.lifecycle || (payload && payload.data ? payload.data.lifecycle : null);
+          const hasLifecycle = lifecycleSource && typeof lifecycleSource === 'object';
+          const lifecycle = normalizeShipmentLifecycle(lifecycleSource);
+          if (hasLifecycle && !lifecycle.pollRequired) {
+            stop();
+            return;
+          }
+          if (!hasLifecycle && (status.registration_terminal || status.registration_success || status.registration_error || !status.polling_continue)) {
             stop();
             return;
           }
@@ -296,7 +385,6 @@
           startShipmentRegistrationPolling(button, {
             interval: payload.data.poll_interval_ms || 5000,
             maxAttempts: payload.data.poll_max_attempts || 14,
-            mode: 'cancellation',
             purpose: payload.data.poll_purpose || 'cancellation'
           });
         } else {

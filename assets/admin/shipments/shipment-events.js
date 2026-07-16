@@ -290,11 +290,10 @@ function initializeShipmentAdmin() {
           const text = getPresentation(box);
           updateShipmentButtons(box, shipmentButtonStateFromStatus(statusPayload));
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
-          const pollInterval = parseInt(statusPayload.registration_poll_interval_ms || text.registrationPollIntervalMs || '5000', 10) || 5000;
-          const pollMaxAttempts = parseInt(statusPayload.registration_poll_max_attempts || text.registrationPollMaxAttempts || '14', 10) || 14;
-          if (dispatchShipmentCarrierHook('handleCreateResponse', {
+          if (handleShipmentLifecycleResult({
             form: form,
             payload: payload,
+            lifecycle: payload.data ? payload.data.lifecycle : null,
             box: box,
             updateButton: updateButton,
             statusPayload: statusPayload,
@@ -303,9 +302,7 @@ function initializeShipmentAdmin() {
             return;
           }
           if (updateButton && !updateButton.disabled) {
-            if (text.autoPollRegistration === '1' && statusPayload.polling_continue) {
-              startShipmentRegistrationPolling(updateButton, { interval: pollInterval, maxAttempts: pollMaxAttempts, mode: 'registration' });
-            } else if (text.autoPollRegistration === '1') {
+            if (text.autoPollRegistration === '1') {
               startDefaultRegistrationPolling(updateButton);
             } else {
               requestShipmentStatus(updateButton, { auto: true });

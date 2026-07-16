@@ -22,8 +22,10 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\Dpd\DpdOrderRegistrationService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentAdapter;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentPersistenceMapper;
+use WallsShop\WDC\Shipments\Dpd\DpdShipmentRepository;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function dpd_create_assert( bool $condition, string $message ): void {
@@ -198,6 +200,31 @@ dpd_create_assert( array( 'Курьер Петров' ) === $settings->courier_c
 $invalid_soap = new DpdCreateFakeSoap( $success_body );
 $invalid = ( new DpdShipmentAdapter( $builder, new DpdApiClient( $settings, $invalid_soap ) ) )->create( dpd_create_request( DeliveryType::PICKUP, array( 'date_pickup' => '' ) ) );
 dpd_create_assert( ! $invalid->success && 'dpd_validation_failed' === $invalid->error_code && 0 === count( $invalid_soap->calls ), 'Missing required fields must block create before SOAP call.' );
+
+$lifecycle_soap = new DpdCreateFakeSoap( array( 'orderNumberInternal' => 'WC-660', 'status' => 'OrderPending' ) );
+$lifecycle_client = new DpdApiClient( $settings, $lifecycle_soap );
+$lifecycle_repository = new DpdShipmentRepository( new OrderShipmentRepository() );
+$lifecycle_order = new DpdCreateFakeOrder( 660 );
+$lifecycle_registration = new DpdOrderRegistrationService( $builder, $lifecycle_client, $lifecycle_repository );
+$begin = $lifecycle_registration->begin( $lifecycle_order, $request );
+$begin_lifecycle = is_array( $begin['lifecycle'] ?? null ) ? $begin['lifecycle'] : array();
+dpd_create_assert( ! empty( $begin['success'] ) && 'submission_required' === (string) ( $begin_lifecycle['phase'] ?? '' ) && ! empty( $begin_lifecycle['submit_required'] ) && '' !== (string) ( $begin_lifecycle['attempt_id'] ?? '' ) && 0 === count( $lifecycle_soap->calls ), 'DPD begin must save local attempt, return neutral submission_required lifecycle and not call SOAP submit.' );
+$attempt_id = (string) ( $begin_lifecycle['attempt_id'] ?? '' );
+$continue = $lifecycle_registration->submit( $lifecycle_order, $attempt_id );
+$continue_lifecycle = is_array( $continue['lifecycle'] ?? null ) ? $continue['lifecycle'] : array();
+dpd_create_assert( ! empty( $continue['success'] ) && 1 === count( $lifecycle_soap->calls ) && 'createOrder2' === $lifecycle_soap->calls[0]['method'] && 'polling_required' === (string) ( $continue_lifecycle['phase'] ?? '' ) && ! empty( $continue_lifecycle['poll_required'] ) && 10000 === (int) ( $continue_lifecycle['poll_interval_ms'] ?? 0 ) && 0 === (int) ( $continue_lifecycle['poll_max_attempts'] ?? -1 ) && ! empty( $continue_lifecycle['stop_on_error'] ), 'Generic continuation must call DPD submit once and return neutral polling_required lifecycle.' );
+$wrong_attempt = $lifecycle_registration->submit( $lifecycle_order, 'wrong-attempt' );
+dpd_create_assert( empty( $wrong_attempt['success'] ) && 1 === count( $lifecycle_soap->calls ), 'Wrong DPD attempt must be rejected before SOAP call.' );
+
+$complete_soap = new DpdCreateFakeSoap( $success_body );
+$complete_repository = new DpdShipmentRepository( new OrderShipmentRepository() );
+$complete_order = new DpdCreateFakeOrder( 660 );
+$complete_registration = new DpdOrderRegistrationService( $builder, new DpdApiClient( $settings, $complete_soap ), $complete_repository );
+$complete_begin = $complete_registration->begin( $complete_order, $request );
+$complete_attempt = (string) ( $complete_begin['lifecycle']['attempt_id'] ?? '' );
+$complete = $complete_registration->submit( $complete_order, $complete_attempt );
+$complete_again = $complete_registration->submit( $complete_order, $complete_attempt );
+dpd_create_assert( 'completed' === (string) ( $complete['lifecycle']['phase'] ?? '' ) && empty( $complete['lifecycle']['poll_required'] ) && 1 === count( $complete_soap->calls ) && ! empty( $complete_again['success'] ) && 1 === count( $complete_soap->calls ), 'Completed DPD continuation must not poll and repeated continuation must not repeat SOAP submit.' );
 
 $repository = new OrderShipmentRepository();
 $order = new DpdCreateFakeOrder( 660 );

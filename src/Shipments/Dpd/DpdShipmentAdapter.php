@@ -9,12 +9,14 @@ use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentLifecycleContinuationInterface;
+use WallsShop\WDC\Shipments\Lifecycle\ShipmentLifecycleResult;
 use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
 use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 
 defined( 'ABSPATH' ) || exit;
 
-final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface {
+final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface, CarrierShipmentLifecycleContinuationInterface {
 	public function __construct(
 		private DpdShipmentPayloadBuilder $builder,
 		private ?DpdApiClient $client = null,
@@ -159,6 +161,7 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'registration_success' => 'ok' === (string) ( $shipment['dpd_registration_state'] ?? '' ),
 			'registration_error' => in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'duplicate', 'error', 'transport_error' ), true ),
 			'polling_continue' => $has && '' === trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) && in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'submitting', 'pending' ), true ),
+			'lifecycle' => $this->lifecycle_from_shipment( $shipment )->to_array(),
 		), $actual_cost );
 	}
 
@@ -265,8 +268,8 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface {
 		return $this->registration instanceof DpdOrderRegistrationService ? $this->registration->begin( $order, $request ) : array( 'success' => false, 'message' => 'Регистрация DPD недоступна.' );
 	}
 
-	public function submit_registration( object $order, ShipmentCreateRequest $request, string $attempt_id ): array {
-		return $this->registration instanceof DpdOrderRegistrationService ? $this->registration->submit( $order, $request, $attempt_id ) : array( 'success' => false, 'message' => 'Регистрация DPD недоступна.' );
+	public function continue_lifecycle( object $order, string $attempt_id ): array {
+		return $this->registration instanceof DpdOrderRegistrationService ? $this->registration->submit( $order, $attempt_id ) : array( 'success' => false, 'message' => 'Регистрация DPD недоступна.' );
 	}
 
 	/**
@@ -372,6 +375,34 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface {
 		if ( '' === trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) ) { return 'ждём регистрацию'; }
 		$label = trim( (string) ( $shipment['universal_status_label'] ?? '' ) );
 		return '' !== $label ? $label : 'зарегистрировано';
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function lifecycle_from_shipment( array $shipment ): ShipmentLifecycleResult {
+		if ( array() === $shipment ) {
+			return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: false );
+		}
+		$state = (string) ( $shipment['dpd_registration_state'] ?? '' );
+		if ( 'ok' === $state || '' !== trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) ) {
+			return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: true );
+		}
+		if ( in_array( $state, array( 'duplicate', 'error', 'cancelled', 'transport_error' ), true ) ) {
+			return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_FAILED, accepted: false, message: (string) ( $shipment['dpd_registration_error'] ?? $shipment['status_title'] ?? '' ) );
+		}
+		if ( in_array( $state, array( 'submitting', 'pending' ), true ) ) {
+			return new ShipmentLifecycleResult(
+				ShipmentLifecycleResult::PHASE_POLLING_REQUIRED,
+				accepted: true,
+				submit_required: false,
+				poll_required: true,
+				message: (string) ( $shipment['status_title'] ?? 'Ждём регистрацию' ),
+				poll_interval_ms: 10000,
+				poll_max_attempts: 0,
+				stop_on_error: true
+			);
+		}
+
+		return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_TERMINAL, accepted: true );
 	}
 
 	private function first_non_empty( mixed ...$values ): string {
