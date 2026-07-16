@@ -43,8 +43,10 @@ use WallsShop\WDC\Shipments\Cdek\CdekCreateRequestBuilder;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentAdapter;
+use WallsShop\WDC\Shipments\Cdek\CdekShipmentModalExtension;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
+use WallsShop\WDC\Shipments\Modal\ShipmentModalExtensionRegistry;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -551,7 +553,8 @@ $blocked = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 
 cdek_order_assert( ! $blocked->success && 'shipment_already_created' === $blocked->error_code, 'Repeated CDEK creation must be blocked while pending.' );
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
-cdek_order_assert( str_contains( $metabox_source, 'Тип точки' ) && str_contains( $metabox_source, 'cdek_pickup_type_label' ) && str_contains( $metabox_source, 'Постамат СДЭК' ) && str_contains( $metabox_source, 'ПВЗ СДЭК' ), 'CDEK shipment modal must show known pickup point type label.' );
+$cdek_modal_extension_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekShipmentModalExtension.php' );
+cdek_order_assert( str_contains( $metabox_source, 'render_pickup_fields' ) && str_contains( $cdek_modal_extension_source, 'Тип точки' ) && str_contains( $cdek_modal_extension_source, 'pickup_type_label' ) && str_contains( $cdek_modal_extension_source, 'data-wdc-cdek-pickup-type-label' ) && str_contains( $cdek_modal_extension_source, 'ПВЗ СДЭК' ), 'CDEK shipment modal extension must show known pickup point type label.' );
 
 $http_post_invalid = new CdekOrderFakeHttp();
 $http_post_invalid->post_responses[] = array( 'entity' => array( 'uuid' => 'invalid-uuid' ), 'requests' => array( array( 'request_uuid' => 'invalid-request-uuid', 'state' => 'INVALID', 'errors' => array( array( 'code' => 'v2_bad', 'message' => 'bad request' ) ) ) ) );
@@ -981,7 +984,15 @@ $ajax_creation = new ShipmentCreationService( $ajax_repository, array( new CdekS
 $rp_tracking = ( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor();
 $status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper() );
 $ajax_status = new CdekOrderStatusService( $ajax_repository, $ajax_client );
-$metabox = new OrderShipmentsMetabox( $ajax_repository, $drafts, $ajax_creation, $services, $status_updates, $ajax_status );
+$metabox = new OrderShipmentsMetabox(
+	$ajax_repository,
+	$drafts,
+	$ajax_creation,
+	$services,
+	$status_updates,
+	cdek_status_updates: $ajax_status,
+	modal_extensions: new ShipmentModalExtensionRegistry( array( new CdekShipmentModalExtension() ) )
+);
 $ajax_order = new CdekOrderFakeOrder();
 $ajax_order->meta['_wdc_platform_carrier_key'] = CdekSettings::CARRIER_KEY;
 $ajax_order->meta['_wdc_platform_delivery_type'] = DeliveryType::PICKUP;
@@ -1055,12 +1066,13 @@ cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, '�
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-shipment-items-table' ) && str_contains( $shipments_js, 'data-wdc-shipment-item-row' ) && str_contains( $shipments_js, 'data-wdc-shipment-place-select' ) && str_contains( $shipments_js, 'data-wdc-add-manual-shipment-item' ) && str_contains( $shipments_js, 'shipment_items[' ) && ! str_contains( $shipments_js, 'cdek_items[' ), 'Shipment packages JS must use carrier-neutral data attributes and canonical shipment_items names.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "mode !== 'location' && !value" ) && str_contains( $shipments_js, "mode === 'location' ? 2000 : 100" ) && str_contains( $shipments_js, "context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId" ), 'Shipment pickup modal must load location points for Russian Post without requiring a typed query and without a 300-row cap.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$russian_post_modal_extension_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/RussianPost/RussianPostShipmentModalExtension.php' );
 cdek_order_assert( str_contains( $metabox_source, 'AJAX_SEARCH_PRODUCTS' ) && str_contains( $metabox_source, 'wc_get_products' ) && str_contains( $metabox_source, 'shipment_product_search_row' ), 'Shipment modal must expose secured WooCommerce product search for manual package items.' );
 cdek_order_assert( str_contains( $metabox_source, 'inputmode="decimal"' ) && str_contains( $metabox_source, 'wdc-icon-action--split' ) && ! str_contains( $metabox_source, 'button wdc-icon-button' ), 'Shipment item decimal fields must allow typed separators and split icon must be borderless.' );
 cdek_order_assert( str_contains( $metabox_source, 'product_ids_by_partial_sku' ) && str_contains( $metabox_source, "meta_key = '_sku'" ) && str_contains( $metabox_source, 'LIKE %s' ) && str_contains( $metabox_source, 'LIMIT %d' ), 'Shipment product search must support partial SKU matching for products and variations.' );
 cdek_order_assert( str_contains( $metabox_source, 'render_shipment_item_rows' ) && str_contains( $metabox_source, 'data-wdc-shipment-item-row' ) && str_contains( $metabox_source, 'data-wdc-original-item' ) && ! str_contains( $metabox_source, 'Пока используется только для СДЭК' ), 'Shipment packages tab must be carrier-neutral and base rows must expose original item data for forced merge.' );
-cdek_order_assert( str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY . \':pickup\'' ) && str_contains( $metabox_source, 'pickupPointTypes' ) && str_contains( $metabox_source, "'location' === \$mode ? 2000 : 100" ), 'Shipment modal backend must keep Russian Post pickup family/type config and location search limit for admin maps.' );
-cdek_order_assert( str_contains( $metabox_source, '$order_shipping_city' ) && str_contains( $metabox_source, '$order_shipping_postcode' ) && str_contains( $metabox_source, '$recipient_address_context' ) && str_contains( $metabox_source, '$pickup_context[\'postal_code\'] ?? $pickup_context[\'postcode\'] ?? $recipient_postcode' ), 'Shipment modal backend must fall back to WooCommerce shipping recipient context for Russian Post map loading.' );
+cdek_order_assert( str_contains( $russian_post_modal_extension_source, 'RussianPostDomesticSettings::CARRIER_KEY . \':pickup\'' ) && str_contains( $metabox_source, 'pickupPointTypes' ) && str_contains( $metabox_source, "'location' === \$mode ? 2000 : 100" ), 'Shipment modal backend and Russian Post extension must keep pickup family/type config and location search limit for admin maps.' );
+cdek_order_assert( str_contains( $russian_post_modal_extension_source, '$order_shipping_city' ) && str_contains( $russian_post_modal_extension_source, '$order_shipping_postcode' ) && str_contains( $russian_post_modal_extension_source, '$recipient_address_context' ) && str_contains( $russian_post_modal_extension_source, '$pickup_context[\'postal_code\'] ?? $pickup_context[\'postcode\'] ?? $context[\'pickup_location_postcode\']' ), 'Russian Post modal extension must fall back to WooCommerce shipping recipient context for map loading.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_id = (int) ( $_POST[\'order_id\'] ?? 0 )' ) && str_contains( $metabox_source, '$location_context[\'city_name\']' ) && str_contains( $metabox_source, 'get_shipping_city' ) && str_contains( $metabox_source, 'get_shipping_postcode' ), 'Shipment modal pickup search backend must use order_id to restore missing Russian Post location context.' );
 cdek_order_assert( str_contains( $metabox_source, 'AJAX_CDEK_BARCODE_PREPARE' ) && str_contains( $metabox_source, 'ajax_cdek_barcode_prepare' ) && str_contains( $metabox_source, 'document_download_url' ), 'CDEK shipment metabox must expose prepare AJAX and delegate final PDF download to the common document endpoint.' );
 cdek_order_assert( str_contains( $metabox_source, 'ShipmentDocumentDownloadService' ) && str_contains( $metabox_source, "\$result['download_url'] = \$this->document_download_url( \$order_id, CdekSettings::CARRIER_KEY, 'download_label' );" ) && ! str_contains( $metabox_source, 'ACTION_CDEK_BARCODE_PDF' ), 'CDEK barcode AJAX download_url must use the common shipment document endpoint.' );

@@ -131,6 +131,6 @@ dpd_documents_assert( empty( $bad_status['success'] ) && str_contains( (string) 
 dpd_documents_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' ), 'requestDpdDocumentsDownload' ), 'Admin JS must include DPD document ZIP download flow.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 dpd_documents_assert( str_contains( $metabox_source, 'ShipmentDocumentDownloadService' ) && ! str_contains( $metabox_source, 'ACTION_DPD_DOCUMENTS_ZIP' ) && ! str_contains( $metabox_source, 'admin_post_dpd_documents_zip' ), 'Metabox must expose DPD documents through the common shipment document endpoint.' );
-dpd_documents_assert( str_contains( $metabox_source, 'if ( $is_cdek || $is_dpd )' ), 'Initial metabox render must use DPD status payload for cancel/remove button state.' );
+dpd_documents_assert( str_contains( $metabox_source, 'status_payload_for_carrier' ) && str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, 'render_pickup_fields' ), 'Initial metabox render must use carrier status payload and modal extensions for DPD button/form state.' );
 
 echo "DPD documents smoke passed\n";

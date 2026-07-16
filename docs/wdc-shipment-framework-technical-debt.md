@@ -15,8 +15,9 @@
 ## 0.108.5 focused debt register
 
 1. Carrier-specific modal fields remain partly hardcoded
-   - Current problem: `OrderShipmentsMetabox` now renders Yandex source/destination/ready fields correctly, but CDEK/DPD/Russian Post/Yandex field blocks are still explicit PHP branches inside the shared metabox.
-   - Target architecture: the shared metabox renders common fields plus a small carrier modal extension contract for carrier-owned fields.
+   - Status: resolved in 0.116.1 for PHP modal field markup and render-time carrier defaults. `CarrierShipmentModalExtensionInterface` and `ShipmentModalExtensionRegistry` now own the carrier modal extension boundary, and CDEK/DPD/Russian Post/Yandex delivery, pickup and courier field fragments plus tariff/capability presentation context are delegated to carrier extensions.
+   - Remaining adjacent debt: carrier-specific AJAX/pickup/source-dropoff backend responsibilities remain inside `OrderShipmentsMetabox` to avoid changing `shipments-admin.js` behavior in the PHP rendering refactor.
+   - Target architecture: the shared metabox renders common fields plus carrier modal extensions for all carrier-owned field fragments.
    - Affected classes/files: `OrderShipmentsMetabox`, carrier adapters/button policies, `shipments-admin.js`, carrier modal smokes.
    - Migration sequence: stabilize current render/runtime tests, extract read-only helper methods, then introduce a carrier field provider without changing the AJAX lifecycle.
 
@@ -53,8 +54,9 @@
    - Status: resolved in 0.113.1. CDEK, DPD and Russian Post now use `CarrierShipmentPersistenceMapperInterface` implementations, `ShipmentCreationService` persists only the common envelope plus mapper fields, and create is blocked before preview/API/repository side effects when a registered adapter has no mapper. The common service no longer accepts the obsolete Russian Post actual-cost lookup dependency.
 
 4. Carrier-specific modal fields in `OrderShipmentsMetabox`
-   - Current problem: the shared metabox still contains hardcoded CDEK/DPD/Russian Post/Yandex field blocks.
-   - Target architecture: the metabox renders common fields plus carrier-provided field fragments or a small field schema.
+   - Status: resolved in 0.116.1 for PHP field markup and render-time carrier decisions. Delivery, pickup and courier fragments are now carrier-owned by modal extensions; tariff ownership and modal capability overrides also live in extension context. No generic form builder was introduced.
+   - Current problem: the shared metabox still contains carrier-specific AJAX/pickup/source-dropoff backend methods that should move in a later JS/backend extension step.
+   - Target architecture: the metabox renders common fields plus carrier-provided field fragments.
    - Affected classes/files: `OrderShipmentsMetabox`, carrier adapters/button policies, admin smoke tests.
    - Migration sequence: extract read-only render helpers first, then introduce a carrier field provider after all current smoke coverage is stable.
 

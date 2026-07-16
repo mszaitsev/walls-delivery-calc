@@ -14,13 +14,13 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
-use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentModalExtension;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -430,7 +430,7 @@ $invalid_ecom_index_request = new ShipmentCreateRequest(
 );
 shipments_smoke_assert( in_array( 'Индекс выбранного ПВЗ/ОПС обязателен.', $builder->validate( $invalid_ecom_index_request ), true ), 'ECOM pickup validation must require 6-digit pickup index.' );
 
-$metabox_reflection = new ReflectionClass( OrderShipmentsMetabox::class );
+$metabox_reflection = new ReflectionClass( RussianPostShipmentModalExtension::class );
 $metabox = $metabox_reflection->newInstanceWithoutConstructor();
 $pickup_destination_index = $metabox_reflection->getMethod( 'pickup_destination_index' );
 $pickup_destination_index->setAccessible( true );
