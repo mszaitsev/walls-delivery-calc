@@ -391,7 +391,7 @@
       const statusPayload = context && context.statusPayload ? context.statusPayload : {};
       const settings = context && context.settings ? context.settings : {};
 
-      if (isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) {
+      if (isCancellationPollingPurpose(settings.purpose || settings.mode)) {
         const rawStatus = String(statusPayload.yandex_status || statusPayload.carrier_status_title || '').trim();
         if (context.pending) {
           updateCancellationPollingToast(
@@ -426,7 +426,7 @@
     handlePollingError: function (context) {
       if (!isYandexPollingContext(context)) return false;
       const settings = context && context.settings ? context.settings : {};
-      if (!isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) return false;
+      if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
       updateCancellationPollingToast(
         context.box,
         context.token,
@@ -452,7 +452,7 @@
     cancelledAndRemoved: function (context) {
       if (!isYandexPollingContext(context)) return false;
       const settings = context && context.settings ? context.settings : {};
-      if (!isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) return false;
+      if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
       updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
       return true;
     },

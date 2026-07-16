@@ -123,11 +123,11 @@
       accepted: source.accepted !== false,
       submitRequired: source.submit_required === true || source.submitRequired === true,
       pollRequired: source.poll_required === true || source.pollRequired === true,
-      attemptId: String(source.attempt_id || source.attemptId || ''),
+      continuationToken: String(source.continuation_token || source.continuationToken || ''),
       message: String(source.message || ''),
       pollIntervalMs: Math.max(0, parseInt(source.poll_interval_ms || source.pollIntervalMs || 5000, 10) || 0),
       pollMaxAttempts: Math.max(0, parseInt(source.poll_max_attempts || source.pollMaxAttempts || 14, 10) || 0),
-      pollPurpose: String(source.poll_purpose || source.pollPurpose || 'registration'),
+      purpose: String(source.purpose || 'registration'),
       stopOnError: source.stop_on_error === true || source.stopOnError === true
     };
   }
@@ -142,7 +142,7 @@
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
     data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
     data.append('carrier_key', button && button.dataset ? button.dataset.shipmentKey || '' : '');
-    data.append('attempt_id', lifecycle.attemptId);
+    data.append('continuation_token', lifecycle.continuationToken);
     if (button) button.disabled = true;
     setShipmentPollingIndicator(box, true);
     return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
@@ -189,7 +189,7 @@
       startShipmentRegistrationPolling(button, {
         interval: lifecycle.pollIntervalMs || 5000,
         maxAttempts: lifecycle.pollMaxAttempts,
-        purpose: lifecycle.pollPurpose || 'registration',
+        purpose: lifecycle.purpose || 'registration',
         stopOnError: lifecycle.stopOnError
       });
       return true;
@@ -305,7 +305,7 @@
     });
     const tick = function () {
       attempts += 1;
-      requestShipmentStatus(button, { auto: true, pollingToken: token, pollPurpose: settings.purpose || 'registration', attempt: attempts, maxAttempts: maxAttempts || 14 })
+      requestShipmentStatus(button, { auto: true, pollingToken: token, purpose: settings.purpose || 'registration', attempt: attempts, maxAttempts: maxAttempts || 14 })
         .then((payload) => {
           if (shipmentPollingTokens.get(box) !== token) return;
           const status = payload && payload.data && payload.data.status ? payload.data.status : {};
@@ -385,7 +385,7 @@
           startShipmentRegistrationPolling(button, {
             interval: payload.data.poll_interval_ms || 5000,
             maxAttempts: payload.data.poll_max_attempts || 14,
-            purpose: payload.data.poll_purpose || 'cancellation'
+            purpose: payload.data.purpose || 'cancellation'
           });
         } else {
           showShipmentToast(box, payload.data.message || 'Запрос на отмену отправления отправлен.', 'success');

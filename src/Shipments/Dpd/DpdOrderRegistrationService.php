@@ -55,7 +55,7 @@ final class DpdOrderRegistrationService {
 			accepted: true,
 			submit_required: true,
 			poll_required: false,
-			attempt_id: $token,
+			continuation_token: $token,
 			message: 'Ждём регистрацию DPD.',
 			poll_interval_ms: 10000,
 			poll_max_attempts: 0,
@@ -65,9 +65,9 @@ final class DpdOrderRegistrationService {
 	}
 
 	/** @return array<string,mixed> */
-	public function submit( object $order, string $attempt_id ): array {
+	public function submit( object $order, string $continuation_token ): array {
 		$shipment = $this->repository->find( $order );
-		if ( array() === $shipment || $attempt_id !== (string) ( $shipment['dpd_registration_attempt_id'] ?? '' ) ) { return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не найдена.' ); }
+		if ( array() === $shipment || $continuation_token !== (string) ( $shipment['dpd_registration_attempt_id'] ?? '' ) ) { return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не найдена.' ); }
 		if ( '' !== trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) || 'ok' === (string) ( $shipment['dpd_registration_state'] ?? '' ) ) {
 			return array_merge( array( 'success' => true, 'message' => 'Номер DPD уже сохранен.', 'shipment' => $shipment ), $this->lifecycle_payload( new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: true, message: 'Номер DPD уже сохранен.' ) ) );
 		}

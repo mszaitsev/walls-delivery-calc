@@ -9,5 +9,5 @@ interface CarrierShipmentLifecycleContinuationInterface {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function continue_lifecycle( object $order, string $attempt_id ): array;
+	public function continue_lifecycle( object $order, string $continuation_token ): array;
 }

@@ -32,14 +32,14 @@ $submission = new ShipmentLifecycleResult(
 	accepted: true,
 	submit_required: true,
 	poll_required: false,
-	attempt_id: 'attempt-1',
+	continuation_token: 'token-1',
 	message: 'Ждём регистрацию DPD.',
 	poll_interval_ms: 10000,
 	poll_max_attempts: 0,
 	stop_on_error: true
 );
 $submission_array = $submission->to_array();
-shipment_lifecycle_assert( 'submission_required' === $submission_array['phase'] && true === $submission_array['submit_required'] && 'attempt-1' === $submission_array['attempt_id'] && 10000 === $submission_array['poll_interval_ms'] && 0 === $submission_array['poll_max_attempts'] && true === $submission_array['stop_on_error'], 'Submission-required lifecycle must serialize neutral submit and polling settings.' );
+shipment_lifecycle_assert( 'submission_required' === $submission_array['phase'] && true === $submission_array['submit_required'] && 'token-1' === $submission_array['continuation_token'] && ! array_key_exists( 'attempt_id', $submission_array ) && 10000 === $submission_array['poll_interval_ms'] && 0 === $submission_array['poll_max_attempts'] && true === $submission_array['stop_on_error'], 'Submission-required lifecycle must serialize neutral continuation token and polling settings.' );
 
 $polling = new ShipmentLifecycleResult(
 	ShipmentLifecycleResult::PHASE_POLLING_REQUIRED,
@@ -49,10 +49,11 @@ $polling = new ShipmentLifecycleResult(
 	message: 'Ждём регистрацию',
 	poll_interval_ms: 10000,
 	poll_max_attempts: 0,
-	poll_purpose: 'registration',
+	purpose: 'registration',
 	stop_on_error: true
 );
-shipment_lifecycle_assert( 'polling_required' === $polling->to_array()['phase'] && true === $polling->to_array()['poll_required'] && 'registration' === $polling->to_array()['poll_purpose'], 'Polling-required lifecycle must serialize neutral polling settings.' );
+$polling_array = $polling->to_array();
+shipment_lifecycle_assert( 'polling_required' === $polling_array['phase'] && true === $polling_array['poll_required'] && 'registration' === $polling_array['purpose'] && ! array_key_exists( 'poll_purpose', $polling_array ), 'Polling-required lifecycle must serialize neutral purpose settings.' );
 
 $failed = new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_FAILED, accepted: false, message: 'Ошибка регистрации' );
 shipment_lifecycle_assert( 'failed' === $failed->to_array()['phase'] && false === $failed->to_array()['accepted'] && 'Ошибка регистрации' === $failed->to_array()['message'], 'Failed lifecycle must serialize controlled failure message.' );
@@ -60,13 +61,20 @@ shipment_lifecycle_assert( 'failed' === $failed->to_array()['phase'] && false ==
 $round_trip = ShipmentLifecycleResult::from_array( $submission_array )->to_array();
 shipment_lifecycle_assert( $submission_array === $round_trip, 'Lifecycle array contract must round-trip without changing values.' );
 
+$dto_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Lifecycle/ShipmentLifecycleResult.php' );
+$continuation_interface_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Contracts/CarrierShipmentLifecycleContinuationInterface.php' );
+$metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+shipment_lifecycle_assert( str_contains( $dto_source, "'continuation_token'" ) && ! str_contains( $dto_source, "'attempt_id'" ) && ! str_contains( $dto_source, "'poll_purpose'" ), 'Lifecycle DTO source must serialize only transport-neutral field names.' );
+shipment_lifecycle_assert( str_contains( $continuation_interface_source, '$continuation_token' ) && ! str_contains( $continuation_interface_source, '$attempt_id' ), 'Lifecycle continuation interface must use continuation_token naming.' );
+shipment_lifecycle_assert( str_contains( $metabox_source, "\$_POST['continuation_token']" ) && ! str_contains( $metabox_source, "\$_POST['attempt_id']" ) && ! str_contains( $metabox_source, "'poll_purpose'" ), 'Common admin lifecycle endpoint must accept continuation_token and purpose only.' );
+
 shipment_lifecycle_expect_invalid(
 	static fn (): ShipmentLifecycleResult => new ShipmentLifecycleResult( 'dpd_submission_required' ),
 	'Carrier-specific lifecycle phase must be rejected.'
 );
 shipment_lifecycle_expect_invalid(
 	static fn (): ShipmentLifecycleResult => new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_SUBMISSION_REQUIRED, submit_required: true ),
-	'Submit-required lifecycle must require attempt_id.'
+	'Submit-required lifecycle must require continuation_token.'
 );
 shipment_lifecycle_expect_invalid(
 	static fn (): ShipmentLifecycleResult => new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_POLLING_REQUIRED, poll_required: true, poll_interval_ms: -1 ),

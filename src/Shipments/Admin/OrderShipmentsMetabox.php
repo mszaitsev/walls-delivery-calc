@@ -542,15 +542,15 @@ final class OrderShipmentsMetabox {
 				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_lifecycle_invalid_request' ), 404 );
 			}
 			$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? $_POST['shipment_key'] ?? '' ) );
-			$attempt_id = sanitize_text_field( wp_unslash( $_POST['attempt_id'] ?? '' ) );
-			if ( '' === $carrier_key || '' === $attempt_id ) {
+			$continuation_token = sanitize_text_field( wp_unslash( $_POST['continuation_token'] ?? '' ) );
+			if ( '' === $carrier_key || '' === $continuation_token ) {
 				throw new \InvalidArgumentException( __( 'Не найден контекст продолжения регистрации отправления.', 'walls-delivery-calc' ) );
 			}
 			$adapter = $this->carrier_adapter( $carrier_key );
 			if ( ! $adapter instanceof CarrierShipmentLifecycleContinuationInterface ) {
 				throw new \InvalidArgumentException( __( 'Выбранная служба не поддерживает продолжение регистрации отправления.', 'walls-delivery-calc' ) );
 			}
-			$result = $adapter->continue_lifecycle( $order, $attempt_id );
+			$result = $adapter->continue_lifecycle( $order, $continuation_token );
 			if ( empty( $result['success'] ) ) {
 				wp_send_json_error(
 					array_merge(
@@ -911,7 +911,7 @@ final class OrderShipmentsMetabox {
 				'auto_poll' => ! empty( $result['auto_poll'] ),
 				'poll_interval_ms' => (int) ( $result['poll_interval_ms'] ?? 0 ),
 				'poll_max_attempts' => (int) ( $result['poll_max_attempts'] ?? 0 ),
-				'poll_purpose' => (string) ( $result['poll_purpose'] ?? '' ),
+				'purpose' => (string) ( $result['purpose'] ?? '' ),
 				)
 			)
 		);

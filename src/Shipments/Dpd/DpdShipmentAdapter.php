@@ -268,8 +268,8 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface, Carri
 		return $this->registration instanceof DpdOrderRegistrationService ? $this->registration->begin( $order, $request ) : array( 'success' => false, 'message' => 'Регистрация DPD недоступна.' );
 	}
 
-	public function continue_lifecycle( object $order, string $attempt_id ): array {
-		return $this->registration instanceof DpdOrderRegistrationService ? $this->registration->submit( $order, $attempt_id ) : array( 'success' => false, 'message' => 'Регистрация DPD недоступна.' );
+	public function continue_lifecycle( object $order, string $continuation_token ): array {
+		return $this->registration instanceof DpdOrderRegistrationService ? $this->registration->submit( $order, $continuation_token ) : array( 'success' => false, 'message' => 'Регистрация DPD недоступна.' );
 	}
 
 	/**

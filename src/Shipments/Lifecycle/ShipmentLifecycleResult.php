@@ -21,11 +21,11 @@ final class ShipmentLifecycleResult {
 		public readonly bool $accepted = true,
 		public readonly bool $submit_required = false,
 		public readonly bool $poll_required = false,
-		public readonly string $attempt_id = '',
+		public readonly string $continuation_token = '',
 		public readonly string $message = '',
 		public readonly int $poll_interval_ms = 5000,
 		public readonly int $poll_max_attempts = 14,
-		public readonly string $poll_purpose = 'registration',
+		public readonly string $purpose = 'registration',
 		public readonly bool $stop_on_error = false,
 		public readonly array $meta = array()
 	) {
@@ -41,11 +41,11 @@ final class ShipmentLifecycleResult {
 			'accepted' => $this->accepted,
 			'submit_required' => $this->submit_required,
 			'poll_required' => $this->poll_required,
-			'attempt_id' => $this->attempt_id,
+			'continuation_token' => $this->continuation_token,
 			'message' => $this->message,
 			'poll_interval_ms' => $this->poll_interval_ms,
 			'poll_max_attempts' => $this->poll_max_attempts,
-			'poll_purpose' => $this->poll_purpose,
+			'purpose' => $this->purpose,
 			'stop_on_error' => $this->stop_on_error,
 			'meta' => $this->meta,
 		);
@@ -60,11 +60,11 @@ final class ShipmentLifecycleResult {
 			(bool) ( $data['accepted'] ?? true ),
 			(bool) ( $data['submit_required'] ?? false ),
 			(bool) ( $data['poll_required'] ?? false ),
-			(string) ( $data['attempt_id'] ?? '' ),
+			(string) ( $data['continuation_token'] ?? '' ),
 			(string) ( $data['message'] ?? '' ),
 			(int) ( $data['poll_interval_ms'] ?? 5000 ),
 			(int) ( $data['poll_max_attempts'] ?? 14 ),
-			(string) ( $data['poll_purpose'] ?? 'registration' ),
+			(string) ( $data['purpose'] ?? 'registration' ),
 			(bool) ( $data['stop_on_error'] ?? false ),
 			is_array( $data['meta'] ?? null ) ? $data['meta'] : array()
 		);
@@ -74,8 +74,8 @@ final class ShipmentLifecycleResult {
 		if ( ! in_array( $this->phase, self::phases(), true ) ) {
 			throw new \InvalidArgumentException( 'Invalid shipment lifecycle phase.' );
 		}
-		if ( $this->submit_required && '' === trim( $this->attempt_id ) ) {
-			throw new \InvalidArgumentException( 'Shipment lifecycle submit phase requires attempt_id.' );
+		if ( $this->submit_required && '' === trim( $this->continuation_token ) ) {
+			throw new \InvalidArgumentException( 'Shipment lifecycle submit phase requires continuation_token.' );
 		}
 		if ( $this->poll_interval_ms < 0 ) {
 			throw new \InvalidArgumentException( 'Shipment lifecycle poll interval must be non-negative.' );

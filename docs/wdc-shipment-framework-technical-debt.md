@@ -68,7 +68,7 @@
 
 6. DPD two-stage flow
    - Status: resolved in 0.118.0.
-   - DPD adapter exposes the same neutral lifecycle shape as other carriers through `ShipmentLifecycleResult`, while preserving DPD-specific begin/submit/status API semantics internally. The shared admin JS reads `lifecycle`, calls the generic continuation endpoint, and no longer knows DPD attempt aliases or DPD submit/polling wrappers.
+   - DPD adapter exposes the same neutral lifecycle shape as other carriers through `ShipmentLifecycleResult`, while preserving DPD-specific begin/submit/status API semantics internally. The shared admin JS reads `lifecycle`, calls the generic continuation endpoint with `continuation_token`, and no longer knows DPD attempt aliases or DPD submit/polling wrappers. Since 0.118.1 lifecycle `purpose` is not polling-specific.
    - Preserved contract: DPD persisted fields, notes, snapshots, request payload, polling interval/attempt behavior and button/document policy remain unchanged.
 
 7. Compatibility meta keys `yandex_item_rows` / `cdek_item_rows`

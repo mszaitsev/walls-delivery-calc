@@ -106,7 +106,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'yandex_items' => is_array( $shipment['yandex_items'] ?? null ) ? $shipment['yandex_items'] : array(),
 			'registration_polling' => $reconciliation_pending || $cancel_pending,
 			'polling_continue' => ( $reconciliation_pending && empty( $shipment['yandex_reconciliation_poll_exhausted'] ) ) || ( $cancel_pending && empty( $shipment['yandex_cancel_poll_exhausted'] ) ),
-			'poll_purpose' => $cancel_pending ? 'cancellation' : 'registration',
+			'purpose' => $cancel_pending ? 'cancellation' : 'registration',
 			'cancellation_pending' => $cancel_pending,
 			'registration_terminal' => array() !== $shipment && ! $reconciliation_pending && ! $cancel_pending,
 			'registration_success' => '' !== $status && ! $reconciliation_pending && ! $cancel_pending,

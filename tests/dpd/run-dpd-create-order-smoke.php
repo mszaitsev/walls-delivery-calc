@@ -208,9 +208,9 @@ $lifecycle_order = new DpdCreateFakeOrder( 660 );
 $lifecycle_registration = new DpdOrderRegistrationService( $builder, $lifecycle_client, $lifecycle_repository );
 $begin = $lifecycle_registration->begin( $lifecycle_order, $request );
 $begin_lifecycle = is_array( $begin['lifecycle'] ?? null ) ? $begin['lifecycle'] : array();
-dpd_create_assert( ! empty( $begin['success'] ) && 'submission_required' === (string) ( $begin_lifecycle['phase'] ?? '' ) && ! empty( $begin_lifecycle['submit_required'] ) && '' !== (string) ( $begin_lifecycle['attempt_id'] ?? '' ) && 0 === count( $lifecycle_soap->calls ), 'DPD begin must save local attempt, return neutral submission_required lifecycle and not call SOAP submit.' );
-$attempt_id = (string) ( $begin_lifecycle['attempt_id'] ?? '' );
-$continue = $lifecycle_registration->submit( $lifecycle_order, $attempt_id );
+dpd_create_assert( ! empty( $begin['success'] ) && 'submission_required' === (string) ( $begin_lifecycle['phase'] ?? '' ) && ! empty( $begin_lifecycle['submit_required'] ) && '' !== (string) ( $begin_lifecycle['continuation_token'] ?? '' ) && ! array_key_exists( 'attempt_id', $begin_lifecycle ) && 0 === count( $lifecycle_soap->calls ), 'DPD begin must save local attempt, return neutral submission_required lifecycle and not call SOAP submit.' );
+$continuation_token = (string) ( $begin_lifecycle['continuation_token'] ?? '' );
+$continue = $lifecycle_registration->submit( $lifecycle_order, $continuation_token );
 $continue_lifecycle = is_array( $continue['lifecycle'] ?? null ) ? $continue['lifecycle'] : array();
 dpd_create_assert( ! empty( $continue['success'] ) && 1 === count( $lifecycle_soap->calls ) && 'createOrder2' === $lifecycle_soap->calls[0]['method'] && 'polling_required' === (string) ( $continue_lifecycle['phase'] ?? '' ) && ! empty( $continue_lifecycle['poll_required'] ) && 10000 === (int) ( $continue_lifecycle['poll_interval_ms'] ?? 0 ) && 0 === (int) ( $continue_lifecycle['poll_max_attempts'] ?? -1 ) && ! empty( $continue_lifecycle['stop_on_error'] ), 'Generic continuation must call DPD submit once and return neutral polling_required lifecycle.' );
 $wrong_attempt = $lifecycle_registration->submit( $lifecycle_order, 'wrong-attempt' );
@@ -221,9 +221,9 @@ $complete_repository = new DpdShipmentRepository( new OrderShipmentRepository() 
 $complete_order = new DpdCreateFakeOrder( 660 );
 $complete_registration = new DpdOrderRegistrationService( $builder, new DpdApiClient( $settings, $complete_soap ), $complete_repository );
 $complete_begin = $complete_registration->begin( $complete_order, $request );
-$complete_attempt = (string) ( $complete_begin['lifecycle']['attempt_id'] ?? '' );
-$complete = $complete_registration->submit( $complete_order, $complete_attempt );
-$complete_again = $complete_registration->submit( $complete_order, $complete_attempt );
+$complete_token = (string) ( $complete_begin['lifecycle']['continuation_token'] ?? '' );
+$complete = $complete_registration->submit( $complete_order, $complete_token );
+$complete_again = $complete_registration->submit( $complete_order, $complete_token );
 dpd_create_assert( 'completed' === (string) ( $complete['lifecycle']['phase'] ?? '' ) && empty( $complete['lifecycle']['poll_required'] ) && 1 === count( $complete_soap->calls ) && ! empty( $complete_again['success'] ) && 1 === count( $complete_soap->calls ), 'Completed DPD continuation must not poll and repeated continuation must not repeat SOAP submit.' );
 
 $repository = new OrderShipmentRepository();
