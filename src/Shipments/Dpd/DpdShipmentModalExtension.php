@@ -63,6 +63,7 @@ final class DpdShipmentModalExtension implements CarrierShipmentModalExtensionIn
 		return array(
 			'requires_tariff' => true,
 			'requires_successful_preview' => true,
+			'modal_create_button_label' => __( 'Создать отправление DPD', 'walls-delivery-calc' ),
 			'selected_tariff_object' => $tariff_object,
 			'selected_service_tariffs' => $tariffs,
 			'selected_tariff_title' => $this->tariff_title( $tariffs, $tariff_object, (string) ( $meta['selected_tariff_title'] ?? $meta['tariff_title'] ?? '' ) ),

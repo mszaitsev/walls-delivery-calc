@@ -213,48 +213,18 @@ final class OrderShipmentsMetabox {
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
 		$carrier_key = (string) ( $request['carrier_key'] ?? $meta['carrier_key'] ?? '' );
 		$service_key = (string) ( $meta['service_key'] ?? $request['rate_id'] ?? '' );
-		$is_cdek = CdekSettings::CARRIER_KEY === $carrier_key;
-		$is_dpd = DpdSettings::CARRIER_KEY === $carrier_key;
-		$is_russian_post = RussianPostDomesticSettings::CARRIER_KEY === $carrier_key;
-		$is_yandex = YandexDeliverySettings::CARRIER_KEY === $carrier_key;
-		$requires_tariff = array_key_exists( 'requires_tariff', $modal_capabilities ) ? (bool) $modal_capabilities['requires_tariff'] : ! $is_yandex;
-		$requires_postoffice = array_key_exists( 'requires_postoffice', $modal_capabilities ) ? (bool) $modal_capabilities['requires_postoffice'] : $is_russian_post;
-		$requires_successful_preview = array_key_exists( 'requires_successful_preview', $modal_capabilities ) ? (bool) $modal_capabilities['requires_successful_preview'] : $is_dpd;
+		$requires_tariff = (bool) ( $modal_capabilities['requires_tariff'] ?? false );
+		$requires_successful_preview = (bool) ( $modal_capabilities['requires_successful_preview'] ?? false );
 		$shipment = '' !== $carrier_key ? $this->repository->find_by_carrier( $order, $carrier_key ) : array();
 		$settings = is_array( $request['services'] ?? null ) ? $request['services'] : array();
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
-		$selected_delivery_type = RussianPostDomesticSettings::normalize_delivery_type( (string) ( $request['delivery_type'] ?? $meta['delivery_type'] ?? DeliveryType::PICKUP ) );
+		$selected_delivery_type = (string) ( $request['delivery_type'] ?? $meta['delivery_type'] ?? DeliveryType::PICKUP );
 		if ( '' === $selected_delivery_type && array() !== $services ) {
 			$selected_delivery_type = (string) ( $services[0]['delivery_type'] ?? DeliveryType::PICKUP );
 		}
-		$selected_tariff_object = (string) ( $meta['tariff_object'] ?? '' );
+		$selected_tariff_object = '';
 		$selected_service_tariffs = array();
-		foreach ( $services as $service ) {
-			if ( $selected_delivery_type === (string) ( $service['delivery_type'] ?? '' ) ) {
-				$selected_service_tariffs = is_array( $service['tariffs'] ?? null ) ? $service['tariffs'] : array();
-				break;
-			}
-		}
-		if ( '' === $selected_tariff_object && array() !== $selected_service_tariffs ) {
-			$selected_tariff_object = (string) ( $selected_service_tariffs[0]['object_code'] ?? '' );
-		}
 		$selected_tariff_has_declared_value = false;
-		foreach ( $selected_service_tariffs as $tariff ) {
-			if ( $selected_tariff_object === (string) ( $tariff['object_code'] ?? '' ) ) {
-				$selected_tariff_has_declared_value = ! empty( $tariff['has_declared_value'] );
-				break;
-			}
-		}
-		$selected_tariff_title = (string) ( $meta['selected_tariff_title'] ?? $meta['tariff_title'] ?? '' );
-		foreach ( $selected_service_tariffs as $tariff ) {
-			if ( $selected_tariff_object === (string) ( $tariff['object_code'] ?? '' ) ) {
-				$selected_tariff_title = (string) ( $tariff['title'] ?? $selected_tariff_title );
-				break;
-			}
-		}
-		if ( '' === trim( $selected_tariff_title ) && '' !== $selected_tariff_object ) {
-			$selected_tariff_title = sprintf( __( 'тариф %s', 'walls-delivery-calc' ), $selected_tariff_object );
-		}
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		$calculated_weight_g = max( 0, (int) ( $meta['place_weight_hint_g'] ?? $place['weight_g'] ?? 0 ) );
@@ -273,7 +243,7 @@ final class OrderShipmentsMetabox {
 		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
 		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
 		$yandex_self_pickup_code = trim( (string) ( $status_payload['yandex_self_pickup_node_code'] ?? $shipment['yandex_self_pickup_node_code'] ?? '' ) );
-		$button_policy = $this->button_policy()->resolve( $carrier_key, $shipment, $status_payload, $is_russian_post && $this->can_cancel_shipment( $shipment ) );
+		$button_policy = $this->button_policy()->resolve( $carrier_key, $shipment, $status_payload, $this->can_cancel_shipment( $shipment ) );
 		$has_created = ! empty( $button_policy['has_shipment'] );
 		$can_cancel = ! empty( $button_policy['can_cancel'] );
 		$show_primary_actions = ! empty( $button_policy['show_create'] );
@@ -284,6 +254,7 @@ final class OrderShipmentsMetabox {
 		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		$modal_extension = $this->modal_extensions instanceof ShipmentModalExtensionRegistry ? $this->modal_extensions->get( $carrier_key ) : null;
 		$modal_extension_context = $modal_extension instanceof CarrierShipmentModalExtensionInterface ? $modal_extension->modal_context( $order, $draft ) : array();
+		$modal_create_button_label = __( 'Создать отправление', 'walls-delivery-calc' );
 		if ( array_key_exists( 'requires_tariff', $modal_extension_context ) ) {
 			$requires_tariff = (bool) $modal_extension_context['requires_tariff'];
 		}
@@ -299,6 +270,9 @@ final class OrderShipmentsMetabox {
 		if ( array_key_exists( 'selected_tariff_has_declared_value', $modal_extension_context ) ) {
 			$selected_tariff_has_declared_value = (bool) $modal_extension_context['selected_tariff_has_declared_value'];
 			$declared_value_initial = $selected_tariff_has_declared_value ? $default_declared_value_attr : '';
+		}
+		if ( array_key_exists( 'modal_create_button_label', $modal_extension_context ) ) {
+			$modal_create_button_label = (string) $modal_extension_context['modal_create_button_label'];
 		}
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
@@ -430,7 +404,7 @@ final class OrderShipmentsMetabox {
 							<div class="wdc-shipment-errors" data-wdc-shipment-errors></div>
 							<pre class="wdc-shipment-preview" data-wdc-shipment-preview><?php echo esc_html( wp_json_encode( $safe_preview, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></pre>
 							<button type="button" class="button" data-wdc-preview-shipment><?php echo esc_html__( 'Предпросмотр payload', 'walls-delivery-calc' ); ?></button>
-							<button type="button" class="button button-primary" data-wdc-create-shipment><?php echo esc_html( $is_dpd ? __( 'Создать отправление DPD', 'walls-delivery-calc' ) : __( 'Создать отправление', 'walls-delivery-calc' ) ); ?></button>
+							<button type="button" class="button button-primary" data-wdc-create-shipment><?php echo esc_html( $modal_create_button_label ); ?></button>
 						</section>
 					</div>
 				</div>

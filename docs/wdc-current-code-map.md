@@ -1,7 +1,7 @@
-## Shipment modal extensions 0.116.0
+## Shipment modal extensions 0.116.1
 - `src/Shipments/Modal/CarrierShipmentModalExtensionInterface.php` and `ShipmentModalExtensionRegistry.php` define the small carrier-neutral extension point for modal presentation fields.
-- CDEK, DPD, Russian Post and Yandex register modal extensions from `src/Core/Plugin.php`; the common metabox calls the registry for carrier delivery, pickup and courier field fragments instead of owning those blocks directly.
-- `OrderShipmentsMetabox` still owns common modal shell, places/items, preview/create, lifecycle/status/actions and document actions. Carrier-specific AJAX and pickup/source-dropoff handlers remain in the metabox for a later JS/backend extraction step.
+- CDEK, DPD, Russian Post and Yandex register modal extensions from `src/Core/Plugin.php`; the common metabox calls the registry for carrier delivery, pickup and courier field fragments plus modal presentation context instead of owning those blocks directly.
+- `OrderShipmentsMetabox` starts from neutral capability defaults and then applies extension context for tariff requirements, successful-preview gates, tariff options and declared-value presentation. It still owns common modal shell, places/items, preview/create, lifecycle/status/actions and document actions. Carrier-specific AJAX and pickup/source-dropoff handlers remain in the metabox for a later JS/backend extraction step.
 
 ## Shipment document actions 0.115.0
 

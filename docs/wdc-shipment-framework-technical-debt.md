@@ -15,7 +15,7 @@
 ## 0.108.5 focused debt register
 
 1. Carrier-specific modal fields remain partly hardcoded
-   - Status: resolved in 0.116.0 for PHP modal field markup. `CarrierShipmentModalExtensionInterface` and `ShipmentModalExtensionRegistry` now own the carrier modal extension boundary, and CDEK/DPD/Russian Post/Yandex delivery, pickup and courier field fragments are delegated to carrier extensions.
+   - Status: resolved in 0.116.1 for PHP modal field markup and render-time carrier defaults. `CarrierShipmentModalExtensionInterface` and `ShipmentModalExtensionRegistry` now own the carrier modal extension boundary, and CDEK/DPD/Russian Post/Yandex delivery, pickup and courier field fragments plus tariff/capability presentation context are delegated to carrier extensions.
    - Remaining adjacent debt: carrier-specific AJAX/pickup/source-dropoff backend responsibilities remain inside `OrderShipmentsMetabox` to avoid changing `shipments-admin.js` behavior in the PHP rendering refactor.
    - Target architecture: the shared metabox renders common fields plus carrier modal extensions for all carrier-owned field fragments.
    - Affected classes/files: `OrderShipmentsMetabox`, carrier adapters/button policies, `shipments-admin.js`, carrier modal smokes.
@@ -54,7 +54,7 @@
    - Status: resolved in 0.113.1. CDEK, DPD and Russian Post now use `CarrierShipmentPersistenceMapperInterface` implementations, `ShipmentCreationService` persists only the common envelope plus mapper fields, and create is blocked before preview/API/repository side effects when a registered adapter has no mapper. The common service no longer accepts the obsolete Russian Post actual-cost lookup dependency.
 
 4. Carrier-specific modal fields in `OrderShipmentsMetabox`
-   - Status: resolved in 0.116.0 for PHP field markup. Delivery, pickup and courier fragments are now carrier-owned by modal extensions; no generic form builder was introduced.
+   - Status: resolved in 0.116.1 for PHP field markup and render-time carrier decisions. Delivery, pickup and courier fragments are now carrier-owned by modal extensions; tariff ownership and modal capability overrides also live in extension context. No generic form builder was introduced.
    - Current problem: the shared metabox still contains carrier-specific AJAX/pickup/source-dropoff backend methods that should move in a later JS/backend extension step.
    - Target architecture: the metabox renders common fields plus carrier-provided field fragments.
    - Affected classes/files: `OrderShipmentsMetabox`, carrier adapters/button policies, admin smoke tests.
