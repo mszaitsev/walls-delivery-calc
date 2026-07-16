@@ -201,6 +201,91 @@
       });
   }
 
+  const cancellationPollingToasts = new WeakMap();
+
+  function isCancellationPollingPurpose(value) {
+    return String(value || '') === 'cancellation';
+  }
+
+  function cancellationPollingProgressMessage(attempt, maxAttempts) {
+    const current = Math.max(0, parseInt(attempt, 10) || 0);
+    const total = Math.max(1, parseInt(maxAttempts, 10) || 14);
+    if (current <= 0) {
+      return 'Запрос на отмену отправления Яндекс отправлен. Проведено: 0/' + total + ' проверок отмены.';
+    }
+    return 'Статус отмены пока не получен. Проведено: ' + current + '/' + total + ' проверок отмены.';
+  }
+
+  function cancellationPollingExhaustedMessage(attempt, maxAttempts) {
+    const total = Math.max(1, parseInt(maxAttempts, 10) || parseInt(attempt, 10) || 14);
+    return 'Статус отмены пока не получен. Проведено: ' + total + '/' + total + ' проверок отмены. Повторите обновление статуса позднее.';
+  }
+
+  function initCancellationPollingToast(box, token, maxAttempts) {
+    if (!box || !token) return;
+    const existing = cancellationPollingToasts.get(box);
+    if (existing && existing.timer) {
+      window.clearTimeout(existing.timer);
+    }
+    const toast = showShipmentToast(box, cancellationPollingProgressMessage(0, maxAttempts), 'warning', { append: true, persist: true });
+    cancellationPollingToasts.set(box, {
+      element: toast,
+      token: token,
+      timer: null
+    });
+  }
+
+  function updateCancellationPollingToast(box, token, message, type, persist) {
+    if (!box) return;
+    const state = cancellationPollingToasts.get(box);
+    if (!state || state.token !== token || !state.element) {
+      if (persist === false) {
+        showShipmentToast(box, message, type || 'warning', { append: true });
+      }
+      return;
+    }
+    state.element.textContent = message;
+    state.element.dataset.status = type || 'warning';
+    state.element.className = state.element.className.replace(/\s*wdc-shipment-toast--(success|warning|error|info)/g, '');
+    state.element.classList.add('wdc-shipment-toast--' + (type || 'warning'));
+    if (state.timer) {
+      window.clearTimeout(state.timer);
+      state.timer = null;
+    }
+    if (persist === false) {
+      state.timer = window.setTimeout(function () {
+        if (state.element && state.element.parentNode) {
+          state.element.parentNode.removeChild(state.element);
+        }
+        cancellationPollingToasts.delete(box);
+      }, 6000);
+      cancellationPollingToasts.set(box, state);
+    }
+  }
+
+  function clearCancellationPollingToast(box) {
+    const state = box ? cancellationPollingToasts.get(box) : null;
+    if (!state) return;
+    if (state.timer) {
+      window.clearTimeout(state.timer);
+    }
+    if (state.element && state.element.parentNode) {
+      state.element.parentNode.removeChild(state.element);
+    }
+    cancellationPollingToasts.delete(box);
+  }
+
+  function renderYandexSelfPickupCode(box, status) {
+    if (!box) return false;
+    const row = box.querySelector('[data-wdc-yandex-self-pickup-code-row]');
+    const value = box.querySelector('[data-wdc-yandex-self-pickup-code]');
+    if (!row || !value) return false;
+    const code = String(status && status.yandex_self_pickup_node_code || '').trim();
+    value.textContent = code;
+    row.hidden = !code;
+    return false;
+  }
+
   registerShipmentCarrierHooks({
     handleClick: function (event) {
       const yandexLabelDownload = event.target.closest('[data-wdc-yandex-label-download]');
@@ -253,5 +338,98 @@
       if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'yandex_delivery') return false;
       syncYandexAddressFields(form, {});
       return true;
+    },
+    renderStatus: function (context) {
+      const box = context && context.box;
+      const status = context && context.status ? context.status : {};
+      return renderYandexSelfPickupCode(box, status);
+    },
+    resetStatusUi: function (context) {
+      const box = context && context.box;
+      if (!box) return false;
+      const row = box.querySelector('[data-wdc-yandex-self-pickup-code-row]');
+      const value = box.querySelector('[data-wdc-yandex-self-pickup-code]');
+      if (value) value.textContent = '';
+      if (row) row.hidden = true;
+      return false;
+    },
+    handlePollingStart: function (context) {
+      const settings = context && context.settings ? context.settings : {};
+      if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
+      initCancellationPollingToast(context.box, context.token, context.maxAttempts || 14);
+      return true;
+    },
+    handlePollingStatus: function (context) {
+      const statusPayload = context && context.statusPayload ? context.statusPayload : {};
+      const settings = context && context.settings ? context.settings : {};
+      if (statusPayload.carrier_key !== 'yandex_delivery' && !isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) {
+        return false;
+      }
+
+      if (isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) {
+        const rawStatus = String(statusPayload.yandex_status || statusPayload.carrier_status_title || '').trim();
+        if (context.pending) {
+          updateCancellationPollingToast(
+            context.box,
+            context.token,
+            cancellationPollingProgressMessage(context.attempt, context.maxAttempts),
+            'warning',
+            true
+          );
+          return true;
+        }
+        if (rawStatus && rawStatus !== 'CANCELLED') {
+          updateCancellationPollingToast(
+            context.box,
+            context.token,
+            'Отмена не выполнена. Получен статус Яндекс: ' + rawStatus + '.',
+            'warning',
+            false
+          );
+          return true;
+        }
+        updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
+        return true;
+      }
+
+      if (context.settings && context.settings.auto && !context.pending && statusPayload.carrier_status_title) {
+        showShipmentToast(context.box, 'Статус отправления Яндекс получен: ' + statusPayload.carrier_status_title, 'success', { append: true });
+        return true;
+      }
+      return false;
+    },
+    handlePollingError: function (context) {
+      const settings = context && context.settings ? context.settings : {};
+      if (!isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) return false;
+      updateCancellationPollingToast(
+        context.box,
+        context.token,
+        cancellationPollingProgressMessage(context.attempt, context.maxAttempts),
+        'warning',
+        true
+      );
+      return true;
+    },
+    handlePollingExhausted: function (context) {
+      const button = context && context.button;
+      if (!button || !button.dataset || !isCancellationPollingPurpose(button.dataset.pollPurpose || '')) return false;
+      updateCancellationPollingToast(
+        context.box,
+        context.token,
+        cancellationPollingExhaustedMessage(context.attempt, context.maxAttempts),
+        'warning',
+        false
+      );
+      return true;
+    },
+    cancelledAndRemoved: function (context) {
+      const settings = context && context.settings ? context.settings : {};
+      if (!isCancellationPollingPurpose(settings.pollPurpose || settings.purpose || settings.mode)) return false;
+      updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
+      return true;
+    },
+    handlePollingStop: function (context) {
+      clearCancellationPollingToast(context && context.box);
+      return false;
     }
   });

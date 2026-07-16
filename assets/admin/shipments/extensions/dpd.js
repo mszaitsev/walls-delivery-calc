@@ -186,6 +186,27 @@
         return true;
       }
       return false;
+    },
+    renderStatus: function (context) {
+      const box = context && context.box;
+      const status = context && context.status ? context.status : {};
+      if (!box) return false;
+      const summary = box.querySelector('[data-wdc-dpd-places-summary]');
+      const label = box.querySelector('[data-wdc-dpd-places-label]');
+      const row = box.querySelector('[data-wdc-dpd-places-row]');
+      if (summary) summary.textContent = status.dpd_places_summary || '';
+      if (label) label.textContent = status.dpd_places_label || 'Грузоместа DPD';
+      if (row) row.hidden = !String(status.dpd_places_summary || '').trim();
+      return false;
+    },
+    resetStatusUi: function (context) {
+      const box = context && context.box;
+      if (!box) return false;
+      const summary = box.querySelector('[data-wdc-dpd-places-summary]');
+      const row = box.querySelector('[data-wdc-dpd-places-row]');
+      if (summary) summary.textContent = '';
+      if (row) row.hidden = true;
+      return false;
     }
   });
 
@@ -239,7 +260,7 @@
   }
 
   function startDpdRegistrationPolling(button) {
-    startShipmentRegistrationPolling(button, { interval: 10000, maxAttempts: 0, mode: 'dpd' });
+    startShipmentRegistrationPolling(button, { interval: 10000, maxAttempts: 0, mode: 'registration', stopOnError: true });
   }
 
   function setDpdDocumentsButtonState(link, busy, label) {

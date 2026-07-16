@@ -138,6 +138,49 @@
     poll();
   }
 
+  function startCdekPolling(button) {
+    let attempts = 0;
+    const maxAttempts = 14;
+    const interval = 5000;
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    setShipmentPollingIndicator(box, true);
+    const tick = function () {
+      attempts += 1;
+      requestShipmentStatus(button, { auto: true })
+        .then((payload) => {
+          const data = payload && payload.data ? payload.data : {};
+          const status = data.status || {};
+          const state = String(status.carrier_operation_index || '').toUpperCase();
+          const code = String(status.carrier_operation_address || '').toUpperCase();
+          if (state === 'INVALID') {
+            setShipmentPollingIndicator(box, false);
+            showShipmentToast(box, getPresentation(box).registrationErrorToast, 'error', { append: true });
+            return;
+          }
+          if (code === 'CREATED' || data.terminal) {
+            setShipmentPollingIndicator(box, false);
+            showShipmentToast(box, getPresentation(box).registrationSuccessToast, 'success', { append: true });
+            return;
+          }
+          if (attempts >= maxAttempts) {
+            setShipmentPollingIndicator(box, false);
+            showShipmentToast(box, getPresentation(box).pollingTimeoutMessage, 'warning', { append: true });
+            return;
+          }
+          window.setTimeout(tick, interval);
+        })
+        .catch(() => {
+          if (attempts >= maxAttempts) {
+            setShipmentPollingIndicator(box, false);
+            showShipmentToast(box, getPresentation(box).pollingTimeoutMessage, 'warning', { append: true });
+            return;
+          }
+          window.setTimeout(tick, interval);
+        });
+    };
+    window.setTimeout(tick, interval);
+  }
+
   registerShipmentCarrierHooks({
     handleClick: function (event) {
       const addManualItemAlias = event.target.closest('[data-wdc-add-manual-cdek-item]');
@@ -180,6 +223,24 @@
           ? (cityCode ? '✅ Данные для СДЭК корректны' : 'Адрес обработан.')
           : (snapshot.message || 'Адрес не подтвержден, создание отправления заблокировано.');
       }
+      return true;
+    },
+    renderStatus: function (context) {
+      const box = context && context.box;
+      const status = context && context.status ? context.status : {};
+      if (!box) return false;
+      if (status.planned_delivery_date) return false;
+      const planned = String(status.cdek_planned_delivery_date || '').trim();
+      const value = box.querySelector('[data-wdc-planned-delivery-date]');
+      const row = box.querySelector('[data-wdc-planned-delivery-row]');
+      if (value) value.textContent = planned;
+      if (row) row.hidden = !planned;
+      return false;
+    },
+    handleDefaultRegistrationPolling: function (context) {
+      const button = context && context.button;
+      if (!button || !button.dataset || button.dataset.shipmentKey !== 'cdek') return false;
+      startCdekPolling(button);
       return true;
     }
   });

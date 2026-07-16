@@ -17,34 +17,20 @@
       '[data-wdc-status-operation]': operationSummary(status),
       '[data-wdc-status-checked]': status.tracking_checked_at || '-',
       '[data-wdc-status-updated]': status.updated_at || '',
-      '[data-wdc-planned-delivery-date]': status.planned_delivery_date || status.cdek_planned_delivery_date || '',
-      '[data-wdc-dpd-places-summary]': status.dpd_places_summary || '',
-      '[data-wdc-dpd-places-label]': status.dpd_places_label || 'Грузоместа DPD'
+      '[data-wdc-planned-delivery-date]': status.planned_delivery_date || ''
     };
     Object.keys(fields).forEach((selector) => {
       const element = box.querySelector(selector);
       if (element) element.textContent = fields[selector];
     });
     const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
-    if (plannedRow) plannedRow.hidden = !String(status.planned_delivery_date || status.cdek_planned_delivery_date || '').trim();
+    if (plannedRow) plannedRow.hidden = !String(status.planned_delivery_date || '').trim();
     const updatedRow = box.querySelector('[data-wdc-status-updated-row]');
     if (updatedRow) updatedRow.hidden = !String(status.updated_at || '').trim();
-    const dpdPlacesRow = box.querySelector('[data-wdc-dpd-places-row]');
-    if (dpdPlacesRow) dpdPlacesRow.hidden = !String(status.dpd_places_summary || '').trim();
-    updateShipmentButtons(box, {
-      hasShipment: !!status.has_shipment,
-      canCreate: Object.prototype.hasOwnProperty.call(status, 'can_create') ? !!status.can_create : undefined,
-      canAttachManual: Object.prototype.hasOwnProperty.call(status, 'can_attach_manual') ? !!status.can_attach_manual : undefined,
-      canCancel: !!status.can_cancel,
-      canRemove: !!status.can_remove_from_order,
-      canUpdate: !!status.can_update_status,
-      canPrintBarcode: !!status.can_print_barcode,
-      canDownloadDpdDocuments: !!status.can_download_dpd_documents,
-      canDownloadYandexLabel: !!status.can_download_yandex_label
-    });
+    updateShipmentButtons(box, shipmentButtonStateFromStatus(status));
     setTrackingDisplay(box, trackingPresentation(status));
     renderShipmentPrice(box, status);
-    renderYandexSelfPickupCode(box, status);
+    dispatchShipmentCarrierHook('renderStatus', { box: box, status: status });
   }
 
   function shipmentStatusFromResponse(data) {
@@ -55,33 +41,14 @@
         status[key] = payload[key];
       }
     });
-    if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_print_barcode')) {
-      status.can_print_barcode = payload.label_actions.some(function (action) {
-        return action && action.key === 'download_label' && !!action.visible;
-      });
-    }
-    if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_download_dpd_documents')) {
-      status.can_download_dpd_documents = payload.label_actions.some(function (action) {
-        return action && action.key === 'download_documents' && !!action.visible;
-      });
-    }
-    if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_download_yandex_label')) {
-      status.can_download_yandex_label = payload.label_actions.some(function (action) {
-        return action && action.key === 'download_yandex_label' && !!action.visible;
-      });
-    }
     return status;
   }
 
   function setShipmentPollingIndicator(box, visible) {
-    const indicator = box && box.querySelector ? box.querySelector('[data-wdc-shipment-polling-indicator], [data-wdc-cdek-polling-indicator]') : null;
+    const indicator = box && box.querySelector ? box.querySelector('[data-wdc-shipment-polling-indicator]') : null;
     if (!indicator) return;
     indicator.hidden = !visible;
     indicator.classList.toggle('is-active', !!visible);
-  }
-
-  function setCdekPollingIndicator(box, visible) {
-    setShipmentPollingIndicator(box, visible);
   }
 
   function renderShipmentPrice(box, status) {
@@ -99,16 +66,6 @@
       : (compare === 'warning' ? 'wdc-shipment-price-warning' : 'wdc-shipment-price-neutral');
     row.classList.add(className);
     row.title = String(status && status.actual_cost_compare_message || '');
-  }
-
-  function renderYandexSelfPickupCode(box, status) {
-    if (!box) return;
-    const row = box.querySelector('[data-wdc-yandex-self-pickup-code-row]');
-    const value = box.querySelector('[data-wdc-yandex-self-pickup-code]');
-    if (!row || !value) return;
-    const code = String(status && status.yandex_self_pickup_node_code || '').trim();
-    value.textContent = code;
-    row.hidden = !code;
   }
 
   function renderShipmentTechnicalInfo(box, data) {
@@ -260,17 +217,11 @@
     const canCancel = !!(state && state.canCancel);
     const canRemove = !!(state && state.canRemove);
     const canUpdate = !!(state && state.canUpdate);
-    const canPrintBarcode = !!(state && state.canPrintBarcode);
-    const canDownloadDpdDocuments = !!(state && state.canDownloadDpdDocuments);
-    const canDownloadYandexLabel = !!(state && state.canDownloadYandexLabel);
     const openButton = box.querySelector('[data-wdc-open-shipment-modal]');
     const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
-    const barcodeDownload = box.querySelector('[data-wdc-cdek-barcode-download]');
-    const dpdDocumentsDownload = box.querySelector('[data-wdc-dpd-documents-download]');
-    const yandexLabelDownload = box.querySelector('[data-wdc-yandex-label-download]');
     if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
       setVisible(openButton, canCreate);
@@ -292,30 +243,27 @@
       setVisible(removeButton, canRemove);
       removeButton.disabled = !canRemove;
     }
-    if (barcodeDownload) {
-      setVisible(barcodeDownload, canPrintBarcode);
-      if (canPrintBarcode) {
-        barcodeDownload.removeAttribute('aria-disabled');
+    updateDocumentActions(box, state && Array.isArray(state.labelActions) ? state.labelActions : []);
+    dispatchShipmentCarrierHook('updateButtons', { box: box, state: state || {} });
+  }
+
+  function updateDocumentActions(box, actions) {
+    if (!box) return;
+    const visible = new Map();
+    (Array.isArray(actions) ? actions : []).forEach(function (action) {
+      if (!action) return;
+      visible.set(String(action.key || ''), !!action.visible);
+    });
+    box.querySelectorAll('[data-wdc-shipment-document-download]').forEach(function (link) {
+      const key = link.dataset ? String(link.dataset.actionKey || '') : '';
+      const enabled = visible.get(key) === true;
+      setVisible(link, enabled);
+      if (enabled) {
+        link.removeAttribute('aria-disabled');
       } else {
-        barcodeDownload.setAttribute('aria-disabled', 'true');
+        link.setAttribute('aria-disabled', 'true');
       }
-    }
-    if (dpdDocumentsDownload) {
-      setVisible(dpdDocumentsDownload, canDownloadDpdDocuments);
-      if (canDownloadDpdDocuments) {
-        dpdDocumentsDownload.removeAttribute('aria-disabled');
-      } else {
-        dpdDocumentsDownload.setAttribute('aria-disabled', 'true');
-      }
-    }
-    if (yandexLabelDownload) {
-      setVisible(yandexLabelDownload, canDownloadYandexLabel);
-      if (canDownloadYandexLabel) {
-        yandexLabelDownload.removeAttribute('aria-disabled');
-      } else {
-        yandexLabelDownload.setAttribute('aria-disabled', 'true');
-      }
-    }
+    });
   }
 
   function shipmentButtonStateFromStatus(statusPayload) {
@@ -326,9 +274,7 @@
       canCancel: !!statusPayload.can_cancel,
       canRemove: !!statusPayload.can_remove_from_order,
       canUpdate: !!statusPayload.can_update_status,
-      canPrintBarcode: !!statusPayload.can_print_barcode,
-      canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents,
-      canDownloadYandexLabel: !!statusPayload.can_download_yandex_label
+      labelActions: Array.isArray(statusPayload.label_actions) ? statusPayload.label_actions : []
     };
   }
 
@@ -349,7 +295,6 @@
     });
     setTrackingDisplay(box, '');
     renderShipmentPrice(box, {});
-    renderYandexSelfPickupCode(box, {});
     const updatedRow = box.querySelector('[data-wdc-updated-row]');
     if (updatedRow) updatedRow.hidden = true;
     const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
@@ -359,8 +304,9 @@
       message.textContent = '';
       message.dataset.status = '';
     }
-    setCdekPollingIndicator(box, false);
-    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, canPrintBarcode: false, canDownloadDpdDocuments: false, canDownloadYandexLabel: false });
+    setShipmentPollingIndicator(box, false);
+    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, labelActions: [] });
+    dispatchShipmentCarrierHook('resetStatusUi', { box: box });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;
   }

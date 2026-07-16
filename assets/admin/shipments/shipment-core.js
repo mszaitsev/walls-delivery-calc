@@ -2,7 +2,6 @@
   const toastTimers = new WeakMap();
   const shipmentPollingTimers = new WeakMap();
   const shipmentPollingTokens = new WeakMap();
-  const cancellationPollingToasts = new WeakMap();
   const shipmentCarrierHooks = [];
   const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
 
