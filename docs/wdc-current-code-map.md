@@ -1,3 +1,9 @@
+## Shipment admin JS modules 0.117.0
+- `assets/admin/shipments-admin.js` is now the bootstrap entrypoint only; DOM event wiring lives in `assets/admin/shipments/shipment-events.js`.
+- `assets/admin/shipments/shipment-core.js`, `shipment-preview.js`, `shipment-status.js`, `shipment-polling.js`, `shipment-allocation.js` and `shipment-picker.js` own generic helpers, preview/create availability, status/button rendering, polling/AJAX lifecycle, places/items allocation and pickup/map interaction respectively.
+- Carrier-specific runtime hooks live in `assets/admin/shipments/extensions/`: CDEK barcode/delivery-mode hooks, DPD address/contact/documents/two-stage submit hooks, Yandex source drop-off/label hooks, and a Russian Post extension placeholder for the currently shared behavior.
+- `OrderShipmentsMetabox::enqueue_assets()` registers the modules in dependency order and keeps the existing localized `wdc-shipments-admin` handle for the final bootstrap; no DOM, selector, input-name, payload or carrier API contract changed.
+
 ## Shipment modal extensions 0.116.1
 - `src/Shipments/Modal/CarrierShipmentModalExtensionInterface.php` and `ShipmentModalExtensionRegistry.php` define the small carrier-neutral extension point for modal presentation fields.
 - CDEK, DPD, Russian Post and Yandex register modal extensions from `src/Core/Plugin.php`; the common metabox calls the registry for carrier delivery, pickup and courier field fragments plus modal presentation context instead of owning those blocks directly.

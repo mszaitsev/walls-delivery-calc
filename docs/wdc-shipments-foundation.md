@@ -186,6 +186,9 @@ Selecting a point updates only shipment draft fields: `pickup_point_code`, `pick
 ## Shipment Modal Extensions 0.116.1
 Carrier-specific shipment modal field markup and presentation context are now owned by small extensions registered through `ShipmentModalExtensionRegistry`. The common metabox keeps the modal shell and common places/items/preview/create lifecycle while CDEK, DPD, Russian Post and Yandex extensions render carrier-owned delivery, pickup and courier fragments without a generic form builder. In 0.116.1 the shared render path also dropped carrier defaults and duplicated tariff preparation: tariff requirements, successful-preview gates, tariff options and declared-value presentation come from draft capabilities plus modal extension context. Existing input names, data selectors and JavaScript behavior are preserved. Carrier-specific AJAX/pickup backend responsibilities remain as explicit follow-up debt.
 
+## Shipment Admin JS Modules 0.117.0
+The shipment admin runtime is split by ownership. `shipments-admin.js` remains the enqueue/localization target and final bootstrap, `shipment-events.js` owns DOM event wiring, and generic modules own core helpers, preview, status rendering, polling, allocation and pickup/map behavior. Carrier-specific JavaScript lives under `assets/admin/shipments/extensions/` for CDEK, DPD, Russian Post and Yandex. The split is behavior-neutral: existing selectors, field names, AJAX actions, payload shape, polling timing and carrier flows are unchanged.
+
 ## Shipment Document Actions 0.115.0
 
 - Common shipment document actions are represented by `ShipmentDocumentAction` and streamed as `ShipmentBinaryDocument`.

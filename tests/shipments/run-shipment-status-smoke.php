@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/admin-js-bundle-source.php';
+
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
@@ -387,7 +389,7 @@ try {
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $status_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentStatusUpdateService.php' );
-$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$js_source = wdc_shipment_admin_js_bundle_source();
 $adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/RussianPost/RussianPostShipmentAdapter.php' );
 shipment_status_smoke_assert( str_contains( $status_service_source, 'Asia/Novosibirsk' ) && str_contains( $status_service_source, '7 * $hour' ), 'tracking_checked_at helper must use Asia/Novosibirsk with a GMT+7 fallback.' );
 shipment_status_smoke_assert( ! str_contains( $status_service_source, 'Статус отправления Почты России обновлен' ) && ! str_contains( implode( "\n", $order->notes ), 'Статус отправления Почты России обновлен' ), 'Shipment status update must not use the old Russian Post status refresh order note.' );

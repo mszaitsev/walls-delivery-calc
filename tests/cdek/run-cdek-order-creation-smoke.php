@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
+
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
@@ -1042,7 +1044,7 @@ cdek_order_assert( str_contains( $modal_html, 'data-wdc-weight-hint' ) && str_co
 cdek_order_assert( str_contains( $modal_html, 'name="pickup_carrier_key" value="cdek"' ) && str_contains( $modal_html, 'name="pickup_family" value="cdek:pickup"' ), 'CDEK shipment modal must render CDEK carrier context for admin pickup map.' );
 cdek_order_assert( str_contains( $modal_html, 'name="recipient_location_city" value="Кемерово"' ) && ! str_contains( $modal_html, 'name="recipient_location_city" value="Новосибирск"' ), 'CDEK shipment modal map context must use recipient locality, not sender locality.' );
 
-$shipments_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$shipments_js = wdc_shipment_admin_js_bundle_source();
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'window.WDCPickupApi.addressSearch' ) && str_contains( $shipments_js, 'addressMarkerFromResult' ) && str_contains( $shipments_js, 'provider.setCenter(searchMarker.lat, searchMarker.lng, 15);' ), 'CDEK shipment modal pickup map must use shared DaData address search and focus the temporary marker.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "data.append('order_id', fieldValue(form, 'input[name=\"order_id\"]') || '')" ), 'Shipment modal pickup point search must send order_id for Russian Post backend fallback.' );
 cdek_order_assert( is_string( $shipments_js ) && ! str_contains( $shipments_js, 'через DaData' ) && str_contains( $shipments_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $shipments_js, "'Адрес найден.'" ) && str_contains( $shipments_js, "'Адрес не найден.'" ), 'CDEK shipment modal pickup map must use neutral address-search UI messages.' );

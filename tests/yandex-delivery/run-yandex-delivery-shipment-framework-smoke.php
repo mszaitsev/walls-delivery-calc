@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
+
 define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 define( 'WDC_SECRET_KEY', 'yandex-framework-smoke-key' );
 
@@ -480,7 +482,7 @@ yd_framework_assert( str_contains( $metabox_source, 'wdc_mark_shipment_poll_exha
 yd_framework_assert( str_contains( $metabox_source, 'tracking_presentation' ) && str_contains( $metabox_source, 'render_tracking_value' ) && str_contains( $metabox_source, 'target="_blank"' ) && str_contains( $metabox_source, 'rel="noopener noreferrer"' ) && str_contains( $metabox_source, 'esc_url( $tracking' ), 'Shared metabox must render structured tracking URLs as escaped links that open in a new tab.' );
 yd_framework_assert( str_contains( $metabox_source, 'data-wdc-yandex-self-pickup-code-row' ) && str_contains( $metabox_source, 'ShipmentDocumentDownloadService' ) && ! str_contains( $metabox_source, 'admin_post_yandex_label_pdf' ) && ! str_contains( $metabox_source, 'ACTION_YANDEX_LABEL_PDF' ), 'Shared metabox must render Yandex pickup-code row and use the common protected shipment document endpoint.' );
 yd_framework_assert( str_contains( $metabox_source, "__( '⚖️%d'" ) && ! str_contains( $metabox_source, 'Расчётный вес товаров: %d г' ), 'Shared modal must preserve compact calculated weight hint format.' );
-$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$js_source = wdc_shipment_admin_js_bundle_source();
 yd_framework_assert( str_contains( $js_source, 'can_create' ) && str_contains( $js_source, 'can_attach_manual' ) && str_contains( $js_source, 'setVisible(openButton, canCreate)' ) && str_contains( $js_source, 'setVisible(manualButton, canAttachManual)' ), 'Runtime shipment buttons must consume adapter create/manual capabilities.' );
 yd_framework_assert( str_contains( $js_source, 'function parseShipmentJsonResponse' ) && str_contains( $js_source, 'Сервер вернул некорректный ответ при подготовке отправления' ) && str_contains( $js_source, '.then(parseShipmentJsonResponse)' ), 'Shipment preview JS must parse malformed responses through controlled JSON fallback.' );
 yd_framework_assert( str_contains( $js_source, "form.dataset.wdcRequiresTariff !== '0'" ) && str_contains( $js_source, 'parseDecimalValue(length' ), 'Shipment admin JS must support no-tariff carriers and decimal place dimensions.' );

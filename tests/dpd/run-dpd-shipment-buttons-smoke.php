@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
+
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
@@ -42,7 +44,7 @@ dpd_buttons_assert( $created_payload['can_cancel'] === $reload_payload['can_canc
 dpd_buttons_assert( str_contains( (string) ( $payload['dpd_places_summary'] ?? '' ), '1) 6.7 кг, 38×24×24 см' ) && str_contains( (string) ( $payload['dpd_places_summary'] ?? '' ), '2) 1.2 кг, 20×15×10 см' ), 'DPD status payload must expose manager-readable sent places summary.' );
 $presentation = $adapter->presentation();
 dpd_buttons_assert( 'Внести номер DPD вручную' === $presentation['manual_attach_button_label'] && 'Номер DPD' === $presentation['manual_attach_placeholder'], 'DPD manual attach UI text must be configured.' );
-$source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$source = wdc_shipment_admin_js_bundle_source();
 dpd_buttons_assert( str_contains( $source, 'temporary_can_remove' ) && str_contains( $source, 'startDpdRegistrationPolling' ) && str_contains( $source, 'registration_attempt_id' ), 'Admin JS must include DPD temporary remove and two-stage polling markers.' );
 $css_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );

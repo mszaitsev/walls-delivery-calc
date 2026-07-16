@@ -61,10 +61,9 @@
    - Migration sequence: extract read-only render helpers first, then introduce a carrier field provider after all current smoke coverage is stable.
 
 5. Carrier-specific JS validation in `shipments-admin.js`
-   - Current problem: common allocation JS is neutral, but carrier-specific validation and UI toggles still live in one admin script.
-   - Target architecture: common modal lifecycle remains in `shipments-admin.js`; carrier-specific behavior is isolated behind carrier-scoped functions or data-driven rules.
-   - Affected classes/files: `assets/admin/shipments-admin.js`, `OrderShipmentsMetabox`, DPD/CDEK/Russian Post/Yandex smoke tests.
-   - Migration sequence: keep current behavior, extract one carrier-specific section at a time only with source assertions and browser-free smoke coverage.
+   - Status: resolved in 0.117.0. The admin shipment runtime is split into `assets/admin/shipments/` modules: core helpers, preview, status rendering, polling, allocation, pickup/map interaction and carrier extensions for CDEK, DPD, Russian Post and Yandex.
+   - Preserved contract: `assets/admin/shipments-admin.js` is now only the bootstrap entrypoint and `shipment-events.js` owns DOM event wiring; existing DOM, selectors, field names, AJAX actions, payload shape, polling timing and carrier behavior are unchanged.
+   - Remaining adjacent debt: DPD still has a carrier-specific two-stage lifecycle, but it is isolated as DPD behavior and is tracked separately below.
 
 6. DPD two-stage flow
    - Current problem: DPD still has a special two-stage registration/status flow that does not fully match the ordinary create path.
