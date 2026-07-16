@@ -1,7 +1,8 @@
-## Shipment regression profile 0.119.0
+## Shipment regression profile 0.119.1
 - `tests/shipments/run-shipment-regression-profile.php` is the canonical Shipment Framework regression command. It loads `tests/shipments/regression/shipment-regression-manifest.php`, validates paths/groups/baselines, and runs every smoke as a separate PHP process through `ShipmentRegressionRunner`.
 - Default execution collects the full mandatory report instead of stopping on the first failure. Use `--fail-fast` for early stop, `--group=framework|cdek|dpd|russian-post|yandex|status-core`, `--list`, `--include-baseline` and `--include-optional` for scoped runs.
 - Known baseline entries are not part of the default profile. A baseline is accepted only when the test exits non-zero and output contains the exact configured signature; a changed signature is reported as `BASELINE-MISMATCH`.
+- Since 0.119.1 process-start/temp-file failures are reported as `INFRASTRUCTURE` with exit code `3` and are checked before baseline matching. Skipped counts are scoped to the selected group, so mandatory group runs no longer include unrelated baseline/optional skips.
 
 ## Shipment lifecycle and admin JS modules 0.118.1
 - Since 0.118.1 DPD two-stage registration is exposed to common UI through a fully transport-neutral `ShipmentLifecycleResult`, not DPD-specific JS wrappers. `CarrierShipmentLifecycleContinuationInterface` is an optional adapter capability; the shared `wdc_continue_shipment_lifecycle` endpoint resolves order/carrier/continuation-token context and delegates the carrier submit internally.

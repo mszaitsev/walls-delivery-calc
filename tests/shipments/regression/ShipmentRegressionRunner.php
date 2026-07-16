@@ -15,11 +15,17 @@ final class ShipmentRegressionRunner {
 	private array $manifest;
 
 	/**
+	 * @var null|callable(string,int):array<string,mixed>
+	 */
+	private $process_executor;
+
+	/**
 	 * @param array<string,array<string,mixed>> $manifest
 	 */
-	public function __construct( string $root, array $manifest ) {
+	public function __construct( string $root, array $manifest, ?callable $process_executor = null ) {
 		$this->root = rtrim( str_replace( '\\', '/', $root ), '/' );
 		$this->manifest = $this->normalize_manifest( $manifest );
+		$this->process_executor = $process_executor;
 	}
 
 	/**
@@ -47,7 +53,7 @@ final class ShipmentRegressionRunner {
 			$result = $this->run_entry( $entry );
 			$results[] = $result;
 
-			if ( 'TIMEOUT' === $result['status'] ) {
+			if ( in_array( $result['status'], array( 'TIMEOUT', 'INFRASTRUCTURE' ), true ) ) {
 				$exit_code = max( $exit_code, self::EXIT_INFRASTRUCTURE );
 			} elseif ( in_array( $result['status'], array( 'FAIL', 'BASELINE-MISMATCH' ), true ) ) {
 				$exit_code = max( $exit_code, self::EXIT_FAILURE );
@@ -113,7 +119,7 @@ final class ShipmentRegressionRunner {
 				$line .= ' - ' . $result['summary'];
 			}
 			echo $line . "\n";
-			if ( in_array( $result['status'], array( 'FAIL', 'TIMEOUT', 'BASELINE-MISMATCH' ), true ) ) {
+			if ( in_array( $result['status'], array( 'FAIL', 'TIMEOUT', 'INFRASTRUCTURE', 'BASELINE-MISMATCH' ), true ) ) {
 				echo 'Exit code: ' . $result['exit_code'] . "\n";
 				$this->print_output_block( 'STDOUT', $result['stdout'] );
 				$this->print_output_block( 'STDERR', $result['stderr'] );
@@ -131,6 +137,7 @@ final class ShipmentRegressionRunner {
 		echo 'Baseline resolved: ' . $counts['baseline_resolved'] . "\n";
 		echo 'Skipped: ' . $counts['skipped'] . "\n";
 		echo 'Timeout: ' . $counts['timeout'] . "\n";
+		echo 'Infrastructure: ' . $counts['infrastructure'] . "\n";
 		echo 'Duration: ' . number_format( (float) $run['duration'], 2, '.', '' ) . "s\n";
 	}
 
@@ -214,16 +221,8 @@ final class ShipmentRegressionRunner {
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function select_tests( array $options ): array {
-		$group = isset( $options['group'] ) ? (string) $options['group'] : '';
-		if ( '' !== $group && ! isset( $this->groups()[ $group ] ) ) {
-			throw new InvalidArgumentException( 'Unknown regression profile group: ' . $group );
-		}
-
 		$selected = array();
-		foreach ( $this->manifest as $entry ) {
-			if ( '' !== $group && ! in_array( $group, $entry['groups'], true ) ) {
-				continue;
-			}
+		foreach ( $this->entries_in_scope( $options ) as $entry ) {
 			if ( $entry['baseline'] && empty( $options['include_baseline'] ) ) {
 				continue;
 			}
@@ -239,12 +238,36 @@ final class ShipmentRegressionRunner {
 	}
 
 	/**
+	 * @param array<string,mixed> $options
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function entries_in_scope( array $options ): array {
+		$group = isset( $options['group'] ) ? (string) $options['group'] : '';
+		if ( '' !== $group && ! isset( $this->groups()[ $group ] ) ) {
+			throw new InvalidArgumentException( 'Unknown regression profile group: ' . $group );
+		}
+
+		if ( '' === $group ) {
+			return array_values( $this->manifest );
+		}
+
+		return array_values(
+			array_filter(
+				$this->manifest,
+				static fn( array $entry ): bool => in_array( $group, $entry['groups'], true )
+			)
+		);
+	}
+
+	/**
 	 * @param array<string,mixed> $entry
 	 * @return array<string,mixed>
 	 */
 	private function run_entry( array $entry ): array {
 		$started = microtime( true );
-		$process = $this->run_process( $entry['absolute_path'], (int) $entry['timeout'] );
+		$process = $this->process_executor
+			? $this->normalize_process_result( ( $this->process_executor )( $entry['absolute_path'], (int) $entry['timeout'] ) )
+			: $this->run_process( $entry['absolute_path'], (int) $entry['timeout'] );
 		$duration = microtime( true ) - $started;
 		$output = trim( $process['stdout'] . "\n" . $process['stderr'] );
 		$status = 'PASS';
@@ -253,6 +276,12 @@ final class ShipmentRegressionRunner {
 		if ( $process['timed_out'] ) {
 			$status = 'TIMEOUT';
 			$summary = 'Process exceeded timeout ' . $entry['timeout'] . 's.';
+		} elseif ( $process['infrastructure_error'] ) {
+			$status = 'INFRASTRUCTURE';
+			$summary = $this->last_non_empty_line( $process['stderr'] );
+			if ( '' === $summary ) {
+				$summary = 'Process infrastructure failure.';
+			}
 		} elseif ( $entry['baseline'] || ( $entry['optional'] && '' !== $entry['expected_failure'] ) ) {
 			if ( 0 === $process['exit_code'] ) {
 				$status = 'BASELINE-RESOLVED';
@@ -283,14 +312,20 @@ final class ShipmentRegressionRunner {
 	}
 
 	/**
-	 * @return array{exit_code:int,stdout:string,stderr:string,timed_out:bool}
+	 * @return array{exit_code:int,stdout:string,stderr:string,timed_out:bool,infrastructure_error:bool}
 	 */
 	private function run_process( string $file, int $timeout ): array {
 		$command = array( PHP_BINARY, $file );
 		$stdout_file = tempnam( sys_get_temp_dir(), 'wdc-regression-out-' );
 		$stderr_file = tempnam( sys_get_temp_dir(), 'wdc-regression-err-' );
 		if ( false === $stdout_file || false === $stderr_file ) {
-			return array( 'exit_code' => self::EXIT_INFRASTRUCTURE, 'stdout' => '', 'stderr' => 'Unable to create temporary output files.', 'timed_out' => false );
+			if ( is_string( $stdout_file ) ) {
+				@unlink( $stdout_file );
+			}
+			if ( is_string( $stderr_file ) ) {
+				@unlink( $stderr_file );
+			}
+			return array( 'exit_code' => self::EXIT_INFRASTRUCTURE, 'stdout' => '', 'stderr' => 'Unable to create temporary output files.', 'timed_out' => false, 'infrastructure_error' => true );
 		}
 		$descriptor_spec = array(
 			0 => array( 'pipe', 'r' ),
@@ -311,7 +346,7 @@ final class ShipmentRegressionRunner {
 			@unlink( $stdout_file );
 			@unlink( $stderr_file );
 			$message = is_array( $last_error ) && isset( $last_error['message'] ) ? (string) $last_error['message'] : 'Unable to start PHP process.';
-			return array( 'exit_code' => self::EXIT_INFRASTRUCTURE, 'stdout' => '', 'stderr' => $message, 'timed_out' => false );
+			return array( 'exit_code' => self::EXIT_INFRASTRUCTURE, 'stdout' => '', 'stderr' => $message, 'timed_out' => false, 'infrastructure_error' => true );
 		}
 		fclose( $pipes[0] );
 
@@ -342,6 +377,7 @@ final class ShipmentRegressionRunner {
 				'stdout' => $stdout,
 				'stderr' => $stderr,
 				'timed_out' => true,
+				'infrastructure_error' => false,
 			);
 		}
 		$exit_code = proc_close( $process );
@@ -351,6 +387,31 @@ final class ShipmentRegressionRunner {
 			'stdout' => $stdout,
 			'stderr' => $stderr,
 			'timed_out' => $timed_out,
+			'infrastructure_error' => false,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 * @return array{exit_code:int,stdout:string,stderr:string,timed_out:bool,infrastructure_error:bool}
+	 */
+	private function normalize_process_result( array $result ): array {
+		if ( ! array_key_exists( 'exit_code', $result ) ) {
+			return array(
+				'exit_code' => self::EXIT_INFRASTRUCTURE,
+				'stdout' => (string) ( $result['stdout'] ?? '' ),
+				'stderr' => 'Invalid process executor result.',
+				'timed_out' => false,
+				'infrastructure_error' => true,
+			);
+		}
+
+		return array(
+			'exit_code' => (int) $result['exit_code'],
+			'stdout' => (string) ( $result['stdout'] ?? '' ),
+			'stderr' => (string) ( $result['stderr'] ?? '' ),
+			'timed_out' => (bool) ( $result['timed_out'] ?? false ),
+			'infrastructure_error' => (bool) ( $result['infrastructure_error'] ?? false ),
 		);
 	}
 
@@ -377,6 +438,7 @@ final class ShipmentRegressionRunner {
 			'baseline_resolved' => 0,
 			'skipped' => 0,
 			'timeout' => 0,
+			'infrastructure' => 0,
 		);
 		foreach ( $results as $result ) {
 			match ( $result['status'] ) {
@@ -384,10 +446,12 @@ final class ShipmentRegressionRunner {
 				'BASELINE' => $counts['baseline']++,
 				'BASELINE-RESOLVED' => $counts['baseline_resolved']++,
 				'TIMEOUT' => $counts['timeout']++,
-				default => $counts['failed']++,
+				'INFRASTRUCTURE' => $counts['infrastructure']++,
+				'FAIL', 'BASELINE-MISMATCH' => $counts['failed']++,
+				default => null,
 			};
 		}
-		foreach ( $this->manifest as $entry ) {
+		foreach ( $this->entries_in_scope( $options ) as $entry ) {
 			if ( $entry['baseline'] && empty( $options['include_baseline'] ) ) {
 				$counts['skipped']++;
 			}

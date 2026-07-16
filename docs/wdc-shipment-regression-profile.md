@@ -1,6 +1,6 @@
 # Shipment Regression Profile
 
-Version: 0.119.0.
+Version: 0.119.1.
 
 Canonical command:
 
@@ -36,6 +36,8 @@ Exit codes:
 3 process infrastructure failure or timeout
 ```
 
+`INFRASTRUCTURE` is separate from `FAIL`. It is used only when the runner cannot create temporary output files or cannot start the child PHP process. This classification happens before baseline matching, so a baseline or optional exact-signature entry that cannot start is reported as `INFRASTRUCTURE`, not `BASELINE-MISMATCH`. A child smoke that exits with code `3` normally is still a regular `FAIL`; exit code `3` becomes infrastructure only when the process result carries the explicit infrastructure flag.
+
 Mandatory groups:
 
 - `framework`: lifecycle contract, JS structure, modal extensions, document actions, persistence mappers, actual-cost presentation, allocation, status and adapter registry.
@@ -50,6 +52,8 @@ Baseline entries are not run by default. With `--include-baseline`, a baseline c
 Optional entries are not run by default. With `--include-optional`, optional failures are real failures unless the entry carries an exact expected harness signature. The Russian Post extended carrier harnesses are optional exact-signature entries because clean `develop` currently fails with `Class "WC_Shipping_Method" not found` and `Typed property WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod::$settings_repository must not be accessed before initialization`.
 
 Timeouts are configured per manifest entry, defaulting to 90 seconds. On timeout the runner terminates the child process and reports `TIMEOUT`. The runner terminates the direct child PHP process; it does not promise process-tree cleanup for external children a smoke might spawn.
+
+Skipped counts are scoped to the selected group. The default run reports skipped baseline/optional entries from the whole profile; `--group=dpd` reports `Skipped: 0`; `--group=baseline` without `--include-baseline` reports only baseline entries in the baseline group as skipped.
 
 When adding a smoke:
 
