@@ -203,7 +203,6 @@ final class OrderShipmentsMetabox {
 		$services = is_array( $draft['services'] ?? null ) ? $draft['services'] : array();
 		$modal_capabilities = is_array( $draft['modal_capabilities'] ?? null ) ? $draft['modal_capabilities'] : array();
 		$recipient = is_array( $request['recipient'] ?? null ) ? $request['recipient'] : array();
-		$address = is_array( $request['recipient_address'] ?? null ) ? $request['recipient_address'] : array();
 		$place = is_array( $request['places'][0] ?? null ) ? $request['places'][0] : array();
 		$place_rows = is_array( $request['places'] ?? null ) ? array_values( array_filter( $request['places'], 'is_array' ) ) : array();
 		if ( array() === $place_rows ) {
