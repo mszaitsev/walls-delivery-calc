@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/admin-js-bundle-source.php';
+
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
@@ -97,7 +99,7 @@ $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/
 $autosync_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentStatusAutoSyncService.php' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $russian_post_adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/RussianPost/RussianPostShipmentAdapter.php' );
-$shipments_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$shipments_js = wdc_shipment_admin_js_bundle_source();
 
 carrier_adapter_registry_assert( str_contains( $plugin_source, 'CarrierShipmentAdapterRegistry::class' ), 'Plugin must register CarrierShipmentAdapterRegistry.' );
 carrier_adapter_registry_assert( str_contains( $plugin_source, 'new CarrierShipmentAdapterRegistry( array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ) ) )' ), 'Plugin registry wiring must include Russian Post, CDEK, DPD and Yandex adapters.' );

@@ -130,7 +130,18 @@ final class OrderShipmentsMetabox {
 		wp_enqueue_style( 'wdc-pickup-map', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-map.css', array(), $this->version );
 		wp_enqueue_style( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.css', array( 'wdc-pickup-map' ), $this->version );
 		wp_enqueue_script( 'wdc-pickup-api', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-api.js', array(), $this->version, true );
-		wp_enqueue_script( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.js', array( $provider_handle, 'wdc-pickup-api' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-core', $this->plugin_url . 'assets/admin/shipments/shipment-core.js', array( $provider_handle, 'wdc-pickup-api' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-allocation', $this->plugin_url . 'assets/admin/shipments/shipment-allocation.js', array( 'wdc-shipments-admin-core' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-preview', $this->plugin_url . 'assets/admin/shipments/shipment-preview.js', array( 'wdc-shipments-admin-allocation' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-status', $this->plugin_url . 'assets/admin/shipments/shipment-status.js', array( 'wdc-shipments-admin-preview' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-polling', $this->plugin_url . 'assets/admin/shipments/shipment-polling.js', array( 'wdc-shipments-admin-status' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-picker', $this->plugin_url . 'assets/admin/shipments/shipment-picker.js', array( 'wdc-shipments-admin-polling' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-cdek', $this->plugin_url . 'assets/admin/shipments/extensions/cdek.js', array( 'wdc-shipments-admin-picker' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-dpd', $this->plugin_url . 'assets/admin/shipments/extensions/dpd.js', array( 'wdc-shipments-admin-cdek' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-russian-post', $this->plugin_url . 'assets/admin/shipments/extensions/russian-post.js', array( 'wdc-shipments-admin-dpd' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-yandex', $this->plugin_url . 'assets/admin/shipments/extensions/yandex.js', array( 'wdc-shipments-admin-russian-post' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin-events', $this->plugin_url . 'assets/admin/shipments/shipment-events.js', array( 'wdc-shipments-admin-yandex' ), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.js', array( 'wdc-shipments-admin-events' ), $this->version, true );
 		wp_localize_script(
 			'wdc-shipments-admin',
 			'wdcShipmentsAdmin',

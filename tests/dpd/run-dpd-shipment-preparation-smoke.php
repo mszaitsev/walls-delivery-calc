@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
+
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
@@ -207,22 +209,24 @@ dpd_shipment_assert( '195300000' === (string) ( $base_request->meta['delivery_ci
 dpd_shipment_assert( 'Петров Иван' === (string) ( $base_request->recipient['name'] ?? '' ), 'Recipient name must use last name before first name.' );
 $draft = $factory->draft_array( $pickup_order );
 $draft_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$dpd_modal_extension_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentModalExtension.php' );
+$cdek_modal_extension_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekShipmentModalExtension.php' );
 $draft_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 $factory_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 dpd_shipment_assert( str_contains( $factory_source, "array( 'get_shipping_last_name', 'get_shipping_first_name' )" ) && strpos( $factory_source, 'get_billing_last_name' ) < strpos( $factory_source, 'get_billing_first_name' ), 'Shared shipment draft factory must build recipient FIO as last name + first name for all carriers.' );
 dpd_shipment_assert( 'MSK-RECEIVER' === (string) ( $draft['request']['meta']['pickup_point_row']['point_code'] ?? '' ) && 'parcel_shop' === (string) ( $draft['request']['meta']['pickup_point_row']['point_type'] ?? '' ), 'DPD modal draft must expose recipient pickup point code/type.' );
-dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-open-pickup-picker' ) && str_contains( $draft_source, 'data-wdc-open-sender-pickup-picker' ), 'DPD modal must expose choose receiver/sender pickup buttons.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'data-wdc-open-pickup-picker' ) && str_contains( $dpd_modal_extension_source, 'data-wdc-open-sender-pickup-picker' ), 'DPD modal extension must expose choose receiver/sender pickup buttons.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-places-row' ) && str_contains( $draft_source, 'data-wdc-dpd-places-summary' ), 'Shipment block must render DPD sent places in the Отправления technical block.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-status-updated-row' ) && str_contains( $draft_source, 'Обновлено' ), 'Shipment block must render updated_at when manual status refresh touches it.' );
 dpd_shipment_assert( ! str_contains( $draft_source, "|| \$is_dpd ) : ?>\n\t\t\t\t\t\t\t\t\t\t<p><strong><?php echo esc_html__( 'Тип точки'" ), 'DPD recipient pickup point visible block must not render point type.' );
-dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-pickup-type-label' ), 'CDEK pickup point type display must remain available.' );
-dpd_shipment_assert( str_contains( $draft_source, 'В заказе тариф' ) && ! str_contains( $draft_source, 'serviceCode</strong>' ) && ! str_contains( $draft_source, 'pickup cityId</strong>' ), 'DPD modal must show order tariff and remove visible technical service block.' );
-dpd_shipment_assert( ! str_contains( $draft_source, 'name="dpd_comment"' ), 'DPD modal must not render DPD comment field.' );
-dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-date-pickup' ) && str_contains( $draft_source, 'Дата отправки' ), 'DPD modal must render datePickup date input after sender pickup point block.' );
-dpd_shipment_assert( str_contains( $draft_source, 'name="date_pickup"' ) && str_contains( $draft_source, 'type="date"' ), 'DPD modal must render date_pickup date input.' );
-dpd_shipment_assert( str_contains( $draft_source, 'class="wdc-dpd-date-label"' ) && str_contains( $draft_source, 'class="wdc-dpd-date-row"' ), 'DPD date field must render label and input/buttons on separate rows.' );
-dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-date-step="-1"' ) && str_contains( $draft_source, 'data-wdc-date-step="1"' ), 'DPD modal must render date step buttons.' );
-dpd_shipment_assert( str_contains( $draft_source, 'wdc-dpd-date-row' ) && str_contains( $draft_css, '.wdc-shipment-modal .wdc-dpd-date-row input[type="date"]' ) && str_contains( $draft_css, 'width: auto;' ), 'DPD date input must use compact row styles instead of the full-width modal input pattern.' );
+dpd_shipment_assert( str_contains( $cdek_modal_extension_source, 'data-wdc-cdek-pickup-type-label' ), 'CDEK pickup point type display must remain available.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'В заказе тариф' ) && ! str_contains( $dpd_modal_extension_source, 'serviceCode</strong>' ) && ! str_contains( $dpd_modal_extension_source, 'pickup cityId</strong>' ), 'DPD modal extension must show order tariff and remove visible technical service block.' );
+dpd_shipment_assert( ! str_contains( $dpd_modal_extension_source, 'name="dpd_comment"' ), 'DPD modal extension must not render DPD comment field.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'data-wdc-dpd-date-pickup' ) && str_contains( $dpd_modal_extension_source, 'Дата отправки' ), 'DPD modal extension must render datePickup date input after sender pickup point block.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'name="date_pickup"' ) && str_contains( $dpd_modal_extension_source, 'type="date"' ), 'DPD modal extension must render date_pickup date input.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'class="wdc-dpd-date-label"' ) && str_contains( $dpd_modal_extension_source, 'class="wdc-dpd-date-row"' ), 'DPD date field must render label and input/buttons on separate rows.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'data-wdc-date-step="-1"' ) && str_contains( $dpd_modal_extension_source, 'data-wdc-date-step="1"' ), 'DPD modal extension must render date step buttons.' );
+dpd_shipment_assert( str_contains( $dpd_modal_extension_source, 'wdc-dpd-date-row' ) && str_contains( $draft_css, '.wdc-shipment-modal .wdc-dpd-date-row input[type="date"]' ) && str_contains( $draft_css, 'width: auto;' ), 'DPD date input must use compact row styles instead of the full-width modal input pattern.' );
 dpd_shipment_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_column( $draft['services'], 'delivery_type' ), 'DPD modal must allow pickup/courier delivery type switch.' );
 dpd_shipment_assert( array( 'ECN', 'CSM' ) === array_column( $draft['services'][0]['tariffs'], 'object_code' ), 'DPD modal must allow active tariff switch.' );
 
@@ -304,7 +308,7 @@ $missing_delivery_request = $factory->create_request_from_admin_data( $missing_d
 dpd_shipment_assert( in_array( 'DPD delivery terminalCode получателя обязателен для доставки до ПВЗ.', $builder->validate( $missing_delivery_request ), true ), 'Missing pickup delivery terminalCode must produce validation error.' );
 dpd_shipment_assert( in_array( 'Добавьте хотя бы одно грузоместо.', $builder->validate( $base_request ), true ), 'Missing parcels must produce validation error.' );
 dpd_shipment_assert( in_array( 'Адрес DPD курьер нужно обработать перед предпросмотром payload.', $builder->validate( $factory->create_request_from_admin_data( $courier_order, array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'recipient_phone' => '+79990000000' ) ) ), true ), 'DPD courier preview must require address normalization.' );
-$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$js_source = wdc_shipment_admin_js_bundle_source();
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-weight-hint' ) && str_contains( $js_source, 'hint.hidden = places.length !== 1' ), 'Single-place weight hint must be common and hidden for multi-place mode.' );
 dpd_shipment_assert( str_contains( $js_source, 'cityCodeRow.hidden = isDpd || !cityCode' ), 'DPD courier modal must not display CDEK city code after address normalization.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-city-code-row <?php echo ( $is_cdek' ), 'CDEK courier modal must still display CDEK city code when normalization has it.' );

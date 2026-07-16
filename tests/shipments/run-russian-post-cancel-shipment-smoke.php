@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/admin-js-bundle-source.php';
+
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
@@ -269,7 +271,7 @@ $ambiguous_attach = $backlog_service->attach_tracking_number( new RussianPostCan
 russian_post_cancel_smoke_assert( false === $ambiguous_attach['success'] && str_contains( $ambiguous_attach['message'], 'несколько' ), 'Manual attach ambiguous search must fail in Russian.' );
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
-$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$js_source = wdc_shipment_admin_js_bundle_source();
 $css_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 russian_post_cancel_smoke_assert( str_contains( $metabox_source, 'label_actions' ) && ! str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY' . " === \$carrier_key &&" ), 'Russian Post documents button must not be hardcoded in the metabox.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'Статус WDC' ) && str_contains( $metabox_source, 'Статус посылки' ), 'Metabox must rename WDC status label.' );

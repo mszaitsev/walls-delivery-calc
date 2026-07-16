@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000023 A0AC:74BD
+Volume serial number is 00000051 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -10,20 +10,35 @@ C:.
 +---.agents
 +---assets
 |   +---admin
-|   |       .gitkeep
-|   |       calendar-admin.css
-|   |       calendar-admin.js
-|   |       checkout-simulation.css
-|   |       dpd-geography-import.js
-|   |       locations-admin.css
-|   |       order-delivery-recalculation.css
-|   |       order-delivery-recalculation.js
-|   |       rules-admin.css
-|   |       rules-admin.js
-|   |       russian-post-pickup-import.js
-|   |       shipments-admin.css
-|   |       shipments-admin.js
-|   |       yandex-delivery-pickup-v2-runner.js
+|   |   |   .gitkeep
+|   |   |   calendar-admin.css
+|   |   |   calendar-admin.js
+|   |   |   checkout-simulation.css
+|   |   |   dpd-geography-import.js
+|   |   |   locations-admin.css
+|   |   |   order-delivery-recalculation.css
+|   |   |   order-delivery-recalculation.js
+|   |   |   rules-admin.css
+|   |   |   rules-admin.js
+|   |   |   russian-post-pickup-import.js
+|   |   |   shipments-admin.css
+|   |   |   shipments-admin.js
+|   |   |   yandex-delivery-pickup-v2-runner.js
+|   |   |
+|   |   \---shipments
+|   |       |   shipment-allocation.js
+|   |       |   shipment-core.js
+|   |       |   shipment-events.js
+|   |       |   shipment-picker.js
+|   |       |   shipment-polling.js
+|   |       |   shipment-preview.js
+|   |       |   shipment-status.js
+|   |       |
+|   |       \---extensions
+|   |               cdek.js
+|   |               dpd.js
+|   |               russian-post.js
+|   |               yandex.js
 |   |
 |   +---frontend
 |   |   |   .gitkeep
@@ -858,12 +873,14 @@ C:.
     |       run-no-legacy-smoke.php
     |
     +---shipments
+    |       admin-js-bundle-source.php
     |       run-carrier-adapter-registry-smoke.php
     |       run-russian-post-cancel-shipment-smoke.php
     |       run-russian-post-documents-smoke.php
     |       run-russian-post-shipment-price-smoke.php
     |       run-russian-post-shipments-smoke.php
     |       run-shipment-actual-cost-presentation-smoke.php
+    |       run-shipment-admin-js-structure-smoke.php
     |       run-shipment-allocation-smoke.php
     |       run-shipment-document-actions-smoke.php
     |       run-shipment-modal-extensions-smoke.php

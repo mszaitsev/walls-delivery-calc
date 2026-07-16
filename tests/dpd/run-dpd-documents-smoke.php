@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
+
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
@@ -128,7 +130,7 @@ $no_number = dpd_documents_service( new DpdDocumentsFakeSoap( array() ) )->creat
 dpd_documents_assert( empty( $no_number['success'] ) && str_contains( (string) $no_number['message'], 'номер заказа DPD' ), 'Missing DPD order number must be an error.' );
 $bad_status = dpd_documents_service( new DpdDocumentsFakeSoap( array() ) )->create_zip_for_order( new DpdDocumentsFakeOrder( 84, dpd_documents_shipment( array( 'dpd_event_code' => '1501' ) ) ) );
 dpd_documents_assert( empty( $bad_status['success'] ) && str_contains( (string) $bad_status['message'], '1401' ), 'Non-1401 status must deny document access.' );
-dpd_documents_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' ), 'requestDpdDocumentsDownload' ), 'Admin JS must include DPD document ZIP download flow.' );
+dpd_documents_assert( str_contains( wdc_shipment_admin_js_bundle_source(), 'requestDpdDocumentsDownload' ), 'Admin JS must include DPD document ZIP download flow.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 dpd_documents_assert( str_contains( $metabox_source, 'ShipmentDocumentDownloadService' ) && ! str_contains( $metabox_source, 'ACTION_DPD_DOCUMENTS_ZIP' ) && ! str_contains( $metabox_source, 'admin_post_dpd_documents_zip' ), 'Metabox must expose DPD documents through the common shipment document endpoint.' );
 dpd_documents_assert( str_contains( $metabox_source, 'status_payload_for_carrier' ) && str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, 'render_pickup_fields' ), 'Initial metabox render must use carrier status payload and modal extensions for DPD button/form state.' );

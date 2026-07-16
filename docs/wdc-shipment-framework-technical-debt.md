@@ -61,10 +61,10 @@
    - Migration sequence: extract read-only render helpers first, then introduce a carrier field provider after all current smoke coverage is stable.
 
 5. Carrier-specific JS validation in `shipments-admin.js`
-   - Current problem: common allocation JS is neutral, but carrier-specific validation and UI toggles still live in one admin script.
-   - Target architecture: common modal lifecycle remains in `shipments-admin.js`; carrier-specific behavior is isolated behind carrier-scoped functions or data-driven rules.
-   - Affected classes/files: `assets/admin/shipments-admin.js`, `OrderShipmentsMetabox`, DPD/CDEK/Russian Post/Yandex smoke tests.
-   - Migration sequence: keep current behavior, extract one carrier-specific section at a time only with source assertions and browser-free smoke coverage.
+   - Status: resolved in 0.117.4. The admin shipment runtime is split into `assets/admin/shipments/` modules: core helpers, preview, status rendering, polling, allocation, pickup/map interaction, carrier-neutral event wiring and carrier extensions for CDEK, DPD, Russian Post and Yandex.
+   - Preserved contract: `assets/admin/shipments-admin.js` is only the bootstrap entrypoint; `shipment-events.js`, `shipment-polling.js` and `shipment-status.js` own only generic behavior. Carrier selectors, sender/source picker wiring, document click handlers, address post-processing, DPD lifecycle wrappers, carrier-scoped Yandex cancellation UX, carrier status rows and CDEK default registration polling live in extensions via `registerShipmentCarrierHooks()`; existing DOM, selectors, field names, AJAX actions, payload shape, polling timing and carrier behavior are unchanged.
+   - Document visibility now uses normalized `label_actions` with the generic document action marker, not carrier-specific booleans in common status code. The structure smoke checks for duplicate classic-script function declarations, duplicate top-level `const`/`let` declarations and function/lexical top-level collisions; since 0.117.4 it keeps every lexical occurrence separately and self-tests the scanner against duplicate const/let declarations, const/let collisions, local declarations, comments, strings and comma-separated declarations.
+   - Remaining adjacent debt: DPD still has a carrier-specific two-stage lifecycle, but it is isolated as DPD behavior and is tracked separately below.
 
 6. DPD two-stage flow
    - Current problem: DPD still has a special two-stage registration/status flow that does not fully match the ordinary create path.

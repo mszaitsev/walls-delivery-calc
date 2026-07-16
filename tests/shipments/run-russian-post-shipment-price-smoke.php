@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/admin-js-bundle-source.php';
+
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
@@ -351,7 +353,7 @@ rp_shipment_price_assert( 'wdc-shipment-price-ok' === $price_class->invoke( $met
 rp_shipment_price_assert( 'wdc-shipment-price-warning' === $price_class->invoke( $metabox, 'warning' ), 'Metabox must expose warning price class.' );
 rp_shipment_price_assert( 'wdc-shipment-price-neutral' === $price_class->invoke( $metabox, 'neutral' ), 'Metabox must expose neutral price class.' );
 
-$js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$js = wdc_shipment_admin_js_bundle_source();
 rp_shipment_price_assert( is_string( $js ) && str_contains( $js, 'actual_cost_label' ), 'Shipments admin JS must render actual cost from status payload.' );
 $css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 rp_shipment_price_assert( is_string( $css ) && str_contains( $css, 'wdc-shipment-price-warning' ), 'Shipments admin CSS must include price warning class.' );

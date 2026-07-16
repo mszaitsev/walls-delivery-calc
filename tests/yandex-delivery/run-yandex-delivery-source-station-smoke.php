@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
+
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
@@ -163,7 +165,7 @@ yandex_source_assert( ! str_contains( $metabox_source, "update_option( 'yandex_s
 $draft_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 yandex_source_assert( str_contains( $draft_source, "'yandex_source_platform_station_id' => \$source_station" ) && str_contains( $draft_source, "'yandex_source_station_overridden' => \$source_station_overridden ? '1' : '0'" ) && str_contains( $draft_source, "'yandex_pickup_platform_station_id' => \$pickup_code" ), 'DraftFactory must submit selected temporary source separately from unchanged destination pickup point.' );
 
-$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$js_source = wdc_shipment_admin_js_bundle_source();
 yandex_source_assert( str_contains( $js_source, 'function yandexSourceDropoffContext' ) && str_contains( $js_source, 'purpose: \'source_dropoff\'' ) && str_contains( $js_source, "data.append('purpose', context.purpose || '')" ) && str_contains( $js_source, "data.append('source_location_id'" ) && str_contains( $js_source, "data.append('source_platform_station_id'" ), 'Shipment admin JS must route Yandex source map searches through the shared picker with purpose=source_dropoff and source context.' );
 yandex_source_assert( str_contains( $js_source, 'function pickupAddressSearchContext' ) && str_contains( $js_source, '!isYandexSourceDropoffContext(context)' ) && str_contains( $js_source, 'result.location_id = context.locationId || \'\'' ) && str_contains( $js_source, 'result.include_points = false' ) && str_contains( $js_source, 'window.WDCPickupApi.addressSearch(value, pickupAddressSearchContext(context), controller.signal)' ), 'Yandex source address search must use an unscoped all-Russia context without source location_id while other pickers keep scoped address search.' );
 yandex_source_assert( str_contains( $js_source, 'loadYandexSourceNearby' ) && str_contains( $js_source, "[10, 25, 50]" ) && str_contains( $js_source, "'nearby'" ) && str_contains( $js_source, "radiusKm: radius" ) && ! str_contains( $js_source, 'source_dropoff_global' ), 'Yandex source address search must reload nearby points with 10/25/50 km radius expansion and no global fallback.' );
