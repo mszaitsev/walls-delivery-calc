@@ -84,7 +84,7 @@
    - Migration sequence: keep source assertions/grep in smoke or review checklist to prevent reintroducing alias interfaces.
 
 10. Unified carrier regression suite
-   - Current problem: carrier regression exists as multiple targeted smokes, but a full post-refactor suite is still manual to assemble.
-   - Target architecture: one documented command/profile runs all shipment framework, Yandex, CDEK, DPD, Russian Post, Packaging and checkout regressions.
-   - Affected classes/files: `tests/*`, development workflow docs.
-   - Migration sequence: stabilize current smoke list, add a wrapper only after individual smoke failures are deterministic and baseline DPD preparation behavior is documented.
+   - Status: resolved in 0.119.0.
+   - `tests/shipments/run-shipment-regression-profile.php` is the canonical command for the deterministic Shipment Framework regression profile. It runs mandatory framework/carrier/status/core smokes as isolated PHP processes, validates the manifest, reports PASS/FAIL/BASELINE/SKIP/TIMEOUT/INFRASTRUCTURE counts, and returns non-zero only for new required failures, configuration errors, infrastructure timeout/failure or explicit baseline mismatches.
+   - Since 0.119.1 process infrastructure failures have a dedicated `INFRASTRUCTURE` status and exit code `3`, baseline matching cannot hide process-start failures, and skipped counts are scoped to the selected group.
+   - Known DPD/CDEK baseline candidates and Russian Post extended harness tests are separated from the default profile behind `--include-baseline` and `--include-optional`, so new failures are not silently treated as known baselines.
