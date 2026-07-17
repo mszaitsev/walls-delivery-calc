@@ -71,6 +71,11 @@
    - DPD adapter exposes the same neutral lifecycle shape as other carriers through `ShipmentLifecycleResult`, while preserving DPD-specific begin/submit/status API semantics internally. The shared admin JS reads `lifecycle`, calls the generic continuation endpoint with `continuation_token`, and no longer knows DPD attempt aliases or DPD submit/polling wrappers. Since 0.118.1 lifecycle `purpose` is not polling-specific.
    - Preserved contract: DPD persisted fields, notes, snapshots, request payload, polling interval/attempt behavior and button/document policy remain unchanged.
 
+6a. Carrier-specific backend AJAX extraction
+   - Status: resolved in 0.120.0.
+   - Shipment admin AJAX endpoint ownership moved from `OrderShipmentsMetabox` to controllers under `src/Shipments/Admin/Ajax/`, with `ShipmentAdminAjaxService` preserving the existing action names, nonce/capability checks, request parsing and carrier-specific orchestration. The metabox now keeps render/enqueue/modal shell and hook registration/delegation only.
+   - Preserved contract: AJAX action names, request/response payloads, JavaScript behavior, carrier APIs, documents, lifecycle, status, persistence, checkout and Packaging behavior are unchanged.
+
 7. Compatibility meta keys `yandex_item_rows` / `cdek_item_rows`
    - Status: resolved in 0.112.1. Yandex registration and CDEK creation now use only `shipment_item_rows`; Yandex also no longer rebuilds rows from `ShipmentPlace::items` when canonical rows are missing.
 

@@ -14,6 +14,8 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentStatusAjaxController;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
@@ -360,7 +362,7 @@ shipment_status_smoke_assert( DeliveryStatus::CANCELLED === $cancelled_saved['un
 shipment_status_smoke_assert( 'отменён' === $cancelled['status']['shipment_status_label'], 'Operation 46 without attr must expose Russian cancelled label.' );
 
 $GLOBALS['wdc_status_smoke_orders'] = array( 11 => $order );
-$metabox = new OrderShipmentsMetabox(
+$ajax_service = new ShipmentAdminAjaxService(
 	$repository,
 	( new ReflectionClass( OrderShipmentDraftFactory::class ) )->newInstanceWithoutConstructor(),
 	( new ReflectionClass( ShipmentCreationService::class ) )->newInstanceWithoutConstructor(),
@@ -368,10 +370,11 @@ $metabox = new OrderShipmentsMetabox(
 	$status_service,
 	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeAdapter( $status_service ) ) )
 );
+$ajax_status_controller = new ShipmentStatusAjaxController( $ajax_service );
 $_POST = array( 'order_id' => 11, 'shipment_key' => RussianPostDomesticSettings::CARRIER_KEY );
 $GLOBALS['wdc_status_smoke_can'] = false;
 try {
-	$metabox->ajax_update_status();
+	$ajax_status_controller->handle_update();
 	shipment_status_smoke_assert( false, 'AJAX without capability must be rejected.' );
 } catch ( ShipmentStatusAjaxResponse $response ) {
 	shipment_status_smoke_assert( false === $response->success && 403 === $response->status_code, 'AJAX without capability must return 403.' );
@@ -380,7 +383,7 @@ $GLOBALS['wdc_status_smoke_can'] = true;
 $GLOBALS['wdc_status_smoke_nonce'] = true;
 $GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-06T10:00:00+07:00', '2', 'Вручение', '1', 'Вручение адресату' ) );
 try {
-	$metabox->ajax_update_status();
+	$ajax_status_controller->handle_update();
 	shipment_status_smoke_assert( false, 'Valid AJAX must return JSON success.' );
 } catch ( ShipmentStatusAjaxResponse $response ) {
 	shipment_status_smoke_assert( true === $response->success, 'Valid AJAX must succeed: ' . json_encode( $response->data, JSON_UNESCAPED_UNICODE ) );

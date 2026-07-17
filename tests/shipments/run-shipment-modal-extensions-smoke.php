@@ -165,7 +165,7 @@ $yandex_source = (string) file_get_contents( $root . '/src/Shipments/YandexDeliv
 modal_ext_assert( str_contains( $metabox_source, 'modal_extensions->get' ) && str_contains( $metabox_source, 'render_fields' ), 'Common metabox must call modal extensions through the registry.' );
 modal_ext_assert( ! str_contains( $metabox_source, "name=\"date_pickup\"" ) && ! str_contains( $metabox_source, "name=\"postoffice_code\"" ) && ! str_contains( $metabox_source, "name=\"yandex_ready_from\"" ), 'Common delivery renderer must not keep DPD/Russian Post/Yandex delivery field markup.' );
 $render_start = strpos( $metabox_source, 'private function render_inner' );
-$render_end = strpos( $metabox_source, 'public function ajax_create', false === $render_start ? 0 : $render_start );
+$render_end = strpos( $metabox_source, 'private function dpd_courier_contact_history', false === $render_start ? 0 : $render_start );
 $render_source = false !== $render_start && false !== $render_end ? substr( $metabox_source, $render_start, $render_end - $render_start ) : '';
 $context_start = strpos( $render_source, '$modal_extension_context' );
 $pre_context_source = false !== $context_start ? substr( $render_source, 0, $context_start ) : $render_source;
