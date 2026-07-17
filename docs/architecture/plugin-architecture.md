@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.123.0
+Version: 0.124.0
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -60,3 +60,5 @@ Generic shipment JS lives in `assets/admin/shipments/*.js`. Carrier extensions l
 ## Regression
 
 The unified shipment runner is `tests/shipments/run-shipment-regression-profile.php`. Its manifest is `tests/shipments/regression/shipment-regression-manifest.php`. The default profile is mandatory except explicit `baseline` and `optional` entries documented in [operations/technical-debt.md](../operations/technical-debt.md).
+
+`tests/architecture/run-plugin-architecture-smoke.php` protects architecture invariants for adapters, document providers, registries, composition root ownership, canonical payloads, generic shipment JS boundaries, canonical docs, and version consistency.

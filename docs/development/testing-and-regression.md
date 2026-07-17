@@ -1,12 +1,13 @@
 # Testing And Regression
 
-Version: 0.123.0
+Version: 0.124.0
 
 ## Commands
 
 ```bash
 php tests/shipments/run-shipment-regression-profile.php --list
 php tests/shipments/run-shipment-regression-profile.php --group=framework
+php tests/architecture/run-plugin-architecture-smoke.php
 php tests/shipments/run-shipment-regression-profile.php --group=cdek
 php tests/shipments/run-shipment-regression-profile.php --group=dpd
 php tests/shipments/run-shipment-regression-profile.php --group=russian-post
@@ -21,6 +22,8 @@ Also run `php -l` for changed PHP files, `node --check` for changed JS files, do
 
 The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. Shipment and carrier smoke tests that protect framework contracts should appear there.
 
+The plugin architecture smoke is `framework.plugin-architecture`; it is registered in the framework group and checks architecture boundaries rather than carrier business behavior.
+
 Allowed matrix values:
 
 - `contract`: shared framework contract smoke.
@@ -34,6 +37,7 @@ Allowed matrix values:
 
 | Capability | Framework | CDEK | DPD | Russian Post | Yandex |
 | --- | --- | --- | --- | --- | --- |
+| architecture invariants | `contract`: `framework.plugin-architecture` | `N/A` | `N/A` | `N/A` | `N/A` |
 | create | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
 | preview | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-payload` |
 | persistence | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |

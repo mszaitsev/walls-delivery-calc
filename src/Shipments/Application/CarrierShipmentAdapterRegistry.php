@@ -23,7 +23,14 @@ final class CarrierShipmentAdapterRegistry {
 	}
 
 	public function register( CarrierShipmentAdapterInterface $adapter ): void {
-		$this->adapters[ $adapter->carrier_key() ] = $adapter;
+		$key = trim( $adapter->carrier_key() );
+		if ( '' === $key ) {
+			throw new \InvalidArgumentException( 'Shipment adapter carrier key must not be empty.' );
+		}
+		if ( isset( $this->adapters[ $key ] ) ) {
+			throw new \InvalidArgumentException( 'Duplicate shipment adapter key: ' . $key );
+		}
+		$this->adapters[ $key ] = $adapter;
 	}
 
 	public function get( string $carrier_key ): ?CarrierShipmentAdapterInterface {
