@@ -81,11 +81,11 @@ $payload_1401 = $adapter->status_payload( new stdClass(), dpd_documents_shipment
 dpd_documents_assert( ! empty( $payload_1401['can_cancel'] ) && empty( $payload_1401['can_remove_from_order'] ) && ! empty( $payload_1401['can_download_dpd_documents'] ), 'Initial DPD payload for 1401 must show cancel/download and hide remove.' );
 $payload_1301 = $adapter->status_payload( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1301' ) ) );
 dpd_documents_assert( empty( $payload_1301['can_cancel'] ) && ! empty( $payload_1301['can_remove_from_order'] ) && empty( $payload_1301['can_download_dpd_documents'] ), 'Initial DPD payload for 1301 must show remove and hide cancel/download.' );
-dpd_documents_assert( 'Скачать документы' === (string) $adapter->label_actions( new stdClass(), dpd_documents_shipment() )[0]['label'], 'Button must be visible for DPD 1401 with order number.' );
-dpd_documents_assert( array() === $adapter->label_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1001' ) ) ), 'Button must be hidden for DPD 1001.' );
-dpd_documents_assert( array() === $adapter->label_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1501' ) ) ), 'Button must be hidden for DPD 1501.' );
+dpd_documents_assert( 'Скачать документы' === (string) $adapter->document_actions( new stdClass(), dpd_documents_shipment() )[0]['label'], 'Button must be visible for DPD 1401 with order number.' );
+dpd_documents_assert( array() === $adapter->document_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1001' ) ) ), 'Button must be hidden for DPD 1001.' );
+dpd_documents_assert( array() === $adapter->document_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1501' ) ) ), 'Button must be hidden for DPD 1501.' );
 foreach ( array( 'delivered', 'cancelled', 'unknown', '2201', '' ) as $code ) {
-	dpd_documents_assert( array() === $adapter->label_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => $code ) ) ), 'Button must be hidden for non-1401 status ' . $code . '.' );
+	dpd_documents_assert( array() === $adapter->document_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => $code ) ) ), 'Button must be hidden for non-1401 status ' . $code . '.' );
 }
 
 $soap = new DpdDocumentsFakeSoap( array( array( 'file' => dpd_documents_pdf( 'invoice' ) ), array( 'file' => base64_encode( dpd_documents_pdf( 'label' ) ), 'order' => array( 'orderNum' => '05120002MOW', 'status' => 'OrderPending' ) ) ) );

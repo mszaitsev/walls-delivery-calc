@@ -58,7 +58,7 @@ final class ShipmentPersistenceAdapter implements CarrierShipmentAdapterInterfac
 	public function attach_manual( object $order, array $payload ): array { unset( $order, $payload ); return array(); }
 	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
 	public function remove_from_order( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
-	public function label_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }
+	public function document_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }
 	public function supports_status_auto_sync(): bool { return false; }
 	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ); }
 	public function auto_sync_throttle_microseconds(): int { return 0; }
@@ -80,7 +80,7 @@ final class ShipmentPersistenceOrderAwareAdapter implements CarrierShipmentAdapt
 	public function attach_manual( object $order, array $payload ): array { unset( $order, $payload ); return array(); }
 	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
 	public function remove_from_order( object $order, string $shipment_key = '' ): array { unset( $order, $shipment_key ); return array(); }
-	public function label_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }
+	public function document_actions( object $order, array $shipment ): array { unset( $order, $shipment ); return array(); }
 	public function supports_status_auto_sync(): bool { return false; }
 	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ); }
 	public function auto_sync_throttle_microseconds(): int { return 0; }

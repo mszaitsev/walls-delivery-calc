@@ -276,7 +276,7 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface, Carri
 	 * @param array<string,mixed> $shipment
 	 * @return array<int,array<string,mixed>>
 	 */
-	public function label_actions( object $order, array $shipment ): array {
+	public function document_actions( object $order, array $shipment ): array {
 		unset( $order );
 		if ( ! DpdShipmentDocumentService::can_download_documents( $shipment ) ) {
 			return array();

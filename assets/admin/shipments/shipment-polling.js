@@ -248,7 +248,7 @@
         if (window.console && window.console.warn) {
           window.console.warn('Не удалось сохранить состояние автоматической проверки отправления.', error);
         }
-        updateShipmentButtons(box, { hasShipment: true, canCreate: false, canAttachManual: false, canCancel: false, canRemove: true, canUpdate: true, labelActions: [] });
+        updateShipmentButtons(box, { hasShipment: true, canCreate: false, canAttachManual: false, canCancel: false, canRemove: true, canUpdate: true, documentActions: [] });
         const message = box && box.querySelector('[data-wdc-shipment-status-message]');
         if (message) {
           message.dataset.status = 'warning';
@@ -369,7 +369,7 @@
       .then((payload) => {
         if (!payload || !payload.success) {
           if (payload && payload.data && payload.data.temporary_can_remove) {
-            updateShipmentButtons(box, { hasShipment: true, canCancel: false, canRemove: true, canUpdate: true, labelActions: [] });
+            updateShipmentButtons(box, { hasShipment: true, canCancel: false, canRemove: true, canUpdate: true, documentActions: [] });
           }
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
         }

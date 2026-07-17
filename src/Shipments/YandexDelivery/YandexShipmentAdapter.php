@@ -148,7 +148,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function mark_polling_exhausted( object $order, int $attempts, string $purpose = 'registration' ): array { return $this->registration->mark_polling_exhausted( $order, $attempts, $purpose ); }
 
 	/** @param array<string,mixed> $shipment @return array<int,array<string,mixed>> */
-	public function label_actions( object $order, array $shipment ): array {
+	public function document_actions( object $order, array $shipment ): array {
 		unset( $order );
 		if ( ! $this->label_policy->can_download( $shipment ) ) {
 			return array();

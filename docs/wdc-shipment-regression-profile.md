@@ -1,6 +1,6 @@
 # Shipment Regression Profile
 
-Version: 0.120.1.
+Version: 0.121.0.
 
 Canonical command:
 
