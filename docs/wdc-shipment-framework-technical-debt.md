@@ -64,7 +64,7 @@
    - Status: resolved in 0.117.4. The admin shipment runtime is split into `assets/admin/shipments/` modules: core helpers, preview, status rendering, polling, allocation, pickup/map interaction, carrier-neutral event wiring and carrier extensions for CDEK, DPD, Russian Post and Yandex.
    - Preserved contract: `assets/admin/shipments-admin.js` is only the bootstrap entrypoint; `shipment-events.js`, `shipment-polling.js` and `shipment-status.js` own only generic behavior. Carrier selectors, sender/source picker wiring, document click handlers, address post-processing, carrier-scoped Yandex cancellation UX, carrier status rows and CDEK default registration polling live in extensions via `registerShipmentCarrierHooks()`; DPD lifecycle continuation now uses the common `ShipmentLifecycleResult`/`wdc_continue_shipment_lifecycle` contract. Existing DOM, selectors, field names, AJAX actions, payload shape, polling timing and carrier behavior are unchanged.
    - Document visibility now uses normalized `label_actions` with the generic document action marker, not carrier-specific booleans in common status code. The structure smoke checks for duplicate classic-script function declarations, duplicate top-level `const`/`let` declarations and function/lexical top-level collisions; since 0.117.4 it keeps every lexical occurrence separately and self-tests the scanner against duplicate const/let declarations, const/let collisions, local declarations, comments, strings and comma-separated declarations.
-   - Backend AJAX extraction was closed in 0.120.0; remaining adjacent debt is limited to backend AJAX controller refinement as needed.
+   - Backend AJAX extraction was closed in 0.120.0, and 0.120.1 tightened the metabox/controller constructor contract plus runtime callback smoke coverage; remaining adjacent debt is limited to backend AJAX controller refinement as needed.
 
 6. DPD two-stage flow
    - Status: resolved in 0.118.0.
@@ -72,8 +72,9 @@
    - Preserved contract: DPD persisted fields, notes, snapshots, request payload, polling interval/attempt behavior and button/document policy remain unchanged.
 
 6a. Carrier-specific backend AJAX extraction
-   - Status: resolved in 0.120.0.
+   - Status: resolved in 0.120.1.
    - Shipment admin AJAX endpoint ownership moved from `OrderShipmentsMetabox` to controllers under `src/Shipments/Admin/Ajax/`. Concrete controllers own nonce/capability checks, request parsing, endpoint orchestration and JSON responses; `ShipmentAdminAjaxService` remains only a small helper, and shared carrier UI payload construction lives in `ShipmentAdminCarrierUiPayloadBuilder`. The metabox now keeps render/enqueue/modal shell and hook registration/delegation only.
+   - 0.120.1 tightened the constructor boundary so all AJAX controllers are required metabox dependencies and added runtime smoke coverage that verifies every registered `wp_ajax_*` callback is callable.
    - Preserved contract: AJAX action names, request/response payloads, JavaScript behavior, carrier APIs, documents, lifecycle, status, persistence, checkout and Packaging behavior are unchanged.
 
 7. Compatibility meta keys `yandex_item_rows` / `cdek_item_rows`

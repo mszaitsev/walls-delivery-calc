@@ -1,6 +1,7 @@
-## Shipment admin AJAX 0.120.0
+## Shipment admin AJAX 0.120.1
 - `OrderShipmentsMetabox` keeps render/enqueue/modal shell, nonce localization and hook registration, but `wp_ajax_*` callbacks now delegate to controller dependencies from `src/Shipments/Admin/Ajax/`.
 - `ShipmentCreateAjaxController`, `ShipmentPreviewAjaxController`, `ShipmentStatusAjaxController`, `ShipmentLifecycleAjaxController`, `ShipmentRemovalAjaxController`, `ShipmentManualAttachAjaxController`, `ShipmentAddressAjaxController`, `ShipmentDocumentsAjaxController` and `ShipmentProductsAjaxController` own their endpoint request parsing, capability/nonce checks, orchestration and JSON responses. `ShipmentAdminAjaxService` is only a small shared helper, and `ShipmentAdminCarrierUiPayloadBuilder` owns shared carrier UI payload construction.
+- Since 0.120.1 all AJAX controllers are required `OrderShipmentsMetabox` constructor dependencies, and the admin AJAX smoke verifies the registered `wp_ajax_*` callbacks are callable at runtime.
 - Existing AJAX action names, nonce action, payload keys, JS selectors and carrier APIs are unchanged.
 
 ## Shipment regression profile 0.119.1

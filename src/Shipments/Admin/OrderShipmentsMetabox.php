@@ -60,6 +60,15 @@ final class OrderShipmentsMetabox {
 		private OrderShipmentDraftFactory $drafts,
 		private DeliveryServiceRepository $services,
 		private ShipmentStatusUpdateService $status_updates,
+		private ShipmentCreateAjaxController $ajax_create_controller,
+		private ShipmentLifecycleAjaxController $ajax_lifecycle_controller,
+		private ShipmentPreviewAjaxController $ajax_preview_controller,
+		private ShipmentStatusAjaxController $ajax_status_controller,
+		private ShipmentRemovalAjaxController $ajax_removal_controller,
+		private ShipmentManualAttachAjaxController $ajax_manual_attach_controller,
+		private ShipmentAddressAjaxController $ajax_address_controller,
+		private ShipmentDocumentsAjaxController $ajax_documents_controller,
+		private ShipmentProductsAjaxController $ajax_products_controller,
 		private ?CdekOrderStatusService $cdek_status_updates = null,
 		private ?ShipmentBacklogService $backlog = null,
 		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
@@ -69,16 +78,7 @@ final class OrderShipmentsMetabox {
 		private ?ShipmentMetaboxButtonPolicy $button_policy = null,
 		private ?ShipmentDocumentProviderRegistry $document_providers = null,
 		private ?ShipmentDocumentDownloadService $document_downloads = null,
-		private ?ShipmentModalExtensionRegistry $modal_extensions = null,
-		private ?ShipmentCreateAjaxController $ajax_create_controller = null,
-		private ?ShipmentLifecycleAjaxController $ajax_lifecycle_controller = null,
-		private ?ShipmentPreviewAjaxController $ajax_preview_controller = null,
-		private ?ShipmentStatusAjaxController $ajax_status_controller = null,
-		private ?ShipmentRemovalAjaxController $ajax_removal_controller = null,
-		private ?ShipmentManualAttachAjaxController $ajax_manual_attach_controller = null,
-		private ?ShipmentAddressAjaxController $ajax_address_controller = null,
-		private ?ShipmentDocumentsAjaxController $ajax_documents_controller = null,
-		private ?ShipmentProductsAjaxController $ajax_products_controller = null
+		private ?ShipmentModalExtensionRegistry $modal_extensions = null
 	) {
 	}
 

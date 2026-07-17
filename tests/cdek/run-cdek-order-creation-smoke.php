@@ -995,11 +995,23 @@ $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	cdek_status_updates: $ajax_status
 );
 $ajax_create_controller = new ShipmentCreateAjaxController( $ajax_repository, $drafts, $ajax_creation, $ajax_payloads );
+$ajax_controller_double = static function ( string $class ): object {
+	return ( new ReflectionClass( $class ) )->newInstanceWithoutConstructor();
+};
 $metabox = new OrderShipmentsMetabox(
 	$ajax_repository,
 	$drafts,
 	$services,
 	$status_updates,
+	ajax_create_controller: $ajax_create_controller,
+	ajax_lifecycle_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentLifecycleAjaxController::class ),
+	ajax_preview_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController::class ),
+	ajax_status_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentStatusAjaxController::class ),
+	ajax_removal_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentRemovalAjaxController::class ),
+	ajax_manual_attach_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController::class ),
+	ajax_address_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController::class ),
+	ajax_documents_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController::class ),
+	ajax_products_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController::class ),
 	cdek_status_updates: $ajax_status,
 	modal_extensions: new ShipmentModalExtensionRegistry( array( new CdekShipmentModalExtension() ) )
 );

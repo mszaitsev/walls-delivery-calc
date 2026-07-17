@@ -767,7 +767,35 @@ final class Plugin {
 		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController( $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder::class ) ) );
 		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController( $this->container->get( RussianPostAddressNormalizer::class ), $this->container->get( CdekDeliveryPointService::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( \WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService::class ), $this->container->get( AddressSuggestionService::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ) ) );
 		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController( $this->container->get( OrderShipmentRepository::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder::class ), $this->container->get( CdekBarcodePrintService::class ) ) );
-		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController() );		$this->container->register( OrderShipmentsMetabox::class, fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( CdekOrderStatusService::class ), $this->container->get( ShipmentBacklogService::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->environment->plugin_url(), $this->environment->version(), $this->container->get( CarrierShipmentAdapterRegistry::class ), $this->container->get( ShipmentMetaboxButtonPolicy::class ), $this->container->get( ShipmentDocumentProviderRegistry::class ), $this->container->get( ShipmentDocumentDownloadService::class ), $this->container->get( ShipmentModalExtensionRegistry::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentLifecycleAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentStatusAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentRemovalAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController::class ), $this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController::class ) ) );
+		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController() );
+		$this->container->register(
+			OrderShipmentsMetabox::class,
+			fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox(
+				$this->container->get( OrderShipmentRepository::class ),
+				$this->container->get( OrderShipmentDraftFactory::class ),
+				$this->container->get( DeliveryServiceRepository::class ),
+				$this->container->get( ShipmentStatusUpdateService::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentLifecycleAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentStatusAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentRemovalAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController::class ),
+				$this->container->get( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController::class ),
+				$this->container->get( CdekOrderStatusService::class ),
+				$this->container->get( ShipmentBacklogService::class ),
+				$this->container->get( RussianPostPickupPointTypeSettings::class ),
+				$this->environment->plugin_url(),
+				$this->environment->version(),
+				$this->container->get( CarrierShipmentAdapterRegistry::class ),
+				$this->container->get( ShipmentMetaboxButtonPolicy::class ),
+				$this->container->get( ShipmentDocumentProviderRegistry::class ),
+				$this->container->get( ShipmentDocumentDownloadService::class ),
+				$this->container->get( ShipmentModalExtensionRegistry::class )
+			)
+		);
 		$this->container->register( ShipmentStatusesAdminPage::class, fn(): ShipmentStatusesAdminPage => new ShipmentStatusesAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( ShipmentStatusAutoSyncService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
 	}
 
