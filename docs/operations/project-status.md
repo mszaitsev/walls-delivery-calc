@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.123.0
+Version: 0.124.1
 
 Stable subsystems:
 
@@ -11,6 +11,7 @@ Stable subsystems:
 - rules engine;
 - shipment adapters, persistence mappers, lifecycle continuation, document providers, modal extensions, admin AJAX, carrier JS extensions;
 - provider-owned document action contract;
+- bounded plugin architecture smoke in the framework regression group;
 - unified shipment regression profile.
 
 Active known limitations:

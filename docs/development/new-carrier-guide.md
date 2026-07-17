@@ -1,6 +1,6 @@
 # New Carrier Guide
 
-Version: 0.123.0
+Version: 0.124.1
 
 Use `ExampleCarrier` as a mental model only; do not add it to production. This guide is implementable: follow it in order and add only capabilities the carrier actually supports.
 
@@ -380,6 +380,7 @@ Update this guide only when the carrier onboarding process changes. Put carrier-
 - API client has timeout and redacted logging.
 - Quote path works or is intentionally absent.
 - Adapter implements every interface method.
+- Adapter public API remains limited to implemented contracts and generic guarded extension points.
 - Mapper is registered in `ShipmentCreationService`.
 - Status payload uses canonical fields.
 - Tracking presentation uses canonical shape.

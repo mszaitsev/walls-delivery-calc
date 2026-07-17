@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 return array(
+	'framework.plugin-architecture' => array( 'path' => 'tests/architecture/run-plugin-architecture-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.lifecycle-contract' => array( 'path' => 'tests/shipments/run-shipment-lifecycle-contract-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.admin-ajax' => array( 'path' => 'tests/shipments/run-shipment-admin-ajax-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.admin-js-structure' => array( 'path' => 'tests/shipments/run-shipment-admin-js-structure-smoke.php', 'groups' => array( 'framework' ) ),

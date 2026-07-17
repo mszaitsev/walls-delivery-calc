@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000B2 A0AC:74BD
+Volume serial number is 000000D1 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -764,6 +764,9 @@ C:.
     +---address
     |       run-address-smoke.php
     |       run-dadata-suggestions-smoke.php
+    |
+    +---architecture
+    |       run-plugin-architecture-smoke.php
     |
     +---calendar
     |       run-calendar-smoke.php
