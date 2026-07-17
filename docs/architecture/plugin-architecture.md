@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.124.0
+Version: 0.124.1
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -61,4 +61,6 @@ Generic shipment JS lives in `assets/admin/shipments/*.js`. Carrier extensions l
 
 The unified shipment runner is `tests/shipments/run-shipment-regression-profile.php`. Its manifest is `tests/shipments/regression/shipment-regression-manifest.php`. The default profile is mandatory except explicit `baseline` and `optional` entries documented in [operations/technical-debt.md](../operations/technical-debt.md).
 
-`tests/architecture/run-plugin-architecture-smoke.php` protects architecture invariants for adapters, document providers, registries, composition root ownership, canonical payloads, generic shipment JS boundaries, canonical docs, and version consistency.
+`tests/architecture/run-plugin-architecture-smoke.php` protects bounded architecture invariants for adapters, document providers, registries, composition-root wiring, canonical payloads, generic shipment JS boundaries, canonical docs, and version consistency.
+
+The smoke uses Reflection to discover production adapter and document-provider implementations. Adapter public API is allowed only from implemented interfaces, a real parent class, and a small documented exception list for existing guarded hooks; production `method_exists()` call sites do not expand the whitelist. Providers are not instantiated without constructors, so duplicate production provider keys are not inferred from uninitialized objects; duplicate registration behavior is checked at the registry contract level. The composition-root check guards the current `Container::register()` wiring pattern outside `Plugin.php`, not every possible future way to create objects. Generic shipment JS is checked for carrier-key branching, with a narrow pickup exception for the existing pickup context helpers in `assets/admin/shipments/shipment-picker.js`.

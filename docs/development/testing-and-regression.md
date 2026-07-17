@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.124.0
+Version: 0.124.1
 
 ## Commands
 
@@ -22,7 +22,7 @@ Also run `php -l` for changed PHP files, `node --check` for changed JS files, do
 
 The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. Shipment and carrier smoke tests that protect framework contracts should appear there.
 
-The plugin architecture smoke is `framework.plugin-architecture`; it is registered in the framework group and checks architecture boundaries rather than carrier business behavior.
+The plugin architecture smoke is `framework.plugin-architecture`; it is registered in the framework group and checks architecture boundaries rather than carrier business behavior. It favors dynamic Reflection-based checks where the contract is inspectable. Where runtime proof would require changing production construction, the smoke checks a narrower contract instead: registry duplicate behavior is tested with stubs, providers are discovered without uninitialized method calls, and composition-root ownership is checked for the current `Container::register()` wiring pattern.
 
 Allowed matrix values:
 

@@ -121,20 +121,39 @@ function plugin_architecture_public_methods_for_interface( string $interface ): 
 }
 
 /**
+ * Existing guarded adapter hooks that are not official adapter contract methods yet.
+ *
+ * These exceptions are intentionally explicit: production call sites must not
+ * expand the adapter public API whitelist automatically.
+ *
+ * @return array<class-string,array<string,string>>
+ */
+function plugin_architecture_adapter_public_api_exceptions(): array {
+	return array(
+		\WallsShop\WDC\Shipments\Dpd\DpdShipmentAdapter::class => array(
+			'begin_registration' => 'DPD lifecycle bootstrap hook used by the create AJAX controller.',
+		),
+		\WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentAdapter::class => array(
+			'create_for_order' => 'Yandex order-aware creation hook used by ShipmentCreationService.',
+			'mark_polling_exhausted' => 'Yandex polling exhaustion hook used by the status AJAX controller.',
+		),
+	);
+}
+
+/**
  * @return array<string,bool>
  */
-function plugin_architecture_dynamic_adapter_methods(): array {
+function plugin_architecture_guarded_adapter_methods(): array {
 	$methods = array();
-	foreach ( array( 'src/Shipments/Application', 'src/Shipments/Admin/Ajax' ) as $dir ) {
-		foreach ( plugin_architecture_php_files( $dir ) as $file ) {
-			$source = (string) file_get_contents( $file );
-			if ( preg_match_all( '/method_exists\s*\(\s*\$adapter\s*,\s*[\'"]([A-Za-z_][A-Za-z0-9_]*)[\'"]\s*\)/', $source, $matches ) ) {
-				foreach ( $matches[1] as $method ) {
-					$methods[ $method ] = true;
-				}
+	foreach ( plugin_architecture_php_files( 'src/Shipments' ) as $file ) {
+		$source = (string) file_get_contents( $file );
+		if ( preg_match_all( '/method_exists\s*\(\s*\$adapter\s*,\s*[\'"]([A-Za-z_][A-Za-z0-9_]*)[\'"]\s*\)/', $source, $matches ) ) {
+			foreach ( $matches[1] as $method ) {
+				$methods[ $method ] = true;
 			}
 		}
 	}
+	ksort( $methods );
 
 	return $methods;
 }
@@ -156,6 +175,62 @@ function plugin_architecture_generic_js_files(): array {
 	sort( $files );
 
 	return $files;
+}
+
+/**
+ * @return array<int,string>
+ */
+function plugin_architecture_js_files( string $relative_dir ): array {
+	$root = plugin_architecture_path( $relative_dir );
+	plugin_architecture_assert( is_dir( $root ), 'Expected JS directory does not exist: ' . $relative_dir );
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root, FilesystemIterator::SKIP_DOTS ) );
+	$files = array();
+	foreach ( $iterator as $file ) {
+		if ( $file instanceof SplFileInfo && 'js' === strtolower( $file->getExtension() ) ) {
+			$files[] = $file->getPathname();
+		}
+	}
+	sort( $files );
+
+	return $files;
+}
+
+function plugin_architecture_remove_js_function( string $source, string $function_name ): string {
+	$needle = 'function ' . $function_name . '(';
+	$start = strpos( $source, $needle );
+	if ( false === $start ) {
+		return $source;
+	}
+	$brace = strpos( $source, '{', $start );
+	if ( false === $brace ) {
+		return $source;
+	}
+	$depth = 0;
+	$length = strlen( $source );
+	for ( $i = $brace; $i < $length; $i++ ) {
+		$char = $source[ $i ];
+		if ( '{' === $char ) {
+			$depth++;
+		} elseif ( '}' === $char ) {
+			$depth--;
+			if ( 0 === $depth ) {
+				return substr( $source, 0, $start ) . "\n/* architecture smoke: legacy pickup block intentionally excluded */\n" . substr( $source, $i + 1 );
+			}
+		}
+	}
+
+	return $source;
+}
+
+function plugin_architecture_source_for_generic_js_check( string $source, string $relative_path ): string {
+	if ( 'assets/admin/shipments/shipment-picker.js' !== $relative_path ) {
+		return $source;
+	}
+
+	return plugin_architecture_remove_js_function(
+		plugin_architecture_remove_js_function( $source, 'pickupPointTitle' ),
+		'senderPickupContext'
+	);
 }
 
 function plugin_architecture_assert_no_carrier_key_branch( string $source, string $label ): void {
@@ -214,13 +289,13 @@ plugin_architecture_assert( array() !== $adapters, 'At least one shipment adapte
 plugin_architecture_assert( array() !== $providers, 'At least one shipment document provider implementation must be discoverable.' );
 
 $adapter_contract_methods = plugin_architecture_public_methods_for_interface( $adapter_interface );
-$dynamic_adapter_methods = plugin_architecture_dynamic_adapter_methods();
+$adapter_public_api_exceptions = plugin_architecture_adapter_public_api_exceptions();
 plugin_architecture_assert( ! isset( $adapter_contract_methods['document_actions'] ), 'Adapter interface must not contain adapter-level document action method.' );
 
 foreach ( $adapters as $adapter_class ) {
 	$reflection = new ReflectionClass( $adapter_class );
 	$source = (string) file_get_contents( (string) $reflection->getFileName() );
-	$allowed = $adapter_contract_methods + $dynamic_adapter_methods;
+	$allowed = $adapter_contract_methods;
 	foreach ( $reflection->getInterfaceNames() as $interface ) {
 		foreach ( plugin_architecture_public_methods_for_interface( $interface ) as $method => $_ ) {
 			$allowed[ $method ] = true;
@@ -231,6 +306,10 @@ foreach ( $adapters as $adapter_class ) {
 		foreach ( $parent->getMethods( ReflectionMethod::IS_PUBLIC ) as $method ) {
 			$allowed[ $method->getName() ] = true;
 		}
+	}
+	foreach ( $adapter_public_api_exceptions[ $adapter_class ] ?? array() as $method => $_reason ) {
+		$allowed[ $method ] = true;
+		plugin_architecture_assert( $reflection->hasMethod( $method ) && $reflection->getMethod( $method )->isPublic(), $adapter_class . ' adapter public API exception must remain an existing public method: ' . $method );
 	}
 	foreach ( $adapter_contract_methods as $method => $_ ) {
 		plugin_architecture_assert( $reflection->hasMethod( $method ), $adapter_class . ' must implement adapter contract method ' . $method . '.' );
@@ -253,18 +332,22 @@ foreach ( $adapters as $adapter_class ) {
 	}
 }
 
-$provider_keys = array();
+$official_guarded_adapter_methods = $adapter_contract_methods;
+foreach ( $adapter_public_api_exceptions as $methods ) {
+	foreach ( $methods as $method => $_reason ) {
+		$official_guarded_adapter_methods[ $method ] = true;
+	}
+}
+foreach ( plugin_architecture_guarded_adapter_methods() as $method => $_ ) {
+	plugin_architecture_assert( isset( $official_guarded_adapter_methods[ $method ] ), 'Guarded adapter method_exists() call must target an official adapter method or an explicit smoke exception: ' . $method );
+}
+
 $provider_contract_methods = plugin_architecture_public_methods_for_interface( $provider_interface );
 foreach ( $providers as $provider_class ) {
 	$reflection = new ReflectionClass( $provider_class );
 	foreach ( array( 'carrier_key', 'actions', 'download' ) as $method ) {
 		plugin_architecture_assert( isset( $provider_contract_methods[ $method ] ) && $reflection->hasMethod( $method ), $provider_class . ' must implement provider method ' . $method . '.' );
 	}
-	$provider = $reflection->newInstanceWithoutConstructor();
-	$key = sanitize_key( (string) $provider->carrier_key() );
-	plugin_architecture_assert( '' !== $key, $provider_class . ' must expose a non-empty carrier key.' );
-	plugin_architecture_assert( ! isset( $provider_keys[ $key ] ), 'Duplicate document provider carrier key: ' . $key );
-	$provider_keys[ $key ] = $provider_class;
 }
 
 $creation_source = plugin_architecture_source( 'src/Shipments/Application/ShipmentCreationService.php' );
@@ -301,7 +384,7 @@ foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 	if ( 'src/Core/Plugin.php' === $relative ) {
 		continue;
 	}
-	plugin_architecture_assert( ! str_contains( $source, '$this->container->register(' ), 'Container service registration must stay in Plugin.php, found in ' . $relative );
+	plugin_architecture_assert( 1 !== preg_match( '/(?:\$this->container|\$container)->register\s*\(/', $source ), 'Container register() composition wiring using the current container syntax must stay in Plugin.php, found in ' . $relative );
 }
 plugin_architecture_assert( str_contains( $plugin_source, 'CarrierShipmentAdapterRegistry::class' ) && str_contains( $plugin_source, 'ShipmentDocumentProviderRegistry::class' ) && str_contains( $plugin_source, 'ShipmentModalExtensionRegistry::class' ), 'Composition root must register shipment registries.' );
 
@@ -309,24 +392,20 @@ $js_source = '';
 foreach ( plugin_architecture_generic_js_files() as $file ) {
 	$source = (string) file_get_contents( $file );
 	$js_source .= "\n" . $source;
-	if ( str_contains( $source, 'data-wdc-pickup-carrier-key' ) ) {
-		continue;
-	}
-	plugin_architecture_assert_no_carrier_key_branch( $source, str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) ) );
+	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+	plugin_architecture_assert_no_carrier_key_branch( plugin_architecture_source_for_generic_js_check( $source, $relative ), $relative );
 }
 plugin_architecture_assert( str_contains( $metabox_source . $payload_builder_source, 'document_actions' ) && str_contains( $js_source, 'documentActions' ), 'Canonical document_actions wire key and documentActions JS state must exist.' );
 $legacy_document_payload_key = 'label_' . 'actions';
-foreach ( array( 'src', 'assets/admin/shipments', 'tests/shipments', 'tests/architecture' ) as $dir ) {
+foreach ( array( 'src', 'tests/shipments', 'tests/architecture' ) as $dir ) {
 	foreach ( plugin_architecture_php_files( $dir ) as $file ) {
 		$source = (string) file_get_contents( $file );
 		plugin_architecture_assert( ! str_contains( $source, $legacy_document_payload_key ), 'Legacy document payload alias must be absent from ' . str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) ) );
 	}
 }
-foreach ( array( 'assets/admin/shipments' ) as $dir ) {
-	foreach ( glob( plugin_architecture_path( $dir ) . DIRECTORY_SEPARATOR . '*.js' ) ?: array() as $file ) {
-		$source = (string) file_get_contents( $file );
-		plugin_architecture_assert( ! str_contains( $source, $legacy_document_payload_key ), 'Legacy document payload alias must be absent from ' . str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) ) );
-	}
+foreach ( plugin_architecture_js_files( 'assets/admin/shipments' ) as $file ) {
+	$source = (string) file_get_contents( $file );
+	plugin_architecture_assert( ! str_contains( $source, $legacy_document_payload_key ), 'Legacy document payload alias must be absent from ' . str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) ) );
 }
 
 foreach ( array( 'admin_post_cdek_barcode_pdf', 'admin_post_dpd_documents_zip', 'admin_post_yandex_label_pdf', 'ACTION_CDEK_BARCODE_PDF', 'ACTION_DPD_DOCUMENTS_ZIP', 'ACTION_YANDEX_LABEL_PDF' ) as $old_handler ) {
