@@ -182,7 +182,6 @@ final class StatusAutoSyncFakeAdapter implements CarrierShipmentAdapterInterface
 	public function attach_manual( object $order, array $payload ): array { return array( 'success' => true ); }
 	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => true ); }
 	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => true ); }
-	public function document_actions( object $order, array $shipment ): array { return array(); }
 	public function supports_status_auto_sync(): bool { return true; }
 	public function tracking_identifier( array $shipment ): string {
 		foreach ( array( 'tracking_number', 'barcode', 'cdek_number', 'external_id', 'uuid', 'entity_uuid', 'request_uuid' ) as $key ) {

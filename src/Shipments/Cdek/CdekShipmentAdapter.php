@@ -20,8 +20,7 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		private CdekCreateRequestBuilder $builder,
 		private ?Logger $logger = null,
 		private ?OrderShipmentRepository $repository = null,
-		private ?CdekOrderStatusService $status_updates = null,
-		private ?CdekBarcodePrintService $barcode_print = null
+		private ?CdekOrderStatusService $status_updates = null
 	) {
 	}
 
@@ -120,30 +119,6 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		}
 
 		return $this->status_updates->remove_local_if_allowed( $order );
-	}
-
-	/**
-	 * @param array<string,mixed> $shipment
-	 * @return array<int,array<string,mixed>>
-	 */
-	public function document_actions( object $order, array $shipment ): array {
-		$status = $this->status_payload( $order, $shipment );
-		if ( ! $this->barcode_print instanceof CdekBarcodePrintService || empty( $status['can_print_barcode'] ) ) {
-			return array();
-		}
-
-		return array(
-			array(
-				'key' => 'download_label',
-				'label' => 'Скачать этикетку',
-				'type' => 'ajax_download',
-				'visible' => true,
-				'data' => array(
-					'prepare_action' => 'wdc_cdek_barcode_prepare',
-					'requires_ready_download_url' => true,
-				),
-			),
-		);
 	}
 
 	public function supports_status_auto_sync(): bool {

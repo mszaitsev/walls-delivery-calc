@@ -27,8 +27,7 @@ function carrier_adapter_registry_assert( bool $condition, string $message ): vo
 final class CarrierAdapterRegistrySmokeAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private string $key,
-		private array $presentation,
-		private array $document_actions = array()
+		private array $presentation
 	) {
 	}
 
@@ -42,7 +41,6 @@ final class CarrierAdapterRegistrySmokeAdapter implements CarrierShipmentAdapter
 	public function attach_manual( object $order, array $payload ): array { return array( 'success' => true, 'adapter' => $this->key ); }
 	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => true, 'adapter' => $this->key ); }
 	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => true, 'adapter' => $this->key ); }
-	public function document_actions( object $order, array $shipment ): array { return $this->document_actions; }
 	public function supports_status_auto_sync(): bool { return true; }
 	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? $shipment['cdek_number'] ?? '' ); }
 	public function auto_sync_throttle_microseconds(): int { return CdekSettings::CARRIER_KEY === $this->key ? 10000 : 0; }
@@ -56,14 +54,6 @@ $registry = new CarrierShipmentAdapterRegistry(
 				'carrier_label' => 'СДЭК',
 				'status_title' => 'Статус СДЭК',
 				'tracking_label' => 'Номер СДЭК',
-			),
-			array(
-				array(
-					'key' => 'download_label',
-					'label' => 'Скачать этикетку',
-					'type' => 'ajax_download',
-					'visible' => true,
-				),
 			)
 		),
 		new CarrierAdapterRegistrySmokeAdapter(
@@ -91,7 +81,6 @@ carrier_adapter_registry_assert( $registry->has( DpdSettings::CARRIER_KEY ), 'Re
 carrier_adapter_registry_assert( 'СДЭК' === $registry->get( CdekSettings::CARRIER_KEY )->presentation()['carrier_label'], 'CDEK adapter presentation must contain the CDEK label.' );
 carrier_adapter_registry_assert( 'Почта России' === $registry->get( RussianPostDomesticSettings::CARRIER_KEY )->presentation()['carrier_label'], 'Russian Post adapter presentation must contain the Russian Post label.' );
 carrier_adapter_registry_assert( 'DPD' === $registry->get( DpdSettings::CARRIER_KEY )->presentation()['carrier_label'], 'DPD adapter presentation must contain the DPD label.' );
-carrier_adapter_registry_assert( 'Скачать этикетку' === $registry->get( CdekSettings::CARRIER_KEY )->document_actions( new stdClass(), array( 'cdek_number' => '10280157676' ) )[0]['label'], 'CDEK document action must expose the carrier label download button.' );
 carrier_adapter_registry_assert( 10000 === $registry->get( CdekSettings::CARRIER_KEY )->auto_sync_throttle_microseconds(), 'CDEK adapter must keep the 10ms auto-sync throttle.' );
 carrier_adapter_registry_assert( 0 === $registry->get( RussianPostDomesticSettings::CARRIER_KEY )->auto_sync_throttle_microseconds(), 'Russian Post adapter must not inherit CDEK throttle.' );
 
@@ -117,5 +106,11 @@ carrier_adapter_registry_assert( str_contains( $russian_post_adapter_source, "'h
 $legacy_document_payload_key = 'label_' . 'actions';
 carrier_adapter_registry_assert( str_contains( $shipments_js, 'function shipmentStatusFromResponse' ) && str_contains( $shipments_js, "['carrier_key', 'presentation', 'document_actions', 'has_shipment', 'can_create', 'can_attach_manual', 'can_update_status', 'can_cancel', 'can_remove_from_order']" ) && str_contains( $shipments_js, 'documentActions: Array.isArray(statusPayload.document_actions)' ) && ! str_contains( $shipments_js, $legacy_document_payload_key ), 'Shipment JS must normalize adapter UI payload flags and map canonical document_actions payload into documentActions state.' );
 carrier_adapter_registry_assert( ! str_contains( $shipments_js, 'isCdek' ) && ! str_contains( $shipments_js, 'isRussianPost' ) && ! str_contains( $shipments_js, "carrier_key === 'cdek'" ) && ! str_contains( $shipments_js, "carrier_key === 'russian_post" ), 'Shipment JS must not branch on CDEK/Russian Post carrier keys for action buttons.' );
+$adapter_interface_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Contracts/CarrierShipmentAdapterInterface.php' );
+carrier_adapter_registry_assert( ! str_contains( $adapter_interface_source, 'document_actions' ), 'CarrierShipmentAdapterInterface must not declare adapter-level document actions.' );
+foreach ( array( 'src/Shipments/Cdek/CdekShipmentAdapter.php', 'src/Shipments/Dpd/DpdShipmentAdapter.php', 'src/Shipments/RussianPost/RussianPostShipmentAdapter.php', 'src/Shipments/YandexDelivery/YandexShipmentAdapter.php' ) as $adapter_path ) {
+	$adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/' . $adapter_path );
+	carrier_adapter_registry_assert( ! str_contains( $adapter_source, 'function document_actions' ), $adapter_path . ' must not declare adapter-level document actions.' );
+}
 
 echo "Carrier adapter registry smoke passed\n";

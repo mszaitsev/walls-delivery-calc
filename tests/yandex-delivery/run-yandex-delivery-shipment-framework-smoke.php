@@ -62,6 +62,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentAdapter;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentButtonPolicy;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentDocumentProvider;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentDocumentService;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentLabelPolicy;
 use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentPersistenceMapper;
@@ -137,6 +138,16 @@ function yd_framework_settings(): YandexDeliverySettings {
 	$settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'SRC-1' ) );
 
 	return $settings;
+}
+function yd_framework_document_provider( YandexShipmentLabelPolicy $policy, ?OrderShipmentRepository $repository = null ): YandexShipmentDocumentProvider {
+	$repository ??= new OrderShipmentRepository();
+	$service = new YandexShipmentDocumentService(
+		new YandexShipmentRepository( $repository ),
+		new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() ), new YdFrameworkFakeHttp( array() ) ) ),
+		$policy
+	);
+
+	return new YandexShipmentDocumentProvider( $service, $policy );
 }
 function yd_framework_response( array $body ): YandexDeliveryApiResponse {
 	return new YandexDeliveryApiResponse( 200, json_encode( $body, JSON_UNESCAPED_UNICODE ) ?: '{}' );
@@ -435,17 +446,18 @@ $order->update_meta_data( OrderShippingMetaPersister::CALCULATION_META_KEY, arra
 $red_payload = $adapter->status_payload( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
 yd_framework_assert( 'warning' === (string) ( $red_payload['actual_cost_compare_status'] ?? '' ), 'Yandex actual cost over the shared +3% threshold must be red/warning.' );
 $order->delete_meta_data( OrderShippingMetaPersister::CALCULATION_META_KEY );
-$document_actions = $adapter->document_actions( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
-yd_framework_assert( 1 === count( $document_actions ) && 'download_yandex_label' === (string) ( $document_actions[0]['key'] ?? '' ) && 'Скачать ярлык' === (string) ( $document_actions[0]['label'] ?? '' ), 'Yandex adapter must expose a shared document_actions download button for allowed universal statuses with request_id.' );
+$document_provider = yd_framework_document_provider( new YandexShipmentLabelPolicy( new YandexStatusMapping( new SettingsRepository() ) ), $base_repository );
+$document_actions = $document_provider->actions( $order, $base_repository->find_by_carrier( $order, YandexDeliverySettings::CARRIER_KEY ) );
+yd_framework_assert( 1 === count( $document_actions ) && 'download_yandex_label' === $document_actions[0]->key && 'Скачать ярлык' === $document_actions[0]->label, 'Yandex provider must expose a shared document_actions download button for allowed universal statuses with request_id.' );
 foreach ( array( DeliveryStatus::CREATED_IN_CARRIER, DeliveryStatus::IN_TRANSIT, DeliveryStatus::READY_FOR_PICKUP, DeliveryStatus::HANDED_TO_COURIER, DeliveryStatus::DELIVERED, DeliveryStatus::RETURNING_TO_SENDER, DeliveryStatus::RETURNED_TO_SENDER ) as $label_status ) {
-	$actions = $adapter->document_actions( $order, array( 'yandex_request_id' => 'REQ-LABEL-' . $label_status, 'universal_status_code' => $label_status ) );
+	$actions = $document_provider->actions( $order, array( 'yandex_request_id' => 'REQ-LABEL-' . $label_status, 'universal_status_code' => $label_status ) );
 	yd_framework_assert( 1 === count( $actions ), 'Yandex label action must be visible for universal status ' . $label_status );
 }
 foreach ( array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::CANCELLED, DeliveryStatus::REJECTED, DeliveryStatus::UNKNOWN ) as $label_status ) {
-	$actions = $adapter->document_actions( $order, array( 'yandex_request_id' => 'REQ-LABEL-' . $label_status, 'universal_status_code' => $label_status ) );
+	$actions = $document_provider->actions( $order, array( 'yandex_request_id' => 'REQ-LABEL-' . $label_status, 'universal_status_code' => $label_status ) );
 	yd_framework_assert( array() === $actions, 'Yandex label action must be hidden for universal status ' . $label_status );
 }
-yd_framework_assert( array() === $adapter->document_actions( $order, array( 'yandex_request_id' => 'REQ-RECONCILE', 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER, 'yandex_reconciliation_required' => true ) ) && array() === $adapter->document_actions( $order, array( 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER ) ), 'Yandex label action must be hidden during reconciliation and without server-side request_id.' );
+yd_framework_assert( array() === $document_provider->actions( $order, array( 'yandex_request_id' => 'REQ-RECONCILE', 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER, 'yandex_reconciliation_required' => true ) ) && array() === $document_provider->actions( $order, array( 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER ) ), 'Yandex label action must be hidden during reconciliation and without server-side request_id.' );
 $tracking_presentation = (array) ( $payload['tracking_presentation'] ?? array() );
 yd_framework_assert( 'Отслеживание посылки' === (string) ( $tracking_presentation['label'] ?? '' ) && 'ссылка' === (string) ( $tracking_presentation['display_text'] ?? '' ) && 'https://dostavka.yandex.ru/route/example' === (string) ( $tracking_presentation['url'] ?? '' ) && 'https://dostavka.yandex.ru/route/example' === (string) ( $tracking_presentation['copy_value'] ?? '' ) && 'REQ-777' !== (string) ( $tracking_presentation['display_text'] ?? '' ), 'Yandex status payload must present sharing_url as tracking link text and clipboard value instead of request_id when available.' );
 $invalid_tracking_payload = $adapter->status_payload( $order, array( 'yandex_request_id' => 'REQ-INVALID-URL', 'sharing_url' => 'javascript:alert(1)' ) );
@@ -1068,8 +1080,8 @@ yd_framework_assert( 'REQ-MANUAL' === (string) $attach_order->get_meta( '_wdc_ya
 $attached_payload = $attach_adapter->status_payload( $attach_order, $attached );
 yd_framework_assert( empty( $attached_payload['can_create'] ) && empty( $attached_payload['can_attach_manual'] ) && ! empty( $attached_payload['can_update_status'] ) && ! empty( $attached_payload['can_cancel'] ), 'Attached CREATED Yandex shipment must hide create/manual attach and expose update/cancel.' );
 yd_framework_assert( '' === (string) ( $attached_payload['actual_cost_label'] ?? '' ) && '00000' === (string) ( $attached_payload['yandex_self_pickup_node_code'] ?? '' ), 'Manual attach must keep price row hidden and expose pickup code from request/info.' );
-$attached_document_actions = $attach_adapter->document_actions( $attach_order, $attached );
-yd_framework_assert( 1 === count( $attached_document_actions ) && 'download_yandex_label' === (string) ( $attached_document_actions[0]['key'] ?? '' ), 'Manual attach without price must still expose Yandex label download when universal status allows it.' );
+$attached_document_actions = yd_framework_document_provider( new YandexShipmentLabelPolicy( new YandexStatusMapping( new SettingsRepository() ) ), $attach_repository )->actions( $attach_order, $attached );
+yd_framework_assert( 1 === count( $attached_document_actions ) && 'download_yandex_label' === $attached_document_actions[0]->key, 'Manual attach without price must still expose Yandex label download when universal status allows it.' );
 $label_success_http = new YdFrameworkFakeHttp( array( new YandexDeliveryApiResponse( 200, "%PDF-1.4\nmanual attach label", array( 'content-type' => 'application/pdf' ) ) ) );
 $label_service = new YandexShipmentDocumentService( new YandexShipmentRepository( $attach_repository ), new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( yd_framework_settings(), $label_success_http ) ), new YandexShipmentLabelPolicy( new YandexStatusMapping( new SettingsRepository() ) ) );
 $label_result = $label_service->label_pdf_for_order( $attach_order );
@@ -1109,7 +1121,8 @@ foreach ( array( DeliveryStatus::UNKNOWN, DeliveryStatus::CANCELLED ) as $overri
 	$label_guard_repository->save_for_carrier( $override_order, YandexDeliverySettings::CARRIER_KEY, array( 'carrier_key' => YandexDeliverySettings::CARRIER_KEY, 'yandex_request_id' => 'REQ-LABEL-OVERRIDE-' . $override_universal, 'yandex_status' => 'CREATED' ) );
 	$override_http = new YdFrameworkFakeHttp( array() );
 	$override_result = ( new YandexShipmentDocumentService( $label_guard_yandex_repository, new YandexDeliveryShipmentClient( new YandexDeliveryApiClient( $settings, $override_http ) ), new YandexShipmentLabelPolicy( $override_label_mapping ) ) )->label_pdf_for_order( $override_order );
-	yd_framework_assert( empty( $override_result['success'] ) && array() === $override_http->requests && array() === ( new YandexShipmentAdapter( $attach_registration, new YandexShipmentButtonPolicy( $override_label_mapping ), $override_label_mapping, new YandexShipmentLabelPolicy( $override_label_mapping ) ) )->document_actions( $override_order, $label_guard_yandex_repository->find( $override_order ) ), 'Server-side and UI Yandex label policy must both follow admin override CREATED -> ' . $override_universal );
+	$override_actions = yd_framework_document_provider( new YandexShipmentLabelPolicy( $override_label_mapping ), $label_guard_repository )->actions( $override_order, $label_guard_yandex_repository->find( $override_order ) );
+	yd_framework_assert( empty( $override_result['success'] ) && array() === $override_http->requests && array() === $override_actions, 'Server-side and UI Yandex label policy must both follow admin override CREATED -> ' . $override_universal );
 }
 $override_label_mapping->save_mapping( YandexStatusMapping::default_mapping() );
 $attached_tracking = (array) ( $attached_payload['tracking_presentation'] ?? array() );

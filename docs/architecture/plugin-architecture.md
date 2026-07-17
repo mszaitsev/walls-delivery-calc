@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.122.2
+Version: 0.123.0
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -31,6 +31,7 @@ Forbidden ownership:
 
 - carrier business logic in `OrderShipmentsMetabox`;
 - carrier persistence inside `ShipmentCreationService`;
+- document action metadata inside shipment adapters;
 - document download inside shipment adapters;
 - carrier UI selectors in generic JS;
 - new lifecycle AJAX endpoints outside the shared lifecycle contract.
