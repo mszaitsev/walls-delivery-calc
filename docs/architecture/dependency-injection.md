@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 0.122.0
+Version: 0.122.1
 
 `src/Core/Plugin.php` is the composition root. `src/Core/Container.php` is a small lazy singleton container with `register()`, `get()`, and `has()`.
 
@@ -28,4 +28,4 @@ For a carrier with shipment support, register:
 
 ## Current Notes
 
-`ShipmentCreationService` receives both a registry and an adapter array. The registry is the canonical path. The adapter array remains a compatibility fallback for tests and direct construction; it is documented technical debt, not a pattern for new code.
+`ShipmentCreationService` receives both a registry and an adapter array. The registry is the canonical path. The adapter array remains a temporary test-construction fallback for direct construction tests; it is documented technical debt, not a production compatibility contract and not a pattern for new code.

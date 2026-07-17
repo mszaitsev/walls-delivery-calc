@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.122.0
+Version: 0.122.1
 
 Stable subsystems:
 
@@ -14,7 +14,7 @@ Stable subsystems:
 
 Active known limitations:
 
-- `ShipmentCreationService` still accepts an adapter array fallback beside the registry for direct test construction.
+- `ShipmentCreationService` still accepts an adapter array temporary test-construction fallback beside the registry for direct test construction.
 - Regression manifest keeps two baseline failures: DPD shipment preparation dry-run date pickup and CDEK large pickup list rendering.
 - Two optional Russian Post carrier tests still require fuller WooCommerce test stubs.
 

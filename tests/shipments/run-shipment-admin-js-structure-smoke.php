@@ -372,9 +372,13 @@ foreach ( array(
 	'docs/architecture/plugin-architecture.md',
 	'docs/architecture/dependency-injection.md',
 	'docs/architecture/shipment-framework.md',
+	'docs/development/chat-start.md',
+	'docs/development/codex-prompt-template.md',
 	'docs/development/new-carrier-guide.md',
+	'docs/development/development-workflow.md',
 	'docs/development/testing-and-regression.md',
 	'docs/development/coding-rules.md',
+	'docs/reference/walls-delivery-calc-tech-spec.md',
 ) as $canonical_doc ) {
 	shipment_admin_js_structure_assert( is_file( $root . '/' . $canonical_doc ), 'Canonical documentation path must exist: ' . $canonical_doc );
 }

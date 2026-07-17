@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.122.0
+Version: 0.122.1
 
 ## Commands
 
@@ -19,29 +19,47 @@ Also run `php -l` for changed PHP files, `node --check` for changed JS files, do
 
 ## Manifest
 
-The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. All shipment and carrier smoke tests that protect framework contracts should appear there.
+The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. Shipment and carrier smoke tests that protect framework contracts should appear there.
+
+Allowed matrix values:
+
+- `contract`: shared framework contract smoke.
+- `carrier smoke`: required carrier-specific smoke.
+- `partial`: covered, but not all variants are represented.
+- `baseline`: known failing baseline entry.
+- `optional`: optional environment-dependent entry.
+- `N/A`: capability does not apply.
 
 ## Coverage Matrix
 
-| Capability | Framework | CDEK | DPD | Russian Post | Yandex | Covered |
-| --- | --- | --- | --- | --- | --- | --- |
-| create | yes | yes | yes | yes | yes | yes |
-| preview | yes | yes | yes | yes | yes | yes |
-| persistence | yes | yes | yes | yes | yes | yes |
-| status update | yes | yes | yes | yes | yes | yes |
-| autosync/polling | yes | yes | yes | yes | yes | yes |
-| lifecycle continuation | yes | carrier-specific | yes | optional | yes | yes |
-| cancel/remove | yes | yes | yes | yes | yes | yes |
-| manual attach | yes | yes | yes | yes | yes | yes |
-| documents | yes | yes | yes | yes | yes | yes |
-| tracking presentation | yes | yes | yes | yes | yes | yes |
-| actual cost | yes | yes | yes | yes | yes | yes |
-| modal | yes | yes | yes | yes | yes | yes |
-| AJAX wiring | yes | yes | yes | yes | yes | yes |
-| JS structure | yes | yes | yes | yes | yes | yes |
-| pickup/courier | shared helpers | baseline gap for pickup list | yes | yes | yes | partial |
-| allocation | yes | yes | yes | yes | yes | yes |
-| source station/dropoff | yes | no | yes | no | yes | yes |
-| error paths | yes | yes | yes | yes | yes | yes |
+| Capability | Framework | CDEK | DPD | Russian Post | Yandex |
+| --- | --- | --- | --- | --- | --- |
+| create | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
+| preview | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-payload` |
+| persistence | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
+| status update | `contract`: `framework.status` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.status-mapping` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
+| autosync/polling | `contract`: `framework.lifecycle-contract` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.status-autosync` | `carrier smoke`: `status.status-autosync` | `carrier smoke`: `yandex.shipment-framework` |
+| lifecycle continuation | `contract`: `framework.lifecycle-contract` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.shipment-lifecycle` | `N/A` | `carrier smoke`: `yandex.shipment-framework` |
+| cancel/remove | `contract`: `framework.admin-ajax` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.shipment-buttons` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
+| manual attach | `contract`: `framework.admin-ajax` | `partial`: `cdek.order-creation` | `partial`: `dpd.shipment-buttons` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
+| documents | `contract`: `framework.document-actions` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.documents` | `carrier smoke`: `russian-post.documents` | `carrier smoke`: `yandex.shipment-framework` |
+| tracking presentation | `contract`: `framework.status` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.status-mapping` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
+| actual cost | `contract`: `framework.actual-cost-presentation` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.event-sync` | `carrier smoke`: `russian-post.price` | `carrier smoke`: `yandex.shipment-framework` |
+| modal | `contract`: `framework.modal-extensions` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
+| AJAX wiring | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
+| JS structure | `contract`: `framework.admin-js-structure` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `partial`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
+| pickup/courier | `partial`: `core.checkout-location-picker` | `baseline`: `baseline.cdek-pickup-points` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.pickup-import` | `carrier smoke`: `yandex.pickup-selection` |
+| allocation | `contract`: `framework.allocation` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
+| source station/dropoff | `contract`: `framework.admin-ajax` | `N/A` | `partial`: `dpd.create-order` | `N/A` | `carrier smoke`: `yandex.source-station` |
+| error paths | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
 
-Current baseline/optional allowances are listed in [technical-debt.md](../operations/technical-debt.md).
+## Baseline And Optional
+
+Current baseline/optional allowances are active, not historical:
+
+- `baseline.dpd-shipment-preparation`
+- `baseline.cdek-pickup-points`
+- `optional.russian-post-carrier`
+- `optional.russian-post-domestic-carrier`
+
+Reasons are tracked in [technical-debt.md](../operations/technical-debt.md).

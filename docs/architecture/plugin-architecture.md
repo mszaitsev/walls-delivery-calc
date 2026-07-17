@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.122.0
+Version: 0.122.1
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 

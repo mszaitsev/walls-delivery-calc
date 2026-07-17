@@ -1,6 +1,6 @@
 # Technical Debt
 
-Version: 0.122.0
+Version: 0.122.1
 
 Active items only.
 
@@ -16,7 +16,7 @@ Active items only.
 
 ## Architectural Debt
 
-- `ShipmentCreationService` has a registry plus adapter-array fallback. New code should use `CarrierShipmentAdapterRegistry`; remove the fallback only after direct construction tests are migrated.
+- `ShipmentCreationService` has a registry plus adapter-array temporary test-construction fallback. New code should use `CarrierShipmentAdapterRegistry`; remove the fallback only after direct construction tests are migrated.
 
 ## Completed Architectural Migrations
 
