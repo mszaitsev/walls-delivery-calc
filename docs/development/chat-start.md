@@ -1,21 +1,21 @@
 # Chat Start
 
-Version: 0.122.1
+Version: 0.122.2
 
 Use this at the start of a new ChatGPT planning/review chat.
 
 ## Read First
 
 1. [README.md](../README.md)
-2. [development/development-workflow.md](development-workflow.md)
+2. [development-workflow.md](development-workflow.md)
 3. [architecture/plugin-architecture.md](../architecture/plugin-architecture.md)
 4. The subsystem doc for the task.
-5. [development/testing-and-regression.md](testing-and-regression.md)
+5. [testing-and-regression.md](testing-and-regression.md)
 
 For shipment/carrier work, also read:
 
 1. [architecture/shipment-framework.md](../architecture/shipment-framework.md)
-2. [development/new-carrier-guide.md](new-carrier-guide.md)
+2. [new-carrier-guide.md](new-carrier-guide.md)
 
 ## Do First
 

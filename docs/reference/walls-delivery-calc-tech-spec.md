@@ -2,7 +2,7 @@
 
 Historical reference. Not source of truth.
 
-This file preserves the old product tech spec for audit and requirement archaeology. Canonical architecture, workflow, testing, and subsystem documentation lives under docs/README.md. When this reference conflicts with production code or canonical docs, use production code and canonical docs.
+This file preserves the old product tech spec for audit and requirement archaeology. Canonical architecture, workflow, testing, and subsystem documentation lives under `docs/README.md`. Internal paths, roadmap sections, external links, version references, and document structure below may be historical. When this reference conflicts with production code or canonical docs, use production code and canonical docs.
 
 ---
 

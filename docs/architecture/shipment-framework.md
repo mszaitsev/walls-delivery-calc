@@ -1,6 +1,6 @@
 # Shipment Framework
 
-Version: 0.122.1
+Version: 0.122.2
 
 The Shipment Framework lets carriers share admin creation, persistence, lifecycle, documents, modal UI, status presentation, polling, and regression coverage. It is not one linear pipeline; each runtime flow has its own owner.
 
@@ -16,7 +16,7 @@ The Shipment Framework lets carriers share admin creation, persistence, lifecycl
 | Lifecycle continuation | `CarrierShipmentLifecycleContinuationInterface`, `ShipmentLifecycleResult` | optional per carrier | `framework.lifecycle-contract` |
 | Status | adapter `status_payload()`, status services, autosync services | per-carrier mapping, shared payload | `framework.status`, carrier/status groups |
 | Actual cost | `ShipmentActualCostComparisonService`, `ShipmentBaseApiCostResolver` | optional carrier fields | `framework.actual-cost-presentation` |
-| Documents | adapter `document_actions()`, provider registry, download service | optional provider per carrier | `framework.document-actions` |
+| Documents | provider registry, download service, adapter interface surface | optional provider per carrier | `framework.document-actions` |
 | Modal | `ShipmentModalExtensionRegistry` | optional extension per carrier | `framework.modal-extensions` |
 | Admin AJAX | controllers in `src/Shipments/Admin/Ajax` | shared endpoints | `framework.admin-ajax` |
 | Admin UI | `OrderShipmentsMetabox`, generic JS, carrier JS extensions | shared shell + carrier hooks | `framework.admin-js-structure` |
@@ -49,16 +49,19 @@ Autosync uses shared status services plus carrier-specific sync services where n
 
 ## Document Flow
 
-Ownership is split deliberately:
+Ownership is split deliberately, and the current production code has two document-action surfaces:
 
-- Adapter owns `document_actions()` visibility for the current shipment.
-- `ShipmentAdminCarrierUiPayloadBuilder` and `OrderShipmentsMetabox` include those actions in the canonical `document_actions` payload.
+- `CarrierShipmentAdapterInterface::document_actions()` still exists and carrier adapters implement it. Tests still assert adapter-level action policy for several carriers. Treat this as required interface surface and carrier policy documentation, not as the current UI payload builder.
+- `CarrierShipmentDocumentProviderInterface::actions()` is the current canonical source used by the metabox/AJAX UI payload for available document actions and visibility.
+- `ShipmentAdminCarrierUiPayloadBuilder` and `OrderShipmentsMetabox` call `ShipmentDocumentProviderRegistry`, filter visible provider actions, and include those actions in the canonical `document_actions` payload.
 - Generic JS maps `document_actions` into `documentActions` state and renders generic document buttons.
-- `ShipmentDocumentDownloadService` builds protected `download_url` values and performs authorization/order/shipment/provider checks.
+- `ShipmentDocumentDownloadService` builds protected `download_url` values.
+- `ShipmentDocumentDownloadService::admin_post_download()` owns capability, nonce, order existence, carrier/action sanitization, and HTTP response authorization.
+- `ShipmentDocumentDownloadService::download_for_order()` re-checks persisted shipment existence and verifies the requested action is still visible in provider `actions()`.
 - `ShipmentDocumentProviderRegistry` resolves the provider.
 - Carrier document provider owns `actions()` and `download()` bytes.
 
-Adapters must not generate download URLs or stream binary documents. Providers must not decide generic button state outside their own action availability.
+Adapters must not generate download URLs or stream binary documents. Providers own binary download and the current UI action availability. Keep adapter `document_actions()` and provider `actions()` aligned until the adapter surface is removed or unified in a future code change.
 
 ## UI Flow
 
@@ -80,7 +83,8 @@ Adapters must not generate download URLs or stream binary documents. Providers m
 
 Document actions use:
 
-- PHP adapter method: `document_actions()`;
+- PHP adapter method: `document_actions()` remains required by the interface;
+- provider action source for UI payload: `CarrierShipmentDocumentProviderInterface::actions()`;
 - AJAX/status payload key: `document_actions`;
 - JS normalized state: `documentActions`.
 

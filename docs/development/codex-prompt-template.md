@@ -1,6 +1,6 @@
 # Codex Prompt Template
 
-Version: 0.122.1
+Version: 0.122.2
 
 Use this as a template, not as a concrete task.
 
@@ -22,7 +22,14 @@ Do not push.
 Do not open PR.
 
 Web search:
-Do not use web search.
+Allowed:
+- <when browsing is allowed>
+
+Forbidden:
+- <when browsing must not be used>
+
+Required:
+- <when browsing is mandatory, if any>
 
 Before starting, read:
 - docs/README.md

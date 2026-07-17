@@ -1,6 +1,6 @@
 # Development Workflow
 
-Version: 0.122.1
+Version: 0.122.2
 
 This is the only canonical developer workflow for Walls Delivery Calc.
 
@@ -14,12 +14,12 @@ discussion
 -> branch selection
 -> prompt preparation
 -> Codex implementation
--> review
 -> documentation update
 -> checks
+-> review
+-> versioning
 -> PR
 -> merge
--> versioning
 ```
 
 ## Discussion
@@ -83,20 +83,10 @@ Codex should:
 1. read the requested docs and relevant code;
 2. inventory before cross-cutting edits;
 3. implement confirmed fixes;
-4. update docs and tests with code;
-5. run requested checks;
-6. report concrete changes and residual risks.
-
-## Review
-
-Review should verify:
-
-- behavior matches acceptance criteria;
-- ownership boundaries are preserved;
-- no hidden carrier switch entered generic framework code;
-- security checks are still present;
-- tests cover the changed contract;
-- docs describe the real code.
+4. update docs, tests, and version with code;
+5. update `tree.txt` when structure changes;
+6. run requested checks;
+7. report concrete changes and residual risks.
 
 ## Documentation Update
 
@@ -112,6 +102,8 @@ Update docs in the same task when changing:
 
 Do not add stage notes, roadmap docs, "current", "final", "v2", or migration-plan docs as active documentation.
 
+Documentation and version updates happen before review, so reviewers inspect the code, tests, docs, version, and `tree.txt` together.
+
 ## Checks
 
 Minimum checks for code changes:
@@ -125,6 +117,18 @@ git diff --check
 ```
 
 For docs-only changes, run docs link check, relevant architecture/documentation smokes, and `git diff --check`.
+
+## Review
+
+Review should verify:
+
+- behavior matches acceptance criteria;
+- ownership boundaries are preserved;
+- no hidden carrier switch entered generic framework code;
+- security checks are still present;
+- tests cover the changed contract;
+- docs describe the real code;
+- version bump and `tree.txt` are already included when required.
 
 ## PR And Merge
 
@@ -143,6 +147,8 @@ Use SemVer:
 - new substantial branch or feature stage: bump `MINOR` and reset patch to `0`;
 - continuation/fix/docs stabilization in the same branch: bump `PATCH`;
 - update plugin header, `WDC_VERSION`, docs, and version assertions together.
+
+Version bump is part of implementation, not a post-merge task.
 
 ## tree.txt
 
