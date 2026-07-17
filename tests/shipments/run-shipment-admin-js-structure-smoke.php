@@ -367,6 +367,18 @@ function shipment_admin_js_scanner_self_test(): void {
 shipment_admin_js_scanner_self_test();
 
 $root = dirname( __DIR__, 2 );
+foreach ( array(
+	'docs/README.md',
+	'docs/architecture/plugin-architecture.md',
+	'docs/architecture/dependency-injection.md',
+	'docs/architecture/shipment-framework.md',
+	'docs/development/new-carrier-guide.md',
+	'docs/development/testing-and-regression.md',
+	'docs/development/coding-rules.md',
+) as $canonical_doc ) {
+	shipment_admin_js_structure_assert( is_file( $root . '/' . $canonical_doc ), 'Canonical documentation path must exist: ' . $canonical_doc );
+}
+
 $files = array(
 	'bootstrap'    => $root . '/assets/admin/shipments-admin.js',
 	'core'         => $root . '/assets/admin/shipments/shipment-core.js',
@@ -426,7 +438,17 @@ foreach ( array( 'handlePollingStart', 'handlePollingStatus', 'handlePollingErro
 shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'handlePollingStop: function (context)' ) && str_contains( $source['yandex'], 'if (isYandexPollingContext(context))' ) && str_contains( $source['yandex'], 'cancellationPollingToasts.has(box)' ), 'Yandex polling stop hook must clear only Yandex-owned cancellation toast state.' );
 shipment_admin_js_structure_assert( ! str_contains( $source['yandex'], "statusPayload.carrier_key !== 'yandex_delivery' && !isCancellationPollingPurpose" ), 'Yandex cancellation purpose must not be treated as carrier identity.' );
 shipment_admin_js_structure_assert( str_contains( $source['cdek'], 'startCdekPolling' ) && str_contains( $source['cdek'], 'handleDefaultRegistrationPolling' ), 'CDEK extension must own the CDEK default registration polling wrapper.' );
-shipment_admin_js_structure_assert( str_contains( $source['status'], 'documentActions' ) && str_contains( $source['status'], 'label_actions' ) && str_contains( $source['status'], 'data-wdc-shipment-document-download' ) && ! str_contains( $source['status'], 'labelActions' ) && ! str_contains( $source['status'], 'can_download_dpd_documents' ) && ! str_contains( $source['status'], 'can_download_yandex_label' ) && ! str_contains( $source['status'], 'data-wdc-cdek-barcode-download' ) && ! str_contains( $source['status'], 'data-wdc-dpd-documents-download' ) && ! str_contains( $source['status'], 'data-wdc-yandex-label-download' ), 'Status module must drive document visibility through normalized documentActions and generic document selectors while preserving the label_actions payload key.' );
+$legacy_document_payload_key = 'label_' . 'actions';
+shipment_admin_js_structure_assert( str_contains( $source['status'], 'documentActions' ) && str_contains( $source['status'], 'document_actions' ) && str_contains( $source['status'], 'data-wdc-shipment-document-download' ) && ! str_contains( $source['status'], $legacy_document_payload_key ) && ! str_contains( $source['status'], 'labelActions' ) && ! str_contains( $source['status'], 'can_download_dpd_documents' ) && ! str_contains( $source['status'], 'can_download_yandex_label' ) && ! str_contains( $source['status'], 'data-wdc-cdek-barcode-download' ) && ! str_contains( $source['status'], 'data-wdc-dpd-documents-download' ) && ! str_contains( $source['status'], 'data-wdc-yandex-label-download' ), 'Status module must drive document visibility through normalized documentActions, canonical document_actions payload, and generic document selectors.' );
+
+foreach ( array(
+	'src/Shipments/Admin/OrderShipmentsMetabox.php',
+	'src/Shipments/Admin/Ajax/ShipmentAdminCarrierUiPayloadBuilder.php',
+	'assets/admin/shipments/shipment-status.js',
+) as $payload_file ) {
+	$payload_source = (string) file_get_contents( $root . '/' . $payload_file );
+	shipment_admin_js_structure_assert( str_contains( $payload_source, 'document_actions' ) && ! str_contains( $payload_source, $legacy_document_payload_key ), $payload_file . ' must use canonical document_actions payload key only.' );
+}
 
 $bundle_source = wdc_shipment_admin_js_bundle_source();
 preg_match_all( '/\\bfunction\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(/', $bundle_source, $function_matches );

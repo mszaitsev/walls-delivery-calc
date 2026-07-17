@@ -905,8 +905,8 @@ pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContextOnce(
 pickup_checkout_assert( str_contains( $checkout_js, 'countryBlocked' ) && str_contains( $checkout_js, "country.toUpperCase() !== 'RU'" ), 'Initial context must ignore non-RU checkout destinations.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContext' ) && str_contains( $checkout_js, "window.jQuery(document.body).on('updated_checkout'" ), 'updated_checkout must refresh server city_context and then prefetch pickup points.' );
 $pickup_css = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.css' ) ?: '';
-$pickup_docs = file_get_contents( $root . '/docs/wdc-russian-post-pickup-points.md' ) ?: '';
-pickup_checkout_assert( str_contains( $pickup_docs, 'As of WDC 0.30.0' ) && str_contains( $pickup_docs, 'Оплата по счету от ИП/ООО' ) && str_contains( $pickup_docs, 'WDC owns' ), 'Pickup docs must describe the resolved external plugin styling split.' );
+$pickup_docs = file_get_contents( $root . '/docs/subsystems/locations.md' ) ?: '';
+pickup_checkout_assert( str_contains( $pickup_docs, 'Pickup Styling Ownership' ) && str_contains( $pickup_docs, 'Оплата по счету от ИП/ООО' ) && str_contains( $pickup_docs, 'WDC owns' ), 'Canonical pickup docs must describe the resolved external plugin styling split.' );
 foreach ( array( '.button:after', '.button::after', '.wc-forward:after', '.wc-forward::after', '.checkout-button:after', '.checkout-button::after', '.blockUI.blockOverlay:before', '.blockUI.blockOverlay::before', '.processing:before', '.processing::before' ) as $forbidden_selector ) {
 	pickup_checkout_assert( ! str_contains( $pickup_css, $forbidden_selector ), 'Pickup CSS must not override global WooCommerce pseudo-element selector: ' . $forbidden_selector );
 }
