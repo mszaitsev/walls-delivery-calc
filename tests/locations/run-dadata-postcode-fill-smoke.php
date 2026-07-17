@@ -348,9 +348,9 @@ $_POST = array();
 ob_start();
 postcode_admin( $repository, $client )->render_page();
 $html = (string) ob_get_clean();
-postcode_smoke_assert( str_contains( $html, 'Заполнение почтовых индексов через DaData' ), 'Admin markup must render postcode fill block.' );
-postcode_smoke_assert( str_contains( $html, '<progress value="0" max="100">' ) && str_contains( $html, 'JSON status' ), 'Admin markup must include progress bar and JSON status.' );
+postcode_smoke_assert( str_contains( $html, 'Заполнение информации через DaData' ) && str_contains( $html, 'wdc-dadata-postcode-fill-start' ), 'Admin markup must render postcode fill block.' );
+postcode_smoke_assert( str_contains( $html, '<progress value="0" max="100"></progress>' ) && str_contains( $html, 'JSON status' ), 'Admin markup must include progress bar and JSON status.' );
 postcode_smoke_assert( ! str_contains( $html, 'plain-token-one' ) && ! str_contains( $html, 'Authorization' ), 'API token must not be exposed to frontend.' );
-postcode_smoke_assert( is_file( dirname( __DIR__, 2 ) . '/docs/wdc-dadata-postcode-fill-removal.md' ), 'Removal doc must exist.' );
+postcode_smoke_assert( is_file( dirname( __DIR__, 2 ) . '/docs/subsystems/locations.md' ), 'Canonical locations doc must exist.' );
 
 echo "DaData postcode fill smoke test passed.\n";

@@ -111,6 +111,8 @@ foreach ( array(
 }
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 shipment_docs_assert( str_contains( $metabox_source, 'document_actions_for_carrier' ) && str_contains( $metabox_source, 'render_document_action_links' ), 'Metabox must render document actions through the common normalized contract.' );
+$legacy_document_payload_key = 'label_' . 'actions';
+shipment_docs_assert( str_contains( $metabox_source, 'document_actions' ) && ! str_contains( $metabox_source, $legacy_document_payload_key ), 'Metabox payload must use canonical document_actions key and no legacy document payload alias.' );
 shipment_docs_assert( ! str_contains( $metabox_source, 'admin_post_cdek_barcode_pdf' ) && ! str_contains( $metabox_source, 'admin_post_dpd_documents_zip' ) && ! str_contains( $metabox_source, 'admin_post_yandex_label_pdf' ), 'Old per-carrier admin-post handlers must be removed from metabox.' );
 
 echo "Shipment document actions smoke passed.\n";

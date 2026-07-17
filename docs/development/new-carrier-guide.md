@@ -1,0 +1,410 @@
+# New Carrier Guide
+
+Version: 0.122.2
+
+Use `ExampleCarrier` as a mental model only; do not add it to production. This guide is implementable: follow it in order and add only capabilities the carrier actually supports.
+
+## Canonical Values
+
+- Carrier key: lowercase `sanitize_key()`-safe string, for example `example`.
+- Delivery type: existing `DeliveryType` values.
+- Document payload key: `document_actions`.
+- JS state field: `documentActions`.
+- Shipment status: map external statuses into `DeliveryStatus`.
+- DI registration: `src/Core/Plugin.php` only.
+
+## 1. Carrier Key And Settings
+
+Mandatory. Define stable settings and credentials classes under `src/Carriers/Example`.
+
+```php
+final class ExampleSettings {
+	public const CARRIER_KEY = 'example';
+
+	public function enabled(): bool {}
+	public function request_timeout(): int {}
+}
+```
+
+Typical mistakes: changing the key later, using display names as keys, reading raw options outside settings, or storing credentials unencrypted.
+
+## 2. API Client
+
+Mandatory for API-backed carriers. Keep transport and response parsing out of shipment adapters.
+
+```php
+final class ExampleApiClient {
+	public function create_order( array $payload ): array {}
+	public function get_status( string $external_id ): array {}
+	public function download_label( string $external_id ): string {}
+}
+```
+
+Required: timeout, safe exception boundary, credential redaction in logs. Optional: separate HTTP client interface if the carrier needs isolated transport tests.
+
+## 3. Quote/Tariff Integration
+
+Mandatory if checkout rates are shown. Implement a runtime carrier registered in `CarrierRegistry`.
+
+Responsibility: convert `QuoteRequest` into `DeliveryQuote`, including source API price, customer price, delivery type, delivery days/date, and diagnostics. Do not create shipments here.
+
+## 4. Pickup/Courier Support
+
+Optional per carrier. Pickup imports/repositories belong under carrier or pickup namespaces. Shared checkout UI should receive normalized pickup point data. If pickup selection changes price, make checkout recalculate only when the customer-visible price can change.
+
+## 5. Shipment Adapter
+
+Mandatory for shipment creation.
+
+```php
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
+
+final class ExampleShipmentAdapter implements CarrierShipmentAdapterInterface {
+	public function carrier_key(): string {
+		return ExampleSettings::CARRIER_KEY;
+	}
+
+	public function supports( ShipmentCreateRequest $request ): bool {
+		return ExampleSettings::CARRIER_KEY === $request->carrier_key;
+	}
+
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array {
+		return array(
+			'method' => 'POST',
+			'path' => '/orders',
+			'body' => array(),
+			'errors' => array(),
+		);
+	}
+
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult {
+		return new ShipmentCreateResult( true, external_id: 'EX-1', tracking_number: 'TRACK-1' );
+	}
+
+	public function presentation(): array {
+		return array(
+			'label' => 'Example',
+			'tracking_label' => 'Tracking',
+		);
+	}
+
+	public function status_payload( object $order, array $shipment ): array {
+		return array(
+			'carrier_key' => $this->carrier_key(),
+			'has_shipment' => array() !== $shipment,
+			'can_create' => array() === $shipment,
+			'can_update_status' => array() !== $shipment,
+			'can_cancel' => false,
+			'can_remove_from_order' => array() !== $shipment,
+			'tracking_presentation' => $this->tracking_presentation( $shipment ),
+			'document_actions' => $this->document_actions( $order, $shipment ),
+		);
+	}
+
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		return array( 'success' => false, 'message' => 'Status update is not supported for this carrier.' );
+	}
+
+	public function attach_manual( object $order, array $payload ): array {
+		return array( 'success' => false, 'message' => 'Manual attach is not supported for this carrier.' );
+	}
+
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array {
+		return array( 'success' => false, 'message' => 'Carrier cancellation is not supported for this carrier.' );
+	}
+
+	public function remove_from_order( object $order, string $shipment_key = '' ): array {
+		return array( 'success' => false, 'message' => 'Local removal is not supported for this carrier.' );
+	}
+
+	public function document_actions( object $order, array $shipment ): array { return array(); }
+	public function supports_status_auto_sync(): bool { return false; }
+	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? '' ); }
+	public function auto_sync_throttle_microseconds(): int { return 0; }
+
+	private function tracking_presentation( array $shipment ): array {
+		$value = (string) ( $shipment['tracking_number'] ?? '' );
+		return array(
+			'label' => 'Tracking',
+			'display_text' => $value,
+			'url' => '',
+			'copy_value' => $value,
+		);
+	}
+}
+```
+
+Required: all interface methods. Supported capability is separate from interface implementation: the method always exists, but a carrier may return a public-safe unsupported response or an empty action list when the feature is not available. Typical mistakes: persisting inside the adapter, doing document download inside the adapter, leaking raw API errors, or adding carrier branches to generic JS.
+
+## 6. ShipmentCreateResult
+
+Mandatory result object for create.
+
+```php
+return new ShipmentCreateResult(
+	true,
+	external_id: (string) $response['id'],
+	tracking_number: (string) $response['tracking_number'],
+	raw_reference: array( 'response' => $safe_response )
+);
+
+return new ShipmentCreateResult(
+	false,
+	error_code: 'example_api_error',
+	error_message: 'Example carrier rejected the shipment.',
+	raw_reference: array( 'response' => $safe_response )
+);
+```
+
+Canonical: failed results need `error_code` or `error_message`. Keep admin messages public-safe.
+
+## 7. Persistence Mapper
+
+Mandatory.
+
+```php
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
+
+final class ExampleShipmentPersistenceMapper implements CarrierShipmentPersistenceMapperInterface {
+	public function carrier_key(): string {
+		return ExampleSettings::CARRIER_KEY;
+	}
+
+	public function build_created_fields( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, string $now ): array {
+		return array(
+			'example_external_id' => $result->external_id,
+			'tracking_number' => $result->tracking_number,
+			'universal_status_code' => 'created_in_carrier',
+			'request_snapshot' => $preview,
+			'response_snapshot' => $result->raw_reference,
+		);
+	}
+
+	public function build_failed_fields( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, string $now ): ?array {
+		return null;
+	}
+
+	public function after_persist( object $order, array $shipment ): void {}
+}
+```
+
+Required: carrier key, created fields, failed fields, after-persist hook. Optional: failed shipment persistence if the carrier has useful pending/uncertain states.
+
+## 8. Status Mapping And Status Payload
+
+Mandatory when the carrier has external statuses.
+
+Map carrier statuses to `DeliveryStatus` and expose normalized status payload fields:
+
+```php
+return array(
+	'carrier_key' => ExampleSettings::CARRIER_KEY,
+	'has_shipment' => true,
+	'status' => (string) ( $shipment['status'] ?? '' ),
+	'status_title' => (string) ( $shipment['status_title'] ?? '' ),
+	'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
+	'tracking_presentation' => array(
+		'label' => 'Tracking',
+		'display_text' => $tracking,
+		'url' => $tracking_url,
+		'copy_value' => $tracking,
+	),
+	'document_actions' => $this->document_actions( $order, $shipment ),
+);
+```
+
+Typical mistakes: using carrier status as universal status, omitting `carrier_key`, or returning document buttons under any key except `document_actions`.
+
+## 9. Lifecycle Continuation
+
+Optional. Use only when create/registration needs a second submit or polling step.
+
+```php
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentLifecycleContinuationInterface;
+use WallsShop\WDC\Shipments\Lifecycle\ShipmentLifecycleResult;
+
+final class ExampleShipmentAdapter implements CarrierShipmentLifecycleContinuationInterface {
+	public function continue_lifecycle( object $order, array $payload ): ShipmentLifecycleResult {
+		return new ShipmentLifecycleResult(
+			ShipmentLifecycleResult::PHASE_POLLING_REQUIRED,
+			poll_required: true,
+			continuation_token: (string) $payload['token'],
+			message: 'Waiting for carrier registration.',
+			purpose: 'registration'
+		);
+	}
+}
+```
+
+Canonical phases: `completed`, `submission_required`, `polling_required`, `pending`, `failed`, `terminal`. `submit_required` requires `continuation_token`.
+
+## 10. Cancellation And Removal
+
+Mandatory to implement interface methods. Carrier API cancellation is optional. If unsupported, return a public-safe error for cancellation and allow safe local removal when business rules permit.
+
+## 11. Manual Attach
+
+Optional but recommended. Validate tracking/external IDs, build mapper-compatible fields, and reuse common presentation/document behavior.
+
+## 12. Tracking Presentation
+
+Mandatory for shipments with external tracking. Canonical shape:
+
+```php
+array(
+	'label' => 'Tracking',
+	'display_text' => $tracking,
+	'url' => $tracking_url,
+	'copy_value' => $tracking,
+)
+```
+
+Use empty strings for absent optional values.
+
+## 13. Actual Cost
+
+Optional. Store shared actual-cost fields and use `ShipmentActualCostComparisonService` plus `ShipmentBaseApiCostResolver` for presentation.
+
+## 14. Document Provider And Actions
+
+Optional. Current production has two document-action surfaces:
+
+- Adapter `document_actions()` is required by `CarrierShipmentAdapterInterface` and should mirror carrier document policy for adapter-level tests and status payloads.
+- Provider `actions()` is the canonical source used by `ShipmentAdminCarrierUiPayloadBuilder` and `OrderShipmentsMetabox` for current UI `document_actions` payload, visibility, and action metadata.
+- `ShipmentDocumentDownloadService` owns `download_url`, capability/nonce/order/action checks, and the final "is this action still visible?" authorization re-check.
+- Provider `download()` owns binary bytes.
+
+Keep adapter actions and provider actions aligned until the codebase intentionally removes or unifies the adapter surface.
+
+```php
+use WallsShop\WDC\Shipments\Documents\CarrierShipmentDocumentProviderInterface;
+use WallsShop\WDC\Shipments\Documents\ShipmentBinaryDocument;
+use WallsShop\WDC\Shipments\Documents\ShipmentDocumentAction;
+
+final class ExampleShipmentDocumentProvider implements CarrierShipmentDocumentProviderInterface {
+	public function carrier_key(): string {
+		return ExampleSettings::CARRIER_KEY;
+	}
+
+	public function actions( object $order, array $shipment ): array {
+		return array( new ShipmentDocumentAction( 'download_label', 'Download label' ) );
+	}
+
+	public function download( object $order, array $shipment, string $action_key ): ShipmentBinaryDocument {
+		return new ShipmentBinaryDocument( $bytes, 'application/pdf', 'example-label.pdf' );
+	}
+}
+```
+
+Adapter payload:
+
+```php
+public function document_actions( object $order, array $shipment ): array {
+	return array(
+		array(
+			'key' => 'download_label',
+			'label' => 'Download label',
+			'type' => 'download',
+			'visible' => true,
+			'data' => array(),
+		),
+	);
+}
+```
+
+Typical mistakes: putting `download_url` in the adapter/provider action data, returning old payload aliases, bypassing `ShipmentDocumentDownloadService`, letting adapter/provider visibility drift apart, or allowing direct downloads for hidden actions.
+
+## 15. Modal Extension
+
+Optional. Implement `CarrierShipmentModalExtensionInterface` when the modal needs carrier-only fields. Generic modal rendering must remain shared.
+
+## 16. Admin AJAX
+
+Use existing controllers for create, preview, lifecycle, manual attach, cancel/remove, status, products, addresses, and documents. New carrier-specific AJAX is a last resort and must not duplicate nonce/capability/order resolution logic.
+
+## 17. JS Extension
+
+Optional. Add `assets/admin/shipments/extensions/example.js` for carrier-only UI. Generic modules dispatch hooks; carrier extensions respond to them. Do not add carrier selectors or branches to generic modules.
+
+## 18. DI And Registry Registration
+
+Register in `Plugin.php`.
+
+```php
+$this->container->register( ExampleSettings::class, fn(): ExampleSettings => new ExampleSettings( $this->container->get( SettingsRepository::class ) ) );
+$this->container->register( ExampleApiClient::class, fn(): ExampleApiClient => new ExampleApiClient( $this->container->get( ExampleSettings::class ), $this->container->get( Logger::class ) ) );
+$this->container->register( ExampleShipmentAdapter::class, fn(): ExampleShipmentAdapter => new ExampleShipmentAdapter( $this->container->get( ExampleApiClient::class ) ) );
+$this->container->register( ExampleShipmentPersistenceMapper::class, fn(): ExampleShipmentPersistenceMapper => new ExampleShipmentPersistenceMapper() );
+$this->container->register( ExampleShipmentDocumentProvider::class, fn(): ExampleShipmentDocumentProvider => new ExampleShipmentDocumentProvider( $this->container->get( ExampleApiClient::class ) ) );
+```
+
+Registry additions:
+
+```php
+new CarrierShipmentAdapterRegistry( array(
+	$this->container->get( RussianPostShipmentAdapter::class ),
+	$this->container->get( CdekShipmentAdapter::class ),
+	$this->container->get( DpdShipmentAdapter::class ),
+	$this->container->get( YandexShipmentAdapter::class ),
+	$this->container->get( ExampleShipmentAdapter::class ),
+) );
+
+new ShipmentDocumentProviderRegistry( array(
+	$this->container->get( CdekShipmentDocumentProvider::class ),
+	$this->container->get( DpdShipmentDocumentProvider::class ),
+	$this->container->get( YandexShipmentDocumentProvider::class ),
+	$this->container->get( RussianPostShipmentDocumentProvider::class ),
+	$this->container->get( ExampleShipmentDocumentProvider::class ),
+) );
+```
+
+Also add the mapper to the `ShipmentCreationService` mapper array. If checkout quotes exist, register the runtime carrier in `CarrierRegistry`.
+
+## 19. Smoke Tests
+
+Add focused smoke tests:
+
+- adapter supports/preview/create/status payload;
+- persistence mapper created/failed fields;
+- registry registration;
+- document provider and protected download;
+- modal extension if present;
+- JS structure if extension exists;
+- carrier create/status/cancel/manual attach paths as applicable.
+
+## 20. Regression Manifest
+
+Register critical smokes in `tests/shipments/regression/shipment-regression-manifest.php`.
+
+```php
+'example.shipment-framework' => array(
+	'path' => 'tests/example/run-example-shipment-framework-smoke.php',
+	'groups' => array( 'example' ),
+),
+```
+
+Required tests should be mandatory. Use `baseline` or `optional` only with a current, documented reason.
+
+## 21. Documentation
+
+Update this guide only when the carrier onboarding process changes. Put carrier-specific stable behavior in subsystem docs. Do not create stage notes.
+
+## 22. Final Readiness Checklist
+
+- Carrier key is stable and sanitize-safe.
+- Settings and credentials are registered.
+- API client has timeout and redacted logging.
+- Quote path works or is intentionally absent.
+- Adapter implements every interface method.
+- Mapper is registered in `ShipmentCreationService`.
+- Status payload uses canonical fields.
+- Tracking presentation uses canonical shape.
+- Document buttons use `document_actions`; download uses provider/service.
+- Modal and JS extensions are registered only if needed.
+- Generic services and JS contain no new carrier switch.
+- Regression manifest contains critical smokes.
+- Required groups pass.

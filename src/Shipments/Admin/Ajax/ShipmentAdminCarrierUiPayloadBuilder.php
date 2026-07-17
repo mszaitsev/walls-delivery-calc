@@ -120,7 +120,7 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 		);
 		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		if ( array() !== $document_actions ) {
-			$status['label_actions'] = $document_actions;
+			$status['document_actions'] = $document_actions;
 		}
 
 		return array(
@@ -128,7 +128,7 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 			'shipment' => $shipment,
 			'status' => $status,
 			'presentation' => $presentation,
-			'label_actions' => $document_actions,
+			'document_actions' => $document_actions,
 			'has_shipment' => ! empty( $status['has_shipment'] ),
 			'can_create' => ! empty( $status['can_create'] ),
 			'can_attach_manual' => ! empty( $status['can_attach_manual'] ),

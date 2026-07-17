@@ -36,7 +36,7 @@
   function shipmentStatusFromResponse(data) {
     const payload = data || {};
     const status = Object.assign({}, payload.status || {});
-    ['carrier_key', 'presentation', 'label_actions', 'has_shipment', 'can_create', 'can_attach_manual', 'can_update_status', 'can_cancel', 'can_remove_from_order'].forEach(function (key) {
+    ['carrier_key', 'presentation', 'document_actions', 'has_shipment', 'can_create', 'can_attach_manual', 'can_update_status', 'can_cancel', 'can_remove_from_order'].forEach(function (key) {
       if (Object.prototype.hasOwnProperty.call(payload, key) && !Object.prototype.hasOwnProperty.call(status, key)) {
         status[key] = payload[key];
       }
@@ -274,7 +274,7 @@
       canCancel: !!statusPayload.can_cancel,
       canRemove: !!statusPayload.can_remove_from_order,
       canUpdate: !!statusPayload.can_update_status,
-      documentActions: Array.isArray(statusPayload.label_actions) ? statusPayload.label_actions : []
+      documentActions: Array.isArray(statusPayload.document_actions) ? statusPayload.document_actions : []
     };
   }
 

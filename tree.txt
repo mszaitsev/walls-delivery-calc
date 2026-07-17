@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000F2 A0AC:74BD
+Volume serial number is 000000B2 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -117,68 +117,40 @@ C:.
 |           0040_create_yandex_location_manual_overrides_v2.php
 |
 +---docs
-|   |   development-workflow.md
-|   |   project-status.md
-|   |   stage-start.md
-|   |   walls-delivery-calc-tech-spec.md
-|   |   wdc-address-normalization.md
-|   |   wdc-audit-summary-for-review.md
-|   |   wdc-carrier-foundation.md
-|   |   wdc-cdek-foundation.md
-|   |   wdc-cdek-insurance-audit.md
-|   |   wdc-cdek-order-creation.md
-|   |   wdc-cdek-pickup-points.md
-|   |   wdc-cdek-tariff-calculation.md
-|   |   wdc-checkout-integration.md
-|   |   wdc-core-platform.md
-|   |   wdc-current-code-map.md
-|   |   wdc-dadata-postcode-fill-removal.md
-|   |   wdc-dadata-suggestions.md
-|   |   wdc-delivery-calendar.md
-|   |   wdc-delivery-services.md
-|   |   wdc-domain-model.md
-|   |   wdc-dpd-autosync.md
-|   |   wdc-dpd-checkout-pickup-selection.md
-|   |   wdc-dpd-checkout-runtime.md
-|   |   wdc-dpd-create-order.md
-|   |   wdc-dpd-documents.md
-|   |   wdc-dpd-event-sync.md
-|   |   wdc-dpd-geography.md
-|   |   wdc-dpd-integration.md
-|   |   wdc-dpd-pickup-autosync.md
-|   |   wdc-dpd-pickup-points.md
-|   |   wdc-dpd-shipment-buttons.md
-|   |   wdc-dpd-shipment-lifecycle.md
-|   |   wdc-dpd-shipment-preparation.md
-|   |   wdc-dpd-status-mapping.md
-|   |   wdc-dpd-tariff-calculation.md
-|   |   wdc-dpd-terminalcode-pricing.md
-|   |   wdc-fias-foundation.md
-|   |   wdc-gar-places-import.md
-|   |   wdc-legacy-uninstall-cleanup.md
-|   |   wdc-locations-clear.md
-|   |   wdc-migration-plan.md
-|   |   wdc-order-delivery-recalculation.md
-|   |   wdc-packaging-weight.md
-|   |   wdc-pickup-foundation.md
-|   |   wdc-real-fias-integration.md
-|   |   wdc-rule-engine-foundation.md
-|   |   wdc-rules-admin.md
-|   |   wdc-runtime-stabilization.md
-|   |   wdc-russian-post-countries.md
-|   |   wdc-russian-post-domestic.md
-|   |   wdc-russian-post-international.md
-|   |   wdc-russian-post-pickup-points.md
-|   |   wdc-russian-post-shipments.md
-|   |   wdc-shipment-framework-technical-debt.md
-|   |   wdc-shipment-regression-profile.md
-|   |   wdc-shipment-statuses.md
-|   |   wdc-shipments-foundation.md
-|   |   wdc-yandex-delivery-other-day-integration.md
-|   |   wdc-yandex-delivery-shipment-registration.md
+|   |   README.md
 |   |
-|   \---dpd
-|           ws-integration-guide.docx
+|   +---architecture
+|   |       dependency-injection.md
+|   |       plugin-architecture.md
+|   |       shipment-framework.md
+|   |
+|   +---development
+|   |       chat-start.md
+|   |       codex-prompt-template.md
+|   |       coding-rules.md
+|   |       development-workflow.md
+|   |       new-carrier-guide.md
+|   |       testing-and-regression.md
+|   |
+|   +---dpd
+|   |       ws-integration-guide.docx
+|   |
+|   +---operations
+|   |       cron-and-background-jobs.md
+|   |       installation-and-runtime.md
+|   |       project-status.md
+|   |       technical-debt.md
+|   |       troubleshooting.md
+|   |
+|   +---reference
+|   |       walls-delivery-calc-tech-spec.md
+|   |
+|   \---subsystems
+|           checkout.md
+|           locations.md
+|           packaging.md
+|           rules.md
+|           shipments.md
 |
 +---src
 |   +---Admin
