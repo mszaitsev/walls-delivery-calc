@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.122.2
+Version: 0.123.0
 
 Stable subsystems:
 
@@ -10,6 +10,7 @@ Stable subsystems:
 - locations and pickup infrastructure;
 - rules engine;
 - shipment adapters, persistence mappers, lifecycle continuation, document providers, modal extensions, admin AJAX, carrier JS extensions;
+- provider-owned document action contract;
 - unified shipment regression profile.
 
 Active known limitations:

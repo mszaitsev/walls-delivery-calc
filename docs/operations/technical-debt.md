@@ -1,6 +1,6 @@
 # Technical Debt
 
-Version: 0.122.2
+Version: 0.123.0
 
 Active items only.
 
@@ -20,5 +20,6 @@ Active items only.
 
 ## Completed Architectural Migrations
 
-- Shipment document UI now uses `document_actions()` in PHP, `documentActions` in JS state, and `document_actions` as the wire payload key.
+- Shipment document UI now uses provider `actions()` in PHP, `documentActions` in JS state, and `document_actions` as the wire payload key.
+- Adapter-level document action metadata was removed; document providers are the only canonical source for action availability and visibility.
 - Historical stage/foundation/current-map docs were removed from the active docs tree and replaced by canonical documents.

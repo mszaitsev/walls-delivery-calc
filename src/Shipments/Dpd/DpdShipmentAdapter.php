@@ -272,26 +272,6 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface, Carri
 		return $this->registration instanceof DpdOrderRegistrationService ? $this->registration->submit( $order, $continuation_token ) : array( 'success' => false, 'message' => 'Регистрация DPD недоступна.' );
 	}
 
-	/**
-	 * @param array<string,mixed> $shipment
-	 * @return array<int,array<string,mixed>>
-	 */
-	public function document_actions( object $order, array $shipment ): array {
-		unset( $order );
-		if ( ! DpdShipmentDocumentService::can_download_documents( $shipment ) ) {
-			return array();
-		}
-
-		return array(
-			array(
-				'key' => 'download_documents',
-				'label' => 'Скачать документы',
-				'type' => 'download',
-				'visible' => true,
-			),
-		);
-	}
-
 	public function supports_status_auto_sync(): bool {
 		return true;
 	}

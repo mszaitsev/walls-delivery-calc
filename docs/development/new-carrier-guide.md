@@ -1,6 +1,6 @@
 # New Carrier Guide
 
-Version: 0.122.2
+Version: 0.123.0
 
 Use `ExampleCarrier` as a mental model only; do not add it to production. This guide is implementable: follow it in order and add only capabilities the carrier actually supports.
 
@@ -99,7 +99,6 @@ final class ExampleShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'can_cancel' => false,
 			'can_remove_from_order' => array() !== $shipment,
 			'tracking_presentation' => $this->tracking_presentation( $shipment ),
-			'document_actions' => $this->document_actions( $order, $shipment ),
 		);
 	}
 
@@ -119,7 +118,6 @@ final class ExampleShipmentAdapter implements CarrierShipmentAdapterInterface {
 		return array( 'success' => false, 'message' => 'Local removal is not supported for this carrier.' );
 	}
 
-	public function document_actions( object $order, array $shipment ): array { return array(); }
 	public function supports_status_auto_sync(): bool { return false; }
 	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? '' ); }
 	public function auto_sync_throttle_microseconds(): int { return 0; }
@@ -136,7 +134,7 @@ final class ExampleShipmentAdapter implements CarrierShipmentAdapterInterface {
 }
 ```
 
-Required: all interface methods. Supported capability is separate from interface implementation: the method always exists, but a carrier may return a public-safe unsupported response or an empty action list when the feature is not available. Typical mistakes: persisting inside the adapter, doing document download inside the adapter, leaking raw API errors, or adding carrier branches to generic JS.
+Required: all interface methods. Supported capability is separate from interface implementation: lifecycle/cancel/manual attach methods always exist, but a carrier may return a public-safe unsupported response when the feature is not available. Document actions are not adapter methods; implement a document provider only when the carrier exposes downloadable artifacts. Typical mistakes: persisting inside the adapter, doing document download inside the adapter, leaking raw API errors, or adding carrier branches to generic JS.
 
 ## 6. ShipmentCreateResult
 
@@ -213,11 +211,10 @@ return array(
 		'url' => $tracking_url,
 		'copy_value' => $tracking,
 	),
-	'document_actions' => $this->document_actions( $order, $shipment ),
 );
 ```
 
-Typical mistakes: using carrier status as universal status, omitting `carrier_key`, or returning document buttons under any key except `document_actions`.
+Typical mistakes: using carrier status as universal status, omitting `carrier_key`, or adding document action metadata to the adapter status payload. The shared metabox/payload builder adds `document_actions` from the provider.
 
 ## 9. Lifecycle Continuation
 
@@ -271,14 +268,13 @@ Optional. Store shared actual-cost fields and use `ShipmentActualCostComparisonS
 
 ## 14. Document Provider And Actions
 
-Optional. Current production has two document-action surfaces:
+Optional. Implement only when the carrier exposes downloadable artifacts.
 
-- Adapter `document_actions()` is required by `CarrierShipmentAdapterInterface` and should mirror carrier document policy for adapter-level tests and status payloads.
-- Provider `actions()` is the canonical source used by `ShipmentAdminCarrierUiPayloadBuilder` and `OrderShipmentsMetabox` for current UI `document_actions` payload, visibility, and action metadata.
+- Provider `actions()` is the canonical source used by `ShipmentAdminCarrierUiPayloadBuilder` and `OrderShipmentsMetabox` for UI `document_actions` payload, visibility, action keys, labels, types, and metadata.
+- `ShipmentAdminCarrierUiPayloadBuilder` and `OrderShipmentsMetabox` normalize visible actions and add protected `download_url`.
 - `ShipmentDocumentDownloadService` owns `download_url`, capability/nonce/order/action checks, and the final "is this action still visible?" authorization re-check.
 - Provider `download()` owns binary bytes.
-
-Keep adapter actions and provider actions aligned until the codebase intentionally removes or unifies the adapter surface.
+- Adapters do not expose document action metadata.
 
 ```php
 use WallsShop\WDC\Shipments\Documents\CarrierShipmentDocumentProviderInterface;
@@ -300,23 +296,7 @@ final class ExampleShipmentDocumentProvider implements CarrierShipmentDocumentPr
 }
 ```
 
-Adapter payload:
-
-```php
-public function document_actions( object $order, array $shipment ): array {
-	return array(
-		array(
-			'key' => 'download_label',
-			'label' => 'Download label',
-			'type' => 'download',
-			'visible' => true,
-			'data' => array(),
-		),
-	);
-}
-```
-
-Typical mistakes: putting `download_url` in the adapter/provider action data, returning old payload aliases, bypassing `ShipmentDocumentDownloadService`, letting adapter/provider visibility drift apart, or allowing direct downloads for hidden actions.
+Typical mistakes: putting `download_url` in provider action data, returning old payload aliases, duplicating document metadata in adapters/status services, bypassing `ShipmentDocumentDownloadService`, or allowing direct downloads for hidden actions.
 
 ## 15. Modal Extension
 

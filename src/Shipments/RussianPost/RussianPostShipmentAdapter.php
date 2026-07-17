@@ -135,14 +135,6 @@ final class RussianPostShipmentAdapter implements CarrierShipmentAdapterInterfac
 		return $this->backlog->remove_from_order( $order, $shipment_key ?: RussianPostDomesticSettings::CARRIER_KEY );
 	}
 
-	/**
-	 * @param array<string,mixed> $shipment
-	 * @return array<int,array<string,mixed>>
-	 */
-	public function document_actions( object $order, array $shipment ): array {
-		return array();
-	}
-
 	public function supports_status_auto_sync(): bool {
 		return true;
 	}

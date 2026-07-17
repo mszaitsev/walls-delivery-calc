@@ -110,9 +110,22 @@ foreach ( array(
 	}
 }
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$payload_builder_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/Ajax/ShipmentAdminCarrierUiPayloadBuilder.php' );
+$download_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Documents/ShipmentDocumentDownloadService.php' );
+$adapter_interface_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Contracts/CarrierShipmentAdapterInterface.php' );
 shipment_docs_assert( str_contains( $metabox_source, 'document_actions_for_carrier' ) && str_contains( $metabox_source, 'render_document_action_links' ), 'Metabox must render document actions through the common normalized contract.' );
 $legacy_document_payload_key = 'label_' . 'actions';
 shipment_docs_assert( str_contains( $metabox_source, 'document_actions' ) && ! str_contains( $metabox_source, $legacy_document_payload_key ), 'Metabox payload must use canonical document_actions key and no legacy document payload alias.' );
+foreach ( array( 'OrderShipmentsMetabox' => $metabox_source, 'ShipmentAdminCarrierUiPayloadBuilder' => $payload_builder_source ) as $owner => $source ) {
+	shipment_docs_assert( str_contains( $source, '$this->document_providers->get( $carrier_key )' ) && str_contains( $source, '$provider->actions( $order, $shipment )' ) && str_contains( $source, "\$row['download_url'] = \$this->document_downloads->download_url" ), $owner . ' must build canonical document_actions payload from provider actions and protected download URLs.' );
+}
+shipment_docs_assert( str_contains( $download_service_source, '$provider->actions( $order, $shipment )' ) && str_contains( $download_service_source, '$action->visible' ) && str_contains( $download_service_source, '$provider->download( $order, $shipment, $action_key )' ), 'Download service must re-check visible provider actions before binary download.' );
+shipment_docs_assert( ! str_contains( $adapter_interface_source, 'document_actions' ), 'Adapter interface must not expose document action metadata.' );
+foreach ( array( 'src/Shipments/Cdek/CdekShipmentAdapter.php', 'src/Shipments/Dpd/DpdShipmentAdapter.php', 'src/Shipments/RussianPost/RussianPostShipmentAdapter.php', 'src/Shipments/YandexDelivery/YandexShipmentAdapter.php' ) as $adapter_path ) {
+	$adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/' . $adapter_path );
+	shipment_docs_assert( ! str_contains( $adapter_source, 'function ' . 'document_actions' ), $adapter_path . ' must not declare adapter-level document action metadata.' );
+}
+shipment_docs_assert( ! str_contains( $payload_builder_source, $legacy_document_payload_key ) && ! str_contains( $download_service_source, $legacy_document_payload_key ), 'Document payload builders and download service must not use the legacy document alias.' );
 shipment_docs_assert( ! str_contains( $metabox_source, 'admin_post_cdek_barcode_pdf' ) && ! str_contains( $metabox_source, 'admin_post_dpd_documents_zip' ) && ! str_contains( $metabox_source, 'admin_post_yandex_label_pdf' ), 'Old per-carrier admin-post handlers must be removed from metabox.' );
 
 echo "Shipment document actions smoke passed.\n";

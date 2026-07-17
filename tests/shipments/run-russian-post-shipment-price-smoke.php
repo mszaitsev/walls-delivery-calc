@@ -210,10 +210,6 @@ final class RussianPostShipmentPriceAdapter implements CarrierShipmentAdapterInt
 		return array( 'success' => false );
 	}
 
-	public function document_actions( object $order, array $shipment ): array {
-		return array();
-	}
-
 	public function supports_status_auto_sync(): bool {
 		return false;
 	}

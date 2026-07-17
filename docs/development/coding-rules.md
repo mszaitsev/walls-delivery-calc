@@ -1,6 +1,6 @@
 # Coding Rules
 
-Version: 0.122.2
+Version: 0.123.0
 
 ## Do Not
 
@@ -8,6 +8,7 @@ Version: 0.122.2
 - Add carrier business logic to `OrderShipmentsMetabox`.
 - Add carrier UI to generic JS modules.
 - Persist carrier data directly from `ShipmentCreationService`.
+- Add document action metadata to shipment adapters or adapter status payloads.
 - Download documents inside shipment adapters.
 - Create an alternate lifecycle endpoint for one carrier when the common continuation contract fits.
 - Add persistence fallbacks that hide missing mapper registration.
@@ -19,6 +20,7 @@ Version: 0.122.2
 
 - Register carrier implementations in the composition root.
 - Implement carrier-specific adapters, mappers, document providers, modal extensions, and JS extensions.
+- Put document action availability, visibility, keys, labels, and action metadata in document providers.
 - Keep AJAX capability/nonce/order/carrier checks close to controller entry points.
 - Keep repositories focused on storage, not application decisions.
 - Update canonical docs with code changes.

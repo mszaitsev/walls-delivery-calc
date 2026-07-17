@@ -254,11 +254,6 @@ final class ShipmentsSmokeAdapter implements CarrierShipmentAdapterInterface {
 		return array( 'success' => true );
 	}
 
-	public function document_actions( object $order, array $shipment ): array {
-		unset( $order, $shipment );
-		return array();
-	}
-
 	public function supports_status_auto_sync(): bool {
 		return false;
 	}
