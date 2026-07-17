@@ -273,7 +273,7 @@ russian_post_cancel_smoke_assert( false === $ambiguous_attach['success'] && str_
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $js_source = wdc_shipment_admin_js_bundle_source();
 $css_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
-russian_post_cancel_smoke_assert( str_contains( $metabox_source, 'label_actions' ) && ! str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY' . " === \$carrier_key &&" ), 'Russian Post documents button must not be hardcoded in the metabox.' );
+russian_post_cancel_smoke_assert( str_contains( $metabox_source, 'document_actions_for_carrier' ) && str_contains( $metabox_source, 'label_actions' ) && ! str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY' . " === \$carrier_key &&" ), 'Russian Post documents button must use generic document actions and must not be hardcoded in the metabox; label_actions remains only the compatible payload key.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'Статус WDC' ) && str_contains( $metabox_source, 'Статус посылки' ), 'Metabox must rename WDC status label.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, '<strong>ШПИ:</strong>' ) && str_contains( $metabox_source, 'Отслеживание' ), 'Metabox must rename tracking label.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'Внести ШПИ вручную' ) && str_contains( $metabox_source, 'Внести отслеживание вручную' ), 'Metabox must rename manual tracking button.' );

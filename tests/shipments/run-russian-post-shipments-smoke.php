@@ -254,7 +254,7 @@ final class ShipmentsSmokeAdapter implements CarrierShipmentAdapterInterface {
 		return array( 'success' => true );
 	}
 
-	public function label_actions( object $order, array $shipment ): array {
+	public function document_actions( object $order, array $shipment ): array {
 		unset( $order, $shipment );
 		return array();
 	}

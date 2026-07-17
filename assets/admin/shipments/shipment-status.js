@@ -243,7 +243,7 @@
       setVisible(removeButton, canRemove);
       removeButton.disabled = !canRemove;
     }
-    updateDocumentActions(box, state && Array.isArray(state.labelActions) ? state.labelActions : []);
+    updateDocumentActions(box, state && Array.isArray(state.documentActions) ? state.documentActions : []);
     dispatchShipmentCarrierHook('updateButtons', { box: box, state: state || {} });
   }
 
@@ -274,7 +274,7 @@
       canCancel: !!statusPayload.can_cancel,
       canRemove: !!statusPayload.can_remove_from_order,
       canUpdate: !!statusPayload.can_update_status,
-      labelActions: Array.isArray(statusPayload.label_actions) ? statusPayload.label_actions : []
+      documentActions: Array.isArray(statusPayload.label_actions) ? statusPayload.label_actions : []
     };
   }
 
@@ -305,7 +305,7 @@
       message.dataset.status = '';
     }
     setShipmentPollingIndicator(box, false);
-    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, labelActions: [] });
+    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, documentActions: [] });
     dispatchShipmentCarrierHook('resetStatusUi', { box: box });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;

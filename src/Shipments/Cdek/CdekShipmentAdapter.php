@@ -126,7 +126,7 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	 * @param array<string,mixed> $shipment
 	 * @return array<int,array<string,mixed>>
 	 */
-	public function label_actions( object $order, array $shipment ): array {
+	public function document_actions( object $order, array $shipment ): array {
 		$status = $this->status_payload( $order, $shipment );
 		if ( ! $this->barcode_print instanceof CdekBarcodePrintService || empty( $status['can_print_barcode'] ) ) {
 			return array();

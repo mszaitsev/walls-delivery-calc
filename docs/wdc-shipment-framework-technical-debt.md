@@ -8,9 +8,9 @@
    - Regression coverage: `tests/shipments/run-shipment-actual-cost-presentation-smoke.php` covers hidden actual cost, carrier zero actual values, neutral missing/zero base, exact +3%, +3% plus one kopeck, non-round bases, formatting, strict input and source assertions.
 
 2. Common document/action layer is missing
-   - Status: resolved in 0.115.0. `ShipmentDocumentAction`, `ShipmentBinaryDocument`, `CarrierShipmentDocumentProviderInterface`, `ShipmentDocumentProviderRegistry` and `ShipmentDocumentDownloadService` now own the normalized document action and protected download shell. CDEK, DPD, Yandex and Russian Post have carrier-specific providers; carrier APIs, payloads, filenames and PDF/ZIP validation remain carrier-owned.
+   - Status: resolved in 0.121.0. `ShipmentDocumentAction`, `ShipmentBinaryDocument`, `CarrierShipmentDocumentProviderInterface`, `ShipmentDocumentProviderRegistry` and `ShipmentDocumentDownloadService` now own the normalized document action and protected download shell. CDEK, DPD, Yandex and Russian Post have carrier-specific providers; carrier APIs, payloads, filenames and PDF/ZIP validation remain carrier-owned.
    - Preserved contract: CDEK BARCODE preparation, DPD document ZIP composition and Yandex `generate-labels` semantics are unchanged. The metabox no longer owns per-carrier admin-post download handlers.
-   - Follow-up debt: `CarrierShipmentAdapterInterface::label_actions()` remains as the older technical facade name for the document/action list. Rename it to `document_actions()` in a separate interface cleanup stage.
+   - Terminology cleanup: 0.121.0 renamed the generic adapter facade to `CarrierShipmentAdapterInterface::document_actions()` and admin JS internal state to `documentActions`. Carrier-specific real labels keep label terminology. The historic `label_actions` status payload key remains only as a backward-compatible wire alias.
 
 ## 0.108.5 focused debt register
 
@@ -63,7 +63,7 @@
 5. Carrier-specific JS validation in `shipments-admin.js`
    - Status: resolved in 0.117.4. The admin shipment runtime is split into `assets/admin/shipments/` modules: core helpers, preview, status rendering, polling, allocation, pickup/map interaction, carrier-neutral event wiring and carrier extensions for CDEK, DPD, Russian Post and Yandex.
    - Preserved contract: `assets/admin/shipments-admin.js` is only the bootstrap entrypoint; `shipment-events.js`, `shipment-polling.js` and `shipment-status.js` own only generic behavior. Carrier selectors, sender/source picker wiring, document click handlers, address post-processing, carrier-scoped Yandex cancellation UX, carrier status rows and CDEK default registration polling live in extensions via `registerShipmentCarrierHooks()`; DPD lifecycle continuation now uses the common `ShipmentLifecycleResult`/`wdc_continue_shipment_lifecycle` contract. Existing DOM, selectors, field names, AJAX actions, payload shape, polling timing and carrier behavior are unchanged.
-   - Document visibility now uses normalized `label_actions` with the generic document action marker, not carrier-specific booleans in common status code. The structure smoke checks for duplicate classic-script function declarations, duplicate top-level `const`/`let` declarations and function/lexical top-level collisions; since 0.117.4 it keeps every lexical occurrence separately and self-tests the scanner against duplicate const/let declarations, const/let collisions, local declarations, comments, strings and comma-separated declarations.
+   - Document visibility now uses normalized document actions with the generic document action marker, not carrier-specific booleans in common status code. The structure smoke checks for duplicate classic-script function declarations, duplicate top-level `const`/`let` declarations and function/lexical top-level collisions; since 0.117.4 it keeps every lexical occurrence separately and self-tests the scanner against duplicate const/let declarations, const/let collisions, local declarations, comments, strings and comma-separated declarations.
    - Backend AJAX extraction was closed in 0.120.0, and 0.120.1 tightened the metabox/controller constructor contract plus runtime callback smoke coverage; remaining adjacent debt is limited to backend AJAX controller refinement as needed.
 
 6. DPD two-stage flow
@@ -76,6 +76,10 @@
    - Shipment admin AJAX endpoint ownership moved from `OrderShipmentsMetabox` to controllers under `src/Shipments/Admin/Ajax/`. Concrete controllers own nonce/capability checks, request parsing, endpoint orchestration and JSON responses; `ShipmentAdminAjaxService` remains only a small helper, and shared carrier UI payload construction lives in `ShipmentAdminCarrierUiPayloadBuilder`. The metabox now keeps render/enqueue/modal shell and hook registration/delegation only.
    - 0.120.1 tightened the constructor boundary so all AJAX controllers are required metabox dependencies and added runtime smoke coverage that verifies every registered `wp_ajax_*` callback is callable.
    - Preserved contract: AJAX action names, request/response payloads, JavaScript behavior, carrier APIs, documents, lifecycle, status, persistence, checkout and Packaging behavior are unchanged.
+
+## Open Shipment Framework technical debt
+
+None. The last terminology item was closed in 0.121.0. Historical resolved entries are kept above for audit context.
 
 7. Compatibility meta keys `yandex_item_rows` / `cdek_item_rows`
    - Status: resolved in 0.112.1. Yandex registration and CDEK creation now use only `shipment_item_rows`; Yandex also no longer rebuilds rows from `ShipmentPlace::items` when canonical rows are missing.
