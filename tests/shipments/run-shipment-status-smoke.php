@@ -14,7 +14,7 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentStatusAjaxController;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
@@ -362,15 +362,13 @@ shipment_status_smoke_assert( DeliveryStatus::CANCELLED === $cancelled_saved['un
 shipment_status_smoke_assert( 'отменён' === $cancelled['status']['shipment_status_label'], 'Operation 46 without attr must expose Russian cancelled label.' );
 
 $GLOBALS['wdc_status_smoke_orders'] = array( 11 => $order );
-$ajax_service = new ShipmentAdminAjaxService(
+$ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	$repository,
-	( new ReflectionClass( OrderShipmentDraftFactory::class ) )->newInstanceWithoutConstructor(),
-	( new ReflectionClass( ShipmentCreationService::class ) )->newInstanceWithoutConstructor(),
 	new DeliveryServiceRepository( $wpdb ),
 	$status_service,
 	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeAdapter( $status_service ) ) )
 );
-$ajax_status_controller = new ShipmentStatusAjaxController( $ajax_service );
+$ajax_status_controller = new ShipmentStatusAjaxController( $repository, $ajax_payloads );
 $_POST = array( 'order_id' => 11, 'shipment_key' => RussianPostDomesticSettings::CARRIER_KEY );
 $GLOBALS['wdc_status_smoke_can'] = false;
 try {

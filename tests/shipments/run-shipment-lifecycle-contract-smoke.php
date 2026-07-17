@@ -63,10 +63,10 @@ shipment_lifecycle_assert( $submission_array === $round_trip, 'Lifecycle array c
 
 $dto_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Lifecycle/ShipmentLifecycleResult.php' );
 $continuation_interface_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Contracts/CarrierShipmentLifecycleContinuationInterface.php' );
-$ajax_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/Ajax/ShipmentAdminAjaxService.php' );
+$lifecycle_controller_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/Ajax/ShipmentLifecycleAjaxController.php' );
 shipment_lifecycle_assert( str_contains( $dto_source, "'continuation_token'" ) && ! str_contains( $dto_source, "'attempt_id'" ) && ! str_contains( $dto_source, "'poll_purpose'" ), 'Lifecycle DTO source must serialize only transport-neutral field names.' );
 shipment_lifecycle_assert( str_contains( $continuation_interface_source, '$continuation_token' ) && ! str_contains( $continuation_interface_source, '$attempt_id' ), 'Lifecycle continuation interface must use continuation_token naming.' );
-shipment_lifecycle_assert( str_contains( $ajax_service_source, "\$_POST['continuation_token']" ) && ! str_contains( $ajax_service_source, "\$_POST['attempt_id']" ) && ! str_contains( $ajax_service_source, "'poll_purpose'" ), 'Common admin lifecycle endpoint must accept continuation_token and purpose only.' );
+shipment_lifecycle_assert( str_contains( $lifecycle_controller_source, "\$_POST['continuation_token']" ) && ! str_contains( $lifecycle_controller_source, "\$_POST['attempt_id']" ) && ! str_contains( $lifecycle_controller_source, "'poll_purpose'" ), 'Common admin lifecycle endpoint must accept continuation_token and purpose only.' );
 
 shipment_lifecycle_expect_invalid(
 	static fn (): ShipmentLifecycleResult => new ShipmentLifecycleResult( 'dpd_submission_required' ),

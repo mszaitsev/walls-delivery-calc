@@ -13,6 +13,7 @@ $root = dirname( __DIR__, 2 );
 $metabox = (string) file_get_contents( $root . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $plugin = (string) file_get_contents( $root . '/src/Core/Plugin.php' );
 $service = (string) file_get_contents( $root . '/src/Shipments/Admin/Ajax/ShipmentAdminAjaxService.php' );
+$payload_builder = (string) file_get_contents( $root . '/src/Shipments/Admin/Ajax/ShipmentAdminCarrierUiPayloadBuilder.php' );
 
 $controllers = array(
 	'ShipmentCreateAjaxController' => 'handle',
@@ -31,6 +32,8 @@ foreach ( $controllers as $class => $method ) {
 	$source = (string) file_get_contents( $path );
 	shipment_admin_ajax_assert( is_file( $path ) && str_contains( $source, 'final class ' . $class ) && str_contains( $source, 'public function ' . $method ), 'AJAX controller must exist and expose expected handler: ' . $class );
 	shipment_admin_ajax_assert( str_contains( $plugin, '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class . '::class' ), 'Plugin DI must register AJAX controller: ' . $class );
+	shipment_admin_ajax_assert( ! preg_match( '/public function ' . preg_quote( $method, '/' ) . '\s*\([^)]*\)\s*:\s*void\s*\{\s*\$this->ajax->ajax_[a-z_]+\(\);\s*\}/', $source ), 'AJAX controller must not be a proxy wrapper: ' . $class );
+	shipment_admin_ajax_assert( str_contains( $source, 'wp_send_json_' ) || str_contains( $source, 'current_user_can' ), 'AJAX controller must own endpoint response/access logic: ' . $class );
 }
 
 foreach ( array(
@@ -49,13 +52,15 @@ foreach ( array(
 	'wdc_dpd_courier_contact_history',
 ) as $action ) {
 	shipment_admin_ajax_assert( str_contains( $metabox, $action ), 'Metabox registration/localization must preserve AJAX action name: ' . $action );
-	shipment_admin_ajax_assert( str_contains( $service, $action ), 'AJAX service must preserve action contract: ' . $action );
 }
 
 shipment_admin_ajax_assert( ! preg_match( '/function\s+ajax_[a-z_]+\s*\(/', $metabox ), 'OrderShipmentsMetabox must not contain AJAX endpoint methods.' );
 shipment_admin_ajax_assert( str_contains( $metabox, '$this->ajax_create_controller' ) && str_contains( $metabox, '$this->ajax_status_controller' ) && str_contains( $metabox, '$this->ajax_address_controller' ), 'OrderShipmentsMetabox must delegate AJAX hooks to controller dependencies.' );
-shipment_admin_ajax_assert( str_contains( $service, 'function ajax_create(' ) && str_contains( $service, 'function ajax_preview(' ) && str_contains( $service, 'function ajax_update_status(' ) && str_contains( $service, 'function ajax_search_pickup_points(' ), 'ShipmentAdminAjaxService must own moved AJAX orchestration methods.' );
-shipment_admin_ajax_assert( str_contains( $service, 'current_user_can( AdminMenu::CAPABILITY )' ) && str_contains( $service, "check_ajax_referer( self::NONCE_ACTION, 'nonce', false )" ), 'AJAX service must keep capability and nonce checks.' );
+shipment_admin_ajax_assert( ! preg_match( '/function\s+ajax_[a-z_]+\s*\(/', $service ), 'ShipmentAdminAjaxService must not contain AJAX endpoint methods.' );
+shipment_admin_ajax_assert( ! str_contains( $service, 'function render(' ) && ! str_contains( $service, 'function enqueue_assets' ) && ! str_contains( $service, 'function add_meta_box' ), 'ShipmentAdminAjaxService must not contain render/enqueue/metabox methods.' );
+shipment_admin_ajax_assert( ! str_contains( $service, 'ShipmentCreationService' ) && ! str_contains( $service, 'ShipmentStatusUpdateService' ) && ! str_contains( $service, 'CarrierShipmentAdapterRegistry' ) && ! str_contains( $service, 'AddressSuggestionService' ) && ! str_contains( $service, 'CdekBarcodePrintService' ), 'ShipmentAdminAjaxService must not depend on endpoint application/carrier services.' );
+shipment_admin_ajax_assert( str_contains( $service, 'function assert_access(' ) && str_contains( $service, 'function resolve_order_from_request(' ) && str_contains( $service, 'function carrier_key_from_request(' ), 'ShipmentAdminAjaxService must remain a small shared AJAX helper.' );
+shipment_admin_ajax_assert( str_contains( $payload_builder, 'function carrier_ui_payload(' ) && ! str_contains( $payload_builder, 'function ajax_' ), 'Carrier UI payload builder must own shared UI payload without endpoint methods.' );
 shipment_admin_ajax_assert( ! str_contains( $metabox, 'CarrierShipmentLifecycleContinuationInterface' ), 'Metabox must not own lifecycle continuation business contract.' );
 
 echo "Shipment admin AJAX smoke passed.\n";
