@@ -1,3 +1,9 @@
+## Shipment admin AJAX 0.120.1
+- `OrderShipmentsMetabox` keeps render/enqueue/modal shell, nonce localization and hook registration, but `wp_ajax_*` callbacks now delegate to controller dependencies from `src/Shipments/Admin/Ajax/`.
+- `ShipmentCreateAjaxController`, `ShipmentPreviewAjaxController`, `ShipmentStatusAjaxController`, `ShipmentLifecycleAjaxController`, `ShipmentRemovalAjaxController`, `ShipmentManualAttachAjaxController`, `ShipmentAddressAjaxController`, `ShipmentDocumentsAjaxController` and `ShipmentProductsAjaxController` own their endpoint request parsing, capability/nonce checks, orchestration and JSON responses. `ShipmentAdminAjaxService` is only a small shared helper, and `ShipmentAdminCarrierUiPayloadBuilder` owns shared carrier UI payload construction.
+- Since 0.120.1 all AJAX controllers are required `OrderShipmentsMetabox` constructor dependencies, and the admin AJAX smoke verifies the registered `wp_ajax_*` callbacks are callable at runtime.
+- Existing AJAX action names, nonce action, payload keys, JS selectors and carrier APIs are unchanged.
+
 ## Shipment regression profile 0.119.1
 - `tests/shipments/run-shipment-regression-profile.php` is the canonical Shipment Framework regression command. It loads `tests/shipments/regression/shipment-regression-manifest.php`, validates paths/groups/baselines, and runs every smoke as a separate PHP process through `ShipmentRegressionRunner`.
 - Default execution collects the full mandatory report instead of stopping on the first failure. Use `--fail-fast` for early stop, `--group=framework|cdek|dpd|russian-post|yandex|status-core`, `--list`, `--include-baseline` and `--include-optional` for scoped runs.

@@ -6,37 +6,35 @@ namespace WallsShop\WDC\Shipments\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
-use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
-use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
-use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
-use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
-use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
-use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
-use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentLifecycleAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentRemovalAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentStatusAjaxController;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
-use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
-use WallsShop\WDC\Shipments\Contracts\CarrierShipmentLifecycleContinuationInterface;
 use WallsShop\WDC\Shipments\Documents\ShipmentDocumentAction;
 use WallsShop\WDC\Shipments\Documents\ShipmentDocumentDownloadService;
 use WallsShop\WDC\Shipments\Documents\ShipmentDocumentProviderRegistry;
 use WallsShop\WDC\Shipments\Modal\CarrierShipmentModalExtensionInterface;
 use WallsShop\WDC\Shipments\Modal\ShipmentModalExtensionRegistry;
-use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -56,26 +54,26 @@ final class OrderShipmentsMetabox {
 	private const AJAX_SEARCH_PRODUCTS = 'wdc_search_products_for_shipment_item';
 	private const AJAX_CDEK_BARCODE_PREPARE = 'wdc_cdek_barcode_prepare';
 	private const AJAX_DPD_COURIER_CONTACT_HISTORY = 'wdc_dpd_courier_contact_history';
-	private ?YandexDeliveryPickupPointV2Repository $yandex_pickup_points = null;
-	private ?YandexLocationMappingV2Repository $yandex_location_mapping = null;
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private OrderShipmentDraftFactory $drafts,
-		private ShipmentCreationService $creation,
 		private DeliveryServiceRepository $services,
 		private ShipmentStatusUpdateService $status_updates,
+		private ShipmentCreateAjaxController $ajax_create_controller,
+		private ShipmentLifecycleAjaxController $ajax_lifecycle_controller,
+		private ShipmentPreviewAjaxController $ajax_preview_controller,
+		private ShipmentStatusAjaxController $ajax_status_controller,
+		private ShipmentRemovalAjaxController $ajax_removal_controller,
+		private ShipmentManualAttachAjaxController $ajax_manual_attach_controller,
+		private ShipmentAddressAjaxController $ajax_address_controller,
+		private ShipmentDocumentsAjaxController $ajax_documents_controller,
+		private ShipmentProductsAjaxController $ajax_products_controller,
 		private ?CdekOrderStatusService $cdek_status_updates = null,
 		private ?ShipmentBacklogService $backlog = null,
-		private ?RussianPostAddressNormalizer $address_normalizer = null,
 		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
-		private ?CdekDeliveryPointService $cdek_delivery_points = null,
-		private ?DpdPickupPointService $dpd_pickup_points = null,
-		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
-		private ?AddressSuggestionService $address_suggestions = null,
 		private string $plugin_url = '',
 		private string $version = '1',
-		private ?CdekBarcodePrintService $cdek_barcode_print = null,
 		private ?CarrierShipmentAdapterRegistry $carrier_adapters = null,
 		private ?ShipmentMetaboxButtonPolicy $button_policy = null,
 		private ?ShipmentDocumentProviderRegistry $document_providers = null,
@@ -87,19 +85,19 @@ final class OrderShipmentsMetabox {
 	public function register(): void {
 		add_action( 'add_meta_boxes', array( $this, 'add_meta_box' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
-		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this, 'ajax_create' ) );
-		add_action( 'wp_ajax_' . self::AJAX_CONTINUE_LIFECYCLE, array( $this, 'ajax_continue_lifecycle' ) );
-		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
-		add_action( 'wp_ajax_' . self::AJAX_UPDATE_STATUS, array( $this, 'ajax_update_status' ) );
-		add_action( 'wp_ajax_' . self::AJAX_MARK_POLL_EXHAUSTED, array( $this, 'ajax_mark_poll_exhausted' ) );
-		add_action( 'wp_ajax_' . self::AJAX_CANCEL, array( $this, 'ajax_cancel' ) );
-		add_action( 'wp_ajax_' . self::AJAX_REMOVE_FROM_ORDER, array( $this, 'ajax_remove_from_order' ) );
-		add_action( 'wp_ajax_' . self::AJAX_ATTACH_TRACKING, array( $this, 'ajax_attach_tracking' ) );
-		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
-		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this, 'ajax_search_pickup_points' ) );
-		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PRODUCTS, array( $this, 'ajax_search_products' ) );
-		add_action( 'wp_ajax_' . self::AJAX_CDEK_BARCODE_PREPARE, array( $this, 'ajax_cdek_barcode_prepare' ) );
-		add_action( 'wp_ajax_' . self::AJAX_DPD_COURIER_CONTACT_HISTORY, array( $this, 'ajax_dpd_courier_contact_history' ) );
+		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this->ajax_create_controller, 'handle' ) );
+		add_action( 'wp_ajax_' . self::AJAX_CONTINUE_LIFECYCLE, array( $this->ajax_lifecycle_controller, 'handle' ) );
+		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this->ajax_preview_controller, 'handle' ) );
+		add_action( 'wp_ajax_' . self::AJAX_UPDATE_STATUS, array( $this->ajax_status_controller, 'handle_update' ) );
+		add_action( 'wp_ajax_' . self::AJAX_MARK_POLL_EXHAUSTED, array( $this->ajax_status_controller, 'handle_mark_poll_exhausted' ) );
+		add_action( 'wp_ajax_' . self::AJAX_CANCEL, array( $this->ajax_removal_controller, 'handle_cancel' ) );
+		add_action( 'wp_ajax_' . self::AJAX_REMOVE_FROM_ORDER, array( $this->ajax_removal_controller, 'handle_remove' ) );
+		add_action( 'wp_ajax_' . self::AJAX_ATTACH_TRACKING, array( $this->ajax_manual_attach_controller, 'handle' ) );
+		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this->ajax_address_controller, 'handle_normalize' ) );
+		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this->ajax_address_controller, 'handle_search_pickup_points' ) );
+		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PRODUCTS, array( $this->ajax_products_controller, 'handle_search_products' ) );
+		add_action( 'wp_ajax_' . self::AJAX_CDEK_BARCODE_PREPARE, array( $this->ajax_documents_controller, 'handle_cdek_barcode_prepare' ) );
+		add_action( 'wp_ajax_' . self::AJAX_DPD_COURIER_CONTACT_HISTORY, array( $this->ajax_products_controller, 'handle_dpd_contact_history' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -427,238 +425,6 @@ final class OrderShipmentsMetabox {
 		<?php
 	}
 
-	public function ajax_create(): void {
-		$buffer_level = ob_get_level();
-		ob_start();
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		try {
-			$order_id = (int) ( $_POST['order_id'] ?? 0 );
-			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-			if ( ! is_object( $order ) ) {
-				$this->discard_preview_buffer( $buffer_level );
-				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_create_invalid_request' ), 404 );
-			}
-			$data = $_POST;
-			$prepared = $this->maybe_prepare_cdek_courier_address( $order, $data );
-			if ( ! empty( $prepared['error'] ) ) {
-				throw new \InvalidArgumentException( (string) $prepared['error'] );
-			}
-			$request = $this->drafts->create_request_from_admin_data( $order, $data );
-			$this->validate_preview_request( $request );
-			$preview = $this->creation->safe_preview( $request );
-			if ( ! empty( $preview['errors'] ) && is_array( $preview['errors'] ) && in_array( $request->carrier_key, array( DpdSettings::CARRIER_KEY, YandexDeliverySettings::CARRIER_KEY ), true ) ) {
-				throw new \InvalidArgumentException( $this->public_shipment_error_message( (string) reset( $preview['errors'] ) ) );
-			}
-			if ( DpdSettings::CARRIER_KEY === $request->carrier_key ) {
-				$adapter = $this->carrier_adapter( DpdSettings::CARRIER_KEY );
-				if ( null === $adapter ) {
-					throw new \InvalidArgumentException( __( 'Адаптер DPD недоступен.', 'walls-delivery-calc' ) );
-				}
-				$result = method_exists( $adapter, 'begin_registration' ) ? $adapter->begin_registration( $order, $request ) : array( 'success' => false, 'message' => __( 'Регистрация DPD недоступна.', 'walls-delivery-calc' ) );
-				if ( empty( $result['success'] ) ) {
-					$this->discard_preview_buffer( $buffer_level );
-					wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось зарегистрировать отправление DPD.', 'walls-delivery-calc' ) ), 'preview' => $preview, 'error_code' => 'shipment_create_validation_failed' ), 400 );
-				}
-				$this->add_dpd_courier_contact_history( (string) ( $request->meta['sender_contact_fio'] ?? '' ) );
-				$this->discard_preview_buffer( $buffer_level );
-				wp_send_json_success(
-					array_merge(
-						$this->carrier_ui_payload( $order, $request->carrier_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
-						$result,
-						array( 'message' => (string) ( $result['message'] ?? $this->carrier_presentation( $request->carrier_key )['created_toast'] ), 'preview' => $preview )
-					)
-				);
-			}
-
-			$result = $this->creation->create( $order, $request );
-			if ( ! $result->success ) {
-				$this->discard_preview_buffer( $buffer_level );
-				wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $result->error_message ), 'code' => $result->error_code, 'error_code' => (string) ( $result->error_code ?: 'shipment_create_failed' ), 'preview' => $preview ), 400 );
-			}
-
-			$this->discard_preview_buffer( $buffer_level );
-			$accepted_reconciliation = is_array( $result->raw_reference['yandex_accepted_reconciliation'] ?? null ) ? $result->raw_reference['yandex_accepted_reconciliation'] : array();
-			$success_message = array() !== $accepted_reconciliation
-				? __( 'Отправление создано в Яндекс.Доставке. Ожидается получение статуса.', 'walls-delivery-calc' )
-				: $this->carrier_presentation( $request->carrier_key )['created_toast'];
-			wp_send_json_success(
-				array_merge(
-					$this->carrier_ui_payload( $order, $request->carrier_key ),
-					array(
-					'message' => $success_message,
-					'tracking_number' => $result->tracking_number,
-					'backlog_order_id' => $result->backlog_order_id,
-					'preview' => $preview,
-					'accepted' => ! empty( $accepted_reconciliation['accepted'] ),
-					'reconciliation_required' => ! empty( $accepted_reconciliation['reconciliation_required'] ),
-					'request_id' => (string) ( $accepted_reconciliation['request_id'] ?? '' ),
-					)
-				)
-			);
-		} catch ( \InvalidArgumentException $exception ) {
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error(
-				array(
-					'message' => $this->public_shipment_error_message( $exception->getMessage() ),
-					'error_code' => 'shipment_create_validation_failed',
-				),
-				400
-			);
-		} catch ( \Throwable $exception ) {
-			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
-				throw $exception;
-			}
-			error_log(
-				sprintf(
-					'[walls-delivery-calc] shipment create failed. class=%s message=%s location=%s:%d',
-					$exception::class,
-					$exception->getMessage(),
-					$exception->getFile(),
-					$exception->getLine()
-				)
-			);
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error(
-				array(
-					'message' => __( 'Не удалось создать отправление. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ),
-					'error_code' => 'shipment_create_unexpected_error',
-				),
-				500
-			);
-		}
-	}
-
-	public function ajax_continue_lifecycle(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		try {
-			$order_id = (int) ( $_POST['order_id'] ?? 0 );
-			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-			if ( ! is_object( $order ) || $order_id <= 0 ) {
-				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_lifecycle_invalid_request' ), 404 );
-			}
-			$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? $_POST['shipment_key'] ?? '' ) );
-			$continuation_token = sanitize_text_field( wp_unslash( $_POST['continuation_token'] ?? '' ) );
-			if ( '' === $carrier_key || '' === $continuation_token ) {
-				throw new \InvalidArgumentException( __( 'Не найден контекст продолжения регистрации отправления.', 'walls-delivery-calc' ) );
-			}
-			$adapter = $this->carrier_adapter( $carrier_key );
-			if ( ! $adapter instanceof CarrierShipmentLifecycleContinuationInterface ) {
-				throw new \InvalidArgumentException( __( 'Выбранная служба не поддерживает продолжение регистрации отправления.', 'walls-delivery-calc' ) );
-			}
-			$result = $adapter->continue_lifecycle( $order, $continuation_token );
-			if ( empty( $result['success'] ) ) {
-				wp_send_json_error(
-					array_merge(
-						$this->carrier_ui_payload( $order, $carrier_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
-						array(
-							'message' => (string) ( $result['message'] ?? __( 'Не удалось продолжить регистрацию отправления.', 'walls-delivery-calc' ) ),
-							'lifecycle' => is_array( $result['lifecycle'] ?? null ) ? $result['lifecycle'] : array(),
-						)
-					),
-					400
-				);
-			}
-			wp_send_json_success(
-				array_merge(
-					$this->carrier_ui_payload( $order, $carrier_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
-					$result,
-					array(
-						'message' => (string) ( $result['message'] ?? __( 'Регистрация отправления продолжена.', 'walls-delivery-calc' ) ),
-						'lifecycle' => is_array( $result['lifecycle'] ?? null ) ? $result['lifecycle'] : array(),
-					)
-				)
-			);
-		} catch ( \InvalidArgumentException $exception ) {
-			wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $exception->getMessage() ), 'error_code' => 'shipment_lifecycle_validation_failed' ), 400 );
-		} catch ( \Throwable $exception ) {
-			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
-				throw $exception;
-			}
-			error_log(
-				sprintf(
-					'[walls-delivery-calc] shipment lifecycle continuation failed. class=%s message=%s location=%s:%d',
-					$exception::class,
-					$exception->getMessage(),
-					$exception->getFile(),
-					$exception->getLine()
-				)
-			);
-			wp_send_json_error( array( 'message' => __( 'Не удалось продолжить регистрацию отправления. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ), 'error_code' => 'shipment_lifecycle_unexpected_error' ), 500 );
-		}
-	}
-
-	public function ajax_preview(): void {
-		$buffer_level = ob_get_level();
-		ob_start();
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		try {
-			$order_id = (int) ( $_POST['order_id'] ?? 0 );
-			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-			if ( ! is_object( $order ) ) {
-				$this->discard_preview_buffer( $buffer_level );
-				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_preview_invalid_request' ), 404 );
-			}
-			$data = $_POST;
-			$prepared = $this->maybe_prepare_cdek_courier_address( $order, $data );
-			if ( ! empty( $prepared['error'] ) ) {
-				throw new \InvalidArgumentException( (string) $prepared['error'] );
-			}
-			$request = $this->preview_request( $this->drafts->create_request_from_admin_data( $order, $data ) );
-			$this->validate_preview_request( $request );
-			$preview = $this->creation->safe_preview( $request );
-			if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key && ! empty( $preview['errors'] ) && is_array( $preview['errors'] ) ) {
-				throw new \InvalidArgumentException( $this->public_shipment_error_message( (string) reset( $preview['errors'] ) ) );
-			}
-
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_success( array( 'preview' => $preview ) );
-		} catch ( \InvalidArgumentException $exception ) {
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error(
-				array(
-					'message' => $this->public_shipment_error_message( $exception->getMessage() ),
-					'error_code' => 'shipment_preview_validation_failed',
-				),
-				400
-			);
-		} catch ( \Throwable $exception ) {
-			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
-				throw $exception;
-			}
-			error_log(
-				sprintf(
-					'[walls-delivery-calc] shipment preview failed. class=%s message=%s location=%s:%d',
-					$exception::class,
-					$exception->getMessage(),
-					$exception->getFile(),
-					$exception->getLine()
-				)
-			);
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error(
-				array(
-					'message' => __( 'Сервер вернул некорректный ответ при подготовке отправления. Проверьте журнал ошибок.', 'walls-delivery-calc' ),
-					'error_code' => 'shipment_preview_unexpected_error',
-				),
-				500
-			);
-		}
-	}
-
-	private function discard_preview_buffer( int $buffer_level ): void {
-		while ( ob_get_level() > $buffer_level ) {
-			ob_end_clean();
-		}
-	}
-
 	/**
 	 * @param array<int,array<string,mixed>> $draft_place_rows
 	 * @return array<int,array<string,mixed>>
@@ -680,703 +446,6 @@ final class OrderShipmentsMetabox {
 		return array() !== $rows ? $rows : array( array( 'place_number' => 1, 'weight_g' => '', 'length_cm' => '', 'width_cm' => '', 'height_cm' => '' ) );
 	}
 
-	private function validate_preview_request( ShipmentCreateRequest $request ): void {
-		if ( YandexDeliverySettings::CARRIER_KEY !== $request->carrier_key ) {
-			return;
-		}
-		$source_station = trim( (string) ( $request->meta['yandex_source_platform_station_id'] ?? '' ) );
-		if ( '' === $source_station ) {
-			throw new \InvalidArgumentException( __( 'Не указана исходная станция Яндекс.', 'walls-delivery-calc' ) );
-		}
-		$this->validate_yandex_source_station( $source_station, ! empty( $request->meta['yandex_source_station_overridden'] ) );
-		$delivery_type = (string) ( $request->delivery_type ?: ( $request->meta['delivery_type'] ?? '' ) );
-		if ( DeliveryType::PICKUP === $delivery_type ) {
-			$destination_station = trim( (string) ( $request->meta['yandex_pickup_platform_station_id'] ?? $request->pickup_point?->point_code ?? '' ) );
-			if ( '' === $destination_station ) {
-				throw new \InvalidArgumentException( __( 'Не выбран ПВЗ назначения Яндекс.', 'walls-delivery-calc' ) );
-			}
-		} elseif ( DeliveryType::COURIER === $delivery_type ) {
-			$details = is_array( $request->meta['yandex_courier_details'] ?? null ) ? $request->meta['yandex_courier_details'] : array();
-			if ( empty( $details['address_verified'] ) || 'dadata+yandex' !== (string) ( $details['normalization_source'] ?? '' ) ) {
-				throw new \InvalidArgumentException( __( 'Проверьте адрес доставки через DaData.', 'walls-delivery-calc' ) );
-			}
-			if ( '' === trim( (string) ( $details['locality'] ?? '' ) ) ) {
-				throw new \InvalidArgumentException( __( 'Не удалось определить населённый пункт. Проверьте полный адрес.', 'walls-delivery-calc' ) );
-			}
-			if ( '' === trim( (string) ( $details['street'] ?? '' ) ) ) {
-				throw new \InvalidArgumentException( __( 'Не удалось определить улицу. Проверьте полный адрес.', 'walls-delivery-calc' ) );
-			}
-			if ( '' === trim( (string) ( $details['house'] ?? '' ) ) ) {
-				throw new \InvalidArgumentException( __( 'Не удалось определить номер дома. Проверьте полный адрес.', 'walls-delivery-calc' ) );
-			}
-		}
-	}
-
-	private function validate_yandex_source_station( string $platform_station_id, bool $overridden ): void {
-		$platform_station_id = trim( $platform_station_id );
-		if ( '' === $platform_station_id ) {
-			throw new \InvalidArgumentException( __( 'Не указана исходная станция Яндекс.', 'walls-delivery-calc' ) );
-		}
-		$row = $this->yandex_pickup_points()->find( $platform_station_id );
-		if ( ! is_array( $row ) ) {
-			if ( $overridden ) {
-				throw new \InvalidArgumentException( __( 'ПВЗ отправления Яндекс не найден.', 'walls-delivery-calc' ) );
-			}
-			return;
-		}
-		if ( empty( $row['active'] ) ) {
-			throw new \InvalidArgumentException( $overridden ? __( 'Выбранный ПВЗ Яндекс сейчас недоступен.', 'walls-delivery-calc' ) : __( 'Сохранённый ПВЗ отправления Яндекс недоступен. Выберите другой ПВЗ.', 'walls-delivery-calc' ) );
-		}
-		if ( empty( $row['available_for_dropoff'] ) ) {
-			throw new \InvalidArgumentException( $overridden ? __( 'Выбранный ПВЗ Яндекс не принимает отправления.', 'walls-delivery-calc' ) : __( 'Сохранённый ПВЗ отправления Яндекс недоступен. Выберите другой ПВЗ.', 'walls-delivery-calc' ) );
-		}
-		if ( '' === trim( (string) ( $row['platform_station_id'] ?? '' ) ) ) {
-			throw new \InvalidArgumentException( __( 'ПВЗ отправления Яндекс не найден.', 'walls-delivery-calc' ) );
-		}
-	}
-
-	private function public_shipment_error_message( string $message ): string {
-		$message = trim( $message );
-		if ( '' === $message ) {
-			return __( 'Проверьте данные отправления.', 'walls-delivery-calc' );
-		}
-		if ( str_contains( $message, "\n" ) ) {
-			$messages = array();
-			foreach ( preg_split( '/\R+/', $message ) ?: array() as $line ) {
-				$translated = $this->public_shipment_error_message( (string) $line );
-				if ( '' !== $translated && ! in_array( $translated, $messages, true ) ) {
-					$messages[] = $translated;
-				}
-			}
-
-			return array() !== $messages ? implode( "\n", $messages ) : __( 'Проверьте данные отправления.', 'walls-delivery-calc' );
-		}
-
-		$translations = array(
-			'amount must be greater than 0' => __( 'Укажите количество товара больше 0.', 'walls-delivery-calc' ),
-			'ordered_quantity must be greater than 0' => __( 'Укажите исходное количество товара больше 0.', 'walls-delivery-calc' ),
-			'weight must be greater than 0' => __( 'Укажите вес товара больше 0.', 'walls-delivery-calc' ),
-			'weight_g must be greater than 0' => __( 'Укажите вес грузоместа.', 'walls-delivery-calc' ),
-			'length_cm must be greater than 0' => __( 'Укажите длину грузоместа.', 'walls-delivery-calc' ),
-			'width_cm must be greater than 0' => __( 'Укажите ширину грузоместа.', 'walls-delivery-calc' ),
-			'height_cm must be greater than 0' => __( 'Укажите высоту грузоместа.', 'walls-delivery-calc' ),
-			'cost must be greater than or equal to 0' => __( 'Укажите стоимость товара.', 'walls-delivery-calc' ),
-			'must contain item_key' => __( 'Не удалось определить товар в строке распределения.', 'walls-delivery-calc' ),
-			'references an unknown shipment place' => __( 'Строка товара ссылается на несуществующее грузоместо.', 'walls-delivery-calc' ),
-			'must contain at least one allocation row' => __( 'Каждое грузоместо должно содержать хотя бы один товар.', 'walls-delivery-calc' ),
-			'CDEK allocation rows must not be empty' => __( 'Добавьте товары в грузоместа.', 'walls-delivery-calc' ),
-			'allocation must contain at least one item' => __( 'Добавьте хотя бы один товар в отправление.', 'walls-delivery-calc' ),
-			'shipment place must contain at least one item' => __( 'Каждое грузоместо должно содержать хотя бы один товар.', 'walls-delivery-calc' ),
-		);
-		foreach ( $translations as $needle => $translation ) {
-			if ( str_contains( $message, $needle ) ) {
-				return $translation;
-			}
-		}
-		if ( preg_match( '/\b(must|failed|invalid|unknown|error|missing|required)\b/i', $message ) && ! preg_match( '/[А-Яа-яЁё]/u', $message ) ) {
-			return __( 'Проверьте данные отправления.', 'walls-delivery-calc' );
-		}
-
-		return $message;
-	}
-
-	public function ajax_dpd_courier_contact_history(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		$operation = sanitize_key( wp_unslash( $_POST['operation'] ?? '' ) );
-		$value = sanitize_text_field( wp_unslash( $_POST['value'] ?? '' ) );
-		$history = 'remove' === $operation ? $this->remove_dpd_courier_contact_history( $value ) : $this->add_dpd_courier_contact_history( $value );
-
-		wp_send_json_success( array( 'history' => $history ) );
-	}
-	public function ajax_update_status(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		$order_id = (int) ( $_POST['order_id'] ?? 0 );
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) ) {
-			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
-		}
-
-		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		$adapter = $this->carrier_adapter( $shipment_key );
-		if ( null === $adapter ) {
-			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
-		}
-		$result = $adapter->update_status( $order, $shipment_key );
-		if ( ! (bool) ( $result['success'] ?? false ) ) {
-			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось получить статус отправления.', 'walls-delivery-calc' ) ) ), 400 );
-		}
-
-		wp_send_json_success(
-			array_merge(
-				$this->carrier_ui_payload( $order, $shipment_key ),
-				array(
-					'message' => (string) ( $result['message'] ?? __( 'Статус отправления обновлен.', 'walls-delivery-calc' ) ),
-					'pending' => ! empty( $result['pending'] ),
-					'retryable' => ! empty( $result['retryable'] ),
-					'carrier_status_value' => is_scalar( $result['status'] ?? null ) ? (string) $result['status'] : '',
-				)
-			)
-		);
-	}
-
-	public function ajax_mark_poll_exhausted(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		try {
-			$order_id = (int) ( $_POST['order_id'] ?? 0 );
-			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-			if ( ! is_object( $order ) || $order_id <= 0 ) {
-				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_poll_exhausted_invalid_request' ), 404 );
-			}
-			$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-			$attempts = max( 0, (int) ( $_POST['attempts'] ?? 0 ) );
-			$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? 'registration' ) );
-			$adapter = $this->carrier_adapter( $shipment_key );
-			if ( null === $adapter ) {
-				throw new \InvalidArgumentException( __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) );
-			}
-			if ( ! method_exists( $adapter, 'mark_polling_exhausted' ) ) {
-				throw new \InvalidArgumentException( __( 'Служба доставки не поддерживает сохранение состояния polling.', 'walls-delivery-calc' ) );
-			}
-			$result = $adapter->mark_polling_exhausted( $order, $attempts, $purpose );
-			if ( ! (bool) ( $result['success'] ?? false ) ) {
-				throw new \InvalidArgumentException( (string) ( $result['message'] ?? __( 'Не удалось сохранить состояние polling.', 'walls-delivery-calc' ) ) );
-			}
-
-			wp_send_json_success(
-				array_merge(
-					$this->carrier_ui_payload( $order, $shipment_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
-					array(
-						'message' => (string) ( $result['message'] ?? __( 'Автоматическая проверка статуса завершена.', 'walls-delivery-calc' ) ),
-						'polling_exhausted' => true,
-						'attempts' => $attempts,
-					)
-				)
-			);
-		} catch ( \InvalidArgumentException $exception ) {
-			wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $exception->getMessage() ), 'error_code' => 'shipment_poll_exhausted_validation_failed' ), 400 );
-		} catch ( \Throwable $exception ) {
-			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
-				throw $exception;
-			}
-			error_log(
-				sprintf(
-					'[walls-delivery-calc] shipment poll exhausted failed. class=%s message=%s location=%s:%d',
-					$exception::class,
-					$exception->getMessage(),
-					$exception->getFile(),
-					$exception->getLine()
-				)
-			);
-			wp_send_json_error( array( 'message' => __( 'Не удалось сохранить состояние автоматической проверки. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ), 'error_code' => 'shipment_poll_exhausted_unexpected_error' ), 500 );
-		}
-	}
-
-	public function ajax_cancel(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		$order_id = (int) ( $_POST['order_id'] ?? 0 );
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) || $order_id <= 0 ) {
-			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
-		}
-		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		$adapter = $this->carrier_adapter( $shipment_key );
-		if ( null === $adapter ) {
-			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
-		}
-		$result = $adapter->cancel_in_carrier( $order, $shipment_key );
-		if ( ! (bool) ( $result['success'] ?? false ) ) {
-			$error_payload = array_merge(
-				$this->carrier_ui_payload( $order, $shipment_key ),
-				array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось отменить отправление.', 'walls-delivery-calc' ) ), 'temporary_can_remove' => ! empty( $result['temporary_can_remove'] ) )
-			);
-			wp_send_json_error( $error_payload, 400 );
-		}
-
-		wp_send_json_success(
-			array_merge(
-				$this->carrier_ui_payload( $order, $shipment_key ),
-				array(
-				'message' => (string) ( $result['message'] ?? __( 'Отправление отменено.', 'walls-delivery-calc' ) ),
-				'accepted' => ! empty( $result['accepted'] ),
-				'cancellation_started' => ! empty( $result['cancellation_started'] ),
-				'cancelled_and_removed' => ! empty( $result['cancelled_and_removed'] ),
-				'auto_poll' => ! empty( $result['auto_poll'] ),
-				'poll_interval_ms' => (int) ( $result['poll_interval_ms'] ?? 0 ),
-				'poll_max_attempts' => (int) ( $result['poll_max_attempts'] ?? 0 ),
-				'purpose' => (string) ( $result['purpose'] ?? '' ),
-				)
-			)
-		);
-	}
-
-	public function ajax_remove_from_order(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		$order_id = (int) ( $_POST['order_id'] ?? 0 );
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) || $order_id <= 0 ) {
-			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
-		}
-		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		$adapter = $this->carrier_adapter( $shipment_key );
-		if ( null === $adapter ) {
-			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
-		}
-		$result = $adapter->remove_from_order( $order, $shipment_key );
-		if ( ! (bool) ( $result['success'] ?? false ) ) {
-			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось удалить данные отправления.', 'walls-delivery-calc' ) ) ), 400 );
-		}
-
-		wp_send_json_success(
-			array_merge(
-				$this->carrier_ui_payload( $order, $shipment_key ),
-				array(
-				'message' => (string) ( $result['message'] ?? __( 'Данные отправления удалены из заказа.', 'walls-delivery-calc' ) ),
-				)
-			)
-		);
-	}
-
-	public function ajax_attach_tracking(): void {
-		$buffer_level = ob_get_level();
-		ob_start();
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		try {
-			$order_id = (int) ( $_POST['order_id'] ?? 0 );
-			$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-			if ( ! is_object( $order ) || $order_id <= 0 ) {
-				$this->discard_preview_buffer( $buffer_level );
-				wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ), 'error_code' => 'shipment_attach_invalid_request' ), 404 );
-			}
-			$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-			$barcode = sanitize_text_field( wp_unslash( $_POST['barcode'] ?? '' ) );
-			$adapter = $this->carrier_adapter( $shipment_key );
-			if ( null === $adapter ) {
-				throw new \InvalidArgumentException( __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) );
-			}
-			$result = $adapter->attach_manual( $order, array( 'barcode' => $barcode, 'request_id' => $barcode, 'tracking_number' => $barcode ) );
-			if ( ! (bool) ( $result['success'] ?? false ) ) {
-				throw new \InvalidArgumentException( (string) ( $result['message'] ?? __( 'Не удалось сохранить номер отслеживания.', 'walls-delivery-calc' ) ) );
-			}
-
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_success(
-				array_merge(
-					$this->carrier_ui_payload( $order, $shipment_key ),
-					array(
-					'message' => (string) ( $result['message'] ?? __( 'Номер отслеживания сохранен.', 'walls-delivery-calc' ) ),
-					'warning' => (string) ( $result['warning'] ?? '' ),
-					'tracking_number' => (string) ( $result['tracking_number'] ?? '' ),
-					'backlog_order_id' => (string) ( $result['backlog_order_id'] ?? '' ),
-					)
-				)
-			);
-		} catch ( \InvalidArgumentException $exception ) {
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $exception->getMessage() ), 'error_code' => 'shipment_attach_validation_failed' ), 400 );
-		} catch ( \Throwable $exception ) {
-			if ( str_contains( $exception::class, 'AjaxResponse' ) ) {
-				throw $exception;
-			}
-			error_log(
-				sprintf(
-					'[walls-delivery-calc] shipment attach failed. class=%s message=%s location=%s:%d',
-					$exception::class,
-					$exception->getMessage(),
-					$exception->getFile(),
-					$exception->getLine()
-				)
-			);
-			$this->discard_preview_buffer( $buffer_level );
-			wp_send_json_error( array( 'message' => __( 'Не удалось прикрепить отправление. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ), 'error_code' => 'shipment_attach_unexpected_error' ), 500 );
-		}
-	}
-
-	public function ajax_cdek_barcode_prepare(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		$order_id = (int) ( $_POST['order_id'] ?? 0 );
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) || $order_id <= 0 ) {
-			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
-		}
-		if ( ! $this->cdek_barcode_print instanceof CdekBarcodePrintService ) {
-			wp_send_json_error( array( 'message' => __( 'Печать этикетки СДЭК недоступна.', 'walls-delivery-calc' ) ), 500 );
-		}
-
-		$result = $this->cdek_barcode_print->prepare_for_order( $order );
-		if ( empty( $result['success'] ) ) {
-			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось подготовить этикетку СДЭК.', 'walls-delivery-calc' ) ) ), 400 );
-		}
-
-		if ( 'READY' === (string) ( $result['status'] ?? '' ) ) {
-			$result['download_url'] = $this->document_download_url( $order_id, CdekSettings::CARRIER_KEY, 'download_label' );
-		}
-
-		wp_send_json_success( $result );
-	}
-
-	public function ajax_normalize_address(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		$order_id = (int) ( $_POST['order_id'] ?? 0 );
-		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
-		if ( ! is_object( $order ) ) {
-			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
-		}
-		$original_address = sanitize_text_field( wp_unslash( $_POST['courier_original_address'] ?? $_POST['original_address'] ?? '' ) );
-		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
-		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
-		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $_POST['delivery_type'] ?? '' ) ) );
-		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type ) {
-			$result = $this->normalize_yandex_courier_address( $order, $original_address );
-			wp_send_json_success( array( 'normalized_address' => $result ) );
-		}
-		if ( CdekSettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type ) {
-			if ( ! $this->cdek_address_preparation instanceof CdekRecipientAddressPreparationService ) {
-				wp_send_json_error( array( 'message' => __( 'Нормализация адреса СДЭК недоступна.', 'walls-delivery-calc' ) ), 500 );
-			}
-			$result = $this->cdek_address_preparation->prepare( $order, $original_address, $this->recipient_location_context_from_request( $order ), $service_key ?: CdekSettings::SERVICE_KEY );
-			wp_send_json_success( array( 'normalized_address' => $result ) );
-		}
-		if ( DpdSettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type ) {
-			if ( ! $this->cdek_address_preparation instanceof CdekRecipientAddressPreparationService ) {
-				wp_send_json_error( array( 'message' => __( 'Нормализация адреса DPD недоступна.', 'walls-delivery-calc' ) ), 500 );
-			}
-			$result = $this->cdek_address_preparation->prepare( $order, $original_address, $this->recipient_location_context_from_request( $order ), DpdSettings::SERVICE_KEY );
-			$result['service_key'] = DpdSettings::SERVICE_KEY;
-			$result['source'] = ! empty( $result['success'] ) ? 'dadata+dpd' : (string) ( $result['source'] ?? 'dadata+dpd' );
-			wp_send_json_success( array( 'normalized_address' => $result ) );
-		}
-		if ( ! $this->address_normalizer instanceof RussianPostAddressNormalizer ) {
-			wp_send_json_error( array( 'message' => __( 'Нормализация адреса недоступна.', 'walls-delivery-calc' ) ), 500 );
-		}
-
-		$result = $this->address_normalizer->normalize( $order_id, $original_address );
-		$result['order_id'] = $order_id;
-		$result['service_key'] = $service_key;
-
-		if ( method_exists( $order, 'update_meta_data' ) && method_exists( $order, 'save' ) ) {
-			$order->update_meta_data( '_wdc_shipment_rp_clean_address', $result );
-			$order->save();
-		}
-
-		wp_send_json_success( array( 'normalized_address' => $result ) );
-	}
-
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function normalize_yandex_courier_address( object $order, string $original_address ): array {
-		$original_address = trim( $original_address );
-		if ( '' === $original_address ) {
-			return array(
-				'success' => false,
-				'message' => __( 'Введите полный адрес доставки.', 'walls-delivery-calc' ),
-				'source' => 'dadata+yandex',
-				'fields' => array(),
-				'display' => '',
-				'original_hash' => hash( 'sha256', $original_address ),
-				'service_key' => YandexDeliverySettings::SERVICE_KEY,
-			);
-		}
-		if ( ! $this->address_suggestions instanceof AddressSuggestionService ) {
-			return array(
-				'success' => false,
-				'message' => __( 'Проверка адреса через DaData недоступна.', 'walls-delivery-calc' ),
-				'source' => 'dadata+yandex',
-				'fields' => array(),
-				'display' => '',
-				'original_hash' => hash( 'sha256', $original_address ),
-				'service_key' => YandexDeliverySettings::SERVICE_KEY,
-			);
-		}
-
-		$response = $this->address_suggestions->suggest( 'address', $original_address, $this->yandex_address_suggestion_context( $order ) );
-		if ( empty( $response['success'] ) ) {
-			return array(
-				'success' => false,
-				'message' => $this->dadata_error_message( (string) ( $response['error_code'] ?? '' ) ),
-				'source' => 'dadata+yandex',
-				'fields' => array(),
-				'display' => '',
-				'original_hash' => hash( 'sha256', $original_address ),
-				'service_key' => YandexDeliverySettings::SERVICE_KEY,
-			);
-		}
-
-		$items = is_array( $response['items'] ?? null ) ? $response['items'] : array();
-		$item = null;
-		foreach ( $items as $candidate ) {
-			if ( is_array( $candidate ) && ! empty( $candidate['isDeliverable'] ) ) {
-				$item = $candidate;
-				break;
-			}
-		}
-		if ( null === $item && isset( $items[0] ) && is_array( $items[0] ) ) {
-			$item = $items[0];
-		}
-		if ( null === $item ) {
-			return array(
-				'success' => false,
-				'message' => __( 'Адрес распознан недостаточно точно. Уточните его и проверьте повторно.', 'walls-delivery-calc' ),
-				'source' => 'dadata+yandex',
-				'fields' => array(),
-				'display' => '',
-				'original_hash' => hash( 'sha256', $original_address ),
-				'service_key' => YandexDeliverySettings::SERVICE_KEY,
-			);
-		}
-
-		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
-		$locality = $this->yandex_locality_from_normalized_item( $item );
-		$street = trim( (string) ( $data['street_with_type'] ?? $data['street'] ?? '' ) );
-		$house = trim( (string) ( $data['house'] ?? '' ) );
-		$room = trim( (string) ( $data['flat'] ?? $data['room'] ?? $data['room_number'] ?? $data['premise'] ?? '' ) );
-		$full_address = trim( (string) ( $item['unrestrictedValue'] ?? $item['value'] ?? $item['label'] ?? $original_address ) );
-		$message = '';
-		if ( '' === $locality ) {
-			$message = __( 'Не удалось определить населённый пункт. Проверьте полный адрес.', 'walls-delivery-calc' );
-		} elseif ( '' === $street ) {
-			$message = __( 'Не удалось определить улицу. Проверьте полный адрес.', 'walls-delivery-calc' );
-		} elseif ( '' === $house ) {
-			$message = __( 'Не удалось определить номер дома. Проверьте полный адрес.', 'walls-delivery-calc' );
-		} elseif ( empty( $item['isDeliverable'] ) ) {
-			$message = __( 'Адрес распознан недостаточно точно. Уточните его и проверьте повторно.', 'walls-delivery-calc' );
-		}
-		$fields = array(
-			'country' => 'Россия',
-			'postal_code' => preg_replace( '/\D+/', '', (string) ( $data['postal_code'] ?? '' ) ) ?: '',
-			'region' => trim( (string) ( $data['region_with_type'] ?? $data['region'] ?? '' ) ),
-			'locality' => $locality,
-			'street' => $street,
-			'house' => $house,
-			'room' => $room,
-			'full_address' => $full_address,
-		);
-
-		return array(
-			'success' => '' === $message,
-			'message' => '' === $message ? __( 'Адрес Яндекс проверен через DaData.', 'walls-delivery-calc' ) : $message,
-			'source' => 'dadata+yandex',
-			'service_key' => YandexDeliverySettings::SERVICE_KEY,
-			'original_hash' => hash( 'sha256', $original_address ),
-			'display' => $full_address,
-			'fields' => $fields,
-			'quality' => array(
-				'level' => (string) ( $item['level'] ?? '' ),
-				'is_deliverable' => ! empty( $item['isDeliverable'] ),
-			),
-			'order_id' => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
-		);
-	}
-
-	/**
-	 * @param array<string,mixed> $item
-	 */
-	private function yandex_locality_from_normalized_item( array $item ): string {
-		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
-		foreach ( array(
-			$item['locality'] ?? null,
-			$item['city_name'] ?? null,
-			$item['city'] ?? null,
-			$item['place'] ?? null,
-			$item['settlement'] ?? null,
-			$data['locality'] ?? null,
-			$data['city_name'] ?? null,
-			$data['place'] ?? null,
-			$data['settlement_with_type'] ?? null,
-			$data['city_with_type'] ?? null,
-			$data['settlement'] ?? null,
-			$data['city'] ?? null,
-		) as $value ) {
-			$locality = $this->clean_yandex_locality( (string) $value );
-			if ( '' !== $locality ) {
-				return $locality;
-			}
-		}
-
-		return $this->federal_city_locality( $data );
-	}
-
-	private function clean_yandex_locality( string $value ): string {
-		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
-		$value = preg_replace( '/^(г\.?|город|пгт|рп|рабочий\s+пос[её]лок|пос[её]лок|с\.?|село|д\.?|деревня)\s+/iu', '', $value ) ?? $value;
-		return trim( $value );
-	}
-
-	/** @param array<string,mixed> $data */
-	private function federal_city_locality( array $data ): string {
-		$region = $this->clean_yandex_locality( (string) ( $data['region_with_type'] ?? $data['region'] ?? '' ) );
-		$normalized = function_exists( 'mb_strtolower' ) ? mb_strtolower( $region ) : strtolower( $region );
-		foreach ( array( 'москва', 'санкт-петербург', 'севастополь' ) as $city ) {
-			if ( $city === $normalized ) {
-				return $region;
-			}
-		}
-
-		return '';
-	}
-
-	/**
-	 * @return array<string,string>
-	 */
-	private function yandex_address_suggestion_context( object $order ): array {
-		return array_filter(
-			array(
-				'country_code' => 'RU',
-				'location_city_fias_id' => method_exists( $order, 'get_meta' ) ? (string) $order->get_meta( '_wdc_platform_location_fias_id', true ) : '',
-			),
-			static fn( string $value ): bool => '' !== trim( $value )
-		);
-	}
-
-	private function dadata_error_message( string $code ): string {
-		return match ( $code ) {
-			'no_available_dadata_token' => __( 'Не настроен токен DaData для проверки адреса.', 'walls-delivery-calc' ),
-			'dadata_daily_limit_exhausted' => __( 'Лимит DaData исчерпан. Повторите проверку позднее.', 'walls-delivery-calc' ),
-			'dadata_timeout' => __( 'DaData не ответила вовремя. Повторите проверку адреса.', 'walls-delivery-calc' ),
-			default => __( 'Не удалось проверить адрес через DaData.', 'walls-delivery-calc' ),
-		};
-	}
-
-	/**
-	 * @param array<string,mixed> $data
-	 * @return array{error:string}
-	 */
-	private function maybe_prepare_cdek_courier_address( object $order, array &$data ): array {
-		$carrier_key = sanitize_key( wp_unslash( $data['carrier_key'] ?? '' ) );
-		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? '' ) ) );
-		if ( CdekSettings::CARRIER_KEY !== $carrier_key || DeliveryType::COURIER !== $delivery_type ) {
-			return array( 'error' => '' );
-		}
-		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $data['original_address'] ?? '' ) );
-		$snapshot = $this->decoded_json_field( $data['normalized_address_json'] ?? '' );
-		$valid = ! empty( $snapshot['success'] )
-			&& (string) ( $snapshot['source'] ?? '' ) === 'dadata+cdek_location'
-			&& (string) ( $snapshot['original_hash'] ?? '' ) === hash( 'sha256', trim( $original_address ) )
-			&& (int) ( $snapshot['fields']['cdek_city_code'] ?? 0 ) > 0;
-		if ( $valid ) {
-			return array( 'error' => '' );
-		}
-		if ( ! $this->cdek_address_preparation instanceof CdekRecipientAddressPreparationService ) {
-			return array( 'error' => __( 'Нормализация адреса СДЭК недоступна.', 'walls-delivery-calc' ) );
-		}
-		$prepared = $this->cdek_address_preparation->prepare( $order, $original_address, $this->recipient_location_context_from_request( $order, $data ), CdekSettings::SERVICE_KEY );
-		$data['normalized_address_json'] = wp_json_encode( $prepared, JSON_UNESCAPED_UNICODE ) ?: '';
-		if ( empty( $prepared['success'] ) ) {
-			return array( 'error' => (string) ( $prepared['message'] ?? CdekRecipientAddressPreparationService::CITY_CODE_ERROR ) );
-		}
-
-		return array( 'error' => '' );
-	}
-
-	/**
-	 * @param mixed $value
-	 * @return array<string,mixed>
-	 */
-	private function decoded_json_field( mixed $value ): array {
-		$json = (string) wp_unslash( $value );
-		$decoded = '' !== trim( $json ) ? json_decode( $json, true ) : array();
-
-		return is_array( $decoded ) ? $decoded : array();
-	}
-
-	/**
-	 * @param array<string,mixed> $data
-	 * @return array<string,mixed>
-	 */
-	private function recipient_location_context_from_request( object $order, array $data = array() ): array {
-		$city = sanitize_text_field( wp_unslash( $data['recipient_location_city'] ?? $_POST['recipient_location_city'] ?? '' ) );
-		$region = sanitize_text_field( wp_unslash( $data['recipient_location_region'] ?? $_POST['recipient_location_region'] ?? '' ) );
-		$postcode = sanitize_text_field( wp_unslash( $data['recipient_location_postcode'] ?? $_POST['recipient_location_postcode'] ?? '' ) );
-		$address = sanitize_text_field( wp_unslash( $data['recipient_location_address'] ?? $_POST['recipient_location_address'] ?? '' ) );
-		if ( '' === $city && method_exists( $order, 'get_shipping_city' ) ) {
-			$city = (string) $order->get_shipping_city();
-		}
-		if ( '' === $region && method_exists( $order, 'get_shipping_state' ) ) {
-			$region = (string) $order->get_shipping_state();
-		}
-		if ( '' === $postcode && method_exists( $order, 'get_shipping_postcode' ) ) {
-			$postcode = (string) $order->get_shipping_postcode();
-		}
-
-		$calculation = $this->order_array_meta( $order, '_wdc_delivery_calculation_data' );
-		$rate_meta = $this->order_array_meta( $order, '_wdc_platform_rate_meta' );
-		$cdek_city_code = $this->cdek_city_code_from_saved_data( $calculation, $rate_meta );
-
-		return array(
-			'country_code' => 'RU',
-			'cdek_city_code' => $cdek_city_code > 0 ? $cdek_city_code : '',
-			'cdek_to_city_code' => $cdek_city_code > 0 ? $cdek_city_code : '',
-			'delivery_calculation_data' => $calculation,
-			'rate_meta' => $rate_meta,
-			'city_name' => $city,
-			'city_value' => $city,
-			'region_name' => $region,
-			'state_value' => $region,
-			'postal_code' => $postcode,
-			'postcode' => $postcode,
-			'display_name' => '' !== $address ? $address : trim( implode( ', ', array_filter( array( $postcode, $region, $city ) ) ) ),
-			'fias_id' => sanitize_text_field( wp_unslash( $data['recipient_location_fias_id'] ?? $_POST['recipient_location_fias_id'] ?? '' ) ),
-			'gar_id' => sanitize_text_field( wp_unslash( $data['recipient_location_gar_id'] ?? $_POST['recipient_location_gar_id'] ?? '' ) ),
-			'location_id' => sanitize_text_field( wp_unslash( $data['recipient_location_id'] ?? $_POST['recipient_location_id'] ?? '' ) ),
-			'lat' => sanitize_text_field( wp_unslash( $data['recipient_location_lat'] ?? $_POST['recipient_location_lat'] ?? '' ) ),
-			'lng' => sanitize_text_field( wp_unslash( $data['recipient_location_lng'] ?? $_POST['recipient_location_lng'] ?? '' ) ),
-		);
-	}
-
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function order_array_meta( object $order, string $key ): array {
-		if ( ! method_exists( $order, 'get_meta' ) ) {
-			return array();
-		}
-		$value = $order->get_meta( $key, true );
-		if ( is_string( $value ) ) {
-			$decoded = json_decode( $value, true );
-			return is_array( $decoded ) ? $decoded : array();
-		}
-
-		return is_array( $value ) ? $value : array();
-	}
-
-	/**
-	 * @param array<string,mixed> $calculation
-	 * @param array<string,mixed> $rate_meta
-	 */
-	private function cdek_city_code_from_saved_data( array $calculation, array $rate_meta ): int {
-		foreach ( array(
-			$calculation['api']['cdek_to_city_code'] ?? null,
-			$rate_meta['api']['cdek_to_city_code'] ?? null,
-			$rate_meta['location']['cdek_to_city_code'] ?? null,
-			$calculation['api']['request_payload_sanitized']['to_location']['code'] ?? null,
-			$rate_meta['request_payload_sanitized']['to_location']['code'] ?? null,
-			$rate_meta['api']['request_payload_sanitized']['to_location']['code'] ?? null,
-		) as $value ) {
-			if ( is_numeric( $value ) && (int) $value > 0 ) {
-				return (int) $value;
-			}
-		}
-
-		return 0;
-	}
-
 	/**
 	 * @return array<int,string>
 	 */
@@ -1385,29 +454,6 @@ final class OrderShipmentsMetabox {
 		$values = $settings->get_array( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, array() );
 
 		return $this->sanitize_dpd_courier_contact_history( $values );
-	}
-
-	/**
-	 * @return array<int,string>
-	 */
-	private function add_dpd_courier_contact_history( string $value ): array {
-		$settings = new SettingsRepository();
-		$history = $this->sanitize_dpd_courier_contact_history( array_merge( array( $value ), $settings->get_array( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, array() ) ) );
-		$settings->set( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, $history );
-
-		return $history;
-	}
-
-	/**
-	 * @return array<int,string>
-	 */
-	private function remove_dpd_courier_contact_history( string $value ): array {
-		$settings = new SettingsRepository();
-		$remove = sanitize_text_field( wp_unslash( $value ) );
-		$history = array_values( array_filter( $this->dpd_courier_contact_history(), static fn( string $item ): bool => $item !== $remove ) );
-		$settings->set( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, $history );
-
-		return $history;
 	}
 
 	/**
@@ -1425,261 +471,55 @@ final class OrderShipmentsMetabox {
 
 		return array_slice( $history, 0, 20 );
 	}
-	public function ajax_search_pickup_points(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-
-		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
-		$mode = sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) );
-		$mode = in_array( $mode, array( 'location', 'nearby', 'search' ), true ) ? $mode : 'search';
-		$limit = max( 1, min( 'location' === $mode ? 2000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 2000 : 50 ) ) ) );
-		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
-		$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? '' ) );
-		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key && 'source_dropoff' === $purpose ) {
-			$this->ajax_search_yandex_source_dropoff_points( $mode, $limit );
-		}
-		if ( DpdSettings::CARRIER_KEY === $carrier_key && $this->dpd_pickup_points instanceof DpdPickupPointService ) {
-			$city_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['city_id'] ?? '' ) );
-			$location_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['location_id'] ?? '' ) );
-			if ( $city_id > 0 ) {
-				$points = 'search' === $mode && '' !== $query
-					? $this->dpd_pickup_points->search_parcel_shops( $query, array( 'city_id' => $city_id, 'limit' => $limit ) )
-					: $this->dpd_pickup_points->get_parcel_shops_by_city_id( $city_id, $limit );
-			} elseif ( $location_id > 0 && 'location' === $mode ) {
-				$points = array_values(
-					array_filter(
-						$this->dpd_pickup_points->get_points_for_location_id( $location_id ),
-						static fn( array $point ): bool => 'parcel_shop' === (string) ( $point['type'] ?? '' )
-					)
-				);
-			} else {
-				$points = $this->dpd_pickup_points->search_parcel_shops(
-					$query,
-					array(
-						'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
-						'limit' => $limit,
-					)
-				);
-			}
-			wp_send_json_success(
-				array(
-					'points' => array_map( array( $this, 'dpd_pickup_point_ajax_row' ), array_slice( $points, 0, $limit ) ),
-				)
-			);
-		}
-		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_delivery_points instanceof CdekDeliveryPointService ) {
-			$points = $this->cdek_delivery_points->pointsForLocation(
-				array(
-					'country_code' => 'RU',
-					'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
-					'city_value' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
-					'region_name' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
-					'state_value' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
-					'postal_code' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
-					'postcode' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
-					'display_name' => sanitize_text_field( wp_unslash( $_POST['address'] ?? $query ) ),
-					'fias_id' => sanitize_text_field( wp_unslash( $_POST['fias_id'] ?? '' ) ),
-					'gar_id' => sanitize_text_field( wp_unslash( $_POST['gar_id'] ?? '' ) ),
-					'location_id' => sanitize_text_field( wp_unslash( $_POST['location_id'] ?? '' ) ),
-				),
-				array( 'type' => 'ALL' )
-			);
-			if ( 'search' === $mode && '' !== $query ) {
-				$needle = $this->normalize_pickup_search_text( $query );
-				$points = array_values(
-					array_filter(
-						$points,
-						fn( array $point ): bool => str_contains(
-							$this->normalize_pickup_search_text(
-								implode(
-									' ',
-									array(
-										(string) ( $point['point_code'] ?? '' ),
-										(string) ( $point['cdek_code'] ?? '' ),
-										(string) ( $point['point_name'] ?? '' ),
-										(string) ( $point['point_address'] ?? $point['address'] ?? '' ),
-										(string) ( $point['point_postcode'] ?? $point['postcode'] ?? '' ),
-									)
-								)
-							),
-							$needle
-						)
-					)
-				);
-			}
-			wp_send_json_success(
-				array(
-					'points' => array_values( $points ),
-				)
-			);
-		}
-		$repository = new RussianPostPickupPointRepository();
-		if ( 'location' === $mode ) {
-			$location_context = array(
-				'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
-				'city_value' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
-				'region_name' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
-				'state_value' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
-				'postal_code' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
-				'postcode' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
-				'display_name' => sanitize_text_field( wp_unslash( $_POST['address'] ?? $query ) ),
-				'fias_id' => sanitize_text_field( wp_unslash( $_POST['fias_id'] ?? '' ) ),
-				'gar_id' => sanitize_text_field( wp_unslash( $_POST['gar_id'] ?? '' ) ),
-				'location_id' => sanitize_text_field( wp_unslash( $_POST['location_id'] ?? '' ) ),
-			);
-			$order_id = (int) ( $_POST['order_id'] ?? 0 );
-			if ( $order_id > 0 && function_exists( 'wc_get_order' ) ) {
-				$order = wc_get_order( $order_id );
-				if ( is_object( $order ) ) {
-					$shipping_city = method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '';
-					$shipping_region = method_exists( $order, 'get_shipping_state' ) ? (string) $order->get_shipping_state() : '';
-					$shipping_postcode = method_exists( $order, 'get_shipping_postcode' ) ? (string) $order->get_shipping_postcode() : '';
-					$shipping_address = trim(
-						implode(
-							' ',
-							array_filter(
-								array(
-									method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
-									method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '',
-								),
-								static fn( string $value ): bool => '' !== trim( $value )
-							)
-						)
-					);
-					$location_context['city_name'] = '' !== trim( (string) $location_context['city_name'] ) ? $location_context['city_name'] : $shipping_city;
-					$location_context['city_value'] = '' !== trim( (string) $location_context['city_value'] ) ? $location_context['city_value'] : $shipping_city;
-					$location_context['region_name'] = '' !== trim( (string) $location_context['region_name'] ) ? $location_context['region_name'] : $shipping_region;
-					$location_context['state_value'] = '' !== trim( (string) $location_context['state_value'] ) ? $location_context['state_value'] : $shipping_region;
-					$location_context['postal_code'] = '' !== trim( (string) $location_context['postal_code'] ) ? $location_context['postal_code'] : $shipping_postcode;
-					$location_context['postcode'] = '' !== trim( (string) $location_context['postcode'] ) ? $location_context['postcode'] : $shipping_postcode;
-					$location_context['display_name'] = '' !== trim( (string) $location_context['display_name'] ) ? $location_context['display_name'] : $shipping_address;
-				}
-			}
-			$rows = $repository->find_rows_by_location_context(
-				$location_context,
-				array( 'limit' => $limit )
-			);
-		} else {
-			$rows = $repository->search_admin_pickup_rows( $query, array( 'limit' => $limit ) );
-		}
-
-		wp_send_json_success(
-			array(
-				'points' => array_map( array( $this, 'pickup_point_ajax_row' ), $rows ),
-			)
-		);
-	}
-
-	public function ajax_search_products(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
-		}
-		if ( ! function_exists( 'wc_get_products' ) || ! function_exists( 'wc_get_product' ) ) {
-			wp_send_json_success( array( 'items' => array() ) );
-		}
-
-		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
-		if ( '' === trim( $query ) ) {
-			wp_send_json_success( array( 'items' => array() ) );
-		}
-
-		$products = array();
-		if ( function_exists( 'wc_get_product_id_by_sku' ) ) {
-			$sku_id = (int) wc_get_product_id_by_sku( $query );
-			if ( $sku_id > 0 ) {
-				$product = wc_get_product( $sku_id );
-				if ( is_object( $product ) ) {
-					$products[ $sku_id ] = $product;
-				}
-			}
-		}
-
-		foreach ( $this->product_ids_by_partial_sku( $query, 20 ) as $sku_id ) {
-			$product = wc_get_product( $sku_id );
-			if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
-				$products[ (int) $product->get_id() ] = $product;
-			}
-			if ( count( $products ) >= 20 ) {
-				break;
-			}
-		}
-
-		foreach ( wc_get_products( array( 'limit' => 20, 'status' => array( 'publish', 'private' ), 'type' => array( 'simple', 'variation' ), 's' => $query ) ) as $product ) {
-			if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
-				$products[ (int) $product->get_id() ] = $product;
-			}
-			if ( count( $products ) >= 20 ) {
-				break;
-			}
-		}
-
-		$items = array();
-		foreach ( array_slice( $products, 0, 20, true ) as $product ) {
-			$items[] = $this->shipment_product_search_row( $product );
-		}
-
-		wp_send_json_success( array( 'items' => $items ) );
-	}
-
-	/**
-	 * @return array<int,int>
-	 */
-	private function product_ids_by_partial_sku( string $query, int $limit ): array {
-		global $wpdb;
-
-		if ( '' === $query || ! is_object( $wpdb ) || ! method_exists( $wpdb, 'get_col' ) ) {
-			return array();
-		}
-
-		$postmeta = isset( $wpdb->postmeta ) ? (string) $wpdb->postmeta : '';
-		if ( '' === $postmeta ) {
-			return array();
-		}
-
-		$like = function_exists( 'esc_like' ) ? esc_like( $query ) : addcslashes( $query, '_%\\' );
-		$sql = "SELECT post_id FROM {$postmeta} WHERE meta_key = '_sku' AND meta_value LIKE %s LIMIT %d";
-		if ( method_exists( $wpdb, 'prepare' ) ) {
-			$sql = $wpdb->prepare( $sql, '%' . $like . '%', max( 1, $limit ) );
-		} else {
-			$sql = str_replace( array( '%s', '%d' ), array( "'" . str_replace( "'", "''", '%' . $like . '%' ) . "'", (string) max( 1, $limit ) ), $sql );
-		}
-
-		return array_values( array_filter( array_map( 'intval', (array) $wpdb->get_col( $sql ) ) ) );
-	}
-
-	private function normalize_pickup_search_text( string $value ): string {
-		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
-
-		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
-	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function shipment_product_search_row( object $product ): array {
-		$product_id = method_exists( $product, 'get_id' ) ? (int) $product->get_id() : 0;
-		$parent_id = method_exists( $product, 'get_parent_id' ) ? (int) $product->get_parent_id() : 0;
-		$is_variation = method_exists( $product, 'is_type' ) && $product->is_type( 'variation' );
-		$price = method_exists( $product, 'get_price' ) ? (float) $product->get_price() : 0.0;
-		$weight = method_exists( $product, 'get_weight' ) ? (string) $product->get_weight() : '';
-		$length = method_exists( $product, 'get_length' ) ? (string) $product->get_length() : '';
-		$width = method_exists( $product, 'get_width' ) ? (string) $product->get_width() : '';
-		$height = method_exists( $product, 'get_height' ) ? (string) $product->get_height() : '';
-
-		return array(
-			'product_id' => $is_variation && $parent_id > 0 ? $parent_id : $product_id,
-			'variation_id' => $is_variation ? $product_id : 0,
-			'name' => method_exists( $product, 'get_name' ) ? (string) $product->get_name() : '',
-			'sku' => method_exists( $product, 'get_sku' ) ? (string) $product->get_sku() : '',
-			'price' => round( max( 0.0, $price ), 2 ),
-			'weight_g' => max( 1, (int) round( function_exists( 'wc_get_weight' ) ? (float) wc_get_weight( $weight, 'g' ) : (float) $weight ) ),
-			'length_cm' => max( 0.1, round( function_exists( 'wc_get_dimension' ) ? (float) wc_get_dimension( $length, 'cm' ) : (float) $length, 1 ) ),
-			'width_cm' => max( 0.1, round( function_exists( 'wc_get_dimension' ) ? (float) wc_get_dimension( $width, 'cm' ) : (float) $width, 1 ) ),
-			'height_cm' => max( 0.1, round( function_exists( 'wc_get_dimension' ) ? (float) wc_get_dimension( $height, 'cm' ) : (float) $height, 1 ) ),
-		);
-	}
-
+	/**
+	 * @param array<string,mixed> $item
+	 */
+	/** @param array<string,mixed> $data */
+	/**
+	 * @return array<string,string>
+	 */
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array{error:string}
+	 */
+	/**
+	 * @param mixed $value
+	 * @return array<string,mixed>
+	 */
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	/**
+	 * @return array<string,mixed>
+	 */
+	/**
+	 * @param array<string,mixed> $calculation
+	 * @param array<string,mixed> $rate_meta
+	 */
+	/**
+	 * @return array<int,string>
+	 */
+	/**
+	 * @return array<int,string>
+	 */
+	/**
+	 * @return array<int,string>
+	 */
+	/**
+	 * @param array<int|string,mixed> $values
+	 * @return array<int,string>
+	 */
+	/**
+	 * @return array<int,int>
+	 */
+	/**
+	 * @return array<string,mixed>
+	 */
 	private function resolve_order( mixed $post_or_order ): ?object {
 		if ( is_object( $post_or_order ) && method_exists( $post_or_order, 'get_id' ) && method_exists( $post_or_order, 'get_meta' ) ) {
 			return $post_or_order;
@@ -1743,23 +583,6 @@ final class OrderShipmentsMetabox {
 		</table>
 		<p><button type="button" class="button" data-wdc-add-manual-shipment-item data-wdc-add-manual-cdek-item><?php echo esc_html__( 'Добавить товар', 'walls-delivery-calc' ); ?></button></p>
 		<?php
-	}
-
-	private function preview_request( \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest $request ): \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest {
-		return new \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest(
-			$request->order_id,
-			$request->carrier_key,
-			$request->delivery_type,
-			$request->rate_id,
-			$request->recipient_address,
-			$request->pickup_point,
-			$request->places,
-			$request->declared_value,
-			$request->insurance_enabled,
-			$request->services,
-			$request->recipient,
-			array_merge( $request->meta, array( 'allow_failed_normalization_preview' => true ) )
-		);
 	}
 
 	/**
@@ -2136,105 +959,11 @@ final class OrderShipmentsMetabox {
 		return '';
 	}
 
-	private function ajax_search_yandex_source_dropoff_points( string $mode, int $limit ): void {
-		$limit = max( 1, min( 2000, $limit ) );
-		$source_location_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['source_location_id'] ?? $_POST['location_id'] ?? '' ) );
-		$source_platform_station_id = sanitize_text_field( wp_unslash( $_POST['source_platform_station_id'] ?? '' ) );
-		$default_row = '' !== trim( $source_platform_station_id ) ? $this->yandex_pickup_points()->find( $source_platform_station_id ) : null;
-		$context = array(
-			'mode' => $mode,
-			'center' => $this->yandex_source_dropoff_center( is_array( $default_row ) ? $default_row : null, array() ),
-			'radius_km' => null,
-			'total' => 0,
-			'source_location_id' => $source_location_id,
-			'yandex_geo_ids' => array(),
-		);
-
-		if ( 'nearby' === $mode ) {
-			$latitude = filter_var( wp_unslash( $_POST['latitude'] ?? $_POST['lat'] ?? null ), FILTER_VALIDATE_FLOAT );
-			$longitude = filter_var( wp_unslash( $_POST['longitude'] ?? $_POST['lng'] ?? null ), FILTER_VALIDATE_FLOAT );
-			$radius_km = filter_var( wp_unslash( $_POST['radius_km'] ?? 10 ), FILTER_VALIDATE_FLOAT );
-			if ( false === $latitude || false === $longitude || $latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180 ) {
-				wp_send_json_error( array( 'message' => __( 'Не удалось определить область поиска ПВЗ.', 'walls-delivery-calc' ) ), 400 );
-			}
-			$radius_km = false === $radius_km ? 10.0 : max( 1.0, min( 50.0, (float) $radius_km ) );
-			$rows = $this->yandex_pickup_points()->search_source_dropoff_points_near( (float) $latitude, (float) $longitude, $radius_km, min( 200, $limit ) );
-			$context['center'] = array( 'lat' => (float) $latitude, 'lng' => (float) $longitude );
-			$context['radius_km'] = $radius_km;
-			$context['total'] = count( $rows );
-			wp_send_json_success(
-				array(
-					'points' => array_map( array( $this, 'yandex_source_dropoff_ajax_row' ), $rows ),
-					'context' => $context,
-					'message' => array() === $rows ? __( 'Рядом с найденным адресом нет ПВЗ Яндекс, принимающих отправления.', 'walls-delivery-calc' ) : '',
-				)
-			);
-		}
-
-		$geo_ids = $source_location_id > 0 ? $this->yandex_location_mapping()->geo_ids_for_location( $source_location_id ) : array();
-		if ( array() === $geo_ids && is_array( $default_row ) && (int) ( $default_row['yandex_geo_id'] ?? 0 ) > 0 ) {
-			$geo_ids = array( (int) $default_row['yandex_geo_id'] );
-		}
-		if ( array() !== $geo_ids ) {
-			$rows = $this->yandex_pickup_points()->source_dropoff_map_points_by_geo_ids( $geo_ids, $limit );
-		} elseif ( is_array( $default_row ) && is_numeric( $default_row['latitude'] ?? null ) && is_numeric( $default_row['longitude'] ?? null ) ) {
-			$rows = $this->yandex_pickup_points()->search_source_dropoff_points_near( (float) $default_row['latitude'], (float) $default_row['longitude'], 10.0, min( 200, $limit ) );
-		} else {
-			$rows = array();
-		}
-
-		$context['mode'] = 'location';
-		$context['center'] = $this->yandex_source_dropoff_center( is_array( $default_row ) ? $default_row : null, $rows );
-		$context['total'] = count( $rows );
-		$context['yandex_geo_ids'] = array_values( array_map( 'intval', $geo_ids ) );
-		wp_send_json_success(
-			array(
-				'points' => array_map( array( $this, 'yandex_source_dropoff_ajax_row' ), $rows ),
-				'context' => $context,
-				'message' => array() === $rows ? __( 'В выбранном городе не найдены ПВЗ Яндекс, принимающие отправления.', 'walls-delivery-calc' ) : '',
-			)
-		);
-	}
-
-	private function yandex_pickup_points(): YandexDeliveryPickupPointV2Repository {
-		if ( ! $this->yandex_pickup_points instanceof YandexDeliveryPickupPointV2Repository ) {
-			$this->yandex_pickup_points = new YandexDeliveryPickupPointV2Repository();
-		}
-
-		return $this->yandex_pickup_points;
-	}
-
-	private function yandex_location_mapping(): YandexLocationMappingV2Repository {
-		if ( ! $this->yandex_location_mapping instanceof YandexLocationMappingV2Repository ) {
-			$this->yandex_location_mapping = new YandexLocationMappingV2Repository();
-		}
-
-		return $this->yandex_location_mapping;
-	}
-
 	/**
 	 * @param array<string,mixed>|null $source_row
 	 * @param array<int,array<string,mixed>> $rows
 	 * @return array<string,float>|null
 	 */
-	private function yandex_source_dropoff_center( ?array $source_row, array $rows ): ?array {
-		if ( is_array( $source_row ) && is_numeric( $source_row['latitude'] ?? null ) && is_numeric( $source_row['longitude'] ?? null ) ) {
-			return array( 'lat' => (float) $source_row['latitude'], 'lng' => (float) $source_row['longitude'] );
-		}
-		$lat_sum = 0.0;
-		$lng_sum = 0.0;
-		$count = 0;
-		foreach ( $rows as $row ) {
-			if ( is_numeric( $row['latitude'] ?? null ) && is_numeric( $row['longitude'] ?? null ) ) {
-				$lat_sum += (float) $row['latitude'];
-				$lng_sum += (float) $row['longitude'];
-				++$count;
-			}
-		}
-
-		return $count > 0 ? array( 'lat' => round( $lat_sum / $count, 7 ), 'lng' => round( $lng_sum / $count, 7 ) ) : null;
-	}
-
 	private function map_provider(): string {
 		$provider = ( new SettingsRepository() )->get_string( 'pickup_map_provider', 'leaflet' );
 
@@ -2249,76 +978,12 @@ final class OrderShipmentsMetabox {
 	 * @param array<string,mixed> $row
 	 * @return array<string,mixed>
 	 */
-	private function pickup_point_ajax_row( array $row ): array {
-		return array(
-			'point_code' => (string) ( $row['point_code'] ?? '' ),
-			'postcode' => (string) ( $row['postcode'] ?? '' ),
-			'region_name' => (string) ( $row['region_name'] ?? '' ),
-			'city_name' => (string) ( $row['city_name'] ?? '' ),
-			'address' => (string) ( $row['address'] ?? '' ),
-			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
-			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
-		);
-	}
-
 	/**
 	 * @param array<string,mixed> $row
 	 * @return array<string,mixed>
 	 */
-	private function yandex_source_dropoff_ajax_row( array $row ): array {
-		$station_id = (string) ( $row['platform_station_id'] ?? '' );
-		$title = (string) ( $row['name'] ?? '' );
-		$address = (string) ( $row['full_address'] ?? '' );
-
-		return array(
-			'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
-			'carrier' => YandexDeliverySettings::CARRIER_KEY,
-			'service_key' => YandexDeliverySettings::SERVICE_KEY,
-			'pickup_family' => YandexDeliverySettings::CARRIER_KEY . ':source_dropoff',
-			'point_code' => $station_id,
-			'platform_station_id' => $station_id,
-			'display_code' => $station_id,
-			'point_type' => 'source_dropoff',
-			'type' => (string) ( $row['type'] ?? 'pickup_point' ),
-			'point_title' => '' !== $title ? $title : ( '' !== $address ? $address : $station_id ),
-			'display_title' => '' !== $title ? $title : ( '' !== $address ? $address : $station_id ),
-			'region_name' => (string) ( $row['region'] ?? '' ),
-			'city_name' => (string) ( $row['locality'] ?? '' ),
-			'city' => (string) ( $row['locality'] ?? '' ),
-			'address' => $address,
-			'work_time' => (string) ( $row['schedule_text'] ?? '' ),
-			'schedule_text' => (string) ( $row['schedule_text'] ?? '' ),
-			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
-			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
-			'drop_off' => true,
-			'available_for_dropoff' => true,
-			'marker_type' => 'source_dropoff',
-			'distance_km' => isset( $row['distance_km'] ) ? (float) $row['distance_km'] : null,
-		);
-	}
-
 	/**
 	 * @param array<string,mixed> $row
 	 * @return array<string,mixed>
 	 */
-	private function dpd_pickup_point_ajax_row( array $row ): array {
-		return array(
-			'carrier_key' => DpdSettings::CARRIER_KEY,
-			'carrier' => DpdSettings::CARRIER_KEY,
-			'point_code' => (string) ( $row['terminal_code'] ?? '' ),
-			'display_code' => (string) ( $row['terminal_code'] ?? '' ),
-			'point_type' => (string) ( $row['type'] ?? 'parcel_shop' ),
-			'type' => (string) ( $row['type'] ?? 'parcel_shop' ),
-			'point_title' => (string) ( $row['name'] ?? 'ПВЗ DPD' ),
-			'display_title' => (string) ( $row['name'] ?? 'ПВЗ DPD' ),
-			'postcode' => '',
-			'region_name' => (string) ( $row['region_name'] ?? '' ),
-			'city_id' => (string) ( $row['city_id'] ?? '' ),
-			'city_name' => (string) ( $row['city_name'] ?? '' ),
-			'address' => (string) ( $row['address'] ?? '' ),
-			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
-			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
-			'source' => (string) ( $row['source'] ?? '' ),
-		);
-	}
 }

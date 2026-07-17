@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 return array(
 	'framework.lifecycle-contract' => array( 'path' => 'tests/shipments/run-shipment-lifecycle-contract-smoke.php', 'groups' => array( 'framework' ) ),
+	'framework.admin-ajax' => array( 'path' => 'tests/shipments/run-shipment-admin-ajax-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.admin-js-structure' => array( 'path' => 'tests/shipments/run-shipment-admin-js-structure-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.modal-extensions' => array( 'path' => 'tests/shipments/run-shipment-modal-extensions-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.document-actions' => array( 'path' => 'tests/shipments/run-shipment-document-actions-smoke.php', 'groups' => array( 'framework' ) ),

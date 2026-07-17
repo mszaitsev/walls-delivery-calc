@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000024 A0AC:74BD
+Volume serial number is 000000F2 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -668,8 +668,21 @@ C:.
 |   |   |   .gitkeep
 |   |   |
 |   |   +---Admin
-|   |   |       OrderShipmentsMetabox.php
-|   |   |       ShipmentStatusesAdminPage.php
+|   |   |   |   OrderShipmentsMetabox.php
+|   |   |   |   ShipmentStatusesAdminPage.php
+|   |   |   |
+|   |   |   \---Ajax
+|   |   |           ShipmentAddressAjaxController.php
+|   |   |           ShipmentAdminAjaxService.php
+|   |   |           ShipmentAdminCarrierUiPayloadBuilder.php
+|   |   |           ShipmentCreateAjaxController.php
+|   |   |           ShipmentDocumentsAjaxController.php
+|   |   |           ShipmentLifecycleAjaxController.php
+|   |   |           ShipmentManualAttachAjaxController.php
+|   |   |           ShipmentPreviewAjaxController.php
+|   |   |           ShipmentProductsAjaxController.php
+|   |   |           ShipmentRemovalAjaxController.php
+|   |   |           ShipmentStatusAjaxController.php
 |   |   |
 |   |   +---Allocation
 |   |   |       ShipmentAllocation.php
@@ -885,6 +898,7 @@ C:.
     |   |   run-russian-post-shipment-price-smoke.php
     |   |   run-russian-post-shipments-smoke.php
     |   |   run-shipment-actual-cost-presentation-smoke.php
+    |   |   run-shipment-admin-ajax-smoke.php
     |   |   run-shipment-admin-js-structure-smoke.php
     |   |   run-shipment-allocation-smoke.php
     |   |   run-shipment-document-actions-smoke.php
@@ -919,4 +933,3 @@ C:.
             run-yandex-delivery-shipment-http-smoke.php
             run-yandex-delivery-shipment-payload-smoke.php
             run-yandex-delivery-source-station-smoke.php
-

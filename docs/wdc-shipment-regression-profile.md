@@ -1,6 +1,6 @@
 # Shipment Regression Profile
 
-Version: 0.119.1.
+Version: 0.120.1.
 
 Canonical command:
 
@@ -40,7 +40,7 @@ Exit codes:
 
 Mandatory groups:
 
-- `framework`: lifecycle contract, JS structure, modal extensions, document actions, persistence mappers, actual-cost presentation, allocation, status and adapter registry.
+- `framework`: lifecycle contract, admin AJAX ownership, JS structure, modal extensions, document actions, persistence mappers, actual-cost presentation, allocation, status and adapter registry.
 - `russian-post`: shipment create/status, price, cancel, documents and pickup import smokes.
 - `cdek`: foundation, order creation including barcode/documents, tariff calculation and tariff sync.
 - `dpd`: foundation, create order, lifecycle, buttons, status mapping, documents, event sync and status autosync.
