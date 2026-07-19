@@ -517,9 +517,10 @@
       return true;
     },
     cancelledAndRemoved: function (context) {
-      if (!isYandexPollingContext(context) && !hasCancellationPollingToast(context && context.box)) return false;
+      const hasToast = hasCancellationPollingToast(context && context.box);
+      if (!isYandexPollingContext(context) && !hasToast) return false;
       const settings = context && context.settings ? context.settings : {};
-      if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
+      if (!hasToast && !isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
       finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
       return true;
     },
