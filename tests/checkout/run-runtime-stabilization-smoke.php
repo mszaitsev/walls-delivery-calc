@@ -720,7 +720,7 @@ foreach ( array( '.wdc-city-picker-search', 'min-height: 50px', 'border: 1px sol
 runtime_smoke_assert( ! str_contains( $city_selector_css, 'grid-template-columns: repeat(2' ), 'Desktop city selector CSS must not use equal-height grid columns.' );
 
 $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
-foreach ( array( '.wdc-platform-pvz-point', 'pickup select changed', 'pickup carrier', 'pickup rate id', 'pickup point code', 'update_checkout triggered after pickup selection' ) as $needle ) {
+foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup carrier', 'pickup rate id', 'pickup point code', 'update_checkout triggered after pickup selection' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $checkout_sort_js, $needle ), 'Pickup frontend JS must contain ' . $needle . '.' );
 }
 $delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
@@ -1210,7 +1210,7 @@ $rp_rate = new class {
 ob_start();
 $renderer->render( $rp_rate );
 $rp_selector_output = (string) ob_get_clean();
-runtime_smoke_assert( ! str_contains( $rp_selector_output, 'Выберите пункт выдачи' ) && ! str_contains( $rp_selector_output, 'wdc-platform-pvz-point' ), 'Russian Post international must not render pickup selector UI.' );
+runtime_smoke_assert( ! str_contains( $rp_selector_output, 'Выберите пункт выдачи' ) && ! str_contains( $rp_selector_output, 'wdc-platform-pickup-point' ), 'Russian Post international must not render pickup selector UI.' );
 
 $pickup_mode_scan = '';
 foreach ( array( '/src', '/tests' ) as $scan_dir ) {

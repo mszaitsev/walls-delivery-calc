@@ -10,12 +10,17 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
@@ -177,6 +182,14 @@ $page = new DeliveryServicesAdminPage(
 	countries: new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] ),
 	rules_admin: $rules_admin,
 	rules: new RuleRepository( $GLOBALS['wpdb'] ),
+	russian_post_pickup_diagnostics: new RussianPostPickupDiagnosticsTab(
+		new RussianPostPickupDiagnosticsService(
+			new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+			new LocationRepository( $GLOBALS['wpdb'] ),
+			$GLOBALS['wpdb'],
+			location_resolver: new RussianPostPickupLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), $GLOBALS['wpdb'] )
+		)
+	),
 	dpd_status_mapping: $mapping
 );
 $service = $GLOBALS['wpdb']->get_row( "SELECT * FROM wp_wdc_delivery_services WHERE service_key = 'dpd' AND deleted = 0 LIMIT 1", ARRAY_A );

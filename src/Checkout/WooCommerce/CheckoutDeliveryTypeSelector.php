@@ -78,7 +78,7 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<input type="hidden" name="wdc_platform_pickup_rate_id" value="' . esc_attr( $rate_id ) . '">';
 		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( $carrier_key ) . '">';
 		echo '<label><span>' . esc_html__( 'Пункт выдачи', 'walls-delivery-calc' ) . '</span>';
-		echo '<select class="wdc-platform-pvz-point" name="wdc_platform_pickup_point">';
+		echo '<select class="wdc-platform-pickup-point" name="wdc_platform_pickup_point">';
 		echo '<option value="">' . esc_html__( 'Выберите пункт выдачи', 'walls-delivery-calc' ) . '</option>';
 		foreach ( $points as $point ) {
 			echo '<option value="' . esc_attr( $point->code ) . '" ' . selected( $selected, $point->code, false ) . '>' . esc_html( $point->city . ' - ' . $point->address ) . '</option>';

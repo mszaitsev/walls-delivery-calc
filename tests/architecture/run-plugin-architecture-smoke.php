@@ -410,8 +410,11 @@ foreach ( array( 'src', 'assets/admin' ) as $dir ) {
 
 $removed_pickup_standalone_page_needles = array(
 	'Pickup' . 'AdminPage',
-	'wdc-platform-' . 'pickup',
 	'wdc_pickup_' . 'view',
+	'page=wdc-platform-' . 'pickup',
+	"'wdc-platform-" . "pickup'",
+	'"wdc-platform-' . 'pickup"',
+	"PAGE_SLUG = 'wdc-platform-" . "pickup'",
 );
 foreach ( array( 'src', 'assets/admin' ) as $dir ) {
 	$root = plugin_architecture_path( $dir );
@@ -427,6 +430,16 @@ foreach ( array( 'src', 'assets/admin' ) as $dir ) {
 		}
 	}
 }
+
+$checkout_selector_source = plugin_architecture_source( 'src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+$checkout_sort_source = (string) file_get_contents( plugin_architecture_path( 'assets/frontend/checkout-sort.js' ) );
+$shipping_registrar_source = plugin_architecture_source( 'src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
+plugin_architecture_assert(
+	str_contains( $checkout_selector_source, 'wdc-platform-pickup-point' )
+	&& str_contains( $checkout_sort_source, 'wdc-platform-pickup-point' )
+	&& str_contains( $shipping_registrar_source, 'wdc-platform-pickup-foundation' ),
+	'Checkout pickup frontend identifiers must preserve their established class and style handle.'
+);
 
 $js_source = '';
 foreach ( plugin_architecture_generic_js_files() as $file ) {

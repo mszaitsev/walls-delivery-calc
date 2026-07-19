@@ -88,6 +88,7 @@ final class DeliveryServicesAdminPage {
 		private DeliveryServiceCountryRepository $countries,
 		private RulesAdminPage $rules_admin,
 		private RuleRepository $rules,
+		private RussianPostPickupDiagnosticsTab $russian_post_pickup_diagnostics,
 		private ?DeliveryServiceSettingsRepository $settings = null,
 		private ?RussianPostSettings $russian_post_settings = null,
 		private ?RussianPostCountriesAdminPage $russian_post_countries = null,
@@ -135,7 +136,6 @@ final class DeliveryServicesAdminPage {
 		private ?YandexGeoV2RegionEnrichmentRunner $yandex_geo_v2_region_enrichment_runner = null,
 		private ?YandexDeliveryGeoPipelineV2Runner $yandex_delivery_geo_pipeline_v2_runner = null,
 		private ?YandexStatusMapping $yandex_status_mapping = null,
-		private ?RussianPostPickupDiagnosticsTab $russian_post_pickup_diagnostics = null,
 	) {
 	}
 
@@ -143,7 +143,7 @@ final class DeliveryServicesAdminPage {
 		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
 		add_action( 'admin_init', array( $this, 'handle_actions' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
-		$this->russian_post_pickup_diagnostics?->register();
+		$this->russian_post_pickup_diagnostics->register();
 		add_action( 'wp_ajax_wdc_russian_post_pickup_import_status', array( $this, 'ajax_pickup_import_status' ) );
 		add_action( 'wp_ajax_wdc_dpd_geography_import_status', array( $this, 'ajax_dpd_geography_import_status' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start' ) );
@@ -3753,11 +3753,6 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	}
 
 	private function render_russian_post_pickup_diagnostics_tab(): void {
-		if ( ! $this->russian_post_pickup_diagnostics instanceof RussianPostPickupDiagnosticsTab ) {
-			$this->notice( 'error', __( 'Сервис диагностики ПВЗ недоступен.', 'walls-delivery-calc' ) );
-			return;
-		}
-
 		$this->russian_post_pickup_diagnostics->render();
 	}
 

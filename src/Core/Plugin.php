@@ -687,6 +687,7 @@ final class Plugin {
 				$this->container->get( DeliveryServiceCountryRepository::class ),
 				$this->container->get( RulesAdminPage::class ),
 				$this->container->get( RuleRepository::class ),
+				$this->container->get( RussianPostPickupDiagnosticsTab::class ),
 				$this->container->get( DeliveryServiceSettingsRepository::class ),
 				$this->container->get( RussianPostSettings::class ),
 				$this->container->get( RussianPostCountriesAdminPage::class ),
@@ -734,7 +735,6 @@ final class Plugin {
 				$this->container->get( YandexGeoV2RegionEnrichmentRunner::class ),
 				$this->container->get( YandexDeliveryGeoPipelineV2Runner::class ),
 				$this->container->get( YandexStatusMapping::class ),
-				$this->container->get( RussianPostPickupDiagnosticsTab::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );
