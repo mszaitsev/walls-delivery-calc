@@ -6,7 +6,6 @@ namespace WallsShop\WDC\Shipments\RussianPost;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Shipments\Documents\CarrierShipmentDocumentProviderInterface;
 use WallsShop\WDC\Shipments\Documents\ShipmentBinaryDocument;
-use WallsShop\WDC\Shipments\Documents\ShipmentDocumentAction;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -22,12 +21,9 @@ final class RussianPostShipmentDocumentProvider implements CarrierShipmentDocume
 
 	/** @param array<string,mixed> $shipment */
 	public function actions( object $order, array $shipment ): array {
-		unset( $order );
-		if ( ! $this->service->can_download_label( $shipment ) ) {
-			return array();
-		}
-
-		return array( new ShipmentDocumentAction( self::ACTION_DOWNLOAD_LABEL, 'Скачать почтовый ярлык' ) );
+		unset( $order, $shipment );
+		// Otpravka currently returns "Forbidden mail type" for /1.0/forms/backlog/{id}/forms before batch formation; keep download code for future API re-check.
+		return array();
 	}
 
 	/** @param array<string,mixed> $shipment */
