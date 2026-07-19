@@ -247,6 +247,25 @@
     return 'Статус отмены пока не получен. Проведено: ' + total + '/' + total + ' проверок отмены. Повторите обновление статуса позднее.';
   }
 
+  function isCancellationPollingPending(context, statusPayload) {
+    const payloadData = context && context.payload && context.payload.data && typeof context.payload.data === 'object'
+      ? context.payload.data
+      : {};
+    const payloadStatus = payloadData.status && typeof payloadData.status === 'object'
+      ? payloadData.status
+      : {};
+    const lifecycle = statusPayload && statusPayload.lifecycle && typeof statusPayload.lifecycle === 'object'
+      ? statusPayload.lifecycle
+      : (payloadStatus.lifecycle && typeof payloadStatus.lifecycle === 'object' ? payloadStatus.lifecycle : (payloadData.lifecycle && typeof payloadData.lifecycle === 'object' ? payloadData.lifecycle : {}));
+    return !!(
+      context && context.pending
+      || (lifecycle.poll_required === true || lifecycle.pollRequired === true)
+      || statusPayload && (statusPayload.cancellation_pending || statusPayload.polling_continue)
+      || payloadStatus && (payloadStatus.cancellation_pending || payloadStatus.polling_continue)
+      || payloadData && payloadData.auto_poll && isCancellationPollingPurpose(payloadData.purpose || '')
+    );
+  }
+
   function initCancellationPollingToast(box, token, maxAttempts) {
     if (!box || !token) return;
     const existing = cancellationPollingToasts.get(box);
@@ -392,8 +411,8 @@
       const settings = context && context.settings ? context.settings : {};
 
       if (isCancellationPollingPurpose(settings.purpose || settings.mode)) {
-        const rawStatus = String(statusPayload.yandex_status || statusPayload.carrier_status_title || '').trim();
-        if (context.pending) {
+        const rawStatus = String(statusPayload.yandex_status || '').trim();
+        if (isCancellationPollingPending(context, statusPayload)) {
           updateCancellationPollingToast(
             context.box,
             context.token,
