@@ -226,6 +226,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 
+use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
@@ -581,6 +582,11 @@ wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_p
 
 $delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && ! str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render availability fields inside main tab and not expose a separate availability tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && str_contains( $delivery_admin_source, 'Диагностика базы ПВЗ' ) && str_contains( $delivery_admin_source, 'render_russian_post_pickup_diagnostics_tab' ), 'Russian Post domestic admin must expose the pickup diagnostics tab and delegate rendering to the specialized tab component.' );
+$domestic_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_domestic_service( $service ) )' ), 700 );
+$cdek_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_cdek_service( $service ) )' ), 450 );
+$yandex_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_yandex_delivery_service( $service ) )' ), 450 );
+wdc_ds_assert( str_contains( $domestic_tabs_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && ! str_contains( $cdek_tabs_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && ! str_contains( $yandex_tabs_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ), 'Pickup diagnostics tab must be added only for Russian Post domestic service tabs.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, "'save_availability' => 'main'" ) && str_contains( $delivery_admin_source, 'sanitize_availability_data' ), 'Legacy availability save action must redirect to main while preserving backend save handling.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_embedded_for_context' ), 'Service rules tab must use embedded reusable rules UI.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countries_tab' ) && str_contains( $delivery_admin_source, 'Страны Почты России' ), 'Russian Post countries must be embedded as a service tab.' );
@@ -612,6 +618,7 @@ wdc_ds_assert( ! str_contains( $service_simulation_body, 'name="simulation[locat
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 wdc_ds_assert( ! str_contains( $plugin_source, 'RussianPostCountriesAdminPage::class )->register()' ), 'Russian Post countries submenu must not be registered separately.' );
+wdc_ds_assert( str_contains( $plugin_source, 'RussianPostPickupDiagnosticsTab::class' ) && str_contains( $plugin_source, 'RussianPostPickupDiagnosticsService::class' ) && ! str_contains( $plugin_source, 'Pickup' . 'AdminPage' ), 'Composition root must wire pickup diagnostics as a service tab and not as a standalone admin page.' );
 
 $countries_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/RussianPost/Admin/RussianPostCountriesAdminPage.php' );
 wdc_ds_assert( str_contains( $countries_admin_source, 'render_embedded( string $return_url )' ) && str_contains( $countries_admin_source, 'wdc-rp-countries-admin' ), 'Russian Post countries admin must support embedded rendering without a WordPress wrap.' );

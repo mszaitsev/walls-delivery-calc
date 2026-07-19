@@ -1,83 +1,42 @@
 <?php
 declare(strict_types=1);
 
-namespace WallsShop\WDC\Pickup\Admin;
+namespace WallsShop\WDC\Carriers\RussianPost\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
-use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
-use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
 
-final class PickupAdminPage {
-	private const PAGE_SLUG = 'wdc-platform-pickup';
+final class RussianPostPickupDiagnosticsTab {
+	public const TAB_KEY = 'russian_post_pickup_diagnostics';
+	private const EXPORT_QUERY = 'wdc_pickup_diagnostics_export';
+	private const NONCE_ACTION = 'wdc_russian_post_pickup_diagnostics_rebind';
+	private const NONCE_NAME = 'wdc_pickup_diagnostics_nonce';
 
 	public function __construct(
-		private ?RussianPostPickupPointRepository $russian_post_repository = null,
-		private ?RussianPostOtpravkaApiSettings $russian_post_settings = null,
-		private ?RussianPostPickupDiagnosticsService $diagnostics = null
+		private RussianPostPickupDiagnosticsService $diagnostics
 	) {
 	}
 
 	public function register(): void {
-		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
+		add_action( 'admin_init', array( $this, 'handle_csv_export' ), 0 );
 	}
 
-	public function add_menu_page(): void {
-		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'ПВЗ', 'walls-delivery-calc' ), esc_html__( 'ПВЗ', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
-	}
-
-	public function render_page(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
-			return;
-		}
-
-		$view = isset( $_GET['wdc_pickup_view'] ) ? sanitize_key( wp_unslash( (string) $_GET['wdc_pickup_view'] ) ) : '';
-		if ( 'diagnostics' === $view ) {
-			$this->render_diagnostics_page();
-			return;
-		}
-
-		?>
-		<div class="wrap">
-			<h1><?php echo esc_html__( 'Пункты выдачи заказов', 'walls-delivery-calc' ); ?></h1>
-			<p><a class="button button-secondary" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&wdc_pickup_view=diagnostics' ) ); ?>"><?php echo esc_html__( 'Диагностика базы ПВЗ Почты России', 'walls-delivery-calc' ); ?></a></p>
-
-			<?php $rp_counts = $this->russian_post_repository instanceof RussianPostPickupPointRepository ? $this->russian_post_repository->count_by_type() : array(); ?>
-			<p><strong>Почта России active:</strong> <?php echo esc_html( (string) ( $this->russian_post_repository instanceof RussianPostPickupPointRepository ? $this->russian_post_repository->count_active() : 0 ) ); ?>; OPS: <?php echo esc_html( (string) ( $rp_counts['OPS'] ?? 0 ) ); ?>, PVZ: <?php echo esc_html( (string) ( $rp_counts['PVZ'] ?? 0 ) ); ?>, APS: <?php echo esc_html( (string) ( $rp_counts['APS'] ?? 0 ) ); ?><?php if ( $this->russian_post_settings instanceof RussianPostOtpravkaApiSettings ) : ?>; last import: <?php echo esc_html( $this->russian_post_settings->last_success_at() ?: '-' ); ?><?php endif; ?></p>
-		</div>
-		<?php
-	}
-
-	private function render_diagnostics_page(): void {
-		if ( ! $this->diagnostics instanceof RussianPostPickupDiagnosticsService ) {
-			?>
-			<div class="wrap"><h1><?php echo esc_html__( 'Диагностика базы ПВЗ Почты России', 'walls-delivery-calc' ); ?></h1><div class="notice notice-error"><p><?php echo esc_html__( 'Сервис диагностики недоступен.', 'walls-delivery-calc' ); ?></p></div></div>
-			<?php
-			return;
-		}
-
-		$problem = isset( $_GET['problem'] ) ? sanitize_key( wp_unslash( (string) $_GET['problem'] ) ) : RussianPostPickupDiagnosticsService::DEFAULT_PROBLEM;
+	public function render(): void {
+		$problem = $this->current_problem();
 		$page = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1;
 		$per_page = isset( $_GET['per_page'] ) ? max( 1, min( 100, (int) $_GET['per_page'] ) ) : RussianPostPickupDiagnosticsService::DEFAULT_PER_PAGE;
-
-		if ( isset( $_GET['wdc_pickup_diagnostics_export'] ) ) {
-			$csv = $this->diagnostics->export_csv( $problem );
-			header( 'Content-Type: text/csv; charset=UTF-8' );
-			header( 'Content-Disposition: attachment; filename="' . $this->diagnostics->filename() . '"' );
-			echo $csv; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-			exit;
-		}
-
-		$notice = $this->handle_diagnostics_post( $problem );
+		$notice = $this->handle_rebind_post( $problem );
 		$summary = $this->diagnostics->summary();
 		$list = $this->diagnostics->list_problematic( $problem, $page, $per_page );
 		$total_pages = max( 1, (int) ceil( $list['total'] / $per_page ) );
 		?>
-		<div class="wrap">
-			<h1><?php echo esc_html__( 'Диагностика базы ПВЗ Почты России', 'walls-delivery-calc' ); ?></h1>
-			<p><a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ); ?>"><?php echo esc_html__( 'Назад к ПВЗ', 'walls-delivery-calc' ); ?></a></p>
+		<section class="wdc-russian-post-pickup-diagnostics">
+			<h3><?php echo esc_html__( 'Диагностика базы ПВЗ', 'walls-delivery-calc' ); ?></h3>
+			<p><a href="<?php echo esc_url( $this->pickup_tab_url() ); ?>"><?php echo esc_html__( 'Назад к ПВЗ', 'walls-delivery-calc' ); ?></a></p>
 			<?php if ( '' !== $notice ) : ?>
 				<div class="notice notice-info is-dismissible"><p><?php echo esc_html( $notice ); ?></p></div>
 			<?php endif; ?>
@@ -96,8 +55,9 @@ final class PickupAdminPage {
 			<?php endif; ?>
 
 			<form method="get" style="margin:16px 0;display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
-				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
-				<input type="hidden" name="wdc_pickup_view" value="diagnostics">
+				<input type="hidden" name="page" value="<?php echo esc_attr( DeliveryServicesAdminPage::MENU_SLUG ); ?>">
+				<input type="hidden" name="service" value="<?php echo esc_attr( RussianPostDomesticSettings::SERVICE_KEY ); ?>">
+				<input type="hidden" name="tab" value="<?php echo esc_attr( self::TAB_KEY ); ?>">
 				<label>
 					<span><?php echo esc_html__( 'Проблема', 'walls-delivery-calc' ); ?></span><br>
 					<select name="problem">
@@ -115,11 +75,11 @@ final class PickupAdminPage {
 					</select>
 				</label>
 				<button class="button button-primary" type="submit"><?php echo esc_html__( 'Применить', 'walls-delivery-calc' ); ?></button>
-				<a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => self::PAGE_SLUG, 'wdc_pickup_view' => 'diagnostics', 'problem' => $list['problem'], 'wdc_pickup_diagnostics_export' => '1' ), admin_url( 'admin.php' ) ) ); ?>"><?php echo esc_html__( 'Экспорт CSV', 'walls-delivery-calc' ); ?></a>
+				<a class="button" href="<?php echo esc_url( $this->diagnostics_url( array( 'problem' => $list['problem'], self::EXPORT_QUERY => '1' ) ) ); ?>"><?php echo esc_html__( 'Экспорт CSV', 'walls-delivery-calc' ); ?></a>
 			</form>
 
-			<form method="post" style="margin:16px 0;">
-				<?php wp_nonce_field( 'wdc_russian_post_pickup_diagnostics_rebind', 'wdc_pickup_diagnostics_nonce' ); ?>
+			<form method="post" action="<?php echo esc_url( $this->diagnostics_url( array( 'problem' => $list['problem'], 'per_page' => $per_page, 'paged' => $page ) ) ); ?>" style="margin:16px 0;">
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<input type="hidden" name="wdc_pickup_diagnostics_action" value="rebind">
 				<input type="hidden" name="problem" value="<?php echo esc_attr( $list['problem'] ); ?>">
 				<label><input type="checkbox" name="apply_rebind" value="1"> <?php echo esc_html__( 'Применить изменения', 'walls-delivery-calc' ); ?></label>
@@ -160,32 +120,44 @@ final class PickupAdminPage {
 			<p style="margin-top:12px;">
 				<?php echo esc_html( sprintf( __( 'Страница %1$d из %2$d, всего проблемных строк: %3$d', 'walls-delivery-calc' ), $page, $total_pages, $list['total'] ) ); ?>
 				<?php if ( $page > 1 ) : ?>
-					<a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => self::PAGE_SLUG, 'wdc_pickup_view' => 'diagnostics', 'problem' => $list['problem'], 'per_page' => $per_page, 'paged' => $page - 1 ), admin_url( 'admin.php' ) ) ); ?>"><?php echo esc_html__( 'Назад', 'walls-delivery-calc' ); ?></a>
+					<a class="button" href="<?php echo esc_url( $this->diagnostics_url( array( 'problem' => $list['problem'], 'per_page' => $per_page, 'paged' => $page - 1 ) ) ); ?>"><?php echo esc_html__( 'Назад', 'walls-delivery-calc' ); ?></a>
 				<?php endif; ?>
 				<?php if ( $page < $total_pages ) : ?>
-					<a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => self::PAGE_SLUG, 'wdc_pickup_view' => 'diagnostics', 'problem' => $list['problem'], 'per_page' => $per_page, 'paged' => $page + 1 ), admin_url( 'admin.php' ) ) ); ?>"><?php echo esc_html__( 'Вперед', 'walls-delivery-calc' ); ?></a>
+					<a class="button" href="<?php echo esc_url( $this->diagnostics_url( array( 'problem' => $list['problem'], 'per_page' => $per_page, 'paged' => $page + 1 ) ) ); ?>"><?php echo esc_html__( 'Вперед', 'walls-delivery-calc' ); ?></a>
 				<?php endif; ?>
 			</p>
-		</div>
+		</section>
 		<?php
 	}
 
-	private function handle_diagnostics_post( string $problem ): string {
+	public function handle_csv_export(): void {
+		if ( ! $this->is_diagnostics_route() || ! isset( $_GET[ self::EXPORT_QUERY ] ) ) {
+			return;
+		}
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			return;
+		}
+
+		$csv = $this->diagnostics->export_csv( $this->current_problem() );
+		header( 'Content-Type: text/csv; charset=UTF-8' );
+		header( 'Content-Disposition: attachment; filename="' . $this->diagnostics->filename() . '"' );
+		echo $csv; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		exit;
+	}
+
+	private function handle_rebind_post( string $problem ): string {
 		if ( ! isset( $_POST['wdc_pickup_diagnostics_action'] ) || 'rebind' !== (string) $_POST['wdc_pickup_diagnostics_action'] ) {
 			return '';
 		}
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return __( 'Недостаточно прав для rebind-действия.', 'walls-delivery-calc' );
 		}
-		if ( ! isset( $_POST['wdc_pickup_diagnostics_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( (string) $_POST['wdc_pickup_diagnostics_nonce'] ) ), 'wdc_russian_post_pickup_diagnostics_rebind' ) ) {
+		if ( ! isset( $_POST[ self::NONCE_NAME ] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( (string) $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) ) {
 			return __( 'Nonce не прошел проверку.', 'walls-delivery-calc' );
 		}
 
 		$apply = ! empty( $_POST['apply_rebind'] );
-		$result = $apply ? $this->diagnostics?->rebind_apply( $problem ) : $this->diagnostics?->rebind_dry_run( $problem );
-		if ( ! is_array( $result ) ) {
-			return '';
-		}
+		$result = $apply ? $this->diagnostics->rebind_apply( $problem ) : $this->diagnostics->rebind_dry_run( $problem );
 		$skipped = is_array( $result['skipped'] ?? null ) ? $result['skipped'] : array();
 
 		return sprintf(
@@ -195,6 +167,48 @@ final class PickupAdminPage {
 			(int) ( $result['updated'] ?? 0 ),
 			(int) ( $skipped['no_match'] ?? 0 ),
 			(int) ( $skipped['ambiguous'] ?? 0 )
+		);
+	}
+
+	private function is_diagnostics_route(): bool {
+		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( (string) $_GET['page'] ) ) : '';
+		$service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( (string) $_GET['service'] ) ) : '';
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( (string) $_GET['tab'] ) ) : '';
+
+		return DeliveryServicesAdminPage::MENU_SLUG === $page
+			&& RussianPostDomesticSettings::SERVICE_KEY === $service
+			&& self::TAB_KEY === $tab;
+	}
+
+	private function current_problem(): string {
+		return isset( $_GET['problem'] ) ? sanitize_key( wp_unslash( (string) $_GET['problem'] ) ) : RussianPostPickupDiagnosticsService::DEFAULT_PROBLEM;
+	}
+
+	/**
+	 * @param array<string,mixed> $args
+	 */
+	private function diagnostics_url( array $args = array() ): string {
+		return add_query_arg(
+			array_merge(
+				array(
+					'page' => DeliveryServicesAdminPage::MENU_SLUG,
+					'service' => RussianPostDomesticSettings::SERVICE_KEY,
+					'tab' => self::TAB_KEY,
+				),
+				$args
+			),
+			admin_url( 'admin.php' )
+		);
+	}
+
+	private function pickup_tab_url(): string {
+		return add_query_arg(
+			array(
+				'page' => DeliveryServicesAdminPage::MENU_SLUG,
+				'service' => RussianPostDomesticSettings::SERVICE_KEY,
+				'tab' => 'russian_post_pickup',
+			),
+			admin_url( 'admin.php' )
 		);
 	}
 

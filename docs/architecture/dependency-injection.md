@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 0.124.18
+Version: 0.124.19
 
 `src/Core/Plugin.php` is the composition root. `src/Core/Container.php` is a small lazy singleton container with `register()`, `get()`, and `has()`.
 

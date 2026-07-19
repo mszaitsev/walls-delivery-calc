@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.124.18
+Version: 0.124.19
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 
@@ -13,6 +13,7 @@ Generic location services own normalized lookup. Carrier pickup services own car
 - Courier addresses are normalized when possible; fallback address text is allowed when the normalizer is unavailable or cannot match.
 - Pickup selection stores only fields needed for checkout and carrier shipment creation.
 - Pickup maps/lists must stay scoped to WDC UI and must not override global WooCommerce controls.
+- Russian Post pickup import/settings live under `Службы доставки → Почта России → ПВЗ / ОПС`; pickup database diagnostics live under `Службы доставки → Почта России → Диагностика базы ПВЗ`.
 
 ## Pickup Styling Ownership
 

@@ -78,6 +78,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayload
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentRegistrationService as CoreYandexDeliveryShipmentRegistrationService;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
+use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
@@ -181,7 +182,6 @@ use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
 use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Packaging\PackagingBuilderConfig;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
-use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\Presentation\PickupPointPresentationResolver;
@@ -673,10 +673,8 @@ final class Plugin {
 			)
 		);
 		$this->container->register(
-			PickupAdminPage::class,
-			fn(): PickupAdminPage => new PickupAdminPage(
-				$this->container->get( RussianPostPickupPointRepository::class ),
-				$this->container->get( RussianPostOtpravkaApiSettings::class ),
+			RussianPostPickupDiagnosticsTab::class,
+			fn(): RussianPostPickupDiagnosticsTab => new RussianPostPickupDiagnosticsTab(
 				$this->container->get( RussianPostPickupDiagnosticsService::class )
 			)
 		);
@@ -736,6 +734,7 @@ final class Plugin {
 				$this->container->get( YandexGeoV2RegionEnrichmentRunner::class ),
 				$this->container->get( YandexDeliveryGeoPipelineV2Runner::class ),
 				$this->container->get( YandexStatusMapping::class ),
+				$this->container->get( RussianPostPickupDiagnosticsTab::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );
@@ -817,7 +816,6 @@ final class Plugin {
 			$this->container->get( CalendarAdminPage::class )->register();
 			$this->container->get( LocationsAdminPage::class )->register();
 			$this->container->get( RulesAdminPage::class )->register();
-			$this->container->get( PickupAdminPage::class )->register();
 			$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
 			$this->container->get( DeliveryServicesAdminPage::class )->register();
 			$this->container->get( ShipmentStatusesAdminPage::class )->register();

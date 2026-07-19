@@ -84,7 +84,7 @@ final class ShippingMethodRegistrar {
 			$this->environment->version()
 		);
 		wp_enqueue_style(
-			'wdc-platform-pickup-foundation',
+			'wdc-platform-pvz-foundation',
 			$this->environment->plugin_url() . 'assets/frontend/pickup-foundation.css',
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()

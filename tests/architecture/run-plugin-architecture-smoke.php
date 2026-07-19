@@ -408,6 +408,26 @@ foreach ( array( 'src', 'assets/admin' ) as $dir ) {
 	}
 }
 
+$removed_pickup_standalone_page_needles = array(
+	'Pickup' . 'AdminPage',
+	'wdc-platform-' . 'pickup',
+	'wdc_pickup_' . 'view',
+);
+foreach ( array( 'src', 'assets/admin' ) as $dir ) {
+	$root = plugin_architecture_path( $dir );
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root, FilesystemIterator::SKIP_DOTS ) );
+	foreach ( $iterator as $file ) {
+		if ( ! $file instanceof SplFileInfo || ! $file->isFile() ) {
+			continue;
+		}
+		$source = (string) file_get_contents( $file->getPathname() );
+		$relative = str_replace( '\\', '/', substr( $file->getPathname(), strlen( plugin_architecture_root() ) + 1 ) );
+		foreach ( $removed_pickup_standalone_page_needles as $needle ) {
+			plugin_architecture_assert( ! str_contains( $source, $needle ), 'Removed pickup standalone page reference must be absent from ' . $relative );
+		}
+	}
+}
+
 $js_source = '';
 foreach ( plugin_architecture_generic_js_files() as $file ) {
 	$source = (string) file_get_contents( $file );

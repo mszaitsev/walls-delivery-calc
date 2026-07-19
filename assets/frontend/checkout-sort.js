@@ -24,7 +24,7 @@
 	$( relocateSortControl );
 	$( document.body ).on( 'updated_checkout', relocateSortControl );
 
-	$( document.body ).on( 'change', '.wdc-platform-pickup-point', function () {
+	$( document.body ).on( 'change', '.wdc-platform-pvz-point', function () {
 		var $select = $( this );
 		var $wrapper = $select.closest( '.wdc-pickup-selector' );
 		var debug = window.wdcPlatformCitySelector && window.wdcPlatformCitySelector.debug && window.console && window.console.log;

@@ -33,6 +33,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repo
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
+use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
@@ -134,6 +135,7 @@ final class DeliveryServicesAdminPage {
 		private ?YandexGeoV2RegionEnrichmentRunner $yandex_geo_v2_region_enrichment_runner = null,
 		private ?YandexDeliveryGeoPipelineV2Runner $yandex_delivery_geo_pipeline_v2_runner = null,
 		private ?YandexStatusMapping $yandex_status_mapping = null,
+		private ?RussianPostPickupDiagnosticsTab $russian_post_pickup_diagnostics = null,
 	) {
 	}
 
@@ -141,6 +143,7 @@ final class DeliveryServicesAdminPage {
 		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
 		add_action( 'admin_init', array( $this, 'handle_actions' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+		$this->russian_post_pickup_diagnostics?->register();
 		add_action( 'wp_ajax_wdc_russian_post_pickup_import_status', array( $this, 'ajax_pickup_import_status' ) );
 		add_action( 'wp_ajax_wdc_dpd_geography_import_status', array( $this, 'ajax_dpd_geography_import_status' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start' ) );
@@ -1377,6 +1380,7 @@ final class DeliveryServicesAdminPage {
 		if ( $this->is_domestic_service( $service ) ) {
 			$tabs['tariffs'] = 'Тарифы';
 			$tabs['russian_post_pickup'] = 'ПВЗ / ОПС';
+			$tabs[ RussianPostPickupDiagnosticsTab::TAB_KEY ] = 'Диагностика базы ПВЗ';
 			$tabs['api_credentials'] = 'Данные для входа';
 			$tabs['shipments'] = 'Отправления';
 			$tabs['status_mapping'] = 'Статусы / Mapping';
@@ -1413,6 +1417,7 @@ final class DeliveryServicesAdminPage {
 			'rules' => $this->render_rules_tab( $service ),
 			'tariffs' => $this->render_tariffs_tab( $service ),
 			'russian_post_pickup' => $this->render_russian_post_pickup_tab( $service ),
+			RussianPostPickupDiagnosticsTab::TAB_KEY => $this->render_russian_post_pickup_diagnostics_tab(),
 			'api_credentials' => $this->render_api_credentials_tab( $service ),
 			'shipments' => $this->render_shipments_tab( $service ),
 			'status_mapping' => $this->render_status_mapping_tab( $service ),
@@ -3745,6 +3750,15 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			</details>
 		</form>
 		<?php
+	}
+
+	private function render_russian_post_pickup_diagnostics_tab(): void {
+		if ( ! $this->russian_post_pickup_diagnostics instanceof RussianPostPickupDiagnosticsTab ) {
+			$this->notice( 'error', __( 'Сервис диагностики ПВЗ недоступен.', 'walls-delivery-calc' ) );
+			return;
+		}
+
+		$this->russian_post_pickup_diagnostics->render();
 	}
 
 	/**
