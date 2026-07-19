@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.7
+Version: 0.124.8
 
 Stable subsystems:
 
@@ -20,6 +20,10 @@ Active known limitations:
 - Russian Post document action is temporarily hidden because Otpravka currently returns `Forbidden mail type` for `/1.0/forms/backlog/{id}/forms` before batch formation; the download implementation remains in place for future API re-check.
 - Regression manifest keeps two baseline failures: DPD shipment preparation dry-run date pickup and CDEK large pickup list rendering.
 - Two optional Russian Post carrier tests still require fuller WooCommerce test stubs.
+
+Recent fixes:
+
+- Yandex Delivery shipment modal restores source drop-off PVZ presentation from the canonical V2 pickup context, including `full_address`, `schedule_text`, and coordinates, so the modal address and drop-off map survive the shipment framework flow.
 
 Canonical docs:
 
