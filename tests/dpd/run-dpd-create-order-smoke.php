@@ -251,6 +251,21 @@ dpd_create_assert( $lifecycle_soap->calls[0]['payload'] === $builder->build( $re
 $wrong_attempt = $lifecycle_registration->submit( $lifecycle_order, 'wrong-attempt' );
 dpd_create_assert( empty( $wrong_attempt['success'] ) && 1 === count( $lifecycle_soap->calls ), 'Wrong DPD attempt must be rejected before SOAP call.' );
 
+$snapshot_fallback_soap = new DpdCreateFakeSoap( $success_body );
+$snapshot_fallback_repository = new DpdShipmentRepository( new OrderShipmentRepository() );
+$snapshot_fallback_order = new DpdCreateFakeOrder( 660 );
+$snapshot_fallback_registration = new DpdOrderRegistrationService( $builder, new DpdApiClient( $settings, $snapshot_fallback_soap ), $snapshot_fallback_repository );
+$snapshot_fallback_begin = $snapshot_fallback_registration->begin( $snapshot_fallback_order, $request );
+$snapshot_fallback_token = (string) ( $snapshot_fallback_begin['lifecycle']['continuation_token'] ?? '' );
+$snapshot_fallback_shipment = $snapshot_fallback_repository->find( $snapshot_fallback_order );
+unset( $snapshot_fallback_shipment['dpd_registration_payload'] );
+$snapshot_fallback_repository->save( $snapshot_fallback_order, $snapshot_fallback_shipment );
+$snapshot_fallback_result = $snapshot_fallback_registration->submit( $snapshot_fallback_order, $snapshot_fallback_token );
+dpd_create_assert( empty( $snapshot_fallback_result['success'] ), 'DPD submit without working payload must fail.' );
+dpd_create_assert( 0 === count( $snapshot_fallback_soap->calls ), 'DPD submit must not call SOAP when only request_snapshot.body exists.' );
+dpd_create_assert( str_contains( (string) ( $snapshot_fallback_result['message'] ?? '' ), 'рабочего payload' ), 'DPD submit failure must explain that the working payload is missing.' );
+dpd_create_assert( is_array( $snapshot_fallback_shipment['request_snapshot']['body'] ?? null ) && '[redacted]' === (string) ( $snapshot_fallback_shipment['request_snapshot']['body']['header']['senderAddress']['contactPhone'] ?? '' ), 'DPD request_snapshot may remain diagnostic but must not be used as SOAP fallback.' );
+
 $complete_soap = new DpdCreateFakeSoap( $success_body );
 $complete_repository = new DpdShipmentRepository( new OrderShipmentRepository() );
 $complete_order = new DpdCreateFakeOrder( 660 );

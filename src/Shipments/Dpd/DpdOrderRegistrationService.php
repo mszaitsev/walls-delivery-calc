@@ -75,9 +75,9 @@ final class DpdOrderRegistrationService {
 		if ( in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'duplicate', 'error', 'cancelled', 'transport_error' ), true ) ) {
 			return $this->failed_lifecycle_result( (string) ( $shipment['dpd_registration_error'] ?? $shipment['status_title'] ?? 'Регистрация DPD уже завершена ошибкой.' ), $shipment );
 		}
-		$payload = is_array( $shipment['dpd_registration_payload'] ?? null ) ? $shipment['dpd_registration_payload'] : ( is_array( $shipment['request_snapshot']['body'] ?? null ) ? $shipment['request_snapshot']['body'] : array() );
+		$payload = is_array( $shipment['dpd_registration_payload'] ?? null ) ? $shipment['dpd_registration_payload'] : array();
 		if ( array() === $payload ) {
-			return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не содержит payload.' );
+			return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не содержит рабочего payload. Создайте отправление заново.', $shipment );
 		}
 		$shipment = array_merge( $shipment, $this->sent_places_fields( $payload ), array( 'request_snapshot' => array( 'method' => 'SOAP', 'path' => 'order2/createOrder2', 'body' => $this->sanitize_value( $payload ) ) ) );
 		$this->repository->save( $order, $shipment );
