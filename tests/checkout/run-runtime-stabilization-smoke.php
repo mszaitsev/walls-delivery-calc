@@ -557,6 +557,20 @@ $plugin->register();
 $container = $plugin->container();
 runtime_smoke_assert( $container->get( CheckoutFeatureGate::class ) instanceof CheckoutFeatureGate, 'Composition root must build CheckoutFeatureGate.' );
 runtime_smoke_assert( $container->get( AdminMenu::class ) instanceof AdminMenu, 'Composition root must build AdminMenu.' );
+$admin_menu = $container->get( AdminMenu::class );
+ob_start();
+$admin_menu->render_page();
+$overview_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $overview_html, 'Версия плагина' ), 'Overview page must render plugin version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия PHP' ), 'Overview page must render PHP version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия WooCommerce' ), 'Overview page must render WooCommerce version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Статус HPOS' ), 'Overview page must render HPOS status row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Статус Action Scheduler' ), 'Overview page must render Action Scheduler status row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Очистка кеша доставки' ), 'Overview page must render delivery cache cleanup section.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Очистить кеш тарифов доставки' ), 'Overview page must render delivery cache cleanup button.' );
+runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ), 'Overview page must render overview POST action field.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Флаги функций' ), 'Overview page must not render the legacy feature flags section.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Требования' ), 'Overview page must not render the requirements section.' );
 $legacy_class = 'Feature' . 'Flags';
 foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) ) as $src_file ) {
 	if ( ! $src_file instanceof SplFileInfo || 'php' !== $src_file->getExtension() ) {
