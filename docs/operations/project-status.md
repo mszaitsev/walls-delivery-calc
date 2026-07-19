@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.8
+Version: 0.124.9
 
 Stable subsystems:
 
@@ -24,6 +24,7 @@ Active known limitations:
 Recent fixes:
 
 - Yandex Delivery shipment modal restores source drop-off PVZ presentation from the canonical V2 pickup context, including `full_address`, `schedule_text`, and coordinates, so the modal address and drop-off map survive the shipment framework flow.
+- Shipment pickup picker defines its local `pickupContext()` resolver again, so Yandex source drop-off picker can open, run initial map search, and perform address search without a `ReferenceError`.
 
 Canonical docs:
 
