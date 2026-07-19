@@ -27,7 +27,7 @@ final class RussianPostShipmentDocumentProvider implements CarrierShipmentDocume
 			return array();
 		}
 
-		return array( new ShipmentDocumentAction( self::ACTION_DOWNLOAD_LABEL, 'Скачать ярлык' ) );
+		return array( new ShipmentDocumentAction( self::ACTION_DOWNLOAD_LABEL, 'Скачать почтовый ярлык' ) );
 	}
 
 	/** @param array<string,mixed> $shipment */

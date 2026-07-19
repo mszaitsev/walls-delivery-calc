@@ -252,7 +252,34 @@
     const visible = new Map();
     (Array.isArray(actions) ? actions : []).forEach(function (action) {
       if (!action) return;
-      visible.set(String(action.key || ''), !!action.visible);
+      const key = String(action.key || '');
+      if (!key) return;
+      visible.set(key, !!action.visible);
+      let link = box.querySelector('[data-wdc-shipment-document-download][data-action-key="' + cssEscape(key) + '"]');
+      if (!link && action.visible && action.download_url) {
+        link = document.createElement('a');
+        link.className = 'button';
+        link.dataset.wdcShipmentDocumentDownload = '1';
+        link.dataset.actionKey = key;
+        const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
+        const orderId = String(action.order_id || (updateButton && updateButton.dataset ? updateButton.dataset.orderId : '') || '');
+        if (orderId) link.dataset.orderId = orderId;
+        const actionsContainer = box.querySelector('.wdc-shipments-actions');
+        const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
+        if (actionsContainer && manualButton && manualButton.parentNode === actionsContainer) {
+          actionsContainer.insertBefore(link, manualButton);
+        } else if (actionsContainer) {
+          actionsContainer.appendChild(link);
+        }
+      }
+      if (link) {
+        const url = String(action.download_url || action.downloadUrl || '').trim();
+        if (url) {
+          link.href = url;
+          link.dataset.downloadUrl = url;
+        }
+        link.textContent = String(action.label || link.textContent || key);
+      }
     });
     box.querySelectorAll('[data-wdc-shipment-document-download]').forEach(function (link) {
       const key = link.dataset ? String(link.dataset.actionKey || '') : '';
@@ -264,6 +291,13 @@
         link.setAttribute('aria-disabled', 'true');
       }
     });
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(value);
+    }
+    return String(value).replace(/["\\]/g, '\\$&');
   }
 
   function shipmentButtonStateFromStatus(statusPayload) {

@@ -121,7 +121,7 @@ $order = new RpDocsOrder( 91, '91-A' );
 $shipment = rp_docs_shipment();
 
 $actions = $provider->actions( $order, $shipment );
-rp_docs_assert( 1 === count( $actions ) && 'download_label' === $actions[0]->key && 'Скачать ярлык' === $actions[0]->label, 'Russian Post shipment with backlog ID must expose label action.' );
+rp_docs_assert( 1 === count( $actions ) && 'download_label' === $actions[0]->key && 'Скачать почтовый ярлык' === $actions[0]->label, 'Russian Post shipment with backlog ID must expose postal label action.' );
 rp_docs_assert( array() === $provider->actions( $order, rp_docs_shipment( array( 'backlog_order_id' => '' ) ) ), 'Russian Post shipment without backlog ID must hide label action.' );
 rp_docs_assert( array() === $provider->actions( $order, rp_docs_shipment( array( 'batch_id' => 'B1' ) ) ), 'Russian Post shipment with explicit batch marker must hide label action.' );
 
@@ -158,5 +158,15 @@ foreach ( array(
 $client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiClient.php' );
 rp_docs_assert( str_contains( $client_source, "method' => 'GET'" ) && str_contains( $client_source, 'BACKLOG_FORMS_ENDPOINT' ) && str_contains( $client_source, "Content-Type' => 'application/json;charset=UTF-8'" ), 'Otpravka client must implement GET backlog forms with required headers.' );
 rp_docs_assert( ! str_contains( $client_source, 'json_decode( $body, true );' . "\n\t\t" . 'if ( $code >= 200' ), 'Successful PDF path must not JSON-decode binary response.' );
+
+$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments/shipment-status.js' );
+rp_docs_assert(
+	str_contains( $js_source, "document.createElement('a')" )
+	&& str_contains( $js_source, "link.dataset.wdcShipmentDocumentDownload = '1'" )
+	&& str_contains( $js_source, "link.dataset.actionKey = key" )
+	&& str_contains( $js_source, "link.dataset.downloadUrl = url" )
+	&& str_contains( $js_source, "actionsContainer.insertBefore(link, manualButton)" ),
+	'Shipment documentActions JS must create a missing document download button after Russian Post create returns document_actions.'
+);
 
 echo "Russian Post documents smoke passed.\n";
