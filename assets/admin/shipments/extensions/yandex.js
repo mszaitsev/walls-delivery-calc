@@ -207,6 +207,10 @@
     return String(value || '') === 'cancellation';
   }
 
+  function hasCancellationPollingToast(box) {
+    return !!(box && cancellationPollingToasts.has(box));
+  }
+
   function isYandexShipmentKey(value) {
     return String(value || '').trim() === 'yandex_delivery';
   }
@@ -513,7 +517,7 @@
       return true;
     },
     cancelledAndRemoved: function (context) {
-      if (!isYandexPollingContext(context)) return false;
+      if (!isYandexPollingContext(context) && !hasCancellationPollingToast(context && context.box)) return false;
       const settings = context && context.settings ? context.settings : {};
       if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
       finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
