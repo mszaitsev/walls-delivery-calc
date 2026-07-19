@@ -316,6 +316,32 @@
     }
   }
 
+  function finishCancellationPollingToast(box, message, type) {
+    if (!box) return;
+    const state = cancellationPollingToasts.get(box);
+    const toast = state && state.element
+      ? state.element
+      : (box.querySelector ? box.querySelector('[data-wdc-shipment-toast]') : null);
+    if (!toast) {
+      showShipmentToast(box, message, type || 'success', { append: true });
+      cancellationPollingToasts.delete(box);
+      return;
+    }
+    if (state && state.timer) {
+      window.clearTimeout(state.timer);
+    }
+    toast.textContent = message;
+    toast.dataset.status = type || 'success';
+    toast.className = toast.className.replace(/\s*wdc-shipment-toast--(success|warning|error|info)/g, '');
+    toast.classList.add('wdc-shipment-toast--' + (type || 'success'));
+    toast.hidden = false;
+    const timer = window.setTimeout(function () {
+      toast.hidden = true;
+      cancellationPollingToasts.delete(box);
+    }, 10000);
+    cancellationPollingToasts.set(box, { element: toast, token: null, timer: timer });
+  }
+
   function clearCancellationPollingToast(box) {
     const state = box ? cancellationPollingToasts.get(box) : null;
     if (!state) return;
@@ -431,7 +457,7 @@
           return true;
         }
         if (isCancellationConfirmed(context, statusPayload)) {
-          updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
+          finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
           return true;
         }
         if (rawStatus && rawStatus !== 'CANCELLED') {
@@ -490,7 +516,7 @@
       if (!isYandexPollingContext(context)) return false;
       const settings = context && context.settings ? context.settings : {};
       if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
-      updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
+      finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
       return true;
     },
     handlePollingStop: function (context) {

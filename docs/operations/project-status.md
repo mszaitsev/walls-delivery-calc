@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.11
+Version: 0.124.12
 
 Stable subsystems:
 
@@ -27,6 +27,7 @@ Recent fixes:
 - Shipment pickup picker defines its local `pickupContext()` resolver again, so Yandex source drop-off picker can open, run initial map search, and perform address search without a `ReferenceError`.
 - Yandex cancellation polling toast treats `cancellation_started` lifecycle/poll flags as pending and no longer interprets the intermediate `carrier_status_title` as terminal failure.
 - Yandex cancellation polling success toast now requires explicit cancellation confirmation via `cancelled_and_removed` or `yandex_status=CANCELLED`; empty `yandex_status` stays non-success.
+- Yandex cancellation polling success now finalizes the existing progress toast by replacing it with a success message and auto-hiding it, so no persistent progress toast remains after cancellation.
 
 Canonical docs:
 
