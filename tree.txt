@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000022 A0AC:74BD
+Volume serial number is 00000079 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -13,7 +13,6 @@ C:.
 |   |   |   .gitkeep
 |   |   |   calendar-admin.css
 |   |   |   calendar-admin.js
-|   |   |   checkout-simulation.css
 |   |   |   dpd-geography-import.js
 |   |   |   locations-admin.css
 |   |   |   order-delivery-recalculation.css
@@ -360,9 +359,6 @@ C:.
 |   |   |       DaDataSuggestionClient.php
 |   |   |       DaDataTokenPool.php
 |   |   |       FallbackSuggestionClient.php
-|   |   |
-|   |   +---Admin
-|   |   |       CheckoutSimulationPage.php
 |   |   |
 |   |   +---Cache
 |   |   |       DeliveryQuoteCacheManager.php

@@ -106,7 +106,6 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
-use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
@@ -674,13 +673,6 @@ final class Plugin {
 			)
 		);
 		$this->container->register(
-			CheckoutSimulationPage::class,
-			fn(): CheckoutSimulationPage => new CheckoutSimulationPage(
-				$this->environment,
-				$this->container->get( CheckoutOrchestrator::class )
-			)
-		);
-		$this->container->register(
 			PickupAdminPage::class,
 			fn(): PickupAdminPage => new PickupAdminPage(
 				$this->container->get( RussianPostPickupPointRepository::class ),
@@ -825,7 +817,6 @@ final class Plugin {
 			$this->container->get( CalendarAdminPage::class )->register();
 			$this->container->get( LocationsAdminPage::class )->register();
 			$this->container->get( RulesAdminPage::class )->register();
-			$this->container->get( CheckoutSimulationPage::class )->register();
 			$this->container->get( PickupAdminPage::class )->register();
 			$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
 			$this->container->get( DeliveryServicesAdminPage::class )->register();
