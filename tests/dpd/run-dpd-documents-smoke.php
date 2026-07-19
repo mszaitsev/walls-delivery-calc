@@ -15,21 +15,36 @@ use WallsShop\WDC\Carriers\Dpd\DpdSoapClientInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapRequest;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
+use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder;
+use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Documents\ShipmentDocumentDownloadService;
+use WallsShop\WDC\Shipments\Documents\ShipmentDocumentProviderRegistry;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentAdapter;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentButtonPolicy;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentProvider;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function dpd_documents_assert( bool $condition, string $message ): void { if ( ! $condition ) { throw new RuntimeException( $message ); } }
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_dpd_documents_options'][ $key ] ?? $default; }
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_dpd_documents_options'][ $key ] = $value; return true; }
+function __( string $text, string $domain = '' ): string { unset( $domain ); return $text; }
+function add_query_arg( array $args, string $url ): string { return $url . '?' . http_build_query( $args ); }
+function admin_url( string $path = '' ): string { return 'https://example.test/wp-admin/' . ltrim( $path, '/' ); }
+function wp_create_nonce( string $action ): string { return 'nonce-' . sha1( $action ); }
 function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? ''; }
 function sanitize_file_name( mixed $name ): string { return preg_replace( '/[^A-Za-z0-9._\-]/', '-', (string) $name ) ?? ''; }
 function wp_generate_uuid4(): string { static $i = 0; $i++; return '00000000-0000-4000-8000-' . str_pad( (string) $i, 12, '0', STR_PAD_LEFT ); }
 function get_temp_dir(): string { return sys_get_temp_dir() . DIRECTORY_SEPARATOR; }
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {}
+}
 
 final class DpdDocumentsFakeSoap implements DpdSoapClientInterface {
 	/** @var array<int,array<string,mixed>> */
@@ -81,15 +96,40 @@ $adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( dpd_documents_
 $payload_1401 = $adapter->status_payload( new stdClass(), dpd_documents_shipment() );
 dpd_documents_assert( ! empty( $payload_1401['can_cancel'] ) && empty( $payload_1401['can_remove_from_order'] ) && ! empty( $payload_1401['can_download_dpd_documents'] ), 'Initial DPD payload for 1401 must show cancel/download and hide remove.' );
 $payload_1301 = $adapter->status_payload( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1301' ) ) );
-dpd_documents_assert( empty( $payload_1301['can_cancel'] ) && ! empty( $payload_1301['can_remove_from_order'] ) && empty( $payload_1301['can_download_dpd_documents'] ), 'Initial DPD payload for 1301 must show remove and hide cancel/download.' );
+dpd_documents_assert( empty( $payload_1301['can_cancel'] ) && ! empty( $payload_1301['can_remove_from_order'] ) && ! empty( $payload_1301['can_download_dpd_documents'] ), 'Initial DPD payload with DPD order number must show download even when the latest event is not 1401.' );
 $provider = new DpdShipmentDocumentProvider( dpd_documents_service( new DpdDocumentsFakeSoap( array() ) ) );
 $provider_actions = $provider->actions( new stdClass(), dpd_documents_shipment() );
-dpd_documents_assert( isset( $provider_actions[0] ) && 'download_documents' === $provider_actions[0]->key && 'Скачать документы' === $provider_actions[0]->label && $provider_actions[0]->visible, 'Provider action must be visible for DPD 1401 with order number.' );
-dpd_documents_assert( array() === $provider->actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1001' ) ) ), 'Provider action must be hidden for DPD 1001.' );
-dpd_documents_assert( array() === $provider->actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1501' ) ) ), 'Provider action must be hidden for DPD 1501.' );
-foreach ( array( 'delivered', 'cancelled', 'unknown', '2201', '' ) as $code ) {
-	dpd_documents_assert( array() === $provider->actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => $code ) ) ), 'Provider action must be hidden for non-1401 status ' . $code . '.' );
+dpd_documents_assert( isset( $provider_actions[0] ) && 'download_documents' === $provider_actions[0]->key && 'Скачать документы DPD' === $provider_actions[0]->label && $provider_actions[0]->visible, 'Provider action must expose one DPD documents ZIP action when a DPD order number exists.' );
+foreach ( array( '1001', '1301', '1501', '2201', '' ) as $code ) {
+	$actions = $provider->actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => $code ) ) );
+	dpd_documents_assert( 1 === count( $actions ) && 'download_documents' === $actions[0]->key, 'Provider action must not depend on DPD event status ' . $code . ' when DPD order number exists.' );
 }
+dpd_documents_assert( array() === $provider->actions( new stdClass(), dpd_documents_shipment( array( 'dpd_order_number' => '' ) ) ), 'Provider action must be hidden when DPD order number is missing.' );
+
+$payload_order = new DpdDocumentsFakeOrder( 88, dpd_documents_shipment( array( 'dpd_event_code' => '', 'dpd_event_marker' => '' ) ) );
+$reflection = new ReflectionClass( DeliveryServiceRepository::class );
+$delivery_services = $reflection->newInstanceWithoutConstructor();
+$status_updates = new ShipmentStatusUpdateService(
+	new OrderShipmentRepository(),
+	( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor(),
+	( new ReflectionClass( RussianPostTrackingStatusMapper::class ) )->newInstanceWithoutConstructor()
+);
+$document_registry = new ShipmentDocumentProviderRegistry( array( $provider ) );
+$payload_builder = new ShipmentAdminCarrierUiPayloadBuilder(
+	new OrderShipmentRepository(),
+	$delivery_services,
+	$status_updates,
+	null,
+	null,
+	new CarrierShipmentAdapterRegistry( array( $adapter ) ),
+	null,
+	$document_registry,
+	new ShipmentDocumentDownloadService( new OrderShipmentRepository(), $document_registry )
+);
+$ui_payload = $payload_builder->carrier_ui_payload( $payload_order, DpdSettings::CARRIER_KEY );
+dpd_documents_assert( isset( $ui_payload['document_actions'][0], $ui_payload['status']['document_actions'][0] ), 'DPD AJAX payload must expose document_actions both at top level and inside status.' );
+dpd_documents_assert( 'download_documents' === (string) $ui_payload['document_actions'][0]['key'] && 'Скачать документы DPD' === (string) $ui_payload['document_actions'][0]['label'], 'DPD AJAX payload must expose the ZIP action key and label after create.' );
+dpd_documents_assert( str_contains( (string) $ui_payload['document_actions'][0]['download_url'], 'action=wdc_download_shipment_document' ) && str_contains( (string) $ui_payload['document_actions'][0]['download_url'], 'action_key=download_documents' ), 'DPD AJAX payload must use the protected generic shipment document download URL.' );
 
 $soap = new DpdDocumentsFakeSoap( array( array( 'file' => dpd_documents_pdf( 'invoice' ) ), array( 'file' => base64_encode( dpd_documents_pdf( 'label' ) ), 'order' => array( 'orderNum' => '05120002MOW', 'status' => 'OrderPending' ) ) ) );
 $order = new DpdDocumentsFakeOrder( 77, dpd_documents_shipment() );
@@ -131,9 +171,12 @@ $not_pdf = dpd_documents_service( new DpdDocumentsFakeSoap( array( array( 'file'
 dpd_documents_assert( empty( $not_pdf['success'] ) && str_contains( (string) $not_pdf['message'], 'не PDF-файл' ), 'Non-PDF response must be an error.' );
 $no_number = dpd_documents_service( new DpdDocumentsFakeSoap( array() ) )->create_zip_for_order( new DpdDocumentsFakeOrder( 83, dpd_documents_shipment( array( 'dpd_order_number' => '' ) ) ) );
 dpd_documents_assert( empty( $no_number['success'] ) && str_contains( (string) $no_number['message'], 'номер заказа DPD' ), 'Missing DPD order number must be an error.' );
-$bad_status = dpd_documents_service( new DpdDocumentsFakeSoap( array() ) )->create_zip_for_order( new DpdDocumentsFakeOrder( 84, dpd_documents_shipment( array( 'dpd_event_code' => '1501' ) ) ) );
-dpd_documents_assert( empty( $bad_status['success'] ) && str_contains( (string) $bad_status['message'], '1401' ), 'Non-1401 status must deny document access.' );
+$not_1401 = dpd_documents_service( new DpdDocumentsFakeSoap( array( array( 'file' => dpd_documents_pdf( 'invoice' ) ), array( 'file' => dpd_documents_pdf( 'label' ) ) ) ) )->create_zip_for_order( new DpdDocumentsFakeOrder( 84, dpd_documents_shipment( array( 'dpd_event_code' => '' ) ) ) );
+dpd_documents_assert( ! empty( $not_1401['success'] ) && is_file( (string) $not_1401['path'] ), 'DPD ZIP download must not require event 1401 once DPD order number is saved.' );
+dpd_documents_service( new DpdDocumentsFakeSoap( array() ) )->delete_temp_file( (string) $not_1401['path'] );
 dpd_documents_assert( str_contains( wdc_shipment_admin_js_bundle_source(), 'requestDpdDocumentsDownload' ), 'Admin JS must include DPD document ZIP download flow.' );
+$shipment_status_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments/shipment-status.js' );
+dpd_documents_assert( str_contains( $shipment_status_source, "document.createElement('a')" ) && str_contains( $shipment_status_source, 'updateDocumentActions' ), 'Generic documentActions JS must be able to materialize a missing DPD ZIP link after AJAX create.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 dpd_documents_assert( str_contains( $metabox_source, 'ShipmentDocumentDownloadService' ) && ! str_contains( $metabox_source, 'ACTION_DPD_DOCUMENTS_ZIP' ) && ! str_contains( $metabox_source, 'admin_post_dpd_documents_zip' ), 'Metabox must expose DPD documents through the common shipment document endpoint.' );
 dpd_documents_assert( str_contains( $metabox_source, 'status_payload_for_carrier' ) && str_contains( $metabox_source, 'button_policy()->resolve' ) && str_contains( $metabox_source, 'render_pickup_fields' ), 'Initial metabox render must use carrier status payload and modal extensions for DPD button/form state.' );

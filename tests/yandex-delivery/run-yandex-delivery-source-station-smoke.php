@@ -22,6 +22,26 @@ function update_option( string $option, mixed $value, bool $autoload = false ): 
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_key( mixed $value ): string { return strtolower( preg_replace( '/[^a-z0-9_\-]/', '', (string) $value ) ?? '' ); }
+function esc_attr( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
+function esc_html( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
+function esc_html__( string $text, string $domain = 'default' ): string { unset( $domain ); return $text; }
+function __( string $text, string $domain = 'default' ): string { unset( $domain ); return $text; }
+function current_user_can( string $capability ): bool { unset( $capability ); return true; }
+function check_ajax_referer( string $action, mixed $query_arg = false, bool $stop = true ): bool { unset( $action, $query_arg, $stop ); return true; }
+
+final class YandexSourceAjaxResponse extends RuntimeException {
+	public function __construct(
+		public bool $success,
+		public array $payload,
+		public int $status_code
+	) {
+		parent::__construct( 'Captured AJAX response.' );
+	}
+}
+
+function wp_send_json_success( mixed $data = null, ?int $status_code = null, int $flags = 0 ): void { unset( $flags ); throw new YandexSourceAjaxResponse( true, is_array( $data ) ? $data : array(), $status_code ?? 200 ); }
+function wp_send_json_error( mixed $data = null, ?int $status_code = null, int $flags = 0 ): void { unset( $flags ); throw new YandexSourceAjaxResponse( false, is_array( $data ) ? $data : array(), $status_code ?? 500 ); }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -50,6 +70,8 @@ use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController;
+use WallsShop\WDC\Shipments\YandexDelivery\YandexShipmentModalExtension;
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
@@ -64,7 +86,7 @@ $GLOBALS['wpdb']->yandex_location_mapping_v2 = array(
 	array( 'location_id' => 20, 'yandex_geo_id' => 213, 'status' => 'mapped', 'is_primary' => 1, 'confidence' => 99.0 ),
 );
 $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2 = array(
-	array( 'platform_station_id' => 'NSK-1', 'name' => 'ПВЗ Березовая', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Березовая 1', 'yandex_geo_id' => 65, 'latitude' => 55.030199, 'longitude' => 82.92043, 'available_for_dropoff' => 1, 'active' => 1 ),
+	array( 'platform_station_id' => 'NSK-1', 'name' => 'ПВЗ Березовая', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Березовая 1', 'yandex_geo_id' => 65, 'latitude' => 55.030199, 'longitude' => 82.92043, 'schedule_text' => 'Пн-Вс 10-22', 'available_for_dropoff' => 1, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-4', 'name' => 'ПВЗ Станционная', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Станционная 4', 'yandex_geo_id' => 65, 'latitude' => 55.020199, 'longitude' => 82.93043, 'available_for_dropoff' => 1, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-5', 'name' => 'ПВЗ Фрунзе', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Фрунзе 5', 'yandex_geo_id' => 66, 'latitude' => 55.040199, 'longitude' => 82.94043, 'available_for_dropoff' => 1, 'active' => 1 ),
 	array( 'platform_station_id' => 'NSK-FAR', 'name' => 'ПВЗ Дальний', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Дальний 99', 'yandex_geo_id' => 65, 'latitude' => 55.300000, 'longitude' => 83.300000, 'available_for_dropoff' => 1, 'active' => 1 ),
@@ -120,6 +142,59 @@ yandex_source_assert( is_array( $inactive ) && empty( $inactive['active'] ) && !
 $not_dropoff = $repository->find( 'NSK-2' );
 yandex_source_assert( is_array( $not_dropoff ) && ! empty( $not_dropoff['active'] ) && empty( $not_dropoff['available_for_dropoff'] ), 'Saved available_for_dropoff=0 PVZ must be detectable as problematic.' );
 
+$modal_extension = new YandexShipmentModalExtension( $mapping );
+$modal_draft = array(
+	'request' => array(
+		'meta' => array(
+			'yandex_source_platform_station_id' => 'NSK-1',
+			'yandex_source_location_id' => 10,
+			'yandex_ready_from' => '2026-06-29T12:00:00+07:00',
+			'yandex_ready_to' => '2026-06-29T18:00:00+07:00',
+		),
+		'pickup_point' => array(),
+		'recipient_address' => array(),
+	),
+);
+$modal_context = $modal_extension->modal_context( (object) array( 'id' => 777 ), $modal_draft );
+$source_dropoff = $modal_context['source_dropoff'] ?? array();
+yandex_source_assert( is_array( $source_dropoff ), 'Yandex modal payload must include source_dropoff pickup context.' );
+yandex_source_assert( 'NSK-1' === (string) ( $modal_context['source_platform_station_id'] ?? '' ), 'Yandex modal payload must keep the current source platform_station_id as technical identity.' );
+yandex_source_assert( 'ПВЗ Березовая' === (string) ( $source_dropoff['title'] ?? '' ), 'Yandex modal payload must restore the current source PVZ title from the local V2 repository.' );
+yandex_source_assert( 'Новосибирск, Березовая 1' === (string) ( $source_dropoff['address'] ?? '' ), 'Yandex modal payload must restore the current source PVZ address from full_address, not expose only platform_station_id.' );
+yandex_source_assert( 'Пн-Вс 10-22' === (string) ( $source_dropoff['work_time'] ?? '' ), 'Yandex modal payload must restore schedule_text as work_time.' );
+yandex_source_assert( '55.030199' === (string) ( $source_dropoff['lat'] ?? '' ) && '82.92043' === (string) ( $source_dropoff['lng'] ?? '' ), 'Yandex modal payload must expose source PVZ coordinates for map context.' );
+ob_start();
+$modal_extension->render_fields( (object) array( 'id' => 777 ), $modal_draft, $modal_context );
+$modal_html = (string) ob_get_clean();
+yandex_source_assert( str_contains( $modal_html, 'data-wdc-yandex-source-dropoff-address>Новосибирск, Березовая 1<' ), 'Yandex modal renderer must show the source PVZ address instead of falling back to platform_station_id.' );
+yandex_source_assert( str_contains( $modal_html, 'data-wdc-yandex-source-dropoff-address-input' ) && str_contains( $modal_html, 'value="Новосибирск, Березовая 1"' ), 'Yandex modal renderer must put the source PVZ address into pickup context hidden fields.' );
+yandex_source_assert( str_contains( $modal_html, 'data-wdc-yandex-source-lat' ) && str_contains( $modal_html, 'value="55.030199"' ) && str_contains( $modal_html, 'data-wdc-yandex-source-lng' ) && str_contains( $modal_html, 'value="82.92043"' ), 'Yandex modal renderer must pass source PVZ coordinates to the shared map picker.' );
+
+$_POST = array(
+	'carrier_key' => YandexDeliverySettings::CARRIER_KEY,
+	'purpose' => 'source_dropoff',
+	'mode' => 'location',
+	'limit' => 2000,
+	'source_location_id' => 10,
+	'source_platform_station_id' => 'NSK-1',
+);
+try {
+	( new ShipmentAddressAjaxController() )->handle_search_pickup_points();
+	yandex_source_assert( false, 'Yandex source dropoff AJAX search must return a JSON response.' );
+} catch ( YandexSourceAjaxResponse $response ) {
+	yandex_source_assert( true === $response->success && 200 === $response->status_code, 'Yandex source dropoff AJAX search must succeed for a valid source context.' );
+	$ajax_points = is_array( $response->payload['points'] ?? null ) ? $response->payload['points'] : array();
+	$ajax_point_ids = array_column( $ajax_points, 'platform_station_id' );
+	sort( $ajax_point_ids, SORT_STRING );
+	yandex_source_assert( array( 'NSK-1', 'NSK-4', 'NSK-5', 'NSK-FAR' ) === $ajax_point_ids, 'Yandex source dropoff AJAX search must return all map-ready dropoff points for the selected city geo ids.' );
+	foreach ( $ajax_points as $ajax_point ) {
+		yandex_source_assert( is_float( $ajax_point['lat'] ?? null ) && is_float( $ajax_point['lng'] ?? null ), 'Yandex source dropoff AJAX points must include numeric coordinates for map markers.' );
+		yandex_source_assert( '' !== (string) ( $ajax_point['address'] ?? '' ), 'Yandex source dropoff AJAX points must include display addresses.' );
+	}
+	yandex_source_assert( is_array( $response->payload['context']['center'] ?? null ) && is_float( $response->payload['context']['center']['lat'] ?? null ) && is_float( $response->payload['context']['center']['lng'] ?? null ), 'Yandex source dropoff AJAX response must provide map center coordinates.' );
+}
+$_POST = array();
+
 $GLOBALS['wdc_options'] = array();
 $settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() );
 yandex_source_assert( '' === $settings->source_platform_station_id(), 'Yandex source platform station must be empty by default so checkout keeps current behavior.' );
@@ -170,6 +245,7 @@ yandex_source_assert( str_contains( $draft_source, "'yandex_source_platform_stat
 
 $js_source = wdc_shipment_admin_js_bundle_source();
 yandex_source_assert( str_contains( $js_source, 'function yandexSourceDropoffContext' ) && str_contains( $js_source, 'purpose: \'source_dropoff\'' ) && str_contains( $js_source, "data.append('purpose', context.purpose || '')" ) && str_contains( $js_source, "data.append('source_location_id'" ) && str_contains( $js_source, "data.append('source_platform_station_id'" ), 'Shipment admin JS must route Yandex source map searches through the shared picker with purpose=source_dropoff and source context.' );
+yandex_source_assert( str_contains( $js_source, 'function pickupContext(form, contextOverride)' ) && str_contains( $js_source, "if (contextOverride && typeof contextOverride === 'object') return contextOverride;" ) && str_contains( $js_source, 'const context = yandexSourceDropoffContext(form);' ) && str_contains( $js_source, 'context: context' ), 'Yandex source picker must pass an explicit context override that the shared picker can resolve without ReferenceError.' );
 yandex_source_assert( str_contains( $js_source, 'function pickupAddressSearchContext' ) && str_contains( $js_source, '!isYandexSourceDropoffContext(context)' ) && str_contains( $js_source, 'result.location_id = context.locationId || \'\'' ) && str_contains( $js_source, 'result.include_points = false' ) && str_contains( $js_source, 'window.WDCPickupApi.addressSearch(value, pickupAddressSearchContext(context), controller.signal)' ), 'Yandex source address search must use an unscoped all-Russia context without source location_id while other pickers keep scoped address search.' );
 yandex_source_assert( str_contains( $js_source, 'loadYandexSourceNearby' ) && str_contains( $js_source, "[10, 25, 50]" ) && str_contains( $js_source, "'nearby'" ) && str_contains( $js_source, "radiusKm: radius" ) && ! str_contains( $js_source, 'source_dropoff_global' ), 'Yandex source address search must reload nearby points with 10/25/50 km radius expansion and no global fallback.' );
 yandex_source_assert( str_contains( $js_source, 'provider.renderMarkers(points, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: searchMarker })' ) && str_contains( $js_source, 'provider.setCenter(center.lat, center.lng, 14)' ), 'Yandex source picker must preserve the search marker while replacing selectable dropoff markers and centering on scoped coordinates.' );

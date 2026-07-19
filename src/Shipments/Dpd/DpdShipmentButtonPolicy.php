@@ -21,6 +21,9 @@ final class DpdShipmentButtonPolicy {
 		if ( '' === $dpd_order ) {
 			return array( 'create' => false, 'manual_attach' => false, 'update' => ! $terminal_error, 'cancel' => false, 'remove' => true );
 		}
+		if ( '' === $event && 'ok' === $registration_state ) {
+			return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => true, 'remove' => false );
+		}
 		$can_cancel = in_array( $event, self::CANCELLABLE, true );
 		return array( 'create' => false, 'manual_attach' => false, 'update' => true, 'cancel' => $can_cancel, 'remove' => ! $can_cancel );
 	}

@@ -37,10 +37,9 @@
     if (tabName === 'places') updateShipmentPlaceOptions(form);
   }
 
-  function updateShipmentPlaceOptions(form) {
-    if (!form) return;
-    const places = Array.from(form.querySelectorAll('[data-wdc-place]'));
-    const options = places.map((row, index) => {
+  function shipmentPlaceOptions(form) {
+    if (!form) return [];
+    return Array.from(form.querySelectorAll('[data-wdc-place]')).map((row, index) => {
       const number = String(index + 1);
       const weight = row.querySelector('input[name*="[weight_g]"]');
       const length = row.querySelector('input[name*="[length_cm]"]');
@@ -55,6 +54,12 @@
         height: parseDecimalValue(height && height.value ? height.value : '0')
       };
     });
+  }
+
+  function updateShipmentPlaceOptions(form) {
+    if (!form) return;
+    const places = Array.from(form.querySelectorAll('[data-wdc-place]'));
+    const options = shipmentPlaceOptions(form);
     places.forEach((row) => {
       const hint = row.querySelector('[data-wdc-weight-hint]');
       if (hint) hint.hidden = places.length !== 1;
@@ -72,6 +77,10 @@
     });
     updateShipmentSplitAvailability(form, options.length);
     updateShipmentItemsSummary(form, options);
+  }
+
+  function refreshShipmentItemsSummary(form) {
+    updateShipmentItemsSummary(form, shipmentPlaceOptions(form));
   }
 
   function updateShipmentItemsSummary(form, places) {

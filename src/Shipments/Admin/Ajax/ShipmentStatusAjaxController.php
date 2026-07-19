@@ -78,6 +78,7 @@ final class ShipmentStatusAjaxController {
 					'message' => (string) ( $result['message'] ?? __( 'Статус отправления обновлен.', 'walls-delivery-calc' ) ),
 					'pending' => ! empty( $result['pending'] ),
 					'retryable' => ! empty( $result['retryable'] ),
+					'cancelled_and_removed' => ! empty( $result['cancelled_and_removed'] ),
 					'carrier_status_value' => is_scalar( $result['status'] ?? null ) ? (string) $result['status'] : '',
 				)
 			)

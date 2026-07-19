@@ -144,12 +144,15 @@ final class YandexShipmentModalExtension implements CarrierShipmentModalExtensio
 			return array_merge( $empty, array( 'title' => $platform_station_id, 'invalid' => true ) );
 		}
 
+		$title = trim( (string) ( $row['name'] ?? $row['title'] ?? '' ) );
+		$address = trim( (string) ( $row['full_address'] ?? $row['address'] ?? '' ) );
+
 		return array(
-			'title' => (string) ( $row['name'] ?? $row['title'] ?? $platform_station_id ),
-			'address' => (string) ( $row['address'] ?? '' ),
-			'work_time' => (string) ( $row['work_time'] ?? $row['schedule'] ?? '' ),
-			'lat' => (string) ( $row['lat'] ?? $row['latitude'] ?? '' ),
-			'lng' => (string) ( $row['lng'] ?? $row['longitude'] ?? '' ),
+			'title' => '' !== $title ? $title : ( '' !== $address ? $address : $platform_station_id ),
+			'address' => $address,
+			'work_time' => (string) ( $row['schedule_text'] ?? $row['work_time'] ?? $row['schedule'] ?? '' ),
+			'lat' => (string) ( $row['latitude'] ?? $row['lat'] ?? '' ),
+			'lng' => (string) ( $row['longitude'] ?? $row['lng'] ?? '' ),
 			'invalid' => false,
 		);
 	}

@@ -207,6 +207,10 @@
     return String(value || '') === 'cancellation';
   }
 
+  function hasCancellationPollingToast(box) {
+    return !!(box && cancellationPollingToasts.has(box));
+  }
+
   function isYandexShipmentKey(value) {
     return String(value || '').trim() === 'yandex_delivery';
   }
@@ -245,6 +249,42 @@
   function cancellationPollingExhaustedMessage(attempt, maxAttempts) {
     const total = Math.max(1, parseInt(maxAttempts, 10) || parseInt(attempt, 10) || 14);
     return 'Статус отмены пока не получен. Проведено: ' + total + '/' + total + ' проверок отмены. Повторите обновление статуса позднее.';
+  }
+
+  function isCancellationPollingPending(context, statusPayload) {
+    const payloadData = context && context.payload && context.payload.data && typeof context.payload.data === 'object'
+      ? context.payload.data
+      : {};
+    const payloadStatus = payloadData.status && typeof payloadData.status === 'object'
+      ? payloadData.status
+      : {};
+    const lifecycle = statusPayload && statusPayload.lifecycle && typeof statusPayload.lifecycle === 'object'
+      ? statusPayload.lifecycle
+      : (payloadStatus.lifecycle && typeof payloadStatus.lifecycle === 'object' ? payloadStatus.lifecycle : (payloadData.lifecycle && typeof payloadData.lifecycle === 'object' ? payloadData.lifecycle : {}));
+    return !!(
+      context && context.pending
+      || (lifecycle.poll_required === true || lifecycle.pollRequired === true)
+      || statusPayload && (statusPayload.cancellation_pending || statusPayload.polling_continue)
+      || payloadStatus && (payloadStatus.cancellation_pending || payloadStatus.polling_continue)
+      || payloadData && payloadData.auto_poll && isCancellationPollingPurpose(payloadData.purpose || '')
+    );
+  }
+
+  function isCancellationConfirmed(context, statusPayload) {
+    const payloadData = context && context.payload && context.payload.data && typeof context.payload.data === 'object'
+      ? context.payload.data
+      : {};
+    const rawStatus = String(statusPayload && statusPayload.yandex_status || '').trim().toUpperCase();
+    return payloadData.cancelled_and_removed === true || rawStatus === 'CANCELLED';
+  }
+
+  function isCancellationTerminalWithoutShipment(statusPayload) {
+    return !!(
+      statusPayload
+      && statusPayload.has_shipment === false
+      && statusPayload.polling_continue !== true
+      && statusPayload.cancellation_pending !== true
+    );
   }
 
   function initCancellationPollingToast(box, token, maxAttempts) {
@@ -287,6 +327,32 @@
       }, 6000);
       cancellationPollingToasts.set(box, state);
     }
+  }
+
+  function finishCancellationPollingToast(box, message, type) {
+    if (!box) return;
+    const state = cancellationPollingToasts.get(box);
+    const toast = state && state.element
+      ? state.element
+      : (box.querySelector ? box.querySelector('[data-wdc-shipment-toast]') : null);
+    if (!toast) {
+      showShipmentToast(box, message, type || 'success', { append: true });
+      cancellationPollingToasts.delete(box);
+      return;
+    }
+    if (state && state.timer) {
+      window.clearTimeout(state.timer);
+    }
+    toast.textContent = message;
+    toast.dataset.status = type || 'success';
+    toast.className = toast.className.replace(/\s*wdc-shipment-toast--(success|warning|error|info)/g, '');
+    toast.classList.add('wdc-shipment-toast--' + (type || 'success'));
+    toast.hidden = false;
+    const timer = window.setTimeout(function () {
+      toast.hidden = true;
+      cancellationPollingToasts.delete(box);
+    }, 10000);
+    cancellationPollingToasts.set(box, { element: toast, token: null, timer: timer });
   }
 
   function clearCancellationPollingToast(box) {
@@ -392,8 +458,8 @@
       const settings = context && context.settings ? context.settings : {};
 
       if (isCancellationPollingPurpose(settings.purpose || settings.mode)) {
-        const rawStatus = String(statusPayload.yandex_status || statusPayload.carrier_status_title || '').trim();
-        if (context.pending) {
+        const rawStatus = String(statusPayload.yandex_status || '').trim().toUpperCase();
+        if (isCancellationPollingPending(context, statusPayload)) {
           updateCancellationPollingToast(
             context.box,
             context.token,
@@ -401,6 +467,14 @@
             'warning',
             true
           );
+          return true;
+        }
+        if (isCancellationConfirmed(context, statusPayload)) {
+          finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
+          return true;
+        }
+        if (isCancellationTerminalWithoutShipment(statusPayload)) {
+          finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
           return true;
         }
         if (rawStatus && rawStatus !== 'CANCELLED') {
@@ -413,7 +487,13 @@
           );
           return true;
         }
-        updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
+        updateCancellationPollingToast(
+          context.box,
+          context.token,
+          cancellationPollingProgressMessage(context.attempt, context.maxAttempts),
+          'warning',
+          true
+        );
         return true;
       }
 
@@ -450,10 +530,11 @@
       return true;
     },
     cancelledAndRemoved: function (context) {
-      if (!isYandexPollingContext(context)) return false;
+      const hasToast = hasCancellationPollingToast(context && context.box);
+      if (!isYandexPollingContext(context) && !hasToast) return false;
       const settings = context && context.settings ? context.settings : {};
-      if (!isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
-      updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
+      if (!hasToast && !isCancellationPollingPurpose(settings.purpose || settings.mode)) return false;
+      finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
       return true;
     },
     handlePollingStop: function (context) {

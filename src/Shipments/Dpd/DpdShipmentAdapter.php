@@ -330,7 +330,7 @@ final class DpdShipmentAdapter implements CarrierShipmentAdapterInterface, Carri
 			$sanitized = array();
 			foreach ( $value as $key => $item ) {
 				$key_text = strtolower( (string) $key );
-				if ( in_array( $key_text, array( 'clientkey', 'client_key', 'auth', 'phone', 'contactphone', 'contactemail', 'email' ), true ) ) {
+				if ( in_array( $key_text, array( 'clientkey', 'client_key', 'auth', 'name', 'contactfio', 'contact_fio', 'phone', 'contactphone', 'contactemail', 'email', 'address', 'addressstring', 'street', 'house', 'flat' ), true ) ) {
 					$sanitized[ $key ] = '[redacted]';
 					continue;
 				}
