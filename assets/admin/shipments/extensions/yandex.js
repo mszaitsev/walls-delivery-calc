@@ -266,6 +266,14 @@
     );
   }
 
+  function isCancellationConfirmed(context, statusPayload) {
+    const payloadData = context && context.payload && context.payload.data && typeof context.payload.data === 'object'
+      ? context.payload.data
+      : {};
+    const rawStatus = String(statusPayload && statusPayload.yandex_status || '').trim().toUpperCase();
+    return payloadData.cancelled_and_removed === true || rawStatus === 'CANCELLED';
+  }
+
   function initCancellationPollingToast(box, token, maxAttempts) {
     if (!box || !token) return;
     const existing = cancellationPollingToasts.get(box);
@@ -411,7 +419,7 @@
       const settings = context && context.settings ? context.settings : {};
 
       if (isCancellationPollingPurpose(settings.purpose || settings.mode)) {
-        const rawStatus = String(statusPayload.yandex_status || '').trim();
+        const rawStatus = String(statusPayload.yandex_status || '').trim().toUpperCase();
         if (isCancellationPollingPending(context, statusPayload)) {
           updateCancellationPollingToast(
             context.box,
@@ -420,6 +428,10 @@
             'warning',
             true
           );
+          return true;
+        }
+        if (isCancellationConfirmed(context, statusPayload)) {
+          updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
           return true;
         }
         if (rawStatus && rawStatus !== 'CANCELLED') {
@@ -432,7 +444,13 @@
           );
           return true;
         }
-        updateCancellationPollingToast(context.box, context.token, 'Отправление Яндекс отменено.', 'success', false);
+        updateCancellationPollingToast(
+          context.box,
+          context.token,
+          cancellationPollingProgressMessage(context.attempt, context.maxAttempts),
+          'warning',
+          true
+        );
         return true;
       }
 

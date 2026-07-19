@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.10
+Version: 0.124.11
 
 Stable subsystems:
 
@@ -26,6 +26,7 @@ Recent fixes:
 - Yandex Delivery shipment modal restores source drop-off PVZ presentation from the canonical V2 pickup context, including `full_address`, `schedule_text`, and coordinates, so the modal address and drop-off map survive the shipment framework flow.
 - Shipment pickup picker defines its local `pickupContext()` resolver again, so Yandex source drop-off picker can open, run initial map search, and perform address search without a `ReferenceError`.
 - Yandex cancellation polling toast treats `cancellation_started` lifecycle/poll flags as pending and no longer interprets the intermediate `carrier_status_title` as terminal failure.
+- Yandex cancellation polling success toast now requires explicit cancellation confirmation via `cancelled_and_removed` or `yandex_status=CANCELLED`; empty `yandex_status` stays non-success.
 
 Canonical docs:
 
