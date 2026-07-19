@@ -23,10 +23,10 @@ function shipment_allocation_expect_exception( callable $callback, string $messa
 		shipment_allocation_assert( str_contains( $exception->getMessage(), $message_part ), $message );
 	}
 }
-function shipment_allocation_row( string $item_key, int $place_number, string $name, string $sku, int $amount, mixed $unit_kopecks, int $weight, mixed $assessed_kopecks = null ): array {
-	return array(
+function shipment_allocation_row( string $item_key, int $place_number, string $name, string $sku, int $amount, mixed $unit_kopecks, int $weight, mixed $assessed_kopecks = null, ?int $ordered_quantity = null, string $split_parent = '' ): array {
+	$row = array(
 		'item_key' => $item_key,
-		'ordered_quantity' => $amount,
+		'ordered_quantity' => $ordered_quantity ?? $amount,
 		'place_number' => $place_number,
 		'name' => $name,
 		'sku' => $sku,
@@ -34,6 +34,49 @@ function shipment_allocation_row( string $item_key, int $place_number, string $n
 		'unit_price_kopecks' => $unit_kopecks,
 		'assessed_unit_price_kopecks' => $assessed_kopecks ?? $unit_kopecks,
 		'weight' => $weight,
+	);
+	if ( '' !== $split_parent ) {
+		$row['split_parent'] = $split_parent;
+	}
+
+	return $row;
+}
+/**
+ * @return array<int,array{quantity:int,weight:int,cost_kopecks:int,place_weight:int}>
+ */
+function shipment_allocation_totals( ShipmentAllocation $allocation ): array {
+	$totals = array();
+	foreach ( $allocation->places as $place ) {
+		$quantity = 0;
+		$weight = 0;
+		$cost = 0;
+		foreach ( $place->items as $item ) {
+			$quantity += $item->quantity;
+			$weight += $item->quantity * $item->weight_g;
+			$cost += $item->quantity * $item->unit_price_kopecks;
+		}
+		$totals[ $place->place_number ] = array(
+			'quantity' => $quantity,
+			'weight' => $weight,
+			'cost_kopecks' => $cost,
+			'place_weight' => $place->weight_g,
+		);
+	}
+
+	return $totals;
+}
+/**
+ * @param array<int,array{quantity:int,weight:int,cost_kopecks:int,place_weight:int}> $totals
+ */
+function shipment_allocation_assert_totals( array $totals, int $place_number, int $quantity, int $weight, int $cost_kopecks, int $place_weight, string $message ): void {
+	$row = $totals[ $place_number ] ?? null;
+	shipment_allocation_assert(
+		is_array( $row )
+		&& $quantity === $row['quantity']
+		&& $weight === $row['weight']
+		&& $cost_kopecks === $row['cost_kopecks']
+		&& $place_weight === $row['place_weight'],
+		$message
 	);
 }
 
@@ -52,6 +95,42 @@ shipment_allocation_assert( 'order-item-a' === $allocation->places[0]->items[0]-
 shipment_allocation_assert( 1 === $allocation->places[0]->items[0]->quantity && 1 === $allocation->places[1]->items[0]->quantity, 'Split quantity must remain allocated independently in each place.' );
 shipment_allocation_assert( 10000 === $allocation->places[0]->items[0]->unit_price_kopecks, 'Canonical row unit price must be kept as kopecks.' );
 shipment_allocation_assert( 10000 === $allocation->places[0]->items[0]->assessed_unit_price_kopecks, 'Absent assessed value must explicitly fall back to unit price before allocation.' );
+
+$single_totals = shipment_allocation_totals( ( new ShipmentAllocationBuilder() )->build( array(
+	shipment_allocation_row( 'order-item-single', 1, 'Single item', 'SINGLE', 3, 69700, 550 ),
+), array( $places[0] ) ) );
+shipment_allocation_assert_totals( $single_totals, 1, 3, 1650, 209100, 1000, 'Single item in one place must count quantity, product weight, cost and place weight.' );
+
+$split_rows = array(
+	shipment_allocation_row( 'order-item-split', 1, 'Split item', 'SPLIT', 2, 69700, 550, null, 3 ),
+	shipment_allocation_row( 'order-item-split:split:2', 2, 'Split item', 'SPLIT', 1, 69700, 550, null, 3, 'order-item-split' ),
+);
+shipment_allocation_assert( 'order-item-split:split:2' === $split_rows[1]['item_key'] && 'order-item-split' === $split_rows[1]['split_parent'] && 1 === $split_rows[1]['amount'] && 2 === $split_rows[1]['place_number'] && 550 === $split_rows[1]['weight'] && 69700 === $split_rows[1]['unit_price_kopecks'], 'Split row fixture must contain independent item id, quantity, place, weight and price fields.' );
+$split_totals = shipment_allocation_totals( ( new ShipmentAllocationBuilder() )->build( $split_rows, $places ) );
+shipment_allocation_assert_totals( $split_totals, 1, 2, 1100, 139400, 1000, 'Split analytics must use the current row assigned to place 1, not the original order quantity.' );
+shipment_allocation_assert_totals( $split_totals, 2, 1, 550, 69700, 1200, 'Split analytics must include the current split row assigned to place 2.' );
+
+$multi_totals = shipment_allocation_totals( ( new ShipmentAllocationBuilder() )->build( array_merge( $split_rows, array(
+	shipment_allocation_row( 'order-item-bulk', 2, 'Bulk item', 'BULK', 4, 10000, 100 ),
+) ), $places ) );
+shipment_allocation_assert_totals( $multi_totals, 1, 2, 1100, 139400, 1000, 'Multiple-item analytics must keep unsplit and split rows separated by place.' );
+shipment_allocation_assert_totals( $multi_totals, 2, 5, 950, 109700, 1200, 'Multiple-item analytics must combine only rows currently assigned to place 2.' );
+
+$changed_place_rows = array(
+	shipment_allocation_row( 'order-item-split', 1, 'Split item', 'SPLIT', 2, 69700, 550, null, 3 ),
+	shipment_allocation_row( 'order-item-split:split:2', 1, 'Split item', 'SPLIT', 1, 69700, 550, null, 3, 'order-item-split' ),
+	shipment_allocation_row( 'order-item-bulk', 2, 'Bulk item', 'BULK', 4, 10000, 100 ),
+);
+$changed_totals = shipment_allocation_totals( ( new ShipmentAllocationBuilder() )->build( $changed_place_rows, $places ) );
+shipment_allocation_assert_totals( $changed_totals, 1, 3, 1650, 209100, 1000, 'Changing a split row place must immediately move its quantity, weight and cost to the new place.' );
+shipment_allocation_assert_totals( $changed_totals, 2, 4, 400, 40000, 1200, 'Changing a split row place must remove its quantity, weight and cost from the old place.' );
+
+$deleted_split_totals = shipment_allocation_totals( ( new ShipmentAllocationBuilder() )->build( array(
+	shipment_allocation_row( 'order-item-split', 1, 'Split item', 'SPLIT', 2, 69700, 550, null, 3 ),
+	shipment_allocation_row( 'order-item-bulk', 2, 'Bulk item', 'BULK', 4, 10000, 100 ),
+), $places ) );
+shipment_allocation_assert_totals( $deleted_split_totals, 1, 2, 1100, 139400, 1000, 'Deleting a split row must remove its quantity, weight and cost from analytics.' );
+shipment_allocation_assert_totals( $deleted_split_totals, 2, 4, 400, 40000, 1200, 'Deleting a split row must leave other place rows intact.' );
 
 $same_sku = ( new ShipmentAllocationBuilder() )->build( array(
 	shipment_allocation_row( 'order-item-1', 1, 'Item A 1', 'SAME-SKU', 1, 10000, 300 ),

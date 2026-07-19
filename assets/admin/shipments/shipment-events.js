@@ -413,6 +413,14 @@ function initializeShipmentAdmin() {
   });
 
   document.addEventListener('change', function (event) {
+    if (event.target.matches('[data-wdc-shipment-place-select]')) {
+      const allocationForm = findShipmentForm(event.target);
+      if (allocationForm) {
+        refreshShipmentItemsSummary(allocationForm);
+        schedulePreview(allocationForm);
+      }
+      return;
+    }
     if (dispatchShipmentCarrierHook('handleChange', event)) return;
     const form = findShipmentForm(event.target);
     if (!form) return;

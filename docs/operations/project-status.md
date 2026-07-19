@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.12
+Version: 0.124.13
 
 Stable subsystems:
 
@@ -28,6 +28,7 @@ Recent fixes:
 - Yandex cancellation polling toast treats `cancellation_started` lifecycle/poll flags as pending and no longer interprets the intermediate `carrier_status_title` as terminal failure.
 - Yandex cancellation polling success toast now requires explicit cancellation confirmation via `cancelled_and_removed` or `yandex_status=CANCELLED`; empty `yandex_status` stays non-success.
 - Yandex cancellation polling success now finalizes the existing progress toast by replacing it with a success message and auto-hiding it, so no persistent progress toast remains after cancellation.
+- Shipment place analytics now refresh directly from current `shipment_item_rows` when item place assignment changes, so split rows are counted in their selected cargo places immediately.
 
 Canonical docs:
 
