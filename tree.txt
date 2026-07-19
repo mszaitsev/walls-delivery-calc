@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000D1 A0AC:74BD
+Volume serial number is 000000D4 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -13,7 +13,6 @@ C:.
 |   |   |   .gitkeep
 |   |   |   calendar-admin.css
 |   |   |   calendar-admin.js
-|   |   |   checkout-simulation.css
 |   |   |   dpd-geography-import.js
 |   |   |   locations-admin.css
 |   |   |   order-delivery-recalculation.css
@@ -280,6 +279,7 @@ C:.
 |   |   |   |
 |   |   |   +---Admin
 |   |   |   |       RussianPostCountriesAdminPage.php
+|   |   |   |       RussianPostPickupDiagnosticsTab.php
 |   |   |   |
 |   |   |   +---Otpravka
 |   |   |   |       RussianPostOtpravkaApiClient.php
@@ -361,9 +361,6 @@ C:.
 |   |   |       DaDataTokenPool.php
 |   |   |       FallbackSuggestionClient.php
 |   |   |
-|   |   +---Admin
-|   |   |       CheckoutSimulationPage.php
-|   |   |
 |   |   +---Cache
 |   |   |       DeliveryQuoteCacheManager.php
 |   |   |       QuoteCache.php
@@ -412,7 +409,6 @@ C:.
 |   |       Autoloader.php
 |   |       bootstrap.php
 |   |       Container.php
-|   |       FeatureFlags.php
 |   |       Plugin.php
 |   |       PluginConstants.php
 |   |       PluginEnvironment.php
@@ -567,9 +563,6 @@ C:.
 |   |       PackagingWeightCalculator.php
 |   |
 |   +---Pickup
-|   |   +---Admin
-|   |   |       PickupAdminPage.php
-|   |   |
 |   |   +---Cdek
 |   |   |       CdekDeliveryPointService.php
 |   |   |

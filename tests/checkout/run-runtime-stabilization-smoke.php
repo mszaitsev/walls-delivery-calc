@@ -467,10 +467,8 @@ use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
-use WallsShop\WDC\Core\FeatureFlags;
 use WallsShop\WDC\Core\Plugin;
 use WallsShop\WDC\Core\PluginEnvironment;
-use WallsShop\WDC\Core\RequirementsChecker;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
@@ -538,16 +536,48 @@ runtime_smoke_assert( NewShippingMethod::class !== $settings_property->getDeclar
 runtime_smoke_assert( $settings_property->isPublic(), 'Inherited WC_Settings_API::$settings must remain public.' );
 
 $settings = new SettingsRepository();
-$flags    = new FeatureFlags();
-$gate     = new CheckoutFeatureGate( $flags, $settings );
+$gate     = new CheckoutFeatureGate( $settings );
 runtime_smoke_assert( ! $gate->enabled(), 'Feature gate must be false by default.' );
-$flags->set_new_shipping_method_enabled( true );
-runtime_smoke_assert( $gate->enabled(), 'Feature gate must honor FeatureFlags dev override.' );
-$flags->set_new_shipping_method_enabled( false );
+$settings->set( 'enable_new_checkout_shipping', false );
+runtime_smoke_assert( ! $gate->enabled(), 'Feature gate must be false when enable_new_checkout_shipping is disabled.' );
+$settings->set( 'enable_new_checkout_shipping', true );
+runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
+$settings->set( 'enable_new_checkout_shipping', false );
+$settings->set( 'show_checkout_debug_panel', true );
+runtime_smoke_assert( ! $gate->debug_panel_enabled(), 'Debug panel gate must require the checkout feature gate.' );
+$settings->set( 'enable_new_checkout_shipping', true );
+$settings->set( 'show_checkout_debug_panel', false );
+runtime_smoke_assert( ! $gate->debug_panel_enabled(), 'Debug panel gate must require show_checkout_debug_panel.' );
+$settings->set( 'show_checkout_debug_panel', true );
+runtime_smoke_assert( $gate->debug_panel_enabled(), 'Debug panel gate must require both checkout and debug settings.' );
+$settings->replace( array() );
 
 $plugin = new Plugin( runtime_smoke_environment() );
 $plugin->register();
 $container = $plugin->container();
+runtime_smoke_assert( $container->get( CheckoutFeatureGate::class ) instanceof CheckoutFeatureGate, 'Composition root must build CheckoutFeatureGate.' );
+runtime_smoke_assert( $container->get( AdminMenu::class ) instanceof AdminMenu, 'Composition root must build AdminMenu.' );
+$admin_menu = $container->get( AdminMenu::class );
+ob_start();
+$admin_menu->render_page();
+$overview_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $overview_html, 'Версия плагина' ), 'Overview page must render plugin version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия PHP' ), 'Overview page must render PHP version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия WooCommerce' ), 'Overview page must render WooCommerce version row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Статус HPOS' ), 'Overview page must render HPOS status row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Статус Action Scheduler' ), 'Overview page must render Action Scheduler status row.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Очистка кеша доставки' ), 'Overview page must render delivery cache cleanup section.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Очистить кеш тарифов доставки' ), 'Overview page must render delivery cache cleanup button.' );
+runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ), 'Overview page must render overview POST action field.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Флаги функций' ), 'Overview page must not render the legacy feature flags section.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Требования' ), 'Overview page must not render the requirements section.' );
+$legacy_class = 'Feature' . 'Flags';
+foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) ) as $src_file ) {
+	if ( ! $src_file instanceof SplFileInfo || 'php' !== $src_file->getExtension() ) {
+		continue;
+	}
+	runtime_smoke_assert( ! str_contains( (string) file_get_contents( $src_file->getPathname() ), $legacy_class ), 'Production code must not reference the legacy feature flag service.' );
+}
 
 NewShippingMethod::configure(
 	$container->get( CheckoutOrchestrator::class ),
@@ -722,7 +752,7 @@ foreach ( $src_iterator as $src_file ) {
 }
 
 $settings->set( 'enable_new_checkout_shipping', true );
-runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
+runtime_smoke_assert( $gate->enabled(), 'Feature gate must stay enabled through SettingsRepository.' );
 runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled through settings.' );
 $registrar->enqueue_assets();
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must not enqueue.' );
@@ -925,13 +955,15 @@ runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_aaa', $GLO
 runtime_smoke_assert( array_key_exists( '_transient_wdc_pickup_search_ccc', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_dadata_ddd', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_foreign_quote', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must leave pickup, DaData, and foreign transients untouched.' );
 runtime_smoke_assert( null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'DeliveryQuoteCacheManager must invalidate runtime quote memory namespace.' );
 
-$admin_menu = new AdminMenu( runtime_smoke_environment(), new FeatureFlags(), new RequirementsChecker( runtime_smoke_environment() ), $quote_cache_manager );
+$admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager );
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_POST = array();
 ob_start();
 $admin_menu->render_page();
 $overview_html = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ) && str_contains( $overview_html, 'clear_delivery_quote_cache' ) && str_contains( $overview_html, 'Очистить кеш тарифов доставки' ), 'Overview page must render delivery quote cache clear button.' );
+runtime_smoke_assert( str_contains( $overview_html, 'Версия плагина' ) && str_contains( $overview_html, 'Версия PHP' ) && str_contains( $overview_html, 'Версия WooCommerce' ) && str_contains( $overview_html, 'Статус HPOS' ) && str_contains( $overview_html, 'Статус Action Scheduler' ), 'Overview page must keep the platform information block.' );
+runtime_smoke_assert( ! str_contains( $overview_html, 'Флаги функций' ) && ! str_contains( $overview_html, '<h2>Требования</h2>' ), 'Overview page must not render legacy flags or requirements sections.' );
 
 $GLOBALS['wpdb']->options['_transient_wdc_rp_domestic_admin'] = 'admin-cache';
 $_SERVER['REQUEST_METHOD'] = 'POST';
@@ -995,7 +1027,7 @@ runtime_smoke_assert( 'fallback' === $fallback->rates[0]->carrier_key, 'Fallback
 
 $debug_session = new CheckoutSessionManager();
 $debug_session->save_debug( array( 'rates_count' => 1, 'fallback_used' => true ) );
-$debug_gate = new CheckoutFeatureGate( new FeatureFlags(), new SettingsRepository() );
+$debug_gate = new CheckoutFeatureGate( new SettingsRepository() );
 ob_start();
 ( new CheckoutDebugPanel( $debug_session, $debug_gate ) )->render();
 $debug_output = (string) ob_get_clean();
@@ -1011,7 +1043,7 @@ $settings->replace(
 	)
 );
 ob_start();
-( new CheckoutDebugPanel( $debug_session, new CheckoutFeatureGate( new FeatureFlags(), $settings ) ) )->render();
+( new CheckoutDebugPanel( $debug_session, new CheckoutFeatureGate( $settings ) ) )->render();
 $debug_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $debug_output, 'Отладка checkout WDC' ), 'Debug panel must render when explicitly enabled.' );
 

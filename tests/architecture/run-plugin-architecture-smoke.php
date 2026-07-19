@@ -388,6 +388,59 @@ foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 }
 plugin_architecture_assert( str_contains( $plugin_source, 'CarrierShipmentAdapterRegistry::class' ) && str_contains( $plugin_source, 'ShipmentDocumentProviderRegistry::class' ) && str_contains( $plugin_source, 'ShipmentModalExtensionRegistry::class' ), 'Composition root must register shipment registries.' );
 
+$removed_checkout_diagnostic_page_needles = array(
+	'Checkout' . 'SimulationPage',
+	'wdc-checkout-' . 'simulation',
+	'checkout-' . 'simulation.css',
+);
+foreach ( array( 'src', 'assets/admin' ) as $dir ) {
+	$root = plugin_architecture_path( $dir );
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root, FilesystemIterator::SKIP_DOTS ) );
+	foreach ( $iterator as $file ) {
+		if ( ! $file instanceof SplFileInfo || ! $file->isFile() ) {
+			continue;
+		}
+		$source = (string) file_get_contents( $file->getPathname() );
+		$relative = str_replace( '\\', '/', substr( $file->getPathname(), strlen( plugin_architecture_root() ) + 1 ) );
+		foreach ( $removed_checkout_diagnostic_page_needles as $needle ) {
+			plugin_architecture_assert( ! str_contains( $source, $needle ), 'Removed checkout diagnostic page reference must be absent from ' . $relative );
+		}
+	}
+}
+
+$removed_pickup_standalone_page_needles = array(
+	'Pickup' . 'AdminPage',
+	'wdc_pickup_' . 'view',
+	'page=wdc-platform-' . 'pickup',
+	"'wdc-platform-" . "pickup'",
+	'"wdc-platform-' . 'pickup"',
+	"PAGE_SLUG = 'wdc-platform-" . "pickup'",
+);
+foreach ( array( 'src', 'assets/admin' ) as $dir ) {
+	$root = plugin_architecture_path( $dir );
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root, FilesystemIterator::SKIP_DOTS ) );
+	foreach ( $iterator as $file ) {
+		if ( ! $file instanceof SplFileInfo || ! $file->isFile() ) {
+			continue;
+		}
+		$source = (string) file_get_contents( $file->getPathname() );
+		$relative = str_replace( '\\', '/', substr( $file->getPathname(), strlen( plugin_architecture_root() ) + 1 ) );
+		foreach ( $removed_pickup_standalone_page_needles as $needle ) {
+			plugin_architecture_assert( ! str_contains( $source, $needle ), 'Removed pickup standalone page reference must be absent from ' . $relative );
+		}
+	}
+}
+
+$checkout_selector_source = plugin_architecture_source( 'src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+$checkout_sort_source = (string) file_get_contents( plugin_architecture_path( 'assets/frontend/checkout-sort.js' ) );
+$shipping_registrar_source = plugin_architecture_source( 'src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
+plugin_architecture_assert(
+	str_contains( $checkout_selector_source, 'wdc-platform-pickup-point' )
+	&& str_contains( $checkout_sort_source, 'wdc-platform-pickup-point' )
+	&& str_contains( $shipping_registrar_source, 'wdc-platform-pickup-foundation' ),
+	'Checkout pickup frontend identifiers must preserve their established class and style handle.'
+);
+
 $js_source = '';
 foreach ( plugin_architecture_generic_js_files() as $file ) {
 	$source = (string) file_get_contents( $file );

@@ -1,8 +1,10 @@
 # Checkout
 
-Version: 0.124.1
+Version: 0.124.19
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
+
+`CheckoutFeatureGate` is the single runtime policy for enabling the new WooCommerce checkout shipping method and frontend runtime. Its source of truth is the `enable_new_checkout_shipping` setting from the platform settings page. The checkout debug panel uses the same gate and additionally requires `show_checkout_debug_panel`.
 
 ## Canonical Requirements
 

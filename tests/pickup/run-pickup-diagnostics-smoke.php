@@ -30,6 +30,57 @@ function __( string $text, string $domain = '' ): string {
 	return $text;
 }
 
+function esc_html__( string $text, string $domain = '' ): string {
+	return htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function esc_html( mixed $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function esc_attr( mixed $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function esc_url( mixed $url ): string {
+	return htmlspecialchars( (string) $url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function selected( mixed $selected, mixed $current = true, bool $echo = true ): string {
+	$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+	if ( $echo ) {
+		echo $result;
+	}
+
+	return $result;
+}
+
+function wp_nonce_field( string $action = '-1', string $name = '_wpnonce', bool $referer = true, bool $display = true ): string {
+	$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="test-nonce">';
+	if ( $display ) {
+		echo $field;
+	}
+
+	return $field;
+}
+
+function admin_url( string $path = '' ): string {
+	return 'admin.php' === $path ? 'admin.php' : $path;
+}
+
+function add_query_arg( array $args, string $url = '' ): string {
+	$separator = str_contains( $url, '?' ) ? '&' : '?';
+	return $url . $separator . http_build_query( $args );
+}
+
+function wp_unslash( mixed $value ): mixed {
+	return is_array( $value ) ? array_map( 'wp_unslash', $value ) : stripslashes( (string) $value );
+}
+
+function sanitize_text_field( mixed $value ): string {
+	return trim( strip_tags( (string) $value ) );
+}
+
 function current_user_can( string $capability ): bool {
 	return in_array( $capability, array( 'manage_options', 'manage_woocommerce' ), true );
 }
@@ -163,6 +214,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 	}
 }
 
+use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
@@ -305,12 +357,37 @@ pickup_diagnostics_assert( 1 === $dry_run['skipped']['ambiguous'], 'rebind dry-r
 pickup_diagnostics_assert( 1 === $dry_run['skipped']['no_match'], 'rebind dry-run must skip no match.' );
 pickup_diagnostics_assert( 0 === (int) $GLOBALS['wpdb']->russian_post_pickup_rows[9]['location_id'], 'dry-run must not write location_id.' );
 
-$admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Admin/PickupAdminPage.php' );
-pickup_diagnostics_assert( str_contains( $admin_source, "wp_verify_nonce" ) && str_contains( $admin_source, "current_user_can( 'manage_options' )" ) && str_contains( $admin_source, 'method="post"' ), 'admin rebind action must require POST, nonce, and manage_options capability.' );
-pickup_diagnostics_assert( ! str_contains( $admin_source, 'pickup_carrier' ) && ! str_contains( $admin_source, 'pickup_city' ) && ! str_contains( $admin_source, 'group_by_city' ), 'admin pickup page must not render legacy carrier key + city search.' );
-pickup_diagnostics_assert( ! str_contains( $admin_source, 'DEMO_PICKUP' ) && ! str_contains( $admin_source, 'delete_by_carrier_keys' ) && ! str_contains( $admin_source, 'count_all()' ), 'admin pickup page must not run legacy demo cleanup or generic pickup count.' );
-pickup_diagnostics_assert( str_contains( $admin_source, 'wdc_pickup_view=diagnostics' ) && str_contains( $admin_source, 'RussianPostPickupDiagnosticsService' ), 'admin pickup page must keep diagnostics link.' );
-pickup_diagnostics_assert( str_contains( $admin_source, 'count_by_type()' ) && str_contains( $admin_source, 'count_active()' ) && str_contains( $admin_source, 'last_success_at()' ), 'admin pickup page must keep Russian Post status summary.' );
+$diagnostics_tab = new RussianPostPickupDiagnosticsTab( $service );
+$_GET = array(
+	'page' => 'wdc-delivery-services',
+	'service' => 'russian_post_domestic',
+	'tab' => RussianPostPickupDiagnosticsTab::TAB_KEY,
+	'problem' => 'missing_location',
+	'per_page' => '50',
+);
+$_POST = array();
+ob_start();
+$diagnostics_tab->render();
+$diagnostics_html = (string) ob_get_clean();
+
+foreach ( array( 'Диагностика базы ПВЗ', 'name="problem"', 'name="per_page"', 'Экспорт CSV', 'method="post"', 'wdc_pickup_diagnostics_nonce', 'wdc_pickup_diagnostics_action', '<table class="widefat striped"' ) as $needle ) {
+	pickup_diagnostics_assert( str_contains( $diagnostics_html, $needle ), 'diagnostics tab must render ' . $needle . '.' );
+}
+foreach ( array( 'page=wdc-delivery-services', 'service=russian_post_domestic', 'tab=russian_post_pickup_diagnostics', 'wdc_pickup_diagnostics_export=1' ) as $needle ) {
+	pickup_diagnostics_assert( str_contains( $diagnostics_html, $needle ), 'diagnostics tab URLs must include ' . $needle . '.' );
+}
+pickup_diagnostics_assert( str_contains( $diagnostics_html, 'tab=russian_post_pickup' ), 'diagnostics tab must link back to the Russian Post pickup import tab.' );
+pickup_diagnostics_assert( ! str_contains( $diagnostics_html, 'wdc-platform-' . 'pickup' ) && ! str_contains( $diagnostics_html, 'wdc_pickup_' . 'view' ), 'diagnostics tab must not render removed standalone route parameters.' );
+
+$tab_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/RussianPost/Admin/RussianPostPickupDiagnosticsTab.php' );
+pickup_diagnostics_assert( str_contains( $tab_source, "wp_verify_nonce" ) && str_contains( $tab_source, "current_user_can( 'manage_options' )" ) && str_contains( $tab_source, 'method="post"' ), 'diagnostics rebind action must require POST, nonce, and manage_options capability.' );
+pickup_diagnostics_assert( str_contains( $tab_source, 'current_user_can( AdminMenu::CAPABILITY )' ) && str_contains( $tab_source, 'export_csv' ) && str_contains( $tab_source, 'filename()' ), 'diagnostics CSV export must keep page capability, service export, and canonical filename.' );
+pickup_diagnostics_assert( str_contains( $tab_source, 'DeliveryServicesAdminPage::MENU_SLUG' ) && str_contains( $tab_source, 'RussianPostDomesticSettings::SERVICE_KEY' ) && str_contains( $tab_source, 'self::TAB_KEY' ), 'diagnostics CSV/export links must be guarded by the delivery service tab route.' );
+pickup_diagnostics_assert( ! str_contains( $tab_source, 'pickup_carrier' ) && ! str_contains( $tab_source, 'pickup_city' ) && ! str_contains( $tab_source, 'group_by_city' ), 'diagnostics tab must not render legacy carrier key + city search.' );
+pickup_diagnostics_assert( ! str_contains( $tab_source, 'DEMO_PICKUP' ) && ! str_contains( $tab_source, 'delete_by_carrier_keys' ) && ! str_contains( $tab_source, 'count_all()' ), 'diagnostics tab must not run legacy demo cleanup or generic pickup count.' );
+
+$delivery_services_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+pickup_diagnostics_assert( str_contains( $delivery_services_source, 'count_by_type()' ) && str_contains( $delivery_services_source, 'count_active()' ) && str_contains( $delivery_services_source, 'last_success_at()' ), 'Russian Post pickup import tab must keep status summary.' );
 
 $pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
 $pickup_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Storage/PickupPointRepository.php' );

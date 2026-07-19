@@ -4,9 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Admin;
 
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
-use WallsShop\WDC\Core\FeatureFlags;
 use WallsShop\WDC\Core\PluginEnvironment;
-use WallsShop\WDC\Core\RequirementsChecker;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -19,19 +17,11 @@ final class AdminMenu {
 
 	private PluginEnvironment $environment;
 
-	private FeatureFlags $feature_flags;
-
-	private RequirementsChecker $requirements;
-
 	public function __construct(
 		PluginEnvironment $environment,
-		FeatureFlags $feature_flags,
-		RequirementsChecker $requirements,
 		private ?DeliveryQuoteCacheManager $quote_cache_manager = null
 	) {
-		$this->environment   = $environment;
-		$this->feature_flags = $feature_flags;
-		$this->requirements  = $requirements;
+		$this->environment = $environment;
 	}
 
 	public function register(): void {
@@ -78,24 +68,6 @@ final class AdminMenu {
 					<?php $this->render_row( __( 'Версия WooCommerce', 'walls-delivery-calc' ), '' !== $this->environment->wc_version() ? $this->environment->wc_version() : __( 'не определена', 'walls-delivery-calc' ) ); ?>
 					<?php $this->render_row( __( 'Статус HPOS', 'walls-delivery-calc' ), $this->environment->hpos_enabled() ? __( 'включен', 'walls-delivery-calc' ) : __( 'выключен', 'walls-delivery-calc' ) ); ?>
 					<?php $this->render_row( __( 'Статус Action Scheduler', 'walls-delivery-calc' ), function_exists( 'as_schedule_single_action' ) ? __( 'доступен', 'walls-delivery-calc' ) : __( 'не найден', 'walls-delivery-calc' ) ); ?>
-				</tbody>
-			</table>
-
-			<h2><?php echo esc_html__( 'Флаги функций', 'walls-delivery-calc' ); ?></h2>
-			<table class="widefat striped" style="max-width: 760px;">
-				<tbody>
-					<?php foreach ( $this->feature_flags->all() as $flag => $enabled ) : ?>
-						<?php $this->render_row( $flag, $enabled ? 'true' : 'false' ); ?>
-					<?php endforeach; ?>
-				</tbody>
-			</table>
-
-			<h2><?php echo esc_html__( 'Требования', 'walls-delivery-calc' ); ?></h2>
-			<table class="widefat striped" style="max-width: 760px;">
-				<tbody>
-					<?php foreach ( $this->requirements->checks() as $check ) : ?>
-						<?php $this->render_row( $check['label'], $check['ok'] ? __( 'ок', 'walls-delivery-calc' ) : $check['actual'] . ' / ' . __( 'требуется', 'walls-delivery-calc' ) . ' ' . $check['required'] ); ?>
-					<?php endforeach; ?>
 				</tbody>
 			</table>
 

@@ -78,6 +78,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentPayload
 use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryShipmentRegistrationService as CoreYandexDeliveryShipmentRegistrationService;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
+use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
@@ -106,7 +107,6 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
-use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
@@ -182,7 +182,6 @@ use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
 use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Packaging\PackagingBuilderConfig;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
-use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\Presentation\PickupPointPresentationResolver;
@@ -290,10 +289,9 @@ final class Plugin {
 	private function register_services(): void {
 		$this->container->register( PluginEnvironment::class, fn(): PluginEnvironment => $this->environment );
 		$this->container->register( PluginConstants::class, fn(): PluginConstants => new PluginConstants( $this->environment ) );
-		$this->container->register( FeatureFlags::class, fn(): FeatureFlags => new FeatureFlags() );
 		$this->container->register( Logger::class, fn(): Logger => new Logger() );
 		$this->container->register( SettingsRepository::class, fn(): SettingsRepository => new SettingsRepository() );
-		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( FeatureFlags::class ), $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( EncryptionService::class, fn(): EncryptionService => new EncryptionService() );
 		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
@@ -631,8 +629,6 @@ final class Plugin {
 			AdminMenu::class,
 			fn(): AdminMenu => new AdminMenu(
 				$this->environment,
-				$this->container->get( FeatureFlags::class ),
-				$this->container->get( RequirementsChecker::class ),
 				$this->container->get( DeliveryQuoteCacheManager::class )
 			)
 		);
@@ -677,17 +673,8 @@ final class Plugin {
 			)
 		);
 		$this->container->register(
-			CheckoutSimulationPage::class,
-			fn(): CheckoutSimulationPage => new CheckoutSimulationPage(
-				$this->environment,
-				$this->container->get( CheckoutOrchestrator::class )
-			)
-		);
-		$this->container->register(
-			PickupAdminPage::class,
-			fn(): PickupAdminPage => new PickupAdminPage(
-				$this->container->get( RussianPostPickupPointRepository::class ),
-				$this->container->get( RussianPostOtpravkaApiSettings::class ),
+			RussianPostPickupDiagnosticsTab::class,
+			fn(): RussianPostPickupDiagnosticsTab => new RussianPostPickupDiagnosticsTab(
 				$this->container->get( RussianPostPickupDiagnosticsService::class )
 			)
 		);
@@ -700,6 +687,7 @@ final class Plugin {
 				$this->container->get( DeliveryServiceCountryRepository::class ),
 				$this->container->get( RulesAdminPage::class ),
 				$this->container->get( RuleRepository::class ),
+				$this->container->get( RussianPostPickupDiagnosticsTab::class ),
 				$this->container->get( DeliveryServiceSettingsRepository::class ),
 				$this->container->get( RussianPostSettings::class ),
 				$this->container->get( RussianPostCountriesAdminPage::class ),
@@ -828,8 +816,6 @@ final class Plugin {
 			$this->container->get( CalendarAdminPage::class )->register();
 			$this->container->get( LocationsAdminPage::class )->register();
 			$this->container->get( RulesAdminPage::class )->register();
-			$this->container->get( CheckoutSimulationPage::class )->register();
-			$this->container->get( PickupAdminPage::class )->register();
 			$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
 			$this->container->get( DeliveryServicesAdminPage::class )->register();
 			$this->container->get( ShipmentStatusesAdminPage::class )->register();
