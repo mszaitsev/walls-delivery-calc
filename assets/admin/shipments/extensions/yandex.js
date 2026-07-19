@@ -278,6 +278,15 @@
     return payloadData.cancelled_and_removed === true || rawStatus === 'CANCELLED';
   }
 
+  function isCancellationTerminalWithoutShipment(statusPayload) {
+    return !!(
+      statusPayload
+      && statusPayload.has_shipment === false
+      && statusPayload.polling_continue !== true
+      && statusPayload.cancellation_pending !== true
+    );
+  }
+
   function initCancellationPollingToast(box, token, maxAttempts) {
     if (!box || !token) return;
     const existing = cancellationPollingToasts.get(box);
@@ -461,6 +470,10 @@
           return true;
         }
         if (isCancellationConfirmed(context, statusPayload)) {
+          finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
+          return true;
+        }
+        if (isCancellationTerminalWithoutShipment(statusPayload)) {
           finishCancellationPollingToast(context.box, 'Отправление Яндекс отменено.', 'success');
           return true;
         }

@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.15
+Version: 0.124.16
 
 Stable subsystems:
 
@@ -31,6 +31,7 @@ Recent fixes:
 - Shipment place analytics now refresh directly from current `shipment_item_rows` when item place assignment changes, so split rows are counted in their selected cargo places immediately.
 - Yandex cancellation `cancelled_and_removed` now finalizes an existing cancellation progress toast even after the shipment UI has already been reset.
 - Yandex terminal cancellation tick now treats the active cancellation toast state as lifecycle ownership, so missing terminal purpose metadata cannot leave the last progress toast visible.
+- Yandex cancellation status AJAX now preserves the adapter's `cancelled_and_removed` marker in JSON, so terminal polling resets the shipment UI and finishes the cancellation toast instead of falling back to persistent progress.
 
 Canonical docs:
 

@@ -125,6 +125,47 @@ final class ShipmentStatusSmokeAdapter implements CarrierShipmentAdapterInterfac
 	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ); }
 	public function auto_sync_throttle_microseconds(): int { return 0; }
 }
+
+final class ShipmentStatusSmokeCancellationAdapter implements CarrierShipmentAdapterInterface {
+	public const CARRIER_KEY = 'yandex_delivery';
+
+	public function __construct( private OrderShipmentRepository $repository, private bool $terminal_cancel ) {
+	}
+
+	public function carrier_key(): string { return self::CARRIER_KEY; }
+	public function supports( ShipmentCreateRequest $request ): bool { return self::CARRIER_KEY === $request->carrier_key; }
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { return array(); }
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { return new ShipmentCreateResult( false, error_code: 'not-supported', error_message: 'Not supported in smoke.' ); }
+	public function presentation(): array { return array( 'title' => 'Yandex smoke' ); }
+	public function status_payload( object $order, array $shipment ): array {
+		return array(
+			'carrier_key' => self::CARRIER_KEY,
+			'has_shipment' => array() !== $shipment,
+			'can_create' => array() === $shipment,
+			'can_update_status' => array() !== $shipment,
+			'can_cancel' => false,
+			'can_remove_from_order' => array() !== $shipment,
+			'can_attach_manual' => array() === $shipment,
+			'polling_continue' => false,
+			'cancellation_pending' => array() !== $shipment,
+		);
+	}
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		if ( ! $this->terminal_cancel ) {
+			return array( 'success' => true, 'pending' => true, 'retryable' => true, 'message' => 'Статус отмены Яндекс ещё не подготовлен.', 'status' => '' );
+		}
+
+		$this->repository->delete_for_carrier( $order, self::CARRIER_KEY );
+
+		return array( 'success' => true, 'message' => 'Отправление Яндекс отменено.', 'status' => 'CANCELLED', 'cancelled_and_removed' => true );
+	}
+	public function attach_manual( object $order, array $payload ): array { return array( 'success' => false ); }
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
+	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
+	public function supports_status_auto_sync(): bool { return false; }
+	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? '' ); }
+	public function auto_sync_throttle_microseconds(): int { return 0; }
+}
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
@@ -385,6 +426,69 @@ try {
 } catch ( ShipmentStatusAjaxResponse $response ) {
 	shipment_status_smoke_assert( true === $response->success, 'Valid AJAX must succeed: ' . json_encode( $response->data, JSON_UNESCAPED_UNICODE ) );
 	shipment_status_smoke_assert( isset( $response->data['status']['universal_status_label'] ), 'Valid AJAX must return status payload for JS.' );
+}
+
+$pending_cancel_order = new ShipmentStatusSmokeOrder(
+	21,
+	array(
+		OrderShipmentRepository::META_KEY => array(
+			ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY => array(
+				'carrier_key' => ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY,
+				'status' => 'cancellation_started',
+				'yandex_request_id' => 'REQ-PENDING-CANCEL',
+			),
+		),
+	)
+);
+$pending_cancel_repository = new OrderShipmentRepository();
+$pending_cancel_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
+	$pending_cancel_repository,
+	new DeliveryServiceRepository( $wpdb ),
+	$status_service,
+	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeCancellationAdapter( $pending_cancel_repository, false ) ) )
+);
+$pending_cancel_controller = new ShipmentStatusAjaxController( $pending_cancel_repository, $pending_cancel_payloads );
+$GLOBALS['wdc_status_smoke_orders'][21] = $pending_cancel_order;
+$_POST = array( 'order_id' => 21, 'shipment_key' => ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY );
+try {
+	$pending_cancel_controller->handle_update();
+	shipment_status_smoke_assert( false, 'Pending cancellation AJAX must return JSON success.' );
+} catch ( ShipmentStatusAjaxResponse $response ) {
+	shipment_status_smoke_assert( true === $response->success && ! empty( $response->data['pending'] ) && empty( $response->data['cancelled_and_removed'] ), 'Pending Yandex cancellation status update must not expose cancelled_and_removed.' );
+	shipment_status_smoke_assert( ! empty( $pending_cancel_repository->find_by_carrier( $pending_cancel_order, ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY ) ), 'Pending Yandex cancellation status update must keep shipment state.' );
+}
+
+$terminal_cancel_order = new ShipmentStatusSmokeOrder(
+	22,
+	array(
+		OrderShipmentRepository::META_KEY => array(
+			ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY => array(
+				'carrier_key' => ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY,
+				'status' => 'cancellation_started',
+				'yandex_request_id' => 'REQ-TERMINAL-CANCEL',
+			),
+		),
+	)
+);
+$terminal_cancel_repository = new OrderShipmentRepository();
+$terminal_cancel_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
+	$terminal_cancel_repository,
+	new DeliveryServiceRepository( $wpdb ),
+	$status_service,
+	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeCancellationAdapter( $terminal_cancel_repository, true ) ) )
+);
+$terminal_cancel_controller = new ShipmentStatusAjaxController( $terminal_cancel_repository, $terminal_cancel_payloads );
+$GLOBALS['wdc_status_smoke_orders'][22] = $terminal_cancel_order;
+$_POST = array( 'order_id' => 22, 'shipment_key' => ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY );
+try {
+	$terminal_cancel_controller->handle_update();
+	shipment_status_smoke_assert( false, 'Terminal cancellation AJAX must return JSON success.' );
+} catch ( ShipmentStatusAjaxResponse $response ) {
+	shipment_status_smoke_assert( true === $response->success, 'Terminal Yandex cancellation status update must succeed.' );
+	shipment_status_smoke_assert( true === ( $response->data['cancelled_and_removed'] ?? null ), 'Terminal Yandex cancellation status update must pass cancelled_and_removed through AJAX JSON.' );
+	$response_status = is_array( $response->data['status'] ?? null ) ? $response->data['status'] : array();
+	shipment_status_smoke_assert( false === ( $response->data['has_shipment'] ?? null ) && false === ( $response_status['polling_continue'] ?? null ) && false === ( $response_status['cancellation_pending'] ?? null ), 'Terminal Yandex cancellation AJAX payload must expose no-shipment terminal state.' );
+	shipment_status_smoke_assert( array() === $terminal_cancel_repository->find_by_carrier( $terminal_cancel_order, ShipmentStatusSmokeCancellationAdapter::CARRIER_KEY ), 'Terminal Yandex cancellation status update must delete shipment state.' );
 }
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
