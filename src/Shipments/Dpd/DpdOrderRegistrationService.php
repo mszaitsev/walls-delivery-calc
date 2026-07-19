@@ -38,6 +38,7 @@ final class DpdOrderRegistrationService {
 			'carrier_key' => 'dpd', 'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ), 'order_id' => $request->order_id,
 			'service_title' => (string) ( $request->meta['service_title'] ?? '' ), 'delivery_type' => $request->delivery_type,
 			'places' => array_map( static fn ( $place ): array => $place->to_array(), $request->places ),
+			'dpd_registration_payload' => $payload,
 			'request_snapshot' => array( 'method' => 'SOAP', 'path' => 'order2/createOrder2', 'body' => $this->sanitize_value( $payload ) ),
 			'barcode' => '', 'tracking_number' => '', 'external_id' => '', 'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 			'dpd_registration_attempt_id' => $token, 'dpd_registration_state' => 'submitting', 'registration_started_at' => $now,
@@ -61,7 +62,7 @@ final class DpdOrderRegistrationService {
 			poll_max_attempts: 0,
 			stop_on_error: true
 		);
-		return array( 'success' => true, 'message' => 'Ждём регистрацию DPD.', 'shipment' => $shipment, 'lifecycle' => $lifecycle->to_array(), 'status' => array( 'lifecycle' => $lifecycle->to_array() ) );
+		return array( 'success' => true, 'message' => 'Ждём регистрацию DPD.', 'shipment' => $this->public_shipment( $shipment ), 'lifecycle' => $lifecycle->to_array(), 'status' => array( 'lifecycle' => $lifecycle->to_array() ) );
 	}
 
 	/** @return array<string,mixed> */
@@ -69,12 +70,12 @@ final class DpdOrderRegistrationService {
 		$shipment = $this->repository->find( $order );
 		if ( array() === $shipment || $continuation_token !== (string) ( $shipment['dpd_registration_attempt_id'] ?? '' ) ) { return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не найдена.' ); }
 		if ( '' !== trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) || 'ok' === (string) ( $shipment['dpd_registration_state'] ?? '' ) ) {
-			return array_merge( array( 'success' => true, 'message' => 'Номер DPD уже сохранен.', 'shipment' => $shipment ), $this->lifecycle_payload( new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: true, message: 'Номер DPD уже сохранен.' ) ) );
+			return array_merge( array( 'success' => true, 'message' => 'Номер DPD уже сохранен.', 'shipment' => $this->public_shipment( $shipment ) ), $this->lifecycle_payload( new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: true, message: 'Номер DPD уже сохранен.' ) ) );
 		}
 		if ( in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'duplicate', 'error', 'cancelled', 'transport_error' ), true ) ) {
 			return $this->failed_lifecycle_result( (string) ( $shipment['dpd_registration_error'] ?? $shipment['status_title'] ?? 'Регистрация DPD уже завершена ошибкой.' ), $shipment );
 		}
-		$payload = is_array( $shipment['request_snapshot']['body'] ?? null ) ? $shipment['request_snapshot']['body'] : array();
+		$payload = is_array( $shipment['dpd_registration_payload'] ?? null ) ? $shipment['dpd_registration_payload'] : ( is_array( $shipment['request_snapshot']['body'] ?? null ) ? $shipment['request_snapshot']['body'] : array() );
 		if ( array() === $payload ) {
 			return $this->failed_lifecycle_result( 'Локальная попытка регистрации DPD не содержит payload.' );
 		}
@@ -143,22 +144,25 @@ final class DpdOrderRegistrationService {
 		$shipment['response_snapshot'] = $this->sanitize_value( is_array( $response['body'] ?? null ) ? $response['body'] : array() );
 		$shipment['updated_at'] = $now;
 		if ( empty( $response['success'] ) && 'dpd_order_create_uncertain' !== (string) ( $response['error_code'] ?? '' ) && 'dpd_uncertain_timeout' !== (string) ( $response['error_code'] ?? '' ) ) {
+			unset( $shipment['dpd_registration_payload'] );
 			$shipment['dpd_registration_state'] = 'transport_error'; $shipment['dpd_registration_error'] = (string) ( $response['error_message'] ?? '' ); $shipment['status_title'] = 'Ошибка регистрации'; $this->repository->save( $order, $shipment );
-			return array( 'message' => $shipment['dpd_registration_error'], 'shipment' => $shipment, 'registration_error' => true, 'registration_terminal' => true, 'polling_continue' => false );
+			return array( 'message' => $shipment['dpd_registration_error'], 'shipment' => $this->public_shipment( $shipment ), 'registration_error' => true, 'registration_terminal' => true, 'polling_continue' => false );
 		}
 		if ( '' === $status && '' === $order_num ) { $status = 'OrderPending'; }
 		if ( 'OK' === $status && '' !== $order_num ) {
+			unset( $shipment['dpd_registration_payload'] );
 			$shipment['dpd_order_number'] = $order_num; $shipment['tracking_number'] = $order_num; $shipment['barcode'] = $order_num; $shipment['external_id'] = $order_num; $shipment['dpd_registration_state'] = 'ok'; $shipment['status'] = 'created'; $shipment['universal_status_code'] = DeliveryStatus::CREATED_IN_CARRIER; $shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ); $shipment['status_title'] = 'Зарегистрировано';
 			$this->repository->save( $order, $shipment );
 			$refresh = $this->refresh_created_shipment( $order );
 			return array( 'message' => 'DPD зарегистрировал отправление.', 'shipment' => $refresh['shipment'], 'event_sync' => $refresh['sync']->to_array(), 'enrichment' => $refresh['enrichment'], 'registration_success' => true, 'registration_terminal' => true, 'polling_continue' => false );
 		}
 		if ( in_array( $status, array( 'OrderDuplicate', 'OrderError', 'OrderCancelled' ), true ) ) {
+			unset( $shipment['dpd_registration_payload'] );
 			$shipment['dpd_registration_state'] = 'OrderCancelled' === $status ? 'cancelled' : ( 'OrderDuplicate' === $status ? 'duplicate' : 'error' ); $shipment['dpd_registration_error'] = (string) ( $row['errorMessage'] ?? $status ); $shipment['status_title'] = 'OrderCancelled' === $status ? 'Заказ отменён' : 'Ошибка регистрации'; $this->repository->save( $order, $shipment );
-			return array( 'message' => $shipment['dpd_registration_error'], 'shipment' => $shipment, 'registration_error' => true, 'registration_terminal' => true, 'polling_continue' => false );
+			return array( 'message' => $shipment['dpd_registration_error'], 'shipment' => $this->public_shipment( $shipment ), 'registration_error' => true, 'registration_terminal' => true, 'polling_continue' => false );
 		}
 		$shipment['dpd_registration_state'] = 'pending'; $shipment['status'] = DeliveryStatus::PENDING_CREATION_IN_CARRIER; $shipment['universal_status_code'] = DeliveryStatus::PENDING_CREATION_IN_CARRIER; $shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ); $shipment['status_title'] = 'OrderPending' === $status ? 'Ждёт ручной доработки DPD' : 'Ждём регистрацию'; $this->repository->save( $order, $shipment );
-		return array( 'message' => $shipment['status_title'], 'shipment' => $shipment, 'registration_polling' => true, 'polling_continue' => true );
+		return array( 'message' => $shipment['status_title'], 'shipment' => $this->public_shipment( $shipment ), 'registration_polling' => true, 'polling_continue' => true );
 	}
 
 	/** @return array{sync:DpdEventSyncResult,enrichment:array<string,mixed>,shipment:array<string,mixed>} */
@@ -219,9 +223,16 @@ final class DpdOrderRegistrationService {
 		return array(
 			'success' => false,
 			'message' => $message,
-			'shipment' => $shipment,
+			'shipment' => $this->public_shipment( $shipment ),
 			'lifecycle' => ( new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_FAILED, accepted: false, message: $message ) )->to_array(),
 		);
+	}
+
+	/** @param array<string,mixed> $shipment @return array<string,mixed> */
+	private function public_shipment( array $shipment ): array {
+		unset( $shipment['dpd_registration_payload'] );
+
+		return $shipment;
 	}
 
 	/** @param array<string,mixed> $payload @return array<string,mixed> */
@@ -260,5 +271,5 @@ final class DpdOrderRegistrationService {
 	/** @param array<string,mixed> $body @return array<string,mixed> */
 	private function first_row( array $body ): array { foreach ( array( 'return', 'order', 'orders' ) as $key ) { $value = $body[ $key ] ?? null; if ( is_array( $value ) ) { return is_array( $value[0] ?? null ) ? $value[0] : $value; } } return $body; }
 	private function now(): string { return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ); }
-	private function sanitize_value( mixed $value ): mixed { if ( is_array( $value ) ) { $out = array(); foreach ( $value as $key => $item ) { $k = strtolower( (string) $key ); $out[ $key ] = in_array( $k, array( 'clientkey', 'client_key', 'auth', 'phone', 'contactphone', 'contactemail', 'email', 'street', 'house', 'flat' ), true ) ? '[redacted]' : $this->sanitize_value( $item ); } return $out; } return is_string( $value ) && strlen( $value ) > 1000 ? substr( $value, 0, 1000 ) . '...' : $value; }
+	private function sanitize_value( mixed $value ): mixed { if ( is_array( $value ) ) { $out = array(); foreach ( $value as $key => $item ) { $k = strtolower( (string) $key ); $out[ $key ] = in_array( $k, array( 'clientkey', 'client_key', 'auth', 'name', 'contactfio', 'contact_fio', 'phone', 'contactphone', 'contactemail', 'email', 'address', 'addressstring', 'street', 'house', 'flat' ), true ) ? '[redacted]' : $this->sanitize_value( $item ); } return $out; } return is_string( $value ) && strlen( $value ) > 1000 ? substr( $value, 0, 1000 ) . '...' : $value; }
 }

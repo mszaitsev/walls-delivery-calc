@@ -63,8 +63,8 @@ final class DpdSoapRequest {
 			'method' => $this->method,
 			'wrapper' => $this->wrapper_mode(),
 			'has_auth' => $this->credentials->is_complete() ? 'yes' : 'no',
-			'request_business_fields' => $this->payload,
-			'soap_payload_shape' => $this->redact_auth( $this->payload_with_auth() ),
+			'request_business_fields' => $this->redact_sensitive( $this->payload ),
+			'soap_payload_shape' => $this->redact_sensitive( $this->payload_with_auth() ),
 		);
 	}
 
@@ -72,22 +72,32 @@ final class DpdSoapRequest {
 	 * @param array<string,mixed> $payload
 	 * @return array<string,mixed>
 	 */
-	private function redact_auth( array $payload ): array {
+	private function redact_sensitive( array $payload ): array {
+		foreach ( $payload as $key => $value ) {
+			$key_text = strtolower( (string) $key );
+			if ( in_array( $key_text, array( 'clientkey', 'client_key', 'auth', 'name', 'contactfio', 'contact_fio', 'phone', 'contactphone', 'contactemail', 'email', 'address', 'addressstring', 'street', 'house', 'flat' ), true ) ) {
+				$payload[ $key ] = '[redacted]';
+				continue;
+			}
+			if ( is_array( $value ) ) {
+				$payload[ $key ] = $this->redact_sensitive( $value );
+			}
+		}
 		if ( isset( $payload['auth'] ) && is_array( $payload['auth'] ) ) {
 			$payload['auth']['clientNumber'] = '' !== (string) ( $payload['auth']['clientNumber'] ?? '' ) ? '[redacted]' : '';
 			$payload['auth']['clientKey'] = '' !== (string) ( $payload['auth']['clientKey'] ?? '' ) ? '[redacted]' : '';
 		}
 		if ( isset( $payload['request'] ) && is_array( $payload['request'] ) ) {
-			$payload['request'] = $this->redact_auth( $payload['request'] );
+			$payload['request'] = $this->redact_sensitive( $payload['request'] );
 		}
 		if ( isset( $payload['orders'] ) && is_array( $payload['orders'] ) ) {
-			$payload['orders'] = $this->redact_auth( $payload['orders'] );
+			$payload['orders'] = $this->redact_sensitive( $payload['orders'] );
 		}
 		if ( isset( $payload['orderStatus'] ) && is_array( $payload['orderStatus'] ) ) {
-			$payload['orderStatus'] = $this->redact_auth( $payload['orderStatus'] );
+			$payload['orderStatus'] = $this->redact_sensitive( $payload['orderStatus'] );
 		}
 		if ( isset( $payload['getLabelFile'] ) && is_array( $payload['getLabelFile'] ) ) {
-			$payload['getLabelFile'] = $this->redact_auth( $payload['getLabelFile'] );
+			$payload['getLabelFile'] = $this->redact_sensitive( $payload['getLabelFile'] );
 		}
 
 		return $payload;
