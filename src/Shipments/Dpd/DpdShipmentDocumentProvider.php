@@ -27,7 +27,7 @@ final class DpdShipmentDocumentProvider implements CarrierShipmentDocumentProvid
 			return array();
 		}
 
-		return array( new ShipmentDocumentAction( self::ACTION_DOWNLOAD_DOCUMENTS, 'Скачать документы', true, 'download', array( 'attrs' => array( 'data-wdc-dpd-documents-download' => '1' ) ) ) );
+		return array( new ShipmentDocumentAction( self::ACTION_DOWNLOAD_DOCUMENTS, 'Скачать документы DPD', true, 'download', array( 'attrs' => array( 'data-wdc-dpd-documents-download' => '1' ) ) ) );
 	}
 
 	/** @param array<string,mixed> $shipment */

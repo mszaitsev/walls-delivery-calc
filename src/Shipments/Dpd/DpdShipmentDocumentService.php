@@ -22,8 +22,7 @@ final class DpdShipmentDocumentService {
 	/** @param array<string,mixed> $shipment */
 	public static function can_download_documents( array $shipment ): bool {
 		return array() !== $shipment
-			&& '' !== trim( (string) ( $shipment['dpd_order_number'] ?? '' ) )
-			&& self::READY_EVENT_CODE === trim( (string) ( $shipment['dpd_event_code'] ?? '' ) );
+			&& '' !== trim( (string) ( $shipment['dpd_order_number'] ?? '' ) );
 	}
 
 	/**
@@ -110,9 +109,6 @@ final class DpdShipmentDocumentService {
 		}
 		if ( '' === trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) ) {
 			return array( 'success' => false, 'message' => 'Не найден номер заказа DPD.' );
-		}
-		if ( self::READY_EVENT_CODE !== trim( (string) ( $shipment['dpd_event_code'] ?? '' ) ) ) {
-			return array( 'success' => false, 'message' => 'Документы DPD доступны только после статуса 1401.' );
 		}
 
 		return array( 'success' => true, 'message' => '' );
