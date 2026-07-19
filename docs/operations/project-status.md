@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.16
+Version: 0.124.17
 
 Stable subsystems:
 
@@ -23,6 +23,8 @@ Active known limitations:
 
 Recent fixes:
 
+- The overview admin page now shows only platform information and delivery quote cache cleanup, while system requirements notices remain handled globally by `AdminNotices`.
+- Checkout runtime gating now uses `CheckoutFeatureGate` with `enable_new_checkout_shipping` as the single source of truth; the legacy feature flag service was removed.
 - Yandex Delivery shipment modal restores source drop-off PVZ presentation from the canonical V2 pickup context, including `full_address`, `schedule_text`, and coordinates, so the modal address and drop-off map survive the shipment framework flow.
 - Shipment pickup picker defines its local `pickupContext()` resolver again, so Yandex source drop-off picker can open, run initial map search, and perform address search without a `ReferenceError`.
 - Yandex cancellation polling toast treats `cancellation_started` lifecycle/poll flags as pending and no longer interprets the intermediate `carrier_status_title` as terminal failure.

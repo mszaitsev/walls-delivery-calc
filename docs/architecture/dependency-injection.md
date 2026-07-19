@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 0.124.1
+Version: 0.124.17
 
 `src/Core/Plugin.php` is the composition root. `src/Core/Container.php` is a small lazy singleton container with `register()`, `get()`, and `has()`.
 
@@ -27,5 +27,7 @@ For a carrier with shipment support, register:
 - lifecycle continuation implementation through the adapter, if the carrier requires continuation steps.
 
 ## Current Notes
+
+`CheckoutFeatureGate` is wired in `Plugin.php` with `SettingsRepository` only. Runtime checkout components depend on the gate rather than reading `enable_new_checkout_shipping` directly.
 
 `ShipmentCreationService` receives both a registry and an adapter array. The registry is the canonical path. The adapter array remains a temporary test-construction fallback for direct construction tests; it is documented technical debt, not a production compatibility contract and not a pattern for new code.

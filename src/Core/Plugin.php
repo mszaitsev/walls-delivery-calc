@@ -290,10 +290,9 @@ final class Plugin {
 	private function register_services(): void {
 		$this->container->register( PluginEnvironment::class, fn(): PluginEnvironment => $this->environment );
 		$this->container->register( PluginConstants::class, fn(): PluginConstants => new PluginConstants( $this->environment ) );
-		$this->container->register( FeatureFlags::class, fn(): FeatureFlags => new FeatureFlags() );
 		$this->container->register( Logger::class, fn(): Logger => new Logger() );
 		$this->container->register( SettingsRepository::class, fn(): SettingsRepository => new SettingsRepository() );
-		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( FeatureFlags::class ), $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( EncryptionService::class, fn(): EncryptionService => new EncryptionService() );
 		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
@@ -631,8 +630,6 @@ final class Plugin {
 			AdminMenu::class,
 			fn(): AdminMenu => new AdminMenu(
 				$this->environment,
-				$this->container->get( FeatureFlags::class ),
-				$this->container->get( RequirementsChecker::class ),
 				$this->container->get( DeliveryQuoteCacheManager::class )
 			)
 		);
