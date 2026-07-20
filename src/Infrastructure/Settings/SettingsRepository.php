@@ -13,6 +13,7 @@ use WallsShop\WDC\Shipments\YandexDelivery\YandexStatusMapping;
 defined( 'ABSPATH' ) || exit;
 
 final class SettingsRepository {
+	public const SHOP_PROCESSING_WORKING_DAYS_KEY = 'shop_processing_working_days';
 	private const OPTION_NAME = 'wdc_core_settings';
 
 	/**
@@ -38,6 +39,7 @@ final class SettingsRepository {
 		return array_merge(
 			array(
 			'shop_processing_days'          => 1,
+			self::SHOP_PROCESSING_WORKING_DAYS_KEY => 2,
 			'auto_generate_next_year'       => true,
 			'enable_new_checkout_shipping' => false,
 			'checkout_sort_mode'            => 'cheapest',
@@ -152,6 +154,10 @@ final class SettingsRepository {
 		$value = $this->all()[ $key ] ?? $default;
 
 		return is_numeric( $value ) ? (int) $value : $default;
+	}
+
+	public function shop_processing_working_days(): int {
+		return max( 0, $this->get_int( self::SHOP_PROCESSING_WORKING_DAYS_KEY, 2 ) );
 	}
 
 	/**

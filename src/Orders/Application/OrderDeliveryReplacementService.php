@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
@@ -19,8 +20,10 @@ final class OrderDeliveryReplacementService {
 	private const METHOD_ID = 'wdc_platform_delivery';
 
 	public function __construct(
-		private OrderShipmentRepository $shipments
+		private OrderShipmentRepository $shipments,
+		private ?DeliveryDateFormatter $date_formatter = null
 	) {
+		$this->date_formatter = $this->date_formatter ?? new DeliveryDateFormatter();
 	}
 
 	/**
@@ -141,7 +144,7 @@ final class OrderDeliveryReplacementService {
 			if ( is_array( $tariff['rate_meta'] ?? null ) ) {
 				$rate['rate_meta'] = $tariff['rate_meta'];
 			}
-			foreach ( array( 'api_base_price_rub', 'crossed_price', 'planned_delivery_comment', 'rules_source', 'round_up_applied', 'minimum_price_applied' ) as $key ) {
+			foreach ( array( 'api_base_price_rub', 'crossed_price', 'planned_delivery_date', 'planned_delivery_comment', 'rules_source', 'round_up_applied', 'minimum_price_applied' ) as $key ) {
 				if ( array_key_exists( $key, $tariff ) ) {
 					$rate[ $key ] = $tariff[ $key ];
 				}
@@ -185,7 +188,10 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 				}
 			}
 			if ( method_exists( $item, 'add_meta_data' ) ) {
-				$item->add_meta_data( 'Срок доставки', $this->delivery_label_or_not_specified( $rate ), true );
+				$planned = $this->planned_delivery_order_meta_value( $rate );
+				if ( '' !== $planned ) {
+					$item->add_meta_data( 'Планируемая* дата доставки', $planned, true );
+				}
 			}
 			if ( method_exists( $item, 'save' ) ) {
 				$item->save();
@@ -197,7 +203,7 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 				'method_id' => self::METHOD_ID,
 				'method_title' => $title,
 				'total' => (float) ( $rate['cost'] ?? 0 ),
-				'meta' => array( 'Срок доставки' => $this->delivery_label_or_not_specified( $rate ) ),
+				'meta' => '' !== $this->planned_delivery_order_meta_value( $rate ) ? array( 'Планируемая* дата доставки' => $this->planned_delivery_order_meta_value( $rate ) ) : array(),
 			);
 		}
 	}
@@ -212,6 +218,18 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 	}
 
 	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function planned_delivery_order_meta_value( array $rate ): string {
+		$date = trim( (string) ( $rate['planned_delivery_date'] ?? '' ) );
+		if ( '' === $date ) {
+			return '';
+		}
+
+		return $this->date_formatter instanceof DeliveryDateFormatter ? $this->date_formatter->format_order_meta_value( $date ) : '';
+	}
+
+	/**
 	 * @return array<int,string>
 	 */
 	private function visible_shipping_item_meta_keys(): array {
@@ -219,6 +237,7 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 			'carrier_key',
 			'rate_id',
 			'delivery_type',
+			'planned_delivery_date',
 			'planned_delivery_comment',
 			'service_key',
 			'service_title',
@@ -239,6 +258,7 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 			'Способ доставки',
 			'Тип доставки',
 			'Срок доставки',
+			'Планируемая* дата доставки',
 			'Населенный пункт',
 			'Нормализация',
 			'Код ПВЗ',
@@ -263,6 +283,7 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 			'_wdc_platform_rate_id' => (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ),
 			'_wdc_platform_delivery_type' => (string) ( $rate['delivery_type'] ?? '' ),
 			'_wdc_platform_crossed_price' => $rate['crossed_price'] ?? null,
+			'_wdc_platform_planned_delivery_date' => (string) ( $rate['planned_delivery_date'] ?? '' ),
 			'_wdc_platform_planned_delivery_comment' => (string) ( $rate['planned_delivery_comment'] ?? $rate['delivery_comment'] ?? '' ),
 			'_wdc_platform_comments' => is_array( $rate['comments'] ?? null ) ? $rate['comments'] : array(),
 			'_wdc_platform_fallback_used' => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ) ? 1 : 0,
@@ -686,6 +707,8 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 				'final_delivery_days_max' => is_numeric( $max_days ) ? (int) $max_days : null,
 				'final_delivery_max_days' => is_numeric( $max_days ) ? (int) $max_days : null,
 				'final_delivery_text' => (string) ( $result['final_delivery_text'] ?? DeliveryDaysFormatter::format_values( $min_days, $max_days ) ?: ( $rate['delivery_comment'] ?? '' ) ),
+				'planned_delivery_date' => (string) ( $rate['planned_delivery_date'] ?? $result['planned_delivery_date'] ?? '' ),
+				'planned_delivery_comment' => (string) ( $rate['planned_delivery_comment'] ?? $result['planned_delivery_comment'] ?? '' ),
 				'round_up_applied' => ! empty( $rate['round_up_applied'] ) || ! empty( $rate_meta['round_up_applied'] ),
 				'minimum_price_applied' => ! empty( $rate['minimum_price_applied'] ) || ! empty( $rate_meta['minimum_price_applied'] ),
 				'crossed_price_rub' => $result['crossed_price_rub'] ?? $rate['crossed_price'] ?? null,

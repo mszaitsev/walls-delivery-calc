@@ -37,7 +37,8 @@ final class CheckoutOrchestrator {
 		private ?DeliveryServiceRegistry $service_registry = null,
 		private ?DeliveryServiceManager $service_manager = null,
 		private ?PackagingWeightCalculator $packaging_calculator = null,
-		private ?DpdSettings $dpd_settings = null
+		private ?DpdSettings $dpd_settings = null,
+		private ?DeliveryLeadTimeNormalizer $lead_time_normalizer = null
 	) {
 	}
 
@@ -111,6 +112,7 @@ final class CheckoutOrchestrator {
 					$rate = $this->rate_with_meta( $rate, $packaging_result->to_meta() );
 				}
 				$rate = $service instanceof DeliveryService ? $this->rate_for_service( $rate, $service ) : $rate;
+				$rate = $this->lead_time_normalizer instanceof DeliveryLeadTimeNormalizer ? $this->lead_time_normalizer->normalize( $rate, $service, $service_request ) : $rate;
 				$rules_source = 'none';
 				if ( ! empty( $rate->meta['skip_rules'] ) ) {
 					$rules_for_rate = array();
@@ -128,6 +130,7 @@ final class CheckoutOrchestrator {
 				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager && empty( $applied['rate']->meta['skip_service_post_processing'] )
 					? $this->service_manager->post_process_rate( $applied['rate'], $service )
 					: $applied['rate'];
+				$processed = $this->lead_time_normalizer instanceof DeliveryLeadTimeNormalizer ? $this->lead_time_normalizer->enrich_planned_date( $processed, $service_request ) : $processed;
 				$processed = $this->rate_with_meta(
 					$processed,
 					array(

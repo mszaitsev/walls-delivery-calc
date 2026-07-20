@@ -442,9 +442,9 @@ final class OrderDeliveryMetabox {
 		$delivery_type = $this->order_meta( $order, '_wdc_platform_delivery_type' );
 		$rows          = array(
 			'Перевозчик' => $this->order_meta( $order, '_wdc_platform_carrier_key' ),
-			'Способ доставки' => $this->order_meta( $order, '_wdc_platform_rate_id' ),
+			'Способ доставки' => $this->order_meta( $order, '_wdc_platform_service_title' ),
 			'Тип доставки' => $this->delivery_type_label( $delivery_type ),
-			'Срок доставки' => $this->order_meta( $order, '_wdc_platform_planned_delivery_comment' ),
+			'Планируемая доставка' => $this->order_meta( $order, '_wdc_platform_planned_delivery_comment' ),
 			'Населенный пункт' => $this->city_summary( $order ),
 			'Источник населенного пункта' => $this->city_source_label( $order ),
 			'Индекс населенного пункта' => $this->order_meta( $order, '_wdc_platform_city_postcode' ),

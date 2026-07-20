@@ -377,6 +377,7 @@ C:.
 |   |   |       CheckoutCalculationResult.php
 |   |   |       CheckoutLogger.php
 |   |   |       CheckoutOrchestrator.php
+|   |   |       DeliveryLeadTimeNormalizer.php
 |   |   |       FallbackRateFactory.php
 |   |   |       RuleAppliedRateBuilder.php
 |   |   |

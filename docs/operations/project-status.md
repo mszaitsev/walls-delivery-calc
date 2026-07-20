@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.124.19
+Version: 0.124.20
 
 Stable subsystems:
 
@@ -23,6 +23,7 @@ Active known limitations:
 
 Recent fixes:
 
+- Checkout and order delivery recalculation now share a delivery lead-time pipeline: carrier raw lead time, shop processing calendar, optional carrier working-day conversion, delivery date rules, and final planned date. The global processing default is `2` shop working days, the per-service working-day flag defaults to off, and existing manual processing additions in rules should be removed manually where they are no longer wanted.
 - The overview admin page now shows only platform information and delivery quote cache cleanup, while system requirements notices remain handled globally by `AdminNotices`.
 - Checkout runtime gating now uses `CheckoutFeatureGate` with `enable_new_checkout_shipping` as the single source of truth; the legacy feature flag service was removed.
 - Yandex Delivery shipment modal restores source drop-off PVZ presentation from the canonical V2 pickup context, including `full_address`, `schedule_text`, and coordinates, so the modal address and drop-off map survive the shipment framework flow.

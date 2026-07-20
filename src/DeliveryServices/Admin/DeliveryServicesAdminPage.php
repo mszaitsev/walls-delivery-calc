@@ -59,6 +59,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
@@ -136,6 +137,7 @@ final class DeliveryServicesAdminPage {
 		private ?YandexGeoV2RegionEnrichmentRunner $yandex_geo_v2_region_enrichment_runner = null,
 		private ?YandexDeliveryGeoPipelineV2Runner $yandex_delivery_geo_pipeline_v2_runner = null,
 		private ?YandexStatusMapping $yandex_status_mapping = null,
+		private ?SettingsRepository $global_settings = null,
 	) {
 	}
 
@@ -708,6 +710,7 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		if ( in_array( $action, array(
+				'save_global_delivery_settings',
 				'save',
 				'save_main',
 				'save_availability',
@@ -750,6 +753,12 @@ final class DeliveryServicesAdminPage {
 				'save_yandex_delivery_settings',
 				'check_yandex_delivery_connection'
 			), true ) ) {
+			if ( 'save_global_delivery_settings' === $action ) {
+				$this->save_global_delivery_settings();
+				$this->clear_delivery_quote_cache();
+				wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&updated=1' ) );
+				exit;
+			}
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -812,6 +821,10 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( 'save_main' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $service instanceof DeliveryService && null !== $service->id ) {
+					$this->settings->set_setting( (int) $service->id, DeliveryServiceSettingsRepository::DELIVERY_DAYS_ARE_WORKING_KEY, isset( $_POST[ DeliveryServiceSettingsRepository::DELIVERY_DAYS_ARE_WORKING_KEY ] ), 'bool' );
+					$this->clear_delivery_quote_cache();
+				}
 				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
 					$this->save_russian_post_domestic_main_settings( (int) $service->id );
 				}
@@ -1364,6 +1377,27 @@ final class DeliveryServicesAdminPage {
 				</tbody>
 			</table>
 		</form>
+		<?php $this->render_global_delivery_settings_form(); ?>
+		<?php
+	}
+
+	private function render_global_delivery_settings_form(): void {
+		$value = $this->global_settings instanceof SettingsRepository ? $this->global_settings->shop_processing_working_days() : 2;
+		?>
+		<form method="post" style="max-width: 760px; margin: 20px 0;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_global_delivery_settings">
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="wdc_shop_processing_working_days"><?php echo esc_html__( 'Рабочих дней на обработку заказа магазином', 'walls-delivery-calc' ); ?></label></th>
+					<td>
+						<input id="wdc_shop_processing_working_days" class="small-text" type="number" min="0" max="365" name="<?php echo esc_attr( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY ); ?>" value="<?php echo esc_attr( (string) $value ); ?>">
+						<p class="description"><?php echo esc_html__( 'Текущий день не учитывается. Рабочие и выходные дни определяются по «Календарю магазина».', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Сохранить настройки сроков', 'walls-delivery-calc' ) ); ?>
+		</form>
 		<?php
 	}
 
@@ -1467,6 +1501,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( 'sort_order', __( 'Sort order', 'walls-delivery-calc' ), (string) $service->sort_order ); ?>
 				<?php $this->checkbox_row( 'enabled', __( 'Включена', 'walls-delivery-calc' ), $service->enabled ); ?>
 				<?php $this->checkbox_row( 'use_default_rules_when_no_service_rules', __( 'Fallback на default rules', 'walls-delivery-calc' ), $service->use_default_rules_when_no_service_rules ); ?>
+				<?php $this->checkbox_row( DeliveryServiceSettingsRepository::DELIVERY_DAYS_ARE_WORKING_KEY, __( 'Служба доставки даёт срок в рабочих днях. Нужно пересчитать в календарные', 'walls-delivery-calc' ), null !== $service->id && $this->settings instanceof DeliveryServiceSettingsRepository ? $this->settings->delivery_days_are_working( (int) $service->id ) : false ); ?>
 				<tr><th colspan="2"><h3><?php echo esc_html__( 'Доступность', 'walls-delivery-calc' ); ?></h3></th></tr>
 				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode, $this->availability_mode_options() ); ?>
 				<?php if ( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY === $service->availability_mode ) : ?>
@@ -4362,6 +4397,15 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		foreach ( $this->sanitize_russian_post_settings_from_post() as $key => $data ) {
 			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
 		}
+	}
+
+	private function save_global_delivery_settings(): void {
+		if ( ! $this->global_settings instanceof SettingsRepository ) {
+			return;
+		}
+
+		$value = max( 0, min( 365, (int) ( $_POST[ SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY ] ?? 2 ) ) );
+		$this->global_settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $value );
 	}
 
 	private function save_russian_post_domestic_settings( int $service_id ): void {

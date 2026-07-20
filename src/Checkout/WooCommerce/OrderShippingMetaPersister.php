@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
@@ -15,8 +16,10 @@ final class OrderShippingMetaPersister {
 	public const CALCULATION_META_KEY = '_wdc_delivery_calculation_data';
 
 	public function __construct(
-		private CheckoutSessionManager $session_manager
+		private CheckoutSessionManager $session_manager,
+		private ?DeliveryDateFormatter $date_formatter = null
 	) {
+		$this->date_formatter = $this->date_formatter ?? new DeliveryDateFormatter();
 	}
 
 	public function register(): void {
@@ -48,6 +51,7 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_rate_id'                  => $rate['rate_id'] ?? '',
 			'_wdc_platform_delivery_type'            => $rate['delivery_type'] ?? '',
 			'_wdc_platform_crossed_price'            => $rate['crossed_price'] ?? null,
+			'_wdc_platform_planned_delivery_date'    => $rate['planned_delivery_date'] ?? '',
 			'_wdc_platform_planned_delivery_comment' => $rate['planned_delivery_comment'] ?? '',
 			'_wdc_platform_comments'                 => $rate['comments'] ?? array(),
 			'_wdc_platform_fallback_used'            => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ),
@@ -173,7 +177,10 @@ final class OrderShippingMetaPersister {
 		}
 
 		$this->delete_visible_technical_item_meta( $item );
-		$item->add_meta_data( 'Срок доставки', $this->delivery_label_or_not_specified( $rate ), true );
+		$planned = $this->planned_delivery_order_meta_value( $rate );
+		if ( '' !== $planned ) {
+			$item->add_meta_data( 'Планируемая* дата доставки', $planned, true );
+		}
 	}
 
 	/**
@@ -347,6 +354,8 @@ final class OrderShippingMetaPersister {
 			'fallback'              => $is_fallback,
 			'fallback_reason'       => (string) ( $rate_meta['fallback_reason'] ?? '' ),
 			'fallback_text'         => (string) ( $rate_meta['fallback_text'] ?? '' ),
+			'planned_delivery_date' => (string) ( $rate['planned_delivery_date'] ?? '' ),
+			'planned_delivery_comment' => (string) ( $rate['planned_delivery_comment'] ?? '' ),
 		);
 
 		$delivery_days = is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array();
@@ -465,6 +474,18 @@ final class OrderShippingMetaPersister {
 		$delivery = $this->compact_delivery_label( $rate );
 
 		return '' !== $delivery ? $delivery : 'не указан';
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function planned_delivery_order_meta_value( array $rate ): string {
+		$date = trim( (string) ( $rate['planned_delivery_date'] ?? '' ) );
+		if ( '' === $date ) {
+			return '';
+		}
+
+		return $this->date_formatter instanceof DeliveryDateFormatter ? $this->date_formatter->format_order_meta_value( $date ) : '';
 	}
 
 	/**
@@ -589,6 +610,7 @@ final class OrderShippingMetaPersister {
 			'Тип доставки',
 			'Тариф',
 			'Срок доставки',
+			'Планируемая* дата доставки',
 			'Населенный пункт',
 			'Нормализация',
 			'Код ПВЗ',
@@ -599,6 +621,7 @@ final class OrderShippingMetaPersister {
 			'Индекс ПВЗ',
 			'Тип ПВЗ',
 			'crossed_price',
+			'planned_delivery_date',
 			'planned_delivery_comment',
 			'comments',
 			'disabled',

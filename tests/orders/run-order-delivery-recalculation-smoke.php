@@ -1113,6 +1113,8 @@ $pickup_rate = $rates_by_id['russian_post_domestic:pickup'];
 $pickup_rate['selected_tariff'] = $pickup_rate['tariff_variants'][0] ?? array();
 $courier_rate = $rates_by_id['russian_post_domestic:courier'];
 $courier_rate['selected_tariff'] = $courier_rate['tariff_variants'][0] ?? array();
+$courier_rate['planned_delivery_date'] = '2026-08-12';
+$courier_rate['selected_tariff']['planned_delivery_date'] = '2026-08-12';
 
 $invalid_pickup = new WdcRecalcOrder( 105, array() );
 $invalid_pickup->shipping_items = array( 'method_title' => 'Old delivery', 'total' => 111.0 );
@@ -1218,7 +1220,7 @@ recalc_smoke_assert( true === $create_result['success'] && 'wdc_platform_deliver
 recalc_smoke_assert( 5700.0 === $no_shipping_order->total && $no_shipping_order->saved, 'Save must recalculate totals and save order after creating shipping item.' );
 recalc_smoke_assert( isset( $no_shipping_order->meta['_wdc_delivery_calculation_data'], $no_shipping_order->meta['_wdc_platform_rate_id'], $no_shipping_order->meta['_wdc_platform_delivery_type'] ), 'Save must update WDC calculation and platform meta.' );
 recalc_smoke_assert( array() !== $no_shipping_order->notes && false === $no_shipping_order->notes[0]['customer'], 'Save must add private order note.' );
-recalc_smoke_assert( array( 'Срок доставки' => (string) ( $courier_rate['selected_tariff']['delivery_comment'] ?? $courier_rate['delivery_comment'] ?? '' ) ) === ( $no_shipping_order->shipping_items['meta'] ?? array() ), 'Russian Post domestic admin visible meta must contain only delivery time.' );
+recalc_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === ( $no_shipping_order->shipping_items['meta'] ?? array() ), 'Russian Post domestic admin visible meta must contain only planned delivery date.' );
 
 $unspecified_rate = $courier_rate;
 $unspecified_rate['id'] = 'future:carrier';
@@ -1227,6 +1229,7 @@ $unspecified_rate['carrier_key'] = 'future';
 $unspecified_rate['service_key'] = 'future';
 $unspecified_rate['label'] = 'Future carrier';
 $unspecified_rate['delivery_comment'] = '';
+$unspecified_rate['planned_delivery_date'] = '';
 $unspecified_rate['planned_delivery_comment'] = '';
 $unspecified_rate['selected_tariff'] = array();
 $unspecified_rate['tariff_title'] = '';
@@ -1242,7 +1245,7 @@ $unspecified_result = $replacement->save(
 		'normalized_shipping_address' => $normalized_address,
 	)
 );
-recalc_smoke_assert( true === $unspecified_result['success'] && array( 'Срок доставки' => 'не указан' ) === ( $unspecified_order->shipping_items['meta'] ?? array() ), 'Admin replacement visible meta must use not specified when delivery time is missing.' );
+recalc_smoke_assert( true === $unspecified_result['success'] && array() === ( $unspecified_order->shipping_items['meta'] ?? array() ), 'Admin replacement visible meta must be omitted when planned date is missing.' );
 
 $cdek_admin_rate = array(
 	'id' => 'cdek:courier:137',
@@ -1253,6 +1256,7 @@ $cdek_admin_rate = array(
 	'label' => 'СДЭК дверь тест',
 	'delivery_type' => 'courier',
 	'delivery_comment' => '10-14 дней',
+	'planned_delivery_date' => '2026-08-12',
 	'planned_delivery_comment' => '10-14 дней',
 	'cost' => 650.0,
 	'api_base_price_rub' => 520.0,
@@ -1292,7 +1296,7 @@ $cdek_admin_result = $replacement->save(
 recalc_smoke_assert( true === $cdek_admin_result['success'], 'CDEK admin save must succeed for courier rate.' );
 recalc_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь - 10-14 дней' === (string) ( $cdek_admin_order->shipping_items['method_title'] ?? '' ), 'CDEK admin save must build method title with custom method, tariff and delivery text.' );
 recalc_smoke_assert( 1 === substr_count( (string) ( $cdek_admin_order->shipping_items['method_title'] ?? '' ), '10-14 дней' ), 'CDEK admin save method title must not duplicate delivery text.' );
-recalc_smoke_assert( array( 'Срок доставки' => '10-14 дней' ) === ( $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must contain only delivery time.' );
+recalc_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === ( $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must contain only planned delivery date.' );
 foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	recalc_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must not contain technical key: ' . $forbidden_meta_key );
 }
@@ -1496,6 +1500,7 @@ $cdek_no_days_rate = $cdek_admin_rate;
 $cdek_no_days_rate['rate_id'] = 'cdek:courier:no-days';
 $cdek_no_days_rate['id'] = 'cdek:courier:no-days';
 $cdek_no_days_rate['delivery_comment'] = '';
+$cdek_no_days_rate['planned_delivery_date'] = '';
 $cdek_no_days_rate['planned_delivery_comment'] = '';
 $cdek_no_days_order = new WdcRecalcOrder( 119, array() );
 $cdek_no_days_order->shipping_items = array();
@@ -1510,7 +1515,7 @@ $cdek_no_days_result = $replacement->save(
 );
 recalc_smoke_assert( true === $cdek_no_days_result['success'], 'CDEK admin save without delivery days must succeed.' );
 recalc_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === (string) ( $cdek_no_days_order->shipping_items['method_title'] ?? '' ), 'CDEK admin save without delivery days must include method and tariff only.' );
-recalc_smoke_assert( array( 'Срок доставки' => 'не указан' ) === ( $cdek_no_days_order->shipping_items['meta'] ?? array() ), 'CDEK admin save without delivery days must keep visible meta not specified.' );
+recalc_smoke_assert( array() === ( $cdek_no_days_order->shipping_items['meta'] ?? array() ), 'CDEK admin save without planned date must omit visible meta.' );
 
 $replace_order = new WdcRecalcOrder( 107, array() );
 $replace_result = $replacement->save(

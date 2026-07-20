@@ -60,6 +60,10 @@ final class CheckoutRateRenderer {
 				}
 			}
 		}
+		$planned_comment = trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) );
+		if ( '' !== $planned_comment ) {
+			echo '<div class="wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">' . esc_html( $planned_comment ) . '</div>';
+		}
 		$this->render_yandex_5post_warning( $meta, $method );
 
 		echo '</div>';

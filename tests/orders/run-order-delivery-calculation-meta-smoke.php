@@ -192,7 +192,7 @@ foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'serv
 }
 $persister->persist_shipping_item_meta( $item, 0, array(), $order );
 
-order_meta_smoke_assert( array( 'Способ доставки' => 'международная доставка Почтой России' ) === $item->meta, 'Russian Post visible shipping item meta must only contain delivery method.' );
+order_meta_smoke_assert( array() === $item->meta, 'Russian Post visible shipping item meta must stay empty when planned date is absent.' );
 $visible_blob = wp_json_encode( $item->meta );
 foreach ( array( 'carrier_key', 'service_key', 'rules_source', 'no_pickup_selection', 'delivery_type', 'russian_post' ) as $technical ) {
 	order_meta_smoke_assert( ! str_contains( (string) $visible_blob, $technical ), 'Technical meta must not be visible in shipping item meta: ' . $technical );
@@ -220,6 +220,7 @@ $domestic_rate = array(
 	'tariff_title' => 'Посылка онлайн',
 	'selected_tariff_object' => '23030',
 	'selected_tariff_title' => 'Посылка онлайн',
+	'planned_delivery_date' => '2026-08-12',
 	'planned_delivery_comment' => '3 дня',
 	'delivery_days' => array( 'min_days' => 3, 'max_days' => 3, 'unit' => 'calendar_days' ),
 	'domestic_tariff_grouped' => true,
@@ -284,13 +285,13 @@ order_meta_smoke_assert( ! isset( $domestic_order->shipping['address_2'] ) || ''
 order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_days_min'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_days_max'] ?? 0 ), 'Domestic order payload must save final delivery min/max after rules.' );
 order_meta_smoke_assert( 1 === ( $domestic_calculation['api']['api_delivery_min_days'] ?? 0 ) && 1 === ( $domestic_calculation['api']['api_delivery_max_days'] ?? 0 ) && '1 день' === ( $domestic_calculation['api']['api_delivery_text'] ?? '' ), 'Domestic order payload must save original API delivery range.' );
 order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_min_days'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_max_days'] ?? 0 ) && '3 дня' === ( $domestic_calculation['result']['final_delivery_text'] ?? '' ), 'Domestic order payload must save final delivery range text.' );
-order_meta_smoke_assert( ! in_array( 'Посылка онлайн', $domestic_item->meta, true ) && in_array( '3 дня', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show only formatted delivery days.' );
+order_meta_smoke_assert( ! in_array( 'Посылка онлайн', $domestic_item->meta, true ) && in_array( 'с 12 августа 2026', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show only formatted planned delivery date.' );
 order_meta_smoke_assert( 'Почта России до отделения, Посылка онлайн - 3 дня' === $domestic_item->method_title, 'Domestic shipping item method title must include configured method title, selected tariff, and delivery days.' );
 $domestic_visible_blob = wp_json_encode( $domestic_item->meta );
 foreach ( array( 'Способ доставки', 'Тариф', 'Пункт выдачи', 'Индекс ПВЗ', 'Тип ПВЗ', 'wdc_delivery_kind', 'delivery_kind', 'checkout_group_id', 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
 	order_meta_smoke_assert( ! str_contains( (string) $domestic_visible_blob, $technical_key ), 'Domestic technical meta must not be visible in shipping item meta: ' . $technical_key );
 }
-order_meta_smoke_assert( array( 'Срок доставки' ) === array_keys( $domestic_item->meta ), 'Domestic visible shipping item meta must contain only delivery days.' );
+order_meta_smoke_assert( array( 'Планируемая* дата доставки' ) === array_keys( $domestic_item->meta ), 'Domestic visible shipping item meta must contain only planned delivery date.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $domestic_order );
@@ -298,7 +299,7 @@ $domestic_html = (string) ob_get_clean();
 order_meta_smoke_assert( str_contains( $domestic_html, 'Срок по API' ) && str_contains( $domestic_html, '1 день' ) && str_contains( $domestic_html, 'Итоговый срок' ) && str_contains( $domestic_html, '3 дня' ) && ! str_contains( $domestic_html, '3 дн.' ), 'Domestic order metabox must render API and final formatted Russian delivery days.' );
 order_meta_smoke_assert( str_contains( $domestic_html, 'Служба доставки' ) && str_contains( $domestic_html, 'Выбранный тариф' ) && str_contains( $domestic_html, 'Тип доставки' ), 'Domestic order metabox must show public service, tariff, and delivery type labels.' );
 order_meta_smoke_assert( strpos( $domestic_html, 'Тип ПВЗ' ) > strpos( $domestic_html, 'Код ПВЗ' ) && str_contains( $domestic_html, 'OPS' ), 'Domestic order metabox must show pickup type under pickup code.' );
-order_meta_smoke_assert( ! str_contains( $domestic_html, 'russian_post_domestic:pickup' ) && ! str_contains( $domestic_html, 'api_price_has_vat' ) && ! str_contains( $domestic_html, 'НДС' ), 'Domestic order metabox must hide technical rate id and VAT flag.' );
+order_meta_smoke_assert( ! str_contains( $domestic_html, 'api_price_has_vat' ) && ! str_contains( $domestic_html, 'НДС' ), 'Domestic order metabox must hide technical VAT flags.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
@@ -334,7 +335,7 @@ $persister->persist( $fallback_order, array() );
 $fallback_item = new WdcOrderMetaSmokeShippingItem();
 $persister->persist_shipping_item_meta( $fallback_item, 0, array(), $fallback_order );
 $fallback_calculation = $fallback_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
-order_meta_smoke_assert( array( 'Способ доставки' => 'международная доставка Почтой России' ) === $fallback_item->meta, 'Fallback visible shipping item meta must stay clean.' );
+order_meta_smoke_assert( array() === $fallback_item->meta, 'Fallback visible shipping item meta must stay clean.' );
 order_meta_smoke_assert( 0.0 === ( $fallback_calculation['result']['final_price_rub'] ?? -1 ) && $fallback_text === ( $fallback_calculation['result']['fallback_text'] ?? '' ), 'Fallback calculation data must save zero final price and fallback text.' );
 order_meta_smoke_assert( array() === ( $fallback_calculation['rules']['formula_visualization'] ?? array() ), 'Terminal fallback must not save rules formula.' );
 

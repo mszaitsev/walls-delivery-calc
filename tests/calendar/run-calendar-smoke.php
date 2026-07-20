@@ -11,6 +11,7 @@ use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Domain\Calendar\CalendarDay;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
@@ -178,6 +179,39 @@ calendar_smoke_assert( '2026-05-26' === $planned->planned_date_max, 'Calendar-da
 
 $working = $calculator->calculate( '2026-05-20 12:00:00 Asia/Novosibirsk', 1, DateRange::single( 5, DateRange::UNIT_WORKING_DAYS ) );
 calendar_smoke_assert( '2026-05-28' === $working->planned_date_min, 'Working-day delivery must skip carrier weekends.' );
+
+$normalized = $calculator->normalize_lead_time( '2026-05-19', 2, DateRange::single( 2 ), false );
+calendar_smoke_assert( 2 === $normalized['processing_calendar_days'] && 4 === $normalized['total_calendar_days']->min_days, 'Tue + 2 shop working days must add 2 calendar days plus carrier calendar days.' );
+
+$normalized = $calculator->normalize_lead_time( '2026-05-22', 2, DateRange::single( 2 ), false );
+calendar_smoke_assert( 3 === $normalized['processing_calendar_days'], 'Fri with working Saturday and Sunday off must produce 3 processing calendar days.' );
+
+$normalized = $calculator->normalize_lead_time( '2026-05-23', 2, DateRange::single( 2 ), false );
+calendar_smoke_assert( 3 === $normalized['processing_calendar_days'], 'Sat with Sunday off and Mon/Tue working must produce 3 processing calendar days.' );
+
+$repository->save_day( new CalendarDay( '2026-05-25', false, 'test holiday', CalendarTypes::SHOP ) );
+$normalized = $calculator->normalize_lead_time( '2026-05-22', 2, DateRange::single( 2 ), false );
+calendar_smoke_assert( 4 === $normalized['processing_calendar_days'], 'Fri with Sun/Mon off must produce 4 processing calendar days.' );
+
+$repository->save_day( new CalendarDay( '2026-05-27', false, 'test holiday', CalendarTypes::SHOP ) );
+$normalized = $calculator->normalize_lead_time( '2026-05-23', 2, DateRange::single( 2 ), false );
+calendar_smoke_assert( 5 === $normalized['processing_calendar_days'], 'Sat with Sun/Mon off and Wed off must produce 5 processing calendar days.' );
+
+$zero = $calculator->normalize_lead_time( '2026-05-22', 0, DateRange::single( 2, DateRange::UNIT_WORKING_DAYS ), true );
+calendar_smoke_assert( '2026-05-22' === $zero['handoff_date'] && 4 === $zero['carrier_calendar_days']->min_days, 'Processing 0 must keep handoff date and carrier working days must still start after handoff.' );
+
+$calendar_carrier = $calculator->normalize_lead_time( '2026-05-22', 0, DateRange::single( 2 ), false );
+calendar_smoke_assert( 2 === $calendar_carrier['carrier_calendar_days']->min_days, 'Carrier calendar flag disabled must keep carrier days as calendar days.' );
+
+$working_carrier = $calculator->normalize_lead_time( '2026-05-22', 0, DateRange::single( 2 ), true );
+calendar_smoke_assert( 4 === $working_carrier['carrier_calendar_days']->min_days, 'Carrier calendar flag enabled must convert carrier working days through carrier_ru calendar.' );
+
+$range = $calculator->normalize_lead_time( '2026-05-22', 0, DateRange::range( 2, 3 ), true );
+calendar_smoke_assert( 4 === $range['total_calendar_days']->min_days && 5 === $range['total_calendar_days']->max_days, 'Min/max carrier range must be converted independently.' );
+
+$formatter = new DeliveryDateFormatter();
+calendar_smoke_assert( 'Доставка планируется* с 12 августа (среда).' === $formatter->format_checkout_comment( '2026-08-12' ), 'Checkout planned delivery comment must use the canonical format.' );
+calendar_smoke_assert( 'с 12 августа 2026' === $formatter->format_order_meta_value( '2026-08-12' ), 'Order planned delivery meta value must use the canonical format.' );
 
 update_option(
 	'wdc_calendar_attention_required',

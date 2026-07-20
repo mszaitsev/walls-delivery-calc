@@ -481,7 +481,7 @@ $render_method = (object) array(
 ob_start();
 ( new CheckoutRateRenderer() )->render( $render_method );
 $rendered_rate_html = (string) ob_get_clean();
-wc_checkout_smoke_assert( ! str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must suppress planned_delivery_comment while preserving ordinary meta comments.' );
+	wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must output planned_delivery_comment and preserve ordinary meta comments.' );
 
 $suggestion_settings_repo = new SettingsRepository();
 $suggestion_settings_repo->set( 'dadata_suggestions_enabled', true );
@@ -628,6 +628,7 @@ $session->save_rates(
 			'service_title' => 'СДЭК',
 			'label' => 'СДЭК курьер, Посылка склад-дверь - 10-14 дней',
 			'delivery_type' => 'courier',
+			'planned_delivery_date' => '2026-08-12',
 			'planned_delivery_comment' => '10-14 дней',
 			'delivery_comment' => '10-14 дней',
 			'cost' => 520.0,
@@ -666,7 +667,7 @@ $cdek_item->meta = array(
 $cdek_persister = new OrderShippingMetaPersister( $session );
 $cdek_persister->persist_shipping_item_meta( $cdek_item );
 wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
-wc_checkout_smoke_assert( array( 'Срок доставки' => '10-14 дней' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only delivery time.' );
+	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );
 foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'pickup_family', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	wc_checkout_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
 }
@@ -686,6 +687,7 @@ $session->save_rates(
 			'label' => 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня',
 			'delivery_type' => 'pickup',
 			'requires_pickup_point' => true,
+			'planned_delivery_date' => '2026-08-12',
 			'planned_delivery_comment' => '2-4 дня',
 			'delivery_comment' => '2-4 дня',
 			'cost' => 350.5,
@@ -772,6 +774,7 @@ $session->save_rates(
 			'label' => 'СДЭК дверь тест',
 			'delivery_type' => 'courier',
 			'delivery_comment' => '10-14 дней',
+			'planned_delivery_date' => '2026-08-12',
 			'planned_delivery_comment' => '10-14 дней',
 			'cost' => 520.0,
 			'tariff_title' => 'Посылка склад-дверь',
@@ -805,7 +808,7 @@ WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cde
 $no_days_cdek_item = new WdcSmokeShippingItem();
 ( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $no_days_cdek_item );
 wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === $no_days_cdek_item->method_title, 'CDEK checkout method title without delivery days must include method and tariff only.' );
-wc_checkout_smoke_assert( array( 'Срок доставки' => 'не указан' ) === $no_days_cdek_item->meta, 'CDEK checkout visible meta without delivery days must be not specified.' );
+	wc_checkout_smoke_assert( array() === $no_days_cdek_item->meta, 'CDEK checkout visible meta without planned date must be omitted.' );
 
 $compact_forbidden_meta_keys = array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация', 'Код ПВЗ', 'Адрес ПВЗ' );
 
@@ -819,6 +822,7 @@ $session->save_rates(
 			'label' => 'Почта России до отделения, Посылка 1 класса - 3-5 дней',
 			'delivery_type' => 'pickup',
 			'delivery_days' => array( 'min_days' => 3, 'max_days' => 5 ),
+			'planned_delivery_date' => '2026-08-12',
 			'planned_delivery_comment' => '3-5 дней',
 			'tariff_title' => 'Посылка 1 класса',
 			'selected_tariff_title' => 'Посылка 1 класса',
@@ -829,7 +833,7 @@ WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:rus
 $domestic_item = new WdcSmokeShippingItem();
 $domestic_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
 ( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $domestic_item );
-wc_checkout_smoke_assert( array( 'Срок доставки' => '3-5 дней' ) === $domestic_item->meta, 'Russian Post domestic checkout visible meta must contain only delivery time.' );
+	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $domestic_item->meta, 'Russian Post domestic checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
 	array(
@@ -839,6 +843,7 @@ $session->save_rates(
 			'service_key' => 'russian_post',
 			'label' => 'Почта России международная - 8-12 дней',
 			'delivery_type' => 'courier',
+			'planned_delivery_date' => '2026-08-12',
 			'planned_delivery_comment' => '8-12 дней',
 		),
 	)
@@ -847,7 +852,7 @@ WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:rus
 $international_item = new WdcSmokeShippingItem();
 $international_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
 ( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $international_item );
-wc_checkout_smoke_assert( array( 'Срок доставки' => '8-12 дней' ) === $international_item->meta, 'Russian Post international checkout visible meta must contain only delivery time.' );
+	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $international_item->meta, 'Russian Post international checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
 	array(
@@ -864,7 +869,7 @@ WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:fut
 $unspecified_item = new WdcSmokeShippingItem();
 $unspecified_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
 ( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $unspecified_item );
-wc_checkout_smoke_assert( array( 'Срок доставки' => 'не указан' ) === $unspecified_item->meta, 'Checkout visible meta must use not specified when delivery time is missing.' );
+	wc_checkout_smoke_assert( array() === $unspecified_item->meta, 'Checkout visible meta must be omitted when planned date is missing.' );
 
 $delivery_days_audit = array(
 	array(
