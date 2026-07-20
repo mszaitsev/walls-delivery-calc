@@ -180,7 +180,7 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 }
 
 $session = new CheckoutSessionManager();
-$persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() );
+$persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
 $rate = wdc_order_meta_rate();
 $session->save_rates( array( 'russian_post_worldwide_parcel' => $rate ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );

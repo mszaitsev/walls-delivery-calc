@@ -433,7 +433,7 @@ $session->save_normalized_address_result(
 );
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:pickup' ) );
 $order = new WdcPickupSmokeOrder();
-$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() );
+$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
 $persister->persist( $order );
 $shipping_item = new WdcPickupSmokeShippingItem();
 $persister->persist_shipping_item_meta( $shipping_item, 0, array(), $order );
@@ -475,7 +475,7 @@ pickup_smoke_assert( ! $errors->has_errors(), 'Validation must ignore another ca
 $bucketed_pickup = $session->pickup_selections();
 pickup_smoke_assert( 'demo-nsk-001' === (string) ( $bucketed_pickup['demo:pickup']['point_code'] ?? '' ) && 'OTHER-1' === (string) ( $bucketed_pickup['other_carrier:pickup']['point_code'] ?? '' ), 'Session must keep demo and other carrier pickup selections in separate buckets.' );
 $order = new WdcPickupSmokeOrder();
-( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $order );
 pickup_smoke_assert( 'demo-nsk-001' === (string) ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must use only the active pickup_family bucket.' );
 $session->clear_pickup_selection_for_family( 'other_carrier:pickup', 'family_reset_smoke' );
 pickup_smoke_assert( ! isset( $session->pickup_selections()['other_carrier:pickup'] ) && 'demo-nsk-001' === (string) ( $session->pickup_selections()['demo:pickup']['point_code'] ?? '' ), 'Custom family reset must not remove active demo pickup bucket.' );
@@ -504,7 +504,7 @@ $errors = new WdcPickupSmokeErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'billing_address_1' => 'ул. Советская, д. 99' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for courier with address and stale pickup selection.' );
 $order = new WdcPickupSmokeOrder();
-$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() );
+$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
 $persister->persist( $order );
 $shipping_item = new WdcPickupSmokeShippingItem();
 $persister->persist_shipping_item_meta( $shipping_item, 0, array(), $order );

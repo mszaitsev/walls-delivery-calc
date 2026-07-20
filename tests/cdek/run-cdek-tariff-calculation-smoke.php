@@ -646,7 +646,7 @@ $checkout_item->meta = array(
 	'Населенный пункт' => 'Новосибирск',
 	'Нормализация' => 'manual',
 );
-$checkout_persister = new OrderShippingMetaPersister( $checkout_session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() );
+$checkout_persister = new OrderShippingMetaPersister( $checkout_session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
 $checkout_persister->persist_shipping_item_meta( $checkout_item );
 cdek_tariff_assert( $courier_rate->title === $checkout_item->method_title, 'CDEK checkout shipping item method title must keep method, tariff and delivery text. Expected "' . $courier_rate->title . '", got "' . $checkout_item->method_title . '".' );
 cdek_tariff_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $checkout_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );

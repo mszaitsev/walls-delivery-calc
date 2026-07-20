@@ -753,7 +753,7 @@ $stored_rates = $session->rates();
 $first_rate   = array_key_first( $stored_rates );
 WC()->session->set( 'chosen_shipping_methods', array( $first_rate ) );
 $order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $order );
 wc_checkout_smoke_assert( isset( $order->meta['_wdc_platform_carrier_key'] ), 'Order meta persister must save carrier key.' );
 wc_checkout_smoke_assert( isset( $order->meta['_wdc_platform_rate_id'] ), 'Order meta persister must save rate id.' );
 wc_checkout_smoke_assert( array_key_exists( '_wdc_platform_fallback_used', $order->meta ), 'Order meta persister must save fallback flag.' );
@@ -782,7 +782,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:demo:courier' ) );
 $order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $order );
 wc_checkout_smoke_assert( 'demo:courier' === ( $order->meta['_wdc_platform_rate_id'] ?? '' ), 'Persister must save selected courier from full WooCommerce rate id.' );
 wc_checkout_smoke_assert( 'courier' === ( $order->meta['_wdc_platform_delivery_type'] ?? '' ), 'Persister must not fall back to first pickup rate.' );
 
@@ -831,7 +831,7 @@ $cdek_item->meta = array(
 	'Населенный пункт' => 'Новосибирск',
 	'Нормализация' => 'manual',
 );
-$cdek_persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() );
+$cdek_persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
 $cdek_persister->persist_shipping_item_meta( $cdek_item );
 wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
 	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );
@@ -925,7 +925,7 @@ $errors = new WdcSmokeCheckoutErrors();
 wc_checkout_smoke_assert( array() === $errors->errors, 'CDEK pickup selected in checkout must pass validation.' );
 wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === (string) ( $session->checkout_pickup_point()['point_address'] ?? '' ) && 'Inside the shopping center' === (string) ( $session->checkout_pickup_point()['description'] ?? '' ) && 'KEM7' === (string) ( $session->checkout_pickup_point()['cdek_code'] ?? '' ), 'CDEK hidden fields restore must keep the full checkout pickup payload in session.' );
 $cdek_pickup_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $cdek_pickup_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $cdek_pickup_order );
 $cdek_pickup_calc = $cdek_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
 wc_checkout_smoke_assert( 'KEM7' === ( $cdek_pickup_calc['pickup']['point_code'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK checkout order create must save point_code separately from postcode.' );
 wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK checkout order create must save pickup description and storage notice.' );
@@ -952,7 +952,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:custom' ) );
 $custom_cdek_item = new WdcSmokeShippingItem();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $custom_cdek_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist_shipping_item_meta( $custom_cdek_item );
 wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь - 10-14 дней' === $custom_cdek_item->method_title, 'CDEK checkout method title must use custom service title, selected tariff and delivery days.' );
 wc_checkout_smoke_assert( 1 === substr_count( $custom_cdek_item->method_title, '10-14 дней' ), 'CDEK checkout method title must not duplicate delivery days.' );
 
@@ -973,7 +973,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:no-days' ) );
 $no_days_cdek_item = new WdcSmokeShippingItem();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $no_days_cdek_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist_shipping_item_meta( $no_days_cdek_item );
 wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === $no_days_cdek_item->method_title, 'CDEK checkout method title without delivery days must include method and tariff only.' );
 	wc_checkout_smoke_assert( array() === $no_days_cdek_item->meta, 'CDEK checkout visible meta without planned date must be omitted.' );
 
@@ -999,7 +999,7 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:russian_post_domestic:pickup' ) );
 $domestic_item = new WdcSmokeShippingItem();
 $domestic_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $domestic_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist_shipping_item_meta( $domestic_item );
 	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $domestic_item->meta, 'Russian Post domestic checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
@@ -1018,7 +1018,7 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:russian_post:international' ) );
 $international_item = new WdcSmokeShippingItem();
 $international_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $international_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist_shipping_item_meta( $international_item );
 	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $international_item->meta, 'Russian Post international checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
@@ -1035,7 +1035,7 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:future:carrier' ) );
 $unspecified_item = new WdcSmokeShippingItem();
 $unspecified_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $unspecified_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist_shipping_item_meta( $unspecified_item );
 	wc_checkout_smoke_assert( array() === $unspecified_item->meta, 'Checkout visible meta must be omitted when planned date is missing.' );
 
 $delivery_days_audit = array(
@@ -1077,7 +1077,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:yandex_courier_535_662' ) );
 $yandex_checkout_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $yandex_checkout_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $yandex_checkout_order );
 $yandex_checkout_calc = $yandex_checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
 $yandex_checkout_formula = $yandex_checkout_calc['rules']['formula_visualization'] ?? array();
 wc_checkout_smoke_assert( 535.0 === (float) ( $yandex_checkout_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_checkout_calc['result']['final_price_rub'] ?? 0 ), 'Yandex checkout persistence must keep API base 535 separate from final 662.' );
@@ -1098,7 +1098,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:yandex_pricing_total_fallback' ) );
 $pricing_total_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $pricing_total_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $pricing_total_order );
 wc_checkout_smoke_assert( 535.0 === (float) ( $pricing_total_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['api']['api_base_price_rub'] ?? 0 ), 'Yandex checkout persistence must use pricing_total_kopecks fallback before final cost.' );
 
 $session->save_rates(
@@ -1117,12 +1117,12 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:money_array_original_cost' ) );
 $money_array_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $money_array_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $money_array_order );
 wc_checkout_smoke_assert( 535.0 === (float) ( $money_array_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['api']['api_base_price_rub'] ?? 0 ), 'Checkout persistence must safely read Money::to_array() original_cost as 535 rubles.' );
 
 WC()->session->set( 'chosen_shipping_methods', array( 'legacy_method:rate' ) );
 $order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $order );
 wc_checkout_smoke_assert( array() === $order->meta, 'Persister must ignore non-WDC selected shipping methods.' );
 
 echo "WooCommerce checkout smoke test passed.\n";

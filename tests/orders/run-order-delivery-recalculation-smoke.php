@@ -894,7 +894,7 @@ recalc_smoke_assert( true === $service->preview( $backlog_blocked )['success'], 
 $pickup_repository = wdc_recalc_pickup_repository();
 $address_client = new WdcRecalcDadataSuggestionClient();
 $address_normalization = new OrderDeliveryAddressNormalizationService( null, $address_client, wdc_recalc_address_suggestion_service( $address_client ) );
-$controller_replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter() );
+$controller_replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
 $controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
@@ -1142,7 +1142,7 @@ recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not 
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );
 recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $before_shipping_postcode === $order->get_shipping_postcode(), 'Pickup endpoint must not change shipping address fields.' );
 
-$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter() );
+$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
 $pickup_point = array(
 	'point_code' => '101000-OPS',
 	'point_type' => 'OPS',
@@ -1168,6 +1168,67 @@ $normalized_address = array(
 	'fallback' => false,
 	'source' => 'dadata',
 );
+
+$grouped_dpd_rate = array(
+	'id' => 'dpd:courier',
+	'rate_id' => 'dpd:courier',
+	'label' => 'DPD до двери',
+	'carrier_key' => 'dpd',
+	'service_key' => 'dpd',
+	'service_title' => 'DPD до двери',
+	'delivery_type' => 'courier',
+	'is_grouped' => true,
+	'cost' => 395.0,
+	'delivery_days' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+	'planned_delivery_date' => '2026-07-27',
+	'planned_delivery_comment' => 'Доставка планируется* с 27 июля (понедельник).',
+	'rate_meta' => array(
+		'rules_audit' => array( 'synthetic-audit' ),
+		'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+	),
+);
+$grouped_dpd_tariff = array(
+	'rate_id' => 'dpd:courier:economy',
+	'object_code' => 'economy',
+	'title' => 'DPD Эконом',
+	'cost' => 247.0,
+	'delivery_comment' => '8-10 дней',
+	'delivery_days' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+	'delivery_days_label' => '8-10 дней',
+	'planned_delivery_date' => '2026-07-28',
+	'planned_delivery_comment' => 'Доставка планируется* с 28 июля (вторник).',
+	'rules_source' => 'rule_engine',
+	'rate_meta' => array(
+		'rules_audit' => array( 'economy-audit' ),
+		'carrier_delivery_days_original' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'shop_processing_working_days' => 0,
+		'shop_processing_calendar_days' => 0,
+		'carrier_days_are_working' => false,
+		'carrier_delivery_calendar_days' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'total_calendar_days' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+	),
+);
+$grouped_dpd_order = new WdcRecalcOrder( 131, array() );
+$grouped_dpd_result = $replacement->save(
+	$grouped_dpd_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $grouped_dpd_rate,
+		'selected_tariff' => $grouped_dpd_tariff,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+$grouped_dpd_calc = $grouped_dpd_order->meta['_wdc_delivery_calculation_data'] ?? array();
+$grouped_dpd_formula = $grouped_dpd_calc['rules']['formula_visualization'] ?? array();
+recalc_smoke_assert( true === $grouped_dpd_result['success'], 'Grouped DPD admin tariff save must succeed.' );
+recalc_smoke_assert( 'dpd:courier:economy' === (string) ( $grouped_dpd_order->meta['_wdc_platform_rate_id'] ?? '' ) && 'economy' === (string) ( $grouped_dpd_order->meta['_wdc_platform_tariff_object'] ?? '' ) && 'DPD Эконом' === (string) ( $grouped_dpd_order->meta['_wdc_platform_tariff_title'] ?? '' ), 'Grouped DPD save must persist selected tariff identity.' );
+recalc_smoke_assert( 247.0 === (float) ( $grouped_dpd_order->shipping_items['total'] ?? 0 ), 'Grouped DPD save must persist selected tariff price.' );
+recalc_smoke_assert( str_contains( (string) ( $grouped_dpd_order->shipping_items['method_title'] ?? '' ), '8-10 дней' ) && ! str_contains( (string) ( $grouped_dpd_order->shipping_items['method_title'] ?? '' ), '7-9 дней' ), 'Grouped DPD save must use selected tariff delivery days in shipping title.' );
+recalc_smoke_assert( '8-10 дней' === (string) ( $grouped_dpd_calc['result']['final_delivery_text'] ?? '' ) && 8 === (int) ( $grouped_dpd_calc['result']['final_delivery_days_min'] ?? 0 ) && 10 === (int) ( $grouped_dpd_calc['result']['final_delivery_days_max'] ?? 0 ), 'Grouped DPD calculation result must use selected tariff delivery range.' );
+recalc_smoke_assert( in_array( 'Итог: 8-10 дней', $grouped_dpd_formula, true ), 'Grouped DPD calculation rules formula must use selected tariff final delivery range.' );
+recalc_smoke_assert( '2026-07-28' === (string) ( $grouped_dpd_calc['result']['planned_delivery_date'] ?? '' ) && 'Доставка планируется* с 28 июля (вторник).' === (string) ( $grouped_dpd_calc['result']['planned_delivery_comment'] ?? '' ), 'Grouped DPD save must use selected tariff planned date/comment.' );
+recalc_smoke_assert( array( 'economy-audit' ) === ( $grouped_dpd_calc['rules']['applied_rules'] ?? null ) && array( 'economy-audit' ) === ( $grouped_dpd_order->meta['_wdc_platform_rate_meta']['rules_audit'] ?? null ), 'Grouped DPD save must use selected tariff rate_meta and rules audit.' );
+
 $pickup_rate = $rates_by_id['russian_post_domestic:pickup'];
 $pickup_rate['selected_tariff'] = $pickup_rate['tariff_variants'][0] ?? array();
 $courier_rate = $rates_by_id['russian_post_domestic:courier'];

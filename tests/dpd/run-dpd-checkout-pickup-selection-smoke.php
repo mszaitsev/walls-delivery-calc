@@ -198,7 +198,7 @@ dpd_checkout_pickup_assert( 'Выберите пункт выдачи.' === (str
 $checkout_rest->save( new DpdCheckoutPickupRequest( array( 'carrier' => 'dpd', 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'NSK-PS-1' ) ) );
 WC()->session->set( 'chosen_shipping_methods', array( $pickup_rate_id ) );
 $order = new DpdCheckoutPickupOrder();
-( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() ) )->persist( $order, array() );
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $order, array() );
 dpd_checkout_pickup_assert( 'NSK-PS-1' === (string) ( $order->meta['_wdc_pickup_point_code'] ?? '' ), 'Order meta must save canonical pickup point code.' );
 dpd_checkout_pickup_assert( 'NSK-PS-1' === (string) ( $order->meta['_wdc_dpd_pickup_terminal_code'] ?? '' ), 'Order meta must save DPD terminal_code alias.' );
 dpd_checkout_pickup_assert( 'DPD Ленина' === (string) ( $order->meta['_wdc_dpd_pickup_name'] ?? '' ) && 'ул Ленина, 1' === (string) ( $order->meta['_wdc_dpd_pickup_address'] ?? '' ), 'Order meta must save selected DPD name and address.' );
