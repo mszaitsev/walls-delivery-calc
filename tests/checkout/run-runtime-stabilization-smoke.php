@@ -444,6 +444,12 @@ require_once dirname( __DIR__ ) . '/fixtures/TestPickupProvider.php';
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Calendar\Services\YearGenerator;
+use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
@@ -451,6 +457,7 @@ use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
@@ -469,6 +476,7 @@ use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\Plugin;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
@@ -526,7 +534,22 @@ function runtime_smoke_orchestrator_with_demo(): CheckoutOrchestrator {
 		new RateSorter(),
 		new FallbackRateFactory(),
 		new CarrierExecutionGuard( $logger ),
-		$logger
+		$logger,
+		runtime_smoke_lead_time_normalizer( 0 )
+	);
+}
+
+function runtime_smoke_lead_time_normalizer( int $processing_days = 0 ): DeliveryLeadTimeNormalizer {
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new TimezoneService();
+	$formatter = new DeliveryDateFormatter();
+
+	return new DeliveryLeadTimeNormalizer(
+		$settings,
+		new DeliveryServiceSettingsRepository(),
+		new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
 	);
 }
 
@@ -727,6 +750,7 @@ $delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout delivery type selector must not auto-render courier customer comment.' );
 $rate_renderer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
 $rate_mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/WooCommerceRateMapper.php' );
+$checkout_orchestrator_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Runtime/CheckoutOrchestrator.php' );
 $new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
 $checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
@@ -735,6 +759,7 @@ runtime_smoke_assert( str_contains( $rate_renderer_source, 'normalize_meta_data'
 runtime_smoke_assert( str_contains( $rate_mapper_source, "'pickup_family'" ) && str_contains( $rate_mapper_source, 'function pickup_family' ), 'WooCommerce rate mapper must expose pickup_family in top-level WC rate meta.' );
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, "woocommerce_after_shipping_rate', array( \$this, 'render'" ), 'Delivery type selector must not register a duplicate checkout pickup UI renderer.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "'planned_delivery_comment'" ) && str_contains( $rate_renderer_source, 'wdc-platform-planned-delivery-comment' ), 'Rate renderer must output planned_delivery_comment from rate meta as the checkout planned-date block.' );
+runtime_smoke_assert( str_contains( $checkout_orchestrator_source, 'private DeliveryLeadTimeNormalizer $lead_time_normalizer' ) && ! str_contains( $checkout_orchestrator_source, '?Delivery' . 'LeadTimeNormalizer' ) && ! str_contains( $checkout_orchestrator_source, 'lead_time_normalizer ' . 'instanceof' ), 'CheckoutOrchestrator must require DeliveryLeadTimeNormalizer and must not fall back to the legacy lead-time pipeline.' );
 runtime_smoke_assert( str_contains( $rate_mapper_source, 'DeliveryDaysFormatter::format( $rate->delivery_days )' ) && str_contains( $rate_mapper_source, 'DeliveryDaysFormatter::format( $rate->original_delivery_days )' ) && str_contains( $rate_mapper_source, 'str_ends_with( $title, $original_delivery_label )' ), 'Single-rate labels must derive final/original delivery suffixes from DeliveryDaysFormatter and replace only the original suffix.' );
 runtime_smoke_assert( str_contains( $rate_mapper_source, "rtrim( \$title ) . ' - ' . \$final_delivery_label" ) && ! str_contains( $rate_mapper_source, "\$label .= ' - ' . \$planned_delivery_comment" ), 'Single-rate labels must append final delivery days with the shared separator and must not use planned_delivery_comment label concatenation.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'count( $variants ) < 2' ), 'Domestic tariff selector must not render radio list for a single tariff.' );

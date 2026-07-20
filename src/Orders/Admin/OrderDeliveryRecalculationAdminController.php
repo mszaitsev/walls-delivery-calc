@@ -12,6 +12,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPoi
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
@@ -50,7 +51,7 @@ final class OrderDeliveryRecalculationAdminController {
 	) {
 		$this->pickup_points = $this->pickup_points ?? new RussianPostPickupPointRepository();
 		$this->address_normalization = $this->address_normalization ?? new OrderDeliveryAddressNormalizationService();
-		$this->replacement = $this->replacement ?? new OrderDeliveryReplacementService( new OrderShipmentRepository() );
+		$this->replacement = $this->replacement ?? new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter() );
 		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 	}
 

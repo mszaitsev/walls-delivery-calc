@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -179,7 +180,7 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 }
 
 $session = new CheckoutSessionManager();
-$persister = new OrderShippingMetaPersister( $session );
+$persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() );
 $rate = wdc_order_meta_rate();
 $session->save_rates( array( 'russian_post_worldwide_parcel' => $rate ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );

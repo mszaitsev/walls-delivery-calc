@@ -497,12 +497,12 @@ final class Plugin {
 				$this->container->get( FallbackRateFactory::class ),
 				$this->container->get( CarrierExecutionGuard::class ),
 				$this->container->get( CheckoutLogger::class ),
+				$this->container->get( DeliveryLeadTimeNormalizer::class ),
 				$this->container->get( QuoteCache::class ),
 				$this->container->get( DeliveryServiceRegistry::class ),
 				$this->container->get( DeliveryServiceManager::class ),
 				$this->container->get( PackagingWeightCalculator::class ),
-				$this->container->get( DpdSettings::class ),
-				$this->container->get( DeliveryLeadTimeNormalizer::class )
+				$this->container->get( DpdSettings::class )
 			)
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );

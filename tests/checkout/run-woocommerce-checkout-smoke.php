@@ -36,6 +36,12 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 	}
 }
 
+if ( ! function_exists( 'current_time' ) ) {
+	function current_time( string $type = 'mysql' ): string {
+		return '2026-08-04 12:00:00';
+	}
+}
+
 if ( ! function_exists( '__' ) ) {
 	function __( string $text, string $domain = '' ): string {
 		return $text;
@@ -83,16 +89,42 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		public int $insert_id = 0;
+		/** @var array<string,array<string,mixed>> */
+		private array $calendar_days = array();
 
 		public function get_results( string $query, mixed $output = null ): array {
 			return array();
 		}
 
 		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( preg_match( "/calendar_type = '([^']+)'.*calendar_date = '([^']+)'/s", $query, $matches ) ) {
+				return $this->calendar_days[ $matches[1] . ':' . $matches[2] ] ?? null;
+			}
+
 			return null;
 		}
 
+		public function get_var( string $query ): mixed {
+			if ( preg_match( "/calendar_type = '([^']+)'.*YEAR\\(calendar_date\\) = (\\d+)/s", $query, $matches ) ) {
+				$count = 0;
+				foreach ( $this->calendar_days as $day ) {
+					if ( $matches[1] === (string) ( $day['calendar_type'] ?? '' ) && $matches[2] === substr( (string) ( $day['calendar_date'] ?? '' ), 0, 4 ) ) {
+						$count++;
+					}
+				}
+
+				return $count;
+			}
+
+			return 0;
+		}
+
 		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$value = is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[sd]/', $value, $query, 1 ) ?? $query;
+			}
+
 			return $query;
 		}
 
@@ -103,6 +135,14 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			return true;
+		}
+
+		public function replace( string $table, array $data, array $format = array() ): bool {
+			if ( str_ends_with( $table, 'wdc_calendar_days' ) ) {
+				$this->calendar_days[ (string) $data['calendar_type'] . ':' . (string) $data['calendar_date'] ] = $data;
+			}
+
 			return true;
 		}
 
@@ -156,9 +196,16 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 require_once dirname( __DIR__ ) . '/fixtures/TestDemoCarrier.php';
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Calendar\Services\YearGenerator;
+use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
@@ -175,6 +222,7 @@ use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
@@ -425,7 +473,22 @@ function wc_checkout_smoke_orchestrator(): CheckoutOrchestrator {
 		new RateSorter(),
 		new FallbackRateFactory(),
 		new CarrierExecutionGuard( $logger ),
-		$logger
+		$logger,
+		wc_checkout_smoke_lead_time_normalizer( 0 )
+	);
+}
+
+function wc_checkout_smoke_lead_time_normalizer( int $processing_days = 0 ): DeliveryLeadTimeNormalizer {
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new TimezoneService();
+	$formatter = new DeliveryDateFormatter();
+
+	return new DeliveryLeadTimeNormalizer(
+		$settings,
+		new DeliveryServiceSettingsRepository(),
+		new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
 	);
 }
 
@@ -458,6 +521,38 @@ $yandex_courier_label = $rate_mapper->map( wc_checkout_label_rate( 'Яндекс
 wc_checkout_smoke_assert( 'Яндекс курьером - 4 дня' === $yandex_courier_label && ! str_contains( $yandex_courier_label, '—' ) && ! str_contains( $yandex_courier_label, '2 дня' ) && 1 === substr_count( $yandex_courier_label, '4 дня' ) && 1 === substr_count( $yandex_courier_label, ' - ' ), 'Yandex courier WC label must use only final rule-adjusted delivery days and one shared separator.' );
 $other_carrier_label = $rate_mapper->map( wc_checkout_label_rate( 'Другая служба — 2-4 дня', DateRange::range( 4, 6 ), DateRange::range( 2, 4 ), carrier_key: 'other_carrier' ) )['label'];
 wc_checkout_smoke_assert( 'Другая служба — 4-6 дней' === $other_carrier_label && ! str_contains( $other_carrier_label, '2-4 дня' ), 'Another carrier single-rate WC label must replace only the original delivery range suffix.' );
+$normalized_range_label = $rate_mapper->map( wc_checkout_label_rate( 'DPD до двери, DPD Эконом - 4-5 дней', DateRange::range( 6, 7 ), DateRange::range( 4, 5 ), carrier_key: 'dpd' ) )['label'];
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 6-7 дней' === $normalized_range_label && ! str_contains( $normalized_range_label, '4-5 дней' ) && 1 === substr_count( $normalized_range_label, 'дней' ), 'Normalized DPD label must replace carrier raw range instead of appending a second delivery range.' );
+$ruled_range_label = $rate_mapper->map( wc_checkout_label_rate( 'DPD до двери, DPD Эконом - 4-5 дней', DateRange::range( 8, 9 ), DateRange::range( 4, 5 ), carrier_key: 'dpd' ) )['label'];
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 8-9 дней' === $ruled_range_label && ! str_contains( $ruled_range_label, '4-5 дней' ) && 1 === substr_count( $ruled_range_label, 'дней' ), 'Rule-adjusted DPD label must keep one final delivery range after normalization and rules.' );
+$normalizer_regression_package = \WallsShop\WDC\Domain\Package\Package::from_items( array(), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) );
+$normalizer_regression_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( 'RU', new \WallsShop\WDC\Domain\Address\Address( country_code: 'RU', city: 'Новосибирск' ), $normalizer_regression_package, '', Money::from_rubles( 1000 ), '2026-08-04' );
+$normalizer_regression_rate = wc_checkout_label_rate( 'DPD до двери, DPD Эконом - 4-5 дней', DateRange::range( 4, 5 ), null, array(), DeliveryType::COURIER, 'dpd' );
+$normalizer_regression_normalized = wc_checkout_smoke_lead_time_normalizer( 2 )->normalize( $normalizer_regression_rate, null, $normalizer_regression_request );
+$normalizer_regression_label = $rate_mapper->map( $normalizer_regression_normalized )['label'];
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 6-7 дней' === $normalizer_regression_label && 4 === $normalizer_regression_normalized->original_delivery_days?->min_days && 5 === $normalizer_regression_normalized->original_delivery_days?->max_days && ! str_contains( $normalizer_regression_label, '4-5 дней' ) && 1 === substr_count( $normalizer_regression_label, 'дней' ), 'DeliveryLeadTimeNormalizer must preserve raw carrier days so mapper replaces the old title suffix after shop processing.' );
+$normalizer_regression_rule = new Rule( null, 'Add delivery days', true, 10, 'default', '', RuleActionTypes::CHANGE_DELIVERY_DAYS, RuleOperationTypes::INCREASE, 2, RuleOperationBases::CALENDAR_DAYS, false, false );
+$normalizer_regression_context = new \WallsShop\WDC\Rules\Domain\RuleEvaluationContext(
+	Money::from_rubles( 1000 ),
+	$normalizer_regression_normalized->price,
+	$normalizer_regression_package,
+	$normalizer_regression_request->destination,
+	$normalizer_regression_normalized->delivery_type,
+	'',
+	'2026-08-04',
+	array(),
+	array_merge(
+		$normalizer_regression_normalized->meta,
+		array(
+			'original_delivery_days' => $normalizer_regression_normalized->delivery_days->min_days,
+			'original_delivery_min_days' => $normalizer_regression_normalized->delivery_days->min_days,
+			'original_delivery_max_days' => $normalizer_regression_normalized->delivery_days->max_days,
+		)
+	)
+);
+$normalizer_regression_applied = ( new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ) )->apply( $normalizer_regression_normalized, $normalizer_regression_context, array( $normalizer_regression_rule ) )['rate'];
+$normalizer_regression_rule_label = $rate_mapper->map( $normalizer_regression_applied )['label'];
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 8-9 дней' === $normalizer_regression_rule_label && 4 === $normalizer_regression_applied->original_delivery_days?->min_days && 5 === $normalizer_regression_applied->original_delivery_days?->max_days && ! str_contains( $normalizer_regression_rule_label, '4-5 дней' ) && 1 === substr_count( $normalizer_regression_rule_label, 'дней' ), 'RuleAppliedRateBuilder must keep raw carrier days so mapper replaces the old title suffix after rules.' );
 $title_without_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба доставки', DateRange::single( 5 ) ) )['label'];
 wc_checkout_smoke_assert( 'Служба доставки - 5 дней' === $title_without_days && ! str_contains( $title_without_days, '—' ) && ! str_ends_with( $title_without_days, ':' ), 'Single-rate title without delivery days must append the final label once with the shared separator and no manual colon.' );
 $title_with_final_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба доставки — 5 дней', DateRange::single( 5 ), DateRange::single( 5 ) ) )['label'];
@@ -586,7 +681,7 @@ $stored_rates = $session->rates();
 $first_rate   = array_key_first( $stored_rates );
 WC()->session->set( 'chosen_shipping_methods', array( $first_rate ) );
 $order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $order );
 wc_checkout_smoke_assert( isset( $order->meta['_wdc_platform_carrier_key'] ), 'Order meta persister must save carrier key.' );
 wc_checkout_smoke_assert( isset( $order->meta['_wdc_platform_rate_id'] ), 'Order meta persister must save rate id.' );
 wc_checkout_smoke_assert( array_key_exists( '_wdc_platform_fallback_used', $order->meta ), 'Order meta persister must save fallback flag.' );
@@ -615,7 +710,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:demo:courier' ) );
 $order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $order );
 wc_checkout_smoke_assert( 'demo:courier' === ( $order->meta['_wdc_platform_rate_id'] ?? '' ), 'Persister must save selected courier from full WooCommerce rate id.' );
 wc_checkout_smoke_assert( 'courier' === ( $order->meta['_wdc_platform_delivery_type'] ?? '' ), 'Persister must not fall back to first pickup rate.' );
 
@@ -664,7 +759,7 @@ $cdek_item->meta = array(
 	'Населенный пункт' => 'Новосибирск',
 	'Нормализация' => 'manual',
 );
-$cdek_persister = new OrderShippingMetaPersister( $session );
+$cdek_persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() );
 $cdek_persister->persist_shipping_item_meta( $cdek_item );
 wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
 	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );
@@ -758,7 +853,7 @@ $errors = new WdcSmokeCheckoutErrors();
 wc_checkout_smoke_assert( array() === $errors->errors, 'CDEK pickup selected in checkout must pass validation.' );
 wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === (string) ( $session->checkout_pickup_point()['point_address'] ?? '' ) && 'Inside the shopping center' === (string) ( $session->checkout_pickup_point()['description'] ?? '' ) && 'KEM7' === (string) ( $session->checkout_pickup_point()['cdek_code'] ?? '' ), 'CDEK hidden fields restore must keep the full checkout pickup payload in session.' );
 $cdek_pickup_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $cdek_pickup_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $cdek_pickup_order );
 $cdek_pickup_calc = $cdek_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
 wc_checkout_smoke_assert( 'KEM7' === ( $cdek_pickup_calc['pickup']['point_code'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK checkout order create must save point_code separately from postcode.' );
 wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK checkout order create must save pickup description and storage notice.' );
@@ -785,7 +880,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:custom' ) );
 $custom_cdek_item = new WdcSmokeShippingItem();
-( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $custom_cdek_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $custom_cdek_item );
 wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь - 10-14 дней' === $custom_cdek_item->method_title, 'CDEK checkout method title must use custom service title, selected tariff and delivery days.' );
 wc_checkout_smoke_assert( 1 === substr_count( $custom_cdek_item->method_title, '10-14 дней' ), 'CDEK checkout method title must not duplicate delivery days.' );
 
@@ -806,7 +901,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:no-days' ) );
 $no_days_cdek_item = new WdcSmokeShippingItem();
-( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $no_days_cdek_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $no_days_cdek_item );
 wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === $no_days_cdek_item->method_title, 'CDEK checkout method title without delivery days must include method and tariff only.' );
 	wc_checkout_smoke_assert( array() === $no_days_cdek_item->meta, 'CDEK checkout visible meta without planned date must be omitted.' );
 
@@ -832,7 +927,7 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:russian_post_domestic:pickup' ) );
 $domestic_item = new WdcSmokeShippingItem();
 $domestic_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
-( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $domestic_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $domestic_item );
 	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $domestic_item->meta, 'Russian Post domestic checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
@@ -851,7 +946,7 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:russian_post:international' ) );
 $international_item = new WdcSmokeShippingItem();
 $international_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
-( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $international_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $international_item );
 	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $international_item->meta, 'Russian Post international checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
@@ -868,7 +963,7 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:future:carrier' ) );
 $unspecified_item = new WdcSmokeShippingItem();
 $unspecified_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
-( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $unspecified_item );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist_shipping_item_meta( $unspecified_item );
 	wc_checkout_smoke_assert( array() === $unspecified_item->meta, 'Checkout visible meta must be omitted when planned date is missing.' );
 
 $delivery_days_audit = array(
@@ -910,7 +1005,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:yandex_courier_535_662' ) );
 $yandex_checkout_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $yandex_checkout_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $yandex_checkout_order );
 $yandex_checkout_calc = $yandex_checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
 $yandex_checkout_formula = $yandex_checkout_calc['rules']['formula_visualization'] ?? array();
 wc_checkout_smoke_assert( 535.0 === (float) ( $yandex_checkout_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_checkout_calc['result']['final_price_rub'] ?? 0 ), 'Yandex checkout persistence must keep API base 535 separate from final 662.' );
@@ -931,7 +1026,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:yandex_pricing_total_fallback' ) );
 $pricing_total_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $pricing_total_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $pricing_total_order );
 wc_checkout_smoke_assert( 535.0 === (float) ( $pricing_total_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['api']['api_base_price_rub'] ?? 0 ), 'Yandex checkout persistence must use pricing_total_kopecks fallback before final cost.' );
 
 $session->save_rates(
@@ -950,12 +1045,12 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:money_array_original_cost' ) );
 $money_array_order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $money_array_order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $money_array_order );
 wc_checkout_smoke_assert( 535.0 === (float) ( $money_array_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['api']['api_base_price_rub'] ?? 0 ), 'Checkout persistence must safely read Money::to_array() original_cost as 535 rubles.' );
 
 WC()->session->set( 'chosen_shipping_methods', array( 'legacy_method:rate' ) );
 $order = new WdcSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter() ) )->persist( $order );
 wc_checkout_smoke_assert( array() === $order->meta, 'Persister must ignore non-WDC selected shipping methods.' );
 
 echo "WooCommerce checkout smoke test passed.\n";

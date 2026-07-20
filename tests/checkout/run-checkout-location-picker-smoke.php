@@ -321,7 +321,7 @@ checkout_location_picker_assert( is_string( $address_js ) && str_contains( $addr
 checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "regionSource: 'checkout_state'" ), 'DaData address opening query falls back to state/city/address.' );
 
 $order = new WdcCheckoutLocationPickerOrder();
-$persister = new OrderShippingMetaPersister( new CheckoutSessionManager() );
+$persister = new OrderShippingMetaPersister( new CheckoutSessionManager(), new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() );
 $persister->persist(
 	$order,
 	array(

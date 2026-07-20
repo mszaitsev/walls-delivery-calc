@@ -28,8 +28,8 @@ final class DeliveryLeadTimeNormalizer {
 		$carrier_working = $service instanceof DeliveryService && null !== $service->id
 			? $this->service_settings->delivery_days_are_working( (int) $service->id )
 			: false;
-		$original_days = $rate->delivery_days;
-		$normalized = $this->calculator->normalize_lead_time( $request->calculation_date, $processing_days, $original_days, $carrier_working );
+		$original_delivery_days = $rate->original_delivery_days ?? $rate->delivery_days;
+		$normalized = $this->calculator->normalize_lead_time( $request->calculation_date, $processing_days, $rate->delivery_days, $carrier_working );
 		$total_days = $normalized['total_calendar_days'];
 
 		return $this->clone_rate(
@@ -40,8 +40,8 @@ final class DeliveryLeadTimeNormalizer {
 			array_merge(
 				$rate->meta,
 				array(
-					'carrier_delivery_days_original' => $original_days->to_array(),
-					'carrier_delivery_days_original_unit' => $original_days->unit,
+					'carrier_delivery_days_original' => $original_delivery_days->to_array(),
+					'carrier_delivery_days_original_unit' => $original_delivery_days->unit,
 					'shop_processing_working_days' => $processing_days,
 					'shop_processing_calendar_days' => $normalized['processing_calendar_days'],
 					'carrier_days_are_working' => $carrier_working,
@@ -51,7 +51,7 @@ final class DeliveryLeadTimeNormalizer {
 					'calculation_date' => $normalized['calculation_date'],
 				)
 			),
-			$rate->original_delivery_days
+			$original_delivery_days
 		);
 	}
 

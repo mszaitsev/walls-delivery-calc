@@ -17,9 +17,8 @@ final class OrderShippingMetaPersister {
 
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
-		private ?DeliveryDateFormatter $date_formatter = null
+		private DeliveryDateFormatter $date_formatter
 	) {
-		$this->date_formatter = $this->date_formatter ?? new DeliveryDateFormatter();
 	}
 
 	public function register(): void {

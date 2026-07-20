@@ -363,7 +363,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
 $order = new WdcAddressSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() ) )->persist( $order );
 address_smoke_assert( $unknown_result->address->raw_address === ( $order->meta['_wdc_platform_fallback_address'] ?? null ), 'Fallback order meta must persist raw fallback address.' );
 address_smoke_assert( true === ( $order->meta['_wdc_platform_address_fallback_used'] ?? false ), 'Fallback order meta must persist fallback address flag.' );
 
@@ -444,7 +444,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
 $order = new WdcAddressSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $order );
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter() ) )->persist( $order );
 address_smoke_assert( false === ( $order->meta['_wdc_platform_normalized'] ?? true ), 'Order meta must not mark local city context as normalized.' );
 address_smoke_assert( 'fallback' === ( $order->meta['_wdc_platform_normalization_source'] ?? '' ), 'Order meta must persist fallback normalization source.' );
 address_smoke_assert( '' === ( $order->meta['_wdc_platform_fallback_address'] ?? null ), 'Local DB city must not create fallback address text by itself.' );

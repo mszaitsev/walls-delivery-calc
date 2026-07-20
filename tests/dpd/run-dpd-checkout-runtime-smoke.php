@@ -306,11 +306,26 @@ function dpd_checkout_orchestrator( CarrierRegistry $registry, DeliveryServiceRe
 		new FallbackRateFactory(),
 		new CarrierExecutionGuard( new CheckoutLogger( $logger ) ),
 		new CheckoutLogger( $logger ),
+		dpd_checkout_lead_time_normalizer( 0 ),
 		null,
 		new DeliveryServiceRegistry( $services, $registry ),
 		$manager,
 		null,
 		$settings
+	);
+}
+
+function dpd_checkout_lead_time_normalizer( int $processing_days = 0 ): \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer {
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new \WallsShop\WDC\Calendar\Services\TimezoneService();
+	$formatter = new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter();
+
+	return new \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer(
+		$settings,
+		new \WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository(),
+		new \WallsShop\WDC\Calendar\Services\DeliveryDateCalculator( new \WallsShop\WDC\Calendar\Services\CalendarService( new \WallsShop\WDC\Calendar\Storage\CalendarRepository(), new \WallsShop\WDC\Calendar\Services\YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
 	);
 }
 

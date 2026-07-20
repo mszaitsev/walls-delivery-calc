@@ -21,9 +21,8 @@ final class OrderDeliveryReplacementService {
 
 	public function __construct(
 		private OrderShipmentRepository $shipments,
-		private ?DeliveryDateFormatter $date_formatter = null
+		private DeliveryDateFormatter $date_formatter
 	) {
-		$this->date_formatter = $this->date_formatter ?? new DeliveryDateFormatter();
 	}
 
 	/**
