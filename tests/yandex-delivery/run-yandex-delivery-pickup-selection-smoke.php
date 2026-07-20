@@ -240,7 +240,7 @@ $validation->validate( array( 'shipping_method' => array( $pickup_rate_id ), 'sh
 yandex_pickup_selection_assert( false === $fivepost_errors->has( 'wdc_pickup_required' ), 'Active Yandex POST and family-specific 5Post selection must pass checkout validation.' );
 WC()->session->set( 'chosen_shipping_methods', array( $pickup_rate_id ) );
 $order = new YandexPickupSelectionOrder();
-( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $order, array() );
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $order, array() );
 yandex_pickup_selection_assert( 'DST-B' === (string) ( $order->meta['_wdc_pickup_point_code'] ?? '' ) && 'DST-B' === (string) ( $order->meta['_wdc_pickup_platform_station_id'] ?? '' ), 'Order meta must save canonical selected 5Post point code/platform_station_id.' );
 yandex_pickup_selection_assert( 'yandex_delivery:pickup' === (string) ( $order->meta['_wdc_pickup_family'] ?? '' ), 'Hidden order meta must preserve the selected Yandex pickup family.' );
 yandex_pickup_selection_assert( 'DST-B' === (string) ( $order->meta['_wdc_yandex_delivery_pickup_platform_station_id'] ?? '' ), 'Order meta must save the 5Post platform_station_id through the Yandex alias.' );

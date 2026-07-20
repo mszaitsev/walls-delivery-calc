@@ -10,6 +10,11 @@ use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 defined( 'ABSPATH' ) || exit;
 
 final class DeliveryCalculationDataBuilder {
+	public function __construct(
+		private RuleFormulaFormatter $rule_formula_formatter
+	) {
+	}
+
 	/**
 	 * @param array<string,mixed> $rate
 	 * @param array<string,mixed> $context
@@ -53,15 +58,13 @@ final class DeliveryCalculationDataBuilder {
 		$package = is_array( $rate_meta['package'] ?? null ) ? $rate_meta['package'] : array();
 		$final_weight = (int) ( $rate_meta['package_weight_with_packaging_g'] ?? $package['total_weight_g'] ?? $package['final_weight_g'] ?? $package['weight_g'] ?? $rate_meta['final_weight_g'] ?? $rate_meta['package_weight_g'] ?? 0 );
 
-		return $this->drop_empty_values(
-			array(
-				'products_weight_g' => (int) ( $rate_meta['products_weight_g'] ?? $package['products_weight_g'] ?? $package['items_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
-				'packaging_weight_g' => (int) ( $rate_meta['packaging_weight_g'] ?? $package['packaging_weight_g'] ?? 0 ),
-				'final_weight_g' => $final_weight,
-				'include_packaging_weight' => ! empty( $rate_meta['include_packaging_weight'] ) || ! empty( $package['include_packaging_weight'] ),
-				'packaging_weight_mode' => (string) ( $rate_meta['packaging_weight_mode'] ?? $package['packaging_weight_mode'] ?? '' ),
-				'dimensions_cm' => is_array( $package['dimensions_cm'] ?? null ) ? $package['dimensions_cm'] : array(),
-			)
+		return array(
+			'products_weight_g' => (int) ( $rate_meta['products_weight_g'] ?? $package['products_weight_g'] ?? $package['items_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
+			'packaging_weight_g' => (int) ( $rate_meta['packaging_weight_g'] ?? $package['packaging_weight_g'] ?? 0 ),
+			'final_weight_g' => $final_weight,
+			'include_packaging_weight' => ! empty( $rate_meta['include_packaging_weight'] ) || ! empty( $package['include_packaging_weight'] ),
+			'packaging_weight_mode' => (string) ( $rate_meta['packaging_weight_mode'] ?? $package['packaging_weight_mode'] ?? '' ),
+			'dimensions_cm' => is_array( $package['dimensions_cm'] ?? null ) ? $package['dimensions_cm'] : array(),
 		);
 	}
 
@@ -141,7 +144,7 @@ final class DeliveryCalculationDataBuilder {
 		$minimum = ! empty( $rules['minimum_price_applied'] ) || ! empty( $rate['minimum_price_applied'] ) || ! empty( $rate_meta['minimum_price_applied'] ) || ! empty( $result['minimum_price_applied'] );
 		$formula = is_array( $rules['formula_visualization'] ?? null ) ? $rules['formula_visualization'] : ( is_array( $rate_meta['formula_visualization'] ?? null ) ? $rate_meta['formula_visualization'] : array() );
 		if ( array() === $formula && ( array() !== $audit || $round || $minimum ) ) {
-			$formula = ( new RuleFormulaFormatter() )->lines(
+			$formula = $this->rule_formula_formatter->lines(
 				$this->nullable_float( $api['api_base_price_rub'] ?? null ) ?? $api_base,
 				$audit,
 				$final,

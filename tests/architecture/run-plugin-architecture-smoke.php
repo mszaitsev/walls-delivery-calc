@@ -502,6 +502,8 @@ $checkout_persister_source = plugin_architecture_source( 'src/Checkout/WooCommer
 $replacement_service_source = plugin_architecture_source( 'src/Orders/Application/OrderDeliveryReplacementService.php' );
 plugin_architecture_assert( str_contains( $calculation_builder_source, 'function lead_time_audit_lines' ), 'DeliveryCalculationDataBuilder must own lead-time audit formatting.' );
 plugin_architecture_assert( ! str_contains( $checkout_persister_source, 'function lead_time_audit_lines' ) && ! str_contains( $replacement_service_source, 'function lead_time_audit_lines' ), 'Checkout/admin persistence services must not duplicate lead-time audit formatting.' );
+plugin_architecture_assert( str_contains( $calculation_builder_source, 'private RuleFormulaFormatter $rule_formula_formatter' ), 'DeliveryCalculationDataBuilder must receive RuleFormulaFormatter through constructor DI.' );
+plugin_architecture_assert( ! str_contains( $calculation_builder_source, 'new RuleFormulaFormatter' ), 'DeliveryCalculationDataBuilder must not construct RuleFormulaFormatter inline.' );
 
 $manifest_path = 'tests/shipments/regression/shipment-regression-manifest.php';
 $manifest = require plugin_architecture_path( $manifest_path );

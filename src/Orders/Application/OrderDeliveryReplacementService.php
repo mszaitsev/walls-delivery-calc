@@ -155,7 +155,7 @@ final class OrderDeliveryReplacementService {
 				}
 			}
 		} else {
-$rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
+			$rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 		}
 		$rate['cost'] = (float) ( $rate['cost'] ?? 0 );
 

@@ -894,7 +894,7 @@ recalc_smoke_assert( true === $service->preview( $backlog_blocked )['success'], 
 $pickup_repository = wdc_recalc_pickup_repository();
 $address_client = new WdcRecalcDadataSuggestionClient();
 $address_normalization = new OrderDeliveryAddressNormalizationService( null, $address_client, wdc_recalc_address_suggestion_service( $address_client ) );
-$controller_replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
+$controller_replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
@@ -1142,7 +1142,7 @@ recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not 
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );
 recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $before_shipping_postcode === $order->get_shipping_postcode(), 'Pickup endpoint must not change shipping address fields.' );
 
-$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
+$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $pickup_point = array(
 	'point_code' => '101000-OPS',
 	'point_type' => 'OPS',

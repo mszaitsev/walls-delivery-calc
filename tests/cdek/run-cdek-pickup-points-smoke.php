@@ -463,7 +463,7 @@ cdek_pickup_assert( true === $session->pickup_selection_matches( 'cdek', 'cdek:p
 cdek_pickup_assert( 'Kemerovo, Sovetskiy 10' === (string) ( $session->checkout_pickup_point()['point_address'] ?? '' ) && 'Inside the shopping center' === (string) ( $session->checkout_pickup_point()['description'] ?? '' ), 'Checkout validation restore must keep the full CDEK checkout pickup payload.' );
 
 $checkout_order = new CdekPickupSmokeOrder();
-$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
+$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $persister->persist( $checkout_order, array() );
 $item = new CdekPickupSmokeItem();
 $persister->persist_shipping_item_meta( $item );
@@ -495,7 +495,7 @@ $order_display->render_email( $checkout_order, false, false, (object) array( 'id
 $email_card = (string) ob_get_clean();
 cdek_pickup_assert( str_contains( $email_card, 'Постамат СДЭК' ) && str_contains( $email_card, 'Inside the shopping center' ) && str_contains( $email_card, 'Срок хранения 3 дня' ), 'CDEK email pickup card must render title, description and storage notice.' );
 
-$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
+$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $admin_order_without_point = new CdekPickupSmokeOrder();
 $admin_order_without_point->shipping_items = array( 'method_title' => 'Old', 'total' => 10.0, 'meta' => array() );
 $blocked = $replacement->save(

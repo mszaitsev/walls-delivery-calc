@@ -371,7 +371,7 @@ $rate_html = ob_get_clean() ?: '';
 pickup_checkout_assert( ! str_contains( $rate_html, 'wdc-platform-pickup-selected' ) && str_contains( $rate_html, 'data-wdc-pickup-checkout' ) && str_contains( $rate_html, 'data-wdc-pickup-card aria-hidden="false"' ), 'Checkout rate renderer must output the shared pickup UI instead of the legacy selected pickup summary after rate comments.' );
 
 $order = new WdcPickupCheckoutOrder();
-$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() );
+$persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $persister->persist( $order, array() );
 pickup_checkout_assert( '10' === (string) $order->meta['_wdc_pickup_point_id'], 'order meta must save pickup point id.' );
 pickup_checkout_assert( str_contains( (string) $order->meta['_wdc_pickup_point_snapshot'], '630001-a' ), 'order meta must save snapshot JSON.' );

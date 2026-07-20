@@ -203,6 +203,7 @@ use WallsShop\WDC\Pickup\Services\PickupPointLocationResolver;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Services\RuleSimulator;
@@ -587,7 +588,8 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ) ) );
 		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
-		$this->container->register( DeliveryCalculationDataBuilder::class, fn(): DeliveryCalculationDataBuilder => new DeliveryCalculationDataBuilder() );
+		$this->container->register( RuleFormulaFormatter::class, fn(): RuleFormulaFormatter => new RuleFormulaFormatter() );
+		$this->container->register( DeliveryCalculationDataBuilder::class, fn(): DeliveryCalculationDataBuilder => new DeliveryCalculationDataBuilder( $this->container->get( RuleFormulaFormatter::class ) ) );
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ) ) );
 		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment, $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ) ) );
 		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay( $this->container->get( PickupPointCardRenderer::class ), $this->container->get( SettingsRepository::class ) ) );

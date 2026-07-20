@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.124.23
+Version: 0.124.24
 
 ## Commands
 

@@ -362,7 +362,7 @@ $order = new class {
 	public array $meta = array();
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
 };
-( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder() ) )->persist( $order, array() );
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $order, array() );
 rp_smoke_assert( 'russian_post' === $order->meta['_wdc_platform_carrier_key'], 'Order meta must contain carrier_key.' );
 rp_smoke_assert( 'russian_post_worldwide_parcel' === $order->meta['_wdc_platform_rate_id'], 'Order meta must contain rate_id.' );
 rp_smoke_assert( DeliveryType::PICKUP === $order->meta['_wdc_platform_delivery_type'], 'Order meta must contain delivery_type.' );

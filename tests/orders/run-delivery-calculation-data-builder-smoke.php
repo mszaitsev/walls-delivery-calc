@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder;
+use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
@@ -57,7 +58,7 @@ function builder_smoke_rate( array $overrides = array() ): array {
 	return $rate;
 }
 
-$builder = new DeliveryCalculationDataBuilder();
+$builder = new DeliveryCalculationDataBuilder( new RuleFormulaFormatter() );
 $rate = builder_smoke_rate();
 $checkout = $builder->build(
 	$rate,
@@ -74,6 +75,47 @@ $admin = $builder->build(
 	)
 );
 builder_smoke_assert( $checkout['api'] === $admin['api'] && $checkout['rules'] === $admin['rules'] && $checkout['result'] === $admin['result'], 'Builder must keep api/rules/result parity for checkout and admin contexts.' );
+builder_smoke_assert( $checkout['package'] === $admin['package'], 'Builder must keep package parity for checkout and admin contexts.' );
+
+$zero_package = $builder->build(
+	array(
+		'rate_id' => 'test',
+		'cost' => 100,
+		'rate_meta' => array(
+			'products_weight_g' => 0,
+			'packaging_weight_g' => 0,
+			'package_weight_with_packaging_g' => 0,
+			'include_packaging_weight' => false,
+			'package' => array(
+				'weight_g' => 0,
+				'packaging_weight_g' => 0,
+				'include_packaging_weight' => false,
+			),
+		),
+	)
+);
+$package = $zero_package['package'] ?? array();
+foreach ( array( 'products_weight_g', 'packaging_weight_g', 'final_weight_g', 'include_packaging_weight' ) as $key ) {
+	builder_smoke_assert( array_key_exists( $key, $package ), 'Builder package data must keep key: ' . $key );
+}
+builder_smoke_assert( 0 === $package['products_weight_g'], 'Builder package data must preserve zero products weight.' );
+builder_smoke_assert( 0 === $package['packaging_weight_g'], 'Builder package data must preserve zero packaging weight.' );
+builder_smoke_assert( 0 === $package['final_weight_g'], 'Builder package data must preserve zero final weight.' );
+builder_smoke_assert( false === $package['include_packaging_weight'], 'Builder package data must preserve explicit false include_packaging_weight.' );
+
+$non_zero_package = $builder->build(
+	array(
+		'rate_id' => 'test',
+		'cost' => 100,
+		'rate_meta' => array(
+			'products_weight_g' => 1200,
+			'packaging_weight_g' => 150,
+			'package_weight_with_packaging_g' => 1350,
+			'include_packaging_weight' => true,
+		),
+	)
+)['package'] ?? array();
+builder_smoke_assert( 1200 === $non_zero_package['products_weight_g'] && 150 === $non_zero_package['packaging_weight_g'] && 1350 === $non_zero_package['final_weight_g'] && true === $non_zero_package['include_packaging_weight'], 'Builder package data must preserve non-zero package values.' );
 
 $formula = $checkout['rules']['formula_visualization'] ?? array();
 foreach ( array( 'Базовый срок API: 7-9 дней', 'Время обработки магазином: 3 дня', 'Доставка: рабочие в календарные 7-9 → 9-10 дней', 'Итог: 12-13 дней' ) as $line ) {
