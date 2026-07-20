@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostLookupService;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -59,15 +60,15 @@ final class RussianPostShipmentPersistenceMapper implements CarrierShipmentPersi
 		try {
 			$result = $this->actual_cost_lookup->lookup_after_create( $barcode );
 		} catch ( \Throwable ) {
-			return array( 'russian_post_actual_cost_lookup_error' => 'exception' );
+			return array( 'russian_post_cost_lookup_error' => 'exception' );
 		}
 
-		$fields = is_array( $result['fields'] ?? null ) ? $result['fields'] : array();
-		if ( array() !== $fields ) {
-			return $fields;
+		$cost = $result['cost'] ?? null;
+		if ( $cost instanceof ShipmentActualCost ) {
+			return array( 'actual_cost_candidate' => $cost );
 		}
 		$error_code = trim( (string) ( $result['error_code'] ?? '' ) );
 
-		return '' !== $error_code ? array( 'russian_post_actual_cost_lookup_error' => $error_code ) : array();
+		return '' !== $error_code ? array( 'russian_post_cost_lookup_error' => $error_code ) : array();
 	}
 }

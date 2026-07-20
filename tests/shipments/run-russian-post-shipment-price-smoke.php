@@ -20,6 +20,7 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostExtractor;
 use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostLookupService;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
@@ -31,6 +32,7 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
 
 defined( 'WDC_SECRET_KEY' ) || define( 'WDC_SECRET_KEY', 'shipment-price-smoke-secret' );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -257,7 +259,7 @@ function rp_shipment_price_lookup_service(): RussianPostShipmentActualCostLookup
 
 $extractor = new RussianPostShipmentActualCostExtractor();
 
-$fields = $extractor->fields_from_row(
+$cost = $extractor->cost_from_row(
 	array(
 		'barcode' => '80080822636157',
 		'total-rate-wo-vat' => 32785,
@@ -265,15 +267,14 @@ $fields = $extractor->fields_from_row(
 	),
 	'backlog_search'
 );
-rp_shipment_price_assert( 39998 === (int) ( $fields['russian_post_actual_cost_kopecks'] ?? 0 ), 'backlog/search total-rate-wo-vat + total-vat must be saved as kopecks.' );
-rp_shipment_price_assert( 399.98 === (float) ( $fields['russian_post_actual_cost_rub'] ?? 0.0 ), 'Actual Russian Post cost must also be stored in rubles.' );
-rp_shipment_price_assert( 'backlog_search' === (string) ( $fields['russian_post_actual_cost_source'] ?? '' ), 'Actual cost source must be backlog_search.' );
+rp_shipment_price_assert( $cost instanceof ShipmentActualCost && 39998 === $cost->amount_kopecks, 'backlog/search total-rate-wo-vat + total-vat must produce ShipmentActualCost kopecks.' );
+rp_shipment_price_assert( $cost instanceof ShipmentActualCost && 'carrier_api' === $cost->source && 'backlog_search' === $cost->source_detail, 'Russian Post actual cost candidate must use canonical source metadata.' );
 
-$missing = $extractor->fields_from_row( array( 'barcode' => '80080822636157' ), 'backlog_search' );
-rp_shipment_price_assert( array() === $missing, 'Missing total-rate-wo-vat / total-vat must not create price fields.' );
+$missing = $extractor->cost_from_row( array( 'barcode' => '80080822636157' ), 'backlog_search' );
+rp_shipment_price_assert( null === $missing, 'Missing total-rate-wo-vat / total-vat must not create an actual cost candidate.' );
 
-$manual_fields = $extractor->fields_from_row( array( 'total-rate-wo-vat' => 32785, 'total-vat' => 7213 ), 'backlog_search' );
-rp_shipment_price_assert( 'backlog_search' === (string) ( $manual_fields['russian_post_actual_cost_source'] ?? '' ), 'Manual attach must continue to use backlog_search source.' );
+$zero_cost = $extractor->cost_from_row( array( 'total-rate-wo-vat' => 0, 'total-vat' => 0 ), 'backlog_search' );
+rp_shipment_price_assert( null === $zero_cost, 'Zero Russian Post API cost must not create an actual cost candidate.' );
 
 $GLOBALS['rp_shipment_price_remote_get_calls'] = array();
 $GLOBALS['rp_shipment_price_remote_get_response'] = array(
@@ -282,13 +283,14 @@ $GLOBALS['rp_shipment_price_remote_get_response'] = array(
 );
 $create_order = new RussianPostShipmentPriceOrder();
 $lookup_service = rp_shipment_price_lookup_service();
-$creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), null, null, array( new RussianPostShipmentPersistenceMapper( $lookup_service ) ) );
+$creation = shipment_test_creation_service( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), array( new RussianPostShipmentPersistenceMapper( $lookup_service ) ) );
 $create_result = $creation->create( $create_order, rp_shipment_price_request() );
 $created_shipment = $create_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 rp_shipment_price_assert( $create_result->success, 'Automatic shipment create must remain successful.' );
-rp_shipment_price_assert( 39998 === (int) ( $created_shipment['russian_post_actual_cost_kopecks'] ?? 0 ), 'Automatic create must save actual cost kopecks from backlog/search.' );
-rp_shipment_price_assert( 399.98 === (float) ( $created_shipment['russian_post_actual_cost_rub'] ?? 0.0 ), 'Automatic create must save actual cost rubles from backlog/search.' );
-rp_shipment_price_assert( 'backlog_search_after_create' === (string) ( $created_shipment['russian_post_actual_cost_source'] ?? '' ), 'Automatic create must use backlog_search_after_create source.' );
+rp_shipment_price_assert( 39998 === (int) ( $created_shipment['actual_cost_kopecks'] ?? 0 ), 'Automatic create must save canonical actual cost kopecks from backlog/search.' );
+rp_shipment_price_assert( 'RUB' === (string) ( $created_shipment['actual_cost_currency'] ?? '' ), 'Automatic create must save canonical actual cost currency.' );
+rp_shipment_price_assert( 'carrier_api' === (string) ( $created_shipment['actual_cost_source'] ?? '' ), 'Automatic create must use carrier_api source.' );
+rp_shipment_price_assert( 'backlog_search_after_create' === (string) ( $created_shipment['actual_cost_source_detail'] ?? '' ), 'Automatic create must use backlog_search_after_create source detail.' );
 rp_shipment_price_assert( 1 === count( $GLOBALS['rp_shipment_price_remote_get_calls'] ), 'Automatic create must call backlog/search once by barcode.' );
 
 $GLOBALS['rp_shipment_price_remote_get_response'] = array( 'response' => array( 'code' => 500 ), 'body' => '{"error":"temporary"}' );
@@ -296,17 +298,20 @@ $error_order = new RussianPostShipmentPriceOrder();
 $error_result = $creation->create( $error_order, rp_shipment_price_request() );
 $error_shipment = $error_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 rp_shipment_price_assert( $error_result->success && '80080822636157' === (string) ( $error_shipment['barcode'] ?? '' ), 'Create must stay successful when actual cost lookup fails.' );
-rp_shipment_price_assert( ! isset( $error_shipment['russian_post_actual_cost_kopecks'] ), 'Failed actual cost lookup must not save price fields.' );
+rp_shipment_price_assert( ! isset( $error_shipment['actual_cost_kopecks'] ), 'Failed actual cost lookup must not save actual cost fields.' );
 
 $GLOBALS['rp_shipment_price_remote_get_response'] = array( 'response' => array( 'code' => 200 ), 'body' => '[{"barcode":"80080822636157"}]' );
 $no_cost_order = new RussianPostShipmentPriceOrder();
 $no_cost_result = $creation->create( $no_cost_order, rp_shipment_price_request() );
 $no_cost_shipment = $no_cost_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
-rp_shipment_price_assert( $no_cost_result->success && ! isset( $no_cost_shipment['russian_post_actual_cost_kopecks'] ), 'Create must stay successful when backlog/search has no total fields.' );
+rp_shipment_price_assert( $no_cost_result->success && ! isset( $no_cost_shipment['actual_cost_kopecks'] ), 'Create must stay successful when backlog/search has no total fields.' );
 
 $status_reflection = new ReflectionClass( ShipmentStatusUpdateService::class );
 $status_service = $status_reflection->newInstanceWithoutConstructor();
-$shipment = array( 'russian_post_actual_cost_kopecks' => 39998 );
+$actual_cost_resolver_property = $status_reflection->getProperty( 'actual_cost_resolver' );
+$actual_cost_resolver_property->setAccessible( true );
+$actual_cost_resolver_property->setValue( $status_service, shipment_test_actual_cost_resolver() );
+$shipment = array( 'actual_cost_kopecks' => 39998, 'actual_cost_currency' => 'RUB', 'actual_cost_source' => 'carrier_api', 'actual_cost_source_detail' => 'backlog_search_after_create' );
 
 $payload_equal = $status_service->status_payload(
 	$shipment,

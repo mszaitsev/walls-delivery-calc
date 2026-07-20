@@ -4,6 +4,7 @@ declare(strict_types=1);
 define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
@@ -15,7 +16,6 @@ use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
-use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
@@ -125,18 +125,18 @@ shipment_persistence_assert( $production_adapter_keys === $mapper_keys && count(
 
 $missing_adapter = new ShipmentPersistenceAdapter( 'test_carrier', new ShipmentCreateResult( true, external_id: 'REMOTE', tracking_number: 'REMOTE' ), array( 'method' => 'LOCAL' ) );
 $missing_order = new ShipmentPersistenceOrder( 1001 );
-$missing_result = ( new ShipmentCreationService( new OrderShipmentRepository(), array( $missing_adapter ) ) )->create( $missing_order, shipment_persistence_request( 'test_carrier' ) );
+$missing_result = shipment_test_creation_service( new OrderShipmentRepository(), array( $missing_adapter ) )->create( $missing_order, shipment_persistence_request( 'test_carrier' ) );
 shipment_persistence_assert( ! $missing_result->success && 'shipment_persistence_mapper_missing' === $missing_result->error_code && 0 === $missing_adapter->preview_calls && 0 === $missing_adapter->create_calls && array() === shipment_persistence_saved( $missing_order, 'test_carrier' ) && array() === $missing_order->notes, 'Missing mapper must block preview/create, repository save and success notes.' );
 
 $missing_order_adapter = new ShipmentPersistenceOrderAwareAdapter( 'test_order_carrier', new ShipmentCreateResult( true, external_id: 'REMOTE', tracking_number: 'REMOTE' ), array( 'method' => 'LOCAL' ) );
 $missing_order_aware = new ShipmentPersistenceOrder( 1001 );
-$missing_order_result = ( new ShipmentCreationService( new OrderShipmentRepository(), array( $missing_order_adapter ) ) )->create( $missing_order_aware, shipment_persistence_request( 'test_order_carrier' ) );
+$missing_order_result = shipment_test_creation_service( new OrderShipmentRepository(), array( $missing_order_adapter ) )->create( $missing_order_aware, shipment_persistence_request( 'test_order_carrier' ) );
 shipment_persistence_assert( ! $missing_order_result->success && 'shipment_persistence_mapper_missing' === $missing_order_result->error_code && 0 === $missing_order_adapter->preview_calls && 0 === $missing_order_adapter->create_calls && 0 === $missing_order_adapter->create_for_order_calls && array() === shipment_persistence_saved( $missing_order_aware, 'test_order_carrier' ), 'Missing mapper must block create_for_order before carrier side effects.' );
 
 $duplicate_without_mapper_adapter = new ShipmentPersistenceAdapter( 'test_duplicate_carrier', new ShipmentCreateResult( true, external_id: 'REMOTE', tracking_number: 'REMOTE' ), array( 'method' => 'LOCAL' ) );
 $duplicate_without_mapper_order = new ShipmentPersistenceOrder( 1001 );
 $duplicate_without_mapper_order->update_meta_data( OrderShipmentRepository::META_KEY, array( 'test_duplicate_carrier' => array( 'carrier_key' => 'test_duplicate_carrier', 'tracking_number' => 'EXISTING', 'status' => 'created' ) ) );
-$duplicate_without_mapper_result = ( new ShipmentCreationService( new OrderShipmentRepository(), array( $duplicate_without_mapper_adapter ) ) )->create( $duplicate_without_mapper_order, shipment_persistence_request( 'test_duplicate_carrier' ) );
+$duplicate_without_mapper_result = shipment_test_creation_service( new OrderShipmentRepository(), array( $duplicate_without_mapper_adapter ) )->create( $duplicate_without_mapper_order, shipment_persistence_request( 'test_duplicate_carrier' ) );
 shipment_persistence_assert( ! $duplicate_without_mapper_result->success && 'shipment_persistence_mapper_missing' === $duplicate_without_mapper_result->error_code && 0 === $duplicate_without_mapper_adapter->preview_calls && 0 === $duplicate_without_mapper_adapter->create_calls && 'EXISTING' === (string) shipment_persistence_saved( $duplicate_without_mapper_order, 'test_duplicate_carrier' )['tracking_number'], 'Duplicate branch without mapper must return controlled missing-mapper failure without TypeError or carrier call.' );
 
 $cdek_preview = array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => array( 'preview' => 'cdek' ), 'errors' => array() );
@@ -151,12 +151,12 @@ $cdek_raw = array(
 	'order_status' => 'CREATED',
 	'order_status_name' => 'Создан',
 	'planned_delivery_date' => '2026-07-20',
-	'actual_cost_kopecks' => 12345,
+	'actual_cost_candidate_kopecks' => 12345,
 );
 $cdek_request = shipment_persistence_request( CdekSettings::CARRIER_KEY );
 $cdek_order = new ShipmentPersistenceOrder( 1001 );
 $cdek_result = new ShipmentCreateResult( true, external_id: 'entity-uuid', tracking_number: '100500', backlog_order_id: 'request-uuid', raw_reference: $cdek_raw );
-( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( CdekSettings::CARRIER_KEY, $cdek_result, $cdek_preview ) ), null, null, array( new CdekShipmentPersistenceMapper() ) ) )->create( $cdek_order, $cdek_request );
+shipment_test_creation_service( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( CdekSettings::CARRIER_KEY, $cdek_result, $cdek_preview ) ), array( new CdekShipmentPersistenceMapper() ) )->create( $cdek_order, $cdek_request );
 $cdek_expected = array(
 	'carrier_key' => CdekSettings::CARRIER_KEY,
 	'service_key' => CdekSettings::CARRIER_KEY . ':service',
@@ -182,10 +182,15 @@ $cdek_expected = array(
 	'cdek_order_status_code' => 'CREATED',
 	'cdek_order_status_name' => 'Создан',
 	'cdek_planned_delivery_date' => '2026-07-20',
-	'cdek_actual_cost_kopecks' => 12345,
 	'backlog_order_id' => 'request-uuid',
+	'actual_cost_kopecks' => 12345,
+	'actual_cost_currency' => 'RUB',
+	'actual_cost_source' => 'carrier_api',
+	'actual_cost_source_detail' => 'cdek_create',
+	'actual_cost_updated_at' => '2026-07-15 10:11:12',
 );
-shipment_persistence_assert( $cdek_expected === shipment_persistence_saved( $cdek_order, CdekSettings::CARRIER_KEY ) && array() === $cdek_order->notes, 'CDEK mapper persistence must equal legacy shipment fields and notes.' );
+$cdek_actual = shipment_persistence_saved( $cdek_order, CdekSettings::CARRIER_KEY );
+shipment_persistence_assert( $cdek_expected === $cdek_actual && array() === $cdek_order->notes, 'CDEK mapper persistence must equal legacy shipment fields and notes.' );
 
 $dpd_preview = array( 'method' => 'SOAP', 'path' => 'order2/createOrder2', 'body' => array( 'preview' => 'dpd' ), 'errors' => array(), 'warnings' => array() );
 $dpd_raw = array(
@@ -201,7 +206,7 @@ $dpd_raw = array(
 $dpd_request = shipment_persistence_request( DpdSettings::CARRIER_KEY, array( 'service_code' => 'PCL', 'pickup_terminal_code' => 'SRC', 'delivery_terminal_code' => 'DST', 'date_pickup' => '2026-07-16', 'declared_value_rub' => 1000 ) );
 $dpd_order = new ShipmentPersistenceOrder( 1001 );
 $dpd_result = new ShipmentCreateResult( true, external_id: 'DPD-1', tracking_number: 'DPD-1', backlog_order_id: 'REQ-1', raw_reference: $dpd_raw );
-( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( DpdSettings::CARRIER_KEY, $dpd_result, $dpd_preview ) ), null, null, array( new DpdShipmentPersistenceMapper() ) ) )->create( $dpd_order, $dpd_request );
+shipment_test_creation_service( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( DpdSettings::CARRIER_KEY, $dpd_result, $dpd_preview ) ), array( new DpdShipmentPersistenceMapper() ) )->create( $dpd_order, $dpd_request );
 $dpd_expected = array(
 	'carrier_key' => DpdSettings::CARRIER_KEY,
 	'service_key' => DpdSettings::CARRIER_KEY . ':service',
@@ -241,7 +246,7 @@ $rp_raw = array( 'orders' => array( array( 'barcode' => 'RP1' ) ), 'barcodes' =>
 $rp_request = shipment_persistence_request( RussianPostDomesticSettings::CARRIER_KEY );
 $rp_order = new ShipmentPersistenceOrder( 1001 );
 $rp_result = new ShipmentCreateResult( true, external_id: '777', tracking_number: 'RP1', backlog_order_id: '777', raw_reference: $rp_raw );
-( new ShipmentCreationService( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( RussianPostDomesticSettings::CARRIER_KEY, $rp_result, $rp_preview ) ), null, null, array( new RussianPostShipmentPersistenceMapper() ) ) )->create( $rp_order, $rp_request );
+shipment_test_creation_service( new OrderShipmentRepository(), array( new ShipmentPersistenceAdapter( RussianPostDomesticSettings::CARRIER_KEY, $rp_result, $rp_preview ) ), array( new RussianPostShipmentPersistenceMapper() ) )->create( $rp_order, $rp_request );
 $rp_expected = array(
 	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 	'service_key' => RussianPostDomesticSettings::CARRIER_KEY . ':service',

@@ -6,6 +6,7 @@ require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
 use WallsShop\WDC\Carriers\Dpd\DpdCredentials;
@@ -92,7 +93,7 @@ function dpd_documents_service( DpdDocumentsFakeSoap $soap ): DpdShipmentDocumen
 function dpd_documents_pdf( string $label ): string { return '%PDF-1.4\n%' . $label . '\n'; }
 function dpd_documents_temp_glob(): array { return glob( sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-dpd-documents-*' ) ?: array(); }
 
-$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( dpd_documents_settings() ), null, null, new DpdShipmentButtonPolicy() );
+$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( dpd_documents_settings() ), shipment_test_actual_cost_resolver(), null, null, new DpdShipmentButtonPolicy() );
 $payload_1401 = $adapter->status_payload( new stdClass(), dpd_documents_shipment() );
 dpd_documents_assert( ! empty( $payload_1401['can_cancel'] ) && empty( $payload_1401['can_remove_from_order'] ) && ! empty( $payload_1401['can_download_dpd_documents'] ), 'Initial DPD payload for 1401 must show cancel/download and hide remove.' );
 $payload_1301 = $adapter->status_payload( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1301' ) ) );
@@ -112,7 +113,8 @@ $delivery_services = $reflection->newInstanceWithoutConstructor();
 $status_updates = new ShipmentStatusUpdateService(
 	new OrderShipmentRepository(),
 	( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor(),
-	( new ReflectionClass( RussianPostTrackingStatusMapper::class ) )->newInstanceWithoutConstructor()
+	( new ReflectionClass( RussianPostTrackingStatusMapper::class ) )->newInstanceWithoutConstructor(),
+	shipment_test_actual_cost_resolver()
 );
 $document_registry = new ShipmentDocumentProviderRegistry( array( $provider ) );
 $payload_builder = new ShipmentAdminCarrierUiPayloadBuilder(

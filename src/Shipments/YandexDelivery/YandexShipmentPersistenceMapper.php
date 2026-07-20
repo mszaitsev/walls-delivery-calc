@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Shipment\YandexDeliveryRequestInfo;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
 
@@ -24,10 +25,10 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 	public function carrier_key(): string { return YandexDeliverySettings::CARRIER_KEY; }
 
 	public function build_created_fields( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, string $now ): array {
-		unset( $preview, $now );
+		unset( $preview );
 		$fields = is_array( $result->raw_reference['yandex'] ?? null ) ? $result->raw_reference['yandex'] : array();
 
-		return array_merge(
+		$base = array_merge(
 			array(
 				'request_snapshot' => $this->canonical_request_snapshot(),
 				'response_snapshot' => is_array( $fields['yandex_request_info_snapshot'] ?? null ) ? $fields['yandex_request_info_snapshot'] : $result->raw_reference,
@@ -36,6 +37,12 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 			),
 			$fields
 		);
+		$amount = is_numeric( $base['yandex_offer_pricing_total_kopecks'] ?? null ) ? (int) $base['yandex_offer_pricing_total_kopecks'] : 0;
+		if ( $amount > 0 ) {
+			$base['actual_cost_candidate'] = new ShipmentActualCost( $amount, 'RUB', 'carrier_api', 'yandex_offer', $now );
+		}
+
+		return $base;
 	}
 
 	public function build_failed_fields( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, string $now ): ?array {
@@ -49,7 +56,7 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 			return null;
 		}
 
-		return array(
+		$fields = array(
 			'request_snapshot' => $this->canonical_request_snapshot(),
 			'response_snapshot' => $this->sanitize_diagnostics( $reconciliation ),
 			'barcode' => $request_id,
@@ -67,8 +74,6 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 			'yandex_offer_pricing' => (string) ( $reconciliation['selected_offer_pricing'] ?? '' ),
 			'yandex_offer_pricing_total' => (string) ( $reconciliation['selected_offer_pricing_total'] ?? '' ),
 			'yandex_offer_pricing_total_kopecks' => max( 0, (int) ( $reconciliation['selected_offer_pricing_total_kopecks'] ?? 0 ) ),
-			'actual_cost_kopecks' => max( 0, (int) ( $reconciliation['selected_offer_pricing_total_kopecks'] ?? 0 ) ),
-			'actual_cost_source' => 'yandex_selected_offer',
 			'yandex_offer_delivery_interval' => is_array( $reconciliation['selected_offer_delivery_interval'] ?? null ) ? $reconciliation['selected_offer_delivery_interval'] : array(),
 			'yandex_offer_pickup_interval' => is_array( $reconciliation['selected_offer_pickup_interval'] ?? null ) ? $reconciliation['selected_offer_pickup_interval'] : array(),
 			'yandex_selected_offer_snapshot' => is_array( $reconciliation['selected_offer_snapshot'] ?? null ) ? $reconciliation['selected_offer_snapshot'] : array(),
@@ -85,6 +90,12 @@ final class YandexShipmentPersistenceMapper implements CarrierShipmentPersistenc
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
+		$amount = is_numeric( $reconciliation['selected_offer_pricing_total_kopecks'] ?? null ) ? (int) $reconciliation['selected_offer_pricing_total_kopecks'] : 0;
+		if ( $amount > 0 ) {
+			$fields['actual_cost_candidate'] = new ShipmentActualCost( $amount, 'RUB', 'carrier_api', 'yandex_offer', $now );
+		}
+
+		return $fields;
 	}
 
 	public function build_manual_attach_fields( object $order, YandexDeliveryRequestInfo $info, string $now ): array {

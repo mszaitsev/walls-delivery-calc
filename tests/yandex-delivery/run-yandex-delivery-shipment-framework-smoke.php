@@ -28,6 +28,7 @@ $GLOBALS['wpdb'] = new wpdb();
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiResponse;
@@ -270,9 +271,9 @@ function yd_framework_stack( array $responses ): array {
 	$mapper = new YandexShipmentPersistenceMapper( $yandex_repository, $status_mapping, $order_status_mapping );
 	$button_policy = new YandexShipmentButtonPolicy( $status_mapping );
 	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
-	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
+	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, shipment_test_actual_cost_resolver(), $status_mapping );
 	$registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, $registry, array( $mapper ) );
+	$creation = shipment_test_creation_service( $base_repository, array( $adapter ), array( $mapper ), $registry );
 
 	return array( $base_repository, $adapter, $creation, $framework_registration, $fake );
 }
@@ -298,9 +299,9 @@ $order_status_mapping = new ShipmentOrderStatusMappingService( new SettingsRepos
 $mapper = new YandexShipmentPersistenceMapper( $yandex_repository, $status_mapping, $order_status_mapping );
 $button_policy = new YandexShipmentButtonPolicy( $status_mapping );
 $framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
-$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
+$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, shipment_test_actual_cost_resolver(), $status_mapping );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, $registry, array( $mapper ) );
+$creation = shipment_test_creation_service( $base_repository, array( $adapter ), array( $mapper ), $registry );
 $order = new YdFrameworkOrder( 777 );
 $request = yd_framework_request();
 
@@ -418,7 +419,7 @@ yd_framework_assert( 'REQ-777' === (string) ( $shipment['yandex_request_id'] ?? 
 yd_framework_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $shipment['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $shipment['universal_status_label'] ?? '' ) && 'state CREATED' === (string) ( $shipment['yandex_status_description'] ?? '' ), 'Repository must persist mapped universal Yandex status fields and raw API status description.' );
 yd_framework_assert( '2026-07-11T16:23:01.000000Z' === (string) ( $shipment['yandex_offer_expires_at'] ?? '' ), 'Repository must persist selected offer expires_at.' );
 yd_framework_assert( '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing'] ?? '' ) && '298.8 RUB' === (string) ( $shipment['yandex_offer_pricing_total'] ?? '' ) && 29880 === (int) ( $shipment['yandex_offer_pricing_total_kopecks'] ?? 0 ), 'Repository must persist selected offer pricing audit fields.' );
-yd_framework_assert( 29880 === (int) ( $shipment['actual_cost_kopecks'] ?? 0 ) && 'yandex_selected_offer' === (string) ( $shipment['actual_cost_source'] ?? '' ), 'Normal Yandex create must persist selected offer pricing_total as common actual-cost kopecks without scale drift.' );
+yd_framework_assert( 29880 === (int) ( $shipment['actual_cost_kopecks'] ?? 0 ) && 'carrier_api' === (string) ( $shipment['actual_cost_source'] ?? '' ) && 'yandex_offer' === (string) ( $shipment['actual_cost_source_detail'] ?? '' ), 'Normal Yandex create must persist selected offer pricing_total as canonical actual-cost kopecks without scale drift.' );
 yd_framework_assert( '2026-07-21T07:00:00.000000Z' === (string) ( $shipment['yandex_offer_delivery_interval']['min'] ?? '' ) && '2026-07-13T05:00:00.000000Z' === (string) ( $shipment['yandex_offer_pickup_interval']['max'] ?? '' ) && 'OFFER-1' === (string) ( $shipment['yandex_selected_offer_snapshot']['offer_id'] ?? '' ), 'Repository must persist selected offer interval snapshot audit fields.' );
 yd_framework_assert( 'REQ-777' === (string) $order->get_meta( '_wdc_yandex_delivery_request_id', true ), 'Successful create must persist Yandex request_id lookup meta.' );
 yd_framework_assert( 'YD-REAL-1' === (string) ( $shipment['yandex_place_barcode_map']['ORDER-777-1'] ?? '' ) && 'YD-REAL-1' === (string) ( $shipment['yandex_places'][0]['barcode'] ?? '' ) && 'ITEM-YD-1' === (string) ( $shipment['yandex_items'][0]['barcode'] ?? '' ), 'Repository must persist request/info items, places and temporary-to-real barcode map.' );
@@ -765,6 +766,7 @@ $preview_mapper = new YandexShipmentPersistenceMapper( $preview_repository, $pre
 $preview_adapter = new YandexShipmentAdapter(
 	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, $preview_repository, $preview_mapper, new YandexShipmentButtonPolicy( $preview_status_mapping ), $preview_status_mapping ),
 	new YandexShipmentButtonPolicy( $preview_status_mapping ),
+	shipment_test_actual_cost_resolver(),
 	$preview_status_mapping
 );
 $preview_payload = $preview_adapter->build_safe_payload_preview( yd_framework_request() );

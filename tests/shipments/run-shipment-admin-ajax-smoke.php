@@ -8,6 +8,12 @@ if ( ! function_exists( 'add_action' ) ) {
 		$GLOBALS['wdc_shipment_admin_ajax_registered_hooks'][] = array( $hook_name, $callback );
 	}
 }
+if ( ! function_exists( '__' ) ) {
+	function __( string $text, string $domain = '' ): string {
+		unset( $domain );
+		return $text;
+	}
+}
 
 function shipment_admin_ajax_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -29,6 +35,7 @@ $controllers = array(
 	'ShipmentRemovalAjaxController' => 'handle_cancel',
 	'ShipmentManualAttachAjaxController' => 'handle',
 	'ShipmentAddressAjaxController' => 'handle_normalize',
+	'ShipmentActualCostAjaxController' => 'handle_save',
 	'ShipmentDocumentsAjaxController' => 'handle_cdek_barcode_prepare',
 	'ShipmentProductsAjaxController' => 'handle_search_products',
 );
@@ -41,6 +48,7 @@ $controller_properties = array(
 	'ShipmentRemovalAjaxController' => 'ajax_removal_controller',
 	'ShipmentManualAttachAjaxController' => 'ajax_manual_attach_controller',
 	'ShipmentAddressAjaxController' => 'ajax_address_controller',
+	'ShipmentActualCostAjaxController' => 'ajax_actual_cost_controller',
 	'ShipmentDocumentsAjaxController' => 'ajax_documents_controller',
 	'ShipmentProductsAjaxController' => 'ajax_products_controller',
 );
@@ -49,7 +57,7 @@ foreach ( $controllers as $class => $method ) {
 	$path = $root . '/src/Shipments/Admin/Ajax/' . $class . '.php';
 	$source = (string) file_get_contents( $path );
 	shipment_admin_ajax_assert( is_file( $path ) && str_contains( $source, 'final class ' . $class ) && str_contains( $source, 'public function ' . $method ), 'AJAX controller must exist and expose expected handler: ' . $class );
-	shipment_admin_ajax_assert( str_contains( $plugin, '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class . '::class' ), 'Plugin DI must register AJAX controller: ' . $class );
+	shipment_admin_ajax_assert( str_contains( $plugin, '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class . '::class' ) || str_contains( $plugin, $class . '::class' ), 'Plugin DI must register AJAX controller: ' . $class );
 	shipment_admin_ajax_assert( ! preg_match( '/public function ' . preg_quote( $method, '/' ) . '\s*\([^)]*\)\s*:\s*void\s*\{\s*\$this->ajax->ajax_[a-z_]+\(\);\s*\}/', $source ), 'AJAX controller must not be a proxy wrapper: ' . $class );
 	shipment_admin_ajax_assert( str_contains( $source, 'wp_send_json_' ) || str_contains( $source, 'current_user_can' ), 'AJAX controller must own endpoint response/access logic: ' . $class );
 	$property = $controller_properties[ $class ];
@@ -68,6 +76,8 @@ foreach ( array(
 	'wdc_attach_shipment_tracking_number',
 	'wdc_normalize_shipment_address',
 	'wdc_search_russian_post_pickup_points',
+	'wdc_save_shipment_actual_cost',
+	'wdc_clear_shipment_actual_cost',
 	'wdc_search_products_for_shipment_item',
 	'wdc_cdek_barcode_prepare',
 	'wdc_dpd_courier_contact_history',
@@ -85,6 +95,7 @@ shipment_admin_ajax_assert( str_contains( $payload_builder, 'function carrier_ui
 shipment_admin_ajax_assert( ! str_contains( $metabox, 'CarrierShipmentLifecycleContinuationInterface' ), 'Metabox must not own lifecycle continuation business contract.' );
 
 $ajax_dir = $root . '/src/Shipments/Admin/Ajax/';
+require_once $root . '/src/Domain/Common/MoneyParser.php';
 foreach ( array_keys( $controllers ) as $class ) {
 	require_once $ajax_dir . $class . '.php';
 }
@@ -119,6 +130,8 @@ $expected_callbacks = array(
 	'wp_ajax_wdc_attach_shipment_tracking_number' => array( 'ShipmentManualAttachAjaxController', 'handle' ),
 	'wp_ajax_wdc_normalize_shipment_address' => array( 'ShipmentAddressAjaxController', 'handle_normalize' ),
 	'wp_ajax_wdc_search_russian_post_pickup_points' => array( 'ShipmentAddressAjaxController', 'handle_search_pickup_points' ),
+	'wp_ajax_wdc_save_shipment_actual_cost' => array( 'ShipmentActualCostAjaxController', 'handle_save' ),
+	'wp_ajax_wdc_clear_shipment_actual_cost' => array( 'ShipmentActualCostAjaxController', 'handle_clear' ),
 	'wp_ajax_wdc_search_products_for_shipment_item' => array( 'ShipmentProductsAjaxController', 'handle_search_products' ),
 	'wp_ajax_wdc_cdek_barcode_prepare' => array( 'ShipmentDocumentsAjaxController', 'handle_cdek_barcode_prepare' ),
 	'wp_ajax_wdc_dpd_courier_contact_history' => array( 'ShipmentProductsAjaxController', 'handle_dpd_contact_history' ),
@@ -129,6 +142,21 @@ foreach ( $expected_callbacks as $hook_name => $expected ) {
 	shipment_admin_ajax_assert( is_callable( $registered[ $hook_name ] ), 'Registered AJAX callback must be callable: ' . $hook_name );
 	shipment_admin_ajax_assert( is_array( $registered[ $hook_name ] ) && is_object( $registered[ $hook_name ][0] ) && $registered[ $hook_name ][1] === $expected[1], 'Registered AJAX callback must point to expected controller method: ' . $hook_name );
 	shipment_admin_ajax_assert( $registered[ $hook_name ][0] instanceof ( '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $expected[0] ), 'Registered AJAX callback must point to expected controller instance: ' . $hook_name );
+}
+
+$actual_cost_controller = ( new ReflectionClass( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController::class ) )->newInstanceWithoutConstructor();
+$parse_actual_cost = new ReflectionMethod( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController::class, 'parse_amount_kopecks' );
+$parse_actual_cost->setAccessible( true );
+shipment_admin_ajax_assert( 123456 === $parse_actual_cost->invoke( $actual_cost_controller, '1234.56' ), 'Actual cost parser must convert decimal rubles to exact kopecks.' );
+shipment_admin_ajax_assert( 123450 === $parse_actual_cost->invoke( $actual_cost_controller, '1234,5' ), 'Actual cost parser must accept comma decimals without float rounding.' );
+foreach ( array( '0', '0.00', '', '-1', '1.234' ) as $invalid_actual_cost ) {
+	$rejected = false;
+	try {
+		$parse_actual_cost->invoke( $actual_cost_controller, $invalid_actual_cost );
+	} catch ( InvalidArgumentException ) {
+		$rejected = true;
+	}
+	shipment_admin_ajax_assert( $rejected, 'Actual cost parser must reject invalid value: ' . $invalid_actual_cost );
 }
 
 echo "Shipment admin AJAX smoke passed.\n";

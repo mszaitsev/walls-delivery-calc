@@ -232,6 +232,18 @@ function initializeShipmentAdmin() {
       return;
     }
 
+    const saveActualCost = event.target.closest('[data-wdc-save-actual-cost]');
+    if (saveActualCost) {
+      requestShipmentActualCost(saveActualCost, 'save').catch(function () {});
+      return;
+    }
+
+    const clearActualCost = event.target.closest('[data-wdc-clear-actual-cost]');
+    if (clearActualCost) {
+      requestShipmentActualCost(clearActualCost, 'clear').catch(function () {});
+      return;
+    }
+
     const copyTracking = event.target.closest('[data-wdc-copy-tracking]');
     if (copyTracking) {
       const box = copyTracking.closest('[data-wdc-shipments-metabox]');
@@ -312,8 +324,44 @@ function initializeShipmentAdmin() {
         .catch((error) => {
           if (errors) errors.textContent = error.message;
           showShipmentToast(findShipmentForm(create), error.message, 'error');
-        });
-    }
+  });
+}
+
+function requestShipmentActualCost(button, operation) {
+  const box = button.closest('[data-wdc-shipments-metabox]');
+  const control = button.closest('[data-wdc-shipment-actual-cost]');
+  const input = control && control.querySelector('[data-wdc-actual-cost-input]');
+  const data = new FormData();
+  data.append('action', operation === 'clear' ? window.wdcShipmentsAdmin.clearActualCostAction : window.wdcShipmentsAdmin.saveActualCostAction);
+  data.append('nonce', window.wdcShipmentsAdmin.nonce);
+  data.append('order_id', control && control.dataset ? String(control.dataset.orderId || '') : '');
+  data.append('shipment_key', control && control.dataset ? String(control.dataset.shipmentKey || '') : '');
+  if (operation !== 'clear') {
+    data.append('actual_cost', input ? input.value : '');
+  }
+  button.disabled = true;
+  return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: data
+  })
+    .then(parseShipmentJsonResponse)
+    .then((payload) => {
+      if (!payload || !payload.success) {
+        throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось сохранить фактическую стоимость.');
+      }
+      const status = shipmentStatusFromResponse(payload.data || {});
+      renderShipmentStatus(box, status);
+      if (input && operation !== 'clear') input.value = '';
+      showShipmentToast(box, payload.data && payload.data.message ? payload.data.message : 'Фактическая стоимость обновлена.', 'success');
+    })
+    .catch((error) => {
+      showShipmentToast(box, error.message || 'Не удалось сохранить фактическую стоимость.', 'error');
+    })
+    .finally(() => {
+      button.disabled = false;
+    });
+}
   });
 
   document.addEventListener('input', function (event) {

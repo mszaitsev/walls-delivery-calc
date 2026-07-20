@@ -771,6 +771,7 @@ final class RulesAdminPage {
 			'postal_code'    => isset( $raw['postal_code'] ) ? sanitize_text_field( (string) $raw['postal_code'] ) : $defaults['postal_code'],
 			'city'           => isset( $raw['city'] ) ? sanitize_text_field( (string) $raw['city'] ) : $defaults['city'],
 			'location_fias_id' => isset( $raw['location_fias_id'] ) ? sanitize_text_field( (string) $raw['location_fias_id'] ) : $defaults['location_fias_id'],
+			'selected_location_id' => isset( $raw['selected_location_id'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['selected_location_id'] ) ) : (int) ( $defaults['selected_location_id'] ?? 0 ),
 			'delivery_type'  => in_array( (string) ( $raw['delivery_type'] ?? '' ), array_keys( $this->condition_schema()->delivery_type_options() ), true ) ? sanitize_text_field( (string) $raw['delivery_type'] ) : $defaults['delivery_type'],
 			'payment_method' => isset( $raw['payment_method'] ) ? sanitize_text_field( (string) $raw['payment_method'] ) : $defaults['payment_method'],
 			'length_cm'      => isset( $raw['length_cm'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['length_cm'] ) ) : $defaults['length_cm'],
@@ -1016,9 +1017,14 @@ final class RulesAdminPage {
 			'country' => 'RU',
 			'city' => '',
 			'location_fias_id' => '',
+			'selected_location_id' => '',
 			'postal_code' => '',
 			'weight' => 1000,
 			'order_total' => 1000,
+			'delivery_type' => 'pickup',
+			'length_cm' => 10,
+			'width_cm' => 10,
+			'height_cm' => 10,
 			'date' => ( new DateTimeImmutable() )->format( 'Y-m-d' ),
 		);
 		?>
@@ -1028,8 +1034,16 @@ final class RulesAdminPage {
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<input type="hidden" name="wdc_rules_action" value="simulate">
 				<div class="wdc-rule-grid">
+					<label><span><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[country]" value="<?php echo esc_attr( (string) $input['country'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Город назначения', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[city]" value="<?php echo esc_attr( (string) $input['city'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Почтовый индекс назначения', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="numeric" name="simulation[postal_code]" value="<?php echo esc_attr( (string) $input['postal_code'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'FIAS ID населённого пункта', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[location_fias_id]" value="<?php echo esc_attr( (string) $input['location_fias_id'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Carrier location ID', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[selected_location_id]" value="<?php echo esc_attr( (string) $input['selected_location_id'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Тип доставки', 'walls-delivery-calc' ); ?></span><select name="simulation[delivery_type]"><?php foreach ( $this->condition_schema()->delivery_type_options() as $value => $label ) : ?><option value="<?php echo esc_attr( (string) $value ); ?>" <?php selected( (string) $input['delivery_type'], (string) $value ); ?>><?php echo esc_html( (string) $label ); ?></option><?php endforeach; ?></select></label>
 					<label><span><?php echo esc_html__( 'Вес товаров, г', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Длина товаров/исходного места, см', 'walls-delivery-calc' ); ?></span><input type="number" min="0" step="0.1" name="simulation[length_cm]" value="<?php echo esc_attr( (string) $input['length_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Ширина товаров/исходного места, см', 'walls-delivery-calc' ); ?></span><input type="number" min="0" step="0.1" name="simulation[width_cm]" value="<?php echo esc_attr( (string) $input['width_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Высота товаров/исходного места, см', 'walls-delivery-calc' ); ?></span><input type="number" min="0" step="0.1" name="simulation[height_cm]" value="<?php echo esc_attr( (string) $input['height_cm'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Сумма заказа, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>
 				</div>
@@ -1059,17 +1073,20 @@ final class RulesAdminPage {
 			<?php if ( ! empty( $result['tariffs'] ) && is_array( $result['tariffs'] ) ) : ?>
 				<h3><?php echo esc_html__( 'Активные тарифы', 'walls-delivery-calc' ); ?></h3>
 				<table class="widefat striped">
-					<thead><tr><th><?php echo esc_html__( 'Object code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API цена', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API срок', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Итоговая цена', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Итоговый срок', 'walls-delivery-calc' ); ?></th></tr></thead>
+					<thead><tr><th><?php echo esc_html__( 'Object code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Тип', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API цена', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API срок', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Итоговая цена', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Итоговый срок', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Отключён', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Комментарий/формула', 'walls-delivery-calc' ); ?></th></tr></thead>
 					<tbody>
 						<?php foreach ( $result['tariffs'] as $tariff ) : ?>
 							<?php if ( ! is_array( $tariff ) ) { continue; } ?>
 							<tr>
 								<td><?php echo esc_html( (string) ( $tariff['object_code'] ?? '' ) ); ?></td>
 								<td><?php echo esc_html( (string) ( $tariff['title'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['delivery_type'] ?? '' ) ); ?></td>
 								<td><?php echo esc_html( (string) ( $tariff['api_price'] ?? '' ) ); ?></td>
 								<td><?php echo esc_html( (string) ( $tariff['api_delivery_days'] ?? '' ) ); ?></td>
 								<td><?php echo esc_html( (string) ( $tariff['final_price'] ?? '' ) ); ?></td>
 								<td><?php echo esc_html( (string) ( $tariff['final_delivery_days'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['disabled'] ?? '' ) . ( '' !== (string) ( $tariff['disabled_reason'] ?? '' ) ? ': ' . (string) $tariff['disabled_reason'] : '' ) ); ?></td>
+								<td><pre><?php echo esc_html( implode( "\n", array_filter( array( (string) ( $tariff['comments'] ?? '' ), (string) ( $tariff['formula_visualization'] ?? '' ), (string) ( $tariff['lead_time_audit'] ?? '' ) ) ) ) ); ?></pre></td>
 							</tr>
 						<?php endforeach; ?>
 					</tbody>
@@ -1217,6 +1234,7 @@ final class RulesAdminPage {
 			'postal_code'    => '',
 			'city'           => 'Moscow',
 			'location_fias_id' => '',
+			'selected_location_id' => 0,
 			'delivery_type'  => 'courier',
 			'payment_method' => $this->default_payment_method(),
 			'length_cm'      => 10,

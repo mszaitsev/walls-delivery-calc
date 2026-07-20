@@ -5,8 +5,6 @@ namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
-use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
-use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -17,12 +15,9 @@ final class ShipmentStatusUpdateService {
 		private OrderShipmentRepository $repository,
 		private RussianPostTrackingApiClient $tracking_client,
 		private RussianPostTrackingStatusMapper $mapper,
-		private ?ShipmentOrderStatusMappingService $order_status_mapping = null,
-		private ?ShipmentActualCostComparisonService $actual_costs = null,
-		private ?ShipmentBaseApiCostResolver $base_costs = null
+		private ShipmentActualCostResolver $actual_cost_resolver,
+		private ShipmentOrderStatusMappingService|null $order_status_mapping = null,
 	) {
-		$this->actual_costs ??= new ShipmentActualCostComparisonService();
-		$this->base_costs ??= new ShipmentBaseApiCostResolver();
 	}
 
 	/**
@@ -162,40 +157,7 @@ final class ShipmentStatusUpdateService {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, ?object $order ): array {
-		$actual_kopecks = $this->positive_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
-		$base_kopecks = $this->base_costs()->resolve_from_order( $order );
-		$presentation = $this->actual_costs()->compare( $actual_kopecks, $base_kopecks )->to_array();
-
-		return $presentation + array( 'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks );
-	}
-
-	private function positive_int_or_null( mixed $value ): ?int {
-		if ( is_int( $value ) ) {
-			return $value > 0 ? $value : null;
-		}
-		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
-			$integer = (int) $value;
-
-			return $integer > 0 ? $integer : null;
-		}
-
-		return null;
-	}
-
-	private function actual_costs(): ShipmentActualCostComparisonService {
-		if ( ! isset( $this->actual_costs ) || ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
-			$this->actual_costs = new ShipmentActualCostComparisonService();
-		}
-
-		return $this->actual_costs;
-	}
-
-	private function base_costs(): ShipmentBaseApiCostResolver {
-		if ( ! isset( $this->base_costs ) || ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
-			$this->base_costs = new ShipmentBaseApiCostResolver();
-		}
-
-		return $this->base_costs;
+		return $this->actual_cost_resolver->presentation_payload( $shipment, $order );
 	}
 
 	private function now(): string {

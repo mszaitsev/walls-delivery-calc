@@ -4,11 +4,19 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Dpd;
 
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Domain\Common\MoneyParser;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 
 defined( 'ABSPATH' ) || exit;
 
 final class DpdShipmentEnrichmentService {
-	public function __construct( private DpdApiClient $client, private DpdShipmentRepository $repository ) {}
+	public function __construct(
+		private DpdApiClient $client,
+		private DpdShipmentRepository $repository,
+		private ShipmentActualCostService $actual_cost_service
+	) {}
 
 	/** @return array<string,mixed> */
 	public function enrich_current_order( object $order ): array {
@@ -21,14 +29,24 @@ final class DpdShipmentEnrichmentService {
 		$state = $this->first_state( is_array( $response['body'] ?? null ) ? $response['body'] : array() );
 		$cost = $this->cost_kopecks( $state['orderCost'] ?? null );
 		$date = trim( (string) ( $state['planDeliveryDate'] ?? '' ) );
-		if ( null === $cost || '' === $date ) { return array( 'success' => true, 'message' => 'DPD пока не вернул цену и плановую дату.', 'complete' => false ); }
 		$now = $this->now();
-		$shipment['dpd_actual_cost_kopecks'] = $cost;
-		$shipment['planned_delivery_date'] = $date;
-		$shipment['dpd_enrichment_checked_at'] = $now;
-		$shipment['updated_at'] = $now;
-		$this->repository->save( $order, $shipment );
-		return array( 'success' => true, 'message' => 'Цена и плановая дата DPD обновлены.', 'complete' => true, 'shipment' => $shipment );
+		$updated = false;
+		if ( '' !== $date ) {
+			$shipment['planned_delivery_date'] = $date;
+			$shipment['dpd_enrichment_checked_at'] = $now;
+			$shipment['updated_at'] = $now;
+			$this->repository->save( $order, $shipment );
+			$updated = true;
+		}
+		if ( null !== $cost && $cost > 0 ) {
+			$shipment = $this->actual_cost_service->apply_carrier_cost( $order, DpdSettings::CARRIER_KEY, new ShipmentActualCost( $cost, 'RUB', 'carrier_status', 'dpd_events', $now ) );
+			$updated = true;
+		}
+		if ( ! $updated ) {
+			return array( 'success' => true, 'message' => 'DPD пока не вернул цену и плановую дату.', 'complete' => false );
+		}
+
+		return array( 'success' => true, 'message' => 'Цена или плановая дата DPD обновлены.', 'complete' => null !== $cost && $cost > 0 && '' !== $date, 'shipment' => $shipment );
 	}
 
 	/** @param array<string,mixed> $body @return array<string,mixed> */
@@ -38,6 +56,13 @@ final class DpdShipmentEnrichmentService {
 		return is_array( $value ) ? $value : array();
 	}
 	private function pickup_year( string $date ): ?int { try { return '' !== $date ? (int) ( new \DateTimeImmutable( $date ) )->format( 'Y' ) : null; } catch ( \Throwable ) { return null; } }
-	private function cost_kopecks( mixed $value ): ?int { return is_numeric( $value ) && (float) $value > 0 ? (int) round( (float) $value * 100 ) : null; }
+	private function cost_kopecks( mixed $value ): ?int {
+		if ( ! is_int( $value ) && ! is_float( $value ) && ! is_string( $value ) ) {
+			return null;
+		}
+		$kopecks = MoneyParser::numeric_to_kopecks( $value );
+
+		return null !== $kopecks && $kopecks > 0 ? $kopecks : null;
+	}
 	private function now(): string { return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ); }
 }

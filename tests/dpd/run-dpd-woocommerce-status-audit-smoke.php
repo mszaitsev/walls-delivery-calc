@@ -4,6 +4,7 @@ declare(strict_types=1);
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
 use WallsShop\WDC\Carriers\Dpd\DpdCredentials;
@@ -107,7 +108,7 @@ function dpd_woo_audit_context( array $orders, array $mapping, bool $confirm = t
 	$dpd_repository = new DpdShipmentRepository( $order_repository );
 	$order_mapping = new ShipmentOrderStatusMappingService( $settings_repository );
 	$events = new DpdEventSyncService( $client, $dpd_settings, $dpd_repository, new DpdEventNormalizer(), new DpdStatusMapping( $settings_repository ), $order_mapping );
-	$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( $dpd_settings ), $client, null, new DpdShipmentButtonPolicy() );
+	$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( $dpd_settings ), shipment_test_actual_cost_resolver(), $client, null, new DpdShipmentButtonPolicy() );
 	$autosync = new ShipmentStatusAutoSyncService( $settings_repository, $order_repository, ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(), $order_mapping, null, null, null, new CarrierShipmentAdapterRegistry( array( $adapter ) ), $events, $dpd_settings );
 	$registration = new DpdOrderRegistrationService( new DpdShipmentPayloadBuilder( $dpd_settings ), $client, $dpd_repository, $events );
 	return array( $soap, $events, $dpd_repository, $autosync, $registration );

@@ -33,26 +33,21 @@ final class RussianPostShipmentActualCostExtractor {
 
 	/**
 	 * @param array<string,mixed> $row
-	 * @return array<string,mixed>
 	 */
-	public function fields_from_row( array $row, string $source ): array {
+	public function cost_from_row( array $row, string $source ): ?ShipmentActualCost {
 		if ( ! array_key_exists( 'total-rate-wo-vat', $row ) || ! array_key_exists( 'total-vat', $row ) ) {
-			return array();
+			return null;
 		}
 		if ( ! is_numeric( $row['total-rate-wo-vat'] ) || ! is_numeric( $row['total-vat'] ) ) {
-			return array();
+			return null;
 		}
 
 		$cost_kopecks = max( 0, (int) $row['total-rate-wo-vat'] ) + max( 0, (int) $row['total-vat'] );
 		if ( $cost_kopecks <= 0 ) {
-			return array();
+			return null;
 		}
 
-		return array(
-			'russian_post_actual_cost_kopecks' => $cost_kopecks,
-			'russian_post_actual_cost_rub' => round( $cost_kopecks / 100, 2 ),
-			'russian_post_actual_cost_source' => $source,
-		);
+		return new ShipmentActualCost( $cost_kopecks, 'RUB', 'carrier_api', $source );
 	}
 
 	/**

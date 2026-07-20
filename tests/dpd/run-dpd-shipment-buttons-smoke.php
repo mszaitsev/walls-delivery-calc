@@ -6,6 +6,7 @@ require_once dirname( __DIR__ ) . '/shipments/admin-js-bundle-source.php';
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
@@ -60,7 +61,7 @@ $reload_1401 = $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'carrier_o
 dpd_buttons_assert( $reload_1401['update'] && $reload_1401['cancel'] && ! $reload_1401['remove'], 'Reloaded DPD shipment with generic 1401 operation code must show update/cancel and hide remove.' );
 $reload_1301 = $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'carrier_operation_code' => '1301' ) );
 dpd_buttons_assert( $reload_1301['update'] && ! $reload_1301['cancel'] && $reload_1301['remove'], 'Reloaded DPD shipment with generic 1301 operation code must show update/remove and hide cancel.' );
-$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( new DpdSettings( new SettingsRepository(), new EncryptionService() ) ), null, null, $policy );
+$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( new DpdSettings( new SettingsRepository(), new EncryptionService() ) ), shipment_test_actual_cost_resolver(), null, null, $policy );
 $payload = $adapter->status_payload( new stdClass(), array( 'dpd_sent_places' => array( array( 'number' => '1', 'weight_kg' => 6.7, 'length_cm' => 38, 'width_cm' => 24, 'height_cm' => 24 ), array( 'number' => '2', 'weight_kg' => 1.2, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 10 ) ) ) );
 $created_before_events_shipment = array( 'carrier_key' => 'dpd', 'dpd_order_number' => 'RUNEW', 'tracking_number' => 'RUNEW', 'barcode' => 'RUNEW', 'external_id' => 'RUNEW', 'dpd_registration_state' => 'ok', 'status' => 'created', 'tracking_checked_at' => '2026-06-21 19:05:05' );
 $created_before_events_payload = $adapter->status_payload( new stdClass(), $created_before_events_shipment );
@@ -77,7 +78,8 @@ $repository = new OrderShipmentRepository();
 $status_updates = new ShipmentStatusUpdateService(
 	$repository,
 	( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor(),
-	( new ReflectionClass( RussianPostTrackingStatusMapper::class ) )->newInstanceWithoutConstructor()
+	( new ReflectionClass( RussianPostTrackingStatusMapper::class ) )->newInstanceWithoutConstructor(),
+	shipment_test_actual_cost_resolver()
 );
 $payload_builder = new ShipmentAdminCarrierUiPayloadBuilder(
 	$repository,

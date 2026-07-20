@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Presentation;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -31,9 +32,9 @@ final class ShipmentBaseApiCostResolver {
 		}
 
 		foreach ( array( 'api_base_price_rub', 'api_price_with_vat_rub', 'base_api_cost_rub' ) as $key ) {
-			$rubles = $this->numeric_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
-			if ( null !== $rubles && $rubles > 0 ) {
-				return (int) round( $rubles * 100 );
+			$kopecks = $this->rubles_kopecks_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
+			if ( null !== $kopecks && $kopecks > 0 ) {
+				return $kopecks;
 			}
 		}
 
@@ -53,7 +54,11 @@ final class ShipmentBaseApiCostResolver {
 		return null;
 	}
 
-	private function numeric_or_null( mixed $value ): ?float {
-		return is_int( $value ) || is_float( $value ) || ( is_string( $value ) && is_numeric( $value ) ) ? (float) $value : null;
+	private function rubles_kopecks_or_null( mixed $value ): ?int {
+		if ( ! is_int( $value ) && ! is_float( $value ) && ! is_string( $value ) ) {
+			return null;
+		}
+
+		return MoneyParser::numeric_to_kopecks( $value );
 	}
 }

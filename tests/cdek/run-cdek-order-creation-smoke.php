@@ -35,9 +35,12 @@ use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
@@ -51,6 +54,8 @@ use WallsShop\WDC\Shipments\Cdek\CdekShipmentModalExtension;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Modal\ShipmentModalExtensionRegistry;
+use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
+use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -59,6 +64,23 @@ function cdek_order_assert( bool $condition, string $message ): void {
 		throw new RuntimeException( $message );
 	}
 }
+
+function cdek_order_actual_cost_resolver(): ShipmentActualCostResolver {
+	return new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
+}
+
+function cdek_order_actual_cost_service( OrderShipmentRepository $repository ): ShipmentActualCostService {
+	return new ShipmentActualCostService( $repository );
+}
+
+function cdek_order_creation_service( OrderShipmentRepository $repository, CdekShipmentAdapter $adapter ): ShipmentCreationService {
+	return new ShipmentCreationService( $repository, array( $adapter ), cdek_order_actual_cost_service( $repository ), null, null, array( new CdekShipmentPersistenceMapper() ) );
+}
+
+function cdek_order_status_service( OrderShipmentRepository $repository, CdekApiClient $client, ?CdekStatusMappingService $status_mapping = null ): CdekOrderStatusService {
+	return new CdekOrderStatusService( $repository, $client, cdek_order_actual_cost_resolver(), cdek_order_actual_cost_service( $repository ), null, $status_mapping );
+}
+
 function cdek_order_item_row( string $item_key, int $place_number, string $name, string $sku, int $amount, int $unit_kopecks, int $weight, ?int $assessed_kopecks = null ): array {
 	return array(
 		'item_key' => $item_key,
@@ -528,7 +550,7 @@ cdek_order_assert( 3 === (int) $split[0]['amount'] && 2 === (int) $split[1]['amo
 $http = new CdekOrderFakeHttp();
 $client = new CdekApiClient( new CdekOAuthTokenService( $settings, $http ), $settings, $http );
 $repository = new OrderShipmentRepository();
-$creation = new ShipmentCreationService( $repository, array( new CdekShipmentAdapter( $client, $builder ) ), null, null, array( new CdekShipmentPersistenceMapper() ) );
+$creation = cdek_order_creation_service( $repository, new CdekShipmentAdapter( $client, $builder ) );
 $order = new CdekOrderFakeOrder();
 $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
@@ -564,13 +586,13 @@ $http_post_invalid = new CdekOrderFakeHttp();
 $http_post_invalid->post_responses[] = array( 'entity' => array( 'uuid' => 'invalid-uuid' ), 'requests' => array( array( 'request_uuid' => 'invalid-request-uuid', 'state' => 'INVALID', 'errors' => array( array( 'code' => 'v2_bad', 'message' => 'bad request' ) ) ) ) );
 $invalid_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $http_post_invalid ), $settings, $http_post_invalid );
 $invalid_repository = new OrderShipmentRepository();
-$invalid_creation = new ShipmentCreationService( $invalid_repository, array( new CdekShipmentAdapter( $invalid_client, $builder ) ), null, null, array( new CdekShipmentPersistenceMapper() ) );
+$invalid_creation = cdek_order_creation_service( $invalid_repository, new CdekShipmentAdapter( $invalid_client, $builder ) );
 $invalid_post_order = new CdekOrderFakeOrder();
 $invalid_post_result = $invalid_creation->create( $invalid_post_order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( ! $invalid_post_result->success && 'cdek_registration_invalid' === $invalid_post_result->error_code, 'POST /v2/orders INVALID must fail ShipmentCreateResult.' );
 cdek_order_assert( array() === $invalid_repository->find_by_carrier( $invalid_post_order, CdekSettings::CARRIER_KEY ), 'POST /v2/orders INVALID must not be stored as registration_pending.' );
 
-$status = new CdekOrderStatusService( $repository, $client );
+$status = cdek_order_status_service( $repository, $client );
 $created = $status->update( $order );
 cdek_order_assert( $created['success'] && 'registered' === (string) $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY )['status'], 'GET /v2/orders CREATED must register shipment.' );
 cdek_order_assert( array( 'Зарегистрировано отправление СДЭК 100500. Мест: 1.' ) === $order->notes, 'CDEK CREATED status update must add a single registered order note.' );
@@ -667,7 +689,7 @@ cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest_sh
 cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest['status']['order_status_code'] ?? '' ), 'CDEK status payload must use latest order status, not request state.' );
 cdek_order_assert( 'Готов к отправке' === (string) ( $latest['status']['carrier_status_title'] ?? '' ), 'CDEK displayed status must use entity.statuses name instead of request_state.' );
 cdek_order_assert( '2026-06-15' === (string) ( $latest['status']['cdek_planned_delivery_date'] ?? '' ), 'CDEK planned_delivery_date must be saved in status payload.' );
-cdek_order_assert( 45018 === (int) ( $latest_shipment['cdek_actual_cost_kopecks'] ?? 0 ), 'CDEK delivery_detail.total_sum must be saved as actual cost.' );
+cdek_order_assert( 45018 === (int) ( $latest_shipment['actual_cost_kopecks'] ?? 0 ) && 'carrier_status' === (string) ( $latest_shipment['actual_cost_source'] ?? '' ), 'CDEK delivery_detail.total_sum must be saved as canonical actual cost from status update.' );
 cdek_order_assert( '450.18 руб.' === (string) ( $latest['status']['actual_cost_label'] ?? '' ) && 'ok' === (string) ( $latest['status']['actual_cost_compare_status'] ?? '' ), 'CDEK actual cost within 3 percent of base API cost must compare as ok.' );
 
 $deleted_status_order = new CdekOrderFakeOrder( 111 );
@@ -725,6 +747,35 @@ $http->order_responses[] = array(
 $missing_cost = $status->update( $missing_cost_order );
 cdek_order_assert( '' === (string) ( $missing_cost['status']['actual_cost_label'] ?? '' ) && '' === (string) ( $missing_cost['status']['actual_cost_compare_status'] ?? '' ), 'Missing CDEK delivery_detail.total_sum must not render actual cost comparison.' );
 
+$manual_overwrite_order = new CdekOrderFakeOrder( 115 );
+$repository->save_for_carrier( $manual_overwrite_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'manual-overwrite-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-115', 'actual_cost_kopecks' => 100000, 'actual_cost_source' => 'manual', 'actual_cost_updated_at' => '2026-06-01 10:00:00' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'manual-overwrite-uuid',
+		'delivery_detail' => array( 'total_sum' => 1200 ),
+		'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ) ),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$status->update( $manual_overwrite_order );
+$manual_overwritten = $repository->find_by_carrier( $manual_overwrite_order, CdekSettings::CARRIER_KEY );
+cdek_order_assert( 120000 === (int) ( $manual_overwritten['actual_cost_kopecks'] ?? 0 ) && 'carrier_status' === (string) ( $manual_overwritten['actual_cost_source'] ?? '' ), 'Positive CDEK status actual cost must overwrite manual actual cost through common service.' );
+
+$zero_cost_keeps_order = new CdekOrderFakeOrder( 116 );
+$repository->save_for_carrier( $zero_cost_keeps_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'zero-cost-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-116', 'actual_cost_kopecks' => 100000, 'actual_cost_source' => 'carrier_api', 'actual_cost_updated_at' => '2026-06-01 10:00:00' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'zero-cost-uuid',
+		'delivery_detail' => array( 'total_sum' => 0 ),
+		'statuses' => array( array( 'code' => 'RECEIVED_AT_SHIPMENT_WAREHOUSE', 'name' => 'Принят на складе', 'date_time' => '2026-06-13T10:04:33+0000' ) ),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$zero_cost_update = $status->update( $zero_cost_keeps_order );
+$zero_cost_kept = $repository->find_by_carrier( $zero_cost_keeps_order, CdekSettings::CARRIER_KEY );
+cdek_order_assert( 100000 === (int) ( $zero_cost_kept['actual_cost_kopecks'] ?? 0 ) && 'carrier_api' === (string) ( $zero_cost_kept['actual_cost_source'] ?? '' ) && '2026-06-01 10:00:00' === (string) ( $zero_cost_kept['actual_cost_updated_at'] ?? '' ), 'Zero CDEK status actual cost must not overwrite existing actual cost.' );
+cdek_order_assert( 'RECEIVED_AT_SHIPMENT_WAREHOUSE' === (string) ( $zero_cost_kept['cdek_order_status_code'] ?? '' ) && 'Принят на складе' === (string) ( $zero_cost_update['status']['carrier_status_title'] ?? '' ), 'CDEK status fields must still update when status response has zero actual cost.' );
+
 $order_invalid = new CdekOrderFakeOrder( 102 );
 $repository->save_for_carrier( $order_invalid, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'bad-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-102' ) );
 $http->order_responses[] = array( 'entity' => array( 'uuid' => 'bad-uuid' ), 'requests' => array( array( 'state' => 'INVALID', 'errors' => array( array( 'message' => 'bad request' ) ) ) ) );
@@ -737,7 +788,7 @@ cdek_order_assert( CdekSettings::CARRIER_KEY === (string) $created['status']['ca
 $attach_http = new CdekOrderFakeHttp();
 $attach_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $attach_http ), $settings, $attach_http );
 $attach_repository = new OrderShipmentRepository();
-$attach_status = new CdekOrderStatusService( $attach_repository, $attach_client );
+$attach_status = cdek_order_status_service( $attach_repository, $attach_client );
 $attach_order = new CdekOrderFakeOrder( 103 );
 $attach_http->order_responses[] = array( 'entity' => array( 'uuid' => 'manual-uuid', 'cdek_number' => '100501', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 $attached = $attach_status->attach_by_cdek_number( $attach_order, '100501' );
@@ -751,7 +802,7 @@ cdek_order_assert( $manual_update['success'] && ! empty( $manual_update['status'
 $attach_pending_http = new CdekOrderFakeHttp();
 $attach_pending_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $attach_pending_http ), $settings, $attach_pending_http );
 $attach_pending_repository = new OrderShipmentRepository();
-$attach_pending_status = new CdekOrderStatusService( $attach_pending_repository, $attach_pending_client );
+$attach_pending_status = cdek_order_status_service( $attach_pending_repository, $attach_pending_client );
 $attach_pending_order = new CdekOrderFakeOrder( 120 );
 $attach_pending_http->order_responses[] = array( 'entity' => array( 'uuid' => 'manual-pending-uuid', 'cdek_number' => '100520', 'statuses' => array() ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 $attach_pending = $attach_pending_status->attach_by_cdek_number( $attach_pending_order, '100520' );
@@ -761,7 +812,7 @@ cdek_order_assert( $attach_pending['success'] && 'registration_pending' === (str
 $not_found_http = new CdekOrderFakeHttp();
 $not_found_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $not_found_http ), $settings, $not_found_http );
 $not_found_repository = new OrderShipmentRepository();
-$not_found_status = new CdekOrderStatusService( $not_found_repository, $not_found_client );
+$not_found_status = cdek_order_status_service( $not_found_repository, $not_found_client );
 $not_found_order = new CdekOrderFakeOrder( 104 );
 $not_found_http->order_responses[] = array( 'entity' => array(), 'requests' => array( array( 'state' => 'INVALID', 'errors' => array( array( 'message' => 'not found' ) ) ) ) );
 $not_found = $not_found_status->attach_by_cdek_number( $not_found_order, 'missing' );
@@ -770,7 +821,7 @@ cdek_order_assert( ! $not_found['success'] && array() === $not_found_repository-
 $cancel_http = new CdekOrderFakeHttp();
 $cancel_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $cancel_http ), $settings, $cancel_http );
 $cancel_repository = new OrderShipmentRepository();
-$cancel_status = new CdekOrderStatusService( $cancel_repository, $cancel_client );
+$cancel_status = cdek_order_status_service( $cancel_repository, $cancel_client );
 $cancel_order = new CdekOrderFakeOrder( 105 );
 $cancel_repository->save_for_carrier( $cancel_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'created-uuid', 'cdek_number' => '100502', 'status' => 'registered', 'cdek_order_status_code' => 'CREATED', 'cdek_order_status_label' => 'Создан' ) );
 $cancel_payload = $cancel_status->status_payload( $cancel_repository->find_by_carrier( $cancel_order, CdekSettings::CARRIER_KEY ) );
@@ -784,7 +835,7 @@ cdek_order_assert( array( 'Отменено отправление СДЭК 1005
 $cancel_fail_http = new CdekOrderFakeHttp();
 $cancel_fail_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $cancel_fail_http ), $settings, $cancel_fail_http );
 $cancel_fail_repository = new OrderShipmentRepository();
-$cancel_fail_status = new CdekOrderStatusService( $cancel_fail_repository, $cancel_fail_client );
+$cancel_fail_status = cdek_order_status_service( $cancel_fail_repository, $cancel_fail_client );
 $cancel_fail_order = new CdekOrderFakeOrder( 110 );
 $cancel_fail_repository->save_for_carrier( $cancel_fail_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'created-fail-uuid', 'cdek_number' => '100506', 'status' => 'registered', 'cdek_order_status_code' => 'CREATED' ) );
 $cancel_fail_http->delete_responses[] = array( 'entity' => array( 'uuid' => 'created-fail-uuid' ), 'requests' => array( array( 'request_uuid' => 'delete-fail', 'state' => 'INVALID', 'errors' => array( array( 'message' => 'delete failed' ) ) ) ) );
@@ -794,7 +845,7 @@ cdek_order_assert( ! $cancel_failed['success'] && array() === $cancel_fail_order
 $forbidden_cancel_http = new CdekOrderFakeHttp();
 $forbidden_cancel_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $forbidden_cancel_http ), $settings, $forbidden_cancel_http );
 $forbidden_cancel_repository = new OrderShipmentRepository();
-$forbidden_cancel_status = new CdekOrderStatusService( $forbidden_cancel_repository, $forbidden_cancel_client );
+$forbidden_cancel_status = cdek_order_status_service( $forbidden_cancel_repository, $forbidden_cancel_client );
 $forbidden_cancel_order = new CdekOrderFakeOrder( 106 );
 $forbidden_cancel_repository->save_for_carrier( $forbidden_cancel_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'accepted-uuid', 'cdek_number' => '100503', 'status' => 'registered', 'cdek_order_status_code' => 'ACCEPTED', 'cdek_order_status_label' => 'Принят' ) );
 $forbidden_cancel_payload = $forbidden_cancel_status->status_payload( $forbidden_cancel_repository->find_by_carrier( $forbidden_cancel_order, CdekSettings::CARRIER_KEY ) );
@@ -805,7 +856,7 @@ cdek_order_assert( empty( $forbidden_cancel_payload['can_cancel'] ) && ! $forbid
 $remove_http = new CdekOrderFakeHttp();
 $remove_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $remove_http ), $settings, $remove_http );
 $remove_repository = new OrderShipmentRepository();
-$remove_status = new CdekOrderStatusService( $remove_repository, $remove_client );
+$remove_status = cdek_order_status_service( $remove_repository, $remove_client );
 $remove_order = new CdekOrderFakeOrder( 107 );
 $remove_repository->save_for_carrier( $remove_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'delivered-uuid', 'cdek_number' => '100504', 'status' => 'registered', 'cdek_order_status_code' => 'DELIVERED', 'cdek_order_status_label' => 'Вручен' ) );
 $remove_payload = $remove_status->status_payload( $remove_repository->find_by_carrier( $remove_order, CdekSettings::CARRIER_KEY ) );
@@ -818,7 +869,7 @@ foreach ( array( 'ACCEPTED', 'CREATED' ) as $protected_status ) {
 	$protected_repository = new OrderShipmentRepository();
 	$protected_http = new CdekOrderFakeHttp();
 	$protected_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $protected_http ), $settings, $protected_http );
-	$protected_service = new CdekOrderStatusService( $protected_repository, $protected_client );
+	$protected_service = cdek_order_status_service( $protected_repository, $protected_client );
 	$protected_order = new CdekOrderFakeOrder( 'ACCEPTED' === $protected_status ? 108 : 109 );
 	$protected_repository->save_for_carrier( $protected_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => strtolower( $protected_status ) . '-uuid', 'cdek_number' => '100505', 'status' => 'registered', 'cdek_order_status_code' => $protected_status ) );
 	$protected_payload = $protected_service->status_payload( $protected_repository->find_by_carrier( $protected_order, CdekSettings::CARRIER_KEY ) );
@@ -984,10 +1035,10 @@ cdek_order_assert( 80050 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
 $ajax_repository = new OrderShipmentRepository();
-$ajax_creation = new ShipmentCreationService( $ajax_repository, array( new CdekShipmentAdapter( $ajax_client, $builder ) ), null, null, array( new CdekShipmentPersistenceMapper() ) );
+$ajax_creation = cdek_order_creation_service( $ajax_repository, new CdekShipmentAdapter( $ajax_client, $builder ) );
 $rp_tracking = ( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor();
-$status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper() );
-$ajax_status = new CdekOrderStatusService( $ajax_repository, $ajax_client );
+$status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper(), cdek_order_actual_cost_resolver() );
+$ajax_status = cdek_order_status_service( $ajax_repository, $ajax_client );
 $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	$ajax_repository,
 	$services,
@@ -995,6 +1046,10 @@ $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	cdek_status_updates: $ajax_status
 );
 $ajax_create_controller = new ShipmentCreateAjaxController( $ajax_repository, $drafts, $ajax_creation, $ajax_payloads );
+$ajax_actual_costs = new ShipmentActualCostService(
+	$ajax_repository
+);
+$ajax_actual_cost_controller = new ShipmentActualCostAjaxController( $ajax_actual_costs, $ajax_payloads );
 $ajax_controller_double = static function ( string $class ): object {
 	return ( new ReflectionClass( $class ) )->newInstanceWithoutConstructor();
 };
@@ -1010,6 +1065,7 @@ $metabox = new OrderShipmentsMetabox(
 	ajax_removal_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentRemovalAjaxController::class ),
 	ajax_manual_attach_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController::class ),
 	ajax_address_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController::class ),
+	ajax_actual_cost_controller: $ajax_actual_cost_controller,
 	ajax_documents_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController::class ),
 	ajax_products_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController::class ),
 	cdek_status_updates: $ajax_status,
@@ -1168,7 +1224,7 @@ $mapped_status_repository->save_for_carrier(
 	CdekSettings::CARRIER_KEY,
 	array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'status' => 'registered', 'external_id' => 'mapped-order-uuid', 'cdek_number' => '100501', 'cdek_order_status_code' => 'CREATED' )
 );
-$mapped_status_service = new CdekOrderStatusService( $mapped_status_repository, $mapped_status_client, null, $mapping_service );
+$mapped_status_service = cdek_order_status_service( $mapped_status_repository, $mapped_status_client, $mapping_service );
 $mapped_update = $mapped_status_service->update( $mapped_status_order );
 cdek_order_assert( $mapped_update['success'] && 'DELIVERED' === (string) ( $mapped_update['status']['order_status_code'] ?? '' ) && DeliveryStatus::READY_FOR_PICKUP === (string) ( $mapped_update['status']['universal_status_code'] ?? '' ), 'CDEK update status must select max date_time raw status and apply saved universal mapping.' );
 

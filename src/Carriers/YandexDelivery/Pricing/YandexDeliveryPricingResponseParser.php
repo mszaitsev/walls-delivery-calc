@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\YandexDelivery\Pricing;
 
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiException;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -21,10 +22,8 @@ final class YandexDeliveryPricingResponseParser {
 	}
 
 	private function price_kopecks( string $value ): int {
-		if ( ! preg_match( '/([0-9]+(?:[\.,][0-9]+)?)/', $value, $matches ) ) {
-			return 0;
-		}
+		$kopecks = MoneyParser::first_decimal_to_kopecks( $value );
 
-		return (int) round( (float) str_replace( ',', '.', $matches[1] ) * 100 );
+		return null !== $kopecks ? max( 0, $kopecks ) : 0;
 	}
 }

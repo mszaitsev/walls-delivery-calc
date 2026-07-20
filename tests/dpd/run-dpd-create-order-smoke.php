@@ -6,6 +6,7 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
 use WallsShop\WDC\Carriers\Dpd\DpdCredentials;
@@ -21,7 +22,6 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Dpd\DpdOrderRegistrationService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentAdapter;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentPersistenceMapper;
@@ -141,10 +141,10 @@ $settings->save_from_admin( array( DpdSettings::ENVIRONMENT_KEY => DpdSettings::
 $settings->save_tariff_settings_from_admin( array( DpdSettings::TARIFF_CARGO_CATEGORY_KEY => 'Посуда', DpdSettings::TARIFF_SENDER_NAME_KEY => 'Walls Shop', DpdSettings::TARIFF_SENDER_PHONE_KEY => '+73830000000' ) );
 $builder = new DpdShipmentPayloadBuilder( $settings );
 dpd_create_assert( method_exists( DpdApiClient::class, 'createOrder2' ), 'DpdApiClient must expose createOrder2().' );
-$no_client_result = ( new DpdShipmentAdapter( $builder ) )->create( dpd_create_request() );
+$no_client_result = ( new DpdShipmentAdapter( $builder, shipment_test_actual_cost_resolver() ) )->create( dpd_create_request() );
 dpd_create_assert( ! $no_client_result->success && 'dpd_create_disabled' !== $no_client_result->error_code, 'DPD adapter create() must no longer return dpd_create_disabled.' );
 
-$preview = ( new DpdShipmentAdapter( $builder ) )->build_safe_payload_preview( dpd_create_request() );
+$preview = ( new DpdShipmentAdapter( $builder, shipment_test_actual_cost_resolver() ) )->build_safe_payload_preview( dpd_create_request() );
 dpd_create_assert( 'order2/createOrder2' === (string) $preview['path'] && ! array_key_exists( 'live_api_call', $preview ), 'DPD dry-run preview must not expose live_api_call in preview payload.' );
 
 $success_body = array(
@@ -157,7 +157,7 @@ $success_body = array(
 );
 $soap = new DpdCreateFakeSoap( $success_body );
 $client = new DpdApiClient( $settings, $soap );
-$adapter = new DpdShipmentAdapter( $builder, $client );
+$adapter = new DpdShipmentAdapter( $builder, shipment_test_actual_cost_resolver(), $client );
 $request = dpd_create_request();
 $result = $adapter->create( $request );
 dpd_create_assert( $result->success && 'DPD-ORDER-1' === $result->tracking_number, 'Successful mocked DPD response must create a successful result.' );
@@ -198,7 +198,7 @@ dpd_create_assert( array( 'Курьер Петров', 'Курьер Ивано�
 $settings->remove_courier_contact_fio_history( 'Курьер Иванов' );
 dpd_create_assert( array( 'Курьер Петров' ) === $settings->courier_contact_fio_history(), 'contactFio history must remove one selected value.' );
 $invalid_soap = new DpdCreateFakeSoap( $success_body );
-$invalid = ( new DpdShipmentAdapter( $builder, new DpdApiClient( $settings, $invalid_soap ) ) )->create( dpd_create_request( DeliveryType::PICKUP, array( 'date_pickup' => '' ) ) );
+$invalid = ( new DpdShipmentAdapter( $builder, shipment_test_actual_cost_resolver(), new DpdApiClient( $settings, $invalid_soap ) ) )->create( dpd_create_request( DeliveryType::PICKUP, array( 'date_pickup' => '' ) ) );
 dpd_create_assert( ! $invalid->success && 'dpd_validation_failed' === $invalid->error_code && 0 === count( $invalid_soap->calls ), 'Missing required fields must block create before SOAP call.' );
 
 $lifecycle_soap = new DpdCreateFakeSoap( array( 'orderNumberInternal' => 'WC-660', 'status' => 'OrderPending' ) );
@@ -279,7 +279,7 @@ dpd_create_assert( ! array_key_exists( 'dpd_registration_payload', $complete_rep
 
 $repository = new OrderShipmentRepository();
 $order = new DpdCreateFakeOrder( 660 );
-$creation = new ShipmentCreationService( $repository, array( $adapter ), null, null, array( new DpdShipmentPersistenceMapper() ) );
+$creation = shipment_test_creation_service( $repository, array( $adapter ), array( new DpdShipmentPersistenceMapper() ) );
 $created = $creation->create( $order, $request );
 $stored = $repository->find_by_carrier( $order, DpdSettings::CARRIER_KEY );
 dpd_create_assert( $created->success && array() !== $stored, 'Successful mocked DPD response must create shipment record.' );
@@ -290,11 +290,12 @@ $duplicate = $creation->create( $order, $request );
 dpd_create_assert( ! $duplicate->success && 'shipment_already_created' === $duplicate->error_code && 'DPD отправление уже создано для этого заказа.' === $duplicate->error_message, 'Duplicate active DPD shipment must block second create.' );
 
 $error_soap = new DpdCreateFakeSoap( array( 'orderNumberInternal' => 'WC-661', 'status' => 'Error', 'errorMessage' => 'Не заполнен параметр Улица' ) );
-$error_creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new DpdShipmentAdapter( $builder, new DpdApiClient( $settings, $error_soap ) ) ), null, null, array( new DpdShipmentPersistenceMapper() ) );
+$error_creation_repository = new OrderShipmentRepository();
+$error_creation = shipment_test_creation_service( $error_creation_repository, array( new DpdShipmentAdapter( $builder, shipment_test_actual_cost_resolver(), new DpdApiClient( $settings, $error_soap ) ) ), array( new DpdShipmentPersistenceMapper() ) );
 $error_order = new DpdCreateFakeOrder( 660 );
 $error_result = $error_creation->create( $error_order, dpd_create_request() );
 dpd_create_assert( ! $error_result->success && 'dpd_business_error' === $error_result->error_code, 'DPD API business error must be shown as create failure.' );
-dpd_create_assert( array() === ( new OrderShipmentRepository() )->find_by_carrier( $error_order, DpdSettings::CARRIER_KEY ), 'DPD API error must not create shipment record.' );
+dpd_create_assert( array() === $error_creation_repository->find_by_carrier( $error_order, DpdSettings::CARRIER_KEY ), 'DPD API error must not create shipment record.' );
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 $cdek_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekShipmentAdapter.php' );

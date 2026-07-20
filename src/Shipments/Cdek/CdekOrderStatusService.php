@@ -6,10 +6,12 @@ namespace WallsShop\WDC\Shipments\Cdek;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiException;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
-use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
-use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -18,13 +20,11 @@ final class CdekOrderStatusService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private CdekApiClient $client,
-		private ?Logger $logger = null,
-		private ?CdekStatusMappingService $status_mapping = null,
-		private ?ShipmentActualCostComparisonService $actual_costs = null,
-		private ?ShipmentBaseApiCostResolver $base_costs = null
+		private ShipmentActualCostResolver $actual_cost_resolver,
+		private ShipmentActualCostService $actual_cost_service,
+		private Logger|null $logger = null,
+		private CdekStatusMappingService|null $status_mapping = null,
 	) {
-		$this->actual_costs ??= new ShipmentActualCostComparisonService();
-		$this->base_costs ??= new ShipmentBaseApiCostResolver();
 	}
 
 	/**
@@ -69,7 +69,6 @@ final class CdekOrderStatusService {
 				'universal_status_code' => $universal_status,
 				'universal_status_label' => '' !== $universal_status ? DeliveryStatus::label( $universal_status ) : '',
 				'cdek_planned_delivery_date' => $this->planned_delivery_date( $entity ),
-				'cdek_actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
 				'response_snapshot' => $this->sanitize_response_snapshot( $body ),
 				'updated_at' => $now,
 				'tracking_checked_at' => $now,
@@ -77,6 +76,7 @@ final class CdekOrderStatusService {
 		);
 		$updated = $this->maybe_add_created_note( $order, $updated, $status_code );
 		$this->repository->save_for_carrier( $order, CdekSettings::CARRIER_KEY, $updated );
+		$updated = $this->apply_carrier_actual_cost( $order, $entity, $updated, $now );
 		$this->log( 'info', 'CDEK order status update result.', array( 'status' => $status, 'request_state' => $request_state, 'order_status' => $status_code ) );
 
 		return array(
@@ -111,6 +111,7 @@ final class CdekOrderStatusService {
 
 		$shipment = $this->shipment_from_body( $body, array( 'cdek_number' => $cdek_number ) );
 		$this->repository->save_for_carrier( $order, CdekSettings::CARRIER_KEY, $shipment );
+		$shipment = $this->apply_carrier_actual_cost( $order, $entity, $shipment, $this->now() );
 		$this->log( 'info', 'CDEK shipment manually attached.', array( 'cdek_number' => $shipment['cdek_number'] ?? '', 'entity_uuid' => $shipment['external_id'] ?? '', 'order_status' => $shipment['cdek_order_status_code'] ?? '' ) );
 
 		return array(
@@ -442,7 +443,6 @@ final class CdekOrderStatusService {
 				'universal_status_code' => $universal_status,
 				'universal_status_label' => '' !== $universal_status ? DeliveryStatus::label( $universal_status ) : '',
 				'cdek_planned_delivery_date' => $this->planned_delivery_date( $entity ),
-				'cdek_actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
 				'response_snapshot' => $this->sanitize_response_snapshot( $body ),
 				'created_at' => $now,
 				'updated_at' => $now,
@@ -528,7 +528,7 @@ final class CdekOrderStatusService {
 			'request_state' => (string) ( $request_row['state'] ?? '' ),
 			'order_status' => (string) ( $order_status['code'] ?? '' ),
 			'planned_delivery_date' => $this->planned_delivery_date( $entity ),
-			'actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
+			'cdek_delivery_total_kopecks' => $this->delivery_total_kopecks( $entity ),
 			'errors' => $this->safe_errors( $request_row ),
 		);
 	}
@@ -551,9 +551,9 @@ final class CdekOrderStatusService {
 		if ( ! is_numeric( $total ) ) {
 			return null;
 		}
-		$kopecks = (int) round( (float) $total * 100 );
+		$kopecks = MoneyParser::numeric_to_kopecks( $total );
 
-		return $kopecks > 0 ? $kopecks : null;
+		return null !== $kopecks && $kopecks > 0 ? $kopecks : null;
 	}
 
 	/**
@@ -561,40 +561,25 @@ final class CdekOrderStatusService {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, ?object $order ): array {
-		$actual_kopecks = $this->positive_int_or_null( $shipment['cdek_actual_cost_kopecks'] ?? null );
-		$base_kopecks = $this->base_costs()->resolve_from_order( $order );
-		$presentation = $this->actual_costs()->compare( $actual_kopecks, $base_kopecks )->to_array();
-
-		return $presentation + array( 'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks );
+		return $this->actual_cost_resolver->presentation_payload( $shipment, $order );
 	}
 
-	private function positive_int_or_null( mixed $value ): ?int {
-		if ( is_int( $value ) ) {
-			return $value > 0 ? $value : null;
-		}
-		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
-			$integer = (int) $value;
-
-			return $integer > 0 ? $integer : null;
-		}
-
-		return null;
-	}
-
-	private function actual_costs(): ShipmentActualCostComparisonService {
-		if ( ! isset( $this->actual_costs ) || ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
-			$this->actual_costs = new ShipmentActualCostComparisonService();
+	/**
+	 * @param array<string,mixed> $entity
+	 * @param array<string,mixed> $fallback
+	 * @return array<string,mixed>
+	 */
+	private function apply_carrier_actual_cost( object $order, array $entity, array $fallback, string $now ): array {
+		$amount = $this->delivery_total_kopecks( $entity );
+		if ( null === $amount || $amount <= 0 ) {
+			return $fallback;
 		}
 
-		return $this->actual_costs;
-	}
-
-	private function base_costs(): ShipmentBaseApiCostResolver {
-		if ( ! isset( $this->base_costs ) || ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
-			$this->base_costs = new ShipmentBaseApiCostResolver();
-		}
-
-		return $this->base_costs;
+		return $this->actual_cost_service->apply_carrier_cost(
+			$order,
+			CdekSettings::CARRIER_KEY,
+			new ShipmentActualCost( $amount, 'RUB', 'carrier_status', 'cdek_order_status', $now )
+		);
 	}
 
 	/**
