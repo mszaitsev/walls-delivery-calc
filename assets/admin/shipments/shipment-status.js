@@ -30,6 +30,7 @@
     updateShipmentButtons(box, shipmentButtonStateFromStatus(status));
     setTrackingDisplay(box, trackingPresentation(status));
     renderShipmentPrice(box, status);
+    renderActualCostControl(box, status);
     dispatchShipmentCarrierHook('renderStatus', { box: box, status: status });
   }
 
@@ -66,6 +67,22 @@
       : (compare === 'warning' ? 'wdc-shipment-price-warning' : 'wdc-shipment-price-neutral');
     row.classList.add(className);
     row.title = String(status && status.actual_cost_compare_message || '');
+  }
+
+  function renderActualCostControl(box, status) {
+    const control = box && box.querySelector ? box.querySelector('[data-wdc-shipment-actual-cost]') : null;
+    if (!control) return;
+    const state = control.querySelector('[data-wdc-actual-cost-state]');
+    const source = control.querySelector('[data-wdc-actual-cost-source]');
+    const clear = control.querySelector('[data-wdc-clear-actual-cost]');
+    const label = String(status && status.actual_cost_label || '').trim();
+    if (state) state.textContent = label || 'Фактическая стоимость пока не получена';
+    if (source) {
+      const sourceLabel = String(status && status.actual_cost_source_label || '').trim();
+      const updated = String(status && status.actual_cost_updated_at || '').trim();
+      source.textContent = [sourceLabel ? 'Источник: ' + sourceLabel : '', updated ? 'Обновлено: ' + updated : ''].filter(Boolean).join('. ');
+    }
+    if (clear) clear.hidden = String(status && status.actual_cost_source || '') !== 'manual';
   }
 
   function renderShipmentTechnicalInfo(box, data) {

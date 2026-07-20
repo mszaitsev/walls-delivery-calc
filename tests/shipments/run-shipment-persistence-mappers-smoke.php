@@ -182,7 +182,10 @@ $cdek_expected = array(
 	'cdek_order_status_code' => 'CREATED',
 	'cdek_order_status_name' => 'Создан',
 	'cdek_planned_delivery_date' => '2026-07-20',
-	'cdek_actual_cost_kopecks' => 12345,
+	'actual_cost_kopecks' => 12345,
+	'actual_cost_currency' => 'RUB',
+	'actual_cost_source' => 'carrier_api',
+	'actual_cost_source_detail' => 'cdek_create',
 	'backlog_order_id' => 'request-uuid',
 );
 shipment_persistence_assert( $cdek_expected === shipment_persistence_saved( $cdek_order, CdekSettings::CARRIER_KEY ) && array() === $cdek_order->notes, 'CDEK mapper persistence must equal legacy shipment fields and notes.' );

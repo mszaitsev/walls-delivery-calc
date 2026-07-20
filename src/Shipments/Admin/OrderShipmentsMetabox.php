@@ -20,6 +20,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentLifecycleAjaxController;
@@ -54,6 +55,8 @@ final class OrderShipmentsMetabox {
 	private const AJAX_SEARCH_PRODUCTS = 'wdc_search_products_for_shipment_item';
 	private const AJAX_CDEK_BARCODE_PREPARE = 'wdc_cdek_barcode_prepare';
 	private const AJAX_DPD_COURIER_CONTACT_HISTORY = 'wdc_dpd_courier_contact_history';
+	private const AJAX_SAVE_ACTUAL_COST = 'wdc_save_shipment_actual_cost';
+	private const AJAX_CLEAR_ACTUAL_COST = 'wdc_clear_shipment_actual_cost';
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -67,6 +70,7 @@ final class OrderShipmentsMetabox {
 		private ShipmentRemovalAjaxController $ajax_removal_controller,
 		private ShipmentManualAttachAjaxController $ajax_manual_attach_controller,
 		private ShipmentAddressAjaxController $ajax_address_controller,
+		private ShipmentActualCostAjaxController $ajax_actual_cost_controller,
 		private ShipmentDocumentsAjaxController $ajax_documents_controller,
 		private ShipmentProductsAjaxController $ajax_products_controller,
 		private ?CdekOrderStatusService $cdek_status_updates = null,
@@ -98,6 +102,8 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PRODUCTS, array( $this->ajax_products_controller, 'handle_search_products' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CDEK_BARCODE_PREPARE, array( $this->ajax_documents_controller, 'handle_cdek_barcode_prepare' ) );
 		add_action( 'wp_ajax_' . self::AJAX_DPD_COURIER_CONTACT_HISTORY, array( $this->ajax_products_controller, 'handle_dpd_contact_history' ) );
+		add_action( 'wp_ajax_' . self::AJAX_SAVE_ACTUAL_COST, array( $this->ajax_actual_cost_controller, 'handle_save' ) );
+		add_action( 'wp_ajax_' . self::AJAX_CLEAR_ACTUAL_COST, array( $this->ajax_actual_cost_controller, 'handle_clear' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -164,6 +170,8 @@ final class OrderShipmentsMetabox {
 				'searchProductsAction' => self::AJAX_SEARCH_PRODUCTS,
 				'cdekBarcodePrepareAction' => self::AJAX_CDEK_BARCODE_PREPARE,
 				'dpdCourierContactHistoryAction' => self::AJAX_DPD_COURIER_CONTACT_HISTORY,
+				'saveActualCostAction' => self::AJAX_SAVE_ACTUAL_COST,
+				'clearActualCostAction' => self::AJAX_CLEAR_ACTUAL_COST,
 				'dpdCourierContactHistory' => $this->dpd_courier_contact_history(),
 				'mapProvider' => $provider,
 				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
@@ -295,6 +303,11 @@ final class OrderShipmentsMetabox {
 			<p data-wdc-tracking-row <?php echo '' === $tracking_presentation['display_text'] && '' === $tracking_presentation['copy_value'] ? 'hidden' : ''; ?>><strong data-wdc-tracking-label><?php echo esc_html( $tracking_presentation['label'] ); ?></strong>: <span data-wdc-tracking-number><?php $this->render_tracking_value( $tracking_presentation ); ?></span> <button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $tracking_presentation['copy_value'] ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $tracking_presentation['copy_value'] ); ?>>🗐</button> <span class="description" data-wdc-copy-tracking-status></span></p>
 			<p data-wdc-yandex-self-pickup-code-row <?php echo '' === $yandex_self_pickup_code ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Код для получения', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-yandex-self-pickup-code><?php echo esc_html( $yandex_self_pickup_code ); ?></span></p>
 			<p data-wdc-shipment-price-row class="<?php echo esc_attr( $this->shipment_price_class( $price_compare_status ) ); ?>" title="<?php echo esc_attr( $price_compare_message ); ?>" <?php echo '' === $price_label ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Цена', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-price-label><?php echo esc_html( $price_label ); ?></span></p>
+			<div class="wdc-shipment-actual-cost" data-wdc-shipment-actual-cost data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>">
+				<p><strong><?php echo esc_html__( 'Фактическая стоимость отправления', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-actual-cost-state><?php echo '' !== $price_label ? esc_html( $price_label ) : esc_html__( 'Фактическая стоимость пока не получена', 'walls-delivery-calc' ); ?></span></p>
+				<p class="description" data-wdc-actual-cost-source><?php echo esc_html( (string) ( $status_payload['actual_cost_source_label'] ?? '' ) ); ?></p>
+				<p><input type="text" inputmode="decimal" data-wdc-actual-cost-input placeholder="<?php echo esc_attr__( 'Фактическая стоимость, ₽', 'walls-delivery-calc' ); ?>"> <button type="button" class="button" data-wdc-save-actual-cost><?php echo esc_html__( 'Изменить', 'walls-delivery-calc' ); ?></button> <button type="button" class="button-link" data-wdc-clear-actual-cost><?php echo esc_html__( 'Очистить ручную цену', 'walls-delivery-calc' ); ?></button></p>
+			</div>
 			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( (string) ( $shipment['updated_at'] ?? '' ) ); ?></span></p>
 			<?php $this->render_status_block( $status_payload ); ?>
 			<span data-wdc-backlog-order-id hidden><?php echo esc_html( $backlog_order_id ); ?></span>

@@ -49,6 +49,10 @@ final class RussianPostShipmentActualCostExtractor {
 		}
 
 		return array(
+			'actual_cost_kopecks' => $cost_kopecks,
+			'actual_cost_currency' => 'RUB',
+			'actual_cost_source' => 'carrier_api',
+			'actual_cost_source_detail' => $source,
 			'russian_post_actual_cost_kopecks' => $cost_kopecks,
 			'russian_post_actual_cost_rub' => round( $cost_kopecks / 100, 2 ),
 			'russian_post_actual_cost_source' => $source,

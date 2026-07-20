@@ -23,7 +23,13 @@ final class DpdShipmentEnrichmentService {
 		$date = trim( (string) ( $state['planDeliveryDate'] ?? '' ) );
 		if ( null === $cost || '' === $date ) { return array( 'success' => true, 'message' => 'DPD пока не вернул цену и плановую дату.', 'complete' => false ); }
 		$now = $this->now();
-		$shipment['dpd_actual_cost_kopecks'] = $cost;
+		if ( 'manual' !== (string) ( $shipment['actual_cost_source'] ?? '' ) ) {
+			$shipment['actual_cost_kopecks'] = $cost;
+			$shipment['actual_cost_currency'] = 'RUB';
+			$shipment['actual_cost_source'] = 'carrier_status';
+			$shipment['actual_cost_source_detail'] = 'dpd_events';
+			$shipment['actual_cost_updated_at'] = $now;
+		}
 		$shipment['planned_delivery_date'] = $date;
 		$shipment['dpd_enrichment_checked_at'] = $now;
 		$shipment['updated_at'] = $now;

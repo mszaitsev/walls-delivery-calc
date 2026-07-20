@@ -122,7 +122,7 @@ final class DpdEventSyncService {
 			return false;
 		}
 
-		return null === $this->positive_int_or_null( $shipment['dpd_actual_cost_kopecks'] ?? null )
+		return null === $this->positive_int_or_null( $shipment['actual_cost_kopecks'] ?? null )
 			|| '' === trim( (string) ( $shipment['planned_delivery_date'] ?? '' ) );
 	}
 

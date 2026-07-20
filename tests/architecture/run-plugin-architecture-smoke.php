@@ -505,6 +505,30 @@ plugin_architecture_assert( ! str_contains( $checkout_persister_source, 'functio
 plugin_architecture_assert( str_contains( $calculation_builder_source, 'private RuleFormulaFormatter $rule_formula_formatter' ), 'DeliveryCalculationDataBuilder must receive RuleFormulaFormatter through constructor DI.' );
 plugin_architecture_assert( ! str_contains( $calculation_builder_source, 'new RuleFormulaFormatter' ), 'DeliveryCalculationDataBuilder must not construct RuleFormulaFormatter inline.' );
 
+$rules_admin_source = plugin_architecture_source( 'src/Rules/Admin/RulesAdminPage.php' );
+plugin_architecture_assert( ! preg_match( '/dpd|yandex_delivery|cdek|russian_post/i', $rules_admin_source ), 'RulesAdminPage must stay carrier-agnostic for service simulation.' );
+
+$delivery_services_admin_source = plugin_architecture_source( 'src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+plugin_architecture_assert( str_contains( $delivery_services_admin_source, 'simulate_runtime_carrier_service_rules' ) && str_contains( $delivery_services_admin_source, 'DpdQuoteCarrier' ) && str_contains( $delivery_services_admin_source, 'YandexDeliveryCarrier' ), 'DPD and Yandex rule simulation must be wired through the shared service simulation runner.' );
+
+$actual_cost_ajax_source = plugin_architecture_source( 'src/Shipments/Admin/Ajax/ShipmentActualCostAjaxController.php' );
+$shipment_metabox_source = plugin_architecture_source( 'src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$shipment_events_source = plugin_architecture_source( 'assets/admin/shipments/shipment-events.js' );
+$shipment_status_source = plugin_architecture_source( 'assets/admin/shipments/shipment-status.js' );
+plugin_architecture_assert( str_contains( $actual_cost_ajax_source, 'handle_save' ) && str_contains( $actual_cost_ajax_source, 'handle_clear' ) && str_contains( $shipment_metabox_source, 'wdc_save_shipment_actual_cost' ) && str_contains( $shipment_metabox_source, 'wdc_clear_shipment_actual_cost' ), 'Manual actual shipment cost AJAX controller must live in the common shipment namespace.' );
+plugin_architecture_assert( str_contains( $shipment_events_source, 'data-wdc-save-actual-cost' ) && str_contains( $shipment_events_source, 'data-wdc-clear-actual-cost' ) && str_contains( $shipment_status_source, 'data-wdc-actual-cost-state' ), 'Common shipment JS must own manual actual cost controls.' );
+
+foreach ( array( 'src', 'tests' ) as $actual_cost_dir ) {
+	foreach ( plugin_architecture_php_files( $actual_cost_dir ) as $file ) {
+		$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+		if ( str_contains( $relative, 'run-russian-post' ) ) {
+			continue;
+		}
+		$source = (string) file_get_contents( $file );
+		plugin_architecture_assert( ! preg_match( '/(cdek|dpd|yandex)_actual_(cost|price)/', $source ), 'Carrier-prefixed actual cost key must not exist in ' . $relative );
+	}
+}
+
 $manifest_path = 'tests/shipments/regression/shipment-regression-manifest.php';
 $manifest = require plugin_architecture_path( $manifest_path );
 plugin_architecture_assert( is_array( $manifest ), 'Regression manifest must return an array.' );

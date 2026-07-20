@@ -536,7 +536,9 @@ final class YandexShipmentRegistrationService {
 		$fields['yandex_offer_pricing_total'] = (string) ( $result->selected_offer->raw['offer_details']['pricing_total'] ?? $result->selected_offer->raw['pricing_total'] ?? '' );
 		$fields['yandex_offer_pricing_total_kopecks'] = $result->selected_offer->pricing_total_kopecks;
 		$fields['actual_cost_kopecks'] = $result->selected_offer->pricing_total_kopecks;
-		$fields['actual_cost_source'] = 'yandex_selected_offer';
+		$fields['actual_cost_currency'] = 'RUB';
+		$fields['actual_cost_source'] = 'carrier_api';
+		$fields['actual_cost_source_detail'] = 'yandex_offer';
 		$fields['yandex_offer_delivery_interval'] = array(
 			'min' => $result->selected_offer->delivery_interval_min,
 			'max' => $result->selected_offer->delivery_interval_max,

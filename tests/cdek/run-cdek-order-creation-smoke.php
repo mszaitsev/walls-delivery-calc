@@ -35,9 +35,12 @@ use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
@@ -51,6 +54,8 @@ use WallsShop\WDC\Shipments\Cdek\CdekShipmentModalExtension;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Modal\ShipmentModalExtensionRegistry;
+use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
+use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -667,7 +672,7 @@ cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest_sh
 cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest['status']['order_status_code'] ?? '' ), 'CDEK status payload must use latest order status, not request state.' );
 cdek_order_assert( 'Готов к отправке' === (string) ( $latest['status']['carrier_status_title'] ?? '' ), 'CDEK displayed status must use entity.statuses name instead of request_state.' );
 cdek_order_assert( '2026-06-15' === (string) ( $latest['status']['cdek_planned_delivery_date'] ?? '' ), 'CDEK planned_delivery_date must be saved in status payload.' );
-cdek_order_assert( 45018 === (int) ( $latest_shipment['cdek_actual_cost_kopecks'] ?? 0 ), 'CDEK delivery_detail.total_sum must be saved as actual cost.' );
+cdek_order_assert( 45018 === (int) ( $latest_shipment['actual_cost_kopecks'] ?? 0 ) && 'carrier_status' === (string) ( $latest_shipment['actual_cost_source'] ?? '' ), 'CDEK delivery_detail.total_sum must be saved as canonical actual cost from status update.' );
 cdek_order_assert( '450.18 руб.' === (string) ( $latest['status']['actual_cost_label'] ?? '' ) && 'ok' === (string) ( $latest['status']['actual_cost_compare_status'] ?? '' ), 'CDEK actual cost within 3 percent of base API cost must compare as ok.' );
 
 $deleted_status_order = new CdekOrderFakeOrder( 111 );
@@ -995,6 +1000,11 @@ $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	cdek_status_updates: $ajax_status
 );
 $ajax_create_controller = new ShipmentCreateAjaxController( $ajax_repository, $drafts, $ajax_creation, $ajax_payloads );
+$ajax_actual_costs = new ShipmentActualCostService(
+	$ajax_repository,
+	new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() )
+);
+$ajax_actual_cost_controller = new ShipmentActualCostAjaxController( $ajax_actual_costs, $ajax_payloads );
 $ajax_controller_double = static function ( string $class ): object {
 	return ( new ReflectionClass( $class ) )->newInstanceWithoutConstructor();
 };
@@ -1010,6 +1020,7 @@ $metabox = new OrderShipmentsMetabox(
 	ajax_removal_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentRemovalAjaxController::class ),
 	ajax_manual_attach_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController::class ),
 	ajax_address_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController::class ),
+	ajax_actual_cost_controller: $ajax_actual_cost_controller,
 	ajax_documents_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentDocumentsAjaxController::class ),
 	ajax_products_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentProductsAjaxController::class ),
 	cdek_status_updates: $ajax_status,

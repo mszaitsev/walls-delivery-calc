@@ -38,9 +38,12 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
+use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Carriers\Runtime\YandexDeliveryCarrier;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -137,6 +140,8 @@ final class DeliveryServicesAdminPage {
 		private ?YandexGeoV2RegionEnrichmentRunner $yandex_geo_v2_region_enrichment_runner = null,
 		private ?YandexDeliveryGeoPipelineV2Runner $yandex_delivery_geo_pipeline_v2_runner = null,
 		private ?YandexStatusMapping $yandex_status_mapping = null,
+		private ?DpdQuoteCarrier $dpd_carrier = null,
+		private ?YandexDeliveryCarrier $yandex_delivery_carrier = null,
 		private ?SettingsRepository $global_settings = null,
 	) {
 	}
@@ -4892,6 +4897,26 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			return $this->simulate_domestic_service_rules( $service, $input, $rules );
 		}
 
+		if ( DpdSettings::SERVICE_KEY === $service->service_key || DpdSettings::CARRIER_KEY === $service->carrier_key ) {
+			return $this->simulate_runtime_carrier_service_rules(
+				$service,
+				$input,
+				$rules,
+				$this->dpd_carrier,
+				__( 'Не удалось выполнить тестовый расчёт DPD: ', 'walls-delivery-calc' )
+			);
+		}
+
+		if ( YandexDeliverySettings::SERVICE_KEY === $service->service_key || YandexDeliverySettings::CARRIER_KEY === $service->carrier_key ) {
+			return $this->simulate_runtime_carrier_service_rules(
+				$service,
+				$input,
+				$rules,
+				$this->yandex_delivery_carrier,
+				__( 'Не удалось выполнить тестовый расчёт Яндекс Доставки: ', 'walls-delivery-calc' )
+			);
+		}
+
 		if ( RussianPostSettings::SERVICE_KEY !== $service->service_key || ! $this->russian_post_carrier instanceof RussianPostInternationalCarrier || ! $this->rule_builder instanceof RuleAppliedRateBuilder ) {
 			return array( 'notice' => __( 'Симуляция для этой службы пока не поддерживается.', 'walls-delivery-calc' ) );
 		}
@@ -4999,6 +5024,133 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			'skipped_tariffs' => is_array( $quote->raw_reference['skipped_tariffs'] ?? null ) ? $quote->raw_reference['skipped_tariffs'] : array(),
 			'audit' => $audit,
 			'notice' => array() === $rows ? ( $quote->error_message ?: $quote->error_code ) : '',
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 * @param array<int,Rule> $rules
+	 * @return array<string,mixed>
+	 */
+	private function simulate_runtime_carrier_service_rules( DeliveryService $service, array $input, array $rules, ?CarrierAdapterInterface $carrier, string $error_prefix ): array {
+		if ( ! $carrier instanceof CarrierAdapterInterface || ! $this->rule_builder instanceof RuleAppliedRateBuilder ) {
+			return array( 'notice' => $error_prefix . __( 'runtime-компонент службы не подключён.', 'walls-delivery-calc' ) );
+		}
+
+		try {
+			$request = $this->simulation_quote_request( $service, $input );
+			$quote = $carrier->quote( $request );
+		} catch ( \Throwable $exception ) {
+			return array( 'notice' => $error_prefix . $exception->getMessage() );
+		}
+
+		$rows = array();
+		$audit = array();
+		foreach ( $quote->rates as $rate ) {
+			if ( ! $rate instanceof DeliveryRate ) {
+				continue;
+			}
+
+			$context = new RuleEvaluationContext(
+				$request->order_total,
+				$rate->price,
+				$request->package,
+				$request->destination,
+				$rate->delivery_type,
+				$request->payment_method,
+				$request->calculation_date,
+				array(),
+				array_merge(
+					$rate->meta,
+					array(
+						'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days,
+						'original_delivery_min_days' => $rate->delivery_days->min_days,
+						'original_delivery_max_days' => $rate->delivery_days->max_days,
+					)
+				)
+			);
+			$applied = $this->rule_builder->apply( $rate, $context, $rules );
+			$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $applied['rate'], $service ) : $applied['rate'];
+			$rows[] = array(
+				'object_code' => $rate->tariff_key,
+				'title' => $rate->tariff_name ?: $rate->title,
+				'delivery_type' => $rate->delivery_type,
+				'api_price' => $rate->price->get_rubles() . ' ' . $rate->price->get_currency(),
+				'api_delivery_days' => $this->range_label( $rate->delivery_days ),
+				'final_price' => $processed->price->get_rubles() . ' ' . $processed->price->get_currency(),
+				'final_delivery_days' => $this->range_label( $processed->delivery_days ),
+				'disabled' => $processed->disabled ? 'yes' : 'no',
+				'disabled_reason' => $processed->disabled_reason,
+				'comments' => implode( '; ', array_map( 'strval', $processed->comments ) ),
+				'formula_visualization' => is_array( $processed->meta['formula_visualization'] ?? null ) ? implode( "\n", array_map( 'strval', $processed->meta['formula_visualization'] ) ) : '',
+				'lead_time_audit' => is_array( $processed->meta['lead_time_audit'] ?? null ) ? implode( "\n", array_map( 'strval', $processed->meta['lead_time_audit'] ) ) : '',
+			);
+			$audit[ $rate->tariff_key ?: $rate->rate_id ] = $applied['audit'];
+		}
+
+		return array(
+			'tariffs' => $rows,
+			'products_weight_g' => $request->package->weight_g,
+			'packaging_weight_g' => (int) ( $request->package->packaging_weight_g ?? 0 ),
+			'package_weight_with_packaging_g' => $request->package->get_total_weight_g(),
+			'packaging_weight_mode' => $request->package->packaging_weight_mode,
+			'dimensions_cm' => trim( (string) $request->package->length_cm . 'x' . (string) $request->package->width_cm . 'x' . (string) $request->package->height_cm, 'x' ),
+			'source' => implode( ' / ', array_filter( array( $quote->source, $quote->error_code, $quote->cache_hit ? 'cache hit' : '' ) ) ),
+			'skipped_tariffs' => is_array( $quote->raw_reference['skipped_tariffs'] ?? null ) ? $quote->raw_reference['skipped_tariffs'] : array(),
+			'audit' => $audit,
+			'notice' => array() === $rows ? ( $quote->error_message ?: $quote->error_code ?: $error_prefix . __( 'служба не вернула тарифы.', 'walls-delivery-calc' ) ) : ( array() === $rules ? __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' ) : '' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	private function simulation_quote_request( DeliveryService $service, array $input ): QuoteRequest {
+		$country = strtoupper( sanitize_text_field( (string) ( $input['country'] ?? 'RU' ) ) );
+		$weight = max( 0, (int) ( $input['weight'] ?? 1000 ) );
+		$order_total_value = (float) str_replace( ',', '.', (string) ( $input['order_total'] ?? 1000 ) );
+		$date = sanitize_text_field( (string) ( $input['date'] ?? gmdate( 'Y-m-d' ) ) );
+		$city = sanitize_text_field( (string) ( $input['city'] ?? '' ) );
+		$postcode = sanitize_text_field( (string) ( $input['postal_code'] ?? '' ) );
+		$fias_id = sanitize_text_field( (string) ( $input['location_fias_id'] ?? '' ) );
+		$delivery_type = DeliveryType::COURIER === (string) ( $input['delivery_type'] ?? '' ) ? DeliveryType::COURIER : DeliveryType::PICKUP;
+		$order_total = Money::from_rubles( $order_total_value );
+		$item = new PackageItem(
+			'SIM',
+			'Simulation',
+			1,
+			$order_total,
+			$order_total,
+			$weight,
+			max( 0, (int) round( (float) ( $input['length_cm'] ?? 0 ) ) ),
+			max( 0, (int) round( (float) ( $input['width_cm'] ?? 0 ) ) ),
+			max( 0, (int) round( (float) ( $input['height_cm'] ?? 0 ) ) )
+		);
+		$package = Package::from_items( array( $item ), 0, $order_total, $order_total );
+		$packaging = $this->packaging_calculator instanceof PackagingWeightCalculator
+			? $this->packaging_calculator->apply_to_package( $package, $service )
+			: new PackagingApplicationResult( $package->weight_g, 0, $package->get_total_weight_g(), $service->include_packaging_weight, $service->packaging_weight_mode, $package );
+
+		$location_id = max( 0, (int) ( $input['selected_location_id'] ?? $input['location_id'] ?? 0 ) );
+
+		return new QuoteRequest(
+			$country,
+			new Address( country_code: $country, city: $city, settlement: $city, postcode: $postcode, raw_address: $city, fias_id: $fias_id ),
+			$packaging->package,
+			sanitize_text_field( (string) ( $input['payment_method'] ?? '' ) ),
+			$order_total,
+			$date,
+			array(
+				'service_key' => $service->service_key,
+				'delivery_type' => $delivery_type,
+				'postcode' => $postcode,
+				'city' => $city,
+				'fias_id' => $fias_id,
+				'selected_location_fias_id' => $fias_id,
+				'location_id' => $location_id,
+				'selected_location_id' => $location_id,
+				'selected_delivery_terminal_code' => sanitize_text_field( (string) ( $input['selected_delivery_terminal_code'] ?? '' ) ),
+			)
 		);
 	}
 

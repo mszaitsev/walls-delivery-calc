@@ -17,12 +17,20 @@ final class ShipmentStatusUpdateService {
 		private OrderShipmentRepository $repository,
 		private RussianPostTrackingApiClient $tracking_client,
 		private RussianPostTrackingStatusMapper $mapper,
-		private ?ShipmentOrderStatusMappingService $order_status_mapping = null,
-		private ?ShipmentActualCostComparisonService $actual_costs = null,
-		private ?ShipmentBaseApiCostResolver $base_costs = null
+		private ShipmentOrderStatusMappingService|null $order_status_mapping = null,
+		private ShipmentActualCostComparisonService|null $actual_costs = null,
+		private ShipmentBaseApiCostResolver|null $base_costs = null,
+		private ShipmentActualCostResolver|null $actual_cost_resolver = null
 	) {
-		$this->actual_costs ??= new ShipmentActualCostComparisonService();
-		$this->base_costs ??= new ShipmentBaseApiCostResolver();
+		if ( ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
+			$this->actual_costs = new ShipmentActualCostComparisonService();
+		}
+		if ( ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
+			$this->base_costs = new ShipmentBaseApiCostResolver();
+		}
+		if ( ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
+			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs, $this->base_costs );
+		}
 	}
 
 	/**
@@ -162,11 +170,7 @@ final class ShipmentStatusUpdateService {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, ?object $order ): array {
-		$actual_kopecks = $this->positive_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
-		$base_kopecks = $this->base_costs()->resolve_from_order( $order );
-		$presentation = $this->actual_costs()->compare( $actual_kopecks, $base_kopecks )->to_array();
-
-		return $presentation + array( 'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks );
+		return $this->actual_cost_resolver()->presentation_payload( $shipment, $order );
 	}
 
 	private function positive_int_or_null( mixed $value ): ?int {
@@ -196,6 +200,14 @@ final class ShipmentStatusUpdateService {
 		}
 
 		return $this->base_costs;
+	}
+
+	private function actual_cost_resolver(): ShipmentActualCostResolver {
+		if ( ! isset( $this->actual_cost_resolver ) || ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
+			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs(), $this->base_costs() );
+		}
+
+		return $this->actual_cost_resolver;
 	}
 
 	private function now(): string {

@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
 use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
@@ -18,14 +19,22 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private YandexShipmentRegistrationService $registration,
 		private YandexShipmentButtonPolicy $buttons,
-		private ?YandexStatusMapping $status_mapping = null,
-		private ?YandexShipmentLabelPolicy $label_policy = null,
-		private ?ShipmentActualCostComparisonService $actual_costs = null,
-		private ?ShipmentBaseApiCostResolver $base_costs = null
+		private YandexStatusMapping|null $status_mapping = null,
+		private YandexShipmentLabelPolicy|null $label_policy = null,
+		private ShipmentActualCostComparisonService|null $actual_costs = null,
+		private ShipmentBaseApiCostResolver|null $base_costs = null,
+		private ShipmentActualCostResolver|null $actual_cost_resolver = null
 	) {
 		$this->label_policy ??= new YandexShipmentLabelPolicy( $this->status_mapping );
-		$this->actual_costs ??= new ShipmentActualCostComparisonService();
-		$this->base_costs ??= new ShipmentBaseApiCostResolver();
+		if ( ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
+			$this->actual_costs = new ShipmentActualCostComparisonService();
+		}
+		if ( ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
+			$this->base_costs = new ShipmentBaseApiCostResolver();
+		}
+		if ( ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
+			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs, $this->base_costs );
+		}
 	}
 
 	public function carrier_key(): string { return YandexDeliverySettings::CARRIER_KEY; }
@@ -205,11 +214,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, object $order ): array {
-		$actual_kopecks = $this->positive_int_or_null( $shipment['actual_cost_kopecks'] ?? $shipment['yandex_offer_pricing_total_kopecks'] ?? null );
-		$base_kopecks = $this->base_costs()->resolve_from_order( $order );
-		$presentation = $this->actual_costs()->compare( $actual_kopecks, $base_kopecks )->to_array();
-
-		return $presentation + array( 'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks );
+		return $this->actual_cost_resolver()->presentation_payload( $shipment, $order );
 	}
 
 	private function positive_int_or_null( mixed $value ): ?int {
@@ -239,6 +244,14 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 		}
 
 		return $this->base_costs;
+	}
+
+	private function actual_cost_resolver(): ShipmentActualCostResolver {
+		if ( ! isset( $this->actual_cost_resolver ) || ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
+			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs(), $this->base_costs() );
+		}
+
+		return $this->actual_cost_resolver;
 	}
 
 	public function auto_sync_throttle_microseconds(): int { return 0; }

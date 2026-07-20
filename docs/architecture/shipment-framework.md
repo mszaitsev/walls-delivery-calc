@@ -1,6 +1,6 @@
 # Shipment Framework
 
-Version: 0.124.24
+Version: 0.125.0
 
 The Shipment Framework lets carriers share admin creation, persistence, lifecycle, documents, modal UI, status presentation, polling, and regression coverage. It is not one linear pipeline; each runtime flow has its own owner.
 
@@ -15,7 +15,7 @@ The Shipment Framework lets carriers share admin creation, persistence, lifecycl
 | Allocation | `ShipmentAllocationBuilder` | shared | `framework.allocation` |
 | Lifecycle continuation | `CarrierShipmentLifecycleContinuationInterface`, `ShipmentLifecycleResult` | optional per carrier | `framework.lifecycle-contract` |
 | Status | adapter `status_payload()`, status services, autosync services | per-carrier mapping, shared payload | `framework.status`, carrier/status groups |
-| Actual cost | `ShipmentActualCostComparisonService`, `ShipmentBaseApiCostResolver` | optional carrier fields | `framework.actual-cost-presentation` |
+| Actual cost | `ShipmentActualCostResolver`, `ShipmentActualCostService`, `ShipmentActualCostComparisonService`, `ShipmentBaseApiCostResolver` | shared canonical fields, optional carrier extraction | `framework.actual-cost-presentation` |
 | Documents | provider registry, document providers, download service | optional provider per carrier | `framework.document-actions` |
 | Modal | `ShipmentModalExtensionRegistry` | optional extension per carrier | `framework.modal-extensions` |
 | Admin AJAX | controllers in `src/Shipments/Admin/Ajax` | shared endpoints | `framework.admin-ajax` |
@@ -46,6 +46,14 @@ Forbidden in create flow: carrier switch in `ShipmentCreationService`, persisten
 6. Carrier JS extension renders carrier-only rows.
 
 Autosync uses shared status services plus carrier-specific sync services where needed.
+
+## Actual Cost Flow
+
+Actual shipment cost is the real carrier cost for a specific shipment. It is separate from base API cost saved in delivery calculation data and from the customer shipping price in WooCommerce totals.
+
+The canonical storage fields are `actual_cost_kopecks`, `actual_cost_currency`, `actual_cost_source`, `actual_cost_source_detail`, and `actual_cost_updated_at`. Carrier-specific code may extract an amount from carrier payloads, but common application code owns merge policy and storage keys. Automatic carrier updates may write the cost when no manual cost exists; `actual_cost_source=manual` protects the value from silent overwrite. The shared metabox AJAX controller owns manual set/clear for all carriers.
+
+Future analytics should read a stable model from order/shipment/calculation data: order ID, carrier key, service key, shipment identifier, created/registered timestamps, `actual_cost_kopecks`, `actual_cost_currency`, `actual_cost_source`, `actual_cost_updated_at`, base API cost, and customer shipping cost.
 
 ## Document Flow
 
@@ -98,5 +106,6 @@ Adding a new carrier must not require:
 - saving carrier data outside a persistence mapper;
 - adding document download code outside the document provider/download service;
 - adding a separate lifecycle endpoint outside the common lifecycle continuation contract.
+- adding carrier-prefixed actual cost fields or manual actual-cost UI.
 
 Registration in `Plugin.php` is expected because it is the composition root.

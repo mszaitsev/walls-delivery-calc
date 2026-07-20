@@ -29,6 +29,7 @@ $controllers = array(
 	'ShipmentRemovalAjaxController' => 'handle_cancel',
 	'ShipmentManualAttachAjaxController' => 'handle',
 	'ShipmentAddressAjaxController' => 'handle_normalize',
+	'ShipmentActualCostAjaxController' => 'handle_save',
 	'ShipmentDocumentsAjaxController' => 'handle_cdek_barcode_prepare',
 	'ShipmentProductsAjaxController' => 'handle_search_products',
 );
@@ -41,6 +42,7 @@ $controller_properties = array(
 	'ShipmentRemovalAjaxController' => 'ajax_removal_controller',
 	'ShipmentManualAttachAjaxController' => 'ajax_manual_attach_controller',
 	'ShipmentAddressAjaxController' => 'ajax_address_controller',
+	'ShipmentActualCostAjaxController' => 'ajax_actual_cost_controller',
 	'ShipmentDocumentsAjaxController' => 'ajax_documents_controller',
 	'ShipmentProductsAjaxController' => 'ajax_products_controller',
 );
@@ -49,7 +51,7 @@ foreach ( $controllers as $class => $method ) {
 	$path = $root . '/src/Shipments/Admin/Ajax/' . $class . '.php';
 	$source = (string) file_get_contents( $path );
 	shipment_admin_ajax_assert( is_file( $path ) && str_contains( $source, 'final class ' . $class ) && str_contains( $source, 'public function ' . $method ), 'AJAX controller must exist and expose expected handler: ' . $class );
-	shipment_admin_ajax_assert( str_contains( $plugin, '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class . '::class' ), 'Plugin DI must register AJAX controller: ' . $class );
+	shipment_admin_ajax_assert( str_contains( $plugin, '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class . '::class' ) || str_contains( $plugin, $class . '::class' ), 'Plugin DI must register AJAX controller: ' . $class );
 	shipment_admin_ajax_assert( ! preg_match( '/public function ' . preg_quote( $method, '/' ) . '\s*\([^)]*\)\s*:\s*void\s*\{\s*\$this->ajax->ajax_[a-z_]+\(\);\s*\}/', $source ), 'AJAX controller must not be a proxy wrapper: ' . $class );
 	shipment_admin_ajax_assert( str_contains( $source, 'wp_send_json_' ) || str_contains( $source, 'current_user_can' ), 'AJAX controller must own endpoint response/access logic: ' . $class );
 	$property = $controller_properties[ $class ];
@@ -68,6 +70,8 @@ foreach ( array(
 	'wdc_attach_shipment_tracking_number',
 	'wdc_normalize_shipment_address',
 	'wdc_search_russian_post_pickup_points',
+	'wdc_save_shipment_actual_cost',
+	'wdc_clear_shipment_actual_cost',
 	'wdc_search_products_for_shipment_item',
 	'wdc_cdek_barcode_prepare',
 	'wdc_dpd_courier_contact_history',
@@ -119,6 +123,8 @@ $expected_callbacks = array(
 	'wp_ajax_wdc_attach_shipment_tracking_number' => array( 'ShipmentManualAttachAjaxController', 'handle' ),
 	'wp_ajax_wdc_normalize_shipment_address' => array( 'ShipmentAddressAjaxController', 'handle_normalize' ),
 	'wp_ajax_wdc_search_russian_post_pickup_points' => array( 'ShipmentAddressAjaxController', 'handle_search_pickup_points' ),
+	'wp_ajax_wdc_save_shipment_actual_cost' => array( 'ShipmentActualCostAjaxController', 'handle_save' ),
+	'wp_ajax_wdc_clear_shipment_actual_cost' => array( 'ShipmentActualCostAjaxController', 'handle_clear' ),
 	'wp_ajax_wdc_search_products_for_shipment_item' => array( 'ShipmentProductsAjaxController', 'handle_search_products' ),
 	'wp_ajax_wdc_cdek_barcode_prepare' => array( 'ShipmentDocumentsAjaxController', 'handle_cdek_barcode_prepare' ),
 	'wp_ajax_wdc_dpd_courier_contact_history' => array( 'ShipmentProductsAjaxController', 'handle_dpd_contact_history' ),

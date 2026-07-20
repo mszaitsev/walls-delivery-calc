@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekApiException;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
 use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -18,13 +19,21 @@ final class CdekOrderStatusService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private CdekApiClient $client,
-		private ?Logger $logger = null,
-		private ?CdekStatusMappingService $status_mapping = null,
-		private ?ShipmentActualCostComparisonService $actual_costs = null,
-		private ?ShipmentBaseApiCostResolver $base_costs = null
+		private Logger|null $logger = null,
+		private CdekStatusMappingService|null $status_mapping = null,
+		private ShipmentActualCostComparisonService|null $actual_costs = null,
+		private ShipmentBaseApiCostResolver|null $base_costs = null,
+		private ShipmentActualCostResolver|null $actual_cost_resolver = null
 	) {
-		$this->actual_costs ??= new ShipmentActualCostComparisonService();
-		$this->base_costs ??= new ShipmentBaseApiCostResolver();
+		if ( ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
+			$this->actual_costs = new ShipmentActualCostComparisonService();
+		}
+		if ( ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
+			$this->base_costs = new ShipmentBaseApiCostResolver();
+		}
+		if ( ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
+			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs, $this->base_costs );
+		}
 	}
 
 	/**
@@ -69,7 +78,11 @@ final class CdekOrderStatusService {
 				'universal_status_code' => $universal_status,
 				'universal_status_label' => '' !== $universal_status ? DeliveryStatus::label( $universal_status ) : '',
 				'cdek_planned_delivery_date' => $this->planned_delivery_date( $entity ),
-				'cdek_actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
+				'actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
+				'actual_cost_currency' => 'RUB',
+				'actual_cost_source' => 'carrier_status',
+				'actual_cost_source_detail' => 'cdek_order_status',
+				'actual_cost_updated_at' => $now,
 				'response_snapshot' => $this->sanitize_response_snapshot( $body ),
 				'updated_at' => $now,
 				'tracking_checked_at' => $now,
@@ -442,7 +455,11 @@ final class CdekOrderStatusService {
 				'universal_status_code' => $universal_status,
 				'universal_status_label' => '' !== $universal_status ? DeliveryStatus::label( $universal_status ) : '',
 				'cdek_planned_delivery_date' => $this->planned_delivery_date( $entity ),
-				'cdek_actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
+				'actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
+				'actual_cost_currency' => 'RUB',
+				'actual_cost_source' => 'carrier_status',
+				'actual_cost_source_detail' => 'cdek_order_status',
+				'actual_cost_updated_at' => $now,
 				'response_snapshot' => $this->sanitize_response_snapshot( $body ),
 				'created_at' => $now,
 				'updated_at' => $now,
@@ -561,11 +578,7 @@ final class CdekOrderStatusService {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, ?object $order ): array {
-		$actual_kopecks = $this->positive_int_or_null( $shipment['cdek_actual_cost_kopecks'] ?? null );
-		$base_kopecks = $this->base_costs()->resolve_from_order( $order );
-		$presentation = $this->actual_costs()->compare( $actual_kopecks, $base_kopecks )->to_array();
-
-		return $presentation + array( 'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks );
+		return $this->actual_cost_resolver()->presentation_payload( $shipment, $order );
 	}
 
 	private function positive_int_or_null( mixed $value ): ?int {
@@ -595,6 +608,14 @@ final class CdekOrderStatusService {
 		}
 
 		return $this->base_costs;
+	}
+
+	private function actual_cost_resolver(): ShipmentActualCostResolver {
+		if ( ! isset( $this->actual_cost_resolver ) || ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
+			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs(), $this->base_costs() );
+		}
+
+		return $this->actual_cost_resolver;
 	}
 
 	/**

@@ -154,7 +154,7 @@ list( $service, $settings, $repository ) = dpd_autosync_context( array( $order )
 dpd_autosync_seed( $repository, $order, 'DPD801' );
 $soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-new', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD801', '801' ) ) ), array() ) );
 $service->run( 'cron' );
-dpd_autosync_assert( 1 === $soap->count_method( 'getStatesByDPDOrder' ) && 12345 === (int) $repository->find( $order )['dpd_actual_cost_kopecks'] && '2026-06-25' === (string) $repository->find( $order )['planned_delivery_date'], 'New DPD event with missing price/date must trigger enrichment.' );
+dpd_autosync_assert( 1 === $soap->count_method( 'getStatesByDPDOrder' ) && 12345 === (int) $repository->find( $order )['actual_cost_kopecks'] && 'carrier_status' === (string) $repository->find( $order )['actual_cost_source'] && '2026-06-25' === (string) $repository->find( $order )['planned_delivery_date'], 'New DPD event with missing price/date must trigger canonical enrichment.' );
 $soap->calls = array();
 $soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-same', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD801', '801' ) ) ), array() ) );
 $service->run( 'cron' );

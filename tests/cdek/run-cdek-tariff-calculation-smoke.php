@@ -450,6 +450,7 @@ function cdek_tariff_orchestrator( CdekCarrier $carrier, ?DeliveryServiceRegistr
 }
 
 function cdek_tariff_lead_time_normalizer( int $processing_days = 0 ): \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer {
+	$db = $GLOBALS['wpdb'] ?? new wpdb();
 	$settings = new SettingsRepository();
 	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
 	$timezone = new \WallsShop\WDC\Calendar\Services\TimezoneService();
@@ -457,8 +458,8 @@ function cdek_tariff_lead_time_normalizer( int $processing_days = 0 ): \WallsSho
 
 	return new \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer(
 		$settings,
-		new \WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository(),
-		new \WallsShop\WDC\Calendar\Services\DeliveryDateCalculator( new \WallsShop\WDC\Calendar\Services\CalendarService( new \WallsShop\WDC\Calendar\Storage\CalendarRepository(), new \WallsShop\WDC\Calendar\Services\YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		new \WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository( $db ),
+		new \WallsShop\WDC\Calendar\Services\DeliveryDateCalculator( new \WallsShop\WDC\Calendar\Services\CalendarService( new \WallsShop\WDC\Calendar\Storage\CalendarRepository( $db ), new \WallsShop\WDC\Calendar\Services\YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
 		$formatter
 	);
 }

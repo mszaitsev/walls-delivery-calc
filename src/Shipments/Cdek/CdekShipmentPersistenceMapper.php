@@ -26,7 +26,10 @@ final class CdekShipmentPersistenceMapper implements CarrierShipmentPersistenceM
 			'cdek_order_status_code' => (string) ( $raw['order_status'] ?? '' ),
 			'cdek_order_status_name' => (string) ( $raw['order_status_name'] ?? '' ),
 			'cdek_planned_delivery_date' => (string) ( $raw['planned_delivery_date'] ?? '' ),
-			'cdek_actual_cost_kopecks' => is_numeric( $raw['actual_cost_kopecks'] ?? null ) ? (int) $raw['actual_cost_kopecks'] : null,
+			'actual_cost_kopecks' => is_numeric( $raw['actual_cost_kopecks'] ?? null ) ? (int) $raw['actual_cost_kopecks'] : null,
+			'actual_cost_currency' => 'RUB',
+			'actual_cost_source' => 'carrier_api',
+			'actual_cost_source_detail' => 'cdek_create',
 			'status' => 'registration_pending',
 			'status_title' => 'Заявка на регистрацию принята',
 		);
