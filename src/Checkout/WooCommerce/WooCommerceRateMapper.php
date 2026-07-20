@@ -24,6 +24,7 @@ final class WooCommerceRateMapper {
 				'delivery_type'   => $rate->delivery_type,
 				'pickup_family'   => $this->pickup_family( $rate ),
 				'crossed_price'   => $rate->crossed_price?->to_array(),
+				'planned_delivery_date' => $rate->planned_delivery_date,
 				'planned_delivery_comment' => $rate->planned_delivery_comment,
 				'comments'        => $rate->comments,
 				'disabled'        => $rate->disabled,

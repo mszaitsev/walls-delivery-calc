@@ -33,6 +33,7 @@ final class CheckoutOrchestrator {
 		private FallbackRateFactory $fallback_factory,
 		private CarrierExecutionGuard $execution_guard,
 		private CheckoutLogger $logger,
+		private DeliveryLeadTimeNormalizer $lead_time_normalizer,
 		private ?QuoteCache $quote_cache = null,
 		private ?DeliveryServiceRegistry $service_registry = null,
 		private ?DeliveryServiceManager $service_manager = null,
@@ -111,6 +112,7 @@ final class CheckoutOrchestrator {
 					$rate = $this->rate_with_meta( $rate, $packaging_result->to_meta() );
 				}
 				$rate = $service instanceof DeliveryService ? $this->rate_for_service( $rate, $service ) : $rate;
+				$rate = $this->lead_time_normalizer->normalize( $rate, $service, $service_request );
 				$rules_source = 'none';
 				if ( ! empty( $rate->meta['skip_rules'] ) ) {
 					$rules_for_rate = array();
@@ -128,6 +130,7 @@ final class CheckoutOrchestrator {
 				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager && empty( $applied['rate']->meta['skip_service_post_processing'] )
 					? $this->service_manager->post_process_rate( $applied['rate'], $service )
 					: $applied['rate'];
+				$processed = $this->lead_time_normalizer->enrich_planned_date( $processed, $service_request );
 				$processed = $this->rate_with_meta(
 					$processed,
 					array(

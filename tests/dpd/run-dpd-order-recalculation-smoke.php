@@ -221,7 +221,7 @@ $selected_dpd_groups = array_values( array_filter( $selected_preview['rates'], s
 $selected_pickup_group = array_values( array_filter( $selected_dpd_groups, static fn( array $rate ): bool => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) )[0] ?? array();
 $selected_pickup_tariff = $selected_pickup_group['tariff_variants'][0] ?? array();
 
-$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository() );
+$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $blocked_pickup = $replacement->save(
 	new DpdOrderRecalcOrder(),
 	array(

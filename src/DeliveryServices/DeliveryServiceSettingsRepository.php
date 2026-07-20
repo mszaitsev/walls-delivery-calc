@@ -6,6 +6,8 @@ namespace WallsShop\WDC\DeliveryServices;
 defined( 'ABSPATH' ) || exit;
 
 final class DeliveryServiceSettingsRepository {
+	public const DELIVERY_DAYS_ARE_WORKING_KEY = 'delivery_days_are_working';
+
 	private \wpdb $wpdb;
 
 	public function __construct( ?\wpdb $db = null ) {
@@ -50,6 +52,10 @@ final class DeliveryServiceSettingsRepository {
 
 	public function delete_setting( int $service_id, string $key ): void {
 		$this->wpdb->delete( $this->table(), array( 'service_id' => $service_id, 'setting_key' => $key ), array( '%d', '%s' ) );
+	}
+
+	public function delivery_days_are_working( int $service_id ): bool {
+		return true === $this->get_setting( $service_id, self::DELIVERY_DAYS_ARE_WORKING_KEY, false );
 	}
 
 	/**

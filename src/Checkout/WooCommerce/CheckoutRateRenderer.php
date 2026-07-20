@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 
@@ -59,6 +60,10 @@ final class CheckoutRateRenderer {
 					echo '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' . esc_html( (string) $comment ) . '</div>';
 				}
 			}
+		}
+		$planned_comment = trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) );
+		if ( '' !== $planned_comment ) {
+			echo '<div class="wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">' . esc_html( $planned_comment ) . '</div>';
 		}
 		$this->render_yandex_5post_warning( $meta, $method );
 
@@ -325,20 +330,24 @@ final class CheckoutRateRenderer {
 			}
 			$object = (string) ( $variant['object_code'] ?? '' );
 			$title = (string) ( $variant['title'] ?? '' );
-			$comment = (string) ( $variant['planned_delivery_comment'] ?? '' );
+			$delivery_days_label = (string) ( $variant['delivery_days_label'] ?? '' );
+			if ( '' === $delivery_days_label && is_array( $variant['delivery_days'] ?? null ) ) {
+				$delivery_days_label = DeliveryDaysFormatter::format_array( $variant['delivery_days'] );
+			}
+			$planned_comment = (string) ( $variant['planned_delivery_comment'] ?? '' );
 			$price = isset( $variant['price_rub'] ) ? $this->format_rubles( (float) $variant['price_rub'] ) : '';
 			$crossed = is_array( $variant['crossed_price'] ?? null ) && isset( $variant['crossed_price']['amount_kopecks'] )
 				? $this->format_money( (int) $variant['crossed_price']['amount_kopecks'] )
 				: '';
 			$line = $title;
-			if ( '' !== $comment ) {
-				$line .= ' - ' . $comment;
+			if ( '' !== $delivery_days_label ) {
+				$line .= ' - ' . $delivery_days_label;
 			}
 			if ( '' !== $price ) {
 				$line .= ': ';
 			}
 			echo '<label class="wdc-domestic-tariff-selector__item">';
-			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $checkout_group_id ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
+			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $checkout_group_id ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" data-delivery-days-label="' . esc_attr( $delivery_days_label ) . '" data-planned-delivery-date="' . esc_attr( (string) ( $variant['planned_delivery_date'] ?? '' ) ) . '" data-planned-delivery-comment="' . esc_attr( $planned_comment ) . '" ' . checked( $selected, $object, false ) . '>';
 			echo '<span class="wdc-domestic-tariff-selector__line">';
 			echo '<span class="wdc-domestic-tariff-selector__line-text">' . esc_html( $line ) . '</span>';
 			if ( '' !== $price ) {

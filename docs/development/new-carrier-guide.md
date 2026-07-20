@@ -1,6 +1,6 @@
 # New Carrier Guide
 
-Version: 0.124.19
+Version: 0.124.24
 
 Use `ExampleCarrier` as a mental model only; do not add it to production. This guide is implementable: follow it in order and add only capabilities the carrier actually supports.
 
@@ -47,6 +47,8 @@ Required: timeout, safe exception boundary, credential redaction in logs. Option
 Mandatory if checkout rates are shown. Implement a runtime carrier registered in `CarrierRegistry`.
 
 Responsibility: convert `QuoteRequest` into `DeliveryQuote`, including source API price, customer price, delivery type, delivery days/date, and diagnostics. Do not create shipments here.
+
+Carriers must return the raw carrier lead time as structured `DateRange` data. Do not add shop processing days, do not convert carrier working days with calendars inside a carrier, and do not bake the lead time into the title. The shared checkout pipeline applies `shop_processing_working_days` with `CalendarTypes::SHOP`, optionally converts service lead time with `CalendarTypes::CARRIER_RU` when `delivery_days_are_working` is enabled, then runs rules and formats the final title/comment.
 
 ## 4. Pickup/Courier Support
 

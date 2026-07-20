@@ -442,9 +442,24 @@ function cdek_tariff_orchestrator( CdekCarrier $carrier, ?DeliveryServiceRegistr
 		new FallbackRateFactory(),
 		new CarrierExecutionGuard( new CheckoutLogger( new Logger() ) ),
 		new CheckoutLogger( new Logger() ),
+		cdek_tariff_lead_time_normalizer( 0 ),
 		$quote_cache,
 		$service_registry,
 		$service_manager
+	);
+}
+
+function cdek_tariff_lead_time_normalizer( int $processing_days = 0 ): \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer {
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new \WallsShop\WDC\Calendar\Services\TimezoneService();
+	$formatter = new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter();
+
+	return new \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer(
+		$settings,
+		new \WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository(),
+		new \WallsShop\WDC\Calendar\Services\DeliveryDateCalculator( new \WallsShop\WDC\Calendar\Services\CalendarService( new \WallsShop\WDC\Calendar\Storage\CalendarRepository(), new \WallsShop\WDC\Calendar\Services\YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
 	);
 }
 
@@ -610,6 +625,7 @@ $checkout_rate = array_merge(
 	array(
 		'label' => $wc_rate['label'],
 		'cost' => (float) $wc_rate['cost'],
+		'planned_delivery_date' => '2026-08-12',
 	)
 );
 $checkout_session = new CheckoutSessionManager();
@@ -630,10 +646,10 @@ $checkout_item->meta = array(
 	'Населенный пункт' => 'Новосибирск',
 	'Нормализация' => 'manual',
 );
-$checkout_persister = new OrderShippingMetaPersister( $checkout_session );
+$checkout_persister = new OrderShippingMetaPersister( $checkout_session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $checkout_persister->persist_shipping_item_meta( $checkout_item );
 cdek_tariff_assert( $courier_rate->title === $checkout_item->method_title, 'CDEK checkout shipping item method title must keep method, tariff and delivery text. Expected "' . $courier_rate->title . '", got "' . $checkout_item->method_title . '".' );
-cdek_tariff_assert( array( 'Срок доставки' => '1 день' ) === $checkout_item->meta, 'CDEK checkout shipping item visible meta must contain only delivery time.' );
+cdek_tariff_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $checkout_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );
 foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	cdek_tariff_assert( ! array_key_exists( $forbidden_meta_key, $checkout_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
 }

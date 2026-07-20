@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -179,7 +180,7 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 }
 
 $session = new CheckoutSessionManager();
-$persister = new OrderShippingMetaPersister( $session );
+$persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $rate = wdc_order_meta_rate();
 $session->save_rates( array( 'russian_post_worldwide_parcel' => $rate ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );
@@ -192,7 +193,7 @@ foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'serv
 }
 $persister->persist_shipping_item_meta( $item, 0, array(), $order );
 
-order_meta_smoke_assert( array( 'Способ доставки' => 'международная доставка Почтой России' ) === $item->meta, 'Russian Post visible shipping item meta must only contain delivery method.' );
+order_meta_smoke_assert( array() === $item->meta, 'Russian Post visible shipping item meta must stay empty when planned date is absent.' );
 $visible_blob = wp_json_encode( $item->meta );
 foreach ( array( 'carrier_key', 'service_key', 'rules_source', 'no_pickup_selection', 'delivery_type', 'russian_post' ) as $technical ) {
 	order_meta_smoke_assert( ! str_contains( (string) $visible_blob, $technical ), 'Technical meta must not be visible in shipping item meta: ' . $technical );
@@ -210,6 +211,118 @@ order_meta_smoke_assert( (bool) preg_grep( '/Итог: 5 338 руб\\./u', $calc
 order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
 
+$lead_time_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-working',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 2,
+			'shop_processing_calendar_days' => 3,
+			'carrier_days_are_working' => true,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-working' => $lead_time_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-working' ) );
+$lead_time_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $lead_time_order, array() );
+$lead_time_formula = $lead_time_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+foreach ( array( 'Базовый срок API: 7-9 дней', 'Время обработки магазином: 3 дня', 'Доставка: рабочие в календарные 7-9 → 9-10 дней', 'Итог: 12-13 дней' ) as $line ) {
+	order_meta_smoke_assert( in_array( $line, $lead_time_formula, true ), 'Lead-time audit must include line: ' . $line );
+}
+
+$calendar_days_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-calendar',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 10, 'max_days' => 12, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 2,
+			'shop_processing_calendar_days' => 3,
+			'carrier_days_are_working' => false,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 10, 'max_days' => 12, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-calendar' => $calendar_days_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-calendar' ) );
+$calendar_days_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $calendar_days_order, array() );
+$calendar_days_formula = $calendar_days_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+order_meta_smoke_assert( in_array( 'Базовый срок API: 7-9 дней', $calendar_days_formula, true ) && in_array( 'Время обработки магазином: 3 дня', $calendar_days_formula, true ) && in_array( 'Итог: 10-12 дней', $calendar_days_formula, true ), 'Lead-time audit must include base, processing, and final lines for calendar carrier days.' );
+order_meta_smoke_assert( ! (bool) preg_grep( '/Доставка: рабочие в календарные/u', $calendar_days_formula ), 'Lead-time audit must not show working-day conversion when carrier days are already calendar days.' );
+
+$zero_processing_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-zero-processing',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 0,
+			'shop_processing_calendar_days' => 0,
+			'carrier_days_are_working' => true,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-zero-processing' => $zero_processing_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-zero-processing' ) );
+$zero_processing_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $zero_processing_order, array() );
+$zero_processing_formula = $zero_processing_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+order_meta_smoke_assert( in_array( 'Базовый срок API: 7-9 дней', $zero_processing_formula, true ) && in_array( 'Доставка: рабочие в календарные 7-9 → 9-10 дней', $zero_processing_formula, true ) && in_array( 'Итог: 9-10 дней', $zero_processing_formula, true ), 'Lead-time audit must include base, conversion, and final lines when processing is zero.' );
+order_meta_smoke_assert( ! (bool) preg_grep( '/Время обработки магазином/u', $zero_processing_formula ), 'Lead-time audit must not show processing line when configured processing is zero.' );
+
+$rules_delivery_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-rules',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 14, 'max_days' => 15, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 2,
+			'shop_processing_calendar_days' => 3,
+			'carrier_days_are_working' => true,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-rules' => $rules_delivery_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-rules' ) );
+$rules_delivery_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $rules_delivery_order, array() );
+$rules_delivery_formula = $rules_delivery_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+order_meta_smoke_assert( in_array( 'Итог: 14-15 дней', $rules_delivery_formula, true ) && ! in_array( 'Итог: 12-13 дней', $rules_delivery_formula, true ), 'Lead-time audit final line must use delivery_days after rules rather than normalized total_calendar_days.' );
+
 $domestic_rate = array(
 	'carrier_key' => 'russian_post_domestic',
 	'rate_id' => 'russian_post_domestic:pickup',
@@ -220,6 +333,7 @@ $domestic_rate = array(
 	'tariff_title' => 'Посылка онлайн',
 	'selected_tariff_object' => '23030',
 	'selected_tariff_title' => 'Посылка онлайн',
+	'planned_delivery_date' => '2026-08-12',
 	'planned_delivery_comment' => '3 дня',
 	'delivery_days' => array( 'min_days' => 3, 'max_days' => 3, 'unit' => 'calendar_days' ),
 	'domestic_tariff_grouped' => true,
@@ -284,13 +398,13 @@ order_meta_smoke_assert( ! isset( $domestic_order->shipping['address_2'] ) || ''
 order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_days_min'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_days_max'] ?? 0 ), 'Domestic order payload must save final delivery min/max after rules.' );
 order_meta_smoke_assert( 1 === ( $domestic_calculation['api']['api_delivery_min_days'] ?? 0 ) && 1 === ( $domestic_calculation['api']['api_delivery_max_days'] ?? 0 ) && '1 день' === ( $domestic_calculation['api']['api_delivery_text'] ?? '' ), 'Domestic order payload must save original API delivery range.' );
 order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_min_days'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_max_days'] ?? 0 ) && '3 дня' === ( $domestic_calculation['result']['final_delivery_text'] ?? '' ), 'Domestic order payload must save final delivery range text.' );
-order_meta_smoke_assert( ! in_array( 'Посылка онлайн', $domestic_item->meta, true ) && in_array( '3 дня', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show only formatted delivery days.' );
+order_meta_smoke_assert( ! in_array( 'Посылка онлайн', $domestic_item->meta, true ) && in_array( 'с 12 августа 2026', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show only formatted planned delivery date.' );
 order_meta_smoke_assert( 'Почта России до отделения, Посылка онлайн - 3 дня' === $domestic_item->method_title, 'Domestic shipping item method title must include configured method title, selected tariff, and delivery days.' );
 $domestic_visible_blob = wp_json_encode( $domestic_item->meta );
 foreach ( array( 'Способ доставки', 'Тариф', 'Пункт выдачи', 'Индекс ПВЗ', 'Тип ПВЗ', 'wdc_delivery_kind', 'delivery_kind', 'checkout_group_id', 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
 	order_meta_smoke_assert( ! str_contains( (string) $domestic_visible_blob, $technical_key ), 'Domestic technical meta must not be visible in shipping item meta: ' . $technical_key );
 }
-order_meta_smoke_assert( array( 'Срок доставки' ) === array_keys( $domestic_item->meta ), 'Domestic visible shipping item meta must contain only delivery days.' );
+order_meta_smoke_assert( array( 'Планируемая* дата доставки' ) === array_keys( $domestic_item->meta ), 'Domestic visible shipping item meta must contain only planned delivery date.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $domestic_order );
@@ -298,7 +412,7 @@ $domestic_html = (string) ob_get_clean();
 order_meta_smoke_assert( str_contains( $domestic_html, 'Срок по API' ) && str_contains( $domestic_html, '1 день' ) && str_contains( $domestic_html, 'Итоговый срок' ) && str_contains( $domestic_html, '3 дня' ) && ! str_contains( $domestic_html, '3 дн.' ), 'Domestic order metabox must render API and final formatted Russian delivery days.' );
 order_meta_smoke_assert( str_contains( $domestic_html, 'Служба доставки' ) && str_contains( $domestic_html, 'Выбранный тариф' ) && str_contains( $domestic_html, 'Тип доставки' ), 'Domestic order metabox must show public service, tariff, and delivery type labels.' );
 order_meta_smoke_assert( strpos( $domestic_html, 'Тип ПВЗ' ) > strpos( $domestic_html, 'Код ПВЗ' ) && str_contains( $domestic_html, 'OPS' ), 'Domestic order metabox must show pickup type under pickup code.' );
-order_meta_smoke_assert( ! str_contains( $domestic_html, 'russian_post_domestic:pickup' ) && ! str_contains( $domestic_html, 'api_price_has_vat' ) && ! str_contains( $domestic_html, 'НДС' ), 'Domestic order metabox must hide technical rate id and VAT flag.' );
+order_meta_smoke_assert( ! str_contains( $domestic_html, 'api_price_has_vat' ) && ! str_contains( $domestic_html, 'НДС' ), 'Domestic order metabox must hide technical VAT flags.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
@@ -334,7 +448,7 @@ $persister->persist( $fallback_order, array() );
 $fallback_item = new WdcOrderMetaSmokeShippingItem();
 $persister->persist_shipping_item_meta( $fallback_item, 0, array(), $fallback_order );
 $fallback_calculation = $fallback_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
-order_meta_smoke_assert( array( 'Способ доставки' => 'международная доставка Почтой России' ) === $fallback_item->meta, 'Fallback visible shipping item meta must stay clean.' );
+order_meta_smoke_assert( array() === $fallback_item->meta, 'Fallback visible shipping item meta must stay clean.' );
 order_meta_smoke_assert( 0.0 === ( $fallback_calculation['result']['final_price_rub'] ?? -1 ) && $fallback_text === ( $fallback_calculation['result']['fallback_text'] ?? '' ), 'Fallback calculation data must save zero final price and fallback text.' );
 order_meta_smoke_assert( array() === ( $fallback_calculation['rules']['formula_visualization'] ?? array() ), 'Terminal fallback must not save rules formula.' );
 

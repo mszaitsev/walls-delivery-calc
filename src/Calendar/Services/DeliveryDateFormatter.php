@@ -37,35 +37,38 @@ final class DeliveryDateFormatter {
 	);
 
 	public function format_comment( string $min_date, string $max_date ): string {
-		if ( $min_date === $max_date ) {
-			$date = $this->date( $min_date );
+		unset( $max_date );
 
-			return sprintf(
-				'Доставка планируется примерно на %d %s, %s',
-				(int) $date->format( 'j' ),
-				$this->months[ (int) $date->format( 'n' ) ],
-				$this->weekdays[ (int) $date->format( 'N' ) ]
-			);
+		return $this->format_checkout_comment( $min_date );
+	}
+
+	public function format_checkout_comment( string $date ): string {
+		if ( '' === trim( $date ) ) {
+			return '';
 		}
 
-		$min = $this->date( $min_date );
-		$max = $this->date( $max_date );
-
-		if ( $min->format( 'Y-m' ) === $max->format( 'Y-m' ) ) {
-			return sprintf(
-				'Доставка планируется примерно %d-%d %s',
-				(int) $min->format( 'j' ),
-				(int) $max->format( 'j' ),
-				$this->months[ (int) $max->format( 'n' ) ]
-			);
-		}
+		$date_value = $this->date( $date );
 
 		return sprintf(
-			'Доставка планируется примерно %d %s-%d %s',
-			(int) $min->format( 'j' ),
-			$this->months[ (int) $min->format( 'n' ) ],
-			(int) $max->format( 'j' ),
-			$this->months[ (int) $max->format( 'n' ) ]
+			'Доставка планируется* с %d %s (%s).',
+			(int) $date_value->format( 'j' ),
+			$this->months[ (int) $date_value->format( 'n' ) ],
+			$this->weekdays[ (int) $date_value->format( 'N' ) ]
+		);
+	}
+
+	public function format_order_meta_value( string $date ): string {
+		if ( '' === trim( $date ) ) {
+			return '';
+		}
+
+		$date_value = $this->date( $date );
+
+		return sprintf(
+			'с %d %s %d',
+			(int) $date_value->format( 'j' ),
+			$this->months[ (int) $date_value->format( 'n' ) ],
+			(int) $date_value->format( 'Y' )
 		);
 	}
 

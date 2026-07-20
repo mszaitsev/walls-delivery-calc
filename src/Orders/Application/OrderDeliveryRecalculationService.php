@@ -153,6 +153,8 @@ final class OrderDeliveryRecalculationService {
 			'price_html'            => $this->format_rubles( $rate->price->get_rubles() ),
 			'crossed_price_html'    => $this->crossed_price( $rate ),
 			'delivery_comment'      => $this->delivery_comment( $rate ),
+			'planned_delivery_date' => $rate->planned_delivery_date,
+			'planned_delivery_comment' => $rate->planned_delivery_comment,
 			'comments'              => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
 			'requires_pickup_point' => $rate->requires_pickup_point,
 			'selected'              => false,
@@ -175,6 +177,10 @@ final class OrderDeliveryRecalculationService {
 			'cost'                => $rate->price->get_rubles(),
 			'crossed_price_html'  => $this->crossed_price( $rate ),
 			'delivery_comment'    => $this->delivery_comment( $rate ),
+			'delivery_days'       => $rate->delivery_days->to_array(),
+			'delivery_days_label' => $this->delivery_comment( $rate ),
+			'planned_delivery_date' => $rate->planned_delivery_date,
+			'planned_delivery_comment' => $rate->planned_delivery_comment,
 			'comments'            => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
 			'selected'            => false,
 			'rate_meta'           => $rate->meta,
@@ -183,7 +189,7 @@ final class OrderDeliveryRecalculationService {
 	}
 
 	private function delivery_comment( DeliveryRate $rate ): string {
-		return '' !== trim( $rate->planned_delivery_comment ) ? $rate->planned_delivery_comment : DeliveryDaysFormatter::format( $rate->delivery_days );
+		return DeliveryDaysFormatter::format( $rate->delivery_days );
 	}
 
 	private function service_method_title( DeliveryRate $rate ): string {

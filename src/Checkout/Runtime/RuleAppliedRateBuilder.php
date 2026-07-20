@@ -5,7 +5,6 @@ namespace WallsShop\WDC\Checkout\Runtime;
 
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Common\DateRange;
-use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -29,7 +28,7 @@ final class RuleAppliedRateBuilder {
 
 		$result = $this->rule_engine->apply_rules( $rules, $context );
 
-		$delivery_days = $result->final_delivery_days ?? $rate->delivery_days;
+		$delivery_days = $this->calendar_days( $result->final_delivery_days ?? $rate->delivery_days );
 		$modified = new DeliveryRate(
 			$rate->rate_id,
 			$rate->carrier_key,
@@ -44,8 +43,8 @@ final class RuleAppliedRateBuilder {
 			$result->original_price ?? $rate->original_price,
 			$result->crossed_price ?? $rate->crossed_price,
 			$delivery_days,
-			$rate->planned_delivery_date,
-			$result->final_delivery_days instanceof DateRange ? $this->delivery_comment( $delivery_days ) : $rate->planned_delivery_comment,
+			'',
+			'',
 			array_values( array_merge( $rate->comments, $result->comments ) ),
 			$rate->disabled || $result->disabled,
 			$result->disabled_reason ?: $rate->disabled_reason,
@@ -62,7 +61,11 @@ final class RuleAppliedRateBuilder {
 		);
 	}
 
-	private function delivery_comment( DateRange $range ): string {
-		return DeliveryDaysFormatter::format( $range );
+	private function calendar_days( DateRange $range ): DateRange {
+		if ( DateRange::UNIT_CALENDAR_DAYS === $range->unit ) {
+			return $range;
+		}
+
+		return DateRange::range( $range->min_days, $range->max_days, DateRange::UNIT_CALENDAR_DAYS );
 	}
 }

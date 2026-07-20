@@ -12,9 +12,16 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repo
 use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingRequestBuilder;
 use WallsShop\WDC\Carriers\YandexDelivery\Pricing\YandexDeliveryPricingResponseParser;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Calendar\Services\YearGenerator;
+use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
@@ -25,9 +32,11 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
@@ -271,10 +280,25 @@ $orchestrator = new CheckoutOrchestrator(
 	new FallbackRateFactory(),
 	new CarrierExecutionGuard( new CheckoutLogger() ),
 	new CheckoutLogger(),
+	yandex_checkout_lead_time_normalizer( 0 ),
 	null,
 	new DeliveryServiceRegistry( $services, $registry ),
 	$manager
 );
+
+function yandex_checkout_lead_time_normalizer( int $processing_days = 0 ): DeliveryLeadTimeNormalizer {
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new TimezoneService();
+	$formatter = new DeliveryDateFormatter();
+
+	return new DeliveryLeadTimeNormalizer(
+		$settings,
+		new DeliveryServiceSettingsRepository(),
+		new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
+	);
+}
 
 $result = $orchestrator->calculate( yandex_checkout_request(), array(), RateSorter::CHEAPEST, false );
 $rates = $result->rates;
@@ -283,11 +307,14 @@ $ids = array_map( static fn ( $rate ): string => $rate->rate_id, $rates );
 yandex_checkout_assert( in_array( YandexDeliveryCarrier::PICKUP_RATE_ID, $ids, true ) && in_array( YandexDeliveryCarrier::COURIER_RATE_ID, $ids, true ), 'Yandex Delivery rates must have separate pickup and courier ids.' );
 yandex_checkout_assert( count( array_unique( $ids ) ) === count( $ids ), 'Yandex Delivery rate ids must be unique.' );
 $by_id = array_combine( $ids, $rates );
-yandex_checkout_assert( 'Яндекс до ПВЗ - 7 дней' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Yandex pickup title must use settings title and pricing delivery time with the shared separator.' );
-yandex_checkout_assert( 'Яндекс до двери - 9 дней' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier title must use settings title and pricing delivery time with the shared separator.' );
+yandex_checkout_assert( 'Яндекс до ПВЗ' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Yandex pickup raw title must not include delivery time.' );
+yandex_checkout_assert( 'Яндекс до двери' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Yandex courier raw title must not include delivery time.' );
 $pickup_delivery_rate = $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID];
 yandex_checkout_assert( DeliveryType::PICKUP === $pickup_delivery_rate->delivery_type && true === $pickup_delivery_rate->requires_pickup_point && YandexDeliverySettings::CARRIER_KEY === $pickup_delivery_rate->carrier_key && YandexDeliveryCarrier::PICKUP_RATE_ID === $pickup_delivery_rate->rate_id, 'Yandex pickup DeliveryRate must carry pickup type, pickup requirement, carrier key and rate id before WooCommerce mapping.' );
 $mapped_yandex_pickup = ( new WooCommerceRateMapper() )->map( $pickup_delivery_rate );
+yandex_checkout_assert( 'Яндекс до ПВЗ - 7 дней' === $mapped_yandex_pickup['label'], 'WooCommerce mapper must append Yandex delivery days once.' );
+$mapped_yandex_range = ( new WooCommerceRateMapper() )->map( new DeliveryRate( 'yandex_pickup_range', YandexDeliverySettings::CARRIER_KEY, 'Яндекс', YandexDeliverySettings::CARRIER_KEY, 'Яндекс', 'pickup', 'Яндекс до ПВЗ', DeliveryType::PICKUP, 'Яндекс до ПВЗ', Money::from_rubles( 100 ), null, null, DateRange::range( 7, 9 ) ) );
+yandex_checkout_assert( 'Яндекс до ПВЗ - 7-9 дней' === $mapped_yandex_range['label'], 'WooCommerce mapper must format Yandex delivery-day ranges once.' );
 yandex_checkout_assert( true === ( $mapped_yandex_pickup['meta_data']['requires_pickup_point'] ?? null ) && YandexDeliverySettings::CARRIER_KEY . ':pickup' === (string) ( $mapped_yandex_pickup['meta_data']['pickup_family'] ?? '' ) && DeliveryType::PICKUP === (string) ( $mapped_yandex_pickup['meta_data']['delivery_type'] ?? '' ) && YandexDeliverySettings::CARRIER_KEY === (string) ( $mapped_yandex_pickup['meta_data']['carrier_key'] ?? '' ) && YandexDeliveryCarrier::PICKUP_RATE_ID === (string) ( $mapped_yandex_pickup['meta_data']['rate_id'] ?? '' ), 'WooCommerceRateMapper must preserve Yandex pickup point meta for checkout rendering.' );
 yandex_checkout_assert( 23790 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ) && 46360 === (int) ( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->meta['pricing_total_kopecks'] ?? 0 ), 'Yandex checkout rates must keep pricing-calculator prices in rate meta.' );
 yandex_checkout_assert( 237.9 === (float) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['api_base_price_rub'] ?? 0 ) && 7 === (int) ( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->meta['api_delivery_days'] ?? 0 ), 'Yandex checkout rates must preserve API base price and original delivery days before rules.' );
@@ -298,7 +325,8 @@ yandex_checkout_assert( 'DST-1' === (string) ( $by_id[YandexDeliveryCarrier::PIC
 $first_pickup_payload = yandex_checkout_pricing_payload( $pricing_http->requests[0] ?? array() );
 yandex_checkout_assert( 'DST-1' === (string) ( $first_pickup_payload['destination']['platform_station_id'] ?? '' ), 'Yandex pricing payload must send representative destination station before selection.' );
 foreach ( $rates as $rate ) {
-	yandex_checkout_assert( str_contains( $rate->title, ' - ' ) && 1 === preg_match( '/- [0-9]+ (день|дня|дней)$/u', $rate->title ), 'Yandex rate title must always use "Название - срок" format with pricing delivery days.' );
+	$mapped = ( new WooCommerceRateMapper() )->map( $rate );
+	yandex_checkout_assert( str_contains( $mapped['label'], ' - ' ) && 1 === preg_match( '/- [0-9]+ (день|дня|дней)$/u', $mapped['label'] ), 'Yandex mapped label must use "Название - срок" format with pricing delivery days.' );
 }
 
 $pricing_535_http = new YandexCheckoutRatesFakeHttp( array(
@@ -336,8 +364,8 @@ $settings->set_setting( (int) $service->id, YandexDeliverySettings::COURIER_METH
 $result = $orchestrator->calculate( yandex_checkout_request(), array(), RateSorter::CHEAPEST, false );
 $ids = array_map( static fn ( $rate ): string => $rate->rate_id, $result->rates );
 $by_id = array_combine( $ids, $result->rates );
-yandex_checkout_assert( 'Самовывоз Яндекс - 5 дней' === $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID]->title, 'Changed pickup title in settings must affect checkout.' );
-yandex_checkout_assert( 'Курьер Яндекс - 6 дней' === $by_id[YandexDeliveryCarrier::COURIER_RATE_ID]->title, 'Changed courier title in settings must affect checkout.' );
+yandex_checkout_assert( 'Самовывоз Яндекс - 5 дней' === ( new WooCommerceRateMapper() )->map( $by_id[YandexDeliveryCarrier::PICKUP_RATE_ID] )['label'], 'Changed pickup title in settings must affect checkout label.' );
+yandex_checkout_assert( 'Курьер Яндекс - 6 дней' === ( new WooCommerceRateMapper() )->map( $by_id[YandexDeliveryCarrier::COURIER_RATE_ID] )['label'], 'Changed courier title in settings must affect checkout label.' );
 
 $selected_request = yandex_checkout_request( array(
 	'delivery_type' => DeliveryType::PICKUP,

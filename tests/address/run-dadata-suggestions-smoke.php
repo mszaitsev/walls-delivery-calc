@@ -514,7 +514,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
 $order = new WdcDaDataSuggestionsOrder();
-( new OrderShippingMetaPersister( $session ) )->persist(
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist(
 	$order,
 	array(
 		'shipping_dadata_status' => 'resolved',
@@ -533,7 +533,7 @@ dadata_suggestions_assert( '630099' === $order->meta['_wdc_platform_resolved_pos
 dadata_suggestions_assert( 'house-fias' === $order->meta['_wdc_platform_fias_id'], 'Resolved DaData selection must persist FIAS ID.' );
 
 $manual_order = new WdcDaDataSuggestionsOrder();
-( new OrderShippingMetaPersister( $session ) )->persist(
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist(
 	$manual_order,
 	array(
 		'billing_dadata_status' => 'manual',

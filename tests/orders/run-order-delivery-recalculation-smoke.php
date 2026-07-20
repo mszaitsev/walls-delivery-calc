@@ -4,11 +4,20 @@ declare(strict_types=1);
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Calendar\Services\YearGenerator;
+use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
@@ -21,6 +30,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
 use WallsShop\WDC\Domain\Common\DateRange;
@@ -42,6 +52,7 @@ use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -497,10 +508,26 @@ function wdc_recalc_service( ?OrderQuoteRequestMapper $mapper = null, array $ext
 		new RateSorter(),
 		new FallbackRateFactory(),
 		new CarrierExecutionGuard( $logger ),
-		$logger
+		$logger,
+		wdc_recalc_lead_time_normalizer( 0 )
 	);
 
 	return new OrderDeliveryRecalculationService( $mapper ?? new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
+}
+
+function wdc_recalc_lead_time_normalizer( int $processing_days = 0 ): DeliveryLeadTimeNormalizer {
+	$GLOBALS['wpdb'] ??= new wpdb();
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new TimezoneService();
+	$formatter = new DeliveryDateFormatter();
+
+	return new DeliveryLeadTimeNormalizer(
+		$settings,
+		new DeliveryServiceSettingsRepository(),
+		new DeliveryDateCalculator( new CalendarService( new CalendarRepository(), new YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
+	);
 }
 
 function wdc_recalc_location_row( int $id, array $overrides = array() ): array {
@@ -629,6 +656,37 @@ function wdc_recalc_pickup_repository(): RussianPostPickupPointRepository {
 			'active' => 1,
 	);
 	return new RussianPostPickupPointRepository( $db );
+}
+
+function wdc_recalc_admin_controller(
+	OrderDeliveryRecalculationService $service,
+	CheckoutLocationAjax $location_ajax,
+	RussianPostPickupPointRepository $pickup_repository,
+	OrderDeliveryAddressNormalizationService $address_normalization,
+	OrderDeliveryReplacementService $replacement,
+	?YandexDeliveryPickupPointV2Repository $yandex_points = null,
+	?YandexLocationMappingV2Repository $yandex_location_mapping = null
+): OrderDeliveryRecalculationAdminController {
+	$settings = new SettingsRepository();
+
+	return new OrderDeliveryRecalculationAdminController(
+		$service,
+		new OrderDeliveryRateRenderer(),
+		$location_ajax,
+		$pickup_repository,
+		$address_normalization,
+		$replacement,
+		new YandexDeliveryCheckoutPickupPointFormatter(),
+		$settings,
+		new RussianPostPickupPointTypeSettings( $settings ),
+		new DpdPickupPointScheduleFormatter(),
+		'',
+		'1',
+		null,
+		null,
+		$yandex_points,
+		$yandex_location_mapping
+	);
 }
 
 $order = new WdcRecalcOrder(
@@ -836,7 +894,8 @@ recalc_smoke_assert( true === $service->preview( $backlog_blocked )['success'], 
 $pickup_repository = wdc_recalc_pickup_repository();
 $address_client = new WdcRecalcDadataSuggestionClient();
 $address_normalization = new OrderDeliveryAddressNormalizationService( null, $address_client, wdc_recalc_address_suggestion_service( $address_client ) );
-$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization );
+$controller_replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
+$controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
 	$controller->ajax_preview();
@@ -1083,7 +1142,7 @@ recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not 
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );
 recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $before_shipping_postcode === $order->get_shipping_postcode(), 'Pickup endpoint must not change shipping address fields.' );
 
-$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository() );
+$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $pickup_point = array(
 	'point_code' => '101000-OPS',
 	'point_type' => 'OPS',
@@ -1109,10 +1168,73 @@ $normalized_address = array(
 	'fallback' => false,
 	'source' => 'dadata',
 );
+
+$grouped_dpd_rate = array(
+	'id' => 'dpd:courier',
+	'rate_id' => 'dpd:courier',
+	'label' => 'DPD до двери',
+	'carrier_key' => 'dpd',
+	'service_key' => 'dpd',
+	'service_title' => 'DPD до двери',
+	'delivery_type' => 'courier',
+	'is_grouped' => true,
+	'cost' => 395.0,
+	'delivery_days' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+	'planned_delivery_date' => '2026-07-27',
+	'planned_delivery_comment' => 'Доставка планируется* с 27 июля (понедельник).',
+	'rate_meta' => array(
+		'rules_audit' => array( 'synthetic-audit' ),
+		'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+	),
+);
+$grouped_dpd_tariff = array(
+	'rate_id' => 'dpd:courier:economy',
+	'object_code' => 'economy',
+	'title' => 'DPD Эконом',
+	'cost' => 247.0,
+	'delivery_comment' => '8-10 дней',
+	'delivery_days' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+	'delivery_days_label' => '8-10 дней',
+	'planned_delivery_date' => '2026-07-28',
+	'planned_delivery_comment' => 'Доставка планируется* с 28 июля (вторник).',
+	'rules_source' => 'rule_engine',
+	'rate_meta' => array(
+		'rules_audit' => array( 'economy-audit' ),
+		'carrier_delivery_days_original' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'shop_processing_working_days' => 0,
+		'shop_processing_calendar_days' => 0,
+		'carrier_days_are_working' => false,
+		'carrier_delivery_calendar_days' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'total_calendar_days' => array( 'min_days' => 8, 'max_days' => 10, 'unit' => 'calendar_days' ),
+	),
+);
+$grouped_dpd_order = new WdcRecalcOrder( 131, array() );
+$grouped_dpd_result = $replacement->save(
+	$grouped_dpd_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $grouped_dpd_rate,
+		'selected_tariff' => $grouped_dpd_tariff,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+$grouped_dpd_calc = $grouped_dpd_order->meta['_wdc_delivery_calculation_data'] ?? array();
+$grouped_dpd_formula = $grouped_dpd_calc['rules']['formula_visualization'] ?? array();
+recalc_smoke_assert( true === $grouped_dpd_result['success'], 'Grouped DPD admin tariff save must succeed.' );
+recalc_smoke_assert( 'dpd:courier:economy' === (string) ( $grouped_dpd_order->meta['_wdc_platform_rate_id'] ?? '' ) && 'economy' === (string) ( $grouped_dpd_order->meta['_wdc_platform_tariff_object'] ?? '' ) && 'DPD Эконом' === (string) ( $grouped_dpd_order->meta['_wdc_platform_tariff_title'] ?? '' ), 'Grouped DPD save must persist selected tariff identity.' );
+recalc_smoke_assert( 247.0 === (float) ( $grouped_dpd_order->shipping_items['total'] ?? 0 ), 'Grouped DPD save must persist selected tariff price.' );
+recalc_smoke_assert( str_contains( (string) ( $grouped_dpd_order->shipping_items['method_title'] ?? '' ), '8-10 дней' ) && ! str_contains( (string) ( $grouped_dpd_order->shipping_items['method_title'] ?? '' ), '7-9 дней' ), 'Grouped DPD save must use selected tariff delivery days in shipping title.' );
+recalc_smoke_assert( '8-10 дней' === (string) ( $grouped_dpd_calc['result']['final_delivery_text'] ?? '' ) && 8 === (int) ( $grouped_dpd_calc['result']['final_delivery_days_min'] ?? 0 ) && 10 === (int) ( $grouped_dpd_calc['result']['final_delivery_days_max'] ?? 0 ), 'Grouped DPD calculation result must use selected tariff delivery range.' );
+recalc_smoke_assert( in_array( 'Итог: 8-10 дней', $grouped_dpd_formula, true ), 'Grouped DPD calculation rules formula must use selected tariff final delivery range.' );
+recalc_smoke_assert( '2026-07-28' === (string) ( $grouped_dpd_calc['result']['planned_delivery_date'] ?? '' ) && 'Доставка планируется* с 28 июля (вторник).' === (string) ( $grouped_dpd_calc['result']['planned_delivery_comment'] ?? '' ), 'Grouped DPD save must use selected tariff planned date/comment.' );
+recalc_smoke_assert( array( 'economy-audit' ) === ( $grouped_dpd_calc['rules']['applied_rules'] ?? null ) && array( 'economy-audit' ) === ( $grouped_dpd_order->meta['_wdc_platform_rate_meta']['rules_audit'] ?? null ), 'Grouped DPD save must use selected tariff rate_meta and rules audit.' );
+
 $pickup_rate = $rates_by_id['russian_post_domestic:pickup'];
 $pickup_rate['selected_tariff'] = $pickup_rate['tariff_variants'][0] ?? array();
 $courier_rate = $rates_by_id['russian_post_domestic:courier'];
 $courier_rate['selected_tariff'] = $courier_rate['tariff_variants'][0] ?? array();
+$courier_rate['planned_delivery_date'] = '2026-08-12';
+$courier_rate['selected_tariff']['planned_delivery_date'] = '2026-08-12';
 
 $invalid_pickup = new WdcRecalcOrder( 105, array() );
 $invalid_pickup->shipping_items = array( 'method_title' => 'Old delivery', 'total' => 111.0 );
@@ -1218,7 +1340,7 @@ recalc_smoke_assert( true === $create_result['success'] && 'wdc_platform_deliver
 recalc_smoke_assert( 5700.0 === $no_shipping_order->total && $no_shipping_order->saved, 'Save must recalculate totals and save order after creating shipping item.' );
 recalc_smoke_assert( isset( $no_shipping_order->meta['_wdc_delivery_calculation_data'], $no_shipping_order->meta['_wdc_platform_rate_id'], $no_shipping_order->meta['_wdc_platform_delivery_type'] ), 'Save must update WDC calculation and platform meta.' );
 recalc_smoke_assert( array() !== $no_shipping_order->notes && false === $no_shipping_order->notes[0]['customer'], 'Save must add private order note.' );
-recalc_smoke_assert( array( 'Срок доставки' => (string) ( $courier_rate['selected_tariff']['delivery_comment'] ?? $courier_rate['delivery_comment'] ?? '' ) ) === ( $no_shipping_order->shipping_items['meta'] ?? array() ), 'Russian Post domestic admin visible meta must contain only delivery time.' );
+recalc_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === ( $no_shipping_order->shipping_items['meta'] ?? array() ), 'Russian Post domestic admin visible meta must contain only planned delivery date.' );
 
 $unspecified_rate = $courier_rate;
 $unspecified_rate['id'] = 'future:carrier';
@@ -1227,6 +1349,7 @@ $unspecified_rate['carrier_key'] = 'future';
 $unspecified_rate['service_key'] = 'future';
 $unspecified_rate['label'] = 'Future carrier';
 $unspecified_rate['delivery_comment'] = '';
+$unspecified_rate['planned_delivery_date'] = '';
 $unspecified_rate['planned_delivery_comment'] = '';
 $unspecified_rate['selected_tariff'] = array();
 $unspecified_rate['tariff_title'] = '';
@@ -1242,7 +1365,7 @@ $unspecified_result = $replacement->save(
 		'normalized_shipping_address' => $normalized_address,
 	)
 );
-recalc_smoke_assert( true === $unspecified_result['success'] && array( 'Срок доставки' => 'не указан' ) === ( $unspecified_order->shipping_items['meta'] ?? array() ), 'Admin replacement visible meta must use not specified when delivery time is missing.' );
+recalc_smoke_assert( true === $unspecified_result['success'] && array() === ( $unspecified_order->shipping_items['meta'] ?? array() ), 'Admin replacement visible meta must be omitted when planned date is missing.' );
 
 $cdek_admin_rate = array(
 	'id' => 'cdek:courier:137',
@@ -1253,6 +1376,7 @@ $cdek_admin_rate = array(
 	'label' => 'СДЭК дверь тест',
 	'delivery_type' => 'courier',
 	'delivery_comment' => '10-14 дней',
+	'planned_delivery_date' => '2026-08-12',
 	'planned_delivery_comment' => '10-14 дней',
 	'cost' => 650.0,
 	'api_base_price_rub' => 520.0,
@@ -1292,7 +1416,7 @@ $cdek_admin_result = $replacement->save(
 recalc_smoke_assert( true === $cdek_admin_result['success'], 'CDEK admin save must succeed for courier rate.' );
 recalc_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь - 10-14 дней' === (string) ( $cdek_admin_order->shipping_items['method_title'] ?? '' ), 'CDEK admin save must build method title with custom method, tariff and delivery text.' );
 recalc_smoke_assert( 1 === substr_count( (string) ( $cdek_admin_order->shipping_items['method_title'] ?? '' ), '10-14 дней' ), 'CDEK admin save method title must not duplicate delivery text.' );
-recalc_smoke_assert( array( 'Срок доставки' => '10-14 дней' ) === ( $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must contain only delivery time.' );
+recalc_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === ( $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must contain only planned delivery date.' );
 foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	recalc_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must not contain technical key: ' . $forbidden_meta_key );
 }
@@ -1496,6 +1620,7 @@ $cdek_no_days_rate = $cdek_admin_rate;
 $cdek_no_days_rate['rate_id'] = 'cdek:courier:no-days';
 $cdek_no_days_rate['id'] = 'cdek:courier:no-days';
 $cdek_no_days_rate['delivery_comment'] = '';
+$cdek_no_days_rate['planned_delivery_date'] = '';
 $cdek_no_days_rate['planned_delivery_comment'] = '';
 $cdek_no_days_order = new WdcRecalcOrder( 119, array() );
 $cdek_no_days_order->shipping_items = array();
@@ -1510,7 +1635,7 @@ $cdek_no_days_result = $replacement->save(
 );
 recalc_smoke_assert( true === $cdek_no_days_result['success'], 'CDEK admin save without delivery days must succeed.' );
 recalc_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === (string) ( $cdek_no_days_order->shipping_items['method_title'] ?? '' ), 'CDEK admin save without delivery days must include method and tariff only.' );
-recalc_smoke_assert( array( 'Срок доставки' => 'не указан' ) === ( $cdek_no_days_order->shipping_items['meta'] ?? array() ), 'CDEK admin save without delivery days must keep visible meta not specified.' );
+recalc_smoke_assert( array() === ( $cdek_no_days_order->shipping_items['meta'] ?? array() ), 'CDEK admin save without planned date must omit visible meta.' );
 
 $replace_order = new WdcRecalcOrder( 107, array() );
 $replace_result = $replacement->save(
@@ -1534,7 +1659,7 @@ $saved_calc = $replace_order->meta['_wdc_delivery_calculation_data'] ?? array();
 recalc_smoke_assert( is_array( $saved_calc ) && 1000 === ( $saved_calc['package']['products_weight_g'] ?? null ) && 200 === ( $saved_calc['package']['packaging_weight_g'] ?? null ) && 1200 === ( $saved_calc['package']['final_weight_g'] ?? null ), 'Saved calculation data must preserve checkout-compatible package products/packaging/final weight.' );
 recalc_smoke_assert( 350.0 === (float) ( $saved_calc['api']['api_base_price_rub'] ?? 0 ) && 400.0 === (float) ( $saved_calc['result']['final_price_rub'] ?? 0 ), 'Saved calculation data must keep API base price separate from final price.' );
 recalc_smoke_assert( '3 дня' === (string) ( $saved_calc['api']['api_delivery_text'] ?? '' ) && 3 === ( $saved_calc['api']['api_delivery_min_days'] ?? null ), 'Saved calculation data must preserve checkout-compatible API delivery days.' );
-recalc_smoke_assert( array( 'base' ) === ( $saved_calc['rules']['applied_rules'] ?? null ) && array( 'API + 50 руб.' ) === ( $saved_calc['rules']['formula_visualization'] ?? null ), 'Saved calculation data must preserve applied rules and formula visualization.' );
+recalc_smoke_assert( array( 'base' ) === ( $saved_calc['rules']['applied_rules'] ?? null ) && in_array( 'API + 50 руб.', $saved_calc['rules']['formula_visualization'] ?? array(), true ), 'Saved calculation data must preserve applied rules and formula visualization.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->shipping_items['method_title'] ?? '' ), ' - 3 дня' ), 'Saved shipping method title must include delivery text.' );
 ob_start();
 $metabox->render( $replace_order );
@@ -1543,6 +1668,38 @@ foreach ( array( 'Вес товаров', 'Вес упаковки', 'Итого
 	recalc_smoke_assert( str_contains( $replace_metabox_html, $expected_row ), 'Metabox after admin save must render checkout-compatible row: ' . $expected_row );
 }
 recalc_smoke_assert( ! str_contains( $replace_metabox_html, 'Страна назначения' ), 'Metabox after RU domestic admin save must not render destination country.' );
+
+$lead_time_admin_rate = $cdek_admin_rate;
+$lead_time_admin_rate['rate_id'] = 'cdek:courier:lead-time-audit';
+$lead_time_admin_rate['id'] = 'cdek:courier:lead-time-audit';
+$lead_time_admin_rate['delivery_days'] = array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' );
+$lead_time_admin_rate['rate_meta'] = array_merge(
+	is_array( $lead_time_admin_rate['rate_meta'] ?? null ) ? $lead_time_admin_rate['rate_meta'] : array(),
+	array(
+		'rules_audit' => array(),
+		'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+		'shop_processing_working_days' => 2,
+		'shop_processing_calendar_days' => 3,
+		'carrier_days_are_working' => true,
+		'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'total_calendar_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+	)
+);
+$lead_time_admin_order = new WdcRecalcOrder( 130, array() );
+$lead_time_admin_result = $replacement->save(
+	$lead_time_admin_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $lead_time_admin_rate,
+		'selected_tariff' => array(),
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+$lead_time_admin_formula = $lead_time_admin_order->meta['_wdc_delivery_calculation_data']['rules']['formula_visualization'] ?? array();
+recalc_smoke_assert( true === $lead_time_admin_result['success'], 'Admin save with lead-time audit fixture must succeed.' );
+foreach ( array( 'Базовый срок API: 7-9 дней', 'Время обработки магазином: 3 дня', 'Доставка: рабочие в календарные 7-9 → 9-10 дней', 'Итог: 12-13 дней' ) as $line ) {
+	recalc_smoke_assert( in_array( $line, $lead_time_admin_formula, true ), 'Admin calculation rules audit must include lead-time line: ' . $line );
+}
 
 $international_order = new WdcRecalcOrder( 113, array() );
 $international_order->meta['_wdc_delivery_calculation_data'] = array(
@@ -1690,7 +1847,7 @@ try {
 	recalc_smoke_assert( str_contains( (string) ( $response->data['formatted_address'] ?? '' ), 'Омская область' ), 'Geocode endpoint must return formatted DaData address.' );
 }
 
-$no_coordinates_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', new OrderDeliveryAddressNormalizationService( null, new WdcRecalcDadataSuggestionClient( false ) ) );
+$no_coordinates_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, new OrderDeliveryAddressNormalizationService( null, new WdcRecalcDadataSuggestionClient( false ) ), $replacement );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Омск, Ленина, 10' );
 try {
 	$no_coordinates_controller->ajax_geocode_address();
@@ -1863,7 +2020,7 @@ $yandex_admin_title = (string) ( $yandex_admin_order->shipping_items['method_tit
 recalc_smoke_assert( true === $yandex_admin_result['success'], 'Yandex admin courier save must succeed for 535 -> 662 regression rate.' );
 recalc_smoke_assert( 535.0 === (float) ( $yandex_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_admin_calc['result']['final_price_rub'] ?? 0 ), 'Yandex admin persistence must keep API base 535 separate from final 662.' );
 recalc_smoke_assert( 'Яндекс до двери - 10 дней' === $yandex_admin_title && ! str_contains( $yandex_admin_title, '8 дней' ) && 1 === substr_count( $yandex_admin_title, '10 дней' ) && ! str_contains( $yandex_admin_title, 'Array' ) && ! str_contains( $yandex_admin_title, '8 дней - 10 дней' ), 'Yandex admin method title must replace original 8 days with final 10 days without duplication.' );
-recalc_smoke_assert( is_array( $yandex_admin_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_admin_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), '10 дней' ) && 'Итог: 662 руб.' === end( $yandex_admin_formula ), 'Yandex admin formula must persist base price, delivery-days audit and final price.' );
+recalc_smoke_assert( is_array( $yandex_admin_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_admin_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), '10 дней' ) && in_array( 'Итог: 662 руб.', $yandex_admin_formula, true ), 'Yandex admin formula must persist base price, delivery-days audit and final price.' );
 
 $yandex_final_title_rate = $yandex_admin_rate;
 $yandex_final_title_rate['label'] = 'Яндекс до двери - 10 дней';
@@ -1934,7 +2091,7 @@ $yandex_db->yandex_delivery_pickup_points_v2 = array(
 	array( 'platform_station_id' => 'YANDEX-TERMINAL', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Постамат', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Гоголя, 7', 'yandex_geo_id' => 88, 'active' => 1 ),
 	array( 'platform_station_id' => 'YANDEX-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов партнёра', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Фрунзе, 12', 'yandex_geo_id' => 88, 'active' => 1 ),
 );
-$yandex_search_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$yandex_search_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $replacement, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
 $yandex_search = new ReflectionMethod( $yandex_search_controller, 'yandex_pickup_points' );
 $yandex_search->setAccessible( true );
 $yandex_location_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), '', 'location' );
@@ -1951,7 +2108,7 @@ recalc_smoke_assert( '5 Post (Пятерочка)' === (string) ( $yandex_points
 recalc_smoke_assert( 'Постамат Яндекса' === (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['point_title'] ?? '' ) && str_contains( (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['presentation_comment'] ?? '' ), '2-3 дня' ), 'Yandex terminal formatter payload must expose checkout terminal title and storage warning comment.' );
 recalc_smoke_assert( 'Партнёрский пункт выдачи' === (string) ( $yandex_points_by_station['YANDEX-PARTNER']['point_title'] ?? '' ), 'Yandex market partner pickup payload must use checkout presentation title without technical code.' );
 $GLOBALS['wdc_recalc_orders'][127] = $first_preview_order;
-$yandex_fallback_controller = new OrderDeliveryRecalculationAdminController( $first_preview_service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$yandex_fallback_controller = wdc_recalc_admin_controller( $first_preview_service, $location_ajax, $pickup_repository, $address_normalization, $replacement, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
 $first_preview_resolved_location = $first_preview_service->resolved_location_payload( $first_preview_order, null );
 recalc_smoke_assert( 92468 === (int) ( $first_preview_resolved_location['location_id'] ?? 0 ), 'Resolved location payload helper must return location_id=92468 without running pricing.' );
 $yandex_fallback_points_direct = $yandex_search->invoke( $yandex_fallback_controller, $first_preview_resolved_location, '', 'location' );

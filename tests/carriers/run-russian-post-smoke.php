@@ -43,6 +43,10 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperators;
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {}
+}
+
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
@@ -217,6 +221,20 @@ function rp_request( int $item_weight = 1000, string $country = 'US' ): QuoteReq
 	return new QuoteRequest( $country, new Address( country_code: $country, city: 'New York', street: 'Broadway', house: '1', raw_address: 'Broadway 1' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-25' );
 }
 
+function rp_smoke_lead_time_normalizer( int $processing_days = 0 ): \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer {
+	$settings = new SettingsRepository();
+	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
+	$timezone = new \WallsShop\WDC\Calendar\Services\TimezoneService();
+	$formatter = new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter();
+
+	return new \WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer(
+		$settings,
+		new \WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository(),
+		new \WallsShop\WDC\Calendar\Services\DeliveryDateCalculator( new \WallsShop\WDC\Calendar\Services\CalendarService( new \WallsShop\WDC\Calendar\Storage\CalendarRepository(), new \WallsShop\WDC\Calendar\Services\YearGenerator(), $settings, $timezone ), $timezone, $formatter ),
+		$formatter
+	);
+}
+
 $settings = rp_settings();
 $carrier = rp_carrier( $settings );
 rp_smoke_assert( ! array_key_exists( 'packaging_tiers', ( new RussianPostSettings( $settings ) )->all() ), 'RussianPostSettings must not expose packaging_tiers as service-specific settings.' );
@@ -326,7 +344,7 @@ rp_smoke_assert( 1 === count( $tariff_cache ) && current( $tariff_cache )['ttl']
 $registry = new CarrierRegistry();
 $registry->register( $carrier );
 $engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
-$orchestrator = new CheckoutOrchestrator( $registry, new RuleAppliedRateBuilder( $engine ), new RateSorter(), new FallbackRateFactory(), new CarrierExecutionGuard( new CheckoutLogger( new Logger() ) ), new CheckoutLogger( new Logger() ) );
+$orchestrator = new CheckoutOrchestrator( $registry, new RuleAppliedRateBuilder( $engine ), new RateSorter(), new FallbackRateFactory(), new CarrierExecutionGuard( new CheckoutLogger( new Logger() ) ), new CheckoutLogger( new Logger() ), rp_smoke_lead_time_normalizer( 0 ) );
 $increase_rule = new Rule( null, 'Add 10', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::RUBLES, false, false );
 $comment_rule = new Rule( null, 'Comment', true, 20, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Комментарий правила' );
 $result = $orchestrator->calculate( rp_request(), array( $increase_rule, $comment_rule ), RateSorter::CHEAPEST, false );
@@ -344,7 +362,7 @@ $order = new class {
 	public array $meta = array();
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
 };
-( new OrderShippingMetaPersister( $session ) )->persist( $order, array() );
+( new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $order, array() );
 rp_smoke_assert( 'russian_post' === $order->meta['_wdc_platform_carrier_key'], 'Order meta must contain carrier_key.' );
 rp_smoke_assert( 'russian_post_worldwide_parcel' === $order->meta['_wdc_platform_rate_id'], 'Order meta must contain rate_id.' );
 rp_smoke_assert( DeliveryType::PICKUP === $order->meta['_wdc_platform_delivery_type'], 'Order meta must contain delivery_type.' );
