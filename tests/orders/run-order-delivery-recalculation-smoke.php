@@ -1598,7 +1598,7 @@ $saved_calc = $replace_order->meta['_wdc_delivery_calculation_data'] ?? array();
 recalc_smoke_assert( is_array( $saved_calc ) && 1000 === ( $saved_calc['package']['products_weight_g'] ?? null ) && 200 === ( $saved_calc['package']['packaging_weight_g'] ?? null ) && 1200 === ( $saved_calc['package']['final_weight_g'] ?? null ), 'Saved calculation data must preserve checkout-compatible package products/packaging/final weight.' );
 recalc_smoke_assert( 350.0 === (float) ( $saved_calc['api']['api_base_price_rub'] ?? 0 ) && 400.0 === (float) ( $saved_calc['result']['final_price_rub'] ?? 0 ), 'Saved calculation data must keep API base price separate from final price.' );
 recalc_smoke_assert( '3 дня' === (string) ( $saved_calc['api']['api_delivery_text'] ?? '' ) && 3 === ( $saved_calc['api']['api_delivery_min_days'] ?? null ), 'Saved calculation data must preserve checkout-compatible API delivery days.' );
-recalc_smoke_assert( array( 'base' ) === ( $saved_calc['rules']['applied_rules'] ?? null ) && array( 'API + 50 руб.' ) === ( $saved_calc['rules']['formula_visualization'] ?? null ), 'Saved calculation data must preserve applied rules and formula visualization.' );
+recalc_smoke_assert( array( 'base' ) === ( $saved_calc['rules']['applied_rules'] ?? null ) && in_array( 'API + 50 руб.', $saved_calc['rules']['formula_visualization'] ?? array(), true ), 'Saved calculation data must preserve applied rules and formula visualization.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->shipping_items['method_title'] ?? '' ), ' - 3 дня' ), 'Saved shipping method title must include delivery text.' );
 ob_start();
 $metabox->render( $replace_order );
@@ -1607,6 +1607,38 @@ foreach ( array( 'Вес товаров', 'Вес упаковки', 'Итого
 	recalc_smoke_assert( str_contains( $replace_metabox_html, $expected_row ), 'Metabox after admin save must render checkout-compatible row: ' . $expected_row );
 }
 recalc_smoke_assert( ! str_contains( $replace_metabox_html, 'Страна назначения' ), 'Metabox after RU domestic admin save must not render destination country.' );
+
+$lead_time_admin_rate = $cdek_admin_rate;
+$lead_time_admin_rate['rate_id'] = 'cdek:courier:lead-time-audit';
+$lead_time_admin_rate['id'] = 'cdek:courier:lead-time-audit';
+$lead_time_admin_rate['delivery_days'] = array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' );
+$lead_time_admin_rate['rate_meta'] = array_merge(
+	is_array( $lead_time_admin_rate['rate_meta'] ?? null ) ? $lead_time_admin_rate['rate_meta'] : array(),
+	array(
+		'rules_audit' => array(),
+		'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+		'shop_processing_working_days' => 2,
+		'shop_processing_calendar_days' => 3,
+		'carrier_days_are_working' => true,
+		'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'total_calendar_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+	)
+);
+$lead_time_admin_order = new WdcRecalcOrder( 130, array() );
+$lead_time_admin_result = $replacement->save(
+	$lead_time_admin_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $lead_time_admin_rate,
+		'selected_tariff' => array(),
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+$lead_time_admin_formula = $lead_time_admin_order->meta['_wdc_delivery_calculation_data']['rules']['formula_visualization'] ?? array();
+recalc_smoke_assert( true === $lead_time_admin_result['success'], 'Admin save with lead-time audit fixture must succeed.' );
+foreach ( array( 'Базовый срок API: 7-9 дней', 'Время обработки магазином: 3 дня', 'Доставка: рабочие в календарные 7-9 → 9-10 дней', 'Итог: 12-13 дней' ) as $line ) {
+	recalc_smoke_assert( in_array( $line, $lead_time_admin_formula, true ), 'Admin calculation rules audit must include lead-time line: ' . $line );
+}
 
 $international_order = new WdcRecalcOrder( 113, array() );
 $international_order->meta['_wdc_delivery_calculation_data'] = array(
@@ -1927,7 +1959,7 @@ $yandex_admin_title = (string) ( $yandex_admin_order->shipping_items['method_tit
 recalc_smoke_assert( true === $yandex_admin_result['success'], 'Yandex admin courier save must succeed for 535 -> 662 regression rate.' );
 recalc_smoke_assert( 535.0 === (float) ( $yandex_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_admin_calc['result']['final_price_rub'] ?? 0 ), 'Yandex admin persistence must keep API base 535 separate from final 662.' );
 recalc_smoke_assert( 'Яндекс до двери - 10 дней' === $yandex_admin_title && ! str_contains( $yandex_admin_title, '8 дней' ) && 1 === substr_count( $yandex_admin_title, '10 дней' ) && ! str_contains( $yandex_admin_title, 'Array' ) && ! str_contains( $yandex_admin_title, '8 дней - 10 дней' ), 'Yandex admin method title must replace original 8 days with final 10 days without duplication.' );
-recalc_smoke_assert( is_array( $yandex_admin_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_admin_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), '10 дней' ) && 'Итог: 662 руб.' === end( $yandex_admin_formula ), 'Yandex admin formula must persist base price, delivery-days audit and final price.' );
+recalc_smoke_assert( is_array( $yandex_admin_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_admin_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_admin_formula ), '10 дней' ) && in_array( 'Итог: 662 руб.', $yandex_admin_formula, true ), 'Yandex admin formula must persist base price, delivery-days audit and final price.' );
 
 $yandex_final_title_rate = $yandex_admin_rate;
 $yandex_final_title_rate['label'] = 'Яндекс до двери - 10 дней';

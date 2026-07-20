@@ -678,6 +678,7 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 				)
 			);
 		}
+		$formula = $this->append_unique_lines( $formula, $this->lead_time_audit_lines( $rate, $rate_meta ) );
 		return array(
 			'rules_source' => $source,
 			'applied_rules' => $audit,
@@ -686,6 +687,87 @@ $rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 			'minimum_price_applied' => $minimum,
 			'price_delta_rub' => $final - $api_base,
 		);
+	}
+
+	/**
+	 * @param array<int,mixed> $lines
+	 * @param array<int,string> $extra
+	 * @return array<int,string>
+	 */
+	private function append_unique_lines( array $lines, array $extra ): array {
+		$output = array_values(
+			array_filter(
+				array_map( static fn( mixed $line ): string => (string) $line, $lines ),
+				static fn( string $line ): bool => '' !== trim( $line )
+			)
+		);
+		foreach ( $extra as $line ) {
+			if ( ! in_array( $line, $output, true ) ) {
+				$output[] = $line;
+			}
+		}
+
+		return $output;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<int,string>
+	 */
+	private function lead_time_audit_lines( array $rate, array $rate_meta ): array {
+		$lines = array();
+		$raw = $this->delivery_days_from_value( $rate_meta['carrier_delivery_days_original'] ?? $rate['original_delivery_days'] ?? null );
+		if ( '' !== $raw ) {
+			$lines[] = 'Базовый срок API: ' . $raw;
+		}
+
+		$processing_working_days = $this->nullable_int( $rate_meta['shop_processing_working_days'] ?? null ) ?? 0;
+		$processing_calendar_days = $this->nullable_int( $rate_meta['shop_processing_calendar_days'] ?? null ) ?? 0;
+		if ( $processing_working_days > 0 && $processing_calendar_days > 0 ) {
+			$lines[] = 'Время обработки магазином: ' . DeliveryDaysFormatter::format_values( $processing_calendar_days, $processing_calendar_days );
+		}
+
+		if ( ! empty( $rate_meta['carrier_days_are_working'] ) ) {
+			$raw_range = $this->delivery_days_range_value( $rate_meta['carrier_delivery_days_original'] ?? $rate['original_delivery_days'] ?? null );
+			$carrier_calendar = $this->delivery_days_from_value( $rate_meta['carrier_delivery_calendar_days'] ?? null );
+			if ( '' === $carrier_calendar ) {
+				$carrier_calendar = DeliveryDaysFormatter::format_values( $rate_meta['carrier_delivery_calendar_min_days'] ?? null, $rate_meta['carrier_delivery_calendar_max_days'] ?? null );
+			}
+			if ( '' !== $raw_range && '' !== $carrier_calendar && $raw !== $carrier_calendar ) {
+				$lines[] = 'Доставка: рабочие в календарные ' . $raw_range . ' → ' . $carrier_calendar;
+			}
+		}
+
+		$final = $this->delivery_days_from_value( $rate['delivery_days'] ?? null );
+		if ( '' !== $final ) {
+			$lines[] = 'Итог: ' . $final;
+		}
+
+		return $lines;
+	}
+
+	private function delivery_days_from_value( mixed $value ): string {
+		return is_array( $value ) ? DeliveryDaysFormatter::format_array( $value ) : '';
+	}
+
+	private function delivery_days_range_value( mixed $value ): string {
+		if ( ! is_array( $value ) ) {
+			return '';
+		}
+		$min = $value['min_days'] ?? $value['min'] ?? null;
+		$max = $value['max_days'] ?? $value['max'] ?? null;
+		if ( ! is_numeric( $min ) && ! is_numeric( $max ) ) {
+			return '';
+		}
+		$min = is_numeric( $min ) ? max( 0, (int) $min ) : max( 0, (int) $max );
+		$max = is_numeric( $max ) ? max( 0, (int) $max ) : $min;
+
+		return $min === $max ? (string) $min : $min . '-' . $max;
+	}
+
+	private function nullable_int( mixed $value ): ?int {
+		return is_numeric( $value ) ? (int) $value : null;
 	}
 
 	/**

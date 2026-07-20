@@ -47,6 +47,8 @@ final class DeliveryLeadTimeNormalizer {
 					'carrier_days_are_working' => $carrier_working,
 					'carrier_delivery_calendar_min_days' => $normalized['carrier_calendar_days']->min_days,
 					'carrier_delivery_calendar_max_days' => $normalized['carrier_calendar_days']->max_days,
+					'carrier_delivery_calendar_days' => $normalized['carrier_calendar_days']->to_array(),
+					'total_calendar_days' => $total_days->to_array(),
 					'handoff_date' => $normalized['handoff_date'],
 					'calculation_date' => $normalized['calculation_date'],
 				)

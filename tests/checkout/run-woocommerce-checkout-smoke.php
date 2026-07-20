@@ -60,6 +60,17 @@ if ( ! function_exists( 'esc_html' ) ) {
 	}
 }
 
+if ( ! function_exists( 'checked' ) ) {
+	function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+		$result = (string) $checked === (string) $current ? 'checked="checked"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+
+		return $result;
+	}
+}
+
 if ( ! function_exists( 'trailingslashit' ) ) {
 	function trailingslashit( string $value ): string {
 		return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR;
@@ -224,6 +235,7 @@ use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -298,6 +310,37 @@ function wc_checkout_label_rate( string $title, DateRange $delivery_days, ?DateR
 		$meta,
 		null,
 		$original_delivery_days
+	);
+}
+
+function wc_checkout_grouped_tariff_rate( string $tariff_key, string $tariff_title, int $min_days, int $max_days, string $planned_comment, float $price_rub ): DeliveryRate {
+	return new DeliveryRate(
+		'dpd:pickup:' . $tariff_key,
+		'dpd',
+		'DPD',
+		'dpd',
+		'DPD до ПВЗ',
+		$tariff_key,
+		$tariff_title,
+		DeliveryType::PICKUP,
+		'DPD до ПВЗ, ' . $tariff_title . ' - ' . DeliveryDaysFormatter::format( DateRange::range( $min_days, $max_days ) ),
+		Money::from_rubles( $price_rub ),
+		null,
+		null,
+		DateRange::range( $min_days, $max_days ),
+		'2026-07-27',
+		$planned_comment,
+		array(),
+		false,
+		'',
+		false,
+		false,
+		array(
+			'tariff_selector_group' => true,
+			'checkout_group_id' => 'dpd:pickup',
+		),
+		Money::from_rubles( $price_rub ),
+		DateRange::range( $min_days, $max_days )
 	);
 }
 
@@ -677,6 +720,35 @@ $wc_rates = $reflection->invoke( $method, $grouped_rates );
 wc_checkout_smoke_assert( array( 'dpd', 'yandex', 'yandex', 'russian_post' ) === array_map( static fn( DeliveryRate $rate ): string => $rate->carrier_key, $wc_rates ), 'WC grouped selector method ordering must use selected tariff final price.' );
 wc_checkout_smoke_assert( 'B' === (string) ( $wc_rates[0]->meta['selected_tariff_object'] ?? '' ) && 50.0 === (float) $wc_rates[0]->price->get_rubles(), 'WC grouped selector active method must use the selected tariff values.' );
 wc_checkout_smoke_assert( array( 'A', 'B' ) === array_map( static fn( array $variant ): string => (string) $variant['object_code'], $wc_rates[0]->meta['tariff_variants'] ?? array() ), 'WC selected grouped selector variants must still keep original-price order.' );
+
+$session->save_selected_tariff( 'dpd:pickup', array( 'object_code' => '1800' ) );
+$dpd_grouped_rates = array(
+	wc_checkout_grouped_tariff_rate( 'economy', 'DPD Эконом', 8, 10, 'Доставка планируется* с 28 июля (вторник).', 247 ),
+	wc_checkout_grouped_tariff_rate( '1800', 'DPD 18:00', 7, 9, 'Доставка планируется* с 27 июля (понедельник).', 395 ),
+	wc_checkout_grouped_tariff_rate( 'classic', 'DPD Classic', 3, 5, 'Доставка планируется* с 23 июля (четверг).', 952 ),
+);
+$dpd_grouped = $reflection->invoke( $method, $dpd_grouped_rates )[0] ?? null;
+wc_checkout_smoke_assert( $dpd_grouped instanceof DeliveryRate, 'DPD grouped selector regression must build a synthetic rate.' );
+wc_checkout_smoke_assert( '7-9 дней' === DeliveryDaysFormatter::format( $dpd_grouped->delivery_days ) && 'Доставка планируется* с 27 июля (понедельник).' === $dpd_grouped->planned_delivery_comment, 'DPD grouped synthetic rate must keep duration and planned-date comment separate.' );
+$dpd_variants = $dpd_grouped->meta['tariff_variants'] ?? array();
+wc_checkout_smoke_assert( isset( $dpd_variants[1]['delivery_days'], $dpd_variants[1]['delivery_days_label'], $dpd_variants[1]['planned_delivery_comment'] ) && '7-9 дней' === $dpd_variants[1]['delivery_days_label'], 'Tariff variant payload must contain delivery_days, delivery_days_label, and planned_delivery_comment.' );
+$dpd_mapped = $rate_mapper->map( $dpd_grouped );
+$dpd_render_method = (object) array(
+	'id' => $dpd_mapped['id'],
+	'meta_data' => $dpd_mapped['meta_data'],
+);
+ob_start();
+( new CheckoutRateRenderer() )->render( $dpd_render_method );
+$dpd_grouped_html = (string) ob_get_clean();
+$selector_start = strpos( $dpd_grouped_html, '<div class="wdc-domestic-tariff-selector"' );
+$selector_end = false !== $selector_start ? strpos( $dpd_grouped_html, '</div>', $selector_start ) : false;
+$dpd_selector_html = false !== $selector_start && false !== $selector_end ? substr( $dpd_grouped_html, $selector_start, $selector_end - $selector_start ) : '';
+wc_checkout_smoke_assert( str_contains( $dpd_grouped_html, 'DPD Эконом - 8-10 дней' ) && str_contains( $dpd_grouped_html, 'DPD 18:00 - 7-9 дней' ) && str_contains( $dpd_grouped_html, 'DPD Classic - 3-5 дней' ), 'Tariff selector must render tariff duration ranges.' );
+wc_checkout_smoke_assert( '' !== $dpd_selector_html && ! (bool) preg_match( '/wdc-domestic-tariff-selector__line-text[^>]*>[^<]*Доставка планируется\\*/u', $dpd_selector_html ), 'Tariff selector rows must not render planned delivery comments.' );
+wc_checkout_smoke_assert( 1 === substr_count( $dpd_grouped_html, 'class="wdc-platform-planned-delivery-comment wdc-shipping-rate-comment"' ) && str_contains( $dpd_grouped_html, 'wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">Доставка планируется* с 27 июля (понедельник).' ), 'Grouped checkout rate must render exactly one active planned delivery comment.' );
+wc_checkout_smoke_assert( ! str_contains( $dpd_grouped_html, 'wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">7-9 дней' ), 'Grouped checkout rate must not render a bare duration as the planned delivery comment.' );
+$domestic_tariff_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/domestic-tariff-selector.js' );
+wc_checkout_smoke_assert( str_contains( $domestic_tariff_js, 'data-planned-delivery-comment' ) && str_contains( $domestic_tariff_js, '.wdc-platform-planned-delivery-comment' ), 'Tariff selector JavaScript must update the shared planned comment from variant payload.' );
 $stored_rates = $session->rates();
 $first_rate   = array_key_first( $stored_rates );
 WC()->session->set( 'chosen_shipping_methods', array( $first_rate ) );
@@ -1009,7 +1081,7 @@ $yandex_checkout_order = new WdcSmokeOrder();
 $yandex_checkout_calc = $yandex_checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
 $yandex_checkout_formula = $yandex_checkout_calc['rules']['formula_visualization'] ?? array();
 wc_checkout_smoke_assert( 535.0 === (float) ( $yandex_checkout_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_checkout_calc['result']['final_price_rub'] ?? 0 ), 'Yandex checkout persistence must keep API base 535 separate from final 662.' );
-wc_checkout_smoke_assert( is_array( $yandex_checkout_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_checkout_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), '10 дней' ) && 'Итог: 662 руб.' === end( $yandex_checkout_formula ), 'Yandex checkout formula must persist base price, delivery-days audit and final price.' );
+wc_checkout_smoke_assert( is_array( $yandex_checkout_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_checkout_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), '10 дней' ) && in_array( 'Итог: 662 руб.', $yandex_checkout_formula, true ), 'Yandex checkout formula must persist base price, delivery-days audit and final price.' );
 
 $session->save_rates(
 	array(

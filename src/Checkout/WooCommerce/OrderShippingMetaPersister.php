@@ -511,27 +511,90 @@ final class OrderShippingMetaPersister {
 		$base  = $this->nullable_float( $api['api_base_price_rub'] ?? null ) ?? $this->nullable_float( $rate['cost'] ?? null ) ?? 0.0;
 		$final = $this->nullable_float( $result['final_price_rub'] ?? null );
 		$has_price_formula = array() !== $audit || ! empty( $result['round_up_applied'] ) || ! empty( $result['minimum_price_applied'] );
+		$lead_time_lines = $this->lead_time_audit_lines( $rate, $rate_meta );
 		if ( null === $final || ! $has_price_formula ) {
 			return array(
 				'rules_source'          => $source,
 				'applied_rules'         => $audit,
-				'formula_visualization' => array(),
+				'formula_visualization' => $lead_time_lines,
 			);
 		}
+
+		$formula = ( new RuleFormulaFormatter() )->lines(
+			$base,
+			$audit,
+			$final,
+			array(
+				'round_up_applied'      => ! empty( $result['round_up_applied'] ) && $final > 0,
+				'minimum_price_applied' => ! empty( $result['minimum_price_applied'] ) && $final > 0,
+			)
+		);
 
 		return array(
 			'rules_source'          => $source,
 			'applied_rules'         => $audit,
-			'formula_visualization' => ( new RuleFormulaFormatter() )->lines(
-				$base,
-				$audit,
-				$final,
-				array(
-					'round_up_applied'      => ! empty( $result['round_up_applied'] ) && $final > 0,
-					'minimum_price_applied' => ! empty( $result['minimum_price_applied'] ) && $final > 0,
-				)
-			),
+			'formula_visualization' => array_merge( $formula, $lead_time_lines ),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<int,string>
+	 */
+	private function lead_time_audit_lines( array $rate, array $rate_meta ): array {
+		$lines = array();
+		$raw = $this->delivery_days_from_value( $rate_meta['carrier_delivery_days_original'] ?? $rate['original_delivery_days'] ?? null );
+		if ( '' !== $raw ) {
+			$lines[] = 'Базовый срок API: ' . $raw;
+		}
+
+		$processing_working_days = $this->nullable_int( $rate_meta['shop_processing_working_days'] ?? null ) ?? 0;
+		$processing_calendar_days = $this->nullable_int( $rate_meta['shop_processing_calendar_days'] ?? null ) ?? 0;
+		if ( $processing_working_days > 0 && $processing_calendar_days > 0 ) {
+			$lines[] = 'Время обработки магазином: ' . DeliveryDaysFormatter::format_values( $processing_calendar_days, $processing_calendar_days );
+		}
+
+		if ( ! empty( $rate_meta['carrier_days_are_working'] ) ) {
+			$raw_range = $this->delivery_days_range_value( $rate_meta['carrier_delivery_days_original'] ?? $rate['original_delivery_days'] ?? null );
+			$carrier_calendar = $this->delivery_days_from_value( $rate_meta['carrier_delivery_calendar_days'] ?? null );
+			if ( '' === $carrier_calendar ) {
+				$carrier_calendar = DeliveryDaysFormatter::format_values( $rate_meta['carrier_delivery_calendar_min_days'] ?? null, $rate_meta['carrier_delivery_calendar_max_days'] ?? null );
+			}
+			if ( '' !== $raw_range && '' !== $carrier_calendar && $raw !== $carrier_calendar ) {
+				$lines[] = 'Доставка: рабочие в календарные ' . $raw_range . ' → ' . $carrier_calendar;
+			}
+		}
+
+		$final = $this->delivery_days_from_value( $rate['delivery_days'] ?? null );
+		if ( '' !== $final ) {
+			$lines[] = 'Итог: ' . $final;
+		}
+
+		return $lines;
+	}
+
+	private function delivery_days_from_value( mixed $value ): string {
+		return is_array( $value ) ? DeliveryDaysFormatter::format_array( $value ) : '';
+	}
+
+	private function delivery_days_range_value( mixed $value ): string {
+		if ( ! is_array( $value ) ) {
+			return '';
+		}
+		$min = $value['min_days'] ?? $value['min'] ?? null;
+		$max = $value['max_days'] ?? $value['max'] ?? null;
+		if ( ! is_numeric( $min ) && ! is_numeric( $max ) ) {
+			return '';
+		}
+		$min = is_numeric( $min ) ? max( 0, (int) $min ) : max( 0, (int) $max );
+		$max = is_numeric( $max ) ? max( 0, (int) $max ) : $min;
+
+		return $min === $max ? (string) $min : $min . '-' . $max;
+	}
+
+	private function nullable_int( mixed $value ): ?int {
+		return is_numeric( $value ) ? (int) $value : null;
 	}
 
 	/**

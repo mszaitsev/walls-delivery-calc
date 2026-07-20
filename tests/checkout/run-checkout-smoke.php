@@ -31,6 +31,45 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, mixed $default = false ): mixed {
+		return $GLOBALS['wdc_checkout_smoke_options'][ $key ] ?? $default;
+	}
+}
+
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
+		$GLOBALS['wdc_checkout_smoke_options'][ $key ] = $value;
+
+		return true;
+	}
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$query = preg_replace( '/%d/', (string) (int) $arg, $query, 1 );
+				$query = preg_replace( '/%s/', "'" . addslashes( (string) $arg ) . "'", $query, 1 );
+			}
+
+			return $query;
+		}
+
+		public function get_row( string $query, mixed $output = null ): ?array {
+			return null;
+		}
+
+		public function get_var( string $query ): mixed {
+			return 0;
+		}
+	}
+}
+
+$GLOBALS['wpdb'] = $GLOBALS['wpdb'] ?? new wpdb();
+
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();

@@ -42,11 +42,23 @@
 		});
 	}
 
+	function updatePlannedDeliveryComment(input) {
+		var wrapper = input && input.closest ? input.closest('.wdc-platform-rate-meta') : null;
+		var comment = input ? String(input.getAttribute('data-planned-delivery-comment') || '') : '';
+		var node = wrapper ? wrapper.querySelector('.wdc-platform-planned-delivery-comment') : null;
+		if (!node) {
+			return;
+		}
+		node.textContent = comment;
+		node.hidden = !comment;
+	}
+
 	$(document.body).on('change', '.wdc-domestic-tariff-selector input[type="radio"]', function () {
 		var input = $(this);
 		if (input.prop('disabled')) {
 			return;
 		}
+		updatePlannedDeliveryComment(this);
 		var wrapper = input.closest('.wdc-domestic-tariff-selector');
 		var data = config();
 		if (!data.ajax_url || !data.action) {

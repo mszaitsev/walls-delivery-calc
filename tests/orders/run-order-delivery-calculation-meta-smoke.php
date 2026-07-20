@@ -211,6 +211,118 @@ order_meta_smoke_assert( (bool) preg_grep( '/Итог: 5 338 руб\\./u', $calc
 order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
 
+$lead_time_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-working',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 2,
+			'shop_processing_calendar_days' => 3,
+			'carrier_days_are_working' => true,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-working' => $lead_time_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-working' ) );
+$lead_time_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $lead_time_order, array() );
+$lead_time_formula = $lead_time_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+foreach ( array( 'Базовый срок API: 7-9 дней', 'Время обработки магазином: 3 дня', 'Доставка: рабочие в календарные 7-9 → 9-10 дней', 'Итог: 12-13 дней' ) as $line ) {
+	order_meta_smoke_assert( in_array( $line, $lead_time_formula, true ), 'Lead-time audit must include line: ' . $line );
+}
+
+$calendar_days_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-calendar',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 10, 'max_days' => 12, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 2,
+			'shop_processing_calendar_days' => 3,
+			'carrier_days_are_working' => false,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 10, 'max_days' => 12, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-calendar' => $calendar_days_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-calendar' ) );
+$calendar_days_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $calendar_days_order, array() );
+$calendar_days_formula = $calendar_days_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+order_meta_smoke_assert( in_array( 'Базовый срок API: 7-9 дней', $calendar_days_formula, true ) && in_array( 'Время обработки магазином: 3 дня', $calendar_days_formula, true ) && in_array( 'Итог: 10-12 дней', $calendar_days_formula, true ), 'Lead-time audit must include base, processing, and final lines for calendar carrier days.' );
+order_meta_smoke_assert( ! (bool) preg_grep( '/Доставка: рабочие в календарные/u', $calendar_days_formula ), 'Lead-time audit must not show working-day conversion when carrier days are already calendar days.' );
+
+$zero_processing_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-zero-processing',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 0,
+			'shop_processing_calendar_days' => 0,
+			'carrier_days_are_working' => true,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-zero-processing' => $zero_processing_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-zero-processing' ) );
+$zero_processing_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $zero_processing_order, array() );
+$zero_processing_formula = $zero_processing_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+order_meta_smoke_assert( in_array( 'Базовый срок API: 7-9 дней', $zero_processing_formula, true ) && in_array( 'Доставка: рабочие в календарные 7-9 → 9-10 дней', $zero_processing_formula, true ) && in_array( 'Итог: 9-10 дней', $zero_processing_formula, true ), 'Lead-time audit must include base, conversion, and final lines when processing is zero.' );
+order_meta_smoke_assert( ! (bool) preg_grep( '/Время обработки магазином/u', $zero_processing_formula ), 'Lead-time audit must not show processing line when configured processing is zero.' );
+
+$rules_delivery_rate = wdc_order_meta_rate(
+	array(
+		'rate_id' => 'demo:lead-time-rules',
+		'cost' => '100',
+		'round_up_applied' => false,
+		'minimum_price_applied' => false,
+		'delivery_days' => array( 'min_days' => 14, 'max_days' => 15, 'unit' => 'calendar_days' ),
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'rules_audit' => array(),
+			'carrier_delivery_days_original' => array( 'min_days' => 7, 'max_days' => 9, 'unit' => 'calendar_days' ),
+			'shop_processing_working_days' => 2,
+			'shop_processing_calendar_days' => 3,
+			'carrier_days_are_working' => true,
+			'carrier_delivery_calendar_days' => array( 'min_days' => 9, 'max_days' => 10, 'unit' => 'calendar_days' ),
+			'total_calendar_days' => array( 'min_days' => 12, 'max_days' => 13, 'unit' => 'calendar_days' ),
+		),
+	)
+);
+$session->save_rates( array( 'demo:lead-time-rules' => $rules_delivery_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:lead-time-rules' ) );
+$rules_delivery_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $rules_delivery_order, array() );
+$rules_delivery_formula = $rules_delivery_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['rules']['formula_visualization'] ?? array();
+order_meta_smoke_assert( in_array( 'Итог: 14-15 дней', $rules_delivery_formula, true ) && ! in_array( 'Итог: 12-13 дней', $rules_delivery_formula, true ), 'Lead-time audit final line must use delivery_days after rules rather than normalized total_calendar_days.' );
+
 $domestic_rate = array(
 	'carrier_key' => 'russian_post_domestic',
 	'rate_id' => 'russian_post_domestic:pickup',
