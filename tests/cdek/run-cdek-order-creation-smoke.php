@@ -70,7 +70,7 @@ function cdek_order_actual_cost_resolver(): ShipmentActualCostResolver {
 }
 
 function cdek_order_actual_cost_service( OrderShipmentRepository $repository ): ShipmentActualCostService {
-	return new ShipmentActualCostService( $repository, cdek_order_actual_cost_resolver() );
+	return new ShipmentActualCostService( $repository );
 }
 
 function cdek_order_creation_service( OrderShipmentRepository $repository, CdekShipmentAdapter $adapter ): ShipmentCreationService {
@@ -1047,8 +1047,7 @@ $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 );
 $ajax_create_controller = new ShipmentCreateAjaxController( $ajax_repository, $drafts, $ajax_creation, $ajax_payloads );
 $ajax_actual_costs = new ShipmentActualCostService(
-	$ajax_repository,
-	new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() )
+	$ajax_repository
 );
 $ajax_actual_cost_controller = new ShipmentActualCostAjaxController( $ajax_actual_costs, $ajax_payloads );
 $ajax_controller_double = static function ( string $class ): object {

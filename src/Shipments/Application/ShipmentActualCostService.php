@@ -9,8 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class ShipmentActualCostService {
 	public function __construct(
-		private OrderShipmentRepository $repository,
-		private ShipmentActualCostResolver $resolver
+		private OrderShipmentRepository $repository
 	) {
 	}
 
@@ -30,7 +29,7 @@ final class ShipmentActualCostService {
 	 */
 	public function clear( object $order, string $carrier_key ): array {
 		$shipment = $this->existing_shipment( $order, $carrier_key );
-		foreach ( array( 'actual_cost_kopecks', 'actual_cost_currency', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at', 'russian_post_actual_cost_kopecks', 'russian_post_actual_cost_rub', 'russian_post_actual_cost_source' ) as $key ) {
+		foreach ( array( 'actual_cost_kopecks', 'actual_cost_currency', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at' ) as $key ) {
 			unset( $shipment[ $key ] );
 		}
 		$shipment['updated_at'] = $this->now();
@@ -55,7 +54,7 @@ final class ShipmentActualCostService {
 	 */
 	private function save_cost( object $order, string $carrier_key, ShipmentActualCost $cost, bool $manual ): array {
 		$now = $this->now();
-		$shipment = $this->resolver->with_legacy_canonical_fields( $this->existing_shipment( $order, $carrier_key ), $now );
+		$shipment = $this->existing_shipment( $order, $carrier_key );
 		$fields = $cost->to_fields( $now );
 		if ( $manual ) {
 			$fields['actual_cost_source'] = 'manual';

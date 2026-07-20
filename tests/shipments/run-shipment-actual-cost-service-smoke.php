@@ -42,7 +42,7 @@ final class ShipmentActualCostServiceOrder {
 
 $repository = new OrderShipmentRepository();
 $resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
-$service = new ShipmentActualCostService( $repository, $resolver );
+$service = new ShipmentActualCostService( $repository );
 
 $order = new ShipmentActualCostServiceOrder(
 	array(
@@ -80,25 +80,23 @@ shipment_actual_cost_service_assert( ! array_key_exists( 'actual_cost_kopecks', 
 $automatic = $service->apply_carrier_cost( $order, DpdSettings::CARRIER_KEY, new ShipmentActualCost( 99999, 'RUB', 'carrier_status', 'dpd_events' ) );
 shipment_actual_cost_service_assert( 99999 === (int) ( $automatic['actual_cost_kopecks'] ?? 0 ) && 'carrier_status' === (string) ( $automatic['actual_cost_source'] ?? '' ), 'Carrier update must save actual cost after clear.' );
 
-$legacy = array( 'russian_post_actual_cost_kopecks' => 39998, 'russian_post_actual_cost_source' => 'shipment_search' );
-$canonical = $resolver->with_legacy_canonical_fields( $legacy, '2026-07-21 10:00:00' );
-shipment_actual_cost_service_assert( 39998 === (int) ( $canonical['actual_cost_kopecks'] ?? 0 ) && 'legacy_import' === (string) ( $canonical['actual_cost_source'] ?? '' ), 'Russian Post legacy actual cost must resolve to canonical fields lazily.' );
-
-$legacy_order = new ShipmentActualCostServiceOrder(
+$clear_order = new ShipmentActualCostServiceOrder(
 	array(
 		OrderShipmentRepository::META_KEY => array(
 			RussianPostDomesticSettings::CARRIER_KEY => array(
 				'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 				'status' => 'created',
-				'russian_post_actual_cost_kopecks' => 39998,
-				'russian_post_actual_cost_rub' => 399.98,
-				'russian_post_actual_cost_source' => 'shipment_search',
+				'actual_cost_kopecks' => 39998,
+				'actual_cost_currency' => 'RUB',
+				'actual_cost_source' => 'carrier_api',
+				'actual_cost_source_detail' => 'russian_post_shipment_search',
+				'actual_cost_updated_at' => '2026-07-21 10:00:00',
 			),
 		),
 	)
 );
-$legacy_cleared = $service->clear( $legacy_order, RussianPostDomesticSettings::CARRIER_KEY );
-shipment_actual_cost_service_assert( ! array_key_exists( 'russian_post_actual_cost_kopecks', $legacy_cleared ) && null === $resolver->amount_kopecks( $legacy_cleared ), 'Explicit clear must remove Russian Post legacy actual-cost fallback too.' );
+$canonical_cleared = $service->clear( $clear_order, RussianPostDomesticSettings::CARRIER_KEY );
+shipment_actual_cost_service_assert( ! array_key_exists( 'actual_cost_kopecks', $canonical_cleared ) && null === $resolver->amount_kopecks( $canonical_cleared ), 'Explicit clear must remove canonical actual-cost fields.' );
 
 try {
 	$service->manual_set( $order, DpdSettings::CARRIER_KEY, 0 );

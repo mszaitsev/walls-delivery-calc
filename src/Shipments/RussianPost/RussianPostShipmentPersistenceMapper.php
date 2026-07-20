@@ -60,23 +60,15 @@ final class RussianPostShipmentPersistenceMapper implements CarrierShipmentPersi
 		try {
 			$result = $this->actual_cost_lookup->lookup_after_create( $barcode );
 		} catch ( \Throwable ) {
-			return array( 'russian_post_actual_cost_lookup_error' => 'exception' );
+			return array( 'russian_post_cost_lookup_error' => 'exception' );
 		}
 
-		$fields = is_array( $result['fields'] ?? null ) ? $result['fields'] : array();
-		if ( array() !== $fields ) {
-			$amount = is_numeric( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] ?? null )
-				? (int) ( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] )
-				: 0;
-			unset( $fields['actual_cost_kopecks'], $fields['actual_cost_currency'], $fields['actual_cost_source'], $fields['actual_cost_source_detail'], $fields['actual_cost_updated_at'] );
-			if ( $amount > 0 ) {
-				$fields['actual_cost_candidate'] = new ShipmentActualCost( $amount, 'RUB', 'carrier_api', (string) ( $fields['russian_post_actual_cost_source'] ?? 'russian_post_shipment_search' ) );
-			}
-
-			return $fields;
+		$cost = $result['cost'] ?? null;
+		if ( $cost instanceof ShipmentActualCost ) {
+			return array( 'actual_cost_candidate' => $cost );
 		}
 		$error_code = trim( (string) ( $result['error_code'] ?? '' ) );
 
-		return '' !== $error_code ? array( 'russian_post_actual_cost_lookup_error' => $error_code ) : array();
+		return '' !== $error_code ? array( 'russian_post_cost_lookup_error' => $error_code ) : array();
 	}
 }

@@ -1,6 +1,6 @@
 # Shipments
 
-Version: 0.125.2
+Version: 0.125.3
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 
@@ -18,6 +18,4 @@ Carrier-specific shipment implementations currently exist for CDEK, DPD, Russian
 
 `actual_cost_kopecks` is the canonical actual shipment cost owner for every carrier. It is an integer amount in kopecks; companion fields are `actual_cost_currency`, `actual_cost_source`, `actual_cost_source_detail`, and `actual_cost_updated_at`.
 
-Supported source values include `carrier_api`, `carrier_status`, `carrier_reconciliation`, `manual`, and `legacy_import`. Manual cost edits in the shared shipment card set `actual_cost_source=manual`, but they are a fallback/correction value, not a lock: a later strictly positive carrier/API update overwrites any existing source. Missing, null, zero, negative, or invalid carrier amounts must not remove or overwrite an existing actual cost. Clearing the actual cost removes canonical actual-cost fields, allowing a later carrier update to populate them again.
-
-Russian Post legacy fields (`russian_post_actual_cost_kopecks`, `russian_post_actual_cost_rub`, `russian_post_actual_cost_source`) remain readable through the common resolver. New writes should populate canonical fields through `ShipmentActualCostService`; legacy fields are compatibility data, not the analytics owner. Explicit admin clear removes legacy actual-cost fields too, otherwise the resolver would immediately display the old legacy value again.
+Supported source values include `carrier_api`, `carrier_status`, `carrier_reconciliation`, and `manual`. Manual cost edits in the shared shipment card set `actual_cost_source=manual`, but they are a fallback/correction value, not a lock: a later strictly positive carrier/API update overwrites any existing source. Missing, null, zero, negative, or invalid carrier amounts must not remove or overwrite an existing actual cost. Clearing the actual cost removes canonical actual-cost fields, allowing a later carrier update to populate them again.

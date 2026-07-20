@@ -552,6 +552,22 @@ foreach ( $actual_cost_production_sources as $relative => $source ) {
 }
 plugin_architecture_assert( str_contains( $actual_cost_production_sources['src/Core/Plugin.php'] ?? '', 'ShipmentActualCostResolver::class' ) && str_contains( $actual_cost_production_sources['src/Core/Plugin.php'] ?? '', 'ShipmentActualCostService::class' ), 'Plugin.php must own actual-cost service/resolver registrations.' );
 
+$rp_cost_legacy_key = 'russian_post_' . 'actual_cost_';
+$actual_cost_legacy_source = 'legacy_' . 'import';
+foreach ( array( 'src', 'tests', 'docs' ) as $legacy_scan_dir ) {
+	$directory = plugin_architecture_path( $legacy_scan_dir );
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $directory, FilesystemIterator::SKIP_DOTS ) );
+	foreach ( $iterator as $file ) {
+		if ( ! $file instanceof SplFileInfo || ! $file->isFile() ) {
+			continue;
+		}
+		$relative = str_replace( '\\', '/', substr( $file->getPathname(), strlen( plugin_architecture_root() ) + 1 ) );
+		$source = (string) file_get_contents( $file->getPathname() );
+		plugin_architecture_assert( ! str_contains( $source, $rp_cost_legacy_key ), 'Russian Post legacy actual-cost fields must not exist in ' . $relative );
+		plugin_architecture_assert( ! str_contains( $source, $actual_cost_legacy_source ), 'Legacy actual-cost source must not exist in ' . $relative );
+	}
+}
+
 foreach ( array( 'src', 'tests' ) as $actual_cost_dir ) {
 	foreach ( plugin_architecture_php_files( $actual_cost_dir ) as $file ) {
 		$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );

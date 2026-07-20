@@ -119,8 +119,8 @@ shipment_actual_cost_assert( null === $dpd_zero['actual_cost_kopecks'] && '' ===
 
 $russian_post = shipment_actual_cost_reflection_instance( ShipmentStatusUpdateService::class );
 shipment_actual_cost_set_property( $russian_post, 'actual_cost_resolver', shipment_test_actual_cost_resolver() );
-$rp_zero = $russian_post->status_payload( array( 'russian_post_actual_cost_kopecks' => 0 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ) );
-shipment_actual_cost_assert( null === $rp_zero['actual_cost_kopecks'] && '' === $rp_zero['actual_cost_label'] && '' === $rp_zero['actual_cost_compare_status'], 'Russian Post legacy russian_post_actual_cost_kopecks=0 must render as missing actual cost.' );
+$rp_zero = $russian_post->status_payload( array( 'actual_cost_kopecks' => 0 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ) );
+shipment_actual_cost_assert( null === $rp_zero['actual_cost_kopecks'] && '' === $rp_zero['actual_cost_label'] && '' === $rp_zero['actual_cost_compare_status'], 'Russian Post canonical actual_cost_kopecks=0 must render as missing actual cost.' );
 
 $cdek = shipment_actual_cost_reflection_instance( CdekOrderStatusService::class );
 shipment_actual_cost_set_property( $cdek, 'actual_cost_resolver', shipment_test_actual_cost_resolver() );

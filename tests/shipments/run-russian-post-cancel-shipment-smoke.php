@@ -12,6 +12,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostExtractor;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
@@ -176,7 +177,7 @@ $otpravka_client = new RussianPostOtpravkaApiClient( $settings );
 $tracking_client = new RussianPostTrackingApiClient( $settings );
 $repository = new OrderShipmentRepository();
 $status_service = new ShipmentStatusUpdateService( $repository, $tracking_client, new RussianPostTrackingStatusMapper(), shipment_test_actual_cost_resolver() );
-$backlog_service = new ShipmentBacklogService( $repository, $otpravka_client, $status_service, shipment_test_actual_cost_service( $repository ) );
+$backlog_service = new ShipmentBacklogService( $repository, $otpravka_client, $status_service, shipment_test_actual_cost_service( $repository ), new RussianPostShipmentActualCostExtractor() );
 
 $GLOBALS['wdc_cancel_smoke_request_body'] = '{"result-ids":[2285075494],"errors":[]}';
 $delete = $otpravka_client->delete_backlog_orders( array( 2285075494 ) );

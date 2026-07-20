@@ -407,7 +407,7 @@ final class Plugin {
 		$this->container->register( ShipmentActualCostComparisonService::class, fn(): ShipmentActualCostComparisonService => new ShipmentActualCostComparisonService() );
 		$this->container->register( ShipmentBaseApiCostResolver::class, fn(): ShipmentBaseApiCostResolver => new ShipmentBaseApiCostResolver() );
 		$this->container->register( ShipmentActualCostResolver::class, fn(): ShipmentActualCostResolver => new ShipmentActualCostResolver( $this->container->get( ShipmentActualCostComparisonService::class ), $this->container->get( ShipmentBaseApiCostResolver::class ) ) );
-		$this->container->register( ShipmentActualCostService::class, fn(): ShipmentActualCostService => new ShipmentActualCostService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentActualCostResolver::class ) ) );
+		$this->container->register( ShipmentActualCostService::class, fn(): ShipmentActualCostService => new ShipmentActualCostService( $this->container->get( OrderShipmentRepository::class ) ) );
 		$this->container->register( DpdShipmentDateResolver::class, fn(): DpdShipmentDateResolver => new DpdShipmentDateResolver( $this->container->get( CalendarService::class ), $this->container->get( TimezoneService::class ) ) );
 		$this->container->register( DpdShipmentPayloadBuilder::class, fn(): DpdShipmentPayloadBuilder => new DpdShipmentPayloadBuilder( $this->container->get( DpdSettings::class ) ) );
 		$this->container->register( DpdShipmentRepository::class, fn(): DpdShipmentRepository => new DpdShipmentRepository( $this->container->get( OrderShipmentRepository::class ) ) );

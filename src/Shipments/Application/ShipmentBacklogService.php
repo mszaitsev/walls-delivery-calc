@@ -15,7 +15,7 @@ final class ShipmentBacklogService {
 		private RussianPostOtpravkaApiClient $otpravka_client,
 		private ShipmentStatusUpdateService $status_updates,
 		private ShipmentActualCostService $actual_cost_service,
-		private ?RussianPostShipmentActualCostExtractor $actual_cost_extractor = null
+		private RussianPostShipmentActualCostExtractor $actual_cost_extractor
 	) {
 	}
 
@@ -120,14 +120,9 @@ final class ShipmentBacklogService {
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
-		$actual_cost = 'backlog_search' === $source_lookup
-			? $this->actual_cost_extractor()->fields_from_row( $selected, 'backlog_search' )
-			: array();
-		$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $actual_cost );
-		if ( array() !== $actual_cost ) {
-			unset( $actual_cost['actual_cost_kopecks'], $actual_cost['actual_cost_currency'], $actual_cost['actual_cost_source'], $actual_cost['actual_cost_source_detail'], $actual_cost['actual_cost_updated_at'] );
-			$shipment = array_merge( $shipment, $actual_cost );
-		}
+		$actual_cost_candidate = 'backlog_search' === $source_lookup
+			? $this->actual_cost_extractor->cost_from_row( $selected, 'backlog_search' )
+			: null;
 		if ( $backlog_order_id > 0 ) {
 			$shipment['backlog_order_id'] = $backlog_order_id;
 		}
@@ -213,7 +208,7 @@ final class ShipmentBacklogService {
 		}
 
 		$backlog_orders = is_array( $backlog_search['orders'] ?? null ) ? $backlog_search['orders'] : array();
-		$backlog_selected = $this->actual_cost_extractor()->select_search_result( $backlog_orders, $barcode );
+		$backlog_selected = $this->actual_cost_extractor->select_search_result( $backlog_orders, $barcode );
 		if ( null !== $backlog_selected ) {
 			return array(
 				'success' => true,
@@ -241,7 +236,7 @@ final class ShipmentBacklogService {
 		}
 
 		$shipment_orders = is_array( $shipment_search['orders'] ?? null ) ? $shipment_search['orders'] : array();
-		$shipment_selected = $this->actual_cost_extractor()->select_search_result( $shipment_orders, $barcode );
+		$shipment_selected = $this->actual_cost_extractor->select_search_result( $shipment_orders, $barcode );
 		if ( null !== $shipment_selected ) {
 			return array(
 				'success' => true,
@@ -283,28 +278,6 @@ final class ShipmentBacklogService {
 		if ( method_exists( $order, 'add_order_note' ) ) {
 			$order->add_order_note( $message );
 		}
-	}
-
-	private function actual_cost_extractor(): RussianPostShipmentActualCostExtractor {
-		if ( ! $this->actual_cost_extractor instanceof RussianPostShipmentActualCostExtractor ) {
-			$this->actual_cost_extractor = new RussianPostShipmentActualCostExtractor();
-		}
-
-		return $this->actual_cost_extractor;
-	}
-
-	/**
-	 * @param array<string,mixed> $fields
-	 */
-	private function actual_cost_candidate_from_fields( array $fields ): ?ShipmentActualCost {
-		$amount = is_numeric( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] ?? null )
-			? (int) ( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] )
-			: 0;
-		if ( $amount <= 0 ) {
-			return null;
-		}
-
-		return new ShipmentActualCost( $amount, 'RUB', 'carrier_api', (string) ( $fields['russian_post_actual_cost_source'] ?? 'russian_post_shipment_search' ) );
 	}
 
 	private function order_id( object $order ): int {

@@ -13,7 +13,7 @@ function shipment_test_actual_cost_resolver(): ShipmentActualCostResolver {
 }
 
 function shipment_test_actual_cost_service( OrderShipmentRepository $repository ): ShipmentActualCostService {
-	return new ShipmentActualCostService( $repository, shipment_test_actual_cost_resolver() );
+	return new ShipmentActualCostService( $repository );
 }
 
 /**

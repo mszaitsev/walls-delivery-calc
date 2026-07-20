@@ -19,14 +19,7 @@ final class ShipmentActualCostResolver {
 	 * @param array<string,mixed> $shipment
 	 */
 	public function amount_kopecks( array $shipment ): ?int {
-		foreach ( array( 'actual_cost_kopecks', 'russian_post_actual_cost_kopecks' ) as $key ) {
-			$value = $this->positive_int_or_null( $shipment[ $key ] ?? null );
-			if ( null !== $value ) {
-				return $value;
-			}
-		}
-
-		return null;
+		return $this->positive_int_or_null( $shipment['actual_cost_kopecks'] ?? null );
 	}
 
 	/**
@@ -37,7 +30,7 @@ final class ShipmentActualCostResolver {
 		$actual_kopecks = $this->amount_kopecks( $shipment );
 		$base_kopecks = $this->base_costs->resolve_from_order( $order );
 		$payload = $this->comparison->compare( $actual_kopecks, $base_kopecks )->to_array();
-		$source = (string) ( $shipment['actual_cost_source'] ?? $shipment['russian_post_actual_cost_source'] ?? '' );
+		$source = (string) ( $shipment['actual_cost_source'] ?? '' );
 
 		return $payload + array(
 			'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks,
@@ -48,40 +41,17 @@ final class ShipmentActualCostResolver {
 		);
 	}
 
-	/**
-	 * @param array<string,mixed> $shipment
-	 * @return array<string,mixed>
-	 */
-	public function with_legacy_canonical_fields( array $shipment, string $updated_at ): array {
-		if ( array_key_exists( 'actual_cost_kopecks', $shipment ) ) {
-			return $shipment;
-		}
-		$legacy = $this->positive_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
-		if ( null === $legacy ) {
-			return $shipment;
-		}
-
-		$shipment['actual_cost_kopecks'] = $legacy;
-		$shipment['actual_cost_currency'] = 'RUB';
-		$shipment['actual_cost_source'] = 'legacy_import';
-		$shipment['actual_cost_source_detail'] = (string) ( $shipment['russian_post_actual_cost_source'] ?? '' );
-		$shipment['actual_cost_updated_at'] = $updated_at;
-
-		return $shipment;
-	}
-
 	private function source_label( string $source ): string {
 		$labels = array(
 			'manual' => 'введено вручную',
 			'carrier_api' => 'API перевозчика',
 			'carrier_status' => 'API перевозчика',
 			'carrier_reconciliation' => 'сверка перевозчика',
-			'legacy_import' => 'legacy import',
 		);
 		$label = $labels[ $source ] ?? ( '' !== $source ? $source : '' );
 
 		return match ( $source ) {
-			'manual', 'carrier_api', 'carrier_status', 'carrier_reconciliation', 'legacy_import' => function_exists( '__' ) ? __( $label, 'walls-delivery-calc' ) : $label,
+			'manual', 'carrier_api', 'carrier_status', 'carrier_reconciliation' => function_exists( '__' ) ? __( $label, 'walls-delivery-calc' ) : $label,
 			default => '' !== $source ? $source : '',
 		};
 	}
