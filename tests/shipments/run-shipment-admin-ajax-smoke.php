@@ -95,6 +95,7 @@ shipment_admin_ajax_assert( str_contains( $payload_builder, 'function carrier_ui
 shipment_admin_ajax_assert( ! str_contains( $metabox, 'CarrierShipmentLifecycleContinuationInterface' ), 'Metabox must not own lifecycle continuation business contract.' );
 
 $ajax_dir = $root . '/src/Shipments/Admin/Ajax/';
+require_once $root . '/src/Domain/Common/MoneyParser.php';
 foreach ( array_keys( $controllers ) as $class ) {
 	require_once $ajax_dir . $class . '.php';
 }

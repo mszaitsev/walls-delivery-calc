@@ -11,9 +11,7 @@ final class Money {
 	}
 
 	public static function from_rubles( float|int|string $rubles, string $currency = 'RUB' ): self {
-		$normalized = str_replace( ',', '.', (string) $rubles );
-
-		return new self( (int) round( (float) $normalized * 100 ), $currency );
+		return new self( MoneyParser::rubles_to_kopecks( (string) $rubles ), $currency );
 	}
 
 	public static function from_kopecks( int $kopecks, string $currency = 'RUB' ): self {

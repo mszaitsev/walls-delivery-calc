@@ -5,6 +5,7 @@ use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
@@ -31,6 +32,11 @@ $money = Money::from_rubles( '123.45' );
 smoke_assert( 12345 === $money->get_kopecks(), 'Money kopecks must round-trip from rubles.' );
 smoke_assert( array() === $money->validate(), 'Money must validate.' );
 smoke_assert( Money::from_array( $money->to_array() )->get_kopecks() === $money->get_kopecks(), 'Money array round-trip failed.' );
+smoke_assert( 123450 === MoneyParser::rubles_to_kopecks( '1234,5' ), 'MoneyParser must parse comma rubles exactly.' );
+smoke_assert( 123456 === MoneyParser::rubles_to_kopecks( '1 234.56' ), 'MoneyParser must ignore grouped spaces.' );
+smoke_assert( 123457 === MoneyParser::rubles_to_kopecks( '1234.565' ), 'MoneyParser must round the third fractional digit.' );
+smoke_assert( 29880 === MoneyParser::first_decimal_to_kopecks( '298.8 RUB' ), 'MoneyParser must extract Yandex-style currency strings.' );
+smoke_assert( null === MoneyParser::numeric_to_kopecks( 'bad' ), 'MoneyParser numeric conversion must return null for invalid values.' );
 
 $address = new Address(
 	country_code: 'RU',

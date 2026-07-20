@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationBuilder;
 
@@ -123,10 +124,11 @@ final class ShipmentModalRequestMapper {
 
 	private function rubles_to_kopecks( mixed $value ): int {
 		$value = $this->decimal_string( $value );
-		if ( '' === $value || ! is_numeric( $value ) ) {
+		if ( '' === $value ) {
 			return -1;
 		}
+		$kopecks = MoneyParser::numeric_to_kopecks( $value );
 
-		return (int) round( (float) $value * 100 );
+		return null !== $kopecks ? $kopecks : -1;
 	}
 }

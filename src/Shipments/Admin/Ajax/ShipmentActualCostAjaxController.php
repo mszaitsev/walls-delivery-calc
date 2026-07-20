@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Admin\Ajax;
 
 use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 
 defined( 'ABSPATH' ) || exit;
@@ -72,8 +73,7 @@ final class ShipmentActualCostAjaxController {
 		if ( 1 !== preg_match( '/^\d+(?:\.\d{1,2})?$/', $raw ) ) {
 			throw new \InvalidArgumentException( __( 'Стоимость должна быть положительным числом с максимум двумя знаками после запятой.', 'walls-delivery-calc' ) );
 		}
-		list( $rubles, $kopecks ) = array_pad( explode( '.', $raw, 2 ), 2, '' );
-		$amount = (int) $rubles * 100 + (int) str_pad( $kopecks, 2, '0' );
+		$amount = MoneyParser::rubles_to_kopecks( $raw );
 		if ( $amount <= 0 ) {
 			throw new \InvalidArgumentException( __( 'Фактическая стоимость должна быть больше нуля.', 'walls-delivery-calc' ) );
 		}

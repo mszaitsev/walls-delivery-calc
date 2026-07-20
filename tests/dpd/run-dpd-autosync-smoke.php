@@ -167,13 +167,24 @@ $service->run( 'cron' );
 dpd_autosync_assert( 120000 === (int) $repository->find( $order )['actual_cost_kopecks'] && 'carrier_status' === (string) $repository->find( $order )['actual_cost_source'], 'Positive DPD enrichment actual cost must overwrite manual actual cost.' );
 
 $soap = new DpdAutosyncFakeSoap();
+$order = new DpdAutosyncSmokeOrder( 804 );
+list( $service, $settings, $repository ) = dpd_autosync_context( array( $order ), $soap, true );
+dpd_autosync_seed( $repository, $order, 'DPD804', array( 'planned_delivery_date' => '2026-06-20' ) );
+$soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-cost-only', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD804', '804' ) ) ), array() ) );
+$soap->queue( 'getStatesByDPDOrder', new DpdSoapResponse( true, array( 'return' => array( 'states' => array( 'orderCost' => 1250 ) ) ), array() ) );
+$service->run( 'cron' );
+$cost_only_shipment = $repository->find( $order );
+dpd_autosync_assert( 125000 === (int) ( $cost_only_shipment['actual_cost_kopecks'] ?? 0 ) && 'carrier_status' === (string) ( $cost_only_shipment['actual_cost_source'] ?? '' ) && '2026-06-20' === (string) ( $cost_only_shipment['planned_delivery_date'] ?? '' ), 'Positive DPD enrichment actual cost must save independently when planDeliveryDate is absent.' );
+
+$soap = new DpdAutosyncFakeSoap();
 $order = new DpdAutosyncSmokeOrder( 803 );
 list( $service, $settings, $repository ) = dpd_autosync_context( array( $order ), $soap, true );
 dpd_autosync_seed( $repository, $order, 'DPD803', array( 'actual_cost_kopecks' => 100000, 'actual_cost_source' => 'carrier_api', 'actual_cost_updated_at' => '2026-06-01 10:00:00' ) );
 $soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-zero', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD803', '803' ) ) ), array() ) );
 $soap->queue( 'getStatesByDPDOrder', new DpdSoapResponse( true, array( 'return' => array( 'states' => array( 'orderCost' => 0, 'planDeliveryDate' => '2026-06-27' ) ) ), array() ) );
 $service->run( 'cron' );
-dpd_autosync_assert( 100000 === (int) $repository->find( $order )['actual_cost_kopecks'] && 'carrier_api' === (string) $repository->find( $order )['actual_cost_source'] && '2026-06-01 10:00:00' === (string) $repository->find( $order )['actual_cost_updated_at'], 'Zero DPD enrichment actual cost must not overwrite existing actual cost.' );
+$date_only_shipment = $repository->find( $order );
+dpd_autosync_assert( 100000 === (int) $date_only_shipment['actual_cost_kopecks'] && 'carrier_api' === (string) $date_only_shipment['actual_cost_source'] && '2026-06-01 10:00:00' === (string) $date_only_shipment['actual_cost_updated_at'] && '2026-06-27' === (string) ( $date_only_shipment['planned_delivery_date'] ?? '' ), 'DPD enrichment planDeliveryDate must save independently when actual cost is missing or zero.' );
 
 $soap->calls = array();
 $soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-same', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD801', '801' ) ) ), array() ) );

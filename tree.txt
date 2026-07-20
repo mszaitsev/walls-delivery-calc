@@ -445,6 +445,7 @@ C:.
 |   |   |       DateRange.php
 |   |   |       DeliveryDaysFormatter.php
 |   |   |       Money.php
+|   |   |       MoneyParser.php
 |   |   |
 |   |   +---Package
 |   |   |       Package.php

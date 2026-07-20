@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Cdek;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiException;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
@@ -550,9 +551,9 @@ final class CdekOrderStatusService {
 		if ( ! is_numeric( $total ) ) {
 			return null;
 		}
-		$kopecks = (int) round( (float) $total * 100 );
+		$kopecks = MoneyParser::numeric_to_kopecks( $total );
 
-		return $kopecks > 0 ? $kopecks : null;
+		return null !== $kopecks && $kopecks > 0 ? $kopecks : null;
 	}
 
 	/**

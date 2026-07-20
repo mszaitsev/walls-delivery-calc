@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\YandexDelivery\Shipment;
 
+use WallsShop\WDC\Domain\Common\MoneyParser;
+
 defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryOffer {
@@ -60,17 +62,8 @@ final class YandexDeliveryOffer {
 		if ( is_int( $value ) ) {
 			return max( 0, $value );
 		}
-		if ( is_float( $value ) ) {
-			return max( 0, (int) round( $value * 100 ) );
-		}
-		$text = trim( (string) $value );
-		if ( '' === $text ) {
-			return 0;
-		}
-		if ( preg_match( '/([0-9]+(?:[\.,][0-9]+)?)/', $text, $matches ) ) {
-			return max( 0, (int) round( (float) str_replace( ',', '.', $matches[1] ) * 100 ) );
-		}
+		$kopecks = MoneyParser::first_decimal_to_kopecks( $value );
 
-		return 0;
+		return null !== $kopecks ? max( 0, $kopecks ) : 0;
 	}
 }
