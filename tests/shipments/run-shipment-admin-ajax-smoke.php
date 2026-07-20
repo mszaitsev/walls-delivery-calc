@@ -8,6 +8,12 @@ if ( ! function_exists( 'add_action' ) ) {
 		$GLOBALS['wdc_shipment_admin_ajax_registered_hooks'][] = array( $hook_name, $callback );
 	}
 }
+if ( ! function_exists( '__' ) ) {
+	function __( string $text, string $domain = '' ): string {
+		unset( $domain );
+		return $text;
+	}
+}
 
 function shipment_admin_ajax_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -135,6 +141,21 @@ foreach ( $expected_callbacks as $hook_name => $expected ) {
 	shipment_admin_ajax_assert( is_callable( $registered[ $hook_name ] ), 'Registered AJAX callback must be callable: ' . $hook_name );
 	shipment_admin_ajax_assert( is_array( $registered[ $hook_name ] ) && is_object( $registered[ $hook_name ][0] ) && $registered[ $hook_name ][1] === $expected[1], 'Registered AJAX callback must point to expected controller method: ' . $hook_name );
 	shipment_admin_ajax_assert( $registered[ $hook_name ][0] instanceof ( '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $expected[0] ), 'Registered AJAX callback must point to expected controller instance: ' . $hook_name );
+}
+
+$actual_cost_controller = ( new ReflectionClass( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController::class ) )->newInstanceWithoutConstructor();
+$parse_actual_cost = new ReflectionMethod( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController::class, 'parse_amount_kopecks' );
+$parse_actual_cost->setAccessible( true );
+shipment_admin_ajax_assert( 123456 === $parse_actual_cost->invoke( $actual_cost_controller, '1234.56' ), 'Actual cost parser must convert decimal rubles to exact kopecks.' );
+shipment_admin_ajax_assert( 123450 === $parse_actual_cost->invoke( $actual_cost_controller, '1234,5' ), 'Actual cost parser must accept comma decimals without float rounding.' );
+foreach ( array( '0', '0.00', '', '-1', '1.234' ) as $invalid_actual_cost ) {
+	$rejected = false;
+	try {
+		$parse_actual_cost->invoke( $actual_cost_controller, $invalid_actual_cost );
+	} catch ( InvalidArgumentException ) {
+		$rejected = true;
+	}
+	shipment_admin_ajax_assert( $rejected, 'Actual cost parser must reject invalid value: ' . $invalid_actual_cost );
 }
 
 echo "Shipment admin AJAX smoke passed.\n";

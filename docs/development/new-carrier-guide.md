@@ -1,6 +1,6 @@
 # New Carrier Guide
 
-Version: 0.125.0
+Version: 0.125.1
 
 Use `ExampleCarrier` as a mental model only; do not add it to production. This guide is implementable: follow it in order and add only capabilities the carrier actually supports.
 
@@ -141,7 +141,7 @@ final class ExampleShipmentAdapter implements CarrierShipmentAdapterInterface {
 
 Required: all interface methods. Supported capability is separate from interface implementation: lifecycle/cancel/manual attach methods always exist, but a carrier may return a public-safe unsupported response when the feature is not available. Document actions are not adapter methods; implement a document provider only when the carrier exposes downloadable artifacts. Typical mistakes: persisting inside the adapter, doing document download inside the adapter, leaking raw API errors, or adding carrier branches to generic JS.
 
-Actual shipment cost extraction is optional, but when a carrier can return the real shipment cost immediately or during a later status/reconciliation update, convert it into the common contract: integer `actual_cost_kopecks`, `actual_cost_currency=RUB`, `actual_cost_source`, optional `actual_cost_source_detail`, and `actual_cost_updated_at`. Do not introduce `example_actual_cost_*` fields. Carriers with no actual-cost API still get the shared manual fallback in the shipment card.
+Actual shipment cost extraction is optional, but when a carrier can return the real shipment cost immediately or during a later status/reconciliation update, convert it into a common actual-cost candidate and pass it to `ShipmentActualCostService`. The service writes integer `actual_cost_kopecks`, `actual_cost_currency=RUB`, `actual_cost_source`, optional `actual_cost_source_detail`, and `actual_cost_updated_at`; strictly positive carrier values overwrite any previous source, while missing/null/zero values leave the stored cost unchanged. Do not introduce `example_actual_cost_*` fields or implement a carrier-local overwrite policy. Carriers with no actual-cost API still get the shared manual fallback in the shipment card.
 
 ## 6. ShipmentCreateResult
 

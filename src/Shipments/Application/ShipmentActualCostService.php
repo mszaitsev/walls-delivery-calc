@@ -18,8 +18,8 @@ final class ShipmentActualCostService {
 	 * @return array<string,mixed>
 	 */
 	public function manual_set( object $order, string $carrier_key, int $amount_kopecks ): array {
-		if ( $amount_kopecks < 0 ) {
-			throw new \InvalidArgumentException( 'Actual shipment cost cannot be negative.' );
+		if ( $amount_kopecks <= 0 ) {
+			throw new \InvalidArgumentException( 'Фактическая стоимость должна быть больше нуля.' );
 		}
 
 		return $this->save_cost( $order, $carrier_key, new ShipmentActualCost( $amount_kopecks, 'RUB', 'manual', 'admin_manual', $this->now() ), true );
@@ -28,9 +28,9 @@ final class ShipmentActualCostService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function manual_clear( object $order, string $carrier_key ): array {
+	public function clear( object $order, string $carrier_key ): array {
 		$shipment = $this->existing_shipment( $order, $carrier_key );
-		foreach ( array( 'actual_cost_kopecks', 'actual_cost_currency', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at' ) as $key ) {
+		foreach ( array( 'actual_cost_kopecks', 'actual_cost_currency', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at', 'russian_post_actual_cost_kopecks', 'russian_post_actual_cost_rub', 'russian_post_actual_cost_source' ) as $key ) {
 			unset( $shipment[ $key ] );
 		}
 		$shipment['updated_at'] = $this->now();
@@ -43,9 +43,8 @@ final class ShipmentActualCostService {
 	 * @return array<string,mixed>
 	 */
 	public function apply_carrier_cost( object $order, string $carrier_key, ShipmentActualCost $cost ): array {
-		$shipment = $this->existing_shipment( $order, $carrier_key );
-		if ( 'manual' === (string) ( $shipment['actual_cost_source'] ?? '' ) ) {
-			return $shipment;
+		if ( $cost->amount_kopecks <= 0 ) {
+			return $this->existing_shipment( $order, $carrier_key );
 		}
 
 		return $this->save_cost( $order, $carrier_key, $cost, false );

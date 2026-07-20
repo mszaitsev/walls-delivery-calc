@@ -205,7 +205,7 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 					'order_status' => $order_status_code,
 					'order_status_name' => (string) ( $order_status['name'] ?? '' ),
 					'planned_delivery_date' => $planned_delivery_date,
-					'actual_cost_kopecks' => $actual_cost_kopecks,
+					'actual_cost_candidate_kopecks' => $actual_cost_kopecks,
 				)
 			);
 		}
@@ -220,7 +220,7 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'order_status' => $order_status_code,
 			'order_status_name' => (string) ( $order_status['name'] ?? '' ),
 			'planned_delivery_date' => $planned_delivery_date,
-			'actual_cost_kopecks' => $actual_cost_kopecks,
+			'actual_cost_candidate_kopecks' => $actual_cost_kopecks,
 		);
 		$this->log( 'info', 'CDEK order create request accepted.', $this->sanitize_response_snapshot( $body ) );
 
@@ -303,7 +303,7 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			'request_state' => (string) ( $request_row['state'] ?? $body['registration_state'] ?? '' ),
 			'order_status' => (string) ( $status['code'] ?? $body['order_status'] ?? '' ),
 			'planned_delivery_date' => $this->planned_delivery_date( $entity ),
-			'actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
+			'cdek_delivery_total_kopecks' => $this->delivery_total_kopecks( $entity ),
 			'errors' => $this->safe_errors( $request_row ),
 		);
 	}

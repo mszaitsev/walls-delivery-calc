@@ -24,6 +24,7 @@ defined( 'SECURE_AUTH_KEY' ) || define( 'SECURE_AUTH_KEY', 'shipment-cancel-smok
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
 
 function russian_post_cancel_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -174,8 +175,8 @@ $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), $encry
 $otpravka_client = new RussianPostOtpravkaApiClient( $settings );
 $tracking_client = new RussianPostTrackingApiClient( $settings );
 $repository = new OrderShipmentRepository();
-$status_service = new ShipmentStatusUpdateService( $repository, $tracking_client, new RussianPostTrackingStatusMapper() );
-$backlog_service = new ShipmentBacklogService( $repository, $otpravka_client, $status_service );
+$status_service = new ShipmentStatusUpdateService( $repository, $tracking_client, new RussianPostTrackingStatusMapper(), shipment_test_actual_cost_resolver() );
+$backlog_service = new ShipmentBacklogService( $repository, $otpravka_client, $status_service, shipment_test_actual_cost_service( $repository ) );
 
 $GLOBALS['wdc_cancel_smoke_request_body'] = '{"result-ids":[2285075494],"errors":[]}';
 $delete = $otpravka_client->delete_backlog_orders( array( 2285075494 ) );

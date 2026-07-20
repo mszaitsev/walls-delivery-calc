@@ -28,6 +28,7 @@ $GLOBALS['wpdb'] = new wpdb();
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiResponse;
@@ -270,9 +271,9 @@ function yd_framework_stack( array $responses ): array {
 	$mapper = new YandexShipmentPersistenceMapper( $yandex_repository, $status_mapping, $order_status_mapping );
 	$button_policy = new YandexShipmentButtonPolicy( $status_mapping );
 	$framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
-	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
+	$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, shipment_test_actual_cost_resolver(), $status_mapping );
 	$registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-	$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, $registry, array( $mapper ) );
+	$creation = shipment_test_creation_service( $base_repository, array( $adapter ), array( $mapper ), $registry );
 
 	return array( $base_repository, $adapter, $creation, $framework_registration, $fake );
 }
@@ -298,9 +299,9 @@ $order_status_mapping = new ShipmentOrderStatusMappingService( new SettingsRepos
 $mapper = new YandexShipmentPersistenceMapper( $yandex_repository, $status_mapping, $order_status_mapping );
 $button_policy = new YandexShipmentButtonPolicy( $status_mapping );
 $framework_registration = new YandexShipmentRegistrationService( $core_registration, $payload_builder, $client, $yandex_repository, $mapper, $button_policy, $status_mapping, $order_status_mapping );
-$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, $status_mapping );
+$adapter = new YandexShipmentAdapter( $framework_registration, $button_policy, shipment_test_actual_cost_resolver(), $status_mapping );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-$creation = new ShipmentCreationService( $base_repository, array( $adapter ), null, $registry, array( $mapper ) );
+$creation = shipment_test_creation_service( $base_repository, array( $adapter ), array( $mapper ), $registry );
 $order = new YdFrameworkOrder( 777 );
 $request = yd_framework_request();
 
@@ -765,6 +766,7 @@ $preview_mapper = new YandexShipmentPersistenceMapper( $preview_repository, $pre
 $preview_adapter = new YandexShipmentAdapter(
 	new YandexShipmentRegistrationService( new CoreYandexRegistrationService( new YandexDeliveryShipmentPayloadBuilder(), $preview_client, new YandexDeliveryEarliestOfferSelector() ), new YandexDeliveryShipmentPayloadBuilder(), $preview_client, $preview_repository, $preview_mapper, new YandexShipmentButtonPolicy( $preview_status_mapping ), $preview_status_mapping ),
 	new YandexShipmentButtonPolicy( $preview_status_mapping ),
+	shipment_test_actual_cost_resolver(),
 	$preview_status_mapping
 );
 $preview_payload = $preview_adapter->build_safe_payload_preview( yd_framework_request() );

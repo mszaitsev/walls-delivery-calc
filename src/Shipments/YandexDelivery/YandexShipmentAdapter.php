@@ -10,8 +10,6 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
-use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
-use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -19,22 +17,11 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function __construct(
 		private YandexShipmentRegistrationService $registration,
 		private YandexShipmentButtonPolicy $buttons,
+		private ShipmentActualCostResolver $actual_cost_resolver,
 		private YandexStatusMapping|null $status_mapping = null,
 		private YandexShipmentLabelPolicy|null $label_policy = null,
-		private ShipmentActualCostComparisonService|null $actual_costs = null,
-		private ShipmentBaseApiCostResolver|null $base_costs = null,
-		private ShipmentActualCostResolver|null $actual_cost_resolver = null
 	) {
 		$this->label_policy ??= new YandexShipmentLabelPolicy( $this->status_mapping );
-		if ( ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
-			$this->actual_costs = new ShipmentActualCostComparisonService();
-		}
-		if ( ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
-			$this->base_costs = new ShipmentBaseApiCostResolver();
-		}
-		if ( ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
-			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs, $this->base_costs );
-		}
 	}
 
 	public function carrier_key(): string { return YandexDeliverySettings::CARRIER_KEY; }
@@ -214,44 +201,7 @@ final class YandexShipmentAdapter implements CarrierShipmentAdapterInterface {
 	 * @return array<string,mixed>
 	 */
 	private function actual_cost_payload( array $shipment, object $order ): array {
-		return $this->actual_cost_resolver()->presentation_payload( $shipment, $order );
-	}
-
-	private function positive_int_or_null( mixed $value ): ?int {
-		if ( is_int( $value ) ) {
-			return $value > 0 ? $value : null;
-		}
-		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
-			$integer = (int) $value;
-
-			return $integer > 0 ? $integer : null;
-		}
-
-		return null;
-	}
-
-	private function actual_costs(): ShipmentActualCostComparisonService {
-		if ( ! isset( $this->actual_costs ) || ! $this->actual_costs instanceof ShipmentActualCostComparisonService ) {
-			$this->actual_costs = new ShipmentActualCostComparisonService();
-		}
-
-		return $this->actual_costs;
-	}
-
-	private function base_costs(): ShipmentBaseApiCostResolver {
-		if ( ! isset( $this->base_costs ) || ! $this->base_costs instanceof ShipmentBaseApiCostResolver ) {
-			$this->base_costs = new ShipmentBaseApiCostResolver();
-		}
-
-		return $this->base_costs;
-	}
-
-	private function actual_cost_resolver(): ShipmentActualCostResolver {
-		if ( ! isset( $this->actual_cost_resolver ) || ! $this->actual_cost_resolver instanceof ShipmentActualCostResolver ) {
-			$this->actual_cost_resolver = new ShipmentActualCostResolver( $this->actual_costs(), $this->base_costs() );
-		}
-
-		return $this->actual_cost_resolver;
+		return $this->actual_cost_resolver->presentation_payload( $shipment, $order );
 	}
 
 	public function auto_sync_throttle_microseconds(): int { return 0; }

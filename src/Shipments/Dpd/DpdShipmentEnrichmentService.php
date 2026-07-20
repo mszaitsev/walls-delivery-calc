@@ -4,11 +4,18 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Dpd;
 
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 
 defined( 'ABSPATH' ) || exit;
 
 final class DpdShipmentEnrichmentService {
-	public function __construct( private DpdApiClient $client, private DpdShipmentRepository $repository ) {}
+	public function __construct(
+		private DpdApiClient $client,
+		private DpdShipmentRepository $repository,
+		private ShipmentActualCostService $actual_cost_service
+	) {}
 
 	/** @return array<string,mixed> */
 	public function enrich_current_order( object $order ): array {
@@ -23,17 +30,11 @@ final class DpdShipmentEnrichmentService {
 		$date = trim( (string) ( $state['planDeliveryDate'] ?? '' ) );
 		if ( null === $cost || '' === $date ) { return array( 'success' => true, 'message' => 'DPD пока не вернул цену и плановую дату.', 'complete' => false ); }
 		$now = $this->now();
-		if ( 'manual' !== (string) ( $shipment['actual_cost_source'] ?? '' ) ) {
-			$shipment['actual_cost_kopecks'] = $cost;
-			$shipment['actual_cost_currency'] = 'RUB';
-			$shipment['actual_cost_source'] = 'carrier_status';
-			$shipment['actual_cost_source_detail'] = 'dpd_events';
-			$shipment['actual_cost_updated_at'] = $now;
-		}
 		$shipment['planned_delivery_date'] = $date;
 		$shipment['dpd_enrichment_checked_at'] = $now;
 		$shipment['updated_at'] = $now;
 		$this->repository->save( $order, $shipment );
+		$shipment = $this->actual_cost_service->apply_carrier_cost( $order, DpdSettings::CARRIER_KEY, new ShipmentActualCost( $cost, 'RUB', 'carrier_status', 'dpd_events', $now ) );
 		return array( 'success' => true, 'message' => 'Цена и плановая дата DPD обновлены.', 'complete' => true, 'shipment' => $shipment );
 	}
 

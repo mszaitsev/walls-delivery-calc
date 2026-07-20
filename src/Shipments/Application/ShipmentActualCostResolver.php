@@ -20,7 +20,7 @@ final class ShipmentActualCostResolver {
 	 */
 	public function amount_kopecks( array $shipment ): ?int {
 		foreach ( array( 'actual_cost_kopecks', 'russian_post_actual_cost_kopecks' ) as $key ) {
-			$value = $this->non_negative_int_or_null( $shipment[ $key ] ?? null );
+			$value = $this->positive_int_or_null( $shipment[ $key ] ?? null );
 			if ( null !== $value ) {
 				return $value;
 			}
@@ -56,7 +56,7 @@ final class ShipmentActualCostResolver {
 		if ( array_key_exists( 'actual_cost_kopecks', $shipment ) ) {
 			return $shipment;
 		}
-		$legacy = $this->non_negative_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
+		$legacy = $this->positive_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
 		if ( null === $legacy ) {
 			return $shipment;
 		}
@@ -86,14 +86,14 @@ final class ShipmentActualCostResolver {
 		};
 	}
 
-	private function non_negative_int_or_null( mixed $value ): ?int {
+	private function positive_int_or_null( mixed $value ): ?int {
 		if ( is_int( $value ) ) {
-			return $value >= 0 ? $value : null;
+			return $value > 0 ? $value : null;
 		}
 		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
 			$integer = (int) $value;
 
-			return $integer >= 0 ? $integer : null;
+			return $integer > 0 ? $integer : null;
 		}
 
 		return null;

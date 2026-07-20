@@ -4,6 +4,7 @@ declare(strict_types=1);
 define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
@@ -102,8 +103,9 @@ $yandex = shipment_actual_cost_reflection_instance( YandexShipmentAdapter::class
 shipment_actual_cost_set_property( $yandex, 'buttons', new YandexShipmentButtonPolicy() );
 shipment_actual_cost_set_property( $yandex, 'status_mapping', null );
 shipment_actual_cost_set_property( $yandex, 'label_policy', null );
+shipment_actual_cost_set_property( $yandex, 'actual_cost_resolver', shipment_test_actual_cost_resolver() );
 $yandex_zero = $yandex->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ), array( 'actual_cost_kopecks' => 0 ) );
-shipment_actual_cost_assert( 0 === $yandex_zero['actual_cost_kopecks'] && '0.00 руб.' === $yandex_zero['actual_cost_label'] && 'ok' === $yandex_zero['actual_cost_compare_status'] && 10000 === $yandex_zero['base_api_cost_kopecks'], 'Yandex actual_cost_kopecks=0 must render as known zero actual cost.' );
+shipment_actual_cost_assert( null === $yandex_zero['actual_cost_kopecks'] && '' === $yandex_zero['actual_cost_label'] && '' === $yandex_zero['actual_cost_compare_status'] && null === $yandex_zero['base_api_cost_kopecks'], 'Yandex actual_cost_kopecks=0 must render as missing actual cost.' );
 $yandex_string_zero = $yandex->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ), array( 'yandex_offer_pricing_total_kopecks' => '0' ) );
 shipment_actual_cost_assert( null === $yandex_string_zero['actual_cost_kopecks'] && '' === $yandex_string_zero['actual_cost_label'], 'Yandex yandex_offer_pricing_total_kopecks=\"0\" must hide actual-cost presentation.' );
 $yandex_base_zero = $yandex->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 0 ) ) ), array( 'actual_cost_kopecks' => 99500 ) );
@@ -111,16 +113,19 @@ shipment_actual_cost_assert( 99500 === $yandex_base_zero['actual_cost_kopecks'] 
 
 $dpd = shipment_actual_cost_reflection_instance( DpdShipmentAdapter::class );
 shipment_actual_cost_set_property( $dpd, 'buttons', null );
+shipment_actual_cost_set_property( $dpd, 'actual_cost_resolver', shipment_test_actual_cost_resolver() );
 $dpd_zero = $dpd->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ), array( 'actual_cost_kopecks' => 0 ) );
-shipment_actual_cost_assert( 0 === $dpd_zero['actual_cost_kopecks'] && '0.00 руб.' === $dpd_zero['actual_cost_label'] && 'ok' === $dpd_zero['actual_cost_compare_status'], 'DPD canonical actual_cost_kopecks=0 must render as known zero actual cost.' );
+shipment_actual_cost_assert( null === $dpd_zero['actual_cost_kopecks'] && '' === $dpd_zero['actual_cost_label'] && '' === $dpd_zero['actual_cost_compare_status'], 'DPD canonical actual_cost_kopecks=0 must render as missing actual cost.' );
 
 $russian_post = shipment_actual_cost_reflection_instance( ShipmentStatusUpdateService::class );
+shipment_actual_cost_set_property( $russian_post, 'actual_cost_resolver', shipment_test_actual_cost_resolver() );
 $rp_zero = $russian_post->status_payload( array( 'russian_post_actual_cost_kopecks' => 0 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ) );
-shipment_actual_cost_assert( 0 === $rp_zero['actual_cost_kopecks'] && '0.00 руб.' === $rp_zero['actual_cost_label'] && 'ok' === $rp_zero['actual_cost_compare_status'], 'Russian Post legacy russian_post_actual_cost_kopecks=0 must render as known zero actual cost.' );
+shipment_actual_cost_assert( null === $rp_zero['actual_cost_kopecks'] && '' === $rp_zero['actual_cost_label'] && '' === $rp_zero['actual_cost_compare_status'], 'Russian Post legacy russian_post_actual_cost_kopecks=0 must render as missing actual cost.' );
 
 $cdek = shipment_actual_cost_reflection_instance( CdekOrderStatusService::class );
+shipment_actual_cost_set_property( $cdek, 'actual_cost_resolver', shipment_test_actual_cost_resolver() );
 $cdek_zero = $cdek->status_payload( array( 'actual_cost_kopecks' => 0 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ) );
-shipment_actual_cost_assert( 0 === $cdek_zero['actual_cost_kopecks'] && '0.00 руб.' === $cdek_zero['actual_cost_label'] && 'ok' === $cdek_zero['actual_cost_compare_status'], 'CDEK canonical actual_cost_kopecks=0 must render as known zero actual cost.' );
+shipment_actual_cost_assert( null === $cdek_zero['actual_cost_kopecks'] && '' === $cdek_zero['actual_cost_label'] && '' === $cdek_zero['actual_cost_compare_status'], 'CDEK canonical actual_cost_kopecks=0 must render as missing actual cost.' );
 
 $service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Presentation/ShipmentActualCostComparisonService.php' );
 shipment_actual_cost_assert( ! str_contains( $service_source, '1.03' ) && ! str_contains( $service_source, 'floor(' ) && ! str_contains( $service_source, 'round(' ) && ! str_contains( $service_source, '(int)' ), 'Comparison service must not use float threshold arithmetic or silent integer casts.' );

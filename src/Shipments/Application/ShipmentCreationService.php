@@ -20,6 +20,7 @@ final class ShipmentCreationService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private array $adapters,
+		private ShipmentActualCostService $actual_cost_service,
 		private ?Logger $logger = null,
 		private ?CarrierShipmentAdapterRegistry $registry = null,
 		private array $persistence_mappers = array()
@@ -90,8 +91,10 @@ final class ShipmentCreationService {
 		if ( ! $result->success ) {
 			$failed_fields = $mapper->build_failed_fields( $request, $result, $preview, $now );
 			if ( is_array( $failed_fields ) && array() !== $failed_fields ) {
+				$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $failed_fields );
 				$shipment = $this->common_shipment_envelope( $request, $result, $preview, $failed_fields, $now );
 				$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
+				$shipment = $this->apply_actual_cost_candidate( $order, $request->carrier_key, $actual_cost_candidate, $shipment );
 				$mapper->after_persist( $order, $shipment );
 				if ( method_exists( $mapper, 'result_after_failed_persist' ) ) {
 					$mapped_result = $mapper->result_after_failed_persist( $request, $result, $shipment );
@@ -127,8 +130,10 @@ final class ShipmentCreationService {
 		}
 
 		$mapped_fields = $mapper->build_created_fields( $request, $result, $preview, $now );
+		$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $mapped_fields );
 		$shipment = $this->common_shipment_envelope( $request, $result, $preview, $mapped_fields, $now );
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
+		$shipment = $this->apply_actual_cost_candidate( $order, $request->carrier_key, $actual_cost_candidate, $shipment );
 		$mapper->after_persist( $order, $shipment );
 
 		return $result;
@@ -169,6 +174,7 @@ final class ShipmentCreationService {
 	private function common_shipment_envelope( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, array $carrier_fields, string $now ): array {
 		$request_snapshot = is_array( $carrier_fields['request_snapshot'] ?? null ) ? $carrier_fields['request_snapshot'] : $preview;
 		$response_snapshot = array_key_exists( 'response_snapshot', $carrier_fields ) ? $carrier_fields['response_snapshot'] : $result->raw_reference;
+		unset( $carrier_fields['actual_cost_candidate'] );
 
 		return array_merge(
 			array(
@@ -193,6 +199,27 @@ final class ShipmentCreationService {
 			),
 			$carrier_fields
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $fields
+	 */
+	private function actual_cost_candidate_from_fields( array $fields ): ?ShipmentActualCost {
+		$candidate = $fields['actual_cost_candidate'] ?? null;
+
+		return $candidate instanceof ShipmentActualCost ? $candidate : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $fallback
+	 * @return array<string,mixed>
+	 */
+	private function apply_actual_cost_candidate( object $order, string $carrier_key, ?ShipmentActualCost $candidate, array $fallback ): array {
+		if ( ! $candidate instanceof ShipmentActualCost ) {
+			return $fallback;
+		}
+
+		return $this->actual_cost_service->apply_carrier_cost( $order, $carrier_key, $candidate );
 	}
 
 	private function order_id( object $order ): int {

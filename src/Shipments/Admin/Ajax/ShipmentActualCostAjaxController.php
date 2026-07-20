@@ -42,11 +42,11 @@ final class ShipmentActualCostAjaxController {
 		$order = $this->order();
 		$carrier_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? '' ) );
 		try {
-			$shipment = $this->actual_costs->manual_clear( $order, $carrier_key );
+			$shipment = $this->actual_costs->clear( $order, $carrier_key );
 			wp_send_json_success(
 				array_merge(
 					$this->payloads->carrier_ui_payload( $order, $carrier_key, $shipment ),
-					array( 'message' => __( 'Ручная фактическая стоимость очищена.', 'walls-delivery-calc' ) )
+					array( 'message' => __( 'Фактическая стоимость отправления очищена.', 'walls-delivery-calc' ) )
 				)
 			);
 		} catch ( \InvalidArgumentException $exception ) {
@@ -70,9 +70,14 @@ final class ShipmentActualCostAjaxController {
 			throw new \InvalidArgumentException( __( 'Укажите фактическую стоимость отправления.', 'walls-delivery-calc' ) );
 		}
 		if ( 1 !== preg_match( '/^\d+(?:\.\d{1,2})?$/', $raw ) ) {
-			throw new \InvalidArgumentException( __( 'Стоимость должна быть неотрицательным числом с максимум двумя знаками после запятой.', 'walls-delivery-calc' ) );
+			throw new \InvalidArgumentException( __( 'Стоимость должна быть положительным числом с максимум двумя знаками после запятой.', 'walls-delivery-calc' ) );
+		}
+		list( $rubles, $kopecks ) = array_pad( explode( '.', $raw, 2 ), 2, '' );
+		$amount = (int) $rubles * 100 + (int) str_pad( $kopecks, 2, '0' );
+		if ( $amount <= 0 ) {
+			throw new \InvalidArgumentException( __( 'Фактическая стоимость должна быть больше нуля.', 'walls-delivery-calc' ) );
 		}
 
-		return (int) round( (float) $raw * 100 );
+		return $amount;
 	}
 }

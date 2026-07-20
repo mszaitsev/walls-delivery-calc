@@ -517,6 +517,40 @@ $shipment_events_source = plugin_architecture_source( 'assets/admin/shipments/sh
 $shipment_status_source = plugin_architecture_source( 'assets/admin/shipments/shipment-status.js' );
 plugin_architecture_assert( str_contains( $actual_cost_ajax_source, 'handle_save' ) && str_contains( $actual_cost_ajax_source, 'handle_clear' ) && str_contains( $shipment_metabox_source, 'wdc_save_shipment_actual_cost' ) && str_contains( $shipment_metabox_source, 'wdc_clear_shipment_actual_cost' ), 'Manual actual shipment cost AJAX controller must live in the common shipment namespace.' );
 plugin_architecture_assert( str_contains( $shipment_events_source, 'data-wdc-save-actual-cost' ) && str_contains( $shipment_events_source, 'data-wdc-clear-actual-cost' ) && str_contains( $shipment_status_source, 'data-wdc-actual-cost-state' ), 'Common shipment JS must own manual actual cost controls.' );
+$actual_cost_legacy_button_text = 'Очистить ' . 'ручную';
+$actual_cost_legacy_message_text = 'Ручная фактическая стоимость ' . 'очищена';
+plugin_architecture_assert( ! str_contains( $shipment_metabox_source, $actual_cost_legacy_button_text ) && ! str_contains( $actual_cost_ajax_source, $actual_cost_legacy_message_text ), 'Actual cost clear wording must apply to any source, not only manual values.' );
+
+$actual_cost_production_sources = array();
+foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
+	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+	$actual_cost_production_sources[ $relative ] = (string) file_get_contents( $file );
+}
+foreach ( $actual_cost_production_sources as $relative => $source ) {
+	foreach ( array(
+		'?ShipmentActualCostResolver',
+		'ShipmentActualCostResolver|null',
+		'?ShipmentActualCostService',
+		'ShipmentActualCostService|null',
+		'?ShipmentActualCostComparisonService',
+		'ShipmentActualCostComparisonService|null',
+		'?ShipmentBaseApiCostResolver',
+		'ShipmentBaseApiCostResolver|null',
+	) as $forbidden_actual_cost_dependency ) {
+		plugin_architecture_assert( ! str_contains( $source, $forbidden_actual_cost_dependency ), 'Actual-cost production dependency must not be nullable/fallback in ' . $relative . ': ' . $forbidden_actual_cost_dependency );
+	}
+	if ( 'src/Core/Plugin.php' !== $relative ) {
+		foreach ( array(
+			'new ShipmentActualCostResolver',
+			'new ShipmentActualCostService',
+			'new ShipmentActualCostComparisonService',
+			'new ShipmentBaseApiCostResolver',
+		) as $forbidden_actual_cost_new ) {
+			plugin_architecture_assert( ! str_contains( $source, $forbidden_actual_cost_new ), 'Actual-cost service/resolver must only be built in Plugin.php, not in ' . $relative . ': ' . $forbidden_actual_cost_new );
+		}
+	}
+}
+plugin_architecture_assert( str_contains( $actual_cost_production_sources['src/Core/Plugin.php'] ?? '', 'ShipmentActualCostResolver::class' ) && str_contains( $actual_cost_production_sources['src/Core/Plugin.php'] ?? '', 'ShipmentActualCostService::class' ), 'Plugin.php must own actual-cost service/resolver registrations.' );
 
 foreach ( array( 'src', 'tests' ) as $actual_cost_dir ) {
 	foreach ( plugin_architecture_php_files( $actual_cost_dir ) as $file ) {

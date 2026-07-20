@@ -33,6 +33,7 @@ defined( 'SECURE_AUTH_KEY' ) || define( 'SECURE_AUTH_KEY', 'shipment-status-smok
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
 
 function shipment_status_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -328,7 +329,7 @@ $empty = $client->get_operation_history( '12345678901234' );
 shipment_status_smoke_assert( false === $empty['success'] && 'Почта России вернула пустую историю операций.' === $empty['error_message'], 'Empty history must return Russian empty-history error.' );
 
 $repository = new OrderShipmentRepository();
-$status_service = new ShipmentStatusUpdateService( $repository, $client, $mapper );
+$status_service = new ShipmentStatusUpdateService( $repository, $client, $mapper, shipment_test_actual_cost_resolver() );
 $no_barcode_order = new ShipmentStatusSmokeOrder( 10, array( OrderShipmentRepository::META_KEY => array( RussianPostDomesticSettings::CARRIER_KEY => array( 'status' => 'created' ) ) ) );
 $no_barcode = $status_service->update_russian_post( $no_barcode_order );
 shipment_status_smoke_assert( false === $no_barcode['success'] && 'У отправления нет ШПИ.' === $no_barcode['message'], 'Shipment without barcode must fail.' );

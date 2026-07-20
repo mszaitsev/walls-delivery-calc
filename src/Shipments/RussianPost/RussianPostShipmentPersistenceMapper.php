@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Shipments\Application\RussianPostShipmentActualCostLookupService;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -64,6 +65,14 @@ final class RussianPostShipmentPersistenceMapper implements CarrierShipmentPersi
 
 		$fields = is_array( $result['fields'] ?? null ) ? $result['fields'] : array();
 		if ( array() !== $fields ) {
+			$amount = is_numeric( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] ?? null )
+				? (int) ( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] )
+				: 0;
+			unset( $fields['actual_cost_kopecks'], $fields['actual_cost_currency'], $fields['actual_cost_source'], $fields['actual_cost_source_detail'], $fields['actual_cost_updated_at'] );
+			if ( $amount > 0 ) {
+				$fields['actual_cost_candidate'] = new ShipmentActualCost( $amount, 'RUB', 'carrier_api', (string) ( $fields['russian_post_actual_cost_source'] ?? 'russian_post_shipment_search' ) );
+			}
+
 			return $fields;
 		}
 		$error_code = trim( (string) ( $result['error_code'] ?? '' ) );

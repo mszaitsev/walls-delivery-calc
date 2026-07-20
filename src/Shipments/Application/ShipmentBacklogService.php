@@ -14,6 +14,7 @@ final class ShipmentBacklogService {
 		private OrderShipmentRepository $repository,
 		private RussianPostOtpravkaApiClient $otpravka_client,
 		private ShipmentStatusUpdateService $status_updates,
+		private ShipmentActualCostService $actual_cost_service,
 		private ?RussianPostShipmentActualCostExtractor $actual_cost_extractor = null
 	) {
 	}
@@ -122,7 +123,9 @@ final class ShipmentBacklogService {
 		$actual_cost = 'backlog_search' === $source_lookup
 			? $this->actual_cost_extractor()->fields_from_row( $selected, 'backlog_search' )
 			: array();
+		$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $actual_cost );
 		if ( array() !== $actual_cost ) {
+			unset( $actual_cost['actual_cost_kopecks'], $actual_cost['actual_cost_currency'], $actual_cost['actual_cost_source'], $actual_cost['actual_cost_source_detail'], $actual_cost['actual_cost_updated_at'] );
 			$shipment = array_merge( $shipment, $actual_cost );
 		}
 		if ( $backlog_order_id > 0 ) {
@@ -130,6 +133,9 @@ final class ShipmentBacklogService {
 		}
 
 		$this->repository->save_for_carrier( $order, $shipment_key, $shipment );
+		if ( $actual_cost_candidate instanceof ShipmentActualCost ) {
+			$shipment = $this->actual_cost_service->apply_carrier_cost( $order, $shipment_key, $actual_cost_candidate );
+		}
 		$this->add_order_note( $order, 'Номер отслеживания Почты России внесен вручную: ' . $barcode . '.' );
 
 		$status_update = $this->status_updates->update_russian_post( $order, $shipment_key );
@@ -285,6 +291,20 @@ final class ShipmentBacklogService {
 		}
 
 		return $this->actual_cost_extractor;
+	}
+
+	/**
+	 * @param array<string,mixed> $fields
+	 */
+	private function actual_cost_candidate_from_fields( array $fields ): ?ShipmentActualCost {
+		$amount = is_numeric( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] ?? null )
+			? (int) ( $fields['actual_cost_kopecks'] ?? $fields['russian_post_actual_cost_kopecks'] )
+			: 0;
+		if ( $amount <= 0 ) {
+			return null;
+		}
+
+		return new ShipmentActualCost( $amount, 'RUB', 'carrier_api', (string) ( $fields['russian_post_actual_cost_source'] ?? 'russian_post_shipment_search' ) );
 	}
 
 	private function order_id( object $order ): int {

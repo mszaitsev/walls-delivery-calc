@@ -31,6 +31,7 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
 
 defined( 'WDC_SECRET_KEY' ) || define( 'WDC_SECRET_KEY', 'shipment-price-smoke-secret' );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -282,7 +283,7 @@ $GLOBALS['rp_shipment_price_remote_get_response'] = array(
 );
 $create_order = new RussianPostShipmentPriceOrder();
 $lookup_service = rp_shipment_price_lookup_service();
-$creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), null, null, array( new RussianPostShipmentPersistenceMapper( $lookup_service ) ) );
+$creation = shipment_test_creation_service( new OrderShipmentRepository(), array( new RussianPostShipmentPriceAdapter() ), array( new RussianPostShipmentPersistenceMapper( $lookup_service ) ) );
 $create_result = $creation->create( $create_order, rp_shipment_price_request() );
 $created_shipment = $create_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 rp_shipment_price_assert( $create_result->success, 'Automatic shipment create must remain successful.' );
@@ -306,6 +307,9 @@ rp_shipment_price_assert( $no_cost_result->success && ! isset( $no_cost_shipment
 
 $status_reflection = new ReflectionClass( ShipmentStatusUpdateService::class );
 $status_service = $status_reflection->newInstanceWithoutConstructor();
+$actual_cost_resolver_property = $status_reflection->getProperty( 'actual_cost_resolver' );
+$actual_cost_resolver_property->setAccessible( true );
+$actual_cost_resolver_property->setValue( $status_service, shipment_test_actual_cost_resolver() );
 $shipment = array( 'russian_post_actual_cost_kopecks' => 39998 );
 
 $payload_equal = $status_service->status_payload(

@@ -4,6 +4,7 @@ declare(strict_types=1);
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
 use WallsShop\WDC\Carriers\Dpd\DpdCredentials;
@@ -97,9 +98,9 @@ function dpd_autosync_context( array $orders, DpdAutosyncFakeSoap $soap, bool $e
 	$dpd_repository = new DpdShipmentRepository( $order_repository );
 	$client = new DpdApiClient( $dpd_settings, $soap );
 	$order_mapping = new ShipmentOrderStatusMappingService( $settings_repository );
-	$enrichment = new DpdShipmentEnrichmentService( $client, $dpd_repository );
+	$enrichment = new DpdShipmentEnrichmentService( $client, $dpd_repository, shipment_test_actual_cost_service( $order_repository ) );
 	$events = new DpdEventSyncService( $client, $dpd_settings, $dpd_repository, new DpdEventNormalizer(), new DpdStatusMapping( $settings_repository ), $order_mapping, null, $enrichment );
-	$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( $dpd_settings ), $client, null, new DpdShipmentButtonPolicy(), $enrichment );
+	$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( $dpd_settings ), shipment_test_actual_cost_resolver(), $client, null, new DpdShipmentButtonPolicy(), $enrichment );
 	$service = new ShipmentStatusAutoSyncService( $settings_repository, $order_repository, ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(), $order_mapping, null, null, null, new CarrierShipmentAdapterRegistry( array( $adapter ) ), $events, $dpd_settings );
 	return array( $service, $dpd_settings, $dpd_repository );
 }
@@ -155,6 +156,25 @@ dpd_autosync_seed( $repository, $order, 'DPD801' );
 $soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-new', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD801', '801' ) ) ), array() ) );
 $service->run( 'cron' );
 dpd_autosync_assert( 1 === $soap->count_method( 'getStatesByDPDOrder' ) && 12345 === (int) $repository->find( $order )['actual_cost_kopecks'] && 'carrier_status' === (string) $repository->find( $order )['actual_cost_source'] && '2026-06-25' === (string) $repository->find( $order )['planned_delivery_date'], 'New DPD event with missing price/date must trigger canonical enrichment.' );
+
+$soap = new DpdAutosyncFakeSoap();
+$order = new DpdAutosyncSmokeOrder( 802 );
+list( $service, $settings, $repository ) = dpd_autosync_context( array( $order ), $soap, true );
+dpd_autosync_seed( $repository, $order, 'DPD802', array( 'actual_cost_kopecks' => 100000, 'actual_cost_source' => 'manual', 'actual_cost_updated_at' => '2026-06-01 10:00:00' ) );
+$soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-manual', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD802', '802' ) ) ), array() ) );
+$soap->queue( 'getStatesByDPDOrder', new DpdSoapResponse( true, array( 'return' => array( 'states' => array( 'orderCost' => 1200, 'planDeliveryDate' => '2026-06-26' ) ) ), array() ) );
+$service->run( 'cron' );
+dpd_autosync_assert( 120000 === (int) $repository->find( $order )['actual_cost_kopecks'] && 'carrier_status' === (string) $repository->find( $order )['actual_cost_source'], 'Positive DPD enrichment actual cost must overwrite manual actual cost.' );
+
+$soap = new DpdAutosyncFakeSoap();
+$order = new DpdAutosyncSmokeOrder( 803 );
+list( $service, $settings, $repository ) = dpd_autosync_context( array( $order ), $soap, true );
+dpd_autosync_seed( $repository, $order, 'DPD803', array( 'actual_cost_kopecks' => 100000, 'actual_cost_source' => 'carrier_api', 'actual_cost_updated_at' => '2026-06-01 10:00:00' ) );
+$soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-zero', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD803', '803' ) ) ), array() ) );
+$soap->queue( 'getStatesByDPDOrder', new DpdSoapResponse( true, array( 'return' => array( 'states' => array( 'orderCost' => 0, 'planDeliveryDate' => '2026-06-27' ) ) ), array() ) );
+$service->run( 'cron' );
+dpd_autosync_assert( 100000 === (int) $repository->find( $order )['actual_cost_kopecks'] && 'carrier_api' === (string) $repository->find( $order )['actual_cost_source'] && '2026-06-01 10:00:00' === (string) $repository->find( $order )['actual_cost_updated_at'], 'Zero DPD enrichment actual cost must not overwrite existing actual cost.' );
+
 $soap->calls = array();
 $soap->queue( 'getEvents', new DpdSoapResponse( true, array( 'docId' => 'doc-same', 'resultComplete' => true, 'event' => array( dpd_autosync_event( 'DPD801', '801' ) ) ), array() ) );
 $service->run( 'cron' );

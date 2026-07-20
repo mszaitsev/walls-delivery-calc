@@ -13,6 +13,9 @@ final class ShipmentActualCost {
 		public readonly string $source_detail = '',
 		public readonly string $updated_at = ''
 	) {
+		if ( $amount_kopecks < 0 ) {
+			throw new \InvalidArgumentException( 'Actual shipment cost cannot be negative.' );
+		}
 	}
 
 	/**
@@ -20,7 +23,7 @@ final class ShipmentActualCost {
 	 */
 	public function to_fields( string $fallback_updated_at ): array {
 		return array(
-			'actual_cost_kopecks' => max( 0, $this->amount_kopecks ),
+			'actual_cost_kopecks' => $this->amount_kopecks,
 			'actual_cost_currency' => '' !== trim( $this->currency ) ? strtoupper( trim( $this->currency ) ) : 'RUB',
 			'actual_cost_source' => '' !== trim( $this->source ) ? trim( $this->source ) : 'carrier_api',
 			'actual_cost_source_detail' => trim( $this->source_detail ),

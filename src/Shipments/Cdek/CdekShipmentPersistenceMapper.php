@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Cdek;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -14,7 +15,7 @@ final class CdekShipmentPersistenceMapper implements CarrierShipmentPersistenceM
 	public function carrier_key(): string { return CdekSettings::CARRIER_KEY; }
 
 	public function build_created_fields( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, string $now ): array {
-		unset( $request, $now );
+		unset( $request );
 		$raw = $result->raw_reference;
 		$backlog_order_id = trim( $result->backlog_order_id );
 		$fields = array(
@@ -26,13 +27,13 @@ final class CdekShipmentPersistenceMapper implements CarrierShipmentPersistenceM
 			'cdek_order_status_code' => (string) ( $raw['order_status'] ?? '' ),
 			'cdek_order_status_name' => (string) ( $raw['order_status_name'] ?? '' ),
 			'cdek_planned_delivery_date' => (string) ( $raw['planned_delivery_date'] ?? '' ),
-			'actual_cost_kopecks' => is_numeric( $raw['actual_cost_kopecks'] ?? null ) ? (int) $raw['actual_cost_kopecks'] : null,
-			'actual_cost_currency' => 'RUB',
-			'actual_cost_source' => 'carrier_api',
-			'actual_cost_source_detail' => 'cdek_create',
 			'status' => 'registration_pending',
 			'status_title' => 'Заявка на регистрацию принята',
 		);
+		$amount = is_numeric( $raw['actual_cost_candidate_kopecks'] ?? null ) ? (int) $raw['actual_cost_candidate_kopecks'] : 0;
+		if ( $amount > 0 ) {
+			$fields['actual_cost_candidate'] = new ShipmentActualCost( $amount, 'RUB', 'carrier_api', 'cdek_create', $now );
+		}
 		if ( '' !== $backlog_order_id ) {
 			$fields['backlog_order_id'] = ctype_digit( $backlog_order_id ) ? (int) $backlog_order_id : $backlog_order_id;
 		}

@@ -8,6 +8,7 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/shipments/actual-cost-test-helpers.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
@@ -194,7 +195,7 @@ $calendar = new CalendarService( new CalendarRepository(), new YearGenerator(), 
 $date_resolver = new DpdShipmentDateResolver( $calendar, new TimezoneService() );
 $factory = new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service, $date_resolver );
 $builder = new DpdShipmentPayloadBuilder( $settings );
-$adapter = new DpdShipmentAdapter( $builder );
+$adapter = new DpdShipmentAdapter( $builder, shipment_test_actual_cost_resolver() );
 
 $before_cutoff = $date_resolver->default_date( new DateTimeImmutable( '2026-06-18 16:30:00', new DateTimeZone( TimezoneService::TIMEZONE ) ) );
 $after_cutoff = $date_resolver->default_date( new DateTimeImmutable( '2026-06-20 17:00:00', new DateTimeZone( TimezoneService::TIMEZONE ) ) );
