@@ -482,6 +482,21 @@ plugin_architecture_assert( 1 === preg_match( '/Version:\s*([0-9]+\.[0-9]+\.[0-9
 plugin_architecture_assert( 1 === preg_match( "/define\(\s*'WDC_VERSION'\s*,\s*'([0-9]+\.[0-9]+\.[0-9]+)'\s*\)/", $plugin_main, $constant_match ), 'WDC_VERSION constant must be present.' );
 plugin_architecture_assert( $header_match[1] === $constant_match[1], 'Plugin header version and WDC_VERSION must match.' );
 
+$order_recalculation_controller = plugin_architecture_source( 'src/Orders/Admin/OrderDeliveryRecalculationAdminController.php' );
+foreach ( array(
+	'new SettingsRepository',
+	'new RussianPostPickupPointRepository',
+	'new OrderDeliveryAddressNormalizationService',
+	'new OrderDeliveryReplacementService',
+	'new DeliveryDateFormatter',
+	'new OrderShipmentRepository',
+	'new YandexDeliveryCheckoutPickupPointFormatter',
+	'new RussianPostPickupPointTypeSettings',
+	'new DpdPickupPointScheduleFormatter',
+) as $forbidden_controller_new ) {
+	plugin_architecture_assert( ! str_contains( $order_recalculation_controller, $forbidden_controller_new ), 'Order delivery recalculation controller must not self-construct dependency: ' . $forbidden_controller_new );
+}
+
 $manifest_path = 'tests/shipments/regression/shipment-regression-manifest.php';
 $manifest = require plugin_architecture_path( $manifest_path );
 plugin_architecture_assert( is_array( $manifest ), 'Regression manifest must return an array.' );

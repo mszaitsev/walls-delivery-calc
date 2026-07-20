@@ -4,7 +4,9 @@ declare(strict_types=1);
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Calendar\Services\CalendarService;
 use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
@@ -50,6 +52,7 @@ use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -655,6 +658,37 @@ function wdc_recalc_pickup_repository(): RussianPostPickupPointRepository {
 	return new RussianPostPickupPointRepository( $db );
 }
 
+function wdc_recalc_admin_controller(
+	OrderDeliveryRecalculationService $service,
+	CheckoutLocationAjax $location_ajax,
+	RussianPostPickupPointRepository $pickup_repository,
+	OrderDeliveryAddressNormalizationService $address_normalization,
+	OrderDeliveryReplacementService $replacement,
+	?YandexDeliveryPickupPointV2Repository $yandex_points = null,
+	?YandexLocationMappingV2Repository $yandex_location_mapping = null
+): OrderDeliveryRecalculationAdminController {
+	$settings = new SettingsRepository();
+
+	return new OrderDeliveryRecalculationAdminController(
+		$service,
+		new OrderDeliveryRateRenderer(),
+		$location_ajax,
+		$pickup_repository,
+		$address_normalization,
+		$replacement,
+		new YandexDeliveryCheckoutPickupPointFormatter(),
+		$settings,
+		new RussianPostPickupPointTypeSettings( $settings ),
+		new DpdPickupPointScheduleFormatter(),
+		'',
+		'1',
+		null,
+		null,
+		$yandex_points,
+		$yandex_location_mapping
+	);
+}
+
 $order = new WdcRecalcOrder(
 	101,
 	array(
@@ -860,7 +894,8 @@ recalc_smoke_assert( true === $service->preview( $backlog_blocked )['success'], 
 $pickup_repository = wdc_recalc_pickup_repository();
 $address_client = new WdcRecalcDadataSuggestionClient();
 $address_normalization = new OrderDeliveryAddressNormalizationService( null, $address_client, wdc_recalc_address_suggestion_service( $address_client ) );
-$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization );
+$controller_replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter() );
+$controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
 	$controller->ajax_preview();
@@ -1719,7 +1754,7 @@ try {
 	recalc_smoke_assert( str_contains( (string) ( $response->data['formatted_address'] ?? '' ), 'Омская область' ), 'Geocode endpoint must return formatted DaData address.' );
 }
 
-$no_coordinates_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', new OrderDeliveryAddressNormalizationService( null, new WdcRecalcDadataSuggestionClient( false ) ) );
+$no_coordinates_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, new OrderDeliveryAddressNormalizationService( null, new WdcRecalcDadataSuggestionClient( false ) ), $replacement );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Омск, Ленина, 10' );
 try {
 	$no_coordinates_controller->ajax_geocode_address();
@@ -1963,7 +1998,7 @@ $yandex_db->yandex_delivery_pickup_points_v2 = array(
 	array( 'platform_station_id' => 'YANDEX-TERMINAL', 'operator_id' => 'market_l4g', 'type' => 'terminal', 'name' => 'Постамат', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Гоголя, 7', 'yandex_geo_id' => 88, 'active' => 1 ),
 	array( 'platform_station_id' => 'YANDEX-PARTNER', 'operator_id' => 'market_l4g', 'type' => 'pickup_point', 'name' => 'Пункт выдачи заказов партнёра', 'locality' => 'Новосибирск', 'full_address' => 'Новосибирск, Фрунзе, 12', 'yandex_geo_id' => 88, 'active' => 1 ),
 );
-$yandex_search_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$yandex_search_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $replacement, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
 $yandex_search = new ReflectionMethod( $yandex_search_controller, 'yandex_pickup_points' );
 $yandex_search->setAccessible( true );
 $yandex_location_points = $yandex_search->invoke( $yandex_search_controller, array( 'id' => 501 ), '', 'location' );
@@ -1980,7 +2015,7 @@ recalc_smoke_assert( '5 Post (Пятерочка)' === (string) ( $yandex_points
 recalc_smoke_assert( 'Постамат Яндекса' === (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['point_title'] ?? '' ) && str_contains( (string) ( $yandex_points_by_station['YANDEX-TERMINAL']['presentation_comment'] ?? '' ), '2-3 дня' ), 'Yandex terminal formatter payload must expose checkout terminal title and storage warning comment.' );
 recalc_smoke_assert( 'Партнёрский пункт выдачи' === (string) ( $yandex_points_by_station['YANDEX-PARTNER']['point_title'] ?? '' ), 'Yandex market partner pickup payload must use checkout presentation title without technical code.' );
 $GLOBALS['wdc_recalc_orders'][127] = $first_preview_order;
-$yandex_fallback_controller = new OrderDeliveryRecalculationAdminController( $first_preview_service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization, $replacement, null, null, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
+$yandex_fallback_controller = wdc_recalc_admin_controller( $first_preview_service, $location_ajax, $pickup_repository, $address_normalization, $replacement, new YandexDeliveryPickupPointV2Repository( $yandex_db ), new YandexLocationMappingV2Repository( $yandex_db ) );
 $first_preview_resolved_location = $first_preview_service->resolved_location_payload( $first_preview_order, null );
 recalc_smoke_assert( 92468 === (int) ( $first_preview_resolved_location['location_id'] ?? 0 ), 'Resolved location payload helper must return location_id=92468 without running pricing.' );
 $yandex_fallback_points_direct = $yandex_search->invoke( $yandex_fallback_controller, $first_preview_resolved_location, '', 'location' );

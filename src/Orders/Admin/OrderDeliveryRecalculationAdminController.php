@@ -12,7 +12,6 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPoi
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
-use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
@@ -20,7 +19,6 @@ use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
-use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -37,22 +35,21 @@ final class OrderDeliveryRecalculationAdminController {
 	public function __construct(
 		private OrderDeliveryRecalculationService $service,
 		private OrderDeliveryRateRenderer $renderer,
-		private ?CheckoutLocationAjax $location_search = null,
-		private ?RussianPostPickupPointRepository $pickup_points = null,
+		private CheckoutLocationAjax $location_search,
+		private RussianPostPickupPointRepository $pickup_points,
+		private OrderDeliveryAddressNormalizationService $address_normalization,
+		private OrderDeliveryReplacementService $replacement,
+		private YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter,
+		private SettingsRepository $settings,
+		private RussianPostPickupPointTypeSettings $pickup_point_type_settings,
+		private DpdPickupPointScheduleFormatter $dpd_schedule_formatter,
 		private string $plugin_url = '',
 		private string $version = '1',
-		private ?OrderDeliveryAddressNormalizationService $address_normalization = null,
-		private ?OrderDeliveryReplacementService $replacement = null,
 		private ?CdekDeliveryPointService $cdek_points = null,
 		private ?DpdPickupPointService $dpd_points = null,
 		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
-		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null,
-		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null
+		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null
 	) {
-		$this->pickup_points = $this->pickup_points ?? new RussianPostPickupPointRepository();
-		$this->address_normalization = $this->address_normalization ?? new OrderDeliveryAddressNormalizationService();
-		$this->replacement = $this->replacement ?? new OrderDeliveryReplacementService( new OrderShipmentRepository(), new DeliveryDateFormatter() );
-		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 	}
 
 	public function register(): void {
@@ -102,7 +99,7 @@ final class OrderDeliveryRecalculationAdminController {
 				'mapProvider' => $provider,
 				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
 				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
-				'pickupPointTypes' => ( new RussianPostPickupPointTypeSettings( new SettingsRepository() ) )->all(),
+				'pickupPointTypes' => $this->pickup_point_type_settings->all(),
 			)
 		);
 	}
@@ -137,10 +134,6 @@ final class OrderDeliveryRecalculationAdminController {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
 		}
-		if ( null === $this->location_search ) {
-			wp_send_json_error( array( 'message' => __( 'Поиск населенных пунктов недоступен.', 'walls-delivery-calc' ) ), 500 );
-		}
-
 		$query = $this->request_string( 'query' );
 		$country = $this->request_string( 'country_code' );
 		$payload = $this->location_search->payload( $query, '', $country );
@@ -615,7 +608,7 @@ final class OrderDeliveryRecalculationAdminController {
 		$point_title = 'terminal_self_delivery' === $type ? 'Терминал DPD' : 'Пункт выдачи DPD';
 		$marker_type = 'terminal_self_delivery' === $type ? 'terminal' : 'pickup';
 		$code = (string) ( $point['terminal_code'] ?? '' );
-		$work_time = ( new DpdPickupPointScheduleFormatter() )->format( $point['schedule'] ?? '' );
+		$work_time = $this->dpd_schedule_formatter->format( $point['schedule'] ?? '' );
 		$snapshot = array(
 			'id' => DpdSettings::CARRIER_KEY . ':' . $code,
 			'carrier_key' => DpdSettings::CARRIER_KEY,
@@ -739,11 +732,11 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	private function map_provider(): string {
-		$provider = ( new SettingsRepository() )->get_string( 'pickup_map_provider', 'leaflet' );
+		$provider = $this->settings->get_string( 'pickup_map_provider', 'leaflet' );
 		return 'yandex' === $provider ? 'yandex' : 'leaflet';
 	}
 
 	private function yandex_api_key(): string {
-		return trim( ( new SettingsRepository() )->get_string( 'pickup_map_yandex_api_key', '' ) );
+		return trim( $this->settings->get_string( 'pickup_map_yandex_api_key', '' ) );
 	}
 }

@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.124.20
+Version: 0.124.21
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 

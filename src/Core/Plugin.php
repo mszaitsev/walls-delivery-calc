@@ -42,6 +42,7 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointAutoSync;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
@@ -66,6 +67,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappin
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Runner;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexRegionMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2ImportService;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2JsonStreamReader;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService;
@@ -302,6 +304,8 @@ final class Plugin {
 		$this->container->register( RegionRepository::class, fn(): RegionRepository => new RegionRepository() );
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
 		$this->container->register( RussianPostPickupPointRepository::class, fn(): RussianPostPickupPointRepository => new RussianPostPickupPointRepository() );
+		$this->container->register( DpdPickupPointScheduleFormatter::class, fn(): DpdPickupPointScheduleFormatter => new DpdPickupPointScheduleFormatter() );
+		$this->container->register( YandexDeliveryCheckoutPickupPointFormatter::class, fn(): YandexDeliveryCheckoutPickupPointFormatter => new YandexDeliveryCheckoutPickupPointFormatter() );
 		$this->container->register( RussianPostPickupLocationResolver::class, fn(): RussianPostPickupLocationResolver => new RussianPostPickupLocationResolver( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( RussianPostPickupDiagnosticsService::class, fn(): RussianPostPickupDiagnosticsService => new RussianPostPickupDiagnosticsService( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( LocationRepository::class ), location_resolver: $this->container->get( RussianPostPickupLocationResolver::class ) ) );
 		$this->container->register( RussianPostPickupPointTypeSettings::class, fn(): RussianPostPickupPointTypeSettings => new RussianPostPickupPointTypeSettings( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
@@ -754,7 +758,7 @@ final class Plugin {
 		$this->container->register( OrderDeliveryAddressNormalizationService::class, fn(): OrderDeliveryAddressNormalizationService => new OrderDeliveryAddressNormalizationService( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionService::class ) ) );
 		$this->container->register( OrderDeliveryReplacementService::class, fn(): OrderDeliveryReplacementService => new OrderDeliveryReplacementService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( DeliveryDateFormatter::class ) ) );
 		$this->container->register( OrderDeliveryRateRenderer::class, fn(): OrderDeliveryRateRenderer => new OrderDeliveryRateRenderer() );
-		$this->container->register( OrderDeliveryRecalculationAdminController::class, fn(): OrderDeliveryRecalculationAdminController => new OrderDeliveryRecalculationAdminController( $this->container->get( OrderDeliveryRecalculationService::class ), $this->container->get( OrderDeliveryRateRenderer::class ), $this->container->get( CheckoutLocationAjax::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->environment->plugin_url(), $this->environment->version(), $this->container->get( OrderDeliveryAddressNormalizationService::class ), $this->container->get( OrderDeliveryReplacementService::class ), $this->container->get( CdekDeliveryPointService::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
+		$this->container->register( OrderDeliveryRecalculationAdminController::class, fn(): OrderDeliveryRecalculationAdminController => new OrderDeliveryRecalculationAdminController( $this->container->get( OrderDeliveryRecalculationService::class ), $this->container->get( OrderDeliveryRateRenderer::class ), $this->container->get( CheckoutLocationAjax::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( OrderDeliveryAddressNormalizationService::class ), $this->container->get( OrderDeliveryReplacementService::class ), $this->container->get( YandexDeliveryCheckoutPickupPointFormatter::class ), $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->container->get( DpdPickupPointScheduleFormatter::class ), $this->environment->plugin_url(), $this->environment->version(), $this->container->get( CdekDeliveryPointService::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox( $this->container->get( OrderShipmentRepository::class ) ) );
 		$this->container->register( \WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService::class, fn(): \WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService => new \WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( CdekLocationResolver::class ) ) );
 		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService() );
