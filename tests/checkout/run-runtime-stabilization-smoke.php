@@ -501,6 +501,8 @@ use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
+use WallsShop\WDC\Shipments\Analytics\OrderAnalyticsShipmentSelector;
+use WallsShop\WDC\Shipments\Analytics\OrderSelectedDeliveryIdentityResolver;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
@@ -526,6 +528,7 @@ function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsA
 			new ShipmentCostAnalyticsQuery(),
 			new OrderShipmentRepository(),
 			new ShipmentBaseApiCostResolver(),
+			new OrderAnalyticsShipmentSelector( new OrderSelectedDeliveryIdentityResolver() ),
 			$registry,
 			$policy
 		),

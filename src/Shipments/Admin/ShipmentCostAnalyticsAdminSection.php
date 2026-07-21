@@ -88,7 +88,7 @@ final class ShipmentCostAnalyticsAdminSection {
 		if ( 0 === $result->total_rows ) {
 			$message = '' !== $filter->order_search
 				? sprintf( 'Заказ с номером %s не найден в выбранном периоде.', $filter->order_search )
-				: ( $filter->include_missing_actual ? 'За выбранный период созданных отправлений не найдено.' : 'За выбранный период нет отправлений с сохранённой фактической стоимостью. Отключите фильтр «Только с фактической стоимостью», чтобы увидеть все отправления.' );
+				: ( $filter->include_missing_actual ? 'За выбранный период созданных отправлений не найдено.' : 'За выбранный период нет отправлений с сохранённой фактической стоимостью. Включите «Показать без фактической стоимости», чтобы увидеть все отправления.' );
 			echo '<p><em>' . esc_html( $message ) . '</em></p>';
 			return;
 		}
@@ -152,7 +152,7 @@ final class ShipmentCostAnalyticsAdminSection {
 		echo '<p>';
 		for ( $page = 1; $page <= $result->total_pages; ++$page ) {
 			$url = $this->url( $filter, array( 'paged' => $page ) );
-			echo $page === $filter->page ? ' <strong>' . esc_html( (string) $page ) . '</strong> ' : ' <a href="' . $this->esc_url_value( $url ) . '">' . esc_html( (string) $page ) . '</a> ';
+			echo $page === $result->current_page ? ' <strong>' . esc_html( (string) $page ) . '</strong> ' : ' <a href="' . $this->esc_url_value( $url ) . '">' . esc_html( (string) $page ) . '</a> ';
 		}
 		echo '</p>';
 	}

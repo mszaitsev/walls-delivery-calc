@@ -16,7 +16,10 @@ final class ShipmentCostAnalyticsSummary {
 		public readonly int $difference_total_kopecks,
 		public readonly ?int $average_difference_percent_basis_points,
 		public readonly int $over_threshold_count,
-		public readonly int $comparable_count
+		public readonly int $comparable_count,
+		public readonly int $skipped_without_selected_carrier = 0,
+		public readonly int $skipped_without_matching_shipment = 0,
+		public readonly int $skipped_ambiguous = 0
 	) {
 	}
 

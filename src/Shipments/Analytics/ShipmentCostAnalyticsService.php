@@ -14,8 +14,10 @@ final class ShipmentCostAnalyticsService {
 		private ShipmentCostAnalyticsQuery $query,
 		private OrderShipmentRepository $shipments,
 		private ShipmentBaseApiCostResolver $base_costs,
+		private OrderAnalyticsShipmentSelector $shipment_selector,
 		private CarrierRegistry $carriers,
-		private ShipmentCostThresholdPolicy $threshold
+		private ShipmentCostThresholdPolicy $threshold,
+		private int $order_batch_size = 200
 	) {
 	}
 
@@ -36,7 +38,7 @@ final class ShipmentCostAnalyticsService {
 	public function result( ShipmentCostAnalyticsFilter $filter ): ShipmentCostAnalyticsResult {
 		$rows = $this->all_rows( $filter );
 		$this->sort_rows( $rows, $filter );
-		$summary = $this->summary( $rows );
+		$summary = $this->summary( $rows, $this->shipment_selector->skip_counts() );
 		$total = count( $rows );
 		$total_pages = max( 1, (int) ceil( $total / $filter->per_page ) );
 		$page = min( $filter->page, $total_pages );
@@ -46,7 +48,8 @@ final class ShipmentCostAnalyticsService {
 			array_slice( $rows, $offset, $filter->per_page ),
 			$summary,
 			$total,
-			$total_pages
+			$total_pages,
+			$page
 		);
 	}
 
@@ -56,23 +59,26 @@ final class ShipmentCostAnalyticsService {
 	private function all_rows( ShipmentCostAnalyticsFilter $filter ): array {
 		$rows = array();
 		$carrier_options = $this->carrier_options();
-		foreach ( $this->query->orders( $filter ) as $order ) {
-			if ( ! $this->matches_order_search( $order, $filter->order_search ) ) {
-				continue;
-			}
-			$base_cost = $this->base_costs->resolve_from_order( $order );
-			foreach ( $this->shipments->all_for_order( $order ) as $shipment_key => $shipment ) {
-				if ( ! is_array( $shipment ) || ! $this->is_created_shipment( $shipment ) ) {
+		$this->shipment_selector->reset_diagnostics();
+		foreach ( $this->query->batches( $filter, $this->order_batch_size ) as $orders ) {
+			foreach ( $orders as $order ) {
+				if ( ! $this->matches_order_search( $order, $filter->order_search ) ) {
 					continue;
 				}
-				$carrier_key = trim( (string) ( $shipment['carrier_key'] ?? $shipment_key ) );
+				$selected = $this->shipment_selector->select( $order, $this->shipments->all_for_order( $order ) );
+				if ( null === $selected ) {
+					continue;
+				}
+				$carrier_key = $selected->carrier_key;
 				if ( null !== $filter->carrier_key && $carrier_key !== $filter->carrier_key ) {
 					continue;
 				}
+				$shipment = $selected->shipment;
 				$actual = $this->positive_int_or_null( $shipment['actual_cost_kopecks'] ?? null );
 				if ( ! $filter->include_missing_actual && null === $actual ) {
 					continue;
 				}
+				$base_cost = $this->base_costs->resolve_from_order( $order );
 				$difference = null !== $base_cost && null !== $actual && $base_cost > 0 ? $actual - $base_cost : null;
 				$percent = null !== $difference && null !== $base_cost && $base_cost > 0 ? intdiv( $difference * 10000, $base_cost ) : null;
 				$status = $this->threshold->classify( $base_cost, $actual );
@@ -82,7 +88,7 @@ final class ShipmentCostAnalyticsService {
 					$this->order_created_at( $order ),
 					$carrier_key,
 					$carrier_options[ $carrier_key ] ?? $carrier_key,
-					(string) ( $shipment['service_key'] ?? '' ),
+					$selected->service_key,
 					(string) ( $shipment['service_title'] ?? '' ),
 					$base_cost,
 					$actual,
@@ -153,7 +159,7 @@ final class ShipmentCostAnalyticsService {
 	/**
 	 * @param array<int,ShipmentCostAnalyticsRow> $rows
 	 */
-	private function summary( array $rows ): ShipmentCostAnalyticsSummary {
+	private function summary( array $rows, array $skip_counts ): ShipmentCostAnalyticsSummary {
 		$shipment_count = count( $rows );
 		$with_actual = 0;
 		$planned_total = 0;
@@ -193,21 +199,11 @@ final class ShipmentCostAnalyticsService {
 			$difference_total,
 			$comparable_count > 0 ? intdiv( $percent_total, $comparable_count ) : null,
 			$over,
-			$comparable_count
+			$comparable_count,
+			(int) ( $skip_counts['no_selected_delivery_identity'] ?? 0 ),
+			(int) ( $skip_counts['no_matching_created_shipment'] ?? 0 ),
+			(int) ( $skip_counts['ambiguous_matching_shipments'] ?? 0 )
 		);
-	}
-
-	/**
-	 * @param array<string,mixed> $shipment
-	 */
-	private function is_created_shipment( array $shipment ): bool {
-		foreach ( array( 'tracking_number', 'barcode', 'external_id', 'carrier_shipment_id', 'shipment_id', 'uuid', 'order_uuid' ) as $key ) {
-			if ( '' !== trim( (string) ( $shipment[ $key ] ?? '' ) ) ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	private function matches_order_search( object $order, string $search ): bool {

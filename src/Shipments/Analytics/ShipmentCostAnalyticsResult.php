@@ -13,7 +13,8 @@ final class ShipmentCostAnalyticsResult {
 		public readonly array $rows,
 		public readonly ShipmentCostAnalyticsSummary $summary,
 		public readonly int $total_rows,
-		public readonly int $total_pages
+		public readonly int $total_pages,
+		public readonly int $current_page
 	) {
 	}
 }

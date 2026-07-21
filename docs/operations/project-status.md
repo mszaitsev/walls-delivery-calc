@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.126.0
+Version: 0.126.1
 
 Stable subsystems:
 
@@ -13,7 +13,7 @@ Stable subsystems:
 - provider-owned document action contract;
 - bounded plugin architecture smoke in the framework regression group;
 - unified shipment regression profile.
-- shipment cost analytics on the overview admin page, comparing base API planned cost with canonical actual shipment cost.
+- shipment cost analytics on the overview admin page, comparing the selected order delivery's base API planned cost with canonical actual shipment cost.
 
 Active known limitations:
 
@@ -36,7 +36,7 @@ Recent fixes:
 - Yandex cancellation `cancelled_and_removed` now finalizes an existing cancellation progress toast even after the shipment UI has already been reset.
 - Yandex terminal cancellation tick now treats the active cancellation toast state as lifecycle ownership, so missing terminal purpose metadata cannot leave the last progress toast visible.
 - Yandex cancellation status AJAX now preserves the adapter's `cancelled_and_removed` marker in JSON, so terminal polling resets the shipment UI and finishes the cancellation toast instead of falling back to persistent progress.
-- Shipment cost analytics now appears on `admin.php?page=wdc-platform`. It uses HPOS-compatible WooCommerce order queries, `_wdc_shipments`, `ShipmentBaseApiCostResolver`, canonical `actual_cost_*` fields, registry-driven carrier filters, integer 3% threshold checks, server-side sorting/pagination, and no new database table.
+- Shipment cost analytics now appears on `admin.php?page=wdc-platform`. It scans WooCommerce orders in HPOS-compatible batches, selects at most one matching created shipment per order from `_wdc_shipments`, uses `ShipmentBaseApiCostResolver`, canonical `actual_cost_*` fields, registry-driven carrier filters, integer 3% threshold checks, server-side sorting/pagination, and no new database table.
 
 Canonical docs:
 

@@ -1,6 +1,6 @@
 # Shipment Framework
 
-Version: 0.126.0
+Version: 0.126.1
 
 The Shipment Framework lets carriers share admin creation, persistence, lifecycle, documents, modal UI, status presentation, polling, and regression coverage. It is not one linear pipeline; each runtime flow has its own owner.
 
@@ -53,15 +53,16 @@ Actual shipment cost is the real carrier cost for a specific shipment. It is sep
 
 The canonical storage fields are `actual_cost_kopecks`, `actual_cost_currency`, `actual_cost_source`, `actual_cost_source_detail`, and `actual_cost_updated_at`. Carrier-specific code may extract an amount from carrier payloads, but common application code owns merge policy and storage keys. A strictly positive carrier amount overwrites any existing actual cost, including `actual_cost_source=manual`; missing, null, zero, negative, or invalid carrier amounts leave the current value untouched. The shared metabox AJAX controller owns manual set and clear for all carriers, and clear removes actual cost regardless of source.
 
-Shipment cost analytics reads a stable model from order/shipment/calculation data: order ID, carrier key, service key, shipment identifier, created/registered timestamps, `actual_cost_kopecks`, `actual_cost_currency`, `actual_cost_source`, `actual_cost_updated_at`, base API cost, and customer shipping cost.
+Shipment cost analytics reads a stable model from order/shipment/calculation data: order ID, selected carrier key, selected service key, shipment identifier, created/registered timestamps, `actual_cost_kopecks`, `actual_cost_currency`, `actual_cost_source`, `actual_cost_updated_at`, base API cost, and customer shipping cost. Because base API cost is order-level data for the selected delivery service, analytics compares at most one created shipment per order.
 
 ## Cost Analytics Flow
 
 1. `ShipmentCostAnalyticsFilter` normalizes GET filters: period, custom dates, carrier, actual-cost mode, order search, sort, page, and page size.
-2. `ShipmentCostAnalyticsQuery` obtains WooCommerce orders by order creation date through HPOS-compatible order APIs.
-3. `ShipmentCostAnalyticsService` reads `_wdc_shipments` via `OrderShipmentRepository`, keeps only created shipment records, resolves base API cost through `ShipmentBaseApiCostResolver`, reads canonical actual cost, computes difference and aggregates, sorts, and paginates.
-4. `ShipmentCostThresholdPolicy` owns the 3% threshold and compares integer kopecks without float arithmetic.
-5. `ShipmentCostAnalyticsAdminSection` renders filters, table, legend, pagination, empty states, and summary on the existing overview page.
+2. `ShipmentCostAnalyticsQuery` obtains WooCommerce order IDs by order creation date through HPOS-compatible order APIs and yields loaded order objects in bounded batches.
+3. `OrderAnalyticsShipmentSelector` resolves the order's selected delivery identity from delivery calculation metadata and selects exactly one matching created shipment, or skips the order when the identity is missing, no matching created shipment exists, or the match is ambiguous.
+4. `ShipmentCostAnalyticsService` reads `_wdc_shipments` via `OrderShipmentRepository`, resolves base API cost through `ShipmentBaseApiCostResolver` for the selected shipment row, reads canonical actual cost, computes difference and aggregates, sorts, and paginates.
+5. `ShipmentCostThresholdPolicy` owns the 3% threshold and compares integer kopecks without float arithmetic.
+6. `ShipmentCostAnalyticsAdminSection` renders filters, table, legend, pagination, empty states, and summary on the existing overview page.
 
 The analytics subsystem is read-only: it must not call carrier APIs, recalculate delivery, update order meta, save shipment records, or create a new database table. Carrier titles and filter options come from `CarrierRegistry`; analytics code must not branch by concrete carrier key.
 

@@ -230,6 +230,8 @@ use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
+use WallsShop\WDC\Shipments\Analytics\OrderAnalyticsShipmentSelector;
+use WallsShop\WDC\Shipments\Analytics\OrderSelectedDeliveryIdentityResolver;
 use WallsShop\WDC\Shipments\Cdek\CdekCreateRequestBuilder;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
@@ -655,12 +657,15 @@ final class Plugin {
 		);
 		$this->container->register( ShipmentCostThresholdPolicy::class, fn(): ShipmentCostThresholdPolicy => new ShipmentCostThresholdPolicy() );
 		$this->container->register( ShipmentCostAnalyticsQuery::class, fn(): ShipmentCostAnalyticsQuery => new ShipmentCostAnalyticsQuery() );
+		$this->container->register( OrderSelectedDeliveryIdentityResolver::class, fn(): OrderSelectedDeliveryIdentityResolver => new OrderSelectedDeliveryIdentityResolver() );
+		$this->container->register( OrderAnalyticsShipmentSelector::class, fn(): OrderAnalyticsShipmentSelector => new OrderAnalyticsShipmentSelector( $this->container->get( OrderSelectedDeliveryIdentityResolver::class ) ) );
 		$this->container->register(
 			ShipmentCostAnalyticsService::class,
 			fn(): ShipmentCostAnalyticsService => new ShipmentCostAnalyticsService(
 				$this->container->get( ShipmentCostAnalyticsQuery::class ),
 				$this->container->get( OrderShipmentRepository::class ),
 				$this->container->get( ShipmentBaseApiCostResolver::class ),
+				$this->container->get( OrderAnalyticsShipmentSelector::class ),
 				$this->container->get( CarrierRegistry::class ),
 				$this->container->get( ShipmentCostThresholdPolicy::class )
 			)

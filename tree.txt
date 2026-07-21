@@ -660,6 +660,10 @@ C:.
 |   |   |       ShipmentAllocationPlace.php
 |   |   |
 |   |   +---Analytics
+|   |   |       OrderAnalyticsShipmentSelector.php
+|   |   |       OrderSelectedDeliveryIdentity.php
+|   |   |       OrderSelectedDeliveryIdentityResolver.php
+|   |   |       SelectedAnalyticsShipment.php
 |   |   |       ShipmentCostAnalyticsFilter.php
 |   |   |       ShipmentCostAnalyticsQuery.php
 |   |   |       ShipmentCostAnalyticsResult.php
