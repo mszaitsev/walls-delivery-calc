@@ -637,6 +637,7 @@ C:.
 |   |   |
 |   |   +---Admin
 |   |   |   |   OrderShipmentsMetabox.php
+|   |   |   |   ShipmentCostAnalyticsAdminSection.php
 |   |   |   |   ShipmentStatusesAdminPage.php
 |   |   |   |
 |   |   |   \---Ajax
@@ -657,6 +658,15 @@ C:.
 |   |   |       ShipmentAllocationBuilder.php
 |   |   |       ShipmentAllocationItem.php
 |   |   |       ShipmentAllocationPlace.php
+|   |   |
+|   |   +---Analytics
+|   |   |       ShipmentCostAnalyticsFilter.php
+|   |   |       ShipmentCostAnalyticsQuery.php
+|   |   |       ShipmentCostAnalyticsResult.php
+|   |   |       ShipmentCostAnalyticsRow.php
+|   |   |       ShipmentCostAnalyticsService.php
+|   |   |       ShipmentCostAnalyticsSummary.php
+|   |   |       ShipmentCostThresholdPolicy.php
 |   |   |
 |   |   +---Application
 |   |   |       CarrierShipmentAdapterRegistry.php
@@ -873,6 +883,8 @@ C:.
     |   |   run-shipment-admin-ajax-smoke.php
     |   |   run-shipment-admin-js-structure-smoke.php
     |   |   run-shipment-allocation-smoke.php
+    |   |   run-shipment-cost-analytics-smoke.php
+    |   |   run-shipment-cost-threshold-policy-smoke.php
     |   |   run-shipment-document-actions-smoke.php
     |   |   run-shipment-lifecycle-contract-smoke.php
     |   |   run-shipment-modal-extensions-smoke.php

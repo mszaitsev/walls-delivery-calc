@@ -500,6 +500,12 @@ use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
+use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
+use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
+use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function runtime_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -509,6 +515,22 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 
 function runtime_smoke_environment(): PluginEnvironment {
 	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.13' );
+}
+
+function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsAdminSection {
+	$registry = new CarrierRegistry();
+	$policy = new ShipmentCostThresholdPolicy();
+
+	return new ShipmentCostAnalyticsAdminSection(
+		new ShipmentCostAnalyticsService(
+			new ShipmentCostAnalyticsQuery(),
+			new OrderShipmentRepository(),
+			new ShipmentBaseApiCostResolver(),
+			$registry,
+			$policy
+		),
+		$policy
+	);
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
@@ -980,7 +1002,7 @@ runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_aaa', $GLO
 runtime_smoke_assert( array_key_exists( '_transient_wdc_pickup_search_ccc', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_dadata_ddd', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_foreign_quote', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must leave pickup, DaData, and foreign transients untouched.' );
 runtime_smoke_assert( null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'DeliveryQuoteCacheManager must invalidate runtime quote memory namespace.' );
 
-$admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager );
+$admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager, runtime_smoke_shipment_cost_analytics_section() );
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_POST = array();
 ob_start();

@@ -210,6 +210,7 @@ use WallsShop\WDC\Rules\Services\RuleSimulator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController;
+use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 use WallsShop\WDC\Shipments\Admin\ShipmentStatusesAdminPage;
@@ -226,6 +227,9 @@ use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
 use WallsShop\WDC\Shipments\Cdek\CdekCreateRequestBuilder;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
@@ -649,11 +653,31 @@ final class Plugin {
 				$this->container->get( CalendarService::class )
 			)
 		);
+		$this->container->register( ShipmentCostThresholdPolicy::class, fn(): ShipmentCostThresholdPolicy => new ShipmentCostThresholdPolicy() );
+		$this->container->register( ShipmentCostAnalyticsQuery::class, fn(): ShipmentCostAnalyticsQuery => new ShipmentCostAnalyticsQuery() );
+		$this->container->register(
+			ShipmentCostAnalyticsService::class,
+			fn(): ShipmentCostAnalyticsService => new ShipmentCostAnalyticsService(
+				$this->container->get( ShipmentCostAnalyticsQuery::class ),
+				$this->container->get( OrderShipmentRepository::class ),
+				$this->container->get( ShipmentBaseApiCostResolver::class ),
+				$this->container->get( CarrierRegistry::class ),
+				$this->container->get( ShipmentCostThresholdPolicy::class )
+			)
+		);
+		$this->container->register(
+			ShipmentCostAnalyticsAdminSection::class,
+			fn(): ShipmentCostAnalyticsAdminSection => new ShipmentCostAnalyticsAdminSection(
+				$this->container->get( ShipmentCostAnalyticsService::class ),
+				$this->container->get( ShipmentCostThresholdPolicy::class )
+			)
+		);
 		$this->container->register(
 			AdminMenu::class,
 			fn(): AdminMenu => new AdminMenu(
 				$this->environment,
-				$this->container->get( DeliveryQuoteCacheManager::class )
+				$this->container->get( DeliveryQuoteCacheManager::class ),
+				$this->container->get( ShipmentCostAnalyticsAdminSection::class )
 			)
 		);
 		$this->container->register(

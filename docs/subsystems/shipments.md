@@ -1,6 +1,6 @@
 # Shipments
 
-Version: 0.125.3
+Version: 0.126.0
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 
@@ -19,3 +19,15 @@ Carrier-specific shipment implementations currently exist for CDEK, DPD, Russian
 `actual_cost_kopecks` is the canonical actual shipment cost owner for every carrier. It is an integer amount in kopecks; companion fields are `actual_cost_currency`, `actual_cost_source`, `actual_cost_source_detail`, and `actual_cost_updated_at`.
 
 Supported source values include `carrier_api`, `carrier_status`, `carrier_reconciliation`, and `manual`. Manual cost edits in the shared shipment card set `actual_cost_source=manual`, but they are a fallback/correction value, not a lock: a later strictly positive carrier/API update overwrites any existing source. Missing, null, zero, negative, or invalid carrier amounts must not remove or overwrite an existing actual cost. Clearing the actual cost removes canonical actual-cost fields, allowing a later carrier update to populate them again.
+
+## Shipment Cost Analytics
+
+The overview page (`admin.php?page=wdc-platform`) includes a read-only shipment cost analytics section. One analytics row represents one created shipment record, not one order. A shipment qualifies when the `_wdc_shipments` record has a real carrier identifier such as `tracking_number`, `barcode`, `external_id`, `carrier_shipment_id`, `shipment_id`, `uuid`, or `order_uuid`; drafts, previews, failed records without identifiers, and removed records are excluded.
+
+Planned cost comes from the same base API cost contract used by the order delivery calculator through `ShipmentBaseApiCostResolver`. It means carrier API cost before delivery rules, markup, discounts, or customer-paid shipping total. Actual cost comes only from canonical `actual_cost_*` shipment fields.
+
+Carrier filters are registry-driven through `CarrierRegistry::all()`. Adding a carrier to the composition root makes it available to the analytics filter and rows without hardcoded carrier arrays. The analytics layer does not call carrier APIs and does not write order meta.
+
+The threshold policy is owned by `ShipmentCostThresholdPolicy`: actual cost is within plan when `actual_cost_kopecks * 100 <= base_api_cost_kopecks * 103`; otherwise it is over threshold. Comparisons use integer kopecks. The summary reports all filtered shipments, rows with/without actual cost, planned and actual totals, comparable difference total, arithmetic average percentage over comparable rows, and count/share of shipments over the 3% threshold.
+
+No analytics table is created. The first implementation reads WooCommerce orders through HPOS-compatible `wc_get_orders()` and extracts `_wdc_shipments` order meta.
