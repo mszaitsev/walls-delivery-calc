@@ -529,7 +529,9 @@ function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsA
 			new ShipmentCostAnalyticsQuery( new ShipmentCostAnalyticsRepository( new ShipmentCostAnalyticsTable() ) ),
 			$registry
 		),
-		$policy
+		$policy,
+		'https://example.test/wp-content/plugins/wdc/',
+		'test'
 	);
 }
 

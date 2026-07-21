@@ -34,6 +34,7 @@ final class ShipmentActualCostResolver {
 
 		return $payload + array(
 			'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks,
+			'has_actual_cost' => null !== $actual_kopecks && $actual_kopecks > 0,
 			'actual_cost_source' => $source,
 			'actual_cost_source_label' => $this->source_label( $source ),
 			'actual_cost_updated_at' => (string) ( $shipment['actual_cost_updated_at'] ?? '' ),

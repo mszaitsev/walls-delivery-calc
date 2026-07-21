@@ -23,8 +23,14 @@ if ( ! function_exists( 'esc_html__' ) ) { function esc_html__( string $value, s
 if ( ! function_exists( 'esc_url' ) ) { function esc_url( string $value ): string { return $value; } }
 if ( ! function_exists( 'add_query_arg' ) ) { function add_query_arg( array $args, string $url ): string { return $url . '?' . http_build_query( $args ); } }
 if ( ! function_exists( 'wp_strip_all_tags' ) ) { function wp_strip_all_tags( string $value ): string { return strip_tags( $value ); } }
+if ( ! function_exists( 'wp_json_encode' ) ) { function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false { return json_encode( $value, $flags, $depth ); } }
 if ( ! function_exists( 'number_format_i18n' ) ) { function number_format_i18n( float $number, int $decimals = 0 ): string { return number_format( $number, $decimals, '.', '' ); } }
 if ( ! function_exists( 'wc_get_orders' ) ) { function wc_get_orders( array $args ): array { throw new RuntimeException( 'Analytics page must not scan WooCommerce orders.' ); } }
+if ( ! function_exists( 'wp_enqueue_script' ) ) {
+	function wp_enqueue_script( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false, bool $in_footer = false ): void {
+		$GLOBALS['wdc_shipment_cost_analytics_enqueued_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' );
+	}
+}
 
 $context = shipment_cost_analytics_test_bootstrap();
 $repository = $context['repository'];
@@ -42,9 +48,13 @@ shipment_cost_analytics_assert( 30 === $result->summary->shipment_count && 29 ==
 
 $_GET = array( 'page' => 'wdc-platform', 'analytics_period' => 'month', 'actual_cost_mode' => 'all', 'paged' => '999', 'per_page' => '25' );
 ob_start();
-( new ShipmentCostAnalyticsAdminSection( $service, new ShipmentCostThresholdPolicy() ) )->render();
+( new ShipmentCostAnalyticsAdminSection( $service, new ShipmentCostThresholdPolicy(), 'https://example.test/wp-content/plugins/wdc/', 'test' ) )->render();
 $html = (string) ob_get_clean();
 shipment_cost_analytics_assert( str_contains( $html, '<strong>2</strong>' ), 'Renderer must mark normalized current_page active.' );
+shipment_cost_analytics_assert( str_contains( $html, 'data-wdc-shipment-cost-filters' ) && str_contains( $html, 'data-wdc-analytics-ranges' ) && str_contains( $html, 'data-wdc-analytics-period' ) && str_contains( $html, 'data-wdc-analytics-date-from' ) && str_contains( $html, 'data-wdc-analytics-date-to' ), 'Analytics filters form must expose stable data selectors and server range map.' );
+shipment_cost_analytics_assert( isset( $GLOBALS['wdc_shipment_cost_analytics_enqueued_scripts']['wdc-shipment-cost-analytics'] ), 'Analytics admin section must enqueue the period synchronization asset.' );
+$analytics_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipment-cost-analytics.js' );
+shipment_cost_analytics_assert( str_contains( $analytics_js, 'wdcAnalyticsRanges' ) && str_contains( $analytics_js, "period.value || '') === 'custom'" ) && str_contains( $analytics_js, "addEventListener('change'" ) && ! str_contains( $analytics_js, '.submit(' ), 'Analytics JS must update fixed date inputs from server ranges without auto-submit and must leave custom dates alone.' );
 
 $GLOBALS['wpdb']->rows = array(
 	1 => array(
@@ -66,7 +76,7 @@ $GLOBALS['wpdb']->rows = array(
 );
 $_GET = array( 'page' => 'wdc-platform', 'analytics_period' => 'month' );
 ob_start();
-( new ShipmentCostAnalyticsAdminSection( $service, new ShipmentCostThresholdPolicy() ) )->render();
+( new ShipmentCostAnalyticsAdminSection( $service, new ShipmentCostThresholdPolicy(), 'https://example.test/wp-content/plugins/wdc/', 'test' ) )->render();
 $html = (string) ob_get_clean();
 shipment_cost_analytics_assert( str_contains( $html, 'Включите «Показать без фактической стоимости»' ), 'Empty state must point to the visible checkbox label.' );
 $old_empty_state_phrase = 'Отключите фильтр «' . 'Только с фактической стоимостью' . '»';

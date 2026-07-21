@@ -118,6 +118,7 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 				'presentation' => $presentation,
 			)
 		);
+		$status = $this->with_actual_cost_defaults( $status, $shipment );
 		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		if ( array() !== $document_actions ) {
 			$status['document_actions'] = $document_actions;
@@ -136,6 +137,44 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 			'can_cancel' => ! empty( $status['can_cancel'] ),
 			'can_remove_from_order' => ! empty( $status['can_remove_from_order'] ),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $status
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	private function with_actual_cost_defaults( array $status, array $shipment ): array {
+		$actual = $this->positive_int_or_null( $status['actual_cost_kopecks'] ?? $shipment['actual_cost_kopecks'] ?? null );
+		$status['actual_cost_kopecks'] = $actual;
+		$status['has_actual_cost'] = null !== $actual && $actual > 0;
+		foreach ( array(
+			'actual_cost_label' => '',
+			'actual_cost_source' => (string) ( $shipment['actual_cost_source'] ?? '' ),
+			'actual_cost_source_detail' => (string) ( $shipment['actual_cost_source_detail'] ?? '' ),
+			'actual_cost_updated_at' => (string) ( $shipment['actual_cost_updated_at'] ?? '' ),
+			'actual_cost_compare_status' => '',
+			'actual_cost_compare_message' => '',
+		) as $key => $default ) {
+			if ( ! array_key_exists( $key, $status ) ) {
+				$status[ $key ] = $default;
+			}
+		}
+
+		return $status;
+	}
+
+	private function positive_int_or_null( mixed $value ): ?int {
+		if ( is_int( $value ) ) {
+			return $value > 0 ? $value : null;
+		}
+		if ( is_string( $value ) && 1 === preg_match( '/^\d+$/', $value ) ) {
+			$integer = (int) $value;
+
+			return $integer > 0 ? $integer : null;
+		}
+
+		return null;
 	}
 
 	private function tracking_presentation( array $status, array $presentation, string $fallback_value ): array {

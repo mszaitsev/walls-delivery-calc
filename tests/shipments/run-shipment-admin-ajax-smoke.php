@@ -291,6 +291,12 @@ shipment_admin_ajax_assert( ! str_contains( $service, 'ShipmentCreationService' 
 shipment_admin_ajax_assert( str_contains( $service, 'function assert_access(' ) && str_contains( $service, 'function resolve_order_from_request(' ) && str_contains( $service, 'function carrier_key_from_request(' ), 'ShipmentAdminAjaxService must remain a small shared AJAX helper.' );
 shipment_admin_ajax_assert( str_contains( $payload_builder, 'function carrier_ui_payload(' ) && ! str_contains( $payload_builder, 'function ajax_' ), 'Carrier UI payload builder must own shared UI payload without endpoint methods.' );
 shipment_admin_ajax_assert( ! str_contains( $metabox, 'CarrierShipmentLifecycleContinuationInterface' ), 'Metabox must not own lifecycle continuation business contract.' );
+shipment_admin_ajax_assert( str_contains( $metabox, 'data-wdc-shipment-price-row' ) && str_contains( $metabox, 'data-wdc-shipment-actual-cost-control' ) && str_contains( $metabox, 'data-wdc-actual-cost-input-wrap' ), 'Metabox must keep price row as the only price presentation and expose conditional actual-cost controls.' );
+shipment_admin_ajax_assert( ! str_contains( $metabox, 'data-wdc-actual-cost-state' ) && ! str_contains( $metabox, 'data-wdc-actual-cost-source' ), 'Metabox must not render duplicated actual-cost state/source rows.' );
+shipment_admin_ajax_assert( str_contains( $metabox, '$has_created && ! $has_actual_cost' ) && str_contains( $metabox, '$has_created && $has_actual_cost' ), 'Metabox initial render must show input/save only without actual cost and clear only with actual cost.' );
+$shipment_status_js = (string) file_get_contents( $root . '/assets/admin/shipments/shipment-status.js' );
+shipment_admin_ajax_assert( str_contains( $shipment_status_js, 'data-wdc-shipment-actual-cost-control' ) && str_contains( $shipment_status_js, 'has_actual_cost' ) && str_contains( $shipment_status_js, 'setVisible(clear, hasShipment && hasActualCost)' ), 'Shipment status JS must refresh actual-cost controls from has_shipment/has_actual_cost.' );
+shipment_admin_ajax_assert( ! str_contains( $shipment_status_js, 'actual_cost_source_label' ) && ! str_contains( $shipment_status_js, 'data-wdc-actual-cost-source' ), 'Shipment status JS must not render actual-cost source/date in the metabox.' );
 
 $ajax_dir = $root . '/src/Shipments/Admin/Ajax/';
 require_once $root . '/src/Domain/Common/MoneyParser.php';

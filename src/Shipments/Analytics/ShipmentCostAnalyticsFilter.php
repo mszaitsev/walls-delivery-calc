@@ -39,15 +39,13 @@ final class ShipmentCostAnalyticsFilter {
 		$now = $now ?? new \DateTimeImmutable( self::current_date( $timezone ), $timezone );
 		$notices = array();
 		$period = self::sanitize_choice( (string) ( $request['analytics_period'] ?? self::PERIOD_MONTH ), array( self::PERIOD_WEEK, self::PERIOD_MONTH, self::PERIOD_QUARTER, self::PERIOD_YEAR, self::PERIOD_CUSTOM ), self::PERIOD_MONTH );
-		$from = $now->modify( '-1 month' );
-		$to = $now;
+		$ranges = self::fixed_ranges( $now );
+		$from = self::parse_date( $ranges[ self::PERIOD_MONTH ]['date_from'], $timezone ) ?? $now->modify( '-1 month' );
+		$to = self::parse_date( $ranges[ self::PERIOD_MONTH ]['date_to'], $timezone ) ?? $now;
 
-		if ( self::PERIOD_WEEK === $period ) {
-			$from = $now->modify( '-7 days' );
-		} elseif ( self::PERIOD_QUARTER === $period ) {
-			$from = $now->modify( '-3 months' );
-		} elseif ( self::PERIOD_YEAR === $period ) {
-			$from = $now->modify( '-1 year' );
+		if ( isset( $ranges[ $period ] ) ) {
+			$from = self::parse_date( $ranges[ $period ]['date_from'], $timezone ) ?? $from;
+			$to = self::parse_date( $ranges[ $period ]['date_to'], $timezone ) ?? $to;
 		} elseif ( self::PERIOD_CUSTOM === $period ) {
 			$custom_from = self::parse_date( (string) ( $request['date_from'] ?? '' ), $timezone );
 			$custom_to = self::parse_date( (string) ( $request['date_to'] ?? '' ), $timezone );
@@ -95,6 +93,34 @@ final class ShipmentCostAnalyticsFilter {
 
 	public function date_to_end(): string {
 		return $this->date_to . ' 23:59:59';
+	}
+
+	/**
+	 * @return array<string,array{date_from:string,date_to:string}>
+	 */
+	public static function fixed_ranges( ?\DateTimeImmutable $now = null ): array {
+		$timezone = self::timezone();
+		$now = $now ?? new \DateTimeImmutable( self::current_date( $timezone ), $timezone );
+		$to = $now->format( 'Y-m-d' );
+
+		return array(
+			self::PERIOD_WEEK => array(
+				'date_from' => $now->modify( '-7 days' )->format( 'Y-m-d' ),
+				'date_to' => $to,
+			),
+			self::PERIOD_MONTH => array(
+				'date_from' => $now->modify( '-1 month' )->format( 'Y-m-d' ),
+				'date_to' => $to,
+			),
+			self::PERIOD_QUARTER => array(
+				'date_from' => $now->modify( '-3 months' )->format( 'Y-m-d' ),
+				'date_to' => $to,
+			),
+			self::PERIOD_YEAR => array(
+				'date_from' => $now->modify( '-1 year' )->format( 'Y-m-d' ),
+				'date_to' => $to,
+			),
+		);
 	}
 
 	private static function timezone(): \DateTimeZone {

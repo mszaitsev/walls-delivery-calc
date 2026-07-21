@@ -15,7 +15,9 @@ defined( 'ABSPATH' ) || exit;
 final class ShipmentCostAnalyticsAdminSection {
 	public function __construct(
 		private ShipmentCostAnalyticsService $analytics,
-		private ShipmentCostThresholdPolicy $threshold
+		private ShipmentCostThresholdPolicy $threshold,
+		private string $plugin_url,
+		private string $version
 	) {
 	}
 
@@ -54,17 +56,19 @@ final class ShipmentCostAnalyticsAdminSection {
 	 * @param array<string,string> $carrier_options
 	 */
 	private function render_filters( ShipmentCostAnalyticsFilter $filter, array $carrier_options ): void {
-		echo '<form method="get" style="margin: 16px 0; padding: 12px; border: 1px solid #ccd0d4; background: #fff;">';
+		$this->enqueue_assets();
+		$ranges_json = wp_json_encode( ShipmentCostAnalyticsFilter::fixed_ranges() );
+		echo '<form method="get" style="margin: 16px 0; padding: 12px; border: 1px solid #ccd0d4; background: #fff;" data-wdc-shipment-cost-filters data-wdc-analytics-ranges="' . esc_attr( is_string( $ranges_json ) ? $ranges_json : '{}' ) . '">';
 		echo '<input type="hidden" name="page" value="' . esc_attr( AdminMenu::MENU_SLUG ) . '">';
 		echo '<input type="hidden" name="paged" value="1">';
 		echo '<label style="margin-right: 12px;">' . esc_html__( 'Период', 'walls-delivery-calc' ) . ' ';
-		echo '<select name="analytics_period">';
+		echo '<select name="analytics_period" data-wdc-analytics-period>';
 		foreach ( array( 'week' => 'Последняя неделя', 'month' => 'Последний месяц', 'quarter' => 'Последний квартал', 'year' => 'Последний год', 'custom' => 'Произвольный период' ) as $value => $label ) {
 			echo '<option value="' . esc_attr( $value ) . '"' . $this->selected_attr( $filter->period, $value ) . '>' . esc_html( $label ) . '</option>';
 		}
 		echo '</select></label>';
-		echo '<label style="margin-right: 12px;">' . esc_html__( 'Дата от', 'walls-delivery-calc' ) . ' <input type="date" name="date_from" value="' . esc_attr( $filter->date_from ) . '"></label>';
-		echo '<label style="margin-right: 12px;">' . esc_html__( 'Дата до', 'walls-delivery-calc' ) . ' <input type="date" name="date_to" value="' . esc_attr( $filter->date_to ) . '"></label>';
+		echo '<label style="margin-right: 12px;">' . esc_html__( 'Дата от', 'walls-delivery-calc' ) . ' <input type="date" name="date_from" value="' . esc_attr( $filter->date_from ) . '" data-wdc-analytics-date-from></label>';
+		echo '<label style="margin-right: 12px;">' . esc_html__( 'Дата до', 'walls-delivery-calc' ) . ' <input type="date" name="date_to" value="' . esc_attr( $filter->date_to ) . '" data-wdc-analytics-date-to></label>';
 		echo '<label style="margin-right: 12px;">' . esc_html__( 'Перевозчик', 'walls-delivery-calc' ) . ' <select name="carrier"><option value="">' . esc_html__( 'Все службы доставки', 'walls-delivery-calc' ) . '</option>';
 		foreach ( $carrier_options as $key => $title ) {
 			echo '<option value="' . esc_attr( $key ) . '"' . $this->selected_attr( $filter->carrier_key, $key ) . '>' . esc_html( $title ) . '</option>';
@@ -84,6 +88,11 @@ final class ShipmentCostAnalyticsAdminSection {
 		echo '</form>';
 	}
 
+	private function enqueue_assets(): void {
+		if ( function_exists( 'wp_enqueue_script' ) ) {
+			wp_enqueue_script( 'wdc-shipment-cost-analytics', $this->plugin_url . 'assets/admin/shipment-cost-analytics.js', array(), $this->version, true );
+		}
+	}
 	private function render_table( ShipmentCostAnalyticsFilter $filter, ShipmentCostAnalyticsResult $result ): void {
 		if ( 0 === $result->total_rows ) {
 			$message = '' !== $filter->order_search

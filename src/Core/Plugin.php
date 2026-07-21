@@ -680,7 +680,9 @@ final class Plugin {
 			ShipmentCostAnalyticsAdminSection::class,
 			fn(): ShipmentCostAnalyticsAdminSection => new ShipmentCostAnalyticsAdminSection(
 				$this->container->get( ShipmentCostAnalyticsService::class ),
-				$this->container->get( ShipmentCostThresholdPolicy::class )
+				$this->container->get( ShipmentCostThresholdPolicy::class ),
+				$this->environment->plugin_url(),
+				$this->environment->version()
 			)
 		);
 		$this->container->register(

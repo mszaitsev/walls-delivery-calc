@@ -127,6 +127,17 @@ shipment_actual_cost_set_property( $cdek, 'actual_cost_resolver', shipment_test_
 $cdek_zero = $cdek->status_payload( array( 'actual_cost_kopecks' => 0 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ) );
 shipment_actual_cost_assert( null === $cdek_zero['actual_cost_kopecks'] && '' === $cdek_zero['actual_cost_label'] && '' === $cdek_zero['actual_cost_compare_status'], 'CDEK canonical actual_cost_kopecks=0 must render as missing actual cost.' );
 
+$carrier_matrix = array(
+	'yandex' => $yandex->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ), array( 'actual_cost_kopecks' => 103000 ) ),
+	'dpd' => $dpd->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ), array( 'actual_cost_kopecks' => 103001 ) ),
+	'russian_post' => $russian_post->status_payload( array( 'actual_cost_kopecks' => 103000 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ) ),
+	'cdek' => $cdek->status_payload( array( 'actual_cost_kopecks' => 103001 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ) ),
+);
+foreach ( $carrier_matrix as $carrier_name => $payload ) {
+	shipment_actual_cost_assert( true === ( $payload['has_actual_cost'] ?? null ) && '' !== (string) ( $payload['actual_cost_label'] ?? '' ), $carrier_name . ' payload must expose has_actual_cost=true and a formatted actual_cost_label.' );
+}
+shipment_actual_cost_assert( 'ok' === $carrier_matrix['yandex']['actual_cost_compare_status'] && 'ok' === $carrier_matrix['russian_post']['actual_cost_compare_status'], 'Actual cost exactly at +3% must be ok in carrier status payloads.' );
+shipment_actual_cost_assert( 'warning' === $carrier_matrix['dpd']['actual_cost_compare_status'] && 'warning' === $carrier_matrix['cdek']['actual_cost_compare_status'], 'Actual cost above +3% must be warning in carrier status payloads.' );
 $service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Presentation/ShipmentActualCostComparisonService.php' );
 shipment_actual_cost_assert( ! str_contains( $service_source, '1.03' ) && ! str_contains( $service_source, 'floor(' ) && ! str_contains( $service_source, 'round(' ) && ! str_contains( $service_source, '(int)' ), 'Comparison service must not use float threshold arithmetic or silent integer casts.' );
 shipment_actual_cost_assert( str_contains( $service_source, '* 100 <= $base_cost_kopecks * 103' ), 'Comparison service must use integer cross multiplication for the +3% threshold.' );

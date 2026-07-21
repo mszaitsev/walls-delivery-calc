@@ -28,7 +28,7 @@ final class ShipmentActualCostAjaxController {
 			wp_send_json_success(
 				array_merge(
 					$this->payloads->carrier_ui_payload( $order, $carrier_key, $shipment ),
-					array( 'message' => __( 'Фактическая стоимость отправления сохранена.', 'walls-delivery-calc' ) )
+					array( 'message' => __( 'Фактическая стоимость сохранена.', 'walls-delivery-calc' ) )
 				)
 			);
 		} catch ( \InvalidArgumentException $exception ) {
@@ -47,7 +47,7 @@ final class ShipmentActualCostAjaxController {
 			wp_send_json_success(
 				array_merge(
 					$this->payloads->carrier_ui_payload( $order, $carrier_key, $shipment ),
-					array( 'message' => __( 'Фактическая стоимость отправления очищена.', 'walls-delivery-calc' ) )
+					array( 'message' => __( 'Фактическая стоимость очищена.', 'walls-delivery-calc' ) )
 				)
 			);
 		} catch ( \InvalidArgumentException $exception ) {
