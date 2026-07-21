@@ -227,11 +227,16 @@ use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
-use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
-use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
-use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
+use WallsShop\WDC\Shipments\Analytics\CreatedShipmentIdentityResolver;
 use WallsShop\WDC\Shipments\Analytics\OrderAnalyticsShipmentSelector;
 use WallsShop\WDC\Shipments\Analytics\OrderSelectedDeliveryIdentityResolver;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsIndexer;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsRecordBuilder;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
+use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
+use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsRepository;
+use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsTable;
 use WallsShop\WDC\Shipments\Cdek\CdekCreateRequestBuilder;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
@@ -656,18 +661,19 @@ final class Plugin {
 			)
 		);
 		$this->container->register( ShipmentCostThresholdPolicy::class, fn(): ShipmentCostThresholdPolicy => new ShipmentCostThresholdPolicy() );
-		$this->container->register( ShipmentCostAnalyticsQuery::class, fn(): ShipmentCostAnalyticsQuery => new ShipmentCostAnalyticsQuery() );
+		$this->container->register( ShipmentCostAnalyticsTable::class, fn(): ShipmentCostAnalyticsTable => new ShipmentCostAnalyticsTable() );
+		$this->container->register( ShipmentCostAnalyticsRepository::class, fn(): ShipmentCostAnalyticsRepository => new ShipmentCostAnalyticsRepository( $this->container->get( ShipmentCostAnalyticsTable::class ) ) );
+		$this->container->register( ShipmentCostAnalyticsQuery::class, fn(): ShipmentCostAnalyticsQuery => new ShipmentCostAnalyticsQuery( $this->container->get( ShipmentCostAnalyticsRepository::class ) ) );
+		$this->container->register( CreatedShipmentIdentityResolver::class, fn(): CreatedShipmentIdentityResolver => new CreatedShipmentIdentityResolver() );
 		$this->container->register( OrderSelectedDeliveryIdentityResolver::class, fn(): OrderSelectedDeliveryIdentityResolver => new OrderSelectedDeliveryIdentityResolver() );
-		$this->container->register( OrderAnalyticsShipmentSelector::class, fn(): OrderAnalyticsShipmentSelector => new OrderAnalyticsShipmentSelector( $this->container->get( OrderSelectedDeliveryIdentityResolver::class ) ) );
+		$this->container->register( OrderAnalyticsShipmentSelector::class, fn(): OrderAnalyticsShipmentSelector => new OrderAnalyticsShipmentSelector( $this->container->get( OrderSelectedDeliveryIdentityResolver::class ), $this->container->get( CreatedShipmentIdentityResolver::class ) ) );
+		$this->container->register( ShipmentCostAnalyticsRecordBuilder::class, fn(): ShipmentCostAnalyticsRecordBuilder => new ShipmentCostAnalyticsRecordBuilder( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderAnalyticsShipmentSelector::class ), $this->container->get( ShipmentBaseApiCostResolver::class ), $this->container->get( ShipmentCostThresholdPolicy::class ) ) );
+		$this->container->register( ShipmentCostAnalyticsIndexer::class, fn(): ShipmentCostAnalyticsIndexer => new ShipmentCostAnalyticsIndexer( $this->container->get( ShipmentCostAnalyticsRecordBuilder::class ), $this->container->get( ShipmentCostAnalyticsRepository::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register(
 			ShipmentCostAnalyticsService::class,
 			fn(): ShipmentCostAnalyticsService => new ShipmentCostAnalyticsService(
 				$this->container->get( ShipmentCostAnalyticsQuery::class ),
-				$this->container->get( OrderShipmentRepository::class ),
-				$this->container->get( ShipmentBaseApiCostResolver::class ),
-				$this->container->get( OrderAnalyticsShipmentSelector::class ),
-				$this->container->get( CarrierRegistry::class ),
-				$this->container->get( ShipmentCostThresholdPolicy::class )
+				$this->container->get( CarrierRegistry::class )
 			)
 		);
 		$this->container->register(
@@ -884,6 +890,15 @@ final class Plugin {
 		$this->container->get( RussianPostPickupImporter::class )->register();
 		$this->container->get( ShipmentStatusAutoSyncCron::class )->register();
 		$this->container->get( DpdPickupPointAutoSync::class )->register();
+		add_action( ShipmentCostAnalyticsIndexer::SHIPMENT_CHANGED_HOOK, array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 3 );
+		add_action( ShipmentCostAnalyticsIndexer::SHIPMENT_DELETED_HOOK, array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 2 );
+		add_action( 'wdc_delivery_calculation_changed', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_shipment_changed' ), 10, 1 );
+		add_action( 'woocommerce_before_delete_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
+		add_action( 'woocommerce_trash_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
+		add_action( 'woocommerce_untrash_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_restored' ), 10, 1 );
+		add_action( 'before_delete_post', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
+		add_action( 'trashed_post', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
+		add_action( 'untrashed_post', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_restored' ), 10, 1 );
 		add_action( YandexDeliveryGeoPipelineV2Runner::CRON_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_step' ) );
 		add_action( YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_start' ) );
 		$this->container->get( YandexDeliveryGeoPipelineV2Runner::class )->ensure_schedule();

@@ -69,6 +69,9 @@ final class OrderDeliveryReplacementService {
 		if ( method_exists( $order, 'save' ) ) {
 			$order->save();
 		}
+		if ( function_exists( 'do_action' ) ) {
+			do_action( 'wdc_delivery_calculation_changed', $order );
+		}
 
 		return array( 'success' => true, 'message' => 'Новый вариант доставки сохранен.' );
 	}

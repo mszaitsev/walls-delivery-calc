@@ -1,6 +1,6 @@
 # Shipments
 
-Version: 0.126.1
+Version: 0.127.0
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 
@@ -30,4 +30,6 @@ Carrier filters are registry-driven through `CarrierRegistry::all()`. Adding a c
 
 The threshold policy is owned by `ShipmentCostThresholdPolicy`: actual cost is within plan when `actual_cost_kopecks * 100 <= base_api_cost_kopecks * 103`; otherwise it is over threshold. Comparisons use integer kopecks. The summary reports all filtered shipments, rows with/without actual cost, planned and actual totals, comparable difference total, arithmetic average percentage over comparable rows, and count/share of shipments over the 3% threshold.
 
-No analytics table is created. The first implementation reads WooCommerce order IDs through HPOS-compatible `wc_get_orders()` in batches, loads only the current batch of order objects, and extracts `_wdc_shipments` order meta.
+Shipment cost analytics uses a materialized read-model table named `{$wpdb->prefix}wdc_shipment_cost_analytics`. Canonical data remains in WooCommerce order metadata: `_wdc_delivery_calculation_data` and `_wdc_shipments`. The analytics row is rebuilt synchronously for one order after delivery calculation changes, shipment save/delete, actual-cost changes, and order deletion/restore hooks. The overview page queries only the read-model table; it does not scan WooCommerce orders or call carrier APIs.
+
+There is no historical analytics import in this version because deployments start without old orders. If an order is not eligible for analytics, its read-model row is deleted.

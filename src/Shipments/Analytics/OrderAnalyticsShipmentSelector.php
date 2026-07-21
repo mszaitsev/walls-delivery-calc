@@ -6,18 +6,6 @@ namespace WallsShop\WDC\Shipments\Analytics;
 defined( 'ABSPATH' ) || exit;
 
 final class OrderAnalyticsShipmentSelector {
-	private const IDENTIFIER_KEYS = array(
-		'tracking_number',
-		'barcode',
-		'external_id',
-		'carrier_shipment_id',
-		'shipment_id',
-		'cdek_number',
-		'dpd_order_number',
-		'yandex_request_id',
-		'request_id',
-	);
-
 	/** @var array<string,int> */
 	private array $skip_counts = array(
 		'no_selected_delivery_identity' => 0,
@@ -26,7 +14,8 @@ final class OrderAnalyticsShipmentSelector {
 	);
 
 	public function __construct(
-		private OrderSelectedDeliveryIdentityResolver $identity_resolver
+		private OrderSelectedDeliveryIdentityResolver $identity_resolver,
+		private CreatedShipmentIdentityResolver $created_identity_resolver
 	) {
 	}
 
@@ -89,7 +78,11 @@ final class OrderAnalyticsShipmentSelector {
 	private function created_shipments( array $shipments ): array {
 		$created = array();
 		foreach ( $shipments as $shipment_key => $shipment ) {
-			if ( ! is_array( $shipment ) || ! $this->is_created_shipment( $shipment ) ) {
+			if ( ! is_array( $shipment ) ) {
+				continue;
+			}
+			$created_identity = $this->created_identity_resolver->resolve( $shipment );
+			if ( null === $created_identity ) {
 				continue;
 			}
 			$carrier_key = $this->normalize_key( (string) ( $shipment['carrier_key'] ?? $shipment_key ) );
@@ -100,7 +93,8 @@ final class OrderAnalyticsShipmentSelector {
 				(string) $shipment_key,
 				$shipment,
 				$carrier_key,
-				$this->normalize_key( (string) ( $shipment['service_key'] ?? '' ) )
+				$this->normalize_key( (string) ( $shipment['service_key'] ?? '' ) ),
+				$created_identity
 			);
 		}
 
@@ -120,19 +114,6 @@ final class OrderAnalyticsShipmentSelector {
 					&& ( null === $service_key || $shipment->service_key === $service_key )
 			)
 		);
-	}
-
-	/**
-	 * @param array<string,mixed> $shipment
-	 */
-	private function is_created_shipment( array $shipment ): bool {
-		foreach ( self::IDENTIFIER_KEYS as $key ) {
-			if ( '' !== trim( (string) ( $shipment[ $key ] ?? '' ) ) ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	private function normalize_key( string $value ): string {

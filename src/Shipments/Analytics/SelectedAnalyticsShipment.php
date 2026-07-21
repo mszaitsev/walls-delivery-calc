@@ -13,7 +13,8 @@ final class SelectedAnalyticsShipment {
 		public readonly string $shipment_key,
 		public readonly array $shipment,
 		public readonly string $carrier_key,
-		public readonly string $service_key
+		public readonly string $service_key,
+		public readonly CreatedShipmentIdentity $created_identity
 	) {
 	}
 }

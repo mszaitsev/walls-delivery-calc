@@ -320,6 +320,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function prepare( string $query, mixed ...$args ): string {
+			if ( 1 === count( $args ) && is_array( $args[0] ) ) {
+				$args = $args[0];
+			}
 			foreach ( $args as $arg ) {
 				$value = is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
 				$query = preg_replace( '/%[sd]/', $value, $query, 1 ) ?? $query;
@@ -501,13 +504,11 @@ use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
-use WallsShop\WDC\Shipments\Analytics\OrderAnalyticsShipmentSelector;
-use WallsShop\WDC\Shipments\Analytics\OrderSelectedDeliveryIdentityResolver;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsQuery;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostAnalyticsService;
 use WallsShop\WDC\Shipments\Analytics\ShipmentCostThresholdPolicy;
-use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
-use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
+use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsRepository;
+use WallsShop\WDC\Shipments\Analytics\Storage\ShipmentCostAnalyticsTable;
 
 function runtime_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -525,12 +526,8 @@ function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsA
 
 	return new ShipmentCostAnalyticsAdminSection(
 		new ShipmentCostAnalyticsService(
-			new ShipmentCostAnalyticsQuery(),
-			new OrderShipmentRepository(),
-			new ShipmentBaseApiCostResolver(),
-			new OrderAnalyticsShipmentSelector( new OrderSelectedDeliveryIdentityResolver() ),
-			$registry,
-			$policy
+			new ShipmentCostAnalyticsQuery( new ShipmentCostAnalyticsRepository( new ShipmentCostAnalyticsTable() ) ),
+			$registry
 		),
 		$policy
 	);

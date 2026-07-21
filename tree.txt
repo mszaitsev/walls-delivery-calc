@@ -660,17 +660,26 @@ C:.
 |   |   |       ShipmentAllocationPlace.php
 |   |   |
 |   |   +---Analytics
+|   |   |   |   CreatedShipmentIdentity.php
+|   |   |   |   CreatedShipmentIdentityResolver.php
 |   |   |       OrderAnalyticsShipmentSelector.php
 |   |   |       OrderSelectedDeliveryIdentity.php
 |   |   |       OrderSelectedDeliveryIdentityResolver.php
 |   |   |       SelectedAnalyticsShipment.php
 |   |   |       ShipmentCostAnalyticsFilter.php
+|   |   |       ShipmentCostAnalyticsIndexer.php
 |   |   |       ShipmentCostAnalyticsQuery.php
+|   |   |       ShipmentCostAnalyticsRecordBuilder.php
 |   |   |       ShipmentCostAnalyticsResult.php
 |   |   |       ShipmentCostAnalyticsRow.php
 |   |   |       ShipmentCostAnalyticsService.php
 |   |   |       ShipmentCostAnalyticsSummary.php
 |   |   |       ShipmentCostThresholdPolicy.php
+|   |   |
+|   |   |   \---Storage
+|   |   |           ShipmentCostAnalyticsRecord.php
+|   |   |           ShipmentCostAnalyticsRepository.php
+|   |   |           ShipmentCostAnalyticsTable.php
 |   |   |
 |   |   +---Application
 |   |   |       CarrierShipmentAdapterRegistry.php
