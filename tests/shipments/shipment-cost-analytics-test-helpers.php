@@ -43,6 +43,15 @@ if ( ! function_exists( 'admin_url' ) ) {
 if ( ! function_exists( 'wc_get_order' ) ) {
 	function wc_get_order( int $order_id ): ?ShipmentCostAnalyticsFakeOrder { return $GLOBALS['shipment_cost_analytics_orders'][ $order_id ] ?? null; }
 }
+if ( ! function_exists( 'wc_get_logger' ) ) {
+	function wc_get_logger(): object {
+		return new class() {
+			public function log( string $level, string $message, array $context = array() ): void {
+				$GLOBALS['shipment_cost_analytics_logs'][] = compact( 'level', 'message', 'context' );
+			}
+		};
+	}
+}
 if ( ! function_exists( 'do_action' ) ) {
 	function do_action( string $hook, mixed ...$args ): void {
 		$GLOBALS['shipment_cost_analytics_actions'][] = array( 'hook' => $hook, 'args' => $args );
@@ -55,6 +64,8 @@ final class ShipmentCostAnalyticsFakeWpdb {
 	public array $rows = array();
 	/** @var array<int,mixed> */
 	public array $queries = array();
+	public string $last_error = '';
+	public bool $fail_next_query = false;
 	private int $next_id = 1;
 
 	public function get_charset_collate(): string { return 'DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'; }
@@ -66,11 +77,16 @@ final class ShipmentCostAnalyticsFakeWpdb {
 	}
 	public function query( mixed $prepared ): bool {
 		$this->queries[] = $prepared;
+		if ( $this->fail_next_query ) {
+			$this->fail_next_query = false;
+			$this->last_error = 'simulated analytics SQL failure';
+			return false;
+		}
 		$sql = is_array( $prepared ) ? (string) $prepared['sql'] : (string) $prepared;
 		$args = is_array( $prepared ) ? $prepared['args'] : array();
 		if ( str_starts_with( $sql, 'INSERT INTO' ) ) {
-			$columns = array( 'order_id', 'order_number', 'order_created_at', 'carrier_key', 'service_key', 'service_title', 'shipment_key', 'shipment_identifier', 'base_api_cost_kopecks', 'actual_cost_kopecks', 'actual_cost_currency', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at', 'difference_kopecks', 'difference_percent_basis_points', 'threshold_status', 'indexed_at' );
-			$row = array_combine( $columns, $args );
+			$columns = $this->insert_columns( $sql );
+			$row = $this->insert_row( $sql, $columns, $args );
 			$order_id = (int) ( $row['order_id'] ?? 0 );
 			foreach ( $this->rows as $id => $existing ) {
 				if ( (int) $existing['order_id'] === $order_id ) {
@@ -170,6 +186,35 @@ final class ShipmentCostAnalyticsFakeWpdb {
 		$summary['average_difference_percent_basis_points'] = $summary['comparable_count'] > 0 ? intdiv( $percent_total, $summary['comparable_count'] ) : null;
 		return $summary;
 	}
+	/** @return array<int,string> */
+	private function insert_columns( string $sql ): array {
+		if ( 1 !== preg_match( '/INSERT INTO\s+\S+\s+\(([^)]+)\)\s+VALUES/s', $sql, $matches ) ) {
+			return array();
+		}
+		return array_map( 'trim', explode( ',', $matches[1] ) );
+	}
+	/**
+	 * @param array<int,string> $columns
+	 * @param array<int,mixed> $args
+	 * @return array<string,mixed>
+	 */
+	private function insert_row( string $sql, array $columns, array $args ): array {
+		if ( 1 !== preg_match( '/VALUES\s+\((.*?)\)\s+ON DUPLICATE KEY UPDATE/s', $sql, $matches ) ) {
+			return array_combine( $columns, $args ) ?: array();
+		}
+		$tokens = array_map( 'trim', explode( ',', $matches[1] ) );
+		$row = array();
+		$arg_index = 0;
+		foreach ( $columns as $index => $column ) {
+			$token = strtoupper( $tokens[ $index ] ?? '' );
+			if ( 'NULL' === $token ) {
+				$row[ $column ] = null;
+				continue;
+			}
+			$row[ $column ] = $args[ $arg_index++ ] ?? null;
+		}
+		return $row;
+	}
 }
 
 final class ShipmentCostAnalyticsFakeCarrier implements CarrierAdapterInterface {
@@ -220,6 +265,7 @@ function shipment_cost_analytics_test_bootstrap(): array {
 	$wpdb = new ShipmentCostAnalyticsFakeWpdb();
 	$GLOBALS['shipment_cost_analytics_orders'] = array();
 	$GLOBALS['shipment_cost_analytics_actions'] = array();
+	$GLOBALS['shipment_cost_analytics_logs'] = array();
 	$registry = new CarrierRegistry();
 	$registry->register( new ShipmentCostAnalyticsFakeCarrier( 'alpha', 'Alpha Carrier' ) );
 	$registry->register( new ShipmentCostAnalyticsFakeCarrier( 'beta', 'Beta Carrier' ) );

@@ -896,9 +896,6 @@ final class Plugin {
 		add_action( 'woocommerce_before_delete_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
 		add_action( 'woocommerce_trash_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
 		add_action( 'woocommerce_untrash_order', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_restored' ), 10, 1 );
-		add_action( 'before_delete_post', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
-		add_action( 'trashed_post', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_deleted' ), 10, 1 );
-		add_action( 'untrashed_post', array( $this->container->get( ShipmentCostAnalyticsIndexer::class ), 'handle_order_restored' ), 10, 1 );
 		add_action( YandexDeliveryGeoPipelineV2Runner::CRON_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_step' ) );
 		add_action( YandexDeliveryGeoPipelineV2Runner::SCHEDULE_HOOK, array( $this->container->get( YandexDeliveryGeoPipelineV2Runner::class ), 'run_scheduled_start' ) );
 		$this->container->get( YandexDeliveryGeoPipelineV2Runner::class )->ensure_schedule();

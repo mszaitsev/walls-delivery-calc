@@ -26,6 +26,10 @@ shipment_cost_analytics_indexer_assert( 1 === count( $GLOBALS['wpdb']->rows ), '
 $row = array_values( $GLOBALS['wpdb']->rows )[0];
 shipment_cost_analytics_indexer_assert( null === $row['actual_cost_kopecks'] && null === $row['difference_kopecks'] && 'not_comparable' === $row['threshold_status'], 'Missing actual cost must keep row not comparable.' );
 
+$GLOBALS['wpdb']->fail_next_query = true;
+$indexer->sync_order( $order );
+shipment_cost_analytics_indexer_assert( array() !== $GLOBALS['shipment_cost_analytics_logs'] && 'error' === (string) $GLOBALS['shipment_cost_analytics_logs'][0]['level'] && str_contains( (string) $GLOBALS['shipment_cost_analytics_logs'][0]['context']['error'], 'simulated analytics SQL failure' ), 'Indexer must catch repository SQL errors and log them.' );
+
 $repository->save_for_carrier( $order, 'alpha', array_merge( $order->shipments['alpha'], array( 'actual_cost_kopecks' => 12000, 'actual_cost_currency' => 'RUB', 'actual_cost_source' => 'carrier_api', 'actual_cost_source_detail' => 'status', 'actual_cost_updated_at' => '2026-07-20 11:00:00' ) ) );
 $indexer->sync_order( $order );
 $row = array_values( $GLOBALS['wpdb']->rows )[0];
