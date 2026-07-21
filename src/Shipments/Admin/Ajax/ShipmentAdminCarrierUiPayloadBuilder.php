@@ -26,6 +26,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
@@ -49,6 +50,7 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 		private OrderShipmentRepository $repository,
 		private DeliveryServiceRepository $services,
 		private ShipmentStatusUpdateService $status_updates,
+		private ShipmentActualCostResolver $actual_costs,
 		private ?CdekOrderStatusService $cdek_status_updates = null,
 		private ?ShipmentBacklogService $backlog = null,
 		private ?CarrierShipmentAdapterRegistry $carrier_adapters = null,
@@ -79,18 +81,11 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 		return $this->button_policy;
 	}
 
-	private function status_payload_for_carrier( object $order, string $carrier_key ): array {
-		$shipment = $this->repository->find_by_carrier( $order, $carrier_key );
-		$adapter = $this->carrier_adapter( $carrier_key );
-		if ( null !== $adapter ) {
-			return array_merge(
-				$adapter->status_payload( $order, $shipment ),
-				array(
-					'carrier_key' => $carrier_key,
-					'presentation' => $this->carrier_presentation( $carrier_key ),
-				)
-			);
-		}
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	private function status_payload_for_carrier( object $order, string $carrier_key, array $shipment ): array {
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
 			return array_merge( $this->cdek_status_updates->status_payload( $shipment, $order ), array( 'presentation' => $this->carrier_presentation( $carrier_key ) ) );
 		}
@@ -110,7 +105,7 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 		$presentation = $this->carrier_presentation( $carrier_key );
 		$status = null !== $adapter
 			? $adapter->status_payload( $order, $shipment )
-			: $this->status_payload_for_carrier( $order, $carrier_key );
+			: $this->status_payload_for_carrier( $order, $carrier_key, $shipment );
 		$status = array_merge(
 			$status,
 			array(
@@ -118,6 +113,7 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 				'presentation' => $presentation,
 			)
 		);
+		$status = $this->actual_costs->enrich_status_payload( $status, $shipment, $order );
 		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		if ( array() !== $document_actions ) {
 			$status['document_actions'] = $document_actions;

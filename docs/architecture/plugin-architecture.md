@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.125.3
+Version: 0.127.6
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -48,6 +48,8 @@ Forbidden ownership:
 ## Storage
 
 Storage is owned by repositories and mappers. Shipment carrier data must be persisted through `OrderShipmentRepository` plus the matching `CarrierShipmentPersistenceMapperInterface`. Settings are accessed through settings classes and `SettingsRepository`; credentials use `EncryptionService` where applicable.
+
+Shipment cost analytics uses a dedicated read-model table, `{$wpdb->prefix}wdc_shipment_cost_analytics`, owned by `ShipmentCostAnalyticsRepository`. The canonical source remains WooCommerce order metadata and `_wdc_shipments`; the indexer rebuilds one order row after canonical mutations. The analytics admin page must query this table only and must not scan WooCommerce orders for filters, sorting, pagination, or totals.
 
 ## Admin And AJAX
 

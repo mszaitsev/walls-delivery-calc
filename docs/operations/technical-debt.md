@@ -1,6 +1,6 @@
 # Technical Debt
 
-Version: 0.125.3
+Version: 0.127.6
 
 Active items only.
 
@@ -17,7 +17,7 @@ Active items only.
 ## Architectural Debt
 
 - `ShipmentCreationService` has a registry plus adapter-array temporary test-construction fallback. New code should use `CarrierShipmentAdapterRegistry`; remove the fallback only after direct construction tests are migrated.
-- Russian Post actual-cost legacy fields are still readable for compatibility. New writes use canonical `actual_cost_kopecks`; remove legacy compatibility only after historical shipment snapshots are no longer needed.
+- Shipment cost analytics intentionally has no historical import/rebuild flow because the current deployment starts without old orders. Add an explicit migration/indexing plan only if a future production rollout needs existing orders indexed.
 
 ## Completed Architectural Migrations
 

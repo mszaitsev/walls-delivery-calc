@@ -516,7 +516,14 @@ $shipment_metabox_source = plugin_architecture_source( 'src/Shipments/Admin/Orde
 $shipment_events_source = plugin_architecture_source( 'assets/admin/shipments/shipment-events.js' );
 $shipment_status_source = plugin_architecture_source( 'assets/admin/shipments/shipment-status.js' );
 plugin_architecture_assert( str_contains( $actual_cost_ajax_source, 'handle_save' ) && str_contains( $actual_cost_ajax_source, 'handle_clear' ) && str_contains( $shipment_metabox_source, 'wdc_save_shipment_actual_cost' ) && str_contains( $shipment_metabox_source, 'wdc_clear_shipment_actual_cost' ), 'Manual actual shipment cost AJAX controller must live in the common shipment namespace.' );
-plugin_architecture_assert( str_contains( $shipment_events_source, 'data-wdc-save-actual-cost' ) && str_contains( $shipment_events_source, 'data-wdc-clear-actual-cost' ) && str_contains( $shipment_status_source, 'data-wdc-actual-cost-state' ), 'Common shipment JS must own manual actual cost controls.' );
+plugin_architecture_assert( str_contains( $shipment_events_source, 'data-wdc-save-actual-cost' ) && str_contains( $shipment_events_source, 'data-wdc-clear-actual-cost' ) && str_contains( $shipment_status_source, 'data-wdc-shipment-actual-cost-control' ) && str_contains( $shipment_status_source, 'has_actual_cost' ), 'Common shipment JS must own manual actual cost controls.' );
+plugin_architecture_assert( ! str_contains( $shipment_status_source, 'data-wdc-actual-cost-state' ) && ! str_contains( $shipment_status_source, 'data-wdc-actual-cost-source' ), 'Common shipment JS must not render duplicated actual-cost state/source rows.' );
+$shipment_payload_builder_source = plugin_architecture_source( 'src/Shipments/Admin/Ajax/ShipmentAdminCarrierUiPayloadBuilder.php' );
+plugin_architecture_assert( str_contains( $shipment_metabox_source, 'ShipmentActualCostResolver' ) && str_contains( $shipment_metabox_source, 'enrich_status_payload' ), 'OrderShipmentsMetabox must use the shared actual-cost status presenter for initial render.' );
+plugin_architecture_assert( str_contains( $shipment_payload_builder_source, 'ShipmentActualCostResolver' ) && str_contains( $shipment_payload_builder_source, 'enrich_status_payload' ), 'ShipmentAdminCarrierUiPayloadBuilder must use the shared actual-cost status presenter for AJAX payloads.' );
+plugin_architecture_assert( ! str_contains( $shipment_payload_builder_source, 'with_actual_cost_defaults' ) && ! preg_match( '/private\s+function\s+positive_int_or_null/', $shipment_payload_builder_source ) && ! preg_match( '/private\s+function\s+positive_int_or_null/', $shipment_metabox_source ), 'Admin shipment UI must not keep local actual-cost normalization helpers.' );
+plugin_architecture_assert( 1 === preg_match( '/private\s+function\s+status_payload_for_carrier\s*\([^)]*array\s+\$shipment[^)]*\).*?public\s+function\s+carrier_ui_payload/s', $shipment_payload_builder_source, $status_payload_method_match ) && ! str_contains( $status_payload_method_match[0], 'find_by_carrier(' ) && ! str_contains( $status_payload_method_match[0], 'carrier_adapter(' ) && ! str_contains( $status_payload_method_match[0], 'adapter->status_payload(' ), 'ShipmentAdminCarrierUiPayloadBuilder fallback status payload must use the selected shipment snapshot and must not contain adapter dispatch.' );
+plugin_architecture_assert( str_contains( $shipment_payload_builder_source, '$adapter = $this->carrier_adapter( $carrier_key )' ) && str_contains( $shipment_payload_builder_source, '? $adapter->status_payload( $order, $shipment )' ) && str_contains( $shipment_payload_builder_source, ': $this->status_payload_for_carrier( $order, $carrier_key, $shipment )' ), 'ShipmentAdminCarrierUiPayloadBuilder carrier_ui_payload() must own the adapter/fallback dispatch.' );
 $actual_cost_legacy_button_text = 'Очистить ' . 'ручную';
 $actual_cost_legacy_message_text = 'Ручная фактическая стоимость ' . 'очищена';
 plugin_architecture_assert( ! str_contains( $shipment_metabox_source, $actual_cost_legacy_button_text ) && ! str_contains( $actual_cost_ajax_source, $actual_cost_legacy_message_text ), 'Actual cost clear wording must apply to any source, not only manual values.' );
@@ -551,6 +558,51 @@ foreach ( $actual_cost_production_sources as $relative => $source ) {
 	}
 }
 plugin_architecture_assert( str_contains( $actual_cost_production_sources['src/Core/Plugin.php'] ?? '', 'ShipmentActualCostResolver::class' ) && str_contains( $actual_cost_production_sources['src/Core/Plugin.php'] ?? '', 'ShipmentActualCostService::class' ), 'Plugin.php must own actual-cost service/resolver registrations.' );
+
+$analytics_sources = array();
+foreach ( array( 'src/Shipments/Analytics', 'src/Shipments/Admin/ShipmentCostAnalyticsAdminSection.php' ) as $analytics_path ) {
+	$absolute = plugin_architecture_path( $analytics_path );
+	if ( is_dir( $absolute ) ) {
+		foreach ( plugin_architecture_php_files( $analytics_path ) as $file ) {
+			$analytics_sources[ str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) ) ] = (string) file_get_contents( $file );
+		}
+	} elseif ( is_file( $absolute ) ) {
+		$analytics_sources[ $analytics_path ] = (string) file_get_contents( $absolute );
+	}
+}
+plugin_architecture_assert( array() !== $analytics_sources, 'Shipment cost analytics subsystem must exist.' );
+foreach ( $analytics_sources as $relative => $source ) {
+	foreach ( array( 'CdekSettings::CARRIER_KEY', 'DpdSettings::CARRIER_KEY', 'YandexDeliverySettings::CARRIER_KEY', 'RussianPostDomesticSettings::CARRIER_KEY' ) as $forbidden_carrier_constant ) {
+		plugin_architecture_assert( ! str_contains( $source, $forbidden_carrier_constant ), 'Analytics must not hardcode carrier constants in ' . $relative );
+	}
+	foreach ( array( 'CdekApiClient', 'DpdApiClient', 'YandexDeliveryApiClient', 'RussianPostOtpravkaApiClient', 'RussianPostTrackingApiClient' ) as $forbidden_api_client ) {
+		plugin_architecture_assert( ! str_contains( $source, $forbidden_api_client ), 'Analytics must not depend on carrier API clients in ' . $relative );
+	}
+	foreach ( array( 'save_for_carrier', 'update_meta_data', '->save(', 'apply_carrier_cost', 'manual_set', '->clear(' ) as $forbidden_write ) {
+		plugin_architecture_assert( ! str_contains( $source, $forbidden_write ), 'Analytics must be read-only in ' . $relative . ': ' . $forbidden_write );
+	}
+	plugin_architecture_assert( ! preg_match( '/switch\s*\([^)]*carrier/i', $source ) && ! preg_match( '/match\s*\([^)]*carrier/i', $source ) && ! preg_match( '/carrier_key\s*={2,3}\s*[\'"][a-z0-9_\-]+[\'"]/i', $source ), 'Analytics must not branch by concrete carrier key in ' . $relative );
+	plugin_architecture_assert( ! str_contains( $source, 'wp_posts' ) && ! str_contains( $source, 'wp_postmeta' ), 'Analytics must not depend on legacy order SQL tables in ' . $relative );
+}
+plugin_architecture_assert( str_contains( $analytics_sources['src/Shipments/Admin/ShipmentCostAnalyticsAdminSection.php'] ?? '', 'carrier_options' ), 'Analytics admin section must use registry-driven carrier options.' );
+$analytics_query_source = $analytics_sources['src/Shipments/Analytics/ShipmentCostAnalyticsQuery.php'] ?? '';
+plugin_architecture_assert( ! preg_match( '/[\'"]limit[\'"]\s*=>\s*-1/', $analytics_query_source ), 'Shipment cost analytics query must not request unlimited orders.' );
+plugin_architecture_assert( ! preg_match( '/[\'"]return[\'"]\s*=>\s*[\'"]objects[\'"]/', $analytics_query_source ), 'Shipment cost analytics query must not request full order objects for the range scan.' );
+plugin_architecture_assert( ! str_contains( $analytics_query_source, 'wc_get_orders' ) && ! str_contains( $analytics_query_source, 'function batches' ), 'Shipment cost analytics query must use the read-model table, not WooCommerce order scans.' );
+$analytics_service_source = $analytics_sources['src/Shipments/Analytics/ShipmentCostAnalyticsService.php'] ?? '';
+plugin_architecture_assert( ! str_contains( $analytics_service_source, 'order_batch_size' ) && ! str_contains( $analytics_service_source, 'function all_rows' ) && ! str_contains( $analytics_service_source, 'usort(' ) && ! str_contains( $analytics_service_source, 'array_slice(' ), 'Shipment cost analytics service must not keep the old runtime scan/sort/pagination pipeline.' );
+$analytics_builder_source = $analytics_sources['src/Shipments/Analytics/ShipmentCostAnalyticsRecordBuilder.php'] ?? '';
+plugin_architecture_assert( str_contains( $analytics_builder_source, 'OrderAnalyticsShipmentSelector' ), 'Shipment cost analytics record builder must use the selected-shipment selector.' );
+plugin_architecture_assert( isset( $analytics_sources['src/Shipments/Analytics/Storage/ShipmentCostAnalyticsRepository.php'], $analytics_sources['src/Shipments/Analytics/Storage/ShipmentCostAnalyticsTable.php'], $analytics_sources['src/Shipments/Analytics/ShipmentCostAnalyticsIndexer.php'] ), 'Shipment cost analytics must have table, repository, and indexer production owners.' );
+$plugin_source = (string) file_get_contents( plugin_architecture_path( 'src/Core/Plugin.php' ) );
+foreach ( array( 'before_delete_' . 'post', 'trashed_' . 'post', 'untrashed_' . 'post' ) as $generic_post_hook ) {
+	plugin_architecture_assert( ! str_contains( $plugin_source, $generic_post_hook ), 'Shipment cost analytics must not register generic WordPress post lifecycle hooks: ' . $generic_post_hook );
+}
+$analytics_scan_source = implode( "\n", $analytics_sources );
+$forbidden_rebuild_word = 'back' . 'fill';
+foreach ( array( $forbidden_rebuild_word, 'rebuild ' . 'analytics', 'analytics ' . 'import' ) as $forbidden_rebuild ) {
+	plugin_architecture_assert( ! str_contains( strtolower( $analytics_scan_source ), $forbidden_rebuild ), 'Shipment cost analytics must not implement historical rebuild/import flow.' );
+}
 
 $rp_cost_legacy_key = 'russian_post_' . 'actual_cost_';
 $actual_cost_legacy_source = 'legacy_' . 'import';

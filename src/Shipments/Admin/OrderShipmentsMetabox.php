@@ -19,6 +19,7 @@ use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController;
@@ -63,6 +64,7 @@ final class OrderShipmentsMetabox {
 		private OrderShipmentDraftFactory $drafts,
 		private DeliveryServiceRepository $services,
 		private ShipmentStatusUpdateService $status_updates,
+		private ShipmentActualCostResolver $actual_costs,
 		private ShipmentCreateAjaxController $ajax_create_controller,
 		private ShipmentLifecycleAjaxController $ajax_lifecycle_controller,
 		private ShipmentPreviewAjaxController $ajax_preview_controller,
@@ -257,11 +259,13 @@ final class OrderShipmentsMetabox {
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
 		$status_payload = $this->status_payload_for_carrier( $order, $carrier_key );
 		$status_payload = array_merge( $status_payload, array( 'carrier_key' => $carrier_key ) );
+		$status_payload = $this->actual_costs->enrich_status_payload( $status_payload, $shipment, $order );
 		$presentation = $this->carrier_presentation( $carrier_key );
 		$tracking_presentation = $this->tracking_presentation( $status_payload, $presentation, $barcode );
-		$price_label = (string) ( $status_payload['actual_cost_label'] ?? '' );
-		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
-		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
+		$price_label = (string) $status_payload['actual_cost_label'];
+		$price_compare_status = (string) $status_payload['actual_cost_compare_status'];
+		$price_compare_message = (string) $status_payload['actual_cost_compare_message'];
+		$has_actual_cost = (bool) $status_payload['has_actual_cost'];
 		$yandex_self_pickup_code = trim( (string) ( $status_payload['yandex_self_pickup_node_code'] ?? $shipment['yandex_self_pickup_node_code'] ?? '' ) );
 		$button_policy = $this->button_policy()->resolve( $carrier_key, $shipment, $status_payload, $this->can_cancel_shipment( $shipment ) );
 		$has_created = ! empty( $button_policy['has_shipment'] );
@@ -303,10 +307,9 @@ final class OrderShipmentsMetabox {
 			<p data-wdc-tracking-row <?php echo '' === $tracking_presentation['display_text'] && '' === $tracking_presentation['copy_value'] ? 'hidden' : ''; ?>><strong data-wdc-tracking-label><?php echo esc_html( $tracking_presentation['label'] ); ?></strong>: <span data-wdc-tracking-number><?php $this->render_tracking_value( $tracking_presentation ); ?></span> <button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $tracking_presentation['copy_value'] ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $tracking_presentation['copy_value'] ); ?>>🗐</button> <span class="description" data-wdc-copy-tracking-status></span></p>
 			<p data-wdc-yandex-self-pickup-code-row <?php echo '' === $yandex_self_pickup_code ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Код для получения', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-yandex-self-pickup-code><?php echo esc_html( $yandex_self_pickup_code ); ?></span></p>
 			<p data-wdc-shipment-price-row class="<?php echo esc_attr( $this->shipment_price_class( $price_compare_status ) ); ?>" title="<?php echo esc_attr( $price_compare_message ); ?>" <?php echo '' === $price_label ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Цена', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-price-label><?php echo esc_html( $price_label ); ?></span></p>
-			<div class="wdc-shipment-actual-cost" data-wdc-shipment-actual-cost data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>">
-				<p><strong><?php echo esc_html__( 'Фактическая стоимость отправления', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-actual-cost-state><?php echo '' !== $price_label ? esc_html( $price_label ) : esc_html__( 'Фактическая стоимость пока не получена', 'walls-delivery-calc' ); ?></span></p>
-				<p class="description" data-wdc-actual-cost-source><?php echo esc_html( (string) ( $status_payload['actual_cost_source_label'] ?? '' ) ); ?></p>
-				<p><input type="text" inputmode="decimal" data-wdc-actual-cost-input placeholder="<?php echo esc_attr__( 'Фактическая стоимость, ₽', 'walls-delivery-calc' ); ?>"> <button type="button" class="button" data-wdc-save-actual-cost><?php echo esc_html__( 'Изменить', 'walls-delivery-calc' ); ?></button> <button type="button" class="button-link" data-wdc-clear-actual-cost><?php echo esc_html__( 'Очистить фактическую стоимость', 'walls-delivery-calc' ); ?></button></p>
+			<div class="wdc-shipment-actual-cost" data-wdc-shipment-actual-cost data-wdc-shipment-actual-cost-control data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $has_created ? '' : 'hidden'; ?>>
+				<p data-wdc-actual-cost-input-wrap <?php echo $has_created && ! $has_actual_cost ? '' : 'hidden'; ?>><input type="text" inputmode="decimal" data-wdc-actual-cost-input placeholder="<?php echo esc_attr__( 'Фактическая стоимость, ₽', 'walls-delivery-calc' ); ?>"> <button type="button" class="button" data-wdc-save-actual-cost <?php echo $has_created && ! $has_actual_cost ? '' : 'hidden'; ?>><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></p>
+				<p><button type="button" class="button-link" data-wdc-clear-actual-cost <?php echo $has_created && $has_actual_cost ? '' : 'hidden'; ?>><?php echo esc_html__( 'Очистить фактическую стоимость', 'walls-delivery-calc' ); ?></button></p>
 			</div>
 			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( (string) ( $shipment['updated_at'] ?? '' ) ); ?></span></p>
 			<?php $this->render_status_block( $status_payload ); ?>

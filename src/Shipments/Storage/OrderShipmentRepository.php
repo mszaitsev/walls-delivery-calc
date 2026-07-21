@@ -55,6 +55,9 @@ final class OrderShipmentRepository {
 		$order->update_meta_data( self::META_KEY, $shipments );
 		$order->update_meta_data( self::LAST_ERROR_META_KEY, '' );
 		$order->save();
+		if ( function_exists( 'do_action' ) ) {
+			do_action( 'wdc_shipment_record_changed', $order, $carrier_key, $shipment );
+		}
 	}
 
 	public function delete_for_carrier( object $order, string $carrier_key ): void {
@@ -67,6 +70,9 @@ final class OrderShipmentRepository {
 		$order->update_meta_data( self::META_KEY, $shipments );
 		$order->update_meta_data( self::LAST_ERROR_META_KEY, '' );
 		$order->save();
+		if ( function_exists( 'do_action' ) ) {
+			do_action( 'wdc_shipment_record_deleted', $order, $carrier_key );
+		}
 	}
 
 	/**

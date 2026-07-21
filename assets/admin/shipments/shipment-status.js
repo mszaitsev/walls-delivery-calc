@@ -70,21 +70,24 @@
   }
 
   function renderActualCostControl(box, status) {
-    const control = box && box.querySelector ? box.querySelector('[data-wdc-shipment-actual-cost]') : null;
+    const control = box && box.querySelector ? box.querySelector('[data-wdc-shipment-actual-cost-control]') : null;
     if (!control) return;
-    const state = control.querySelector('[data-wdc-actual-cost-state]');
-    const source = control.querySelector('[data-wdc-actual-cost-source]');
+    const inputWrap = control.querySelector('[data-wdc-actual-cost-input-wrap]');
+    const input = control.querySelector('[data-wdc-actual-cost-input]');
+    const save = control.querySelector('[data-wdc-save-actual-cost]');
     const clear = control.querySelector('[data-wdc-clear-actual-cost]');
-    const label = String(status && status.actual_cost_label || '').trim();
-    if (state) state.textContent = label || 'Фактическая стоимость пока не получена';
-    if (source) {
-      const sourceLabel = String(status && status.actual_cost_source_label || '').trim();
-      const updated = String(status && status.actual_cost_updated_at || '').trim();
-      source.textContent = [sourceLabel ? 'Источник: ' + sourceLabel : '', updated ? 'Обновлено: ' + updated : ''].filter(Boolean).join('. ');
+    const hasShipment = Boolean(status && status.has_shipment);
+    const hasActualCost = Object.prototype.hasOwnProperty.call(status || {}, 'has_actual_cost')
+      ? Boolean(status.has_actual_cost)
+      : (Number(status && status.actual_cost_kopecks || 0) > 0 || String(status && status.actual_cost_label || '').trim() !== '');
+    setVisible(control, hasShipment);
+    setVisible(inputWrap, hasShipment && !hasActualCost);
+    setVisible(save, hasShipment && !hasActualCost);
+    setVisible(clear, hasShipment && hasActualCost);
+    if (input && hasActualCost) {
+      input.value = '';
     }
-    if (clear) clear.hidden = String(status && status.actual_cost_source || '') !== 'manual';
   }
-
   function renderShipmentTechnicalInfo(box, data) {
     if (!box || !data) return;
     const backlogOrderId = String(data.backlog_order_id || '').trim();
@@ -346,6 +349,7 @@
     });
     setTrackingDisplay(box, '');
     renderShipmentPrice(box, {});
+    renderActualCostControl(box, { has_shipment: false, has_actual_cost: false });
     const updatedRow = box.querySelector('[data-wdc-updated-row]');
     if (updatedRow) updatedRow.hidden = true;
     const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');

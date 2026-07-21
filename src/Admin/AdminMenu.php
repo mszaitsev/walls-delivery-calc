@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Admin;
 
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Shipments\Admin\ShipmentCostAnalyticsAdminSection;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -19,7 +20,8 @@ final class AdminMenu {
 
 	public function __construct(
 		PluginEnvironment $environment,
-		private ?DeliveryQuoteCacheManager $quote_cache_manager = null
+		private DeliveryQuoteCacheManager $quote_cache_manager,
+		private ShipmentCostAnalyticsAdminSection $shipment_cost_analytics
 	) {
 		$this->environment = $environment;
 	}
@@ -78,6 +80,7 @@ final class AdminMenu {
 				<input type="hidden" name="<?php echo esc_attr( self::NONCE_NAME ); ?>" value="<?php echo esc_attr( wp_create_nonce( self::NONCE_ACTION ) ); ?>">
 				<button class="button button-secondary" type="submit"><?php echo esc_html__( 'Очистить кеш тарифов доставки', 'walls-delivery-calc' ); ?></button>
 			</form>
+			<?php $this->shipment_cost_analytics->render(); ?>
 		</div>
 		<?php
 	}
@@ -98,7 +101,7 @@ final class AdminMenu {
 			return '';
 		}
 
-		$deleted = $this->quote_cache_manager instanceof DeliveryQuoteCacheManager ? $this->quote_cache_manager->clear_all_delivery_cache() : 0;
+		$deleted = $this->quote_cache_manager->clear_all_delivery_cache();
 
 		return sprintf( __( 'Кеш тарифов доставки очищен. Удалено записей: %d', 'walls-delivery-calc' ), $deleted );
 	}

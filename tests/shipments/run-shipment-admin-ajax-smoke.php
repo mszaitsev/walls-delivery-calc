@@ -3,6 +3,11 @@ declare(strict_types=1);
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
+$root = dirname( __DIR__, 2 );
+require_once $root . '/src/Core/Autoloader.php';
+( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', $root . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
+
 if ( ! function_exists( 'add_action' ) ) {
 	function add_action( string $hook_name, callable|array $callback ): void {
 		$GLOBALS['wdc_shipment_admin_ajax_registered_hooks'][] = array( $hook_name, $callback );
@@ -14,6 +19,58 @@ if ( ! function_exists( '__' ) ) {
 		return $text;
 	}
 }
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		unset( $capability );
+		return true;
+	}
+}
+if ( ! function_exists( 'check_ajax_referer' ) ) {
+	function check_ajax_referer( string $action, string $query_arg = '', bool $stop = true ): bool {
+		unset( $action, $query_arg, $stop );
+		return true;
+	}
+}
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( mixed $value ): string {
+		return strtolower( preg_replace( '/[^a-zA-Z0-9_\-]/', '', (string) $value ) ?? '' );
+	}
+}
+if ( ! function_exists( 'sanitize_text_field' ) ) {
+	function sanitize_text_field( mixed $value ): string {
+		return trim( strip_tags( (string) $value ) );
+	}
+}
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( mixed $value ): mixed {
+		return $value;
+	}
+}
+if ( ! function_exists( 'wp_send_json_success' ) ) {
+	function wp_send_json_success( mixed $data = null, ?int $status_code = null ): never {
+		throw new ShipmentAdminAjaxSmokeAjaxResponse( true, $data, $status_code ?? 200 );
+	}
+}
+if ( ! function_exists( 'wp_send_json_error' ) ) {
+	function wp_send_json_error( mixed $data = null, ?int $status_code = null ): never {
+		throw new ShipmentAdminAjaxSmokeAjaxResponse( false, $data, $status_code ?? 400 );
+	}
+}
+if ( ! function_exists( 'admin_url' ) ) {
+	function admin_url( string $path = '' ): string {
+		return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+	}
+}
+if ( ! function_exists( 'wc_get_order' ) ) {
+	function wc_get_order( int $order_id ): ?ShipmentAdminAjaxSmokeOrder {
+		return $GLOBALS['wdc_shipment_admin_ajax_orders'][ $order_id ] ?? null;
+	}
+}
+if ( ! function_exists( 'do_action' ) ) {
+	function do_action( string $hook, mixed ...$args ): void {
+		$GLOBALS['wdc_shipment_admin_ajax_actions'][] = array( 'hook' => $hook, 'args' => $args );
+	}
+}
 
 function shipment_admin_ajax_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -21,7 +78,149 @@ function shipment_admin_ajax_assert( bool $condition, string $message ): void {
 	}
 }
 
-$root = dirname( __DIR__, 2 );
+final class ShipmentAdminAjaxSmokeAjaxResponse extends RuntimeException {
+	public function __construct(
+		public readonly bool $success,
+		public readonly mixed $data,
+		public readonly int $status_code
+	) {
+		parent::__construct( 'AJAX response captured.' );
+	}
+}
+
+final class ShipmentAdminAjaxSmokeOrder {
+	/** @param array<string,mixed> $meta */
+	public function __construct(
+		private int $id,
+		private array $meta = array()
+	) {
+	}
+
+	public function get_id(): int {
+		return $this->id;
+	}
+
+	public function get_meta( string $key, bool $single = true ): mixed {
+		unset( $single );
+		return $this->meta[ $key ] ?? array();
+	}
+
+	public function update_meta_data( string $key, mixed $value ): void {
+		$this->meta[ $key ] = $value;
+	}
+
+	public function save(): void {
+	}
+}
+
+final class ShipmentAdminAjaxSmokeAdapter implements \WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface {
+	public int $attach_calls = 0;
+	public int $status_calls = 0;
+	/** @var array<string,mixed> */
+	public array $status_overrides = array();
+
+	public function __construct(
+		private string $carrier_key,
+		private \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository $repository
+	) {
+	}
+
+	public function carrier_key(): string {
+		return $this->carrier_key;
+	}
+
+	public function supports( \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest $request ): bool {
+		unset( $request );
+		return true;
+	}
+
+	public function build_safe_payload_preview( \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest $request ): array {
+		unset( $request );
+		return array();
+	}
+
+	public function create( \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest $request ): \WallsShop\WDC\Domain\Shipment\ShipmentCreateResult {
+		unset( $request );
+		throw new RuntimeException( 'Manual attach smoke must not create shipments.' );
+	}
+
+	public function presentation(): array {
+		return array(
+			'carrier_label' => 'Fake Carrier',
+			'status_title' => 'Fake status',
+			'tracking_label' => 'Tracking',
+			'created_toast' => 'Created',
+		);
+	}
+
+	public function status_payload( object $order, array $shipment ): array {
+		++$this->status_calls;
+		unset( $order );
+		return array_merge(
+			array(
+				'has_shipment' => '' !== trim( (string) ( $shipment['tracking_number'] ?? '' ) ),
+				'can_create' => false,
+				'can_attach_manual' => false,
+				'can_update_status' => true,
+				'can_cancel' => false,
+				'can_remove_from_order' => true,
+				'tracking_number' => (string) ( $shipment['tracking_number'] ?? '' ),
+			),
+			$this->status_overrides
+		);
+	}
+
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		unset( $order, $shipment_key );
+		return array();
+	}
+
+	public function attach_manual( object $order, array $payload ): array {
+		++$this->attach_calls;
+		$barcode = (string) ( $payload['barcode'] ?? '' );
+		$this->repository->save_for_carrier(
+			$order,
+			$this->carrier_key,
+			array(
+				'carrier_key' => $this->carrier_key,
+				'service_key' => $this->carrier_key . '_service',
+				'service_title' => 'Fake service',
+				'tracking_number' => $barcode,
+				'barcode' => $barcode,
+				'status' => 'created',
+			)
+		);
+
+		return array(
+			'success' => true,
+			'message' => 'Attached',
+			'tracking_number' => $barcode,
+		);
+	}
+
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array {
+		unset( $order, $shipment_key );
+		return array();
+	}
+
+	public function remove_from_order( object $order, string $shipment_key = '' ): array {
+		unset( $order, $shipment_key );
+		return array();
+	}
+
+	public function supports_status_auto_sync(): bool {
+		return false;
+	}
+
+	public function tracking_identifier( array $shipment ): string {
+		return (string) ( $shipment['tracking_number'] ?? '' );
+	}
+
+	public function auto_sync_throttle_microseconds(): int {
+		return 0;
+	}
+}
+
 $metabox = (string) file_get_contents( $root . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $plugin = (string) file_get_contents( $root . '/src/Core/Plugin.php' );
 $service = (string) file_get_contents( $root . '/src/Shipments/Admin/Ajax/ShipmentAdminAjaxService.php' );
@@ -65,6 +264,13 @@ foreach ( $controllers as $class => $method ) {
 	shipment_admin_ajax_assert( ! str_contains( $metabox, 'private ?' . $class . ' $' . $property ) && ! preg_match( '/private\s+\??' . preg_quote( $class, '/' ) . '\s+\$' . preg_quote( $property, '/' ) . '\s*=\s*null/', $metabox ), 'Metabox AJAX controller dependency must not allow null/default null: ' . $class );
 }
 
+foreach ( glob( $root . '/src/Shipments/Admin/Ajax/*.php' ) ?: array() as $ajax_file ) {
+	$source = (string) file_get_contents( $ajax_file );
+	if ( str_contains( $source, '->discard_preview_buffer(' ) ) {
+		shipment_admin_ajax_assert( str_contains( $source, 'function discard_preview_buffer(' ), 'AJAX controller using discard_preview_buffer must declare it locally: ' . basename( $ajax_file ) );
+	}
+}
+
 foreach ( array(
 	'wdc_create_shipment',
 	'wdc_continue_shipment_lifecycle',
@@ -93,6 +299,12 @@ shipment_admin_ajax_assert( ! str_contains( $service, 'ShipmentCreationService' 
 shipment_admin_ajax_assert( str_contains( $service, 'function assert_access(' ) && str_contains( $service, 'function resolve_order_from_request(' ) && str_contains( $service, 'function carrier_key_from_request(' ), 'ShipmentAdminAjaxService must remain a small shared AJAX helper.' );
 shipment_admin_ajax_assert( str_contains( $payload_builder, 'function carrier_ui_payload(' ) && ! str_contains( $payload_builder, 'function ajax_' ), 'Carrier UI payload builder must own shared UI payload without endpoint methods.' );
 shipment_admin_ajax_assert( ! str_contains( $metabox, 'CarrierShipmentLifecycleContinuationInterface' ), 'Metabox must not own lifecycle continuation business contract.' );
+shipment_admin_ajax_assert( str_contains( $metabox, 'data-wdc-shipment-price-row' ) && str_contains( $metabox, 'data-wdc-shipment-actual-cost-control' ) && str_contains( $metabox, 'data-wdc-actual-cost-input-wrap' ), 'Metabox must keep price row as the only price presentation and expose conditional actual-cost controls.' );
+shipment_admin_ajax_assert( ! str_contains( $metabox, 'data-wdc-actual-cost-state' ) && ! str_contains( $metabox, 'data-wdc-actual-cost-source' ), 'Metabox must not render duplicated actual-cost state/source rows.' );
+shipment_admin_ajax_assert( str_contains( $metabox, '$has_created && ! $has_actual_cost' ) && str_contains( $metabox, '$has_created && $has_actual_cost' ), 'Metabox initial render must show input/save only without actual cost and clear only with actual cost.' );
+$shipment_status_js = (string) file_get_contents( $root . '/assets/admin/shipments/shipment-status.js' );
+shipment_admin_ajax_assert( str_contains( $shipment_status_js, 'data-wdc-shipment-actual-cost-control' ) && str_contains( $shipment_status_js, 'has_actual_cost' ) && str_contains( $shipment_status_js, 'setVisible(clear, hasShipment && hasActualCost)' ), 'Shipment status JS must refresh actual-cost controls from has_shipment/has_actual_cost.' );
+shipment_admin_ajax_assert( ! str_contains( $shipment_status_js, 'actual_cost_source_label' ) && ! str_contains( $shipment_status_js, 'data-wdc-actual-cost-source' ), 'Shipment status JS must not render actual-cost source/date in the metabox.' );
 
 $ajax_dir = $root . '/src/Shipments/Admin/Ajax/';
 require_once $root . '/src/Domain/Common/MoneyParser.php';
@@ -158,5 +370,133 @@ foreach ( array( '0', '0.00', '', '-1', '1.234' ) as $invalid_actual_cost ) {
 	}
 	shipment_admin_ajax_assert( $rejected, 'Actual cost parser must reject invalid value: ' . $invalid_actual_cost );
 }
+
+$repository = new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository();
+$alpha_adapter = new ShipmentAdminAjaxSmokeAdapter( 'alpha', $repository );
+$beta_adapter = new ShipmentAdminAjaxSmokeAdapter( 'beta', $repository );
+$adapter_registry = new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $alpha_adapter, $beta_adapter ) );
+$delivery_services = ( new ReflectionClass( \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository::class ) )->newInstanceWithoutConstructor();
+$status_updates = ( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
+$actual_cost_resolver = shipment_test_actual_cost_resolver();
+$payloads = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder( $repository, $delivery_services, $status_updates, $actual_cost_resolver, null, null, $adapter_registry );
+$manual_attach = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController( $payloads );
+
+$parity_order = new ShipmentAdminAjaxSmokeOrder(
+	601,
+	array(
+		\WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister::CALCULATION_META_KEY => array(
+			'api' => array( 'api_base_price_kopecks' => 10000 ),
+		),
+	)
+);
+$parity_shipment = array(
+	'carrier_key' => 'alpha',
+	'service_key' => 'alpha_service',
+	'tracking_number' => 'TEST-1',
+	'actual_cost_kopecks' => 10000,
+	'actual_cost_source' => 'carrier_api',
+	'actual_cost_source_detail' => 'fake_status',
+	'actual_cost_updated_at' => '2026-07-21 13:35:38',
+);
+$repository->save_for_carrier( $parity_order, 'alpha', $parity_shipment );
+$initial_status = $actual_cost_resolver->enrich_status_payload( $alpha_adapter->status_payload( $parity_order, $parity_shipment ), $parity_shipment, $parity_order );
+$alpha_adapter->status_calls = 0;
+$ajax_status = $payloads->carrier_ui_payload( $parity_order, 'alpha' )['status'];
+shipment_admin_ajax_assert( 1 === $alpha_adapter->status_calls, 'Carrier UI payload dispatch must call the adapter status payload exactly once for the adapter path.' );
+foreach ( array( 'actual_cost_kopecks', 'has_actual_cost', 'actual_cost_label', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at', 'base_api_cost_kopecks', 'actual_cost_compare_status', 'actual_cost_compare_message' ) as $key ) {
+	shipment_admin_ajax_assert( $initial_status[ $key ] === $ajax_status[ $key ], 'Initial render and AJAX payload must agree for actual-cost key: ' . $key );
+}
+shipment_admin_ajax_assert( true === $ajax_status['has_actual_cost'] && 'carrier_api' === $ajax_status['actual_cost_source'] && 'fake_status' === $ajax_status['actual_cost_source_detail'], 'Minimal carrier adapter must receive shared actual-cost presentation from canonical shipment fields.' );
+
+$override_shipment = array_merge( $parity_shipment, array( 'actual_cost_kopecks' => 12000, 'actual_cost_source' => 'manual', 'actual_cost_source_detail' => 'manual_save' ) );
+$override_status = $payloads->carrier_ui_payload( $parity_order, 'alpha', $override_shipment )['status'];
+shipment_admin_ajax_assert( 12000 === $override_status['actual_cost_kopecks'] && '120.00' === substr( (string) $override_status['actual_cost_label'], 0, 6 ) && 'warning' === $override_status['actual_cost_compare_status'], 'AJAX payload must use fresh shipment_override actual cost instead of stale repository cost.' );
+$cleared_shipment = $parity_shipment;
+unset( $cleared_shipment['actual_cost_source'], $cleared_shipment['actual_cost_source_detail'], $cleared_shipment['actual_cost_updated_at'] );
+$cleared_shipment['actual_cost_kopecks'] = null;
+$cleared_status = $payloads->carrier_ui_payload( $parity_order, 'alpha', $cleared_shipment )['status'];
+shipment_admin_ajax_assert( false === $cleared_status['has_actual_cost'] && null === $cleared_status['actual_cost_kopecks'] && '' === $cleared_status['actual_cost_label'], 'AJAX payload must use fresh clear override instead of stale repository cost.' );
+
+$alpha_adapter->status_overrides = array(
+	'actual_cost_kopecks' => 12000,
+	'actual_cost_compare_status' => 'ok',
+	'actual_cost_compare_message' => 'wrong carrier comparison',
+);
+$adapter_override_status = $payloads->carrier_ui_payload( $parity_order, 'alpha', $parity_shipment )['status'];
+shipment_admin_ajax_assert( 12000 === $adapter_override_status['actual_cost_kopecks'] && 'warning' === $adapter_override_status['actual_cost_compare_status'] && 'wrong carrier comparison' !== $adapter_override_status['actual_cost_compare_message'], 'Shared presenter must override carrier-supplied comparison fields.' );
+$alpha_adapter->status_overrides = array();
+
+$fallback_order = new ShipmentAdminAjaxSmokeOrder(
+	602,
+	array(
+		\WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister::CALCULATION_META_KEY => array(
+			'api' => array( 'api_base_price_kopecks' => 10000 ),
+		),
+	)
+);
+$fallback_repository_shipment = array(
+	'carrier_key' => 'gamma',
+	'service_key' => 'gamma_service',
+	'tracking_number' => 'TEST-FALLBACK',
+	'actual_cost_kopecks' => 10000,
+	'actual_cost_source' => 'carrier_api',
+	'actual_cost_source_detail' => 'repository_status',
+	'actual_cost_updated_at' => '2026-07-21 13:00:00',
+);
+$repository->save_for_carrier( $fallback_order, 'gamma', $fallback_repository_shipment );
+$fallback_save_override = array_merge(
+	$fallback_repository_shipment,
+	array(
+		'actual_cost_kopecks' => 12000,
+		'actual_cost_source' => 'manual',
+		'actual_cost_source_detail' => 'override_save',
+	)
+);
+$fallback_save_status = $payloads->carrier_ui_payload( $fallback_order, 'gamma', $fallback_save_override )['status'];
+shipment_admin_ajax_assert( 12000 === $fallback_save_status['actual_cost_kopecks'] && true === $fallback_save_status['has_actual_cost'] && 'override_save' === $fallback_save_status['actual_cost_source_detail'], 'Fallback payload must use fresh save override without re-reading repository shipment.' );
+$fallback_clear_override = $fallback_repository_shipment;
+unset( $fallback_clear_override['actual_cost_source'], $fallback_clear_override['actual_cost_source_detail'], $fallback_clear_override['actual_cost_updated_at'] );
+$fallback_clear_override['actual_cost_kopecks'] = null;
+$fallback_clear_status = $payloads->carrier_ui_payload( $fallback_order, 'gamma', $fallback_clear_override )['status'];
+shipment_admin_ajax_assert( null === $fallback_clear_status['actual_cost_kopecks'] && false === $fallback_clear_status['has_actual_cost'] && '' === $fallback_clear_status['actual_cost_label'], 'Fallback payload must use fresh clear override and must not restore repository actual cost.' );
+
+$GLOBALS['wdc_shipment_admin_ajax_actions'] = array();
+$GLOBALS['wdc_shipment_admin_ajax_orders'] = array(
+	501 => new ShipmentAdminAjaxSmokeOrder( 501 ),
+);
+$initial_buffer_level = ob_get_level();
+$_POST = array(
+	'nonce' => 'valid',
+	'order_id' => 501,
+	'shipment_key' => 'alpha',
+	'barcode' => 'TRACK-501',
+);
+$response = null;
+try {
+	$manual_attach->handle();
+} catch ( ShipmentAdminAjaxSmokeAjaxResponse $captured ) {
+	$response = $captured;
+}
+shipment_admin_ajax_assert( $response instanceof ShipmentAdminAjaxSmokeAjaxResponse && $response->success && 200 === $response->status_code, 'Manual attach controller must return JSON success without fatal error.' );
+shipment_admin_ajax_assert( 1 === $alpha_adapter->attach_calls, 'Manual attach controller must call the selected carrier adapter.' );
+shipment_admin_ajax_assert( 'TRACK-501' === (string) ( $response->data['tracking_number'] ?? '' ), 'Manual attach response must include tracking_number.' );
+shipment_admin_ajax_assert( $initial_buffer_level === ob_get_level(), 'Manual attach controller must restore output buffer level before JSON response.' );
+$saved = $repository->find_by_carrier( $GLOBALS['wdc_shipment_admin_ajax_orders'][501], 'alpha' );
+shipment_admin_ajax_assert( 'TRACK-501' === (string) ( $saved['tracking_number'] ?? '' ), 'Manual attach must persist shipment through OrderShipmentRepository.' );
+shipment_admin_ajax_assert( array() !== array_filter( $GLOBALS['wdc_shipment_admin_ajax_actions'], static fn( array $action ): bool => 'wdc_shipment_record_changed' === $action['hook'] ), 'Manual attach persistence must emit analytics shipment-changed hook.' );
+
+$_POST = array(
+	'nonce' => 'valid',
+	'order_id' => 501,
+	'shipment_key' => 'beta',
+	'barcode' => 'TRACK-502',
+);
+$response = null;
+try {
+	$manual_attach->handle();
+} catch ( ShipmentAdminAjaxSmokeAjaxResponse $captured ) {
+	$response = $captured;
+}
+shipment_admin_ajax_assert( $response instanceof ShipmentAdminAjaxSmokeAjaxResponse && $response->success && 1 === $beta_adapter->attach_calls && 'TRACK-502' === (string) ( $response->data['tracking_number'] ?? '' ), 'Manual attach controller must stay carrier-agnostic across fake carriers.' );
 
 echo "Shipment admin AJAX smoke passed.\n";

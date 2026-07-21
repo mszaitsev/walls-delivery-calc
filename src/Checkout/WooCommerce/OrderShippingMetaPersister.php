@@ -144,6 +144,9 @@ final class OrderShippingMetaPersister {
 		foreach ( $map as $key => $value ) {
 			$order->update_meta_data( $key, $value );
 		}
+		if ( function_exists( 'do_action' ) ) {
+			do_action( 'wdc_delivery_calculation_changed', $order );
+		}
 	}
 
 	/**

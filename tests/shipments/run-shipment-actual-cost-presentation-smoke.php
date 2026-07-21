@@ -99,6 +99,51 @@ shipment_actual_cost_assert( null === $resolver->resolve_from_order( new Shipmen
 shipment_actual_cost_assert( null === $resolver->resolve_from_order( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_rub' => '0.00' ) ) ) ), 'Resolver must treat string zero base rubles as missing.' );
 shipment_actual_cost_assert( 777 === $resolver->resolve_from_order( new ShipmentActualCostOrder( json_encode( array( 'api' => array( 'base_api_cost_kopecks' => 777 ) ), JSON_THROW_ON_ERROR ) ) ), 'Resolver must keep JSON calculation meta support.' );
 
+$actual_costs = shipment_test_actual_cost_resolver();
+$minimal_enriched = $actual_costs->enrich_status_payload(
+	array(
+		'has_shipment' => true,
+		'tracking_number' => 'TEST-1',
+	),
+	array(
+		'actual_cost_kopecks' => 10000,
+		'actual_cost_source' => 'carrier_api',
+		'actual_cost_source_detail' => 'fake_status',
+		'actual_cost_updated_at' => '2026-07-21 13:35:38',
+	),
+	new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) )
+);
+shipment_actual_cost_assert( true === $minimal_enriched['has_actual_cost'] && 10000 === $minimal_enriched['actual_cost_kopecks'] && '' !== $minimal_enriched['actual_cost_label'], 'Shared presenter must add actual-cost presentation for a minimal carrier payload.' );
+shipment_actual_cost_assert( 'carrier_api' === $minimal_enriched['actual_cost_source'] && 'fake_status' === $minimal_enriched['actual_cost_source_detail'] && '2026-07-21 13:35:38' === $minimal_enriched['actual_cost_updated_at'], 'Shared presenter must keep canonical source metadata.' );
+shipment_actual_cost_assert( 10000 === $minimal_enriched['base_api_cost_kopecks'] && 'ok' === $minimal_enriched['actual_cost_compare_status'] && '' !== $minimal_enriched['actual_cost_compare_message'], 'Shared presenter must calculate comparison payload through the common service.' );
+
+$status_priority = $actual_costs->enrich_status_payload(
+	array(
+		'actual_cost_kopecks' => '12000',
+		'actual_cost_source' => 'manual',
+		'actual_cost_source_detail' => 'override_status',
+		'actual_cost_updated_at' => '2026-07-21 14:00:00',
+		'actual_cost_compare_status' => 'ok',
+		'actual_cost_compare_message' => 'adapter override must be ignored',
+	),
+	array(
+		'actual_cost_kopecks' => 10000,
+		'actual_cost_source' => 'carrier_api',
+		'actual_cost_source_detail' => 'canonical_status',
+		'actual_cost_updated_at' => '2026-07-21 13:00:00',
+	),
+	new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) )
+);
+shipment_actual_cost_assert( 12000 === $status_priority['actual_cost_kopecks'] && 'manual' === $status_priority['actual_cost_source'] && 'override_status' === $status_priority['actual_cost_source_detail'], 'Shared presenter must prefer explicit status actual cost and metadata over canonical shipment values.' );
+shipment_actual_cost_assert( 'warning' === $status_priority['actual_cost_compare_status'] && str_contains( $status_priority['actual_cost_compare_message'], '100.00' ), 'Shared presenter must override carrier-supplied comparison fields with the common threshold result.' );
+
+$clear_override = $actual_costs->enrich_status_payload(
+	array(),
+	array( 'actual_cost_kopecks' => null ),
+	new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) )
+);
+shipment_actual_cost_assert( false === $clear_override['has_actual_cost'] && null === $clear_override['actual_cost_kopecks'] && '' === $clear_override['actual_cost_label'] && '' === $clear_override['actual_cost_compare_status'], 'Shared presenter must treat a cleared shipment override as missing actual cost.' );
+
 $yandex = shipment_actual_cost_reflection_instance( YandexShipmentAdapter::class );
 shipment_actual_cost_set_property( $yandex, 'buttons', new YandexShipmentButtonPolicy() );
 shipment_actual_cost_set_property( $yandex, 'status_mapping', null );
@@ -127,6 +172,17 @@ shipment_actual_cost_set_property( $cdek, 'actual_cost_resolver', shipment_test_
 $cdek_zero = $cdek->status_payload( array( 'actual_cost_kopecks' => 0 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 10000 ) ) ) );
 shipment_actual_cost_assert( null === $cdek_zero['actual_cost_kopecks'] && '' === $cdek_zero['actual_cost_label'] && '' === $cdek_zero['actual_cost_compare_status'], 'CDEK canonical actual_cost_kopecks=0 must render as missing actual cost.' );
 
+$carrier_matrix = array(
+	'yandex' => $yandex->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ), array( 'actual_cost_kopecks' => 103000 ) ),
+	'dpd' => $dpd->status_payload( new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ), array( 'actual_cost_kopecks' => 103001 ) ),
+	'russian_post' => $russian_post->status_payload( array( 'actual_cost_kopecks' => 103000 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ) ),
+	'cdek' => $cdek->status_payload( array( 'actual_cost_kopecks' => 103001 ), new ShipmentActualCostOrder( array( 'api' => array( 'api_base_price_kopecks' => 100000 ) ) ) ),
+);
+foreach ( $carrier_matrix as $carrier_name => $payload ) {
+	shipment_actual_cost_assert( true === ( $payload['has_actual_cost'] ?? null ) && '' !== (string) ( $payload['actual_cost_label'] ?? '' ), $carrier_name . ' payload must expose has_actual_cost=true and a formatted actual_cost_label.' );
+}
+shipment_actual_cost_assert( 'ok' === $carrier_matrix['yandex']['actual_cost_compare_status'] && 'ok' === $carrier_matrix['russian_post']['actual_cost_compare_status'], 'Actual cost exactly at +3% must be ok in carrier status payloads.' );
+shipment_actual_cost_assert( 'warning' === $carrier_matrix['dpd']['actual_cost_compare_status'] && 'warning' === $carrier_matrix['cdek']['actual_cost_compare_status'], 'Actual cost above +3% must be warning in carrier status payloads.' );
 $service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Presentation/ShipmentActualCostComparisonService.php' );
 shipment_actual_cost_assert( ! str_contains( $service_source, '1.03' ) && ! str_contains( $service_source, 'floor(' ) && ! str_contains( $service_source, 'round(' ) && ! str_contains( $service_source, '(int)' ), 'Comparison service must not use float threshold arithmetic or silent integer casts.' );
 shipment_actual_cost_assert( str_contains( $service_source, '* 100 <= $base_cost_kopecks * 103' ), 'Comparison service must use integer cross multiplication for the +3% threshold.' );

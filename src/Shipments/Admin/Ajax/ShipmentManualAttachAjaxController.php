@@ -108,6 +108,12 @@ final class ShipmentManualAttachAjaxController {
 		}
 	}
 
+	private function discard_preview_buffer( int $buffer_level ): void {
+		while ( ob_get_level() > $buffer_level ) {
+			ob_end_clean();
+		}
+	}
+
 	private function public_shipment_error_message( string $message ): string {
 		$message = trim( $message );
 		if ( '' === $message ) {

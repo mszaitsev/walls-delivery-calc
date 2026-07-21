@@ -34,10 +34,37 @@ final class ShipmentActualCostResolver {
 
 		return $payload + array(
 			'base_api_cost_kopecks' => null === $actual_kopecks ? null : $base_kopecks,
+			'has_actual_cost' => null !== $actual_kopecks && $actual_kopecks > 0,
 			'actual_cost_source' => $source,
+			'actual_cost_source_detail' => (string) ( $shipment['actual_cost_source_detail'] ?? '' ),
 			'actual_cost_source_label' => $this->source_label( $source ),
 			'actual_cost_updated_at' => (string) ( $shipment['actual_cost_updated_at'] ?? '' ),
 			'actual_cost_is_manual' => 'manual' === $source,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $status
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	public function enrich_status_payload( array $status, array $shipment, ?object $order ): array {
+		$actual_kopecks = $this->positive_int_or_null( $status['actual_cost_kopecks'] ?? null );
+		if ( null === $actual_kopecks ) {
+			$actual_kopecks = $this->amount_kopecks( $shipment );
+		}
+
+		$canonical = $shipment;
+		$canonical['actual_cost_kopecks'] = $actual_kopecks;
+		foreach ( array( 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at' ) as $key ) {
+			$canonical[ $key ] = array_key_exists( $key, $status )
+				? (string) $status[ $key ]
+				: (string) ( $shipment[ $key ] ?? '' );
+		}
+
+		return array_merge(
+			$status,
+			$this->presentation_payload( $canonical, $order )
 		);
 	}
 
