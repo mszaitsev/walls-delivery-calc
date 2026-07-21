@@ -1043,6 +1043,7 @@ $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	$ajax_repository,
 	$services,
 	$status_updates,
+	cdek_order_actual_cost_resolver(),
 	cdek_status_updates: $ajax_status
 );
 $ajax_create_controller = new ShipmentCreateAjaxController( $ajax_repository, $drafts, $ajax_creation, $ajax_payloads );
@@ -1058,6 +1059,7 @@ $metabox = new OrderShipmentsMetabox(
 	$drafts,
 	$services,
 	$status_updates,
+	cdek_order_actual_cost_resolver(),
 	ajax_create_controller: $ajax_create_controller,
 	ajax_lifecycle_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentLifecycleAjaxController::class ),
 	ajax_preview_controller: $ajax_controller_double( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController::class ),

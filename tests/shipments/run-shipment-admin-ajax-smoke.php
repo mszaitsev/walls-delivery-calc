@@ -6,6 +6,7 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 $root = dirname( __DIR__, 2 );
 require_once $root . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', $root . '/src' ) )->register();
+require_once __DIR__ . '/actual-cost-test-helpers.php';
 
 if ( ! function_exists( 'add_action' ) ) {
 	function add_action( string $hook_name, callable|array $callback ): void {
@@ -114,6 +115,8 @@ final class ShipmentAdminAjaxSmokeOrder {
 
 final class ShipmentAdminAjaxSmokeAdapter implements \WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface {
 	public int $attach_calls = 0;
+	/** @var array<string,mixed> */
+	public array $status_overrides = array();
 
 	public function __construct(
 		private string $carrier_key,
@@ -151,14 +154,17 @@ final class ShipmentAdminAjaxSmokeAdapter implements \WallsShop\WDC\Shipments\Co
 
 	public function status_payload( object $order, array $shipment ): array {
 		unset( $order );
-		return array(
-			'has_shipment' => '' !== trim( (string) ( $shipment['tracking_number'] ?? '' ) ),
-			'can_create' => false,
-			'can_attach_manual' => false,
-			'can_update_status' => true,
-			'can_cancel' => false,
-			'can_remove_from_order' => true,
-			'tracking_number' => (string) ( $shipment['tracking_number'] ?? '' ),
+		return array_merge(
+			array(
+				'has_shipment' => '' !== trim( (string) ( $shipment['tracking_number'] ?? '' ) ),
+				'can_create' => false,
+				'can_attach_manual' => false,
+				'can_update_status' => true,
+				'can_cancel' => false,
+				'can_remove_from_order' => true,
+				'tracking_number' => (string) ( $shipment['tracking_number'] ?? '' ),
+			),
+			$this->status_overrides
 		);
 	}
 
@@ -369,8 +375,52 @@ $beta_adapter = new ShipmentAdminAjaxSmokeAdapter( 'beta', $repository );
 $adapter_registry = new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $alpha_adapter, $beta_adapter ) );
 $delivery_services = ( new ReflectionClass( \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository::class ) )->newInstanceWithoutConstructor();
 $status_updates = ( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
-$payloads = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder( $repository, $delivery_services, $status_updates, null, null, $adapter_registry );
+$actual_cost_resolver = shipment_test_actual_cost_resolver();
+$payloads = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder( $repository, $delivery_services, $status_updates, $actual_cost_resolver, null, null, $adapter_registry );
 $manual_attach = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentManualAttachAjaxController( $payloads );
+
+$parity_order = new ShipmentAdminAjaxSmokeOrder(
+	601,
+	array(
+		\WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister::CALCULATION_META_KEY => array(
+			'api' => array( 'api_base_price_kopecks' => 10000 ),
+		),
+	)
+);
+$parity_shipment = array(
+	'carrier_key' => 'alpha',
+	'service_key' => 'alpha_service',
+	'tracking_number' => 'TEST-1',
+	'actual_cost_kopecks' => 10000,
+	'actual_cost_source' => 'carrier_api',
+	'actual_cost_source_detail' => 'fake_status',
+	'actual_cost_updated_at' => '2026-07-21 13:35:38',
+);
+$repository->save_for_carrier( $parity_order, 'alpha', $parity_shipment );
+$initial_status = $actual_cost_resolver->enrich_status_payload( $alpha_adapter->status_payload( $parity_order, $parity_shipment ), $parity_shipment, $parity_order );
+$ajax_status = $payloads->carrier_ui_payload( $parity_order, 'alpha' )['status'];
+foreach ( array( 'actual_cost_kopecks', 'has_actual_cost', 'actual_cost_label', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at', 'base_api_cost_kopecks', 'actual_cost_compare_status', 'actual_cost_compare_message' ) as $key ) {
+	shipment_admin_ajax_assert( $initial_status[ $key ] === $ajax_status[ $key ], 'Initial render and AJAX payload must agree for actual-cost key: ' . $key );
+}
+shipment_admin_ajax_assert( true === $ajax_status['has_actual_cost'] && 'carrier_api' === $ajax_status['actual_cost_source'] && 'fake_status' === $ajax_status['actual_cost_source_detail'], 'Minimal carrier adapter must receive shared actual-cost presentation from canonical shipment fields.' );
+
+$override_shipment = array_merge( $parity_shipment, array( 'actual_cost_kopecks' => 12000, 'actual_cost_source' => 'manual', 'actual_cost_source_detail' => 'manual_save' ) );
+$override_status = $payloads->carrier_ui_payload( $parity_order, 'alpha', $override_shipment )['status'];
+shipment_admin_ajax_assert( 12000 === $override_status['actual_cost_kopecks'] && '120.00' === substr( (string) $override_status['actual_cost_label'], 0, 6 ) && 'warning' === $override_status['actual_cost_compare_status'], 'AJAX payload must use fresh shipment_override actual cost instead of stale repository cost.' );
+$cleared_shipment = $parity_shipment;
+unset( $cleared_shipment['actual_cost_source'], $cleared_shipment['actual_cost_source_detail'], $cleared_shipment['actual_cost_updated_at'] );
+$cleared_shipment['actual_cost_kopecks'] = null;
+$cleared_status = $payloads->carrier_ui_payload( $parity_order, 'alpha', $cleared_shipment )['status'];
+shipment_admin_ajax_assert( false === $cleared_status['has_actual_cost'] && null === $cleared_status['actual_cost_kopecks'] && '' === $cleared_status['actual_cost_label'], 'AJAX payload must use fresh clear override instead of stale repository cost.' );
+
+$alpha_adapter->status_overrides = array(
+	'actual_cost_kopecks' => 12000,
+	'actual_cost_compare_status' => 'ok',
+	'actual_cost_compare_message' => 'wrong carrier comparison',
+);
+$adapter_override_status = $payloads->carrier_ui_payload( $parity_order, 'alpha', $parity_shipment )['status'];
+shipment_admin_ajax_assert( 12000 === $adapter_override_status['actual_cost_kopecks'] && 'warning' === $adapter_override_status['actual_cost_compare_status'] && 'wrong carrier comparison' !== $adapter_override_status['actual_cost_compare_message'], 'Shared presenter must override carrier-supplied comparison fields.' );
+$alpha_adapter->status_overrides = array();
 
 $GLOBALS['wdc_shipment_admin_ajax_actions'] = array();
 $GLOBALS['wdc_shipment_admin_ajax_orders'] = array(

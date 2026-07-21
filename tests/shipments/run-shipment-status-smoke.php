@@ -407,6 +407,7 @@ $ajax_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	$repository,
 	new DeliveryServiceRepository( $wpdb ),
 	$status_service,
+	shipment_test_actual_cost_resolver(),
 	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeAdapter( $status_service ) ) )
 );
 $ajax_status_controller = new ShipmentStatusAjaxController( $repository, $ajax_payloads );
@@ -446,6 +447,7 @@ $pending_cancel_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	$pending_cancel_repository,
 	new DeliveryServiceRepository( $wpdb ),
 	$status_service,
+	shipment_test_actual_cost_resolver(),
 	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeCancellationAdapter( $pending_cancel_repository, false ) ) )
 );
 $pending_cancel_controller = new ShipmentStatusAjaxController( $pending_cancel_repository, $pending_cancel_payloads );
@@ -476,6 +478,7 @@ $terminal_cancel_payloads = new ShipmentAdminCarrierUiPayloadBuilder(
 	$terminal_cancel_repository,
 	new DeliveryServiceRepository( $wpdb ),
 	$status_service,
+	shipment_test_actual_cost_resolver(),
 	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeCancellationAdapter( $terminal_cancel_repository, true ) ) )
 );
 $terminal_cancel_controller = new ShipmentStatusAjaxController( $terminal_cancel_repository, $terminal_cancel_payloads );

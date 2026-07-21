@@ -19,6 +19,7 @@ use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController;
@@ -63,6 +64,7 @@ final class OrderShipmentsMetabox {
 		private OrderShipmentDraftFactory $drafts,
 		private DeliveryServiceRepository $services,
 		private ShipmentStatusUpdateService $status_updates,
+		private ShipmentActualCostResolver $actual_costs,
 		private ShipmentCreateAjaxController $ajax_create_controller,
 		private ShipmentLifecycleAjaxController $ajax_lifecycle_controller,
 		private ShipmentPreviewAjaxController $ajax_preview_controller,
@@ -257,12 +259,13 @@ final class OrderShipmentsMetabox {
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
 		$status_payload = $this->status_payload_for_carrier( $order, $carrier_key );
 		$status_payload = array_merge( $status_payload, array( 'carrier_key' => $carrier_key ) );
+		$status_payload = $this->actual_costs->enrich_status_payload( $status_payload, $shipment, $order );
 		$presentation = $this->carrier_presentation( $carrier_key );
 		$tracking_presentation = $this->tracking_presentation( $status_payload, $presentation, $barcode );
-		$price_label = (string) ( $status_payload['actual_cost_label'] ?? '' );
-		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
-		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
-		$has_actual_cost = ! empty( $status_payload['has_actual_cost'] );
+		$price_label = (string) $status_payload['actual_cost_label'];
+		$price_compare_status = (string) $status_payload['actual_cost_compare_status'];
+		$price_compare_message = (string) $status_payload['actual_cost_compare_message'];
+		$has_actual_cost = (bool) $status_payload['has_actual_cost'];
 		$yandex_self_pickup_code = trim( (string) ( $status_payload['yandex_self_pickup_node_code'] ?? $shipment['yandex_self_pickup_node_code'] ?? '' ) );
 		$button_policy = $this->button_policy()->resolve( $carrier_key, $shipment, $status_payload, $this->can_cancel_shipment( $shipment ) );
 		$has_created = ! empty( $button_policy['has_shipment'] );

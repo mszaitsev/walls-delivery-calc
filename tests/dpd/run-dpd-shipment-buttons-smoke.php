@@ -85,6 +85,7 @@ $payload_builder = new ShipmentAdminCarrierUiPayloadBuilder(
 	$repository,
 	( new ReflectionClass( DeliveryServiceRepository::class ) )->newInstanceWithoutConstructor(),
 	$status_updates,
+	shipment_test_actual_cost_resolver(),
 	null,
 	null,
 	new CarrierShipmentAdapterRegistry( array( $adapter ) )
