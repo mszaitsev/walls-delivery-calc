@@ -115,6 +115,7 @@ final class ShipmentAdminAjaxSmokeOrder {
 
 final class ShipmentAdminAjaxSmokeAdapter implements \WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface {
 	public int $attach_calls = 0;
+	public int $status_calls = 0;
 	/** @var array<string,mixed> */
 	public array $status_overrides = array();
 
@@ -153,6 +154,7 @@ final class ShipmentAdminAjaxSmokeAdapter implements \WallsShop\WDC\Shipments\Co
 	}
 
 	public function status_payload( object $order, array $shipment ): array {
+		++$this->status_calls;
 		unset( $order );
 		return array_merge(
 			array(
@@ -398,7 +400,9 @@ $parity_shipment = array(
 );
 $repository->save_for_carrier( $parity_order, 'alpha', $parity_shipment );
 $initial_status = $actual_cost_resolver->enrich_status_payload( $alpha_adapter->status_payload( $parity_order, $parity_shipment ), $parity_shipment, $parity_order );
+$alpha_adapter->status_calls = 0;
 $ajax_status = $payloads->carrier_ui_payload( $parity_order, 'alpha' )['status'];
+shipment_admin_ajax_assert( 1 === $alpha_adapter->status_calls, 'Carrier UI payload dispatch must call the adapter status payload exactly once for the adapter path.' );
 foreach ( array( 'actual_cost_kopecks', 'has_actual_cost', 'actual_cost_label', 'actual_cost_source', 'actual_cost_source_detail', 'actual_cost_updated_at', 'base_api_cost_kopecks', 'actual_cost_compare_status', 'actual_cost_compare_message' ) as $key ) {
 	shipment_admin_ajax_assert( $initial_status[ $key ] === $ajax_status[ $key ], 'Initial render and AJAX payload must agree for actual-cost key: ' . $key );
 }

@@ -86,16 +86,6 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 	 * @return array<string,mixed>
 	 */
 	private function status_payload_for_carrier( object $order, string $carrier_key, array $shipment ): array {
-		$adapter = $this->carrier_adapter( $carrier_key );
-		if ( null !== $adapter ) {
-			return array_merge(
-				$adapter->status_payload( $order, $shipment ),
-				array(
-					'carrier_key' => $carrier_key,
-					'presentation' => $this->carrier_presentation( $carrier_key ),
-				)
-			);
-		}
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
 			return array_merge( $this->cdek_status_updates->status_payload( $shipment, $order ), array( 'presentation' => $this->carrier_presentation( $carrier_key ) ) );
 		}

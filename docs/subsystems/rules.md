@@ -1,6 +1,6 @@
 # Rules
 
-Version: 0.127.5
+Version: 0.127.6
 
 Rules live under `src/Rules`. The rule engine evaluates delivery conditions and operations used by checkout and delivery services.
 
