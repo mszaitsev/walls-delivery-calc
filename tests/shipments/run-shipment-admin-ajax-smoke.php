@@ -422,6 +422,40 @@ $adapter_override_status = $payloads->carrier_ui_payload( $parity_order, 'alpha'
 shipment_admin_ajax_assert( 12000 === $adapter_override_status['actual_cost_kopecks'] && 'warning' === $adapter_override_status['actual_cost_compare_status'] && 'wrong carrier comparison' !== $adapter_override_status['actual_cost_compare_message'], 'Shared presenter must override carrier-supplied comparison fields.' );
 $alpha_adapter->status_overrides = array();
 
+$fallback_order = new ShipmentAdminAjaxSmokeOrder(
+	602,
+	array(
+		\WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister::CALCULATION_META_KEY => array(
+			'api' => array( 'api_base_price_kopecks' => 10000 ),
+		),
+	)
+);
+$fallback_repository_shipment = array(
+	'carrier_key' => 'gamma',
+	'service_key' => 'gamma_service',
+	'tracking_number' => 'TEST-FALLBACK',
+	'actual_cost_kopecks' => 10000,
+	'actual_cost_source' => 'carrier_api',
+	'actual_cost_source_detail' => 'repository_status',
+	'actual_cost_updated_at' => '2026-07-21 13:00:00',
+);
+$repository->save_for_carrier( $fallback_order, 'gamma', $fallback_repository_shipment );
+$fallback_save_override = array_merge(
+	$fallback_repository_shipment,
+	array(
+		'actual_cost_kopecks' => 12000,
+		'actual_cost_source' => 'manual',
+		'actual_cost_source_detail' => 'override_save',
+	)
+);
+$fallback_save_status = $payloads->carrier_ui_payload( $fallback_order, 'gamma', $fallback_save_override )['status'];
+shipment_admin_ajax_assert( 12000 === $fallback_save_status['actual_cost_kopecks'] && true === $fallback_save_status['has_actual_cost'] && 'override_save' === $fallback_save_status['actual_cost_source_detail'], 'Fallback payload must use fresh save override without re-reading repository shipment.' );
+$fallback_clear_override = $fallback_repository_shipment;
+unset( $fallback_clear_override['actual_cost_source'], $fallback_clear_override['actual_cost_source_detail'], $fallback_clear_override['actual_cost_updated_at'] );
+$fallback_clear_override['actual_cost_kopecks'] = null;
+$fallback_clear_status = $payloads->carrier_ui_payload( $fallback_order, 'gamma', $fallback_clear_override )['status'];
+shipment_admin_ajax_assert( null === $fallback_clear_status['actual_cost_kopecks'] && false === $fallback_clear_status['has_actual_cost'] && '' === $fallback_clear_status['actual_cost_label'], 'Fallback payload must use fresh clear override and must not restore repository actual cost.' );
+
 $GLOBALS['wdc_shipment_admin_ajax_actions'] = array();
 $GLOBALS['wdc_shipment_admin_ajax_orders'] = array(
 	501 => new ShipmentAdminAjaxSmokeOrder( 501 ),
