@@ -37,6 +37,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentActualCostAjaxController;
 use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController;
+use WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
@@ -453,6 +454,19 @@ foreach ( array( 'KZ', 'KG', 'AM', 'BY' ) as $document_optional_country ) {
 }
 $ru_document_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => 'RU', 'tin' => 'RU-DOC-IGNORED', 'passport_number' => 'RU-PASS-IGNORED' ) ) );
 cdek_order_assert( ! array_key_exists( 'tin', $ru_document_payload['recipient'] ) && ! array_key_exists( 'passport_number', $ru_document_payload['recipient'] ), 'CDEK RU payload must ignore recipient document fields.' );
+foreach ( array( 'UZ', 'DE' ) as $unsupported_country ) {
+	$unsupported_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => $unsupported_country, 'tin' => 'SHOULD-NOT-SEND', 'passport_number' => 'SHOULD-NOT-SEND' ) );
+	$unsupported_errors = implode( "\n", $builder->validate( $unsupported_request ) );
+	cdek_order_assert( str_contains( $unsupported_errors, 'CDEK does not support recipient country ' . $unsupported_country ), 'CDEK builder must reject explicit unsupported recipient country ' . $unsupported_country . '.' );
+	try {
+		$builder->build( $unsupported_request );
+		cdek_order_assert( false, 'CDEK builder build() must throw for explicit unsupported recipient country ' . $unsupported_country . '.' );
+	} catch ( InvalidArgumentException $exception ) {
+		cdek_order_assert( str_contains( $exception->getMessage(), $unsupported_country ), 'CDEK builder build() must throw controlled validation error for unsupported country ' . $unsupported_country . '.' );
+	}
+}
+$legacy_empty_country_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => '' ) ) );
+cdek_order_assert( ! array_key_exists( 'tin', $legacy_empty_country_payload['recipient'] ) && ! array_key_exists( 'passport_number', $legacy_empty_country_payload['recipient'] ), 'CDEK legacy empty country must fall back to RU without recipient document fields.' );
 $override_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_point' => 'nsk70' ) ) );
 cdek_order_assert( 'NSK70' === $override_payload['shipment_point'], 'CDEK order creation must use temporary sender shipment_point from modal meta.' );
 $postcode_as_point_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '101000' ) );
@@ -511,6 +525,38 @@ cdek_order_assert( str_contains( (string) ( $prepared_address['display'] ?? '' )
 cdek_order_assert( hash( 'sha256', '125252, Москва, Ходынский б-р, д 13, кв 150' ) === (string) ( $prepared_address['original_hash'] ?? '' ), 'CDEK courier original hash must use the full original address with flat.' );
 $location_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $location_http->requests ) );
 cdek_order_assert( ! str_contains( $location_urls, '/v2/location/cities' ), 'Known delivery_calculation_data.api.cdek_to_city_code must skip CDEK location lookup.' );
+
+$international_http = new CdekOrderFakeHttp();
+$international_service = cdek_order_address_service( new CdekOrderFakeSuggestionClient(), new CdekApiClient( new CdekOAuthTokenService( $settings, $international_http ), $settings, $international_http ), false );
+$by_original_address = 'BY, 220000, Minsk, Nezavisimosti 1';
+$by_prepared = $international_service->prepare(
+	new CdekOrderFakeOrder( 133 ),
+	$by_original_address,
+	array( 'country_code' => 'BY', 'city_name' => 'Minsk', 'postal_code' => '220000', 'address' => 'Nezavisimosti 1', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 9220 ) ) ),
+	CdekSettings::SERVICE_KEY
+);
+cdek_order_assert( ! empty( $by_prepared['success'] ) && 'cdek_eaeu_raw_address' === (string) ( $by_prepared['source'] ?? '' ) && 'BY' === (string) ( $by_prepared['fields']['country_code'] ?? '' ) && 9220 === (int) ( $by_prepared['fields']['cdek_city_code'] ?? 0 ), 'CDEK BY courier preparation must create cdek_eaeu_raw_address snapshot.' );
+cdek_order_assert( 0 === count( array_filter( $international_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/location/cities' ) ) ), 'CDEK BY courier with known city code must not repeat CDEK city lookup.' );
+$uz_prepared = $international_service->prepare(
+	new CdekOrderFakeOrder( 134 ),
+	'UZ, Tashkent, Test 1',
+	array( 'country_code' => 'UZ', 'city_name' => 'Tashkent', 'postal_code' => '100000', 'address' => 'Test 1', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 12345 ) ) ),
+	CdekSettings::SERVICE_KEY
+);
+cdek_order_assert( empty( $uz_prepared['success'] ) && 'cdek_eaeu_raw_address' === (string) ( $uz_prepared['source'] ?? '' ) && 0 === count( array_filter( $international_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/location/cities' ) ) ), 'CDEK unsupported country preparation must fail without looking it up as RU.' );
+
+foreach ( array( ShipmentCreateAjaxController::class, ShipmentPreviewAjaxController::class ) as $controller_class ) {
+	$reflection = new ReflectionClass( $controller_class );
+	$controller = $reflection->newInstanceWithoutConstructor();
+	$method = $reflection->getMethod( 'cdek_normalized_snapshot_valid' );
+	$method->setAccessible( true );
+	cdek_order_assert( true === $method->invoke( $controller, $by_prepared, $by_original_address, 'BY' ), $controller_class . ' must accept reusable cdek_eaeu_raw_address snapshot for the same BY address.' );
+	cdek_order_assert( false === $method->invoke( $controller, $by_prepared, $by_original_address . ' changed', 'BY' ), $controller_class . ' must invalidate cdek_eaeu_raw_address snapshot when address hash changes.' );
+	cdek_order_assert( false === $method->invoke( $controller, $by_prepared, $by_original_address, 'KZ' ), $controller_class . ' must invalidate cdek_eaeu_raw_address snapshot when country changes.' );
+	$unknown_source = array_merge( $by_prepared, array( 'source' => 'external' ) );
+	cdek_order_assert( false === $method->invoke( $controller, $unknown_source, $by_original_address, 'BY' ), $controller_class . ' must reject unknown CDEK normalized snapshot source.' );
+	cdek_order_assert( true === $method->invoke( $controller, $prepared_address, '125252, Москва, Ходынский б-р, д 13, кв 150', 'RU' ), $controller_class . ' must keep RU dadata+cdek_location snapshot reusable.' );
+}
 
 $extracted_flat_suggestions = new CdekOrderFakeSuggestionClient();
 $extracted_flat_suggestions->responses[] = array(
@@ -1309,6 +1355,14 @@ cdek_order_assert( ! str_contains( $modal_html, 'tariff_code:' ) && ! str_contai
 cdek_order_assert( str_contains( $modal_html, 'В заказе тариф' ) && str_contains( $modal_html, 'Кастомный ПВЗ' ), 'CDEK shipment modal must render human selected tariff title.' );
 cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) && str_contains( $modal_html, 'NSK69' ) && str_contains( $modal_html, 'Новосибирск, Красный проспект 1' ) && str_contains( $modal_html, 'Выбрать другой ПВЗ отправителя' ), 'CDEK shipment modal must render sender shipment_point code/address and temporary replacement button.' );
 cdek_order_assert( str_contains( $modal_html, 'Код ПВЗ' ) && str_contains( $modal_html, 'ISK1' ), 'CDEK shipment modal must show recipient CDEK point code, not index label.' );
+$uz_modal_order = new CdekOrderFakeOrder( 138 );
+$uz_modal_order->shipping_country = 'UZ';
+$uz_modal_order->meta = $draft_order->meta;
+$uz_modal_order->meta['_wdc_delivery_calculation_data']['pickup']['country_code'] = 'UZ';
+ob_start();
+$metabox->render( $uz_modal_order );
+$uz_modal_html = ob_get_clean() ?: '';
+cdek_order_assert( str_contains( $uz_modal_html, 'name="recipient_location_country" value="UZ"' ) && ! str_contains( $uz_modal_html, 'name="recipient_location_country" value="RU"' ), 'CDEK shipment modal must preserve explicit unsupported order country UZ instead of hiding it as RU.' );
 ob_start();
 $metabox->render( $weight_hint_order );
 $weight_hint_modal_html = ob_get_clean() ?: '';

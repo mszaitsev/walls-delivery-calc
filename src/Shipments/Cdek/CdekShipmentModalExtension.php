@@ -46,11 +46,11 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		$recipient_postcode = (string) ( $address['postcode'] ?? $order_shipping_postcode );
 		$recipient_address_context = (string) ( $address['raw_address'] ?? $order_shipping_address );
 		$recipient_country = strtoupper( trim( (string) ( $address['country_code'] ?? ( method_exists( $order, 'get_shipping_country' ) ? $order->get_shipping_country() : 'RU' ) ) ) );
-		$recipient_country = in_array( $recipient_country, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $recipient_country : 'RU';
+		$recipient_country = '' === $recipient_country ? 'RU' : $recipient_country;
 		$pickup_code = (string) ( $pickup['point_code'] ?? $meta['pickup_point_code'] ?? '' );
 		$pickup_address = $recipient_address_context;
 		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
-		$normalized_is_cdek = 'dadata+cdek_location' === (string) ( $normalized_address['source'] ?? '' );
+		$normalized_is_cdek = in_array( (string) ( $normalized_address['source'] ?? '' ), array( 'dadata+cdek_location', 'cdek_eaeu_raw_address' ), true );
 		$normalized_status = array() !== $normalized_address
 			? ( ! empty( $normalized_address['success'] ) ? '✅ Данные для СДЭК корректны' : (string) ( $normalized_address['message'] ?? 'Адрес не подтвержден СДЭК, создание отправления заблокировано.' ) )
 			: 'Адрес нужно обработать перед созданием отправления.';

@@ -172,7 +172,7 @@ final class CdekDeliveryPointService {
 			'cdek_owner_code' => (string) ( $point['owner_code'] ?? '' ),
 			'cdek_nearest_station' => (string) ( $point['nearest_station'] ?? '' ),
 			'cdek_note' => (string) ( $point['note'] ?? '' ),
-			'is_handout' => ! array_key_exists( 'is_handout', $point ) || filter_var( $point['is_handout'], FILTER_VALIDATE_BOOLEAN ),
+			'is_handout' => array_key_exists( 'is_handout', $point ) && filter_var( $point['is_handout'], FILTER_VALIDATE_BOOLEAN ),
 			'cdek_city_code' => is_numeric( $location['city_code'] ?? $location['code'] ?? null ) ? (int) ( $location['city_code'] ?? $location['code'] ) : 0,
 			'raw' => $this->sanitize_raw( $point ),
 		);

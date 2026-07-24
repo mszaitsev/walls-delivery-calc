@@ -65,6 +65,10 @@ final class CdekCreateRequestBuilder {
 		if ( CdekSettings::CARRIER_KEY !== $request->carrier_key ) {
 			$errors[] = 'Заказ не относится к CDEK.';
 		}
+		$recipient_country = $this->recipient_country_code( $request );
+		if ( '' !== $recipient_country && ! in_array( $recipient_country, CdekSettings::SUPPORTED_COUNTRIES, true ) ) {
+			$errors[] = sprintf( 'CDEK does not support recipient country %s.', $recipient_country );
+		}
 		if ( '' === trim( (string) ( $request->recipient['name'] ?? '' ) ) ) {
 			$errors[] = 'Заполните получателя СДЭК.';
 		}
@@ -225,7 +229,7 @@ final class CdekCreateRequestBuilder {
 
 	private function recipient_country_code( ShipmentCreateRequest $request ): string {
 		$country_code = strtoupper( trim( (string) $request->recipient_address->country_code ) );
-		return in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
+		return '' === $country_code ? 'RU' : $country_code;
 	}
 
 	private function recipient_document( ShipmentCreateRequest $request ): string {

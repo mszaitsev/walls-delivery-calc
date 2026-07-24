@@ -184,8 +184,8 @@ final class CdekRecipientAddressPreparationService {
 	 * @param array<string,mixed> $location_context
 	 */
 	private function country_code( array $location_context ): string {
-		$country_code = strtoupper( trim( (string) ( $location_context['country_code'] ?? 'RU' ) ) );
-		return in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
+		$country_code = strtoupper( trim( (string) ( $location_context['country_code'] ?? '' ) ) );
+		return '' === $country_code ? 'RU' : $country_code;
 	}
 
 	private function normalize_spaces( string $value ): string {

@@ -954,7 +954,7 @@ final class OrderShipmentDraftFactory {
 		if ( DeliveryType::PICKUP === $delivery_type ) {
 			$row = is_array( $pickup_row ) ? $pickup_row : array();
 			$country_code = strtoupper( trim( (string) ( $row['country_code'] ?? ( method_exists( $order, 'get_shipping_country' ) ? $order->get_shipping_country() : 'RU' ) ) ) );
-			$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
+			$country_code = $this->cdek_country_code( $country_code );
 
 			return new Address(
 				country_code: $country_code,
@@ -998,7 +998,7 @@ final class OrderShipmentDraftFactory {
 				return $base;
 			}
 			$country_code = strtoupper( trim( (string) ( $pickup_row['country_code'] ?? ( $base->country_code ?: 'RU' ) ) ) );
-			$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
+			$country_code = $this->cdek_country_code( $country_code );
 
 			return new Address(
 				country_code: $country_code,
@@ -1368,7 +1368,7 @@ final class OrderShipmentDraftFactory {
 		$city = sanitize_text_field( wp_unslash( $data['pickup_point_city'] ?? $base_row['city_name'] ?? '' ) );
 		$region = sanitize_text_field( wp_unslash( $data['pickup_point_region'] ?? $base_row['region_name'] ?? '' ) );
 		$country_code = strtoupper( trim( sanitize_text_field( wp_unslash( $data['pickup_point_country'] ?? $base_row['country_code'] ?? 'RU' ) ) ) );
-		$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
+		$country_code = $this->cdek_country_code( $country_code );
 		$is_handout = array_key_exists( 'pickup_point_is_handout', $data )
 			? filter_var( wp_unslash( $data['pickup_point_is_handout'] ), FILTER_VALIDATE_BOOLEAN )
 			: ( ! array_key_exists( 'is_handout', $base_row ) || filter_var( $base_row['is_handout'], FILTER_VALIDATE_BOOLEAN ) );
@@ -1614,6 +1614,11 @@ final class OrderShipmentDraftFactory {
 		$value = trim( preg_replace( '/[\x00-\x1F\x7F]+/u', '', $value ) ?? $value );
 
 		return function_exists( 'mb_substr' ) ? mb_substr( $value, 0, 30 ) : substr( $value, 0, 30 );
+	}
+
+	private function cdek_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+		return '' === $country_code ? 'RU' : $country_code;
 	}
 
 	private function original_address_hash( string $original_address ): string {

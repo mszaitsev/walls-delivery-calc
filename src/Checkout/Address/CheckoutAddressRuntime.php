@@ -171,8 +171,14 @@ final class CheckoutAddressRuntime {
 	 * @param array<string,mixed> $selection
 	 */
 	private function posted_destination_conflicts_with_pickup( array $context, array $selection ): bool {
-		$posted_fias = $this->normalized_guid( (string) ( $context['selected_fias_id'] ?? '' ) );
 		$selection_snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$posted_country = strtoupper( trim( (string) ( $context['country_code'] ?? '' ) ) );
+		$point_country = strtoupper( trim( (string) ( $selection['country_code'] ?? $selection_snapshot['country_code'] ?? '' ) ) );
+		if ( '' !== $posted_country && '' !== $point_country && $posted_country !== $point_country ) {
+			return true;
+		}
+
+		$posted_fias = $this->normalized_guid( (string) ( $context['selected_fias_id'] ?? '' ) );
 		$point_fias = $this->normalized_guid( (string) ( $selection_snapshot['fias_location_guid'] ?? $selection['fias_location_guid'] ?? '' ) );
 		if ( '' !== $posted_fias && '' !== $point_fias ) {
 			return $posted_fias !== $point_fias;
@@ -271,6 +277,7 @@ final class CheckoutAddressRuntime {
 	 */
 	private function city_context_from_location( array $location ): array {
 		$context = array(
+			'country_code'    => strtoupper( (string) ( $location['country_code'] ?? 'RU' ) ),
 			'location_id'     => (string) ( $location['id'] ?? '' ),
 			'city_name'       => (string) ( $location['city_name'] ?? '' ),
 			'settlement_name' => (string) ( $location['settlement_name'] ?? '' ),
@@ -301,6 +308,7 @@ final class CheckoutAddressRuntime {
 	 */
 	private function manual_city_context( array $context ): array {
 		return array(
+			'country_code'    => strtoupper( (string) ( $context['country_code'] ?? 'RU' ) ),
 			'location_id'     => '',
 			'city_name'       => $context['city'],
 			'settlement_name' => '',

@@ -22,6 +22,8 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
@@ -125,6 +127,7 @@ final class CdekPickupFakeHttpClient implements CdekHttpClientInterface {
 							'uuid' => 'uuid-nsk-1',
 							'name' => 'CDEK Point One',
 							'type' => 'PVZ',
+							'is_handout' => true,
 							'owner_code' => 'CDEK',
 							'nearest_station' => 'Metro',
 							'note' => 'No cash',
@@ -148,6 +151,7 @@ final class CdekPickupFakeHttpClient implements CdekHttpClientInterface {
 							'uuid' => 'uuid-kem-7',
 							'name' => 'CDEK Postamat',
 							'type' => 'POSTAMAT',
+							'is_handout' => true,
 							'owner_code' => 'CDEK',
 							'nearest_station' => 'Mall',
 							'note' => 'Inside the shopping center',
@@ -388,6 +392,7 @@ for ( $i = 1; $i <= 490; ++$i ) {
 		'code' => 'MSK' . $i,
 		'name' => 'Moscow CDEK ' . $i,
 		'type' => 0 === $i % 5 ? 'POSTAMAT' : 'PVZ',
+		'is_handout' => true,
 		'location' => array(
 			'country_code' => 'RU',
 			'region' => 'Москва',
@@ -500,6 +505,98 @@ $rest_saved = $rest_controller->save(
 );
 cdek_pickup_assert( 'KEM7' === (string) ( $rest_saved['pickupSelections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $rest_session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'CDEK REST save must write and return the canonical cdek:pickup bucket.' );
 cdek_pickup_assert( 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'CDEK REST save must persist the canonical bucket in the raw WC session key.' );
+
+$kz_rate = $rate;
+$kz_rate['rate_id'] = 'cdek:pickup:136';
+$kz_rate['meta'] = array(
+	'country_code' => 'KZ',
+	'location' => array( 'cdek_to_country_code' => 'KZ', 'cdek_to_city_code' => 152 ),
+	'request_payload_sanitized' => array( 'to_location' => array( 'code' => 152 ) ),
+);
+$kz_handout = array(
+	array(
+		'code' => 'ALA1',
+		'name' => 'Almaty handout',
+		'type' => 'PVZ',
+		'is_handout' => true,
+		'location' => array(
+			'country_code' => 'KZ',
+			'region' => 'Almaty',
+			'city' => 'Almaty',
+			'city_code' => 152,
+			'postal_code' => '050000',
+			'address_full' => 'Almaty, server address',
+			'latitude' => 43.2389,
+			'longitude' => 76.8897,
+		),
+	),
+);
+$GLOBALS['wdc_cdek_pickup_transients'] = array();
+$kz_session = new CheckoutSessionManager();
+$kz_session->save_rates( array( 'cdek:pickup:136' => $kz_rate ) );
+$kz_session->save_city_context( array( 'city_code' => 152, 'city_name' => 'Almaty', 'region_name' => 'Almaty', 'postcode' => '050000', 'country_code' => 'KZ' ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup:136' ) );
+$kz_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $kz_session, null, $service );
+$http->next_deliverypoints_body = $kz_handout;
+$kz_saved = $kz_controller->save(
+	array(
+		'carrier' => 'cdek',
+		'point_id' => 'cdek:ALA1',
+		'shipping_method_id' => 'cdek:pickup:136',
+		'point_code' => 'ALA1',
+		'selection_intent' => 'explicit',
+		'point' => array(
+			'carrier_key' => 'cdek',
+			'point_code' => 'ALA1',
+			'country_code' => 'BY',
+			'cdek_city_code' => 9220,
+			'point_address' => 'forged browser address',
+			'is_handout' => false,
+		),
+	)
+);
+$kz_selection = $kz_session->pickup_selections()['cdek:pickup'] ?? array();
+cdek_pickup_assert( 'ALA1' === (string) ( $kz_saved['pickupSelections']['cdek:pickup']['point_code'] ?? '' ) && 'KZ' === (string) ( $kz_selection['country_code'] ?? '' ) && 152 === (int) ( $kz_selection['cdek_city_code'] ?? 0 ), 'CDEK REST save must persist server-normalized KZ point from the selected rate destination.' );
+cdek_pickup_assert( true === (bool) ( $kz_selection['is_handout'] ?? false ) && 'Almaty, server address' === (string) ( $kz_selection['point_address'] ?? '' ) && ! str_contains( (string) wp_json_encode( $kz_selection ), 'forged browser address' ), 'CDEK REST save must ignore forged browser CDEK point fields and save server-normalized point only.' );
+$kz_query = $http->lastDeliveryPointQuery();
+cdek_pickup_assert( 'KZ' === (string) ( $kz_query['country_code'] ?? '' ) && '152' === (string) ( $kz_query['city_code'] ?? '' ), 'CDEK REST save must lookup deliverypoints by server-side country/city from the selected rate.' );
+
+foreach (
+	array(
+		'country mismatch' => array(
+			'body' => array( array_merge( $kz_handout[0], array( 'location' => array_merge( $kz_handout[0]['location'], array( 'country_code' => 'BY' ) ) ) ) ),
+			'code' => 'ALA1',
+		),
+		'city mismatch' => array(
+			'body' => array( array_merge( $kz_handout[0], array( 'location' => array_merge( $kz_handout[0]['location'], array( 'city_code' => 153 ) ) ) ) ),
+			'code' => 'ALA1',
+		),
+		'unknown code' => array(
+			'body' => $kz_handout,
+			'code' => 'UNKNOWN',
+		),
+		'server reception only' => array(
+			'body' => array( array_merge( $kz_handout[0], array( 'is_handout' => false ) ) ),
+			'code' => 'ALA1',
+		),
+	) as $case => $payload
+) {
+	$GLOBALS['wdc_cdek_pickup_transients'] = array();
+	$before = wp_json_encode( $kz_session->pickup_selections(), JSON_UNESCAPED_UNICODE );
+	$http->next_deliverypoints_body = $payload['body'];
+	$result = $kz_controller->save(
+		array(
+			'carrier' => 'cdek',
+			'point_id' => 'cdek:' . $payload['code'],
+			'shipping_method_id' => 'cdek:pickup:136',
+			'point_code' => $payload['code'],
+			'point' => array( 'carrier_key' => 'cdek', 'point_code' => $payload['code'], 'country_code' => 'KZ', 'cdek_city_code' => 152, 'is_handout' => true ),
+		)
+	);
+	cdek_pickup_assert( in_array( (string) ( $result['code'] ?? '' ), array( 'not_found', 'unsupported_pickup_point' ), true ), 'CDEK REST save must reject ' . $case . ' from server-authoritative lookup.' );
+	cdek_pickup_assert( $before === wp_json_encode( $kz_session->pickup_selections(), JSON_UNESCAPED_UNICODE ), 'Rejected CDEK REST save must not change session for ' . $case . '.' );
+}
+
 $reception_only_save = $rest_controller->save(
 	array(
 		'carrier' => 'cdek',
@@ -520,7 +617,7 @@ $reception_only_save = $rest_controller->save(
 		),
 	)
 );
-cdek_pickup_assert( 'unsupported_pickup_point' === (string) ( $reception_only_save['code'] ?? '' ), 'CDEK REST save must reject recipient pickup points with explicit is_handout=false.' );
+cdek_pickup_assert( 'not_found' === (string) ( $reception_only_save['code'] ?? '' ), 'CDEK REST save must not trust a browser-supplied CDEK point from another country/city.' );
 $rest_errors = new CdekPickupSmokeErrors();
 ( new CheckoutValidation( $rest_session ) )->validate(
 	array(
@@ -560,6 +657,75 @@ cdek_pickup_assert( 'Inside the shopping center' === ( $calculation['pickup']['d
 cdek_pickup_assert( '' === ( $calculation['pickup']['work_time'] ?? '' ), 'Checkout calculation data must not save numeric zero work_time.' );
 cdek_pickup_assert( isset( $calculation['pickup']['raw_sanitized'] ) && is_array( $calculation['pickup']['raw_sanitized'] ), 'Checkout calculation data must save raw_sanitized pickup payload.' );
 cdek_pickup_assert( ! array_key_exists( 'country_code', $item->meta ) && ! array_key_exists( 'rate_meta', $item->meta ) && ! array_key_exists( 'request_payload_sanitized', $item->meta ), 'Checkout visible shipping item meta must not contain technical CDEK data.' );
+
+$foreign_rate = $rate;
+$foreign_rate['meta'] = array( 'location' => array( 'cdek_to_city_code' => 9220, 'cdek_to_country_code' => 'BY' ) );
+foreach (
+	array(
+		'BY' => array( 'city' => 'Minsk', 'region' => 'Minsk region', 'postcode' => '220000', 'address' => 'Minsk, server pickup', 'city_code' => 9220 ),
+		'KZ' => array( 'city' => 'Almaty', 'region' => 'Almaty', 'postcode' => '050000', 'address' => 'Almaty, server pickup', 'city_code' => 152 ),
+	) as $country => $data
+) {
+	$foreign_session = new CheckoutSessionManager();
+	$foreign_rate['meta']['location']['cdek_to_country_code'] = $country;
+	$foreign_rate['meta']['location']['cdek_to_city_code'] = $data['city_code'];
+	$foreign_session->save_rates( array( 'cdek:pickup:136' => $foreign_rate ) );
+	$foreign_session->save_city_context( array( 'country_code' => $country, 'city_name' => $data['city'], 'region_name' => $data['region'], 'postcode' => $data['postcode'], 'city_code' => $data['city_code'] ) );
+	$foreign_selection = array(
+		'id' => 'cdek:' . $country . '1',
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'pickup_family' => 'cdek:pickup',
+		'rate_id' => 'cdek:pickup:136',
+		'point_code' => $country . '1',
+		'point_type' => 'PVZ',
+		'point_name' => $country . ' Point',
+		'point_address' => $data['address'],
+		'point_postcode' => $data['postcode'],
+		'city_name' => $data['city'],
+		'region_name' => $data['region'],
+		'country_code' => $country,
+		'cdek_city_code' => $data['city_code'],
+		'is_handout' => true,
+		'snapshot' => array(
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'pickup_family' => 'cdek:pickup',
+			'point_code' => $country . '1',
+			'address' => $data['address'],
+			'postcode' => $data['postcode'],
+			'city' => $data['city'],
+			'region' => $data['region'],
+			'country_code' => $country,
+			'cdek_city_code' => $data['city_code'],
+			'is_handout' => true,
+		),
+	);
+	$foreign_session->save_pickup_selection( $foreign_selection );
+	WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup:136' ) );
+	$foreign_order = new CdekPickupSmokeOrder();
+	( new OrderShippingMetaPersister( $foreign_session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $foreign_order, array() );
+	cdek_pickup_assert( $country === $foreign_order->shipping_country && $data['city'] === $foreign_order->shipping_city && $data['address'] === $foreign_order->shipping_address_1, 'Checkout order create must preserve international CDEK pickup country/address for ' . $country . '.' );
+}
+
+$address_country_session = new CheckoutSessionManager();
+$address_country_rate = $rate;
+$address_country_rate['meta'] = array( 'location' => array( 'cdek_to_city_code' => 123, 'cdek_to_country_code' => 'AM' ) );
+$address_country_session->save_rates( array( 'cdek:pickup:136' => $address_country_rate ) );
+$address_country_session->save_city_context( array( 'country_code' => 'AM', 'city_name' => 'Yerevan', 'region_name' => 'Yerevan', 'postcode' => '0010', 'city_code' => 123 ) );
+$address_country_session->save_normalized_address_result( new AddressNormalizationResult( 'Yerevan address', new Address( country_code: 'AM', region_name: 'Yerevan', city: 'Yerevan', postcode: '0010', raw_address: 'Yerevan address' ), true, 1.0, 'manual' ) );
+$address_country_selection = $selection;
+unset( $address_country_selection['country_code'], $address_country_selection['snapshot']['country_code'] );
+$address_country_selection['pickup_family'] = 'cdek:pickup';
+$address_country_selection['rate_id'] = 'cdek:pickup:136';
+$address_country_selection['city_name'] = 'Yerevan';
+$address_country_selection['region_name'] = 'Yerevan';
+$address_country_selection['point_address'] = 'Yerevan address';
+$address_country_session->save_pickup_selection( $address_country_selection );
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup:136' ) );
+$address_country_order = new CdekPickupSmokeOrder();
+( new OrderShippingMetaPersister( $address_country_session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $address_country_order, array() );
+cdek_pickup_assert( 'AM' === $address_country_order->shipping_country, 'Checkout order create must use normalized Address country before legacy RU fallback when point country is absent.' );
 
 $order_display = new PickupPointOrderDisplay( $card_renderer, $settings_repository );
 ob_start();

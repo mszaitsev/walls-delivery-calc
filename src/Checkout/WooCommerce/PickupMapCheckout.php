@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Core\PluginEnvironment;
-use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
@@ -54,6 +53,7 @@ final class PickupMapCheckout {
 		if ( function_exists( 'wp_localize_script' ) ) {
 			$active_shipping_method = $this->active_shipping_method_id();
 			$active_pickup_family = $this->active_pickup_family();
+			$active_pickup_country = $this->active_pickup_rate_country_code();
 			$initial_context = $this->initial_context();
 			$pickup_selections = $this->selected_points_context( false );
 			$selected_pickup_points = $this->selected_points_context( true );
@@ -72,6 +72,7 @@ final class PickupMapCheckout {
 					'pickupSelectionsRaw' => $pickup_selections,
 					'selectedPickupPoints' => $selected_pickup_points,
 					'activePickupFamily' => $active_pickup_family,
+					'activePickupCountryCode' => $active_pickup_country,
 					'selectedPickupPoint' => $selected_pickup_point,
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
@@ -140,8 +141,9 @@ final class PickupMapCheckout {
 	 * @return array<string,mixed>
 	 */
 	private function initial_context(): array {
+		$active_family = $this->active_pickup_family();
 		$context = $this->session_manager->city_context();
-		$rate_location = $this->first_pickup_rate_location();
+		$rate_location = $this->active_pickup_rate_location();
 		if ( array() !== $rate_location ) {
 			foreach ( $rate_location as $key => $value ) {
 				if ( ! array_key_exists( $key, $context ) || '' === (string) $context[ $key ] || null === $context[ $key ] ) {
@@ -159,12 +161,11 @@ final class PickupMapCheckout {
 		}
 
 		$country_code = strtoupper( (string) ( $context['country_code'] ?? 'RU' ) );
-		$active_family = $this->active_pickup_family();
-		if ( CdekSettings::CARRIER_KEY . ':pickup' === $active_family ) {
-			if ( ! in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ) {
-				return array();
-			}
-		} elseif ( 'RU' !== $country_code ) {
+		$rate_country = $this->active_pickup_rate_country_code();
+		if ( '' !== $rate_country && $country_code !== $rate_country ) {
+			return array();
+		}
+		if ( '' === $rate_country && 'RU' !== $country_code ) {
 			return array();
 		}
 
@@ -196,20 +197,12 @@ final class PickupMapCheckout {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function first_pickup_rate_location(): array {
-		foreach ( $this->session_manager->rates() as $rate ) {
-			if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) || empty( $rate['requires_pickup_point'] ) ) {
-				continue;
-			}
+	private function active_pickup_rate_location(): array {
+		$rate = $this->active_pickup_rate();
+		$meta = $this->rate_meta( $rate );
+		$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
 
-			$meta = is_array( $rate['meta'] ?? null ) ? $rate['meta'] : array();
-			$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
-			if ( array() !== $location ) {
-				return $location;
-			}
-		}
-
-		return array();
+		return $location;
 	}
 
 	/**
@@ -468,10 +461,75 @@ final class PickupMapCheckout {
 	private function active_shipping_method_id(): string {
 		$chosen = $this->chosen_shipping_method();
 		if ( '' !== $chosen ) {
-			return $chosen;
+			return $this->session_manager->normalize_rate_id( $chosen );
 		}
 
 		return $this->first_pickup_rate_id();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function active_pickup_rate(): array {
+		$method_id = $this->active_shipping_method_id();
+		if ( '' === $method_id ) {
+			return array();
+		}
+		$rates = $this->session_manager->rates();
+		if ( isset( $rates[ $method_id ] ) && is_array( $rates[ $method_id ] ) ) {
+			$rate = $rates[ $method_id ];
+			return $this->is_pickup_rate( $rate ) ? $rate : array();
+		}
+		foreach ( $rates as $rate ) {
+			if ( ! is_array( $rate ) || ! $this->is_pickup_rate( $rate ) ) {
+				continue;
+			}
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			if ( $rate_id === $method_id ) {
+				return $rate;
+			}
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_pickup_rate( array $rate ): bool {
+		return DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && ! empty( $rate['requires_pickup_point'] );
+	}
+
+	private function active_pickup_rate_country_code(): string {
+		$rate = $this->active_pickup_rate();
+		if ( array() === $rate ) {
+			return '';
+		}
+		$meta = $this->rate_meta( $rate );
+		$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
+		$country = strtoupper(
+			trim(
+				$this->first_text(
+					$location['cdek_to_country_code'] ?? '',
+					$location['country_code'] ?? '',
+					$meta['country_code'] ?? '',
+					$rate['country_code'] ?? ''
+				)
+			)
+		);
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function rate_meta( array $rate ): array {
+		$meta = is_array( $rate['meta'] ?? null ) ? $rate['meta'] : array();
+		$legacy_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+
+		return array_replace_recursive( $legacy_meta, $meta );
 	}
 
 	private function chosen_shipping_method(): string {

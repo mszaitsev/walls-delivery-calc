@@ -539,6 +539,7 @@ final class CheckoutSessionManager {
 		$selection = $this->normalize_location_aliases( $selection );
 		$snapshot = $this->normalize_location_aliases( $snapshot );
 		foreach ( array(
+			'country_code' => array( 'country_code', 'country' ),
 			'location_id' => array( 'location_id', 'id' ),
 			'fias_id' => array( 'fias_id', 'city_fias_id', 'fias_location_guid' ),
 			'gar_object_id' => array( 'gar_object_id', 'gar_id' ),
@@ -605,21 +606,23 @@ final class CheckoutSessionManager {
 	 */
 	private function location_fingerprint( array $context ): string {
 		$context = $this->normalize_location_aliases( $context );
+		$country = $this->normalized_location_value( $context['country_code'] ?? '' );
+		$prefix = '' !== $country ? 'country=' . strtoupper( $country ) . '|' : '';
 		foreach ( array( 'location_id', 'fias_id', 'gar_object_id' ) as $key ) {
 			$value = $this->normalized_location_value( $context[ $key ] ?? '' );
 			if ( '' !== $value ) {
-				return $key . '=' . $value;
+				return $prefix . $key . '=' . $value;
 			}
 		}
 
 		$city = $this->normalized_location_value( $context['city_name'] ?? '' );
 		$region = $this->normalized_location_value( $context['region_name'] ?? '' );
 		if ( '' !== $city || '' !== $region ) {
-			return 'place=' . $region . '|' . $city;
+			return $prefix . 'place=' . $region . '|' . $city;
 		}
 
 		$postcode = $this->normalized_location_value( $context['postcode'] ?? '' );
-		return '' !== $postcode ? 'postcode=' . $postcode : '';
+		return '' !== $postcode ? $prefix . 'postcode=' . $postcode : '';
 	}
 
 	/**
@@ -628,6 +631,7 @@ final class CheckoutSessionManager {
 	 */
 	private function normalize_location_aliases( array $context ): array {
 		$aliases = array(
+			'country_code' => array( 'country_code', 'country' ),
 			'fias_id' => array( 'fias_id', 'city_fias_id', 'fias_location_guid' ),
 			'gar_object_id' => array( 'gar_object_id', 'gar_id' ),
 			'city_name' => array( 'city_name', 'settlement_name', 'place_name', 'city' ),

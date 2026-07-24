@@ -496,7 +496,27 @@ final class OrderShippingMetaPersister {
 			$postcode = (string) $address->postcode;
 		}
 		$this->call_order_setter( $order, 'set_shipping_postcode', $postcode );
-		$this->call_order_setter( $order, 'set_shipping_country', is_object( $address ) && '' !== (string) $address->country_code ? (string) $address->country_code : 'RU' );
+		$this->call_order_setter( $order, 'set_shipping_country', $this->pickup_country_code( $pickup, $address ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $pickup
+	 */
+	private function pickup_country_code( array $pickup, mixed $address ): string {
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$city_context = $this->session_manager->city_context();
+		$country = strtoupper(
+			trim(
+				$this->first_meaningful(
+					$pickup['country_code'] ?? '',
+					$snapshot['country_code'] ?? '',
+					is_object( $address ) ? (string) ( $address->country_code ?? '' ) : '',
+					$city_context['country_code'] ?? ''
+				)
+			)
+		);
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : 'RU';
 	}
 
 	private function call_order_setter( object $order, string $method, string $value, bool $allow_empty = false ): void {

@@ -220,6 +220,7 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
@@ -230,6 +231,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -348,6 +350,24 @@ function wc_checkout_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
 	}
+}
+
+/**
+ * @param array<string,array<string,mixed>> $rates
+ * @param array<string,mixed>               $city_context
+ * @return array<string,mixed>
+ */
+function wc_checkout_pickup_map_initial_context( array $rates, array $city_context, string $chosen_method ): array {
+	$session = new CheckoutSessionManager();
+	$session->save_rates( $rates );
+	$session->save_city_context( $city_context );
+	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.0' ), new SettingsRepository() );
+	$method = new ReflectionMethod( $checkout, 'initial_context' );
+	$method->setAccessible( true );
+	$context = $method->invoke( $checkout );
+
+	return is_array( $context ) ? $context : array();
 }
 
 final class WdcSmokeProduct {
@@ -679,6 +699,82 @@ $session->save_selected_delivery_type( 'pickup' );
 $session->save_sort_mode( RateSorter::FASTEST );
 wc_checkout_smoke_assert( 'pickup' === $session->selected_delivery_type(), 'Session manager must save delivery type.' );
 wc_checkout_smoke_assert( RateSorter::FASTEST === $session->selected_sort_mode(), 'Session manager must save sort mode.' );
+
+$cdek_by_pickup_rate = array(
+	'rate_id' => 'cdek:pickup:136',
+	'id' => 'cdek:pickup:136',
+	'carrier_key' => 'cdek',
+	'service_key' => 'cdek',
+	'delivery_type' => DeliveryType::PICKUP,
+	'requires_pickup_point' => true,
+	'meta' => array( 'location' => array( 'cdek_to_country_code' => 'BY', 'cdek_to_city_code' => 9220 ), 'country_code' => 'BY' ),
+);
+$cdek_kz_pickup_rate = $cdek_by_pickup_rate;
+$cdek_kz_pickup_rate['meta'] = array( 'location' => array( 'cdek_to_country_code' => 'KZ', 'cdek_to_city_code' => 152 ), 'country_code' => 'KZ' );
+$by_context = wc_checkout_pickup_map_initial_context( array( 'cdek:pickup:136' => $cdek_by_pickup_rate ), array( 'country_code' => 'BY', 'city_name' => 'Minsk', 'city_code' => 9220 ), 'wdc_platform_delivery:cdek:pickup:136' );
+wc_checkout_smoke_assert( 'BY' === (string) ( $by_context['country_code'] ?? '' ) && 9220 === (int) ( $by_context['cdek_city_code'] ?? 0 ), 'Generic pickup map must allow active CDEK BY pickup rate for BY checkout destination.' );
+$kz_context = wc_checkout_pickup_map_initial_context( array( 'cdek:pickup:136' => $cdek_kz_pickup_rate ), array( 'country_code' => 'KZ', 'city_name' => 'Almaty', 'city_code' => 152 ), 'wdc_platform_delivery:cdek:pickup:136' );
+wc_checkout_smoke_assert( 'KZ' === (string) ( $kz_context['country_code'] ?? '' ) && 152 === (int) ( $kz_context['cdek_city_code'] ?? 0 ), 'Generic pickup map must allow active CDEK KZ pickup rate for KZ checkout destination.' );
+$mismatch_context = wc_checkout_pickup_map_initial_context( array( 'cdek:pickup:136' => $cdek_by_pickup_rate ), array( 'country_code' => 'KZ', 'city_name' => 'Almaty', 'city_code' => 152 ), 'wdc_platform_delivery:cdek:pickup:136' );
+wc_checkout_smoke_assert( array() === $mismatch_context, 'Generic pickup map must block checkout country when it differs from active pickup rate country.' );
+$no_rate_context = wc_checkout_pickup_map_initial_context( array(), array( 'country_code' => 'BY', 'city_name' => 'Minsk', 'city_code' => 9220 ), '' );
+wc_checkout_smoke_assert( array() === $no_rate_context, 'Generic pickup map must keep legacy RU-only fallback when no active pickup rate exists.' );
+$russian_post_pickup_rate = array(
+	'rate_id' => 'russian_post_domestic:pickup',
+	'id' => 'russian_post_domestic:pickup',
+	'carrier_key' => 'russian_post_domestic',
+	'service_key' => 'russian_post_domestic',
+	'delivery_type' => DeliveryType::PICKUP,
+	'requires_pickup_point' => true,
+);
+$russian_post_by_context = wc_checkout_pickup_map_initial_context( array( 'russian_post_domestic:pickup' => $russian_post_pickup_rate ), array( 'country_code' => 'BY', 'city_name' => 'Minsk' ), 'wdc_platform_delivery:russian_post_domestic:pickup' );
+wc_checkout_smoke_assert( array() === $russian_post_by_context, 'Generic pickup map must not make Russian Post pickup international without a rate country.' );
+$pickup_map_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/PickupMapCheckout.php' );
+$pickup_checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' );
+wc_checkout_smoke_assert( ! str_contains( $pickup_map_source, 'CdekSettings' ), 'Generic PickupMapCheckout must not import or reference CdekSettings.' );
+wc_checkout_smoke_assert( ! str_contains( $pickup_checkout_js, "['RU', 'AM', 'BY', 'KZ', 'KG']" ) && ! str_contains( $pickup_checkout_js, 'RU, AM, BY, KZ, KG' ), 'Frontend pickup checkout map must not hardcode the CDEK supported country allowlist.' );
+
+$fingerprint_selection = array(
+	'id' => 'cdek:MIN40',
+	'carrier_key' => 'cdek',
+	'service_key' => 'cdek',
+	'pickup_family' => 'cdek:pickup',
+	'rate_id' => 'cdek:pickup:136',
+	'point_code' => 'MIN40',
+	'point_address' => 'Minsk, Point',
+	'city_name' => 'Minsk',
+	'region_name' => 'Minsk region',
+	'country_code' => 'BY',
+	'snapshot' => array( 'country_code' => 'BY', 'city' => 'Minsk', 'region' => 'Minsk region', 'point_code' => 'MIN40' ),
+);
+$fingerprint_session = new CheckoutSessionManager();
+$fingerprint_session->save_city_context( array( 'country_code' => 'BY', 'city_name' => 'Minsk', 'region_name' => 'Minsk region' ) );
+$fingerprint_session->save_pickup_selection( $fingerprint_selection );
+$by_fingerprint = (string) ( $fingerprint_session->pickup_selections()['cdek:pickup']['destination_fingerprint'] ?? '' );
+wc_checkout_smoke_assert( str_starts_with( $by_fingerprint, 'country=BY|' ), 'Pickup destination fingerprint must include BY country code.' );
+wc_checkout_smoke_assert( true === $fingerprint_session->pickup_selection_matches( 'cdek', 'cdek:pickup:137' ), 'Changing only the CDEK pickup tariff inside the same destination/family must preserve selection.' );
+$fingerprint_session->save_city_context( array( 'country_code' => 'KZ', 'city_name' => 'Minsk', 'region_name' => 'Minsk region' ) );
+wc_checkout_smoke_assert( false === $fingerprint_session->pickup_selection_matches( 'cdek', 'cdek:pickup:136' ), 'Changing checkout country from BY to KZ with the same city text must invalidate pickup selection.' );
+$kz_fingerprint_session = new CheckoutSessionManager();
+$kz_fingerprint_session->save_city_context( array( 'country_code' => 'KZ', 'city_name' => 'Minsk', 'region_name' => 'Minsk region' ) );
+$kz_fingerprint_selection = $fingerprint_selection;
+$kz_fingerprint_selection['country_code'] = 'KZ';
+$kz_fingerprint_selection['snapshot']['country_code'] = 'KZ';
+$kz_fingerprint_session->save_pickup_selection( $kz_fingerprint_selection );
+$kz_fingerprint = (string) ( $kz_fingerprint_session->pickup_selections()['cdek:pickup']['destination_fingerprint'] ?? '' );
+wc_checkout_smoke_assert( '' !== $by_fingerprint && '' !== $kz_fingerprint && $by_fingerprint !== $kz_fingerprint, 'Pickup destination fingerprint must distinguish BY/Minsk from KZ/Minsk.' );
+$legacy_selection_session = new CheckoutSessionManager();
+$legacy_selection_session->save_city_context( array( 'city_name' => 'Minsk', 'region_name' => 'Minsk region' ) );
+$legacy_selection = $fingerprint_selection;
+unset( $legacy_selection['country_code'], $legacy_selection['snapshot']['country_code'] );
+$legacy_selection_session->save_pickup_selection( $legacy_selection );
+wc_checkout_smoke_assert( is_bool( $legacy_selection_session->pickup_selection_matches( 'cdek', 'cdek:pickup:136' ) ), 'Legacy pickup selection without country_code must not cause a fatal error.' );
+$address_runtime_reflection = new ReflectionClass( CheckoutAddressRuntime::class );
+$address_runtime = $address_runtime_reflection->newInstanceWithoutConstructor();
+$conflict_method = $address_runtime_reflection->getMethod( 'posted_destination_conflicts_with_pickup' );
+$conflict_method->setAccessible( true );
+wc_checkout_smoke_assert( true === $conflict_method->invoke( $address_runtime, array( 'country_code' => 'KZ', 'city' => 'Minsk' ), $fingerprint_selection ), 'Checkout destination conflict detection must treat country change as a conflict.' );
+wc_checkout_smoke_assert( false === $conflict_method->invoke( $address_runtime, array( 'country_code' => 'BY', 'city' => 'Minsk' ), $fingerprint_selection ), 'Checkout destination conflict detection must allow the same pickup country/city.' );
 
 $settings = new SettingsRepository();
 $settings->set( 'checkout_sort_mode', RateSorter::CHEAPEST );

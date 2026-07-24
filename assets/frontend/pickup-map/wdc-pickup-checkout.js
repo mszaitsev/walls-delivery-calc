@@ -8,6 +8,7 @@
 	var preferredShippingMethodPending = false;
 	var preferredShippingMethodRecoveryUpdateSent = false;
 	var activePickupFamily = String(checkoutConfig.activePickupFamily || checkoutConfig.active_pickup_family || '').trim();
+	var activePickupCountryCode = String(checkoutConfig.activePickupCountryCode || checkoutConfig.active_pickup_country_code || '').trim().toUpperCase();
 	var currentContext = checkoutConfig.currentContext || checkoutConfig.initialContext || {};
 	var prefetchTimer = 0;
 	var prefetchController = null;
@@ -39,6 +40,7 @@
 window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 window.wdcPickupCheckout.activePickupFamily = activePickupFamily;
+window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
 var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
@@ -599,8 +601,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var country = fieldValue('shipping_country') || fieldValue('billing_country');
 		var normalizedCountry = String(country || 'RU').toUpperCase();
 		var activeFamily = shippingMethodFamily(currentShippingMethod() || activeMethod);
-		if (activeFamily === 'cdek:pickup') {
-			if (['RU', 'AM', 'BY', 'KZ', 'KG'].indexOf(normalizedCountry) === -1) {
+		if (activePickupCountryCode) {
+			if (normalizedCountry !== activePickupCountryCode) {
 				return { countryBlocked: true };
 			}
 		} else if (country && normalizedCountry !== 'RU') {
@@ -1101,6 +1103,12 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			activePickupFamily = String(response.activePickupFamily || response.active_pickup_family || '').trim();
 			if (window.wdcPickupCheckout) {
 				window.wdcPickupCheckout.activePickupFamily = activePickupFamily;
+			}
+		}
+		if (response.activePickupCountryCode || response.active_pickup_country_code) {
+			activePickupCountryCode = String(response.activePickupCountryCode || response.active_pickup_country_code || '').trim().toUpperCase();
+			if (window.wdcPickupCheckout) {
+				window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
 			}
 		}
 		selectedPickupPoints = mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));

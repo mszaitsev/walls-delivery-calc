@@ -229,17 +229,15 @@ final class ShipmentPreviewAjaxController {
 		}
 		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $data['original_address'] ?? '' ) );
 		$snapshot = $this->decoded_json_field( $data['normalized_address_json'] ?? '' );
-		$valid = ! empty( $snapshot['success'] )
-			&& (string) ( $snapshot['source'] ?? '' ) === 'dadata+cdek_location'
-			&& (string) ( $snapshot['original_hash'] ?? '' ) === hash( 'sha256', trim( $original_address ) )
-			&& (int) ( $snapshot['fields']['cdek_city_code'] ?? 0 ) > 0;
+		$location_context = $this->recipient_location_context_from_request( $order, $data );
+		$valid = $this->cdek_normalized_snapshot_valid( $snapshot, $original_address, (string) ( $location_context['country_code'] ?? '' ) );
 		if ( $valid ) {
 			return array( 'error' => '' );
 		}
 		if ( ! $this->cdek_address_preparation instanceof CdekRecipientAddressPreparationService ) {
 			return array( 'error' => __( 'Нормализация адреса СДЭК недоступна.', 'walls-delivery-calc' ) );
 		}
-		$prepared = $this->cdek_address_preparation->prepare( $order, $original_address, $this->recipient_location_context_from_request( $order, $data ), CdekSettings::SERVICE_KEY );
+		$prepared = $this->cdek_address_preparation->prepare( $order, $original_address, $location_context, CdekSettings::SERVICE_KEY );
 		$data['normalized_address_json'] = wp_json_encode( $prepared, JSON_UNESCAPED_UNICODE ) ?: '';
 		if ( empty( $prepared['success'] ) ) {
 			return array( 'error' => (string) ( $prepared['message'] ?? CdekRecipientAddressPreparationService::CITY_CODE_ERROR ) );
@@ -270,7 +268,7 @@ final class ShipmentPreviewAjaxController {
 		if ( '' === $country_code && method_exists( $order, 'get_shipping_country' ) ) {
 			$country_code = strtoupper( trim( (string) $order->get_shipping_country() ) );
 		}
-		$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
+		$country_code = '' === $country_code ? 'RU' : $country_code;
 
 		return array(
 			'country_code' => $country_code,
@@ -291,6 +289,30 @@ final class ShipmentPreviewAjaxController {
 			'lat' => sanitize_text_field( wp_unslash( $data['recipient_location_lat'] ?? $_POST['recipient_location_lat'] ?? '' ) ),
 			'lng' => sanitize_text_field( wp_unslash( $data['recipient_location_lng'] ?? $_POST['recipient_location_lng'] ?? '' ) ),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $snapshot
+	 */
+	private function cdek_normalized_snapshot_valid( array $snapshot, string $original_address, string $current_country ): bool {
+		$source = (string) ( $snapshot['source'] ?? '' );
+		if ( empty( $snapshot['success'] ) || ! in_array( $source, array( 'dadata+cdek_location', 'cdek_eaeu_raw_address' ), true ) ) {
+			return false;
+		}
+		if ( (string) ( $snapshot['original_hash'] ?? '' ) !== hash( 'sha256', trim( $original_address ) ) ) {
+			return false;
+		}
+		$fields = is_array( $snapshot['fields'] ?? null ) ? $snapshot['fields'] : array();
+		if ( (int) ( $fields['cdek_city_code'] ?? 0 ) <= 0 ) {
+			return false;
+		}
+		$current_country = strtoupper( trim( $current_country ) );
+		$snapshot_country = strtoupper( trim( (string) ( $fields['country_code'] ?? $snapshot['country_code'] ?? '' ) ) );
+		if ( '' === $snapshot_country && 'dadata+cdek_location' === $source ) {
+			$snapshot_country = 'RU';
+		}
+
+		return '' === $current_country || '' === $snapshot_country || $current_country === $snapshot_country;
 	}
 
 	private function order_array_meta( object $order, string $key ): array {
