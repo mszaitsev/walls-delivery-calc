@@ -221,14 +221,11 @@ use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
-use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
-use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
-use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
@@ -239,8 +236,6 @@ use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
-use WallsShop\WDC\Domain\Address\Address;
-use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
@@ -248,10 +243,6 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Locations\Normalization\AddressNormalizerInterface;
-use WallsShop\WDC\Locations\Services\LocationSearchService;
-use WallsShop\WDC\Locations\Storage\LocationRepository;
-use WallsShop\WDC\Locations\ValueObjects\Location;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -281,7 +272,7 @@ function wc_checkout_sort_rate( string $carrier, string $tariff_key, int $origin
 		null,
 		DateRange::single( $final_days ),
 		'',
-		$final_days . ' РґРЅ.',
+		$final_days . ' дн.',
 		array(),
 		false,
 		'',
@@ -330,11 +321,11 @@ function wc_checkout_grouped_tariff_rate( string $tariff_key, string $tariff_tit
 		'dpd',
 		'DPD',
 		'dpd',
-		'DPD РґРѕ РџР’Р—',
+		'DPD до ПВЗ',
 		$tariff_key,
 		$tariff_title,
 		DeliveryType::PICKUP,
-		'DPD РґРѕ РџР’Р—, ' . $tariff_title . ' - ' . DeliveryDaysFormatter::format( DateRange::range( $min_days, $max_days ) ),
+		'DPD до ПВЗ, ' . $tariff_title . ' - ' . DeliveryDaysFormatter::format( DateRange::range( $min_days, $max_days ) ),
 		Money::from_rubles( $price_rub ),
 		null,
 		null,
@@ -371,7 +362,7 @@ function wc_checkout_pickup_map_initial_context( array $rates, array $city_conte
 	$session->save_rates( $rates );
 	$session->save_city_context( $city_context );
 	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
-	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.2' ), new SettingsRepository() );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.1' ), new SettingsRepository() );
 	$method = new ReflectionMethod( $checkout, 'initial_context' );
 	$method->setAccessible( true );
 	$context = $method->invoke( $checkout );
@@ -442,25 +433,6 @@ final class WdcSmokeCheckoutErrors {
 	}
 }
 
-final class WdcCheckoutSmokeFallbackNormalizer implements AddressNormalizerInterface {
-	public function normalize( string $input, array $context = array() ): AddressNormalizationResult {
-		return new AddressNormalizationResult(
-			$input,
-			new Address(
-				country_code: (string) ( $context['country_code'] ?? '' ),
-				region_name: (string) ( $context['region_name'] ?? '' ),
-				city: (string) ( $context['city'] ?? '' ),
-				postcode: (string) ( $context['postcode'] ?? '' ),
-				raw_address: $input,
-				fallback: true
-			),
-			false,
-			0.2,
-			'fallback'
-		);
-	}
-}
-
 final class WdcCheckoutApartmentSuggestionClient implements AddressSuggestionClientInterface {
 	public int $calls = 0;
 	/** @var array<int,string> */
@@ -477,20 +449,20 @@ final class WdcCheckoutApartmentSuggestionClient implements AddressSuggestionCli
 			$house = array(
 				'fias_level' => '8',
 				'country_iso_code' => 'RU',
-				'region_with_type' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»Р°СЃС‚СЊ',
-				'city_with_type' => 'Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє',
-				'street_with_type' => 'СѓР» РќРµРєСЂР°СЃРѕРІР°',
+				'region_with_type' => 'Новосибирская область',
+				'city_with_type' => 'г Новосибирск',
+				'street_with_type' => 'ул Некрасова',
 				'house' => '63/1',
 				'house_fias_id' => 'house-fias',
 				'postal_code' => '630005',
 			);
-			$flat_values = str_contains( $query, 'РєРІ 9' ) || str_contains( $query, ', 9' ) ? array_map( 'strval', range( 9, 28 ) ) : array( '1', '2' );
+			$flat_values = str_contains( $query, 'кв 9' ) || str_contains( $query, ', 9' ) ? array_map( 'strval', range( 9, 28 ) ) : array( '1', '2' );
 			$flat_items = array(
-				array( 'value' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, 63/1', 'unrestricted_value' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»Р°СЃС‚СЊ, Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, Рґ 63/1', 'data' => $house ),
+				array( 'value' => 'Новосибирск, ул Некрасова, 63/1', 'unrestricted_value' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1', 'data' => $house ),
 			);
 			foreach ( $flat_values as $flat_value ) {
 				$flat = array_merge( $house, array( 'fias_level' => '9', 'flat' => $flat_value ) );
-				$flat_items[] = array( 'value' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, 63/1, РєРІ ' . $flat_value, 'unrestricted_value' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»Р°СЃС‚СЊ, Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, Рґ 63/1, РєРІ ' . $flat_value, 'data' => $flat );
+				$flat_items[] = array( 'value' => 'Новосибирск, ул Некрасова, 63/1, кв ' . $flat_value, 'unrestricted_value' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1, кв ' . $flat_value, 'data' => $flat );
 			}
 			return array(
 				'success' => true,
@@ -499,28 +471,28 @@ final class WdcCheckoutApartmentSuggestionClient implements AddressSuggestionCli
 				'suggestions' => $flat_items,
 			);
 		}
-		$has_flat = str_contains( $query, 'РєРІ' ) || str_contains( $query, 'РєРІР°СЂС‚РёСЂР°' ) || str_contains( $query, 'apt' );
-		if ( str_contains( $query, 'Р±РµР·-flat-С‚РѕР»СЊРєРѕ' ) && $has_flat ) {
+		$has_flat = str_contains( $query, 'кв' ) || str_contains( $query, 'квартира' ) || str_contains( $query, 'apt' );
+		if ( str_contains( $query, 'без-flat-только' ) && $has_flat ) {
 			return array( 'success' => true, 'suggestions' => array(), 'status_code' => 200, 'body' => array( 'query' => $query ) );
 		}
-		if ( str_contains( $query, 'РЅРµРєСЂР°СЃРѕРІР°' ) || str_contains( $query, 'РќРµРєСЂР°СЃРѕРІР°' ) ) {
+		if ( str_contains( $query, 'некрасова' ) || str_contains( $query, 'Некрасова' ) ) {
 			return array(
 				'success' => true,
 				'status_code' => 200,
 				'body' => array( 'query' => $query ),
 				'suggestions' => array(
 					array(
-						'value' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, 63/1',
-						'unrestricted_value' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»Р°СЃС‚СЊ, Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, Рґ 63/1',
+						'value' => 'Новосибирск, ул Некрасова, 63/1',
+						'unrestricted_value' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1',
 						'data' => array(
 							'fias_level' => '8',
 							'country_iso_code' => 'RU',
-							'region_with_type' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»Р°СЃС‚СЊ',
-							'city_with_type' => 'Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє',
-							'street_with_type' => 'СѓР» РќРµРєСЂР°СЃРѕРІР°',
+							'region_with_type' => 'Новосибирская область',
+							'city_with_type' => 'г Новосибирск',
+							'street_with_type' => 'ул Некрасова',
 							'house' => '63/1',
 							'house_fias_id' => 'house-fias',
-							'flat' => str_contains( $query, 'РєРІ 10' ) ? '10' : '',
+							'flat' => str_contains( $query, 'кв 10' ) ? '10' : '',
 							'postal_code' => '630005',
 						),
 					),
@@ -606,22 +578,22 @@ $mapped      = $rate_mapper->map( $result->rates[0] );
 wc_checkout_smoke_assert( isset( $mapped['id'], $mapped['label'], $mapped['cost'], $mapped['meta_data'] ), 'WooCommerceRateMapper output must be valid.' );
 wc_checkout_smoke_assert( is_array( $mapped['meta_data']['crossed_price'] ), 'WooCommerceRateMapper must expose crossed price rendering data.' );
 
-$yandex_pickup_label = $rate_mapper->map( wc_checkout_label_rate( 'РЇРЅРґРµРєСЃ РґРѕ РџР’Р— - 2 РґРЅСЏ', DateRange::single( 4 ), DateRange::single( 2 ) ) )['label'];
-wc_checkout_smoke_assert( 'РЇРЅРґРµРєСЃ РґРѕ РџР’Р— - 4 РґРЅСЏ' === $yandex_pickup_label && ! str_contains( $yandex_pickup_label, 'вЂ”' ) && ! str_contains( $yandex_pickup_label, '2 РґРЅСЏ' ) && 1 === substr_count( $yandex_pickup_label, '4 РґРЅСЏ' ) && 1 === substr_count( $yandex_pickup_label, ' - ' ), 'Yandex pickup WC label must replace the original API delivery suffix with the final rule-adjusted delivery days and one shared separator.' );
-$yandex_courier_label = $rate_mapper->map( wc_checkout_label_rate( 'РЇРЅРґРµРєСЃ РєСѓСЂСЊРµСЂРѕРј - 2 РґРЅСЏ', DateRange::single( 4 ), DateRange::single( 2 ), array(), DeliveryType::COURIER ) )['label'];
-wc_checkout_smoke_assert( 'РЇРЅРґРµРєСЃ РєСѓСЂСЊРµСЂРѕРј - 4 РґРЅСЏ' === $yandex_courier_label && ! str_contains( $yandex_courier_label, 'вЂ”' ) && ! str_contains( $yandex_courier_label, '2 РґРЅСЏ' ) && 1 === substr_count( $yandex_courier_label, '4 РґРЅСЏ' ) && 1 === substr_count( $yandex_courier_label, ' - ' ), 'Yandex courier WC label must use only final rule-adjusted delivery days and one shared separator.' );
-$other_carrier_label = $rate_mapper->map( wc_checkout_label_rate( 'Р”СЂСѓРіР°СЏ СЃР»СѓР¶Р±Р° вЂ” 2-4 РґРЅСЏ', DateRange::range( 4, 6 ), DateRange::range( 2, 4 ), carrier_key: 'other_carrier' ) )['label'];
-wc_checkout_smoke_assert( 'Р”СЂСѓРіР°СЏ СЃР»СѓР¶Р±Р° вЂ” 4-6 РґРЅРµР№' === $other_carrier_label && ! str_contains( $other_carrier_label, '2-4 РґРЅСЏ' ), 'Another carrier single-rate WC label must replace only the original delivery range suffix.' );
-$normalized_range_label = $rate_mapper->map( wc_checkout_label_rate( 'DPD РґРѕ РґРІРµСЂРё, DPD Р­РєРѕРЅРѕРј - 4-5 РґРЅРµР№', DateRange::range( 6, 7 ), DateRange::range( 4, 5 ), carrier_key: 'dpd' ) )['label'];
-wc_checkout_smoke_assert( 'DPD РґРѕ РґРІРµСЂРё, DPD Р­РєРѕРЅРѕРј - 6-7 РґРЅРµР№' === $normalized_range_label && ! str_contains( $normalized_range_label, '4-5 РґРЅРµР№' ) && 1 === substr_count( $normalized_range_label, 'РґРЅРµР№' ), 'Normalized DPD label must replace carrier raw range instead of appending a second delivery range.' );
-$ruled_range_label = $rate_mapper->map( wc_checkout_label_rate( 'DPD РґРѕ РґРІРµСЂРё, DPD Р­РєРѕРЅРѕРј - 4-5 РґРЅРµР№', DateRange::range( 8, 9 ), DateRange::range( 4, 5 ), carrier_key: 'dpd' ) )['label'];
-wc_checkout_smoke_assert( 'DPD РґРѕ РґРІРµСЂРё, DPD Р­РєРѕРЅРѕРј - 8-9 РґРЅРµР№' === $ruled_range_label && ! str_contains( $ruled_range_label, '4-5 РґРЅРµР№' ) && 1 === substr_count( $ruled_range_label, 'РґРЅРµР№' ), 'Rule-adjusted DPD label must keep one final delivery range after normalization and rules.' );
+$yandex_pickup_label = $rate_mapper->map( wc_checkout_label_rate( 'Яндекс до ПВЗ - 2 дня', DateRange::single( 4 ), DateRange::single( 2 ) ) )['label'];
+wc_checkout_smoke_assert( 'Яндекс до ПВЗ - 4 дня' === $yandex_pickup_label && ! str_contains( $yandex_pickup_label, '—' ) && ! str_contains( $yandex_pickup_label, '2 дня' ) && 1 === substr_count( $yandex_pickup_label, '4 дня' ) && 1 === substr_count( $yandex_pickup_label, ' - ' ), 'Yandex pickup WC label must replace the original API delivery suffix with the final rule-adjusted delivery days and one shared separator.' );
+$yandex_courier_label = $rate_mapper->map( wc_checkout_label_rate( 'Яндекс курьером - 2 дня', DateRange::single( 4 ), DateRange::single( 2 ), array(), DeliveryType::COURIER ) )['label'];
+wc_checkout_smoke_assert( 'Яндекс курьером - 4 дня' === $yandex_courier_label && ! str_contains( $yandex_courier_label, '—' ) && ! str_contains( $yandex_courier_label, '2 дня' ) && 1 === substr_count( $yandex_courier_label, '4 дня' ) && 1 === substr_count( $yandex_courier_label, ' - ' ), 'Yandex courier WC label must use only final rule-adjusted delivery days and one shared separator.' );
+$other_carrier_label = $rate_mapper->map( wc_checkout_label_rate( 'Другая служба — 2-4 дня', DateRange::range( 4, 6 ), DateRange::range( 2, 4 ), carrier_key: 'other_carrier' ) )['label'];
+wc_checkout_smoke_assert( 'Другая служба — 4-6 дней' === $other_carrier_label && ! str_contains( $other_carrier_label, '2-4 дня' ), 'Another carrier single-rate WC label must replace only the original delivery range suffix.' );
+$normalized_range_label = $rate_mapper->map( wc_checkout_label_rate( 'DPD до двери, DPD Эконом - 4-5 дней', DateRange::range( 6, 7 ), DateRange::range( 4, 5 ), carrier_key: 'dpd' ) )['label'];
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 6-7 дней' === $normalized_range_label && ! str_contains( $normalized_range_label, '4-5 дней' ) && 1 === substr_count( $normalized_range_label, 'дней' ), 'Normalized DPD label must replace carrier raw range instead of appending a second delivery range.' );
+$ruled_range_label = $rate_mapper->map( wc_checkout_label_rate( 'DPD до двери, DPD Эконом - 4-5 дней', DateRange::range( 8, 9 ), DateRange::range( 4, 5 ), carrier_key: 'dpd' ) )['label'];
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 8-9 дней' === $ruled_range_label && ! str_contains( $ruled_range_label, '4-5 дней' ) && 1 === substr_count( $ruled_range_label, 'дней' ), 'Rule-adjusted DPD label must keep one final delivery range after normalization and rules.' );
 $normalizer_regression_package = \WallsShop\WDC\Domain\Package\Package::from_items( array(), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) );
-$normalizer_regression_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( 'RU', new \WallsShop\WDC\Domain\Address\Address( country_code: 'RU', city: 'РќРѕРІРѕСЃРёР±РёСЂСЃРє' ), $normalizer_regression_package, '', Money::from_rubles( 1000 ), '2026-08-04' );
-$normalizer_regression_rate = wc_checkout_label_rate( 'DPD РґРѕ РґРІРµСЂРё, DPD Р­РєРѕРЅРѕРј - 4-5 РґРЅРµР№', DateRange::range( 4, 5 ), null, array(), DeliveryType::COURIER, 'dpd' );
+$normalizer_regression_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( 'RU', new \WallsShop\WDC\Domain\Address\Address( country_code: 'RU', city: 'Новосибирск' ), $normalizer_regression_package, '', Money::from_rubles( 1000 ), '2026-08-04' );
+$normalizer_regression_rate = wc_checkout_label_rate( 'DPD до двери, DPD Эконом - 4-5 дней', DateRange::range( 4, 5 ), null, array(), DeliveryType::COURIER, 'dpd' );
 $normalizer_regression_normalized = wc_checkout_smoke_lead_time_normalizer( 2 )->normalize( $normalizer_regression_rate, null, $normalizer_regression_request );
 $normalizer_regression_label = $rate_mapper->map( $normalizer_regression_normalized )['label'];
-wc_checkout_smoke_assert( 'DPD РґРѕ РґРІРµСЂРё, DPD Р­РєРѕРЅРѕРј - 6-7 РґРЅРµР№' === $normalizer_regression_label && 4 === $normalizer_regression_normalized->original_delivery_days?->min_days && 5 === $normalizer_regression_normalized->original_delivery_days?->max_days && ! str_contains( $normalizer_regression_label, '4-5 РґРЅРµР№' ) && 1 === substr_count( $normalizer_regression_label, 'РґРЅРµР№' ), 'DeliveryLeadTimeNormalizer must preserve raw carrier days so mapper replaces the old title suffix after shop processing.' );
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 6-7 дней' === $normalizer_regression_label && 4 === $normalizer_regression_normalized->original_delivery_days?->min_days && 5 === $normalizer_regression_normalized->original_delivery_days?->max_days && ! str_contains( $normalizer_regression_label, '4-5 дней' ) && 1 === substr_count( $normalizer_regression_label, 'дней' ), 'DeliveryLeadTimeNormalizer must preserve raw carrier days so mapper replaces the old title suffix after shop processing.' );
 $normalizer_regression_rule = new Rule( null, 'Add delivery days', true, 10, 'default', '', RuleActionTypes::CHANGE_DELIVERY_DAYS, RuleOperationTypes::INCREASE, 2, RuleOperationBases::CALENDAR_DAYS, false, false );
 $normalizer_regression_context = new \WallsShop\WDC\Rules\Domain\RuleEvaluationContext(
 	Money::from_rubles( 1000 ),
@@ -643,15 +615,15 @@ $normalizer_regression_context = new \WallsShop\WDC\Rules\Domain\RuleEvaluationC
 );
 $normalizer_regression_applied = ( new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ) )->apply( $normalizer_regression_normalized, $normalizer_regression_context, array( $normalizer_regression_rule ) )['rate'];
 $normalizer_regression_rule_label = $rate_mapper->map( $normalizer_regression_applied )['label'];
-wc_checkout_smoke_assert( 'DPD РґРѕ РґРІРµСЂРё, DPD Р­РєРѕРЅРѕРј - 8-9 РґРЅРµР№' === $normalizer_regression_rule_label && 4 === $normalizer_regression_applied->original_delivery_days?->min_days && 5 === $normalizer_regression_applied->original_delivery_days?->max_days && ! str_contains( $normalizer_regression_rule_label, '4-5 РґРЅРµР№' ) && 1 === substr_count( $normalizer_regression_rule_label, 'РґРЅРµР№' ), 'RuleAppliedRateBuilder must keep raw carrier days so mapper replaces the old title suffix after rules.' );
-$title_without_days = $rate_mapper->map( wc_checkout_label_rate( 'РЎР»СѓР¶Р±Р° РґРѕСЃС‚Р°РІРєРё', DateRange::single( 5 ) ) )['label'];
-wc_checkout_smoke_assert( 'РЎР»СѓР¶Р±Р° РґРѕСЃС‚Р°РІРєРё - 5 РґРЅРµР№' === $title_without_days && ! str_contains( $title_without_days, 'вЂ”' ) && ! str_ends_with( $title_without_days, ':' ), 'Single-rate title without delivery days must append the final label once with the shared separator and no manual colon.' );
-$title_with_final_days = $rate_mapper->map( wc_checkout_label_rate( 'РЎР»СѓР¶Р±Р° РґРѕСЃС‚Р°РІРєРё вЂ” 5 РґРЅРµР№', DateRange::single( 5 ), DateRange::single( 5 ) ) )['label'];
-wc_checkout_smoke_assert( 'РЎР»СѓР¶Р±Р° РґРѕСЃС‚Р°РІРєРё вЂ” 5 РґРЅРµР№' === $title_with_final_days && 1 === substr_count( $title_with_final_days, '5 РґРЅРµР№' ), 'Single-rate title that already ends with final delivery days must remain unchanged.' );
-$title_without_final_days = $rate_mapper->map( wc_checkout_label_rate( 'РЎР»СѓР¶Р±Р° Р±РµР· СЃСЂРѕРєР°', new DateRange() ) )['label'];
-wc_checkout_smoke_assert( 'РЎР»СѓР¶Р±Р° Р±РµР· СЃСЂРѕРєР°' === $title_without_final_days, 'Single-rate title must remain unchanged when final delivery days are empty.' );
-$grouped_title = $rate_mapper->map( wc_checkout_label_rate( 'РЎРіСЂСѓРїРїРёСЂРѕРІР°РЅРЅР°СЏ СЃР»СѓР¶Р±Р°', DateRange::single( 7 ), DateRange::single( 2 ), array( 'domestic_tariff_grouped' => true, 'tariff_variants' => array( array( 'object_code' => 'A' ), array( 'object_code' => 'B' ) ) ) ) )['label'];
-wc_checkout_smoke_assert( 'РЎРіСЂСѓРїРїРёСЂРѕРІР°РЅРЅР°СЏ СЃР»СѓР¶Р±Р°' === $grouped_title, 'Grouped/tariff-selector WC label must keep its existing format without an appended common delivery term.' );
+wc_checkout_smoke_assert( 'DPD до двери, DPD Эконом - 8-9 дней' === $normalizer_regression_rule_label && 4 === $normalizer_regression_applied->original_delivery_days?->min_days && 5 === $normalizer_regression_applied->original_delivery_days?->max_days && ! str_contains( $normalizer_regression_rule_label, '4-5 дней' ) && 1 === substr_count( $normalizer_regression_rule_label, 'дней' ), 'RuleAppliedRateBuilder must keep raw carrier days so mapper replaces the old title suffix after rules.' );
+$title_without_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба доставки', DateRange::single( 5 ) ) )['label'];
+wc_checkout_smoke_assert( 'Служба доставки - 5 дней' === $title_without_days && ! str_contains( $title_without_days, '—' ) && ! str_ends_with( $title_without_days, ':' ), 'Single-rate title without delivery days must append the final label once with the shared separator and no manual colon.' );
+$title_with_final_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба доставки — 5 дней', DateRange::single( 5 ), DateRange::single( 5 ) ) )['label'];
+wc_checkout_smoke_assert( 'Служба доставки — 5 дней' === $title_with_final_days && 1 === substr_count( $title_with_final_days, '5 дней' ), 'Single-rate title that already ends with final delivery days must remain unchanged.' );
+$title_without_final_days = $rate_mapper->map( wc_checkout_label_rate( 'Служба без срока', new DateRange() ) )['label'];
+wc_checkout_smoke_assert( 'Служба без срока' === $title_without_final_days, 'Single-rate title must remain unchanged when final delivery days are empty.' );
+$grouped_title = $rate_mapper->map( wc_checkout_label_rate( 'Сгруппированная служба', DateRange::single( 7 ), DateRange::single( 2 ), array( 'domestic_tariff_grouped' => true, 'tariff_variants' => array( array( 'object_code' => 'A' ), array( 'object_code' => 'B' ) ) ) ) )['label'];
+wc_checkout_smoke_assert( 'Сгруппированная служба' === $grouped_title, 'Grouped/tariff-selector WC label must keep its existing format without an appended common delivery term.' );
 
 $render_method = (object) array(
 	'id' => 'single:pickup',
@@ -660,14 +632,14 @@ $render_method = (object) array(
 		'rate_id' => 'single:pickup',
 		'delivery_type' => DeliveryType::PICKUP,
 		'requires_pickup_point' => false,
-		'planned_delivery_comment' => '4 РґРЅСЏ',
-		'comments' => array( 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёР№ РєРѕРјРјРµРЅС‚Р°СЂРёР№' ),
+		'planned_delivery_comment' => '4 дня',
+		'comments' => array( 'Пользовательский комментарий' ),
 	),
 );
 ob_start();
 ( new CheckoutRateRenderer() )->render( $render_method );
 $rendered_rate_html = (string) ob_get_clean();
-	wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '4 РґРЅСЏ' ) && str_contains( $rendered_rate_html, 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёР№ РєРѕРјРјРµРЅС‚Р°СЂРёР№' ), 'Single-rate renderer must output planned_delivery_comment and preserve ordinary meta comments.' );
+	wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must output planned_delivery_comment and preserve ordinary meta comments.' );
 
 $suggestion_settings_repo = new SettingsRepository();
 $suggestion_settings_repo->set( 'dadata_suggestions_enabled', true );
@@ -685,30 +657,30 @@ $suggestion_settings_repo->set(
 $suggestion_pool = new DaDataTokenPool( $suggestion_settings_repo, new EncryptionService() );
 $suggestion_client = new WdcCheckoutApartmentSuggestionClient();
 $suggestions = new AddressSuggestionService( new AddressSuggestionSettings( $suggestion_settings_repo, new EncryptionService(), $suggestion_pool ), $suggestion_client, new AddressSuggestionNormalizer() );
-$with_flat = $suggestions->suggest( 'address', 'РќРѕРІРѕСЃРёР±РёСЂСЃРє, РЅРµРєСЂР°СЃРѕРІР°, Рґ 63/1, РєРІ 10', array( 'country_code' => 'RU', 'selected_display_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє' ) );
+$with_flat = $suggestions->suggest( 'address', 'Новосибирск, некрасова, д 63/1, кв 10', array( 'country_code' => 'RU', 'selected_display_name' => 'Новосибирск' ) );
 $with_flat_item = $with_flat['items'][0] ?? array();
 wc_checkout_smoke_assert( true === ( $with_flat['success'] ?? false ) && true === ( $with_flat_item['isDeliverable'] ?? false ), 'Checkout address suggestions must normalize address with apartment.' );
-wc_checkout_smoke_assert( str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'РќРµРєСЂР°СЃРѕРІР°' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), '63/1' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'РєРІ 10' ), 'Checkout address suggestion label must include street, house and flat.' );
+wc_checkout_smoke_assert( str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'Некрасова' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), '63/1' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'кв 10' ), 'Checkout address suggestion label must include street, house and flat.' );
 wc_checkout_smoke_assert( ! isset( $with_flat['debug']['request_body'] ) && ! str_contains( json_encode( $with_flat['debug'] ?? array() ) ?: '', 'Authorization' ), 'Checkout address suggestions debug must not expose request body or secrets.' );
-$restored_flat = $suggestions->suggest( 'address', 'РЅРµРєСЂР°СЃРѕРІР° 63/1 РєРІ 1', array( 'country_code' => 'RU', 'selected_display_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'city' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє' ) );
+$restored_flat = $suggestions->suggest( 'address', 'некрасова 63/1 кв 1', array( 'country_code' => 'RU', 'selected_display_name' => 'Новосибирск', 'city' => 'Новосибирск' ) );
 $restored_item = $restored_flat['items'][0] ?? array();
-wc_checkout_smoke_assert( true === ( $restored_item['isDeliverable'] ?? false ) && '1' === (string) ( $restored_item['data']['flat'] ?? '' ) && str_contains( (string) ( $restored_item['label'] ?? '' ), 'РєРІ 1' ), 'Checkout address suggestions must restore flat from input when DaData omits flat.' );
+wc_checkout_smoke_assert( true === ( $restored_item['isDeliverable'] ?? false ) && '1' === (string) ( $restored_item['data']['flat'] ?? '' ) && str_contains( (string) ( $restored_item['label'] ?? '' ), 'кв 1' ), 'Checkout address suggestions must restore flat from input when DaData omits flat.' );
 wc_checkout_smoke_assert( true === ( $restored_flat['debug']['flat_restored_from_input'] ?? false ), 'Checkout address suggestions debug must mark restored flat from input.' );
 $fallback_client = new WdcCheckoutApartmentSuggestionClient();
 $fallback_suggestions = new AddressSuggestionService( new AddressSuggestionSettings( $suggestion_settings_repo, new EncryptionService(), $suggestion_pool ), $fallback_client, new AddressSuggestionNormalizer() );
-$without_flat_fallback = $fallback_suggestions->suggest( 'address', 'Р±РµР·-flat-С‚РѕР»СЊРєРѕ РЅРѕРІРѕСЃРёР±РёСЂСЃРє РЅРµРєСЂР°СЃРѕРІР° 63/1 РєРІ 1', array( 'country_code' => 'RU', 'selected_display_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє' ) );
+$without_flat_fallback = $fallback_suggestions->suggest( 'address', 'без-flat-только новосибирск некрасова 63/1 кв 1', array( 'country_code' => 'RU', 'selected_display_name' => 'Новосибирск' ) );
 wc_checkout_smoke_assert( true === ( $without_flat_fallback['items'][0]['isDeliverable'] ?? false ), 'Checkout address suggestions must retry without flat when query with flat returns no suggestions.' );
-wc_checkout_smoke_assert( $fallback_client->calls <= 5 && in_array( 'Р±РµР·-flat-С‚РѕР»СЊРєРѕ РЅРѕРІРѕСЃРёР±РёСЂСЃРє РЅРµРєСЂР°СЃРѕРІР° 63/1', $fallback_client->queries, true ), 'Checkout address suggestions query variants must stay within a reasonable limit and include query without flat.' );
+wc_checkout_smoke_assert( $fallback_client->calls <= 5 && in_array( 'без-flat-только новосибирск некрасова 63/1', $fallback_client->queries, true ), 'Checkout address suggestions query variants must stay within a reasonable limit and include query without flat.' );
 $next_client = new WdcCheckoutApartmentSuggestionClient();
 $next_suggestions = new AddressSuggestionService( new AddressSuggestionSettings( $suggestion_settings_repo, new EncryptionService(), $suggestion_pool ), $next_client, new AddressSuggestionNormalizer() );
-$next = $next_suggestions->suggest( 'address_next', '630005, РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р», Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, Рґ 63/1', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
+$next = $next_suggestions->suggest( 'address_next', '630005, Новосибирская обл, г Новосибирск, ул Некрасова, д 63/1', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
 wc_checkout_smoke_assert( true === ( $next['success'] ?? false ) && 3 === count( $next['items'] ?? array() ), 'Address next must return mixed house and flat suggestions.' );
 wc_checkout_smoke_assert( 'house' === ( $next['items'][0]['level'] ?? '' ) && 'flat' === ( $next['items'][1]['level'] ?? '' ) && 'flat' === ( $next['items'][2]['level'] ?? '' ), 'Address next must preserve house and mark flats as lower-level items.' );
 wc_checkout_smoke_assert( 'address_next_relaxed' === ( $next['debug']['selected_variant'] ?? '' ) && 2 === ( $next['debug']['lower_level_count'] ?? 0 ) && ! isset( $next['debug']['request_body'] ), 'Address next debug must expose relaxed variant/lower-level count without request body.' );
-$next_filtered = $next_suggestions->suggest( 'address_next', '630005, РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р», Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє, СѓР» РќРµРєСЂР°СЃРѕРІР°, Рґ 63/1, 9', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
+$next_filtered = $next_suggestions->suggest( 'address_next', '630005, Новосибирская обл, г Новосибирск, ул Некрасова, д 63/1, 9', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
 $next_filtered_labels = implode( ' | ', array_map( static fn( array $item ): string => (string) ( $item['label'] ?? '' ), $next_filtered['items'] ?? array() ) );
 wc_checkout_smoke_assert( true === ( $next_filtered['success'] ?? false ) && 21 === count( $next_filtered['items'] ?? array() ), 'Address next must keep returning mixed house and filtered flat suggestions while typing flat number without cutting the list to four.' );
-wc_checkout_smoke_assert( 20 === ( $next_filtered['debug']['lower_level_count'] ?? 0 ) && str_contains( $next_filtered_labels, 'РєРІ 9' ) && str_contains( $next_filtered_labels, 'РєРІ 28' ), 'Address next must return all flat suggestions matching typed apartment number within the 20-item limit.' );
+wc_checkout_smoke_assert( 20 === ( $next_filtered['debug']['lower_level_count'] ?? 0 ) && str_contains( $next_filtered_labels, 'кв 9' ) && str_contains( $next_filtered_labels, 'кв 28' ), 'Address next must return all flat suggestions matching typed apartment number within the 20-item limit.' );
 $dadata_client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/DaDataSuggestionClient.php' );
 $address_next_start = strpos( $dadata_client_source, "if ( 'address_next' === \$stage )" );
 $address_next_end = false !== $address_next_start ? strpos( $dadata_client_source, "if ( 'address' === \$stage )", $address_next_start ) : false;
@@ -804,46 +776,6 @@ $conflict_method->setAccessible( true );
 wc_checkout_smoke_assert( true === $conflict_method->invoke( $address_runtime, array( 'country_code' => 'KZ', 'city' => 'Minsk' ), $fingerprint_selection ), 'Checkout destination conflict detection must treat country change as a conflict.' );
 wc_checkout_smoke_assert( false === $conflict_method->invoke( $address_runtime, array( 'country_code' => 'BY', 'city' => 'Minsk' ), $fingerprint_selection ), 'Checkout destination conflict detection must allow the same pickup country/city.' );
 
-$location_db = new wpdb();
-$location_db->locations = array(
-	array( 'id' => 1, 'country_code' => 'RU', 'active' => 1, 'city_name' => 'Минск', 'settlement_name' => 'Минск', 'place_name' => 'Минск', 'display_name' => 'Минск, Россия', 'region_name' => 'Московская область', 'postal_code' => '101000', 'searchable_text' => 'минск россия московская область' ),
-	array( 'id' => 2, 'country_code' => 'BY', 'active' => 1, 'city_name' => 'Минск', 'settlement_name' => 'Минск', 'place_name' => 'Минск', 'display_name' => 'Минск, Беларусь', 'region_name' => 'Минская область', 'postal_code' => '220000', 'searchable_text' => 'минск беларусь минская область' ),
-);
-$location_repository = new LocationRepository( $location_db );
-$checkout_location_search = new CheckoutLocationSearch( new LocationSearchService( $location_repository ) );
-$checkout_city_resolver = new CheckoutCityResolver( $location_repository, $checkout_location_search );
-$by_minsk_location = $checkout_city_resolver->resolve_city( 'Минск', 'BY' );
-wc_checkout_smoke_assert( $by_minsk_location instanceof Location && 'BY' === $by_minsk_location->country_code, 'CheckoutCityResolver must resolve BY/Minsk to the same-country location when RU namesake exists.' );
-wc_checkout_smoke_assert( '220000' === $checkout_city_resolver->resolve_postcode( 'Минск', 'BY' ), 'CheckoutCityResolver must resolve BY/Minsk postcode from same-country location.' );
-
-$manual_location_db = new wpdb();
-$manual_location_db->locations = array(
-	array( 'id' => 1, 'country_code' => 'RU', 'active' => 1, 'city_name' => 'Минск', 'settlement_name' => 'Минск', 'place_name' => 'Минск', 'display_name' => 'Минск, Россия', 'region_name' => 'Московская область', 'postal_code' => '101000', 'searchable_text' => 'минск россия московская область' ),
-);
-$manual_location_repository = new LocationRepository( $manual_location_db );
-$manual_city_resolver = new CheckoutCityResolver( $manual_location_repository, new CheckoutLocationSearch( new LocationSearchService( $manual_location_repository ) ) );
-wc_checkout_smoke_assert( null === $manual_city_resolver->resolve_city( 'Минск', 'BY' ), 'CheckoutCityResolver must not return RU namesake when BY local location is absent.' );
-wc_checkout_smoke_assert( null === $manual_city_resolver->resolve_postcode( 'Минск', 'BY' ), 'CheckoutCityResolver must not autofill BY postcode from a RU namesake.' );
-$manual_session = new CheckoutSessionManager();
-$manual_runtime = new CheckoutAddressRuntime(
-	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
-	$manual_city_resolver,
-	$manual_session
-);
-$manual_runtime->resolve_checkout_address(
-	array(
-		'shipping_country' => 'BY',
-		'shipping_state' => 'Минская область',
-		'shipping_city' => 'Минск',
-		'shipping_postcode' => '',
-		'shipping_address_1' => 'Независимости 1',
-	)
-);
-$manual_context = $manual_session->city_context();
-wc_checkout_smoke_assert( 'BY' === (string) ( $manual_context['country_code'] ?? '' ) && 'Минск' === (string) ( $manual_context['city_name'] ?? '' ), 'Manual checkout city context must keep BY/Minsk when no local BY location exists.' );
-wc_checkout_smoke_assert( 'Минская область' === (string) ( $manual_context['region_name'] ?? '' ), 'Manual checkout city context must preserve shipping_state as region_name.' );
-wc_checkout_smoke_assert( '' === (string) ( $manual_context['postcode'] ?? '' ), 'Manual BY city context must not autofill postcode from a RU namesake.' );
-
 $settings = new SettingsRepository();
 $settings->set( 'checkout_sort_mode', RateSorter::CHEAPEST );
 NewShippingMethod::configure(
@@ -887,15 +819,15 @@ wc_checkout_smoke_assert( array( 'A', 'B' ) === array_map( static fn( array $var
 
 $session->save_selected_tariff( 'dpd:pickup', array( 'object_code' => '1800' ) );
 $dpd_grouped_rates = array(
-	wc_checkout_grouped_tariff_rate( 'economy', 'DPD Р­РєРѕРЅРѕРј', 8, 10, 'Р”РѕСЃС‚Р°РІРєР° РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ* СЃ 28 РёСЋР»СЏ (РІС‚РѕСЂРЅРёРє).', 247 ),
-	wc_checkout_grouped_tariff_rate( '1800', 'DPD 18:00', 7, 9, 'Р”РѕСЃС‚Р°РІРєР° РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ* СЃ 27 РёСЋР»СЏ (РїРѕРЅРµРґРµР»СЊРЅРёРє).', 395 ),
-	wc_checkout_grouped_tariff_rate( 'classic', 'DPD Classic', 3, 5, 'Р”РѕСЃС‚Р°РІРєР° РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ* СЃ 23 РёСЋР»СЏ (С‡РµС‚РІРµСЂРі).', 952 ),
+	wc_checkout_grouped_tariff_rate( 'economy', 'DPD Эконом', 8, 10, 'Доставка планируется* с 28 июля (вторник).', 247 ),
+	wc_checkout_grouped_tariff_rate( '1800', 'DPD 18:00', 7, 9, 'Доставка планируется* с 27 июля (понедельник).', 395 ),
+	wc_checkout_grouped_tariff_rate( 'classic', 'DPD Classic', 3, 5, 'Доставка планируется* с 23 июля (четверг).', 952 ),
 );
 $dpd_grouped = $reflection->invoke( $method, $dpd_grouped_rates )[0] ?? null;
 wc_checkout_smoke_assert( $dpd_grouped instanceof DeliveryRate, 'DPD grouped selector regression must build a synthetic rate.' );
-wc_checkout_smoke_assert( '7-9 РґРЅРµР№' === DeliveryDaysFormatter::format( $dpd_grouped->delivery_days ) && 'Р”РѕСЃС‚Р°РІРєР° РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ* СЃ 27 РёСЋР»СЏ (РїРѕРЅРµРґРµР»СЊРЅРёРє).' === $dpd_grouped->planned_delivery_comment, 'DPD grouped synthetic rate must keep duration and planned-date comment separate.' );
+wc_checkout_smoke_assert( '7-9 дней' === DeliveryDaysFormatter::format( $dpd_grouped->delivery_days ) && 'Доставка планируется* с 27 июля (понедельник).' === $dpd_grouped->planned_delivery_comment, 'DPD grouped synthetic rate must keep duration and planned-date comment separate.' );
 $dpd_variants = $dpd_grouped->meta['tariff_variants'] ?? array();
-wc_checkout_smoke_assert( isset( $dpd_variants[1]['delivery_days'], $dpd_variants[1]['delivery_days_label'], $dpd_variants[1]['planned_delivery_comment'] ) && '7-9 РґРЅРµР№' === $dpd_variants[1]['delivery_days_label'], 'Tariff variant payload must contain delivery_days, delivery_days_label, and planned_delivery_comment.' );
+wc_checkout_smoke_assert( isset( $dpd_variants[1]['delivery_days'], $dpd_variants[1]['delivery_days_label'], $dpd_variants[1]['planned_delivery_comment'] ) && '7-9 дней' === $dpd_variants[1]['delivery_days_label'], 'Tariff variant payload must contain delivery_days, delivery_days_label, and planned_delivery_comment.' );
 $dpd_mapped = $rate_mapper->map( $dpd_grouped );
 $dpd_render_method = (object) array(
 	'id' => $dpd_mapped['id'],
@@ -907,10 +839,10 @@ $dpd_grouped_html = (string) ob_get_clean();
 $selector_start = strpos( $dpd_grouped_html, '<div class="wdc-domestic-tariff-selector"' );
 $selector_end = false !== $selector_start ? strpos( $dpd_grouped_html, '</div>', $selector_start ) : false;
 $dpd_selector_html = false !== $selector_start && false !== $selector_end ? substr( $dpd_grouped_html, $selector_start, $selector_end - $selector_start ) : '';
-wc_checkout_smoke_assert( str_contains( $dpd_grouped_html, 'DPD Р­РєРѕРЅРѕРј - 8-10 РґРЅРµР№' ) && str_contains( $dpd_grouped_html, 'DPD 18:00 - 7-9 РґРЅРµР№' ) && str_contains( $dpd_grouped_html, 'DPD Classic - 3-5 РґРЅРµР№' ), 'Tariff selector must render tariff duration ranges.' );
-wc_checkout_smoke_assert( '' !== $dpd_selector_html && ! (bool) preg_match( '/wdc-domestic-tariff-selector__line-text[^>]*>[^<]*Р”РѕСЃС‚Р°РІРєР° РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ\\*/u', $dpd_selector_html ), 'Tariff selector rows must not render planned delivery comments.' );
-wc_checkout_smoke_assert( 1 === substr_count( $dpd_grouped_html, 'class="wdc-platform-planned-delivery-comment wdc-shipping-rate-comment"' ) && str_contains( $dpd_grouped_html, 'wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">Р”РѕСЃС‚Р°РІРєР° РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ* СЃ 27 РёСЋР»СЏ (РїРѕРЅРµРґРµР»СЊРЅРёРє).' ), 'Grouped checkout rate must render exactly one active planned delivery comment.' );
-wc_checkout_smoke_assert( ! str_contains( $dpd_grouped_html, 'wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">7-9 РґРЅРµР№' ), 'Grouped checkout rate must not render a bare duration as the planned delivery comment.' );
+wc_checkout_smoke_assert( str_contains( $dpd_grouped_html, 'DPD Эконом - 8-10 дней' ) && str_contains( $dpd_grouped_html, 'DPD 18:00 - 7-9 дней' ) && str_contains( $dpd_grouped_html, 'DPD Classic - 3-5 дней' ), 'Tariff selector must render tariff duration ranges.' );
+wc_checkout_smoke_assert( '' !== $dpd_selector_html && ! (bool) preg_match( '/wdc-domestic-tariff-selector__line-text[^>]*>[^<]*Доставка планируется\\*/u', $dpd_selector_html ), 'Tariff selector rows must not render planned delivery comments.' );
+wc_checkout_smoke_assert( 1 === substr_count( $dpd_grouped_html, 'class="wdc-platform-planned-delivery-comment wdc-shipping-rate-comment"' ) && str_contains( $dpd_grouped_html, 'wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">Доставка планируется* с 27 июля (понедельник).' ), 'Grouped checkout rate must render exactly one active planned delivery comment.' );
+wc_checkout_smoke_assert( ! str_contains( $dpd_grouped_html, 'wdc-platform-planned-delivery-comment wdc-shipping-rate-comment">7-9 дней' ), 'Grouped checkout rate must not render a bare duration as the planned delivery comment.' );
 $domestic_tariff_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/domestic-tariff-selector.js' );
 wc_checkout_smoke_assert( str_contains( $domestic_tariff_js, 'data-planned-delivery-comment' ) && str_contains( $domestic_tariff_js, '.wdc-platform-planned-delivery-comment' ), 'Tariff selector JavaScript must update the shared planned comment from variant payload.' );
 $stored_rates = $session->rates();
@@ -956,17 +888,17 @@ $session->save_rates(
 			'rate_id' => 'cdek:courier',
 			'carrier_key' => 'cdek',
 			'service_key' => 'cdek',
-			'service_title' => 'РЎР”Р­Рљ',
-			'label' => 'РЎР”Р­Рљ РєСѓСЂСЊРµСЂ, РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ - 10-14 РґРЅРµР№',
+			'service_title' => 'СДЭК',
+			'label' => 'СДЭК курьер, Посылка склад-дверь - 10-14 дней',
 			'delivery_type' => 'courier',
 			'planned_delivery_date' => '2026-08-12',
-			'planned_delivery_comment' => '10-14 РґРЅРµР№',
-			'delivery_comment' => '10-14 РґРЅРµР№',
+			'planned_delivery_comment' => '10-14 дней',
+			'delivery_comment' => '10-14 дней',
 			'cost' => 520.0,
 			'tariff_key' => '137',
-			'tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ',
+			'tariff_title' => 'Посылка склад-дверь',
 			'selected_tariff_object' => '137',
-			'selected_tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ',
+			'selected_tariff_title' => 'Посылка склад-дверь',
 			'api_base_price_rub' => 520.0,
 			'rules_source' => 'none',
 			'rate_meta' => array(
@@ -989,17 +921,17 @@ $cdek_item->meta = array(
 	'api_base_price_rub' => 520,
 	'tariff_key' => '137',
 	'selected_tariff_object' => '137',
-	'РџРµСЂРµРІРѕР·С‡РёРє' => 'cdek',
-	'РЎРїРѕСЃРѕР± РґРѕСЃС‚Р°РІРєРё' => 'cdek:courier',
-	'РўРёРї РґРѕСЃС‚Р°РІРєРё' => 'РљСѓСЂСЊРµСЂ',
-	'РќР°СЃРµР»РµРЅРЅС‹Р№ РїСѓРЅРєС‚' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє',
-	'РќРѕСЂРјР°Р»РёР·Р°С†РёСЏ' => 'manual',
+	'Перевозчик' => 'cdek',
+	'Способ доставки' => 'cdek:courier',
+	'Тип доставки' => 'Курьер',
+	'Населенный пункт' => 'Новосибирск',
+	'Нормализация' => 'manual',
 );
 $cdek_persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $cdek_persister->persist_shipping_item_meta( $cdek_item );
-wc_checkout_smoke_assert( 'РЎР”Р­Рљ РєСѓСЂСЊРµСЂ, РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ - 10-14 РґРЅРµР№' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
-	wc_checkout_smoke_assert( array( 'РџР»Р°РЅРёСЂСѓРµРјР°СЏ* РґР°С‚Р° РґРѕСЃС‚Р°РІРєРё' => 'СЃ 12 Р°РІРіСѓСЃС‚Р° 2026' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );
-foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'pickup_family', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'РџРµСЂРµРІРѕР·С‡РёРє', 'РЎРїРѕСЃРѕР± РґРѕСЃС‚Р°РІРєРё', 'РўРёРї РґРѕСЃС‚Р°РІРєРё', 'РќР°СЃРµР»РµРЅРЅС‹Р№ РїСѓРЅРєС‚', 'РќРѕСЂРјР°Р»РёР·Р°С†РёСЏ' ) as $forbidden_meta_key ) {
+wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
+	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only planned delivery date.' );
+foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'pickup_family', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	wc_checkout_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
 }
 $cdek_order = new WdcSmokeOrder();
@@ -1014,17 +946,17 @@ $session->save_rates(
 			'rate_id' => 'cdek:pickup:136',
 			'carrier_key' => 'cdek',
 			'service_key' => 'cdek',
-			'service_title' => 'РЎР”Р­Рљ РґРѕ РїСѓРЅРєС‚Р° РІС‹РґР°С‡Рё',
-			'label' => 'РЎР”Р­Рљ РґРѕ РїСѓРЅРєС‚Р° РІС‹РґР°С‡Рё, РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-СЃРєР»Р°Рґ - 2-4 РґРЅСЏ',
+			'service_title' => 'СДЭК до пункта выдачи',
+			'label' => 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня',
 			'delivery_type' => 'pickup',
 			'requires_pickup_point' => true,
 			'planned_delivery_date' => '2026-08-12',
-			'planned_delivery_comment' => '2-4 РґРЅСЏ',
-			'delivery_comment' => '2-4 РґРЅСЏ',
+			'planned_delivery_comment' => '2-4 дня',
+			'delivery_comment' => '2-4 дня',
 			'cost' => 350.5,
 			'tariff_key' => '136',
-			'tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-СЃРєР»Р°Рґ',
-			'selected_tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-СЃРєР»Р°Рґ',
+			'tariff_title' => 'Посылка склад-склад',
+			'selected_tariff_title' => 'Посылка склад-склад',
 			'selected_tariff_object' => '136',
 			'rate_meta' => array(
 				'package' => array( 'weight_g' => 1200 ),
@@ -1049,7 +981,7 @@ $cdek_pickup = array(
 	'lng' => 86.0873,
 	'point_work_time' => 'Daily 10-22',
 	'description' => 'Inside the shopping center',
-	'storage_notice' => 'РЎСЂРѕРє С…СЂР°РЅРµРЅРёСЏ 3 РґРЅСЏ',
+	'storage_notice' => 'Срок хранения 3 дня',
 	'cdek_code' => 'KEM7',
 	'snapshot' => array(
 		'id' => 'cdek:KEM7',
@@ -1061,7 +993,7 @@ $cdek_pickup = array(
 		'city' => 'Kemerovo',
 		'region' => 'Kemerovo region',
 		'description' => 'Inside the shopping center',
-		'storage_notice' => 'РЎСЂРѕРє С…СЂР°РЅРµРЅРёСЏ 3 РґРЅСЏ',
+		'storage_notice' => 'Срок хранения 3 дня',
 		'cdek_code' => 'KEM7',
 	),
 );
@@ -1081,7 +1013,7 @@ $errors = new WdcSmokeCheckoutErrors();
 		'wdc_pickup_region_name' => 'Kemerovo region',
 		'wdc_pickup_work_time' => '0.000000',
 		'wdc_pickup_description' => 'Inside the shopping center',
-		'wdc_pickup_storage_notice' => 'РЎСЂРѕРє С…СЂР°РЅРµРЅРёСЏ 3 РґРЅСЏ',
+		'wdc_pickup_storage_notice' => 'Срок хранения 3 дня',
 		'wdc_pickup_cdek_code' => 'KEM7',
 	),
 	$errors
@@ -1092,7 +1024,7 @@ $cdek_pickup_order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $cdek_pickup_order );
 $cdek_pickup_calc = $cdek_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
 wc_checkout_smoke_assert( 'KEM7' === ( $cdek_pickup_calc['pickup']['point_code'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK checkout order create must save point_code separately from postcode.' );
-wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ) && 'РЎСЂРѕРє С…СЂР°РЅРµРЅРёСЏ 3 РґРЅСЏ' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK checkout order create must save pickup description and storage notice.' );
+wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK checkout order create must save pickup description and storage notice.' );
 wc_checkout_smoke_assert( '' === ( $cdek_pickup_calc['pickup']['work_time'] ?? '' ), 'CDEK checkout order create must not save numeric zero work_time as meaningful text.' );
 wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->shipping_address_1 && '' === $cdek_pickup_order->shipping_address_2, 'CDEK checkout order create must write pickup shipping address.' );
 
@@ -1102,14 +1034,14 @@ $session->save_rates(
 			'rate_id' => 'cdek:courier:custom',
 			'carrier_key' => 'cdek',
 			'service_key' => 'cdek',
-			'label' => 'РЎР”Р­Рљ РґРІРµСЂСЊ С‚РµСЃС‚',
+			'label' => 'СДЭК дверь тест',
 			'delivery_type' => 'courier',
-			'delivery_comment' => '10-14 РґРЅРµР№',
+			'delivery_comment' => '10-14 дней',
 			'planned_delivery_date' => '2026-08-12',
-			'planned_delivery_comment' => '10-14 РґРЅРµР№',
+			'planned_delivery_comment' => '10-14 дней',
 			'cost' => 520.0,
-			'tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ',
-			'selected_tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ',
+			'tariff_title' => 'Посылка склад-дверь',
+			'selected_tariff_title' => 'Посылка склад-дверь',
 			'selected_tariff_object' => '137',
 		),
 	)
@@ -1117,8 +1049,8 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:custom' ) );
 $custom_cdek_item = new WdcSmokeShippingItem();
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist_shipping_item_meta( $custom_cdek_item );
-wc_checkout_smoke_assert( 'РЎР”Р­Рљ РґРІРµСЂСЊ С‚РµСЃС‚, РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ - 10-14 РґРЅРµР№' === $custom_cdek_item->method_title, 'CDEK checkout method title must use custom service title, selected tariff and delivery days.' );
-wc_checkout_smoke_assert( 1 === substr_count( $custom_cdek_item->method_title, '10-14 РґРЅРµР№' ), 'CDEK checkout method title must not duplicate delivery days.' );
+wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь - 10-14 дней' === $custom_cdek_item->method_title, 'CDEK checkout method title must use custom service title, selected tariff and delivery days.' );
+wc_checkout_smoke_assert( 1 === substr_count( $custom_cdek_item->method_title, '10-14 дней' ), 'CDEK checkout method title must not duplicate delivery days.' );
 
 $session->save_rates(
 	array(
@@ -1126,11 +1058,11 @@ $session->save_rates(
 			'rate_id' => 'cdek:courier:no-days',
 			'carrier_key' => 'cdek',
 			'service_key' => 'cdek',
-			'label' => 'РЎР”Р­Рљ РґРІРµСЂСЊ С‚РµСЃС‚',
+			'label' => 'СДЭК дверь тест',
 			'delivery_type' => 'courier',
 			'cost' => 520.0,
-			'tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ',
-			'selected_tariff_title' => 'РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ',
+			'tariff_title' => 'Посылка склад-дверь',
+			'selected_tariff_title' => 'Посылка склад-дверь',
 			'selected_tariff_object' => '137',
 		),
 	)
@@ -1138,10 +1070,10 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:no-days' ) );
 $no_days_cdek_item = new WdcSmokeShippingItem();
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist_shipping_item_meta( $no_days_cdek_item );
-wc_checkout_smoke_assert( 'РЎР”Р­Рљ РґРІРµСЂСЊ С‚РµСЃС‚, РџРѕСЃС‹Р»РєР° СЃРєР»Р°Рґ-РґРІРµСЂСЊ' === $no_days_cdek_item->method_title, 'CDEK checkout method title without delivery days must include method and tariff only.' );
+wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === $no_days_cdek_item->method_title, 'CDEK checkout method title without delivery days must include method and tariff only.' );
 	wc_checkout_smoke_assert( array() === $no_days_cdek_item->meta, 'CDEK checkout visible meta without planned date must be omitted.' );
 
-$compact_forbidden_meta_keys = array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'РџРµСЂРµРІРѕР·С‡РёРє', 'РЎРїРѕСЃРѕР± РґРѕСЃС‚Р°РІРєРё', 'РўРёРї РґРѕСЃС‚Р°РІРєРё', 'РќР°СЃРµР»РµРЅРЅС‹Р№ РїСѓРЅРєС‚', 'РќРѕСЂРјР°Р»РёР·Р°С†РёСЏ', 'РљРѕРґ РџР’Р—', 'РђРґСЂРµСЃ РџР’Р—' );
+$compact_forbidden_meta_keys = array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация', 'Код ПВЗ', 'Адрес ПВЗ' );
 
 $session->save_rates(
 	array(
@@ -1149,14 +1081,14 @@ $session->save_rates(
 			'rate_id' => 'russian_post_domestic:pickup',
 			'carrier_key' => 'russian_post_domestic',
 			'service_key' => 'russian_post_domestic',
-			'service_title' => 'РџРѕС‡С‚Р° Р РѕСЃСЃРёРё РґРѕ РѕС‚РґРµР»РµРЅРёСЏ',
-			'label' => 'РџРѕС‡С‚Р° Р РѕСЃСЃРёРё РґРѕ РѕС‚РґРµР»РµРЅРёСЏ, РџРѕСЃС‹Р»РєР° 1 РєР»Р°СЃСЃР° - 3-5 РґРЅРµР№',
+			'service_title' => 'Почта России до отделения',
+			'label' => 'Почта России до отделения, Посылка 1 класса - 3-5 дней',
 			'delivery_type' => 'pickup',
 			'delivery_days' => array( 'min_days' => 3, 'max_days' => 5 ),
 			'planned_delivery_date' => '2026-08-12',
-			'planned_delivery_comment' => '3-5 РґРЅРµР№',
-			'tariff_title' => 'РџРѕСЃС‹Р»РєР° 1 РєР»Р°СЃСЃР°',
-			'selected_tariff_title' => 'РџРѕСЃС‹Р»РєР° 1 РєР»Р°СЃСЃР°',
+			'planned_delivery_comment' => '3-5 дней',
+			'tariff_title' => 'Посылка 1 класса',
+			'selected_tariff_title' => 'Посылка 1 класса',
 		),
 	)
 );
@@ -1164,7 +1096,7 @@ WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:rus
 $domestic_item = new WdcSmokeShippingItem();
 $domestic_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist_shipping_item_meta( $domestic_item );
-	wc_checkout_smoke_assert( array( 'РџР»Р°РЅРёСЂСѓРµРјР°СЏ* РґР°С‚Р° РґРѕСЃС‚Р°РІРєРё' => 'СЃ 12 Р°РІРіСѓСЃС‚Р° 2026' ) === $domestic_item->meta, 'Russian Post domestic checkout visible meta must contain only planned delivery date.' );
+	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $domestic_item->meta, 'Russian Post domestic checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
 	array(
@@ -1172,10 +1104,10 @@ $session->save_rates(
 			'rate_id' => 'russian_post:international',
 			'carrier_key' => 'russian_post',
 			'service_key' => 'russian_post',
-			'label' => 'РџРѕС‡С‚Р° Р РѕСЃСЃРёРё РјРµР¶РґСѓРЅР°СЂРѕРґРЅР°СЏ - 8-12 РґРЅРµР№',
+			'label' => 'Почта России международная - 8-12 дней',
 			'delivery_type' => 'courier',
 			'planned_delivery_date' => '2026-08-12',
-			'planned_delivery_comment' => '8-12 РґРЅРµР№',
+			'planned_delivery_comment' => '8-12 дней',
 		),
 	)
 );
@@ -1183,7 +1115,7 @@ WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:rus
 $international_item = new WdcSmokeShippingItem();
 $international_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist_shipping_item_meta( $international_item );
-	wc_checkout_smoke_assert( array( 'РџР»Р°РЅРёСЂСѓРµРјР°СЏ* РґР°С‚Р° РґРѕСЃС‚Р°РІРєРё' => 'СЃ 12 Р°РІРіСѓСЃС‚Р° 2026' ) === $international_item->meta, 'Russian Post international checkout visible meta must contain only planned delivery date.' );
+	wc_checkout_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === $international_item->meta, 'Russian Post international checkout visible meta must contain only planned delivery date.' );
 
 $session->save_rates(
 	array(
@@ -1206,7 +1138,7 @@ $delivery_days_audit = array(
 	array(
 		'applied' => true,
 		'action_type' => 'change_delivery_days',
-		'rule_name' => 'РЎСЂРѕРє РґРѕСЃС‚Р°РІРєРё',
+		'rule_name' => 'Срок доставки',
 		'operation' => 'increase',
 		'operation_value' => 2,
 		'operation_base' => 'calendar_days',
@@ -1219,12 +1151,12 @@ $session->save_rates(
 			'rate_id' => 'yandex_courier',
 			'carrier_key' => 'yandex_delivery',
 			'service_key' => 'yandex_delivery',
-			'service_title' => 'РЇРЅРґРµРєСЃ.Р”РѕСЃС‚Р°РІРєР°',
-			'label' => 'РЇРЅРґРµРєСЃ РґРѕ РґРІРµСЂРё - 8 РґРЅРµР№',
+			'service_title' => 'Яндекс.Доставка',
+			'label' => 'Яндекс до двери - 8 дней',
 			'delivery_type' => 'courier',
 			'cost' => 662.0,
 			'delivery_days' => array( 'min_days' => 10, 'max_days' => 10 ),
-			'delivery_comment' => '10 РґРЅРµР№',
+			'delivery_comment' => '10 дней',
 			'original_delivery_days' => array( 'min_days' => 8, 'max_days' => 8 ),
 			'rules_source' => 'rule_engine',
 			'rate_meta' => array(
@@ -1245,7 +1177,7 @@ $yandex_checkout_order = new WdcSmokeOrder();
 $yandex_checkout_calc = $yandex_checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
 $yandex_checkout_formula = $yandex_checkout_calc['rules']['formula_visualization'] ?? array();
 wc_checkout_smoke_assert( 535.0 === (float) ( $yandex_checkout_calc['api']['api_base_price_rub'] ?? 0 ) && 662.0 === (float) ( $yandex_checkout_calc['result']['final_price_rub'] ?? 0 ), 'Yandex checkout persistence must keep API base 535 separate from final 662.' );
-wc_checkout_smoke_assert( is_array( $yandex_checkout_formula ) && 'Р‘Р°Р·РѕРІР°СЏ С†РµРЅР° API: 535 СЂСѓР±.' === ( $yandex_checkout_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'РЎСЂРѕРє РґРѕСЃС‚Р°РІРєРё' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'СѓРІРµР»РёС‡РёС‚СЊ СЃСЂРѕРє РґРѕСЃС‚Р°РІРєРё' ) && str_contains( implode( "\n", $yandex_checkout_formula ), '10 РґРЅРµР№' ) && in_array( 'РС‚РѕРі: 662 СЂСѓР±.', $yandex_checkout_formula, true ), 'Yandex checkout formula must persist base price, delivery-days audit and final price.' );
+wc_checkout_smoke_assert( is_array( $yandex_checkout_formula ) && 'Базовая цена API: 535 руб.' === ( $yandex_checkout_formula[0] ?? '' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'Срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), 'увеличить срок доставки' ) && str_contains( implode( "\n", $yandex_checkout_formula ), '10 дней' ) && in_array( 'Итог: 662 руб.', $yandex_checkout_formula, true ), 'Yandex checkout formula must persist base price, delivery-days audit and final price.' );
 
 $session->save_rates(
 	array(
@@ -1253,7 +1185,7 @@ $session->save_rates(
 			'rate_id' => 'yandex_courier',
 			'carrier_key' => 'yandex_delivery',
 			'service_key' => 'yandex_delivery',
-			'label' => 'РЇРЅРґРµРєСЃ РґРѕ РґРІРµСЂРё',
+			'label' => 'Яндекс до двери',
 			'delivery_type' => 'courier',
 			'cost' => 662.0,
 			'rate_meta' => array( 'pricing_total_kopecks' => 53500 ),
@@ -1271,7 +1203,7 @@ $session->save_rates(
 			'rate_id' => 'yandex_courier',
 			'carrier_key' => 'yandex_delivery',
 			'service_key' => 'yandex_delivery',
-			'label' => 'РЇРЅРґРµРєСЃ РґРѕ РґРІРµСЂРё',
+			'label' => 'Яндекс до двери',
 			'delivery_type' => 'courier',
 			'cost' => 662.0,
 			'original_cost' => Money::from_rubles( 535 )->to_array(),

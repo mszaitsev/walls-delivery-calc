@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.128.2
+Version: 0.128.1
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -37,7 +37,7 @@ CDEK pickup and courier branches are available for every enabled CDEK country wh
 - Selected city, rate, tariff, pickup point, and courier address are preserved through checkout session/runtime state.
 - Sorting can use price or delivery time.
 - Manager recalculation in the order admin must save a clear order note with old/new delivery title and price.
-- Planned checkout comments use `DeliveryRate::planned_delivery_comment` and the format `Р”РѕСЃС‚Р°РІРєР° РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ* СЃ 12 Р°РІРіСѓСЃС‚Р° (СЃСЂРµРґР°).`.
+- Planned checkout comments use `DeliveryRate::planned_delivery_comment` and the format `Доставка планируется* с 12 августа (среда).`.
 
 Raw carrier quote responses are not order storage by default. Use diagnostics/logging for raw payloads and redact credentials.
 

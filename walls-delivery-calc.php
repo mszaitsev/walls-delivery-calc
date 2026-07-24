@@ -1,10 +1,10 @@
 <?php
 /**
- * Plugin Name: РљР°Р»СЊРєСѓР»СЏС‚РѕСЂ РґРѕСЃС‚Р°РІРѕРє walls-shop.ru
- * Author: РњРёС…Р°РёР» Р—Р°Р№С†РµРІ
- * Description: Р Р°СЃС‡РµС‚ СЃС‚РѕРёРјРѕСЃС‚Рё РґРѕСЃС‚Р°РІРєРё РґР»СЏ WooCommerce.
+ * Plugin Name: Калькулятор доставок walls-shop.ru
+ * Author: Михаил Зайцев
+ * Description: Расчет стоимости доставки для WooCommerce.
  * Text Domain: walls-delivery-calc
- * Version: 0.128.2
+ * Version: 0.128.1
  * Requires at least: 6.8
  * Requires PHP: 8.4
  * WC requires at least: 9.0
@@ -17,7 +17,7 @@ defined( 'ABSPATH' ) || exit;
 define( 'WDC_PLUGIN_FILE', __FILE__ );
 define( 'WDC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WDC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
-define( 'WDC_VERSION', '0.128.2' );
+define( 'WDC_VERSION', '0.128.1' );
 
 require_once WDC_PLUGIN_DIR . 'src/Core/bootstrap.php';
 

@@ -69,12 +69,9 @@ final class CdekLocationResolver {
 				return array_merge( $this->failed( 'api_error' ), $this->resolve_diagnostics( $diagnostics, '', 'api_error' ) );
 			}
 
-			$match = $this->best_match( $items, $country, $fias, $attempt );
-			$diagnostics[] = $this->attempt_diagnostics( $attempt['label'], $attempt['query'], $http_code, count( $items ), is_array( $match['candidate_summaries'] ?? null ) ? $match['candidate_summaries'] : array() );
+			$diagnostics[] = $this->attempt_diagnostics( $attempt['label'], $attempt['query'], $http_code, count( $items ) );
+			$match = $this->best_match( $items, $country, $fias, $attempt['match_city'], $attempt['match_region'], $postcode );
 			if ( (float) ( $match['confidence'] ?? 0.0 ) > (float) ( $best['confidence'] ?? 0.0 ) ) {
-				$best = $match;
-				$best['selected_attempt_label'] = $attempt['label'];
-			} elseif ( 'ambiguous' === (string) ( $match['reason'] ?? '' ) && 'ambiguous' !== (string) ( $best['reason'] ?? '' ) ) {
 				$best = $match;
 				$best['selected_attempt_label'] = $attempt['label'];
 			}
@@ -95,80 +92,36 @@ final class CdekLocationResolver {
 	 * @param array<int|string,mixed> $items
 	 * @return array<string,mixed>
 	 */
-	private function best_match( array $items, string $country, string $fias, array $attempt ): array {
+	private function best_match( array $items, string $country, string $fias, string $city, string $region, string $postcode ): array {
 		$matches = array();
-		$summaries = array();
-		$city = (string) ( $attempt['match_city'] ?? '' );
-		$region = (string) ( $attempt['match_region'] ?? '' );
-		$postcode = (string) ( $attempt['match_postcode'] ?? '' );
-		$require_postcode = ! empty( $attempt['require_postcode_match'] );
-		$require_region = ! empty( $attempt['require_region_match'] );
 		foreach ( $items as $item ) {
 			if ( ! is_array( $item ) ) {
 				continue;
 			}
 			$code = (int) ( $item['code'] ?? $item['city_code'] ?? 0 );
-			$item_city = (string) ( $item['city'] ?? $item['city_name'] ?? '' );
-			$item_region = (string) ( $item['region'] ?? $item['region_name'] ?? '' );
-			$item_country_code = strtoupper( trim( (string) ( $item['country_code'] ?? '' ) ) );
-			$postcodes = $this->candidate_postcodes( $item );
-			$exact_city_match = '' !== $city && $this->normalize( $city ) === $this->normalize( $item_city );
-			$country_match = '' === $item_country_code || $item_country_code === $country;
-			$postcode_match = '' === $postcode || array() === $postcodes ? null : in_array( $postcode, $postcodes, true );
-			$region_match = '' === $region || '' === $item_region ? null : $this->regions_compatible( $region, $item_region );
-			$summary = array(
-				'code' => $code,
-				'city' => $item_city,
-				'country_code' => $item_country_code,
-				'region' => $item_region,
-				'postcodes' => $postcodes,
-				'exact_city_match' => $exact_city_match,
-				'country_match' => $country_match,
-				'postcode_match' => null === $postcode_match ? 'unknown' : $postcode_match,
-				'region_match' => ( ! $require_region || '' === $region ) ? 'not_required' : ( null === $region_match ? 'unknown' : $region_match ),
-				'accepted' => false,
-				'rejection_reason' => '',
-			);
 			if ( $code <= 0 ) {
-				$summary['rejection_reason'] = 'missing_city_code';
-				$summaries[] = $summary;
 				continue;
 			}
 
-			if ( ! $country_match ) {
-				$summary['rejection_reason'] = 'country_mismatch';
-				$summaries[] = $summary;
+			$item_city = (string) ( $item['city'] ?? $item['city_name'] ?? '' );
+			$item_region = (string) ( $item['region'] ?? $item['region_name'] ?? '' );
+			$item_country = strtoupper( trim( (string) ( $item['country_code'] ?? $item['country'] ?? $country ) ) );
+			if ( '' !== $item_country && $item_country !== $country ) {
 				continue;
 			}
 			$item_fias = strtolower( trim( (string) ( $item['fias_guid'] ?? $item['fias_id'] ?? '' ) ) );
+			$item_postcode = preg_replace( '/\D+/', '', (string) ( $item['postal_code'] ?? $item['postcode'] ?? '' ) ) ?? '';
 			if ( 'RU' === $country && '' !== $fias && '' !== $item_fias && strtolower( $fias ) === $item_fias ) {
 				$confidence = 1.0;
-			} elseif ( ! $exact_city_match ) {
-				$summary['rejection_reason'] = 'city_mismatch';
-				$summaries[] = $summary;
+			} elseif ( '' === $city || $this->normalize( $city ) !== $this->normalize( $item_city ) ) {
 				continue;
-			} elseif ( $require_postcode && '' !== $postcode && array() !== $postcodes && ! in_array( $postcode, $postcodes, true ) ) {
-				$summary['rejection_reason'] = 'postcode_mismatch';
-				$summaries[] = $summary;
+			} elseif ( '' !== $postcode && '' !== $item_postcode && $postcode !== $item_postcode ) {
 				continue;
-			} elseif ( $require_region && '' !== $region && '' !== $item_region && ! $this->regions_compatible( $region, $item_region ) ) {
-				$summary['rejection_reason'] = 'region_mismatch';
-				$summaries[] = $summary;
+			} elseif ( '' !== $region && '' !== $item_region && ! $this->regions_compatible( $region, $item_region ) ) {
 				continue;
 			} else {
-				$confidence = 0.9;
-				if ( true === $postcode_match ) {
-					$confidence += 0.04;
-				}
-				if ( true === $region_match ) {
-					$confidence += 0.03;
-				}
-				if ( '' !== $region && '' !== $item_region && $this->normalize( $region ) === $this->normalize( $item_region ) ) {
-					$confidence += 0.02;
-				}
+				$confidence = '' !== $region || '' !== $postcode ? 0.95 : 0.9;
 			}
-			$summary['accepted'] = true;
-			$summaries[ $code ] = $summary;
 			$matches[ $code ] = array(
 				'success' => true,
 					'city_code' => $code,
@@ -182,27 +135,10 @@ final class CdekLocationResolver {
 		}
 
 		if ( 1 === count( $matches ) ) {
-			return array_merge( array_values( $matches )[0], array( 'candidate_summaries' => array_values( $summaries ) ) );
-		}
-		if ( count( $matches ) > 1 ) {
-			uasort( $matches, static fn( array $a, array $b ): int => (float) $b['confidence'] <=> (float) $a['confidence'] ?: (int) $a['city_code'] <=> (int) $b['city_code'] );
-			$top = array_values( $matches )[0];
-			$top_score = (float) ( $top['confidence'] ?? 0.0 );
-			$top_matches = array_values( array_filter( $matches, static fn( array $match ): bool => abs( (float) ( $match['confidence'] ?? 0.0 ) - $top_score ) < 0.000001 ) );
-			foreach ( $summaries as $index => $summary ) {
-				if ( empty( $summary['accepted'] ) ) {
-					continue;
-				}
-				$summary['accepted'] = 1 === count( $top_matches ) && (int) ( $summary['code'] ?? 0 ) === (int) ( $top['city_code'] ?? 0 );
-				$summary['rejection_reason'] = $summary['accepted'] ? '' : ( 1 === count( $top_matches ) ? 'lower_score' : 'ambiguous_top_score' );
-				$summaries[ $index ] = $summary;
-			}
-			if ( 1 === count( $top_matches ) ) {
-				return array_merge( $top, array( 'candidate_summaries' => array_values( $summaries ) ) );
-			}
+			return array_values( $matches )[0];
 		}
 
-		return array_merge( $this->failed( count( $matches ) > 1 ? 'ambiguous' : 'not_found' ), array( 'candidate_summaries' => array_values( $summaries ) ) );
+		return $this->failed( count( $matches ) > 1 ? 'ambiguous' : 'not_found' );
 	}
 
 	/**
@@ -235,7 +171,7 @@ final class CdekLocationResolver {
 	}
 
 	private function destination_region( QuoteRequest $request ): string {
-		return trim( (string) ( $request->destination->region_name ?: ( $request->customer_context['selected_location_region'] ?? $request->customer_context['region_name'] ?? '' ) ) );
+		return trim( (string) ( $request->destination->region_name ?: ( $request->customer_context['selected_location_region'] ?? '' ) ) );
 	}
 
 	private function destination_postcode( QuoteRequest $request ): string {
@@ -273,65 +209,32 @@ final class CdekLocationResolver {
 	}
 
 	/**
-	 * @param array<string,mixed> $item
-	 * @return array<int,string>
-	 */
-	private function candidate_postcodes( array $item ): array {
-		$values = array();
-		foreach ( array( 'postal_code', 'postcode' ) as $key ) {
-			if ( isset( $item[ $key ] ) ) {
-				$values[] = $item[ $key ];
-			}
-		}
-		if ( isset( $item['postal_codes'] ) ) {
-			if ( is_array( $item['postal_codes'] ) ) {
-				$values = array_merge( $values, $item['postal_codes'] );
-			} else {
-				$values[] = $item['postal_codes'];
-			}
-		}
-
-		$postcodes = array();
-		foreach ( $values as $value ) {
-			if ( ! is_scalar( $value ) ) {
-				continue;
-			}
-			$postcode = preg_replace( '/\D+/', '', trim( (string) $value ) ) ?? '';
-			if ( '' !== $postcode ) {
-				$postcodes[] = $postcode;
-			}
-		}
-
-		return array_values( array_unique( $postcodes ) );
-	}
-
-	/**
-	 * @return array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string,match_postcode:string,require_postcode_match:bool,require_region_match:bool}>
+	 * @return array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string}>
 	 */
 	private function query_attempts( string $country, string $fias, string $city, string $region, string $postcode, QuoteRequest $request ): array {
 		$attempts = array();
 		$lat = $this->coordinate_from_context( $request, array( 'lat', 'latitude', 'geo_lat' ) );
 		$lng = $this->coordinate_from_context( $request, array( 'lng', 'lon', 'longitude', 'geo_lon' ) );
 		if ( null !== $lat && null !== $lng ) {
-			$attempts[] = $this->attempt( $country, 'coordinates', array( 'latitude' => (string) $lat, 'longitude' => (string) $lng, 'size' => '10' ), $city, $region, $postcode, false, false );
+			$attempts[] = $this->attempt( $country, 'coordinates', array( 'latitude' => (string) $lat, 'longitude' => (string) $lng, 'size' => '10' ), $city, $region );
 		}
 		if ( 'RU' === $country && '' !== $fias ) {
-			$attempts[] = $this->attempt( $country, 'fias_guid_only', array( 'fias_guid' => $fias ), $city, $region, $postcode, false, false );
+			$attempts[] = $this->attempt( $country, 'fias_guid_only', array( 'fias_guid' => $fias ), $city, $region );
 		}
 		if ( '' !== $city && '' !== $postcode ) {
-			$attempts[] = $this->attempt( $country, 'city_postcode', array( 'city' => $city, 'postal_code' => $postcode ), $city, $region, $postcode, true, false );
+			$attempts[] = $this->attempt( $country, 'city_postcode', array( 'city' => $city, 'postal_code' => $postcode ), $city, $region );
 		}
 		if ( '' !== $city ) {
-			$attempts[] = $this->attempt( $country, 'city_only', array( 'city' => $city ), $city, $region, $postcode, false, false );
+			$attempts[] = $this->attempt( $country, 'city_only', array( 'city' => $city ), $city, $region );
 			$normalized_city = $this->normalized_city_for_query( $city );
 			if ( '' !== $normalized_city && $normalized_city !== trim( $city ) ) {
-				$attempts[] = $this->attempt( $country, 'normalized_city_only', array( 'city' => $normalized_city ), $normalized_city, $region, $postcode, false, false );
+				$attempts[] = $this->attempt( $country, 'normalized_city_only', array( 'city' => $normalized_city ), $normalized_city, $region );
 			}
 		}
 
 		$context_city = $this->city_from_context( $request );
 		if ( '' !== $context_city && $this->normalize( $context_city ) !== $this->normalize( $city ) ) {
-			$attempts[] = $this->attempt( $country, 'context_city_only', array( 'city' => $context_city ), $context_city, $region, $postcode, false, false );
+			$attempts[] = $this->attempt( $country, 'context_city_only', array( 'city' => $context_city ), $context_city, $region );
 		}
 
 		return $this->unique_attempts( $attempts );
@@ -355,25 +258,17 @@ final class CdekLocationResolver {
 
 	/**
 	 * @param array<string,string> $query
-	 * @return array{label:string,query:array<string,string>,match_city:string,match_region:string,match_postcode:string,require_postcode_match:bool,require_region_match:bool}
+	 * @return array{label:string,query:array<string,string>,match_city:string,match_region:string}
 	 */
-	private function attempt( string $country, string $label, array $query, string $match_city, string $match_region, string $match_postcode, bool $require_postcode_match, bool $require_region_match ): array {
+	private function attempt( string $country, string $label, array $query, string $match_city, string $match_region ): array {
 		$query = array_merge( array( 'country_codes' => $country ), $query );
 
-		return array(
-			'label' => $label,
-			'query' => $query,
-			'match_city' => $match_city,
-			'match_region' => $match_region,
-			'match_postcode' => $match_postcode,
-			'require_postcode_match' => $require_postcode_match,
-			'require_region_match' => $require_region_match,
-		);
+		return array( 'label' => $label, 'query' => $query, 'match_city' => $match_city, 'match_region' => $match_region );
 	}
 
 	/**
-	 * @param array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string,match_postcode:string,require_postcode_match:bool,require_region_match:bool}> $attempts
-	 * @return array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string,match_postcode:string,require_postcode_match:bool,require_region_match:bool}>
+	 * @param array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string}> $attempts
+	 * @return array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string}>
 	 */
 	private function unique_attempts( array $attempts ): array {
 		$seen = array();
@@ -419,16 +314,14 @@ final class CdekLocationResolver {
 
 	/**
 	 * @param array<string,string> $query
-	 * @param array<int,array<string,mixed>> $candidate_summaries
 	 * @return array<string,mixed>
 	 */
-	private function attempt_diagnostics( string $label, array $query, int $http_code, int $items_count, array $candidate_summaries = array() ): array {
+	private function attempt_diagnostics( string $label, array $query, int $http_code, int $items_count ): array {
 		return array(
 			'label' => $label,
 			'query' => $query,
 			'http_code' => $http_code,
 			'items_count' => $items_count,
-			'candidates' => $candidate_summaries,
 		);
 	}
 
