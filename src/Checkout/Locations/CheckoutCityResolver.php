@@ -15,24 +15,25 @@ final class CheckoutCityResolver {
 	) {
 	}
 
-	public function resolve_city( string $input ): ?Location {
+	public function resolve_city( string $input, string $country_code = '' ): ?Location {
 		$input = trim( $input );
 		if ( '' === $input ) {
 			return null;
 		}
+		$country_code = $this->normalize_country_code( $country_code );
 
-		$location = $this->location_search->best_match( $input );
+		$location = $this->location_search->best_match( $input, $country_code );
 		if ( $location instanceof Location ) {
 			return $location;
 		}
 
-		$locations = $this->repository->search( $input, 1 );
+		$locations = $this->repository->search( $input, 1, $country_code );
 
 		return $locations[0] ?? null;
 	}
 
-	public function resolve_postcode( string $input ): ?string {
-		$location = $this->resolve_city( $input );
+	public function resolve_postcode( string $input, string $country_code = '' ): ?string {
+		$location = $this->resolve_city( $input, $country_code );
 		if ( ! $location instanceof Location ) {
 			return null;
 		}
@@ -40,5 +41,11 @@ final class CheckoutCityResolver {
 		$postcode = trim( $location->postal_code );
 
 		return '' !== $postcode ? $postcode : null;
+	}
+
+	private function normalize_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country_code ) ? $country_code : '';
 	}
 }

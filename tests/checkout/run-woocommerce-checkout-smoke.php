@@ -220,7 +220,10 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
+use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
@@ -239,10 +242,16 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Normalization\AddressNormalizerInterface;
+use WallsShop\WDC\Locations\Services\LocationSearchService;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -362,7 +371,7 @@ function wc_checkout_pickup_map_initial_context( array $rates, array $city_conte
 	$session->save_rates( $rates );
 	$session->save_city_context( $city_context );
 	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
-	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.1' ), new SettingsRepository() );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.2' ), new SettingsRepository() );
 	$method = new ReflectionMethod( $checkout, 'initial_context' );
 	$method->setAccessible( true );
 	$context = $method->invoke( $checkout );
@@ -430,6 +439,30 @@ final class WdcSmokeCheckoutErrors {
 
 	public function add( string $code, string $message ): void {
 		$this->errors[ $code ] = $message;
+	}
+}
+
+final class WdcCheckoutSmokeFallbackNormalizer implements AddressNormalizerInterface {
+	/**
+	 * @param array<string,mixed> $context
+	 */
+	public function normalize( string $input, array $context = array() ): AddressNormalizationResult {
+		return new AddressNormalizationResult(
+			$input,
+			new Address(
+				country_code: strtoupper( (string) ( $context['country_code'] ?? '' ) ),
+				region_name: (string) ( $context['region_name'] ?? '' ),
+				city: (string) ( $context['city'] ?? '' ),
+				postcode: (string) ( $context['postcode'] ?? '' ),
+				raw_address: $input,
+				fallback: true
+			),
+			false,
+			0.0,
+			'fallback',
+			'fallback',
+			''
+		);
 	}
 }
 
@@ -775,6 +808,88 @@ $conflict_method = $address_runtime_reflection->getMethod( 'posted_destination_c
 $conflict_method->setAccessible( true );
 wc_checkout_smoke_assert( true === $conflict_method->invoke( $address_runtime, array( 'country_code' => 'KZ', 'city' => 'Minsk' ), $fingerprint_selection ), 'Checkout destination conflict detection must treat country change as a conflict.' );
 wc_checkout_smoke_assert( false === $conflict_method->invoke( $address_runtime, array( 'country_code' => 'BY', 'city' => 'Minsk' ), $fingerprint_selection ), 'Checkout destination conflict detection must allow the same pickup country/city.' );
+
+$location_db = new class extends wpdb {
+	public array $locations = array();
+};
+$location_db->locations = array(
+	array(
+		'id' => 101,
+		'country_code' => 'RU',
+		'region_name' => 'Московская область',
+		'region_code' => '77',
+		'city_name' => 'Минск',
+		'place_name' => 'Минск',
+		'place_type' => 'г',
+		'display_name' => 'Московская область, г Минск',
+		'postal_code' => '101000',
+		'searchable_text' => 'московская область г минск минск 101000',
+		'fias_id' => 'ru-minsk-fias',
+		'gar_object_id' => 101,
+		'active' => 1,
+	),
+	array(
+		'id' => 102,
+		'country_code' => 'BY',
+		'region_name' => 'Минская область',
+		'city_name' => 'Минск',
+		'place_name' => 'Минск',
+		'place_type' => 'г',
+		'display_name' => 'Минская область, г Минск',
+		'postal_code' => '220000',
+		'searchable_text' => 'минская область г минск минск 220000',
+		'active' => 1,
+	),
+);
+$location_repository = new LocationRepository( $location_db );
+$country_city_resolver = new CheckoutCityResolver( $location_repository, new CheckoutLocationSearch( new LocationSearchService( $location_repository ) ) );
+$by_minsk_location = $country_city_resolver->resolve_city( 'Минск', 'BY' );
+wc_checkout_smoke_assert( $by_minsk_location instanceof Location && 'BY' === $by_minsk_location->country_code, 'CheckoutCityResolver must resolve same-name city within requested BY country.' );
+wc_checkout_smoke_assert( '220000' === $country_city_resolver->resolve_postcode( 'Минск', 'BY' ), 'CheckoutCityResolver must resolve postcode from same-country BY location.' );
+
+$manual_location_db = new class extends wpdb {
+	public array $locations = array();
+};
+$manual_location_db->locations = array(
+	array(
+		'id' => 201,
+		'country_code' => 'RU',
+		'region_name' => 'Московская область',
+		'region_code' => '77',
+		'city_name' => 'Минск',
+		'place_name' => 'Минск',
+		'place_type' => 'г',
+		'display_name' => 'Московская область, г Минск',
+		'postal_code' => '101000',
+		'searchable_text' => 'московская область г минск минск 101000',
+		'fias_id' => 'ru-only-minsk-fias',
+		'gar_object_id' => 201,
+		'active' => 1,
+	),
+);
+$manual_repository = new LocationRepository( $manual_location_db );
+$manual_city_resolver = new CheckoutCityResolver( $manual_repository, new CheckoutLocationSearch( new LocationSearchService( $manual_repository ) ) );
+wc_checkout_smoke_assert( null === $manual_city_resolver->resolve_city( 'Минск', 'BY' ), 'CheckoutCityResolver must not return RU namesake for BY city lookup.' );
+wc_checkout_smoke_assert( null === $manual_city_resolver->resolve_postcode( 'Минск', 'BY' ), 'CheckoutCityResolver must not autofill BY postcode from RU namesake.' );
+$manual_session = new CheckoutSessionManager();
+$manual_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$manual_session
+);
+$manual_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Минская область',
+		'shipping_city' => 'Минск',
+		'shipping_postcode' => '',
+		'shipping_address_1' => 'проспект Независимости',
+	)
+);
+$manual_context = $manual_session->city_context();
+wc_checkout_smoke_assert( 'BY' === (string) ( $manual_context['country_code'] ?? '' ) && 'Минск' === (string) ( $manual_context['city_name'] ?? '' ), 'Manual BY checkout city context must preserve country and city when local BY location is absent.' );
+wc_checkout_smoke_assert( 'Минская область' === (string) ( $manual_context['region_name'] ?? '' ), 'Manual BY checkout city context must preserve shipping_state region.' );
+wc_checkout_smoke_assert( '' === (string) ( $manual_context['postcode'] ?? '' ), 'Manual BY checkout city context must not autofill postcode from RU namesake.' );
 
 $settings = new SettingsRepository();
 $settings->set( 'checkout_sort_mode', RateSorter::CHEAPEST );

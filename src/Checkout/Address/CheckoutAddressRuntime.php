@@ -63,7 +63,7 @@ final class CheckoutAddressRuntime {
 			return $result;
 		}
 
-		$location = $this->city_resolver->resolve_city( (string) $context['city'] );
+		$location = $this->city_resolver->resolve_city( (string) $context['city'], (string) $context['country_code'] );
 		if ( $location instanceof Location ) {
 			$location_data = $location->to_array();
 			$location_data = $this->enrich_location_coordinates( $location_data );
@@ -211,9 +211,14 @@ final class CheckoutAddressRuntime {
 	private function context_from_checkout_data( array $checkoutData ): array {
 		$country   = $this->value( $checkoutData, 'shipping_country', 'billing_country', $this->value( $checkoutData, 'country', 'country', 'RU' ) );
 		$city      = $this->value( $checkoutData, 'shipping_city', 'billing_city', $this->value( $checkoutData, 'city', 'city', '' ) );
+		$region    = $this->value( $checkoutData, 'shipping_state', 'billing_state', $this->value( $checkoutData, 'state', 'region', '' ) );
 		$postcode  = $this->value( $checkoutData, 'shipping_postcode', 'billing_postcode', $this->value( $checkoutData, 'postcode', 'postcode', '' ) );
 		$address_1 = $this->value( $checkoutData, 'shipping_address_1', 'billing_address_1', $this->value( $checkoutData, 'address', 'street', '' ) );
 		$address_2 = $this->value( $checkoutData, 'shipping_address_2', 'billing_address_2', '' );
+		$selected_region = $this->value( $checkoutData, 'wdc_platform_location_region_name', 'wdc_platform_location_region_name', '' );
+		if ( '' !== $selected_region ) {
+			$region = $selected_region;
+		}
 
 		$selected_postcode = $this->value( $checkoutData, 'wdc_platform_location_postcode', 'wdc_platform_location_postcode', '' );
 		if ( '' !== $selected_postcode ) {
@@ -221,12 +226,13 @@ final class CheckoutAddressRuntime {
 		}
 
 		if ( '' === $postcode && '' !== $city ) {
-			$postcode = (string) ( $this->city_resolver->resolve_postcode( $city ) ?? '' );
+			$postcode = (string) ( $this->city_resolver->resolve_postcode( $city, $country ) ?? '' );
 		}
 
 		return array(
 			'country_code'          => strtoupper( $country ),
 			'city'                  => $city,
+			'region_name'           => $region,
 			'postcode'              => $postcode,
 			'address_1'             => $address_1,
 			'address_2'             => $address_2,
@@ -235,7 +241,7 @@ final class CheckoutAddressRuntime {
 			'selected_gar_id'       => $this->value( $checkoutData, 'wdc_platform_location_gar_id', 'wdc_platform_location_gar_id', '' ),
 			'selected_gar_object_id' => $this->value( $checkoutData, 'wdc_platform_location_gar_object_id', 'wdc_platform_location_gar_object_id', '' ),
 			'selected_display_name' => $this->value( $checkoutData, 'wdc_platform_location_display_name', 'wdc_platform_location_display_name', '' ),
-			'selected_region_name'  => $this->value( $checkoutData, 'wdc_platform_location_region_name', 'wdc_platform_location_region_name', '' ),
+			'selected_region_name'  => $selected_region,
 			'selected_lat'          => $this->value( $checkoutData, 'wdc_platform_location_lat', 'wdc_platform_location_lat', '' ),
 			'selected_lng'          => $this->value( $checkoutData, 'wdc_platform_location_lng', 'wdc_platform_location_lng', '' ),
 		);
@@ -256,7 +262,7 @@ final class CheckoutAddressRuntime {
 			'gar_id'          => $context['selected_gar_id'],
 			'gar_object_id'   => $context['selected_gar_object_id'],
 			'country_code'    => $context['country_code'],
-			'region_name'     => $context['selected_region_name'],
+			'region_name'     => '' !== $context['selected_region_name'] ? $context['selected_region_name'] : $context['region_name'],
 			'region_code'     => '',
 			'city_name'       => $context['city'],
 			'settlement_name' => '',
@@ -313,7 +319,7 @@ final class CheckoutAddressRuntime {
 			'city_name'       => $context['city'],
 			'settlement_name' => '',
 			'display_name'    => $context['city'],
-			'region_name'     => '',
+			'region_name'     => (string) ( $context['region_name'] ?? '' ),
 			'region_code'     => '',
 			'postcode'        => $context['postcode'],
 			'fias_id'         => '',
