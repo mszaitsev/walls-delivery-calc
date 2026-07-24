@@ -156,11 +156,15 @@ final class ShipmentAddressAjaxController {
 				wp_send_json_success( array( 'points' => array(), 'context' => array( 'country_code' => '' ) ) );
 			}
 			$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? '' ) );
+			$cdek_city_code = sanitize_text_field( wp_unslash( $_POST['city_code'] ?? $_POST['cdek_city_code'] ?? '' ) );
+			if ( '' === trim( $cdek_city_code ) ) {
+				$cdek_city_code = sanitize_text_field( wp_unslash( $_POST['city_id'] ?? '' ) );
+			}
 			$points = $this->cdek_delivery_points->pointsForLocation(
 				array(
 					'country_code' => $country_code,
-					'city_code' => sanitize_text_field( wp_unslash( $_POST['city_code'] ?? $_POST['cdek_city_code'] ?? '' ) ),
-					'cdek_city_code' => sanitize_text_field( wp_unslash( $_POST['cdek_city_code'] ?? $_POST['city_code'] ?? '' ) ),
+					'city_code' => $cdek_city_code,
+					'cdek_city_code' => $cdek_city_code,
 					'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
 					'city_value' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
 					'region_name' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),

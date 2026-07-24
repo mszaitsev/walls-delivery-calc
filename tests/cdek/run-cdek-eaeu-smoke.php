@@ -34,6 +34,7 @@ $adapter = cdek_eaeu_source( 'src/Shipments/Cdek/CdekShipmentAdapter.php' );
 $api = cdek_eaeu_source( 'src/Carriers/Cdek/Api/CdekApiClient.php' );
 $modal = cdek_eaeu_source( 'src/Shipments/Cdek/CdekShipmentModalExtension.php' );
 $js = cdek_eaeu_source( 'assets/admin/shipments/extensions/cdek.js' );
+$shipment_picker_js = cdek_eaeu_source( 'assets/admin/shipments/shipment-picker.js' );
 
 cdek_eaeu_assert( str_contains( $settings, "SUPPORTED_COUNTRIES = array( 'RU', 'AM', 'BY', 'KZ', 'KG' )" ), 'CDEK supported country universe must be RU/AM/BY/KZ/KG.' );
 cdek_eaeu_assert( str_contains( $carrier, 'supports_international: true' ) && str_contains( $carrier, 'CdekSettings::SUPPORTED_COUNTRIES' ), 'CDEK carrier must support international through one existing carrier.' );
@@ -49,6 +50,7 @@ cdek_eaeu_assert( str_contains( $resolver, "'country_codes' => \$country" ) && s
 cdek_eaeu_assert( str_contains( $points, "'country_code' => \$country_code" ) && str_contains( $points, "'is_handout'" ) && str_contains( $carrier, 'has_handout_delivery_point' ), 'CDEK pickup quotes must require country-aware handout points.' );
 cdek_eaeu_assert( str_contains( $checkout_js, 'normalizeText(context.country_code || \'\')' ) && str_contains( $checkout_js, 'country_code: point.country_code || snapshot.country_code' ) && str_contains( $checkout_js, 'cdek_city_code: point.cdek_city_code' ) && str_contains( $checkout_js, 'is_handout: point.is_handout !== undefined' ) && str_contains( $checkout_js, 'Object.prototype.hasOwnProperty.call(response, \'activePickupCountryCode\')' ), 'Frontend pickup map must carry country/cdek city/handout identity and refresh active pickup country from REST responses.' );
 cdek_eaeu_assert( str_contains( $checkout_js, 'pointCountry && contextCountry && pointCountry !== contextCountry' ) && str_contains( $checkout_js, 'matchedBy = \'\';' ), 'Frontend pickup matching must reject known country mismatch before location shortcuts.' );
+cdek_eaeu_assert( str_contains( $shipment_picker_js, 'cdekCityCode' ) && str_contains( $shipment_picker_js, "data.append('city_code', cdekCityCode)" ) && str_contains( $shipment_picker_js, "data.append('cdek_city_code', cdekCityCode)" ) && str_contains( $shipment_picker_js, 'recipient_location_city_id: cdekCityCode' ) && str_contains( $shipment_picker_js, 'pickup_point_cdek_city_code: cdekCityCode' ), 'Admin shipment pickup picker must pass and update canonical CDEK city code fields.' );
 
 cdek_eaeu_assert( str_contains( $draft, 'cdek_recipient_document_from_admin_data' ) && ! str_contains( $draft, "'cdek_recipient_document' =>" ), 'Recipient document must stay out of shipment meta.' );
 cdek_eaeu_assert( str_contains( $builder, "\$recipient['tin']" ) && str_contains( $builder, "'KZ', 'KG'" ) && str_contains( $builder, "\$recipient['passport_number']" ) && str_contains( $builder, "'AM', 'BY'" ) && ! str_contains( $builder, 'Fill CDEK recipient document for Kazakhstan' ), 'CDEK builder must keep recipient document optional and map KZ/KG to tin, AM/BY to passport_number.' );

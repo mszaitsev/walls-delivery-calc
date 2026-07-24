@@ -5,12 +5,14 @@
   function pickupContext(form, contextOverride) {
     if (contextOverride && typeof contextOverride === 'object') return contextOverride;
     const carrier = fieldValue(form, '[data-wdc-pickup-carrier-key]');
+    const pickupFamily = fieldValue(form, '[data-wdc-pickup-family]') || (carrier ? carrier + ':pickup' : '');
     return {
       carrierKey: carrier,
       serviceKey: fieldValue(form, '[data-wdc-pickup-service-key]') || carrier,
-      pickupFamily: fieldValue(form, '[data-wdc-pickup-family]') || (carrier ? carrier + ':pickup' : ''),
+      pickupFamily,
       city: fieldValue(form, '[data-wdc-pickup-location-city]') || fieldValue(form, '[data-wdc-pickup-city-field]'),
       cityId: fieldValue(form, '[data-wdc-pickup-location-city-id]'),
+      cdekCityCode: pickupFamily === 'cdek:pickup' ? (fieldValue(form, '[data-wdc-pickup-cdek-city-code-field]') || fieldValue(form, '[data-wdc-pickup-location-city-id]')) : '',
       countryCode: fieldValue(form, 'input[name="recipient_location_country"]') || fieldValue(form, '[data-wdc-pickup-country-field]') || fieldValue(form, '[data-wdc-pickup-location-country]') || 'RU',
       region: fieldValue(form, '[data-wdc-pickup-location-region]') || fieldValue(form, '[data-wdc-pickup-region-field]'),
       postcode: fieldValue(form, '[data-wdc-pickup-location-postcode]') || fieldValue(form, '[data-wdc-pickup-postcode-field]'),
@@ -58,7 +60,7 @@
       city: String(point && (point.city || point.city_name) || ''),
       country_code: String(point && (point.country_code || point.country) || ''),
       cdek_city_code: point && point.cdek_city_code !== undefined ? point.cdek_city_code : '',
-      is_handout: point && point.is_handout !== undefined ? !!point.is_handout : true,
+      is_handout: point && point.is_handout !== undefined ? !!point.is_handout : undefined,
       address: String(point && (point.address || point.point_address) || ''),
       lat: Number.isFinite(lat) ? lat : null,
       lng: Number.isFinite(lng) ? lng : null
@@ -85,6 +87,11 @@
     data.append('gar_id', context.garId || '');
     data.append('location_id', context.locationId || '');
     data.append('city_id', context.cityId || '');
+    if (context.pickupFamily === 'cdek:pickup') {
+      const cdekCityCode = context.cdekCityCode || context.cityId || '';
+      data.append('city_code', cdekCityCode);
+      data.append('cdek_city_code', cdekCityCode);
+    }
     data.append('country_code', context.countryCode || '');
     data.append('lat', context.lat || '');
     data.append('lng', context.lng || '');
@@ -124,14 +131,20 @@
 
   function updatePickupDraft(form, point) {
     const code = pickupCode(point);
+    const context = pickupContext(form);
+    const cdekCityCode = point.cdek_city_code || point.city_code || (context.pickupFamily === 'cdek:pickup' ? (context.cdekCityCode || context.cityId || '') : '');
+    const countryCode = point.country_code || point.country || context.countryCode || '';
+    const handoutValue = point.is_handout === true ? '1' : (point.is_handout === false ? '0' : '');
     const fields = {
       pickup_point_code: code || '',
       delivery_point: code || '',
-      recipient_location_country: point.country_code || point.country || '',
+      recipient_location_country: countryCode,
+      recipient_location_city_id: cdekCityCode,
       pickup_point_postcode: point.postcode || point.postal_code || '',
       pickup_point_address: point.address || '',
-      pickup_point_country: point.country_code || point.country || '',
-      pickup_point_is_handout: point.is_handout === false ? '0' : '1',
+      pickup_point_country: countryCode,
+      pickup_point_cdek_city_code: cdekCityCode,
+      pickup_point_is_handout: handoutValue,
       pickup_point_city: point.city_name || point.city || '',
       pickup_point_region: point.region_name || '',
       pickup_point_type: point.point_type || point.type || '',
