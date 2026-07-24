@@ -20,6 +20,7 @@ final class CdekSettings {
 	public const DEFAULT_COURIER_METHOD_TITLE = 'СДЭК курьер';
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
+	public const SUPPORTED_COUNTRIES = array( 'RU', 'AM', 'BY', 'KZ', 'KG' );
 
 	public const ENVIRONMENT_KEY = 'cdek_environment';
 	public const TEST_ACCOUNT_KEY = 'cdek_test_account';

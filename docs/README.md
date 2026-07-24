@@ -1,6 +1,6 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.127.6
+Version: 0.128.0
 
 Start here when changing the plugin. The documentation is intentionally small: each topic has one canonical owner, and historical stage notes were removed because this plugin has not been deployed to production.
 
@@ -61,3 +61,7 @@ New developer:
 - Do not preserve compatibility aliases in docs unless an active consumer exists.
 - Put historical context only in an archive when it is still needed to understand a live decision.
 - Prefer one canonical document per subsystem over multiple partial documents.
+
+## Current Carrier Scope
+
+CDEK uses one carrier key and one delivery service key, both `cdek`. The existing CDEK service can be enabled per country for `RU`, `AM`, `BY`, `KZ`, and `KG` through the delivery-service country repository; there is no separate international CDEK carrier or service.

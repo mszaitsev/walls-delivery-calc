@@ -27,6 +27,7 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 
 function cdek_tariffs_sync_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -137,6 +138,9 @@ final class CdekTariffsSyncFakeHttpClient implements CdekHttpClientInterface {
 		}
 		if ( str_contains( $url, '/v2/location/cities' ) ) {
 			return new CdekApiResponse( 200, (string) json_encode( array( array( 'code' => 270, 'city' => 'Москва', 'region' => 'Москва', 'fias_guid' => 'dest-fias' ) ) ) );
+		}
+		if ( str_contains( $url, '/v2/deliverypoints' ) ) {
+			return new CdekApiResponse( 200, (string) json_encode( array( array( 'code' => 'NSK69', 'type' => 'PVZ', 'is_handout' => true, 'location' => array( 'city_code' => 270, 'country_code' => 'RU', 'address' => 'Test pickup point' ) ) ) ) );
 		}
 		if ( str_contains( $url, '/v2/calculator/tarifflist' ) ) {
 			return new CdekApiResponse(
@@ -265,7 +269,9 @@ $courier = $repository->find_by_code( '137' );
 cdek_tariffs_sync_assert( is_array( $pickup ) && 'СДЭК Эконом' === (string) $pickup['custom_title'] && 'site title' === (string) $pickup['admin_comment'] && 1 === (int) $pickup['is_active'], 'CDEK sync must preserve custom title/comment/active for existing pickup tariff.' );
 cdek_tariffs_sync_assert( is_array( $courier ) && 'СДЭК Курьер' === (string) $courier['custom_title'] && 0 === (int) $courier['is_active'] && 3 === (int) $courier['delivery_mode'], 'CDEK sync must preserve inactive state and refresh delivery_mode for existing courier tariff.' );
 
-$carrier = new CdekCarrier( $settings, $client, new CdekLocationResolver( $client, new Logger() ), new Logger(), $repository );
+$resolver = new CdekLocationResolver( $client, $settings, new Logger() );
+$delivery_points = new CdekDeliveryPointService( $client, $settings, $resolver, new Logger() );
+$carrier = new CdekCarrier( $settings, $client, $resolver, new Logger(), $delivery_points, $repository );
 $pickup_quote = $carrier->quote( cdek_tariffs_sync_request( DeliveryType::PICKUP ) );
 cdek_tariffs_sync_assert( 1 === count( $pickup_quote->rates ), 'Managed active CDEK pickup tariff must produce one pickup rate.' );
 cdek_tariffs_sync_assert( 'СДЭК до пункта выдачи, СДЭК Эконом - 2-4 дня' === $pickup_quote->rates[0]->title, 'Managed CDEK runtime title must use custom tariff title.' );

@@ -822,7 +822,13 @@ final class DeliveryServicesAdminPage {
 				}
 			}
 			if ( in_array( $action, array( 'save', 'save_main', 'save_availability' ), true ) ) {
-				$this->countries->replace_countries( $id, $this->countries_from_post() );
+				$countries = $this->countries_from_post();
+				$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+				$current_service = $id > 0 ? $this->services->find_by_id( $id ) : null;
+				if ( CdekSettings::SERVICE_KEY === $service_key || ( $current_service instanceof DeliveryService && CdekSettings::SERVICE_KEY === $current_service->service_key ) ) {
+					$countries = array_values( array_intersect( array_map( 'strtoupper', $countries ), CdekSettings::SUPPORTED_COUNTRIES ) );
+				}
+				$this->countries->replace_countries( $id, $countries );
 			}
 			if ( 'save_main' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
@@ -1518,7 +1524,7 @@ final class DeliveryServicesAdminPage {
 					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до ПВЗ / ОПС', 'walls-delivery-calc' ), (string) ( $domestic['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ) ); ?>
 					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $domestic['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ) ); ?>
 				<?php elseif ( CdekSettings::SERVICE_KEY === $service->service_key ) : ?>
-					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'СДЭК на текущем этапе доступен только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
+					<?php $this->render_cdek_country_checkboxes( $service ); ?>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
 					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до пункта выдачи', 'walls-delivery-calc' ), (string) ( $cdek['pickup_method_title'] ?? CdekSettings::DEFAULT_PICKUP_METHOD_TITLE ) ); ?>
 					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $cdek['courier_method_title'] ?? CdekSettings::DEFAULT_COURIER_METHOD_TITLE ) ); ?>
@@ -4630,7 +4636,37 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 * @return array<int,string>
 	 */
 	private function countries_from_post(): array {
-		return array_filter( array_map( 'trim', explode( ',', (string) wp_unslash( $_POST['countries'] ?? '' ) ) ) );
+		$raw = wp_unslash( $_POST['countries'] ?? '' );
+		if ( is_array( $raw ) ) {
+			return array_values( array_filter( array_map( 'trim', array_map( 'strval', $raw ) ) ) );
+		}
+
+		return array_filter( array_map( 'trim', explode( ',', (string) $raw ) ) );
+	}
+
+	private function render_cdek_country_checkboxes( DeliveryService $service ): void {
+		$selected = null === $service->id ? array() : $this->countries->countries( (int) $service->id );
+		$labels = array(
+			'RU' => __( 'Россия', 'walls-delivery-calc' ),
+			'AM' => __( 'Армения', 'walls-delivery-calc' ),
+			'BY' => __( 'Беларусь', 'walls-delivery-calc' ),
+			'KZ' => __( 'Казахстан', 'walls-delivery-calc' ),
+			'KG' => __( 'Киргизия', 'walls-delivery-calc' ),
+		);
+		?>
+		<tr>
+			<th scope="row"><?php echo esc_html__( 'Страны СДЭК', 'walls-delivery-calc' ); ?></th>
+			<td>
+				<?php foreach ( CdekSettings::SUPPORTED_COUNTRIES as $country ) : ?>
+					<label style="display:block;margin:0 0 6px;">
+						<input type="checkbox" name="countries[]" value="<?php echo esc_attr( $country ); ?>" <?php checked( in_array( $country, $selected, true ) ); ?>>
+						<?php echo esc_html( $country . ' — ' . ( $labels[ $country ] ?? $country ) ); ?>
+					</label>
+				<?php endforeach; ?>
+				<p class="description"><?php echo esc_html__( 'Снятая страна полностью отключает службу СДЭК для этой страны. Можно снять все страны; глобальный статус службы сохраняется отдельно.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
+		<?php
 	}
 
 	private function countries_summary( DeliveryService $service ): string {

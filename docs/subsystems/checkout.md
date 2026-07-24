@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.127.6
+Version: 0.128.0
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -19,6 +19,14 @@ Checkout and order-admin recalculation use the same runtime order:
 Carrier adapters return the raw carrier `DateRange`. `DeliveryLeadTimeNormalizer` adds the global `shop_processing_working_days` setting, default `2`, using `CalendarTypes::SHOP`, then converts carrier working days through `CalendarTypes::CARRIER_RU` only when the service-level `delivery_days_are_working` checkbox is enabled. That checkbox defaults to `false`.
 
 The current calculation day is not counted for shop processing, and the handoff day is not counted when carrier working days are converted. Rules run only after the base duration is normalized into calendar days. The planned date is calculated after rules from the final minimum delivery-days boundary, so checkout comments and order metadata stay aligned with rule changes.
+
+## CDEK EAEU Availability
+
+The `cdek` delivery service owns CDEK availability for `RU`, `AM`, `BY`, `KZ`, and `KG`. Administrators configure those countries with the existing service-country checkboxes, persisted in `wdc_delivery_service_countries`; the global service enabled flag remains independent. Checkout must not create a `cdek_international` service or bypass the delivery-service country selection.
+
+CDEK city resolution uses the quote country, city, optional postcode, optional region for local disambiguation, RU FIAS when present, and coordinates when available. Manual city input is allowed, but a CDEK quote is produced only after an unambiguous exact normalized `/v2/location/cities` match. Ambiguous, missing, or null API city results suppress only the CDEK quote and must not block other carriers.
+
+CDEK pickup and courier branches are available for every enabled CDEK country when the API returns a supported tariff. Delivery modes `1` and `3` map to courier; modes `2` and `4` map to pickup. Modes `6` through `10` may remain diagnostic data but are not checkout delivery types. Pickup requires at least one country- and city-matching CDEK handout point; courier does not depend on pickup points.
 
 ## Canonical Requirements
 

@@ -122,8 +122,10 @@
     const fields = {
       pickup_point_code: code || '',
       delivery_point: code || '',
+      recipient_location_country: point.country_code || point.country || '',
       pickup_point_postcode: point.postcode || point.postal_code || '',
       pickup_point_address: point.address || '',
+      pickup_point_country: point.country_code || point.country || '',
       pickup_point_city: point.city_name || point.city || '',
       pickup_point_region: point.region_name || '',
       pickup_point_type: point.point_type || point.type || '',

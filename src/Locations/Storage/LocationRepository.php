@@ -110,6 +110,67 @@ final class LocationRepository {
 		return $this->find_one( 'id', $id, '%d' );
 	}
 
+	public function find_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '', string $postal_code = '' ): ?Location {
+		$country_code = $this->normalize_country_code( $country_code );
+		$place_name = trim( $place_name );
+		$region_name = trim( $region_name );
+		$postal_code = trim( $postal_code );
+		if ( '' === $country_code || 'RU' === $country_code || '' === $place_name ) {
+			return null;
+		}
+
+		$place_key = $this->normalize_query( $place_name );
+		$region_key = $this->normalize_query( $region_name );
+		if ( $this->has_test_location_rows() ) {
+			$matches = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) || $country_code !== $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ) ) {
+					continue;
+				}
+				$row_place = $this->normalize_query( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
+				$row_region = $this->normalize_query( (string) ( $row['region_name'] ?? '' ) );
+				if ( $row_place !== $place_key || ( '' !== $region_key && '' !== $row_region && $row_region !== $region_key ) ) {
+					continue;
+				}
+				if ( '' !== $postal_code && '' !== (string) ( $row['postal_code'] ?? '' ) && $postal_code !== (string) $row['postal_code'] ) {
+					continue;
+				}
+				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+			}
+
+			return 1 === count( $matches ) ? $matches[0] : null;
+		}
+
+		$where = array(
+			'l.active = 1',
+			'l.country_code = %s',
+			'(LOWER(l.place_name) = %s OR LOWER(l.settlement_name) = %s OR LOWER(l.city_name) = %s)',
+		);
+		$args = array( $country_code, $place_key, $place_key, $place_key );
+		if ( '' !== $region_key ) {
+			$where[] = '(LOWER(l.region_name) = %s OR l.region_name = "")';
+			$args[] = $region_key;
+		}
+		if ( '' !== $postal_code ) {
+			$where[] = '(l.postal_code = %s OR l.postal_code = "")';
+			$args[] = $postal_code;
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE " . implode( ' AND ', $where ) . '
+				LIMIT 2',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) && 1 === count( $rows ) ? $this->row_to_location( $rows[0] ) : null;
+	}
+
 	public function find_by_gar_object_id( int $gar_object_id ): ?Location {
 		return $this->find_one( 'gar_object_id', $gar_object_id, '%d' );
 	}

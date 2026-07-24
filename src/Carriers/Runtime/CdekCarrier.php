@@ -21,6 +21,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -34,6 +35,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		private CdekApiClient $client,
 		private CdekLocationResolver $locations,
 		private Logger $logger,
+		private CdekDeliveryPointService $delivery_points,
 		private ?CdekTariffRepository $tariffs = null
 	) {
 	}
@@ -49,13 +51,15 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	public function get_capabilities(): CarrierCapabilities {
 		return new CarrierCapabilities(
 			supports_quotes: true,
+			supports_pickup_points: true,
 			supports_courier_delivery: true,
-			supports_pickup_delivery: true
+			supports_pickup_delivery: true,
+			supports_international: true
 		);
 	}
 
 	public function supports_country( string $countryCode ): bool {
-		return 'RU' === strtoupper( trim( $countryCode ) ) && $this->settings->credentials_are_complete();
+		return in_array( strtoupper( trim( $countryCode ) ), CdekSettings::SUPPORTED_COUNTRIES, true ) && $this->settings->credentials_are_complete();
 	}
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {
@@ -71,6 +75,9 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		$this->logger->debug( 'CDEK location resolved.', $this->sanitize_location_result( $to ) );
 		if ( empty( $to['success'] ) ) {
 			return $this->empty_quote( $request, 'destination_city_not_resolved', $to );
+		}
+		if ( DeliveryType::PICKUP === $delivery_type && ! $this->has_handout_delivery_point( $request, $to ) ) {
+			return $this->empty_quote( $request, 'pickup_handout_point_not_found', $to );
 		}
 
 		$payload = $this->tariff_payload( $request, $to );
@@ -671,6 +678,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'courier_method_title' => $this->settings->courier_method_title(),
 			'carrier_key' => self::KEY,
 			'service_key' => CdekSettings::SERVICE_KEY,
+			'country_code' => strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ),
 			'delivery_type' => $delivery_type,
 			'tariff_code' => $code,
 			'tariff_name' => $name,
@@ -699,6 +707,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				'cdek_from_city_name' => $this->settings->sender_city_name(),
 				'cdek_to_city_code' => (int) $to['city_code'],
 				'cdek_to_city_name' => (string) $to['city_name'],
+				'cdek_to_country_code' => (string) ( $to['country_code'] ?? strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ) ),
 				'cdek_location_source' => (string) $to['source'],
 				'cdek_location_confidence' => (float) $to['confidence'],
 			),
@@ -875,6 +884,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'success' => (bool) ( $result['success'] ?? false ),
 			'city_code' => isset( $result['city_code'] ) ? (int) $result['city_code'] : null,
 			'city_name' => (string) ( $result['city_name'] ?? '' ),
+			'country_code' => (string) ( $result['country_code'] ?? '' ),
 			'region' => (string) ( $result['region'] ?? '' ),
 			'source' => (string) ( $result['source'] ?? '' ),
 			'confidence' => isset( $result['confidence'] ) ? (float) $result['confidence'] : null,
@@ -948,7 +958,27 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		return DeliveryType::COURIER === $delivery_type ? DeliveryType::COURIER : DeliveryType::PICKUP;
 	}
 
+	/**
+	 * @param array<string,mixed> $to
+	 */
+	private function has_handout_delivery_point( QuoteRequest $request, array $to ): bool {
+		$country = strtoupper( trim( (string) ( $to['country_code'] ?? ( $request->country_code ?: $request->destination->country_code ) ) ) );
+		$points = $this->delivery_points->pointsByCityCode( (int) ( $to['city_code'] ?? 0 ), array( 'country_code' => $country ) );
+		foreach ( $points as $point ) {
+			if ( empty( $point['is_handout'] ) ) {
+				continue;
+			}
+			$point_country = strtoupper( trim( (string) ( $point['country_code'] ?? $country ) ) );
+			$point_city_code = is_numeric( $point['cdek_city_code'] ?? null ) ? (int) $point['cdek_city_code'] : (int) ( $to['city_code'] ?? 0 );
+			if ( $point_country === $country && $point_city_code === (int) ( $to['city_code'] ?? 0 ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private function quote_id( QuoteRequest $request, string $suffix ): string {
-		return self::KEY . ':' . sha1( $suffix . '|' . $request->country_code . '|' . $request->destination->postcode . '|' . $request->destination->city . '|' . $request->package->get_total_weight_g() );
+		return self::KEY . ':' . sha1( $suffix . '|' . strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ) . '|' . $request->destination->postcode . '|' . $request->destination->city . '|' . $request->package->get_total_weight_g() );
 	}
 }

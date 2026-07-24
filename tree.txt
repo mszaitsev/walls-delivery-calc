@@ -114,6 +114,8 @@ C:.
 |           0038_create_yandex_location_mapping_v2.php
 |           0039_create_yandex_region_mapping_v2.php
 |           0040_create_yandex_location_manual_overrides_v2.php
+|           0041_create_shipment_cost_analytics_table.php
+|           0042_seed_cdek_eaeu_countries.php
 |
 +---docs
 |   |   README.md
@@ -797,6 +799,7 @@ C:.
     |       run-russian-post-smoke.php
     |
     +---cdek
+    |       run-cdek-eaeu-smoke.php
     |       run-cdek-foundation-smoke.php
     |       run-cdek-order-creation-smoke.php
     |       run-cdek-pickup-points-smoke.php

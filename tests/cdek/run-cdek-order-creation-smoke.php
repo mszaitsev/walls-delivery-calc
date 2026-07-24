@@ -353,13 +353,14 @@ function cdek_order_address_service( AddressSuggestionClientInterface $suggestio
 	return new CdekRecipientAddressPreparationService(
 		cdek_order_dadata_settings( $dadata_enabled ),
 		$suggestions,
-		new CdekLocationResolver( $client, new Logger() )
+		new CdekLocationResolver( $client, $GLOBALS['wdc_cdek_order_settings'], new Logger() )
 	);
 }
 
 $GLOBALS['wdc_cdek_order_options'] = array();
 $GLOBALS['wdc_cdek_order_transients'] = array();
 $settings = new CdekSettings( new SettingsRepository(), new EncryptionService() );
+$GLOBALS['wdc_cdek_order_settings'] = $settings;
 $settings->save_from_admin(
 	array(
 		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_TEST,

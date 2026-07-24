@@ -5,6 +5,9 @@ namespace WallsShop\WDC\Carriers\Dpd\Geography;
 
 use Throwable;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -17,6 +20,8 @@ final class DpdGeographyImportService {
 		private DpdLocationIndex $index,
 		private DpdGeographyImportStateService $state,
 		private DpdGeographyStageRepository $stage,
+		private LocationRepository $locations,
+		private LocationDeliveryCodeRepository $delivery_codes,
 		private ?DpdSettings $settings = null
 	) {
 	}
@@ -184,7 +189,12 @@ final class DpdGeographyImportService {
 	 * @param array<string,mixed> $patch
 	 */
 	private function process_row( string $stage_table, array $row, array &$patch ): void {
-		if ( 'RU' !== strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) ) ) {
+		$country = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
+		if ( 'RU' !== $country ) {
+			if ( in_array( $country, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
+				$this->process_foreign_row( $row, $patch, $country );
+				return;
+			}
 			$this->inc( $patch, 'skipped_non_ru' );
 			return;
 		}
@@ -224,6 +234,63 @@ final class DpdGeographyImportService {
 		$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
 		$errors[] = 'Failed to stage mapping for location_id=' . $location_id;
 		$patch['errors'] = $errors;
+	}
+
+	/**
+	 * @param array<string,string> $row
+	 * @param array<string,mixed> $patch
+	 */
+	private function process_foreign_row( array $row, array &$patch, string $country ): void {
+		$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $row['dpd_city_id'] ?? '' ) ) ?? '';
+		$place = trim( (string) ( $row['settlement'] ?? $row['main_city'] ?? '' ) );
+		if ( '' === $dpd_city_id || '0' === $dpd_city_id || '' === $place ) {
+			$this->inc( $patch, 'skipped_invalid' );
+			return;
+		}
+
+		$region = trim( (string) ( $row['region'] ?? '' ) );
+		$postcode = trim( (string) ( $row['postal_code'] ?? '' ) );
+		$location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
+		$existing = null !== $location_id ? $this->locations->find_by_id( $location_id ) : null;
+		if ( ! $existing instanceof Location ) {
+			$existing = $this->locations->find_foreign_by_place_identity( $country, $place, $region, $postcode );
+		}
+
+		$location = Location::from_array(
+			array(
+				'id' => $existing?->id,
+				'country_code' => $country,
+				'region_name' => $region,
+				'city_name' => trim( (string) ( $row['main_city'] ?? $place ) ),
+				'city_type' => trim( (string) ( $row['settlement_type'] ?? '' ) ),
+				'settlement_name' => $place,
+				'settlement_type' => trim( (string) ( $row['settlement_type'] ?? '' ) ),
+				'place_name' => $place,
+				'place_type' => trim( (string) ( $row['settlement_type'] ?? '' ) ),
+				'display_name' => $this->foreign_display_name( $country, $region, $place ),
+				'postal_code' => $postcode,
+				'active' => true,
+			)
+		);
+		if ( array() !== $location->validate() ) {
+			$this->inc( $patch, 'skipped_invalid' );
+			return;
+		}
+
+		$saved_id = $this->locations->save( $location );
+		if ( $saved_id <= 0 || ! $this->delivery_codes->save_dpd_city_id( $saved_id, $dpd_city_id ) ) {
+			$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
+			$errors[] = 'Failed to save foreign DPD location for dpd_city_id=' . $dpd_city_id;
+			$patch['errors'] = $errors;
+			return;
+		}
+
+		$this->inc( $patch, null === $existing ? 'foreign_locations_inserted' : 'foreign_locations_updated' );
+		$this->inc( $patch, 'foreign_' . strtolower( $country ) . '_rows' );
+	}
+
+	private function foreign_display_name( string $country, string $region, string $place ): string {
+		return implode( ', ', array_values( array_filter( array( $country, $region, $place ), static fn( string $value ): bool => '' !== trim( $value ) ) ) );
 	}
 
 	/**
@@ -269,6 +336,12 @@ final class DpdGeographyImportService {
 			'file_size' => (int) ( $state['file_size'] ?? 0 ),
 			'total_rows' => (int) ( $state['total_rows'] ?? 0 ),
 			'ru_rows' => (int) ( $state['ru_rows'] ?? 0 ),
+			'foreign_am_rows' => (int) ( $state['foreign_am_rows'] ?? 0 ),
+			'foreign_by_rows' => (int) ( $state['foreign_by_rows'] ?? 0 ),
+			'foreign_kz_rows' => (int) ( $state['foreign_kz_rows'] ?? 0 ),
+			'foreign_kg_rows' => (int) ( $state['foreign_kg_rows'] ?? 0 ),
+			'foreign_locations_inserted' => (int) ( $state['foreign_locations_inserted'] ?? 0 ),
+			'foreign_locations_updated' => (int) ( $state['foreign_locations_updated'] ?? 0 ),
 			'skipped_non_ru' => (int) ( $state['skipped_non_ru'] ?? 0 ),
 			'skipped_invalid' => (int) ( $state['skipped_invalid'] ?? 0 ),
 			'matched_by_fias' => (int) ( $state['matched_by_fias'] ?? 0 ),

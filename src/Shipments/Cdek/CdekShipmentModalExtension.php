@@ -45,6 +45,8 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		$city = (string) ( $address['settlement'] ?? $address['city'] ?? $order_shipping_city );
 		$recipient_postcode = (string) ( $address['postcode'] ?? $order_shipping_postcode );
 		$recipient_address_context = (string) ( $address['raw_address'] ?? $order_shipping_address );
+		$recipient_country = strtoupper( trim( (string) ( $address['country_code'] ?? ( method_exists( $order, 'get_shipping_country' ) ? $order->get_shipping_country() : 'RU' ) ) ) );
+		$recipient_country = in_array( $recipient_country, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $recipient_country : 'RU';
 		$pickup_code = (string) ( $pickup['point_code'] ?? $meta['pickup_point_code'] ?? '' );
 		$pickup_address = $recipient_address_context;
 		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
@@ -67,6 +69,7 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 			'cdek_sender_door' => in_array( $delivery_mode, array( 1, 2 ), true ),
 			'cdek_recipient_door' => in_array( $delivery_mode, array( 1, 3 ), true ),
 			'pickup_code' => $pickup_code,
+			'recipient_country' => $recipient_country,
 			'pickup_postcode' => (string) ( $pickup_row['postcode'] ?? $pickup_code ),
 			'pickup_address' => $pickup_address,
 			'pickup_city' => $city,
@@ -98,6 +101,8 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		<input type="hidden" name="shipment_point_address" value="<?php echo esc_attr( (string) ( $context['shipment_point_address'] ?? '' ) ); ?>" data-wdc-sender-shipment-point-address>
 		<input type="hidden" name="sender_shipment_point_address" value="<?php echo esc_attr( (string) ( $context['shipment_point_address'] ?? '' ) ); ?>">
 		<input type="hidden" name="sender_pickup_city" value="Новосибирск" data-wdc-sender-pickup-city>
+		<input type="hidden" name="recipient_location_country" value="<?php echo esc_attr( (string) ( $context['recipient_country'] ?? 'RU' ) ); ?>" data-wdc-cdek-recipient-country>
+		<label data-wdc-cdek-recipient-document-row hidden><?php echo esc_html__( 'Документ получателя', 'walls-delivery-calc' ); ?><input type="text" name="cdek_recipient_document" value="" maxlength="30" autocomplete="off" data-wdc-cdek-recipient-document><span class="description"><?php echo esc_html__( 'Для Казахстана укажите ИИН / IIN / TIN. Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ); ?></span></label>
 		<div data-wdc-cdek-sender-door <?php echo ! empty( $context['cdek_sender_door'] ) ? '' : 'hidden'; ?>>
 			<p><strong><?php echo esc_html__( 'Отправитель', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html__( 'от двери', 'walls-delivery-calc' ); ?></p>
 			<p><strong><?php echo esc_html__( 'Адрес отправителя', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== (string) ( $context['sender_from_door_display'] ?? '' ) ? (string) $context['sender_from_door_display'] : '-' ); ?></p>
@@ -121,6 +126,7 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		<input type="hidden" name="pickup_point_address" value="<?php echo esc_attr( (string) ( $context['pickup_address'] ?? '' ) ); ?>" data-wdc-pickup-address-field>
 		<input type="hidden" name="pickup_point_city" value="<?php echo esc_attr( (string) ( $context['pickup_city'] ?? '' ) ); ?>" data-wdc-pickup-city-field>
 		<input type="hidden" name="pickup_point_region" value="<?php echo esc_attr( (string) ( $context['pickup_region'] ?? '' ) ); ?>" data-wdc-pickup-region-field>
+		<input type="hidden" name="pickup_point_country" value="<?php echo esc_attr( (string) ( $context['recipient_country'] ?? 'RU' ) ); ?>" data-wdc-pickup-country-field>
 		<?php $this->render_pickup_common_hidden( $pickup_row, $pickup_context, $context, CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, CdekSettings::CARRIER_KEY . ':pickup' ); ?>
 		<p><strong><?php echo esc_html__( 'Код ПВЗ', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pickup-index><?php echo esc_html( '' !== $pickup_code ? $pickup_code : '-' ); ?></span></p>
 		<?php if ( '' !== (string) ( $context['pickup_type_label'] ?? '' ) ) : ?>
@@ -225,6 +231,7 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 	/** @param array<string,mixed> $pickup_context @param array<string,mixed> $context */
 	private function render_recipient_location_hidden( array $pickup_context, array $context, bool $include_city_id = false ): void {
 		?>
+		<input type="hidden" name="recipient_location_country" value="<?php echo esc_attr( (string) ( $pickup_context['country_code'] ?? $context['recipient_country'] ?? 'RU' ) ); ?>" <?php echo $include_city_id ? 'data-wdc-pickup-location-country' : ''; ?>>
 		<input type="hidden" name="recipient_location_city" value="<?php echo esc_attr( (string) ( $pickup_context['city_name'] ?? $pickup_context['city_value'] ?? $context['pickup_city'] ?? '' ) ); ?>" <?php echo $include_city_id ? 'data-wdc-pickup-location-city' : ''; ?>>
 		<input type="hidden" name="recipient_location_region" value="<?php echo esc_attr( (string) ( $pickup_context['region_name'] ?? $pickup_context['state_value'] ?? $context['pickup_region'] ?? '' ) ); ?>" <?php echo $include_city_id ? 'data-wdc-pickup-location-region' : ''; ?>>
 		<input type="hidden" name="recipient_location_postcode" value="<?php echo esc_attr( (string) ( $pickup_context['postal_code'] ?? $pickup_context['postcode'] ?? $context['pickup_location_postcode'] ?? '' ) ); ?>" <?php echo $include_city_id ? 'data-wdc-pickup-location-postcode' : ''; ?>>

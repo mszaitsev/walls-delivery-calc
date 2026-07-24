@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.127.6
+Version: 0.128.0
 
 Stable subsystems:
 
@@ -14,6 +14,7 @@ Stable subsystems:
 - bounded plugin architecture smoke in the framework regression group;
 - unified shipment regression profile.
 - shipment cost analytics on the overview admin page, comparing the selected order delivery's base API planned cost with canonical actual shipment cost.
+- CDEK EAEU support through the single `cdek` carrier/service with configurable `RU`, `AM`, `BY`, `KZ`, and `KG` availability.
 
 Active known limitations:
 
@@ -24,6 +25,9 @@ Active known limitations:
 
 Recent fixes:
 
+- CDEK now supports RU/AM/BY/KZ/KG through the existing service-country repository. Existing installs receive a one-time migration from empty/RU-only CDEK countries to the five-country default, while fresh installs seed the same defaults only when the built-in service is first created.
+- DPD Geography imports AM/BY/KZ/KG locations into the shared locations table with `dpd_city_id` idempotency and without fake Russian identifiers. CDEK city resolution is country-aware, supports manual city input, and does not persist CDEK city codes.
+- CDEK shipment creation now handles international pickup and courier on the shared adapter/request/status/document pipeline. Non-RU courier uses raw WooCommerce address data plus resolved CDEK city code, and the CDEK-only recipient document field maps to `recipient.tin` without persistence or logging.
 - Checkout and order delivery recalculation now share a delivery lead-time pipeline: carrier raw lead time, shop processing calendar, optional carrier working-day conversion, delivery date rules, and final planned date. The global processing default is `2` shop working days, the per-service working-day flag defaults to off, and existing manual processing additions in rules should be removed manually where they are no longer wanted.
 - The overview admin page now shows only platform information and delivery quote cache cleanup, while system requirements notices remain handled globally by `AdminNotices`.
 - Checkout runtime gating now uses `CheckoutFeatureGate` with `enable_new_checkout_shipping` as the single source of truth; the legacy feature flag service was removed.

@@ -229,6 +229,7 @@ final class OrderShipmentDraftFactory {
 				'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
 				'phone' => sanitize_text_field( wp_unslash( $data['recipient_phone'] ?? $base->recipient['phone'] ?? '' ) ),
 				'email' => sanitize_email( wp_unslash( $data['recipient_email'] ?? $base->recipient['email'] ?? '' ) ),
+				'tin' => $this->cdek_recipient_document_from_admin_data( $data, $base->recipient_address->country_code ),
 			),
 			array_merge(
 				$base->meta,
@@ -943,9 +944,11 @@ final class OrderShipmentDraftFactory {
 	private function recipient_address( object $order, string $delivery_type, ?array $pickup_row = null, array $normalized_address = array() ): Address {
 		if ( DeliveryType::PICKUP === $delivery_type ) {
 			$row = is_array( $pickup_row ) ? $pickup_row : array();
+			$country_code = strtoupper( trim( (string) ( $row['country_code'] ?? ( method_exists( $order, 'get_shipping_country' ) ? $order->get_shipping_country() : 'RU' ) ) ) );
+			$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
 
 			return new Address(
-				country_code: 'RU',
+				country_code: $country_code,
 				region_name: (string) ( $row['region_name'] ?? '' ),
 				city: (string) ( $row['city_name'] ?? '' ),
 				postcode: preg_replace( '/\D+/', '', (string) ( $row['postcode'] ?? $this->meta_string( $order, '_wdc_pickup_point_postcode' ) ) ) ?: '',
@@ -985,9 +988,11 @@ final class OrderShipmentDraftFactory {
 			if ( array() === $pickup_row ) {
 				return $base;
 			}
+			$country_code = strtoupper( trim( (string) ( $pickup_row['country_code'] ?? ( $base->country_code ?: 'RU' ) ) ) );
+			$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
 
 			return new Address(
-				country_code: 'RU',
+				country_code: $country_code,
 				region_name: (string) ( $pickup_row['region_name'] ?? $base->region_name ),
 				city: (string) ( $pickup_row['city_name'] ?? $base->city ),
 				postcode: preg_replace( '/\D+/', '', (string) ( $pickup_row['postcode'] ?? $base->postcode ) ) ?: '',
@@ -1155,6 +1160,7 @@ final class OrderShipmentDraftFactory {
 
 		return array(
 			'point_code' => (string) ( $row['point_code'] ?? '' ),
+			'country_code' => (string) ( $row['country_code'] ?? '' ),
 			'postcode' => (string) ( $row['postcode'] ?? '' ),
 			'region_name' => (string) ( $row['region_name'] ?? '' ),
 			'city_name' => (string) ( $row['city_name'] ?? '' ),
@@ -1347,6 +1353,8 @@ final class OrderShipmentDraftFactory {
 		$address = sanitize_text_field( wp_unslash( $data['pickup_point_address'] ?? $base_row['address'] ?? '' ) );
 		$city = sanitize_text_field( wp_unslash( $data['pickup_point_city'] ?? $base_row['city_name'] ?? '' ) );
 		$region = sanitize_text_field( wp_unslash( $data['pickup_point_region'] ?? $base_row['region_name'] ?? '' ) );
+		$country_code = strtoupper( trim( sanitize_text_field( wp_unslash( $data['pickup_point_country'] ?? $base_row['country_code'] ?? 'RU' ) ) ) );
+		$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
 		$latitude = is_numeric( $data['pickup_point_lat'] ?? null ) ? (float) $data['pickup_point_lat'] : ( is_numeric( $base_row['lat'] ?? null ) ? (float) $base_row['lat'] : null );
 		$longitude = is_numeric( $data['pickup_point_lng'] ?? null ) ? (float) $data['pickup_point_lng'] : ( is_numeric( $base_row['lng'] ?? null ) ? (float) $base_row['lng'] : null );
 		if ( '' === $point_code ) {
@@ -1355,6 +1363,7 @@ final class OrderShipmentDraftFactory {
 
 		return array(
 			'point_code' => $point_code,
+			'country_code' => $country_code,
 			'postcode' => $postcode,
 			'region_name' => $region,
 			'city_name' => $city,
@@ -1573,6 +1582,20 @@ final class OrderShipmentDraftFactory {
 		$value = trim( preg_replace( '/\s+/', ' ', $value ) ?? $value );
 
 		return function_exists( 'mb_substr' ) ? mb_substr( $value, 0, $max_length ) : substr( $value, 0, $max_length );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function cdek_recipient_document_from_admin_data( array $data, string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+		if ( 'RU' === $country_code ) {
+			return '';
+		}
+		$value = sanitize_text_field( wp_unslash( $data['cdek_recipient_document'] ?? '' ) );
+		$value = trim( preg_replace( '/[\x00-\x1F\x7F]+/u', '', $value ) ?? $value );
+
+		return function_exists( 'mb_substr' ) ? mb_substr( $value, 0, 30 ) : substr( $value, 0, 30 );
 	}
 
 	private function original_address_hash( string $original_address ): string {

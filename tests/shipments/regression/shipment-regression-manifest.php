@@ -28,6 +28,7 @@ return array(
 
 	'cdek.foundation' => array( 'path' => 'tests/cdek/run-cdek-foundation-smoke.php', 'groups' => array( 'cdek' ) ),
 	'cdek.order-creation' => array( 'path' => 'tests/cdek/run-cdek-order-creation-smoke.php', 'groups' => array( 'cdek' ), 'timeout' => 120 ),
+	'cdek.eaeu' => array( 'path' => 'tests/cdek/run-cdek-eaeu-smoke.php', 'groups' => array( 'cdek' ) ),
 	'cdek.tariff-calculation' => array( 'path' => 'tests/cdek/run-cdek-tariff-calculation-smoke.php', 'groups' => array( 'cdek' ), 'timeout' => 120 ),
 	'cdek.tariffs-sync' => array( 'path' => 'tests/cdek/run-cdek-tariffs-sync-smoke.php', 'groups' => array( 'cdek' ) ),
 

@@ -13,6 +13,7 @@ defined( 'ABSPATH' ) || exit;
 final class CdekLocationResolver {
 	public function __construct(
 		private CdekApiClient $client,
+		private CdekSettings $settings,
 		private Logger $logger
 	) {
 	}
@@ -21,21 +22,26 @@ final class CdekLocationResolver {
 	 * @return array<string,mixed>
 	 */
 	public function resolve( QuoteRequest $request ): array {
-		$fias = $this->destination_fias( $request );
+		$country = $this->destination_country( $request );
+		$fias = 'RU' === $country ? $this->destination_fias( $request ) : '';
 		$city = $this->destination_city( $request );
 		$region = $this->destination_region( $request );
+		$postcode = $this->destination_postcode( $request );
+		if ( '' === $country ) {
+			return $this->failed( 'unsupported_country' );
+		}
 		if ( '' === $city && '' === $fias ) {
 			return $this->failed( 'city_required' );
 		}
 
-		$cache_key = $this->cache_key( $fias, $city, $region );
+		$cache_key = $this->cache_key( $country, $fias, $city, $region, $postcode, $request );
 		$cached = $this->cached( $cache_key );
 		if ( array() !== $cached ) {
 			$cached['source'] = 'cache:' . (string) ( $cached['source'] ?? 'cdek_location_cities' );
 			return $cached;
 		}
 
-		$attempts = $this->query_attempts( $fias, $city, $region, $request );
+		$attempts = $this->query_attempts( $country, $fias, $city, $region, $postcode, $request );
 		$diagnostics = array();
 		$best = $this->failed( 'not_found' );
 
@@ -64,7 +70,7 @@ final class CdekLocationResolver {
 			}
 
 			$diagnostics[] = $this->attempt_diagnostics( $attempt['label'], $attempt['query'], $http_code, count( $items ) );
-			$match = $this->best_match( $items, $fias, $attempt['match_city'], $attempt['match_region'] );
+			$match = $this->best_match( $items, $country, $fias, $attempt['match_city'], $attempt['match_region'], $postcode );
 			if ( (float) ( $match['confidence'] ?? 0.0 ) > (float) ( $best['confidence'] ?? 0.0 ) ) {
 				$best = $match;
 				$best['selected_attempt_label'] = $attempt['label'];
@@ -86,8 +92,8 @@ final class CdekLocationResolver {
 	 * @param array<int|string,mixed> $items
 	 * @return array<string,mixed>
 	 */
-	private function best_match( array $items, string $fias, string $city, string $region ): array {
-		$best = $this->failed( 'not_found' );
+	private function best_match( array $items, string $country, string $fias, string $city, string $region, string $postcode ): array {
+		$matches = array();
 		foreach ( $items as $item ) {
 			if ( ! is_array( $item ) ) {
 				continue;
@@ -99,33 +105,40 @@ final class CdekLocationResolver {
 
 			$item_city = (string) ( $item['city'] ?? $item['city_name'] ?? '' );
 			$item_region = (string) ( $item['region'] ?? $item['region_name'] ?? '' );
-			$item_fias = strtolower( trim( (string) ( $item['fias_guid'] ?? $item['fias_id'] ?? '' ) ) );
-			$confidence = 0.0;
-			if ( '' !== $fias && '' !== $item_fias && strtolower( $fias ) === $item_fias ) {
-				$confidence = 1.0;
-			} elseif ( '' !== $city && $this->normalize( $city ) === $this->normalize( $item_city ) ) {
-				if ( '' === $region ) {
-					$confidence = 0.86;
-				} elseif ( '' === $item_region || $this->regions_compatible( $region, $item_region ) ) {
-					$confidence = 0.9;
-				} else {
-					$confidence = 0.7;
-				}
+			$item_country = strtoupper( trim( (string) ( $item['country_code'] ?? $item['country'] ?? $country ) ) );
+			if ( '' !== $item_country && $item_country !== $country ) {
+				continue;
 			}
-			if ( $confidence > (float) ( $best['confidence'] ?? 0 ) ) {
-				$best = array(
-					'success' => $confidence >= 0.85,
+			$item_fias = strtolower( trim( (string) ( $item['fias_guid'] ?? $item['fias_id'] ?? '' ) ) );
+			$item_postcode = preg_replace( '/\D+/', '', (string) ( $item['postal_code'] ?? $item['postcode'] ?? '' ) ) ?? '';
+			if ( 'RU' === $country && '' !== $fias && '' !== $item_fias && strtolower( $fias ) === $item_fias ) {
+				$confidence = 1.0;
+			} elseif ( '' === $city || $this->normalize( $city ) !== $this->normalize( $item_city ) ) {
+				continue;
+			} elseif ( '' !== $postcode && '' !== $item_postcode && $postcode !== $item_postcode ) {
+				continue;
+			} elseif ( '' !== $region && '' !== $item_region && ! $this->regions_compatible( $region, $item_region ) ) {
+				continue;
+			} else {
+				$confidence = '' !== $region || '' !== $postcode ? 0.95 : 0.9;
+			}
+			$matches[ $code ] = array(
+				'success' => true,
 					'city_code' => $code,
 					'city_name' => $item_city,
+				'country_code' => $country,
 					'region' => $item_region,
 					'source' => 'cdek_location_cities',
 					'confidence' => $confidence,
-					'reason' => $confidence >= 0.85 ? '' : 'low_confidence',
-				);
-			}
+				'reason' => '',
+			);
 		}
 
-		return $best;
+		if ( 1 === count( $matches ) ) {
+			return array_values( $matches )[0];
+		}
+
+		return $this->failed( count( $matches ) > 1 ? 'ambiguous' : 'not_found' );
 	}
 
 	/**
@@ -136,6 +149,7 @@ final class CdekLocationResolver {
 			'success' => false,
 			'city_code' => 0,
 			'city_name' => '',
+			'country_code' => '',
 			'region' => '',
 			'source' => '',
 			'confidence' => 0.0,
@@ -147,12 +161,21 @@ final class CdekLocationResolver {
 		return trim( (string) ( $request->destination->fias_id ?: ( $request->customer_context['selected_location_fias_id'] ?? $request->customer_context['location_fias_id'] ?? $request->customer_context['fias_id'] ?? '' ) ) );
 	}
 
+	private function destination_country( QuoteRequest $request ): string {
+		$country = strtoupper( trim( (string) ( $request->country_code ?: $request->destination->country_code ?: ( $request->customer_context['country_code'] ?? '' ) ) ) );
+		return in_array( $country, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country : '';
+	}
+
 	private function destination_city( QuoteRequest $request ): string {
 		return trim( (string) ( $request->destination->settlement ?: $request->destination->city ?: ( $request->customer_context['city_name'] ?? $request->customer_context['selected_location_name'] ?? $request->customer_context['display_name'] ?? '' ) ) );
 	}
 
 	private function destination_region( QuoteRequest $request ): string {
 		return trim( (string) ( $request->destination->region_name ?: ( $request->customer_context['selected_location_region'] ?? '' ) ) );
+	}
+
+	private function destination_postcode( QuoteRequest $request ): string {
+		return preg_replace( '/\D+/', '', (string) ( $request->destination->postcode ?: ( $request->customer_context['postcode'] ?? $request->customer_context['postal_code'] ?? '' ) ) ) ?? '';
 	}
 
 	private function normalize( string $value ): string {
@@ -188,30 +211,30 @@ final class CdekLocationResolver {
 	/**
 	 * @return array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string}>
 	 */
-	private function query_attempts( string $fias, string $city, string $region, QuoteRequest $request ): array {
+	private function query_attempts( string $country, string $fias, string $city, string $region, string $postcode, QuoteRequest $request ): array {
 		$attempts = array();
 		$lat = $this->coordinate_from_context( $request, array( 'lat', 'latitude', 'geo_lat' ) );
 		$lng = $this->coordinate_from_context( $request, array( 'lng', 'lon', 'longitude', 'geo_lon' ) );
 		if ( null !== $lat && null !== $lng ) {
-			$attempts[] = $this->attempt( 'coordinates', array( 'latitude' => (string) $lat, 'longitude' => (string) $lng, 'size' => '1' ), $city, $region );
+			$attempts[] = $this->attempt( $country, 'coordinates', array( 'latitude' => (string) $lat, 'longitude' => (string) $lng, 'size' => '10' ), $city, $region );
 		}
-		if ( '' !== $fias ) {
-			$attempts[] = $this->attempt( 'fias_guid_only', array( 'fias_guid' => $fias ), $city, $region );
+		if ( 'RU' === $country && '' !== $fias ) {
+			$attempts[] = $this->attempt( $country, 'fias_guid_only', array( 'fias_guid' => $fias ), $city, $region );
 		}
-		if ( '' !== $city && '' !== $region ) {
-			$attempts[] = $this->attempt( 'city_region', array( 'city' => $city, 'region' => $region ), $city, $region );
+		if ( '' !== $city && '' !== $postcode ) {
+			$attempts[] = $this->attempt( $country, 'city_postcode', array( 'city' => $city, 'postal_code' => $postcode ), $city, $region );
 		}
 		if ( '' !== $city ) {
-			$attempts[] = $this->attempt( 'city_only', array( 'city' => $city ), $city, '' );
+			$attempts[] = $this->attempt( $country, 'city_only', array( 'city' => $city ), $city, $region );
 			$normalized_city = $this->normalized_city_for_query( $city );
 			if ( '' !== $normalized_city && $normalized_city !== trim( $city ) ) {
-				$attempts[] = $this->attempt( 'normalized_city_only', array( 'city' => $normalized_city ), $normalized_city, '' );
+				$attempts[] = $this->attempt( $country, 'normalized_city_only', array( 'city' => $normalized_city ), $normalized_city, $region );
 			}
 		}
 
 		$context_city = $this->city_from_context( $request );
 		if ( '' !== $context_city && $this->normalize( $context_city ) !== $this->normalize( $city ) ) {
-			$attempts[] = $this->attempt( 'context_city_only', array( 'city' => $context_city ), $context_city, '' );
+			$attempts[] = $this->attempt( $country, 'context_city_only', array( 'city' => $context_city ), $context_city, $region );
 		}
 
 		return $this->unique_attempts( $attempts );
@@ -237,8 +260,8 @@ final class CdekLocationResolver {
 	 * @param array<string,string> $query
 	 * @return array{label:string,query:array<string,string>,match_city:string,match_region:string}
 	 */
-	private function attempt( string $label, array $query, string $match_city, string $match_region ): array {
-		$query = array_merge( array( 'country_codes' => 'RU' ), $query );
+	private function attempt( string $country, string $label, array $query, string $match_city, string $match_region ): array {
+		$query = array_merge( array( 'country_codes' => $country ), $query );
 
 		return array( 'label' => $label, 'query' => $query, 'match_city' => $match_city, 'match_region' => $match_region );
 	}
@@ -316,8 +339,10 @@ final class CdekLocationResolver {
 		);
 	}
 
-	private function cache_key( string $fias, string $city, string $region ): string {
-		return 'wdc_cdek_city_' . sha1( strtolower( implode( '|', array( $fias, $city, $region ) ) ) );
+	private function cache_key( string $country, string $fias, string $city, string $region, string $postcode, QuoteRequest $request ): string {
+		$lat = (string) ( $this->coordinate_from_context( $request, array( 'lat', 'latitude', 'geo_lat' ) ) ?? '' );
+		$lng = (string) ( $this->coordinate_from_context( $request, array( 'lng', 'lon', 'longitude', 'geo_lon' ) ) ?? '' );
+		return 'wdc_cdek_city_' . sha1( strtolower( implode( '|', array( $this->settings->environment(), $country, $fias, $city, $region, $postcode, $lat, $lng ) ) ) );
 	}
 
 	/**
@@ -334,8 +359,8 @@ final class CdekLocationResolver {
 	 */
 	private function store( string $key, array $value ): void {
 		if ( function_exists( 'set_transient' ) ) {
-			$day = defined( 'DAY_IN_SECONDS' ) ? (int) DAY_IN_SECONDS : 86400;
-			set_transient( $key, $value, 30 * $day );
+			$ttl = max( 60, strtotime( 'tomorrow' ) - time() );
+			set_transient( $key, $value, $ttl );
 		}
 	}
 }

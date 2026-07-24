@@ -471,9 +471,14 @@ final class ShipmentAddressAjaxController {
 		$calculation = $this->order_array_meta( $order, '_wdc_delivery_calculation_data' );
 		$rate_meta = $this->order_array_meta( $order, '_wdc_platform_rate_meta' );
 		$cdek_city_code = $this->cdek_city_code_from_saved_data( $calculation, $rate_meta );
+		$country_code = strtoupper( trim( sanitize_text_field( wp_unslash( $data['recipient_location_country'] ?? $_POST['recipient_location_country'] ?? $rate_meta['country_code'] ?? $rate_meta['location']['cdek_to_country_code'] ?? $calculation['country_code'] ?? '' ) ) ) );
+		if ( '' === $country_code && method_exists( $order, 'get_shipping_country' ) ) {
+			$country_code = strtoupper( trim( (string) $order->get_shipping_country() ) );
+		}
+		$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
 
 		return array(
-			'country_code' => 'RU',
+			'country_code' => $country_code,
 			'cdek_city_code' => $cdek_city_code > 0 ? $cdek_city_code : '',
 			'cdek_to_city_code' => $cdek_city_code > 0 ? $cdek_city_code : '',
 			'delivery_calculation_data' => $calculation,

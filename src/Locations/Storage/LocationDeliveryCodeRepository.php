@@ -53,6 +53,32 @@ final class LocationDeliveryCodeRepository {
 		return $row['dpd_city_id'];
 	}
 
+	public function find_location_id_by_dpd_city_id( string|int $dpd_city_id ): ?int {
+		$dpd_city_id = preg_replace( '/\D+/', '', (string) $dpd_city_id ) ?? '';
+		if ( '' === $dpd_city_id || '0' === $dpd_city_id ) {
+			return null;
+		}
+
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->wpdb->delivery_codes as $row ) {
+				if ( (string) ( $row['dpd_city_id'] ?? '' ) === $dpd_city_id && (int) ( $row['location_id'] ?? 0 ) > 0 ) {
+					return (int) $row['location_id'];
+				}
+			}
+
+			return null;
+		}
+
+		$value = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				'SELECT location_id FROM ' . $this->table_name() . ' WHERE dpd_city_id = %d LIMIT 1',
+				(int) $dpd_city_id
+			)
+		);
+
+		return is_numeric( $value ) && (int) $value > 0 ? (int) $value : null;
+	}
+
 	public function save_dpd_city_id( int $location_id, string|int $dpd_city_id ): bool {
 		$location_id = max( 0, $location_id );
 		$dpd_city_id = preg_replace( '/\D+/', '', (string) $dpd_city_id ) ?? '';

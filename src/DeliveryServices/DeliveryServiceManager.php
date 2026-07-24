@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\DeliveryServices;
 
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
@@ -25,9 +26,10 @@ final class DeliveryServiceManager {
 		if ( null !== $service->id ) {
 			$this->countries->replace_countries( (int) $service->id, array( 'RU' ) );
 		}
+		$cdek_existed = $this->services->cdek_service_exists();
 		$cdek = $this->services->ensure_cdek_service();
-		if ( null !== $cdek->id ) {
-			$this->countries->replace_countries( (int) $cdek->id, array( 'RU' ) );
+		if ( ! $cdek_existed && null !== $cdek->id ) {
+			$this->countries->replace_countries( (int) $cdek->id, CdekSettings::SUPPORTED_COUNTRIES );
 		}
 		$dpd = $this->services->ensure_dpd_service();
 		if ( null !== $dpd->id ) {

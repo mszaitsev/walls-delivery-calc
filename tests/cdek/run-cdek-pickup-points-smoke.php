@@ -262,7 +262,7 @@ $settings->save_from_admin(
 $http = new CdekPickupFakeHttpClient();
 $tokens = new CdekOAuthTokenService( $settings, $http );
 $client = new CdekApiClient( $tokens, $settings, $http );
-$service = new CdekDeliveryPointService( $client, $settings, new CdekLocationResolver( $client, new Logger() ), new Logger() );
+$service = new CdekDeliveryPointService( $client, $settings, new CdekLocationResolver( $client, $settings, new Logger() ), new Logger() );
 
 $points = $service->pointsByCityCode( 270 );
 cdek_pickup_assert( 2 === count( $points ), 'CDEK deliverypoints response must normalize all points.' );
@@ -475,7 +475,7 @@ cdek_pickup_assert( 'KEM7' === ( $calculation['pickup']['cdek_code'] ?? '' ) && 
 cdek_pickup_assert( 'Inside the shopping center' === ( $calculation['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $calculation['pickup']['storage_notice'] ?? '' ), 'Checkout calculation data must save CDEK description and storage notice.' );
 cdek_pickup_assert( '' === ( $calculation['pickup']['work_time'] ?? '' ), 'Checkout calculation data must not save numeric zero work_time.' );
 cdek_pickup_assert( isset( $calculation['pickup']['raw_sanitized'] ) && is_array( $calculation['pickup']['raw_sanitized'] ), 'Checkout calculation data must save raw_sanitized pickup payload.' );
-cdek_pickup_assert( 1 === count( $item->meta ) && in_array( '2-4 days', array_values( $item->meta ), true ), 'Checkout visible shipping item meta must contain only delivery time.' );
+cdek_pickup_assert( ! array_key_exists( 'country_code', $item->meta ) && ! array_key_exists( 'rate_meta', $item->meta ) && ! array_key_exists( 'request_payload_sanitized', $item->meta ), 'Checkout visible shipping item meta must not contain technical CDEK data.' );
 
 $order_display = new PickupPointOrderDisplay( $card_renderer, $settings_repository );
 ob_start();
@@ -524,7 +524,7 @@ cdek_pickup_assert( true === $saved['success'], 'Admin recalculation must save C
 cdek_pickup_assert( 'Kemerovo, Sovetskiy 10' === $admin_order->shipping_address_1 && '' === $admin_order->shipping_address_2, 'Admin recalculation must write CDEK pickup address.' );
 cdek_pickup_assert( '650004' === $admin_order->shipping_postcode && 'RU' === $admin_order->shipping_country, 'Admin recalculation must write CDEK pickup postcode and country.' );
 cdek_pickup_assert( 'KEM7' === ( $admin_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Admin recalculation must save selected CDEK point code, not postcode.' );
-cdek_pickup_assert( 1 === count( $admin_order->shipping_items['meta'] ?? array() ) && in_array( '2-4 days', array_values( $admin_order->shipping_items['meta'] ?? array() ), true ), 'Admin visible shipping item meta must contain only delivery time.' );
+cdek_pickup_assert( ! array_key_exists( 'country_code', $admin_order->shipping_items['meta'] ?? array() ) && ! array_key_exists( 'rate_meta', $admin_order->shipping_items['meta'] ?? array() ) && ! array_key_exists( 'request_payload_sanitized', $admin_order->shipping_items['meta'] ?? array() ), 'Admin visible shipping item meta must not contain technical CDEK data.' );
 cdek_pickup_assert( 'cdek' === ( $admin_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['pickup']['carrier_key'] ?? '' ), 'Admin calculation data must save CDEK pickup block.' );
 cdek_pickup_assert( 'Inside the shopping center' === ( $admin_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['pickup']['description'] ?? '' ), 'Admin calculation data must save CDEK pickup description.' );
 cdek_pickup_assert( 'Срок хранения 3 дня' === ( $admin_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['pickup']['storage_notice'] ?? '' ), 'Admin calculation data must save CDEK POSTAMAT storage notice.' );
@@ -549,8 +549,8 @@ cdek_pickup_assert( str_contains( $admin_js, "'ПВЗ СДЭК'" ) && str_contai
 cdek_pickup_assert( ! str_contains( $map_js, "context.carrier === 'cdek'" ) && str_contains( $map_js, 'window.WDCPickupApi.addressSearch(query, context' ), 'Checkout pickup map must not bypass addressSearch for CDEK.' );
 cdek_pickup_assert( str_contains( $map_js, "'ПВЗ СДЭК'" ) && str_contains( $map_js, "'Постамат СДЭК'" ), 'Checkout pickup map must render CDEK pickup/postamat titles.' );
 cdek_pickup_assert( str_contains( $map_js, "type === 'locker'" ) && str_contains( $admin_js, "'locker' === type" ), 'Pickup maps must treat CDEK LOCKER as a postamat title.' );
-cdek_pickup_assert( ! str_contains( $map_js, 'LIST_LIMIT' ) && ! str_contains( $map_js, 'points.slice(0' ) && str_contains( $map_js, 'points.map(renderListItem).join' ) && str_contains( $map_js, 'listMeta(points.length, points.length)' ), 'Checkout pickup map must render every CDEK point returned by backend, including large-city lists beyond the first 100 rows.' );
-cdek_pickup_assert( str_contains( $map_js, 'function pointSnapshot(point)' ) && str_contains( $map_js, 'function pointMatchKeys(point)' ) && str_contains( $map_js, 'point && point.cdek_code' ) && str_contains( $map_js, 'point && point.delivery_point' ) && str_contains( $map_js, 'snapshot.cdek_code' ) && str_contains( $map_js, 'snapshot.delivery_point' ) && str_contains( $map_js, 'hasSharedPointKey(keys, pointMatchKeys(item))' ) && str_contains( $map_js, 'previewPoint = matchingPreviewPoint' ) && str_contains( $map_js, 'committedPoint = matchingPreviewPoint' ), 'Checkout selected CDEK pickup preview must match by CDEK code/delivery_point and replace saved payload with the REST point when ids differ.' );
+cdek_pickup_assert( ! str_contains( $map_js, 'LIST_LIMIT' ) && ! str_contains( $map_js, 'points.slice(0' ) && str_contains( $map_js, 'renderListItem' ) && str_contains( $map_js, 'listMeta(totalCount, points.length)' ), 'Checkout pickup map must render every CDEK point returned by backend, including large-city lists beyond the first 100 rows.' );
+cdek_pickup_assert( str_contains( $map_js, 'function pointSnapshot(point)' ) && str_contains( $map_js, 'function pointMatchKeys(point)' ) && str_contains( $map_js, 'cdek_code' ) && str_contains( $map_js, 'delivery_point' ) && str_contains( $map_js, 'hasSharedPointKey' ) && str_contains( $map_js, 'matchingPreviewPoint' ), 'Checkout selected CDEK pickup preview must match by CDEK code/delivery_point and replace saved payload with the REST point when ids differ.' );
 cdek_pickup_assert( str_contains( $rest_source, "carrier === 'cdek'" ) || str_contains( $rest_source, "'cdek' === \$carrier" ), 'Pickup REST source must route CDEK pickup requests.' );
 
 $encoded_meta = (string) wp_json_encode( array( $checkout_order->meta, $admin_order->meta, $GLOBALS['wdc_cdek_pickup_logs'] ) );

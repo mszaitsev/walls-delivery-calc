@@ -6,12 +6,36 @@ define( 'ABSPATH', __DIR__ . '/../../' );
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
+		public int $insert_id = 0;
 		/** @var array<int,array<string,mixed>> */
 		public array $delivery_codes = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $locations = array();
 		/** @var array<string,array<int,array<string,mixed>>> */
 		public array $dpd_geography_stage_tables = array();
+
+		public function insert( string $table, array $data, array $format = array() ): bool {
+			unset( $table, $format );
+			$ids = array_map( static fn( array $row ): int => (int) ( $row['id'] ?? 0 ), $this->locations );
+			$this->insert_id = ( $ids ? max( $ids ) : 0 ) + 1;
+			$data['id'] = $this->insert_id;
+			$this->locations[] = $data;
+
+			return true;
+		}
+
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			unset( $table, $format, $where_format );
+			$id = (int) ( $where['id'] ?? 0 );
+			foreach ( $this->locations as $index => $row ) {
+				if ( (int) ( $row['id'] ?? 0 ) === $id ) {
+					$this->locations[ $index ] = array_merge( $row, $data, array( 'id' => $id ) );
+					return true;
+				}
+			}
+
+			return false;
+		}
 	}
 }
 
@@ -30,6 +54,7 @@ function wp_salt( string $scheme = '' ): string { return 'wdc-test-salt-' . $sch
 require_once __DIR__ . '/../../src/Domain/Status/DeliveryStatus.php';
 require_once __DIR__ . '/../../src/Shipments/Cdek/CdekStatusMappingService.php';
 require_once __DIR__ . '/../../src/Shipments/Dpd/DpdStatusMapping.php';
+require_once __DIR__ . '/../../src/Shipments/YandexDelivery/YandexStatusMapping.php';
 require_once __DIR__ . '/../../src/Carriers/Cdek/CdekSettings.php';
 require_once __DIR__ . '/../../src/Infrastructure/Settings/SettingsRepository.php';
 require_once __DIR__ . '/../../src/Infrastructure/Security/EncryptionService.php';
@@ -193,6 +218,8 @@ $importer = new DpdGeographyImportService(
 	$index,
 	$state,
 	$stage,
+	$location_repository,
+	$repository,
 	$settings
 );
 $parser = new DpdGeographyCsvParser();
@@ -281,12 +308,12 @@ $report = $settings->last_geography_import_report();
 dpd_import_assert( 0 === (int) $report['total_rows'], 'import does not pre-count data rows' );
 dpd_import_assert( (int) $report['file_size'] > 0, 'report stores source file size' );
 dpd_import_assert( 7 === (int) $report['ru_rows'], 'import processes RU rows only' );
-dpd_import_assert( 1 === (int) $report['skipped_non_ru'], 'import skips non-RU rows' );
+dpd_import_assert( 0 === (int) $report['skipped_non_ru'] && 1 === (int) ( $report['foreign_locations_inserted'] ?? 0 ), 'import writes valid non-RU rows as foreign locations' );
 dpd_import_assert( 1 === (int) $report['skipped_invalid'], 'import skips rows without DPD city ID' );
 dpd_import_assert( 4 === (int) $report['matched_by_fias'], 'FIAS exact matches are counted before staging conflict filtering' );
 dpd_import_assert( 1 === (int) $report['matched_by_kladr'], 'KLADR normalized match is saved' );
 dpd_import_assert( 3 === (int) $report['saved_candidates'], 'non-conflicting rows are staged as candidates before finalization' );
-dpd_import_assert( 2 === (int) $report['finalized_mappings'], 'only candidates are finalized into working delivery codes table' );
+dpd_import_assert( 3 === (int) $report['finalized_mappings'], 'RU candidates and foreign imports are finalized into working delivery codes table' );
 dpd_import_assert( 1 === (int) $report['unchanged_mappings'], 'duplicate same DPD city ID is idempotent' );
 dpd_import_assert( 1 === (int) $report['conflicts'], 'different DPD city IDs for one location are treated as conflict' );
 dpd_import_assert( 1 === (int) $report['ambiguous'], 'ambiguous name match is not saved' );

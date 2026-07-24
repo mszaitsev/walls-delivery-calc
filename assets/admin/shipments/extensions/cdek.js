@@ -6,6 +6,26 @@
     const senderWarehouse = form.querySelector('[data-wdc-cdek-sender-warehouse]');
     if (senderDoor) senderDoor.hidden = ![1, 2].includes(mode);
     if (senderWarehouse) senderWarehouse.hidden = [1, 2].includes(mode);
+    updateCdekRecipientDocumentUi(form);
+  }
+
+  function cdekRecipientCountry(form) {
+    return String(fieldValue(form, 'input[name="recipient_location_country"]') || fieldValue(form, '[data-wdc-cdek-recipient-country]') || 'RU').trim().toUpperCase();
+  }
+
+  function updateCdekRecipientDocumentUi(form) {
+    if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return true;
+    const country = cdekRecipientCountry(form);
+    const row = form.querySelector('[data-wdc-cdek-recipient-document-row]');
+    const input = form.querySelector('[data-wdc-cdek-recipient-document]');
+    const visible = ['AM', 'BY', 'KZ', 'KG'].includes(country);
+    if (row) row.hidden = !visible;
+    if (input) {
+      input.required = country === 'KZ';
+      input.disabled = !visible;
+      if (!visible) input.value = '';
+    }
+    return country !== 'KZ' || !input || String(input.value || '').trim() !== '';
   }
   const CDEK_BARCODE_POLL_INTERVAL_MS = 2000;
   const CDEK_BARCODE_TIMEOUT_MS = 300000;
@@ -208,6 +228,23 @@
         }
       });
       return true;
+    },
+    handleInput: function (event) {
+      const form = findShipmentForm(event.target);
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return false;
+      if (event.target.matches('[data-wdc-cdek-recipient-document]')) {
+        updateCreateAvailability(form);
+      }
+      return false;
+    },
+    handleChange: function (event) {
+      const form = findShipmentForm(event.target);
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return false;
+      updateCdekRecipientDocumentUi(form);
+      return false;
+    },
+    createAvailability: function (form) {
+      return updateCdekRecipientDocumentUi(form);
     },
     afterAddressNormalized: function (context) {
       const form = context && context.form;
