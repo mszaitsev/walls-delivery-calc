@@ -187,6 +187,8 @@ final class CheckoutPickupPointRestController {
 				'pickupSelections' => $this->session_manager->pickup_selections(),
 				'active_pickup_family' => '' !== $family ? $family : null,
 				'activePickupFamily' => '' !== $family ? $family : null,
+				'active_pickup_country_code' => $this->active_pickup_country_code(),
+				'activePickupCountryCode' => $this->active_pickup_country_code(),
 			)
 		);
 	}
@@ -205,6 +207,8 @@ final class CheckoutPickupPointRestController {
 				'pickupSelections' => $this->session_manager->pickup_selections(),
 				'active_pickup_family' => $active_family,
 				'activePickupFamily' => $active_family,
+				'active_pickup_country_code' => $this->active_pickup_country_code(),
+				'activePickupCountryCode' => $this->active_pickup_country_code(),
 				'city_context' => $this->city_context(),
 			)
 		);
@@ -768,6 +772,8 @@ final class CheckoutPickupPointRestController {
 				'pickupSelections' => $selections,
 				'active_pickup_family' => $family,
 				'activePickupFamily' => $family,
+				'active_pickup_country_code' => $this->active_pickup_country_code(),
+				'activePickupCountryCode' => $this->active_pickup_country_code(),
 			)
 		);
 	}
@@ -788,6 +794,34 @@ final class CheckoutPickupPointRestController {
 		}
 
 		return '';
+	}
+
+	private function active_pickup_country_code(): string {
+		$rate = $this->rate_for_shipping_method( $this->active_shipping_method_id() );
+		if ( array() === $rate || 'pickup' !== (string) ( $rate['delivery_type'] ?? $this->rate_meta( $rate )['delivery_type'] ?? '' ) || empty( $rate['requires_pickup_point'] ) ) {
+			return '';
+		}
+		$meta = $this->rate_meta( $rate );
+		$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
+		$request_payload = is_array( $meta['request_payload_sanitized'] ?? null ) ? $meta['request_payload_sanitized'] : array();
+		$api = is_array( $meta['api'] ?? null ) ? $meta['api'] : array();
+		if ( array() === $request_payload && is_array( $api['request_payload_sanitized'] ?? null ) ) {
+			$request_payload = $api['request_payload_sanitized'];
+		}
+		$to_location = is_array( $request_payload['to_location'] ?? null ) ? $request_payload['to_location'] : array();
+		$country = strtoupper(
+			trim(
+				$this->first_text_value(
+					$location['cdek_to_country_code'] ?? null,
+					$location['country_code'] ?? null,
+					$meta['country_code'] ?? null,
+					$rate['country_code'] ?? null,
+					$to_location['country_code'] ?? null
+				)
+			)
+		);
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
 	}
 
 	/**

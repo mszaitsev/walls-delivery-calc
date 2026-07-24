@@ -308,11 +308,18 @@ final class ShipmentPreviewAjaxController {
 		}
 		$current_country = strtoupper( trim( $current_country ) );
 		$snapshot_country = strtoupper( trim( (string) ( $fields['country_code'] ?? $snapshot['country_code'] ?? '' ) ) );
-		if ( '' === $snapshot_country && 'dadata+cdek_location' === $source ) {
-			$snapshot_country = 'RU';
+		if ( '' === $current_country ) {
+			$current_country = 'RU';
+		}
+		if ( 'dadata+cdek_location' === $source ) {
+			$snapshot_country = '' === $snapshot_country ? 'RU' : $snapshot_country;
+			return 'RU' === $current_country && 'RU' === $snapshot_country;
+		}
+		if ( 'cdek_eaeu_raw_address' === $source ) {
+			return in_array( $snapshot_country, array( 'AM', 'BY', 'KZ', 'KG' ), true ) && $snapshot_country === $current_country;
 		}
 
-		return '' === $current_country || '' === $snapshot_country || $current_country === $snapshot_country;
+		return false;
 	}
 
 	private function order_array_meta( object $order, string $key ): array {

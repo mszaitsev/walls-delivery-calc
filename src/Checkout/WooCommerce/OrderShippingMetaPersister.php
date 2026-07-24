@@ -215,29 +215,34 @@ final class OrderShippingMetaPersister {
 		if ( ! $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
 			return array();
 		}
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$is_handout = array_key_exists( 'is_handout', $pickup ) ? filter_var( $pickup['is_handout'], FILTER_VALIDATE_BOOLEAN ) : ( array_key_exists( 'is_handout', $snapshot ) ? filter_var( $snapshot['is_handout'], FILTER_VALIDATE_BOOLEAN ) : null );
 
 		return array(
 			'carrier_key'   => (string) ( $pickup['carrier_key'] ?? '' ),
 			'service_key'   => (string) ( $pickup['service_key'] ?? '' ),
 			'pickup_family' => (string) ( $pickup['pickup_family'] ?? '' ),
 			'point_code'    => (string) ( $pickup['point_code'] ?? '' ),
-			'platform_station_id' => (string) ( $pickup['platform_station_id'] ?? $pickup['snapshot']['platform_station_id'] ?? '' ),
+			'country_code'  => strtoupper( trim( $this->first_meaningful( $pickup['country_code'] ?? '', $snapshot['country_code'] ?? '' ) ) ),
+			'cdek_city_code' => (int) ( $pickup['cdek_city_code'] ?? $snapshot['cdek_city_code'] ?? 0 ),
+			'is_handout'    => null === $is_handout ? null : $is_handout,
+			'platform_station_id' => (string) ( $pickup['platform_station_id'] ?? $snapshot['platform_station_id'] ?? '' ),
 			'point_type'    => (string) ( $pickup['point_type'] ?? '' ),
-			'point_type_label' => (string) ( $pickup['point_type_label'] ?? $pickup['snapshot']['point_type_label'] ?? '' ),
-			'point_title'   => (string) ( $pickup['point_title'] ?? $pickup['snapshot']['point_title'] ?? '' ),
-			'marker_type'   => (string) ( $pickup['marker_type'] ?? $pickup['snapshot']['marker_type'] ?? '' ),
+			'point_type_label' => (string) ( $pickup['point_type_label'] ?? $snapshot['point_type_label'] ?? '' ),
+			'point_title'   => (string) ( $pickup['point_title'] ?? $snapshot['point_title'] ?? '' ),
+			'marker_type'   => (string) ( $pickup['marker_type'] ?? $snapshot['marker_type'] ?? '' ),
 			'point_name'    => (string) ( $pickup['point_name'] ?? '' ),
 			'point_address' => $this->pickup_address( $pickup ),
-			'point_postcode' => $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' ),
-			'city_name'     => $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $pickup['snapshot']['city'] ?? '' ),
-			'region_name'   => $this->first_meaningful( $pickup['region_name'] ?? '', $pickup['region'] ?? '', $pickup['snapshot']['region'] ?? '' ),
-			'latitude'      => $pickup['lat'] ?? $pickup['snapshot']['lat'] ?? null,
-			'longitude'     => $pickup['lng'] ?? $pickup['snapshot']['lng'] ?? null,
+			'point_postcode' => $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $snapshot['postcode'] ?? '' ),
+			'city_name'     => $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $snapshot['city'] ?? '' ),
+			'region_name'   => $this->first_meaningful( $pickup['region_name'] ?? '', $pickup['region'] ?? '', $snapshot['region'] ?? '' ),
+			'latitude'      => $pickup['lat'] ?? $snapshot['lat'] ?? null,
+			'longitude'     => $pickup['lng'] ?? $snapshot['lng'] ?? null,
 			'work_time'     => $this->first_meaningful( $pickup['point_work_time'] ?? '', $pickup['work_time'] ?? '' ),
-			'description'   => $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '', $pickup['snapshot']['description'] ?? '' ),
-			'storage_notice' => $this->first_meaningful( $pickup['storage_notice'] ?? '', $pickup['snapshot']['storage_notice'] ?? '' ),
-			'cdek_code'     => (string) ( $pickup['cdek_code'] ?? $pickup['snapshot']['cdek_code'] ?? '' ),
-			'raw_sanitized' => is_array( $pickup['snapshot']['raw_sanitized'] ?? null ) ? $pickup['snapshot']['raw_sanitized'] : ( is_array( $pickup['snapshot']['raw'] ?? null ) ? $pickup['snapshot']['raw'] : array() ),
+			'description'   => $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '', $snapshot['description'] ?? '' ),
+			'storage_notice' => $this->first_meaningful( $pickup['storage_notice'] ?? '', $snapshot['storage_notice'] ?? '' ),
+			'cdek_code'     => (string) ( $pickup['cdek_code'] ?? $snapshot['cdek_code'] ?? '' ),
+			'raw_sanitized' => is_array( $snapshot['raw_sanitized'] ?? null ) ? $snapshot['raw_sanitized'] : ( is_array( $snapshot['raw'] ?? null ) ? $snapshot['raw'] : array() ),
 		);
 	}
 

@@ -553,9 +553,13 @@ foreach ( array( ShipmentCreateAjaxController::class, ShipmentPreviewAjaxControl
 	cdek_order_assert( true === $method->invoke( $controller, $by_prepared, $by_original_address, 'BY' ), $controller_class . ' must accept reusable cdek_eaeu_raw_address snapshot for the same BY address.' );
 	cdek_order_assert( false === $method->invoke( $controller, $by_prepared, $by_original_address . ' changed', 'BY' ), $controller_class . ' must invalidate cdek_eaeu_raw_address snapshot when address hash changes.' );
 	cdek_order_assert( false === $method->invoke( $controller, $by_prepared, $by_original_address, 'KZ' ), $controller_class . ' must invalidate cdek_eaeu_raw_address snapshot when country changes.' );
+	$missing_country_prepared = $by_prepared;
+	unset( $missing_country_prepared['fields']['country_code'], $missing_country_prepared['country_code'] );
+	cdek_order_assert( false === $method->invoke( $controller, $missing_country_prepared, $by_original_address, 'BY' ), $controller_class . ' must reject cdek_eaeu_raw_address snapshot without explicit country.' );
 	$unknown_source = array_merge( $by_prepared, array( 'source' => 'external' ) );
 	cdek_order_assert( false === $method->invoke( $controller, $unknown_source, $by_original_address, 'BY' ), $controller_class . ' must reject unknown CDEK normalized snapshot source.' );
 	cdek_order_assert( true === $method->invoke( $controller, $prepared_address, '125252, Москва, Ходынский б-р, д 13, кв 150', 'RU' ), $controller_class . ' must keep RU dadata+cdek_location snapshot reusable.' );
+	cdek_order_assert( false === $method->invoke( $controller, $prepared_address, '125252, Москва, Ходынский б-р, д 13, кв 150', 'KZ' ), $controller_class . ' must not reuse RU dadata+cdek_location snapshot for KZ.' );
 }
 
 $extracted_flat_suggestions = new CdekOrderFakeSuggestionClient();
@@ -1164,6 +1168,8 @@ $cdek_admin_document_data = array(
 	'pickup_point_address' => 'Document point',
 	'pickup_point_city' => 'Document city',
 	'pickup_point_region' => 'Document region',
+	'pickup_point_cdek_city_code' => '9220',
+	'pickup_point_is_handout' => '1',
 	'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
 	'shipment_items' => array( array( 'item_key' => 'doc-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-DOC', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
 );
@@ -1194,6 +1200,100 @@ foreach ( array( 'KZ' => 'tin', 'KG' => 'tin', 'AM' => 'passport_number', 'BY' =
 	);
 	cdek_order_assert( ! array_key_exists( 'tin', $empty_document_request->recipient ) && ! array_key_exists( 'passport_number', $empty_document_request->recipient ) && array() === $builder->validate( $empty_document_request ), 'Empty CDEK admin document must be allowed and omitted for ' . $document_country . '.' );
 }
+foreach (
+	array(
+		'KZ' => array( 'city_code' => 152, 'point_code' => 'ALA1', 'city' => 'Almaty', 'document_key' => 'tin' ),
+		'BY' => array( 'city_code' => 9220, 'point_code' => 'MIN40', 'city' => 'Minsk', 'document_key' => 'passport_number' ),
+	) as $pickup_country => $pickup_case
+) {
+	$pickup_order = new CdekOrderFakeOrder( 170 + ( 'KZ' === $pickup_country ? 1 : 2 ) );
+	$pickup_order->shipping_country = $pickup_country;
+	$pickup_order->meta['_wdc_platform_carrier_key'] = CdekSettings::CARRIER_KEY;
+	$pickup_order->meta['_wdc_platform_delivery_type'] = DeliveryType::PICKUP;
+	$pickup_order->meta['_wdc_delivery_calculation_data'] = array(
+		'carrier_key' => CdekSettings::CARRIER_KEY,
+		'selected_tariff_object' => '136',
+		'selected_tariff_title' => 'CDEK pickup EAEU',
+		'pickup' => array(
+			'carrier_key' => CdekSettings::CARRIER_KEY,
+			'service_key' => CdekSettings::SERVICE_KEY,
+			'pickup_family' => 'cdek:pickup',
+			'point_code' => $pickup_case['point_code'],
+			'cdek_code' => $pickup_case['point_code'],
+			'delivery_point' => $pickup_case['point_code'],
+			'point_address' => $pickup_case['city'] . ', handout point',
+			'point_postcode' => '050000',
+			'city_name' => $pickup_case['city'],
+			'region_name' => $pickup_case['city'],
+			'country_code' => $pickup_country,
+			'cdek_city_code' => $pickup_case['city_code'],
+			'is_handout' => true,
+			'snapshot' => array(
+				'country_code' => $pickup_country,
+				'cdek_city_code' => $pickup_case['city_code'],
+				'is_handout' => true,
+				'point_code' => $pickup_case['point_code'],
+				'address' => $pickup_case['city'] . ', handout point',
+			),
+		),
+		'api' => array( 'response_tariff_sanitized' => array( 'delivery_mode' => 4 ), 'cdek_to_city_code' => $pickup_case['city_code'], 'cdek_to_country_code' => $pickup_country ),
+		'package' => array( 'products_weight_g' => 500, 'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ) ),
+	);
+	$pickup_draft = $drafts->draft_array( $pickup_order );
+	$pickup_draft_request = $pickup_draft['request'];
+	cdek_order_assert( $pickup_country === (string) ( $pickup_draft_request['recipient_address']['country_code'] ?? '' ) && $pickup_country === (string) ( $pickup_draft_request['meta']['pickup_point_row']['country_code'] ?? '' ), 'CDEK international pickup draft must preserve recipient and pickup country for ' . $pickup_country . '.' );
+	cdek_order_assert( $pickup_case['city_code'] === (int) ( $pickup_draft_request['meta']['pickup_point_row']['cdek_city_code'] ?? 0 ) && true === (bool) ( $pickup_draft_request['meta']['pickup_point_row']['is_handout'] ?? false ) && ! empty( $pickup_draft_request['meta']['pickup_point_found'] ), 'CDEK international pickup draft must require city code and confirmed handout point for ' . $pickup_country . '.' );
+	$pickup_modal_context = ( new CdekShipmentModalExtension() )->modal_context( $pickup_order, $pickup_draft );
+	cdek_order_assert( $pickup_country === (string) ( $pickup_modal_context['recipient_country'] ?? '' ), 'CDEK modal context must keep recipient_country=' . $pickup_country . ' for international pickup.' );
+	$pickup_admin_request = $drafts->create_request_from_admin_data(
+		$pickup_order,
+		array_merge(
+			$cdek_admin_document_data,
+			array(
+				'delivery_point' => $pickup_case['point_code'],
+				'pickup_point_code' => $pickup_case['point_code'],
+				'pickup_point_country' => $pickup_country,
+				'pickup_point_city' => $pickup_case['city'],
+				'pickup_point_region' => $pickup_case['city'],
+				'pickup_point_address' => $pickup_case['city'] . ', handout point',
+				'pickup_point_cdek_city_code' => (string) $pickup_case['city_code'],
+				'pickup_point_is_handout' => '1',
+				'cdek_recipient_document' => $pickup_country . '-DOC-123',
+			)
+		)
+	);
+	$pickup_payload = $builder->build( $pickup_admin_request );
+	cdek_order_assert( $pickup_country . '-DOC-123' === (string) ( $pickup_payload['recipient'][ $pickup_case['document_key'] ] ?? '' ), 'CDEK international pickup payload must map optional recipient document for ' . $pickup_country . '.' );
+	$empty_pickup_admin_request = $drafts->create_request_from_admin_data(
+		$pickup_order,
+		array_merge(
+			$cdek_admin_document_data,
+			array(
+				'delivery_point' => $pickup_case['point_code'],
+				'pickup_point_code' => $pickup_case['point_code'],
+				'pickup_point_country' => $pickup_country,
+				'pickup_point_cdek_city_code' => (string) $pickup_case['city_code'],
+				'pickup_point_is_handout' => '1',
+				'cdek_recipient_document' => '',
+			)
+		)
+	);
+	$empty_pickup_payload = $builder->build( $empty_pickup_admin_request );
+	cdek_order_assert( ! array_key_exists( 'tin', $empty_pickup_payload['recipient'] ) && ! array_key_exists( 'passport_number', $empty_pickup_payload['recipient'] ), 'CDEK international pickup payload must omit empty recipient document for ' . $pickup_country . '.' );
+}
+$invalid_foreign_pickup_order = new CdekOrderFakeOrder( 173 );
+$invalid_foreign_pickup_order->shipping_country = 'KZ';
+$invalid_foreign_pickup_order->meta = $draft_order->meta;
+$invalid_foreign_pickup_order->meta['_wdc_delivery_calculation_data']['pickup']['country_code'] = 'KZ';
+$invalid_foreign_pickup_order->meta['_wdc_delivery_calculation_data']['pickup']['cdek_city_code'] = 152;
+unset( $invalid_foreign_pickup_order->meta['_wdc_delivery_calculation_data']['pickup']['is_handout'] );
+$invalid_foreign_draft = $drafts->draft_array( $invalid_foreign_pickup_order );
+cdek_order_assert( empty( $invalid_foreign_draft['request']['meta']['pickup_point_found'] ) && array() !== $builder->validate( $drafts->create_request_from_order( $invalid_foreign_pickup_order ) ), 'CDEK foreign pickup without explicit is_handout must not be treated as a valid recipient point.' );
+$legacy_ru_pickup_order = new CdekOrderFakeOrder( 174 );
+$legacy_ru_pickup_order->meta = $draft_order->meta;
+unset( $legacy_ru_pickup_order->meta['_wdc_delivery_calculation_data']['pickup']['is_handout'], $legacy_ru_pickup_order->meta['_wdc_delivery_calculation_data']['pickup']['country_code'] );
+$legacy_ru_draft = $drafts->draft_array( $legacy_ru_pickup_order );
+cdek_order_assert( ! empty( $legacy_ru_draft['request']['meta']['pickup_point_found'] ), 'CDEK legacy RU pickup without is_handout must remain compatible only for RU/empty country context.' );
 $ru_admin_document_request = $drafts->create_request_from_admin_data(
 	$draft_order,
 	array_merge(

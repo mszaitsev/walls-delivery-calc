@@ -77,7 +77,7 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 			'pickup_row' => $pickup_row,
 			'pickup_context' => $pickup_context,
 			'pickup_family' => (string) ( $meta['pickup_family'] ?? CdekSettings::CARRIER_KEY . ':pickup' ),
-			'delivery_city_id' => (string) ( $meta['delivery_city_id'] ?? '' ),
+			'delivery_city_id' => (string) ( $meta['delivery_city_id'] ?? $pickup_row['cdek_city_code'] ?? '' ),
 			'pickup_point_found' => ! empty( $meta['pickup_point_found'] ),
 			'pickup_type_label' => $this->pickup_type_label( $pickup_row ),
 			'pickup_location_postcode' => $recipient_postcode,
@@ -119,6 +119,8 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		$pickup_row = is_array( $context['pickup_row'] ?? null ) ? $context['pickup_row'] : array();
 		$pickup_context = is_array( $context['pickup_context'] ?? null ) ? $context['pickup_context'] : array();
 		$pickup_code = (string) ( $context['pickup_code'] ?? '' );
+		$pickup_row_has_handout = array_key_exists( 'is_handout', $pickup_row ) && null !== $pickup_row['is_handout'];
+		$pickup_row_handout_value = $pickup_row_has_handout ? ( true === filter_var( $pickup_row['is_handout'], FILTER_VALIDATE_BOOLEAN ) ? '1' : '0' ) : '';
 		?>
 		<input type="hidden" name="pickup_point_code" value="<?php echo esc_attr( $pickup_code ); ?>">
 		<input type="hidden" name="delivery_point" value="<?php echo esc_attr( $pickup_code ); ?>" data-wdc-delivery-point-field>
@@ -127,7 +129,8 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		<input type="hidden" name="pickup_point_city" value="<?php echo esc_attr( (string) ( $context['pickup_city'] ?? '' ) ); ?>" data-wdc-pickup-city-field>
 		<input type="hidden" name="pickup_point_region" value="<?php echo esc_attr( (string) ( $context['pickup_region'] ?? '' ) ); ?>" data-wdc-pickup-region-field>
 		<input type="hidden" name="pickup_point_country" value="<?php echo esc_attr( (string) ( $context['recipient_country'] ?? 'RU' ) ); ?>" data-wdc-pickup-country-field>
-		<input type="hidden" name="pickup_point_is_handout" value="<?php echo ! array_key_exists( 'is_handout', $pickup_row ) || ! empty( $pickup_row['is_handout'] ) ? '1' : '0'; ?>" data-wdc-pickup-handout-field>
+		<input type="hidden" name="pickup_point_cdek_city_code" value="<?php echo esc_attr( (string) ( $pickup_row['cdek_city_code'] ?? '' ) ); ?>" data-wdc-pickup-cdek-city-code-field>
+		<input type="hidden" name="pickup_point_is_handout" value="<?php echo esc_attr( $pickup_row_handout_value ); ?>" data-wdc-pickup-handout-field>
 		<?php $this->render_pickup_common_hidden( $pickup_row, $pickup_context, $context, CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, CdekSettings::CARRIER_KEY . ':pickup' ); ?>
 		<p><strong><?php echo esc_html__( 'Код ПВЗ', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pickup-index><?php echo esc_html( '' !== $pickup_code ? $pickup_code : '-' ); ?></span></p>
 		<?php if ( '' !== (string) ( $context['pickup_type_label'] ?? '' ) ) : ?>

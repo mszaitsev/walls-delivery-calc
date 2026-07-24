@@ -334,6 +334,7 @@ final class OrderShipmentDraftFactory {
 		$tariff_title = $this->cdek_tariff_title( $tariff_row, $tariff_code, (string) ( $calculation['selected_tariff_title'] ?? $response_tariff['tariff_name'] ?? '' ) );
 		$pickup_code = $this->cdek_pickup_code( $pickup, $this->meta_string( $order, '_wdc_platform_pickup_code' ) ?: $this->meta_string( $order, '_wdc_pickup_point_code' ) );
 		$pickup_row = $this->cdek_pickup_row( $pickup );
+		$pickup_point_found = $this->cdek_pickup_row_valid( $pickup_row );
 		$location_context = $this->recipient_location_context( $order, $pickup_row );
 
 		return new ShipmentCreateRequest(
@@ -342,7 +343,7 @@ final class OrderShipmentDraftFactory {
 			delivery_type: $delivery_type,
 			rate_id: CdekCarrier::checkout_group_id( $delivery_type ),
 			recipient_address: $this->recipient_address( $order, $delivery_type, $pickup_row ),
-			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $pickup_code ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, $pickup_code, (string) ( $pickup['point_address'] ?? '' ), $this->now() ) : null,
+			pickup_point: DeliveryType::PICKUP === $delivery_type && $pickup_point_found ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, $pickup_code, (string) ( $pickup['point_address'] ?? '' ), $this->now() ) : null,
 			places: array( $place ),
 			declared_value: Money::from_kopecks( 0 ),
 			services: array(),
@@ -370,10 +371,10 @@ final class OrderShipmentDraftFactory {
 				'sender_address' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->sender_address() : '',
 				'shipment_point' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point() : '',
 				'shipment_point_address' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point_address() : '',
-				'delivery_point' => $pickup_code,
-				'pickup_point_code' => $pickup_code,
+				'delivery_point' => $pickup_point_found ? $pickup_code : '',
+				'pickup_point_code' => $pickup_point_found ? $pickup_code : '',
 				'pickup_point_postcode' => (string) ( $pickup['point_postcode'] ?? '' ),
-				'pickup_point_found' => '' !== $pickup_code,
+				'pickup_point_found' => $pickup_point_found,
 				'pickup_point_row' => $pickup_row,
 				'pickup_family' => CdekSettings::CARRIER_KEY . ':pickup',
 				'pickup_location_context' => $location_context,
@@ -401,7 +402,8 @@ final class OrderShipmentDraftFactory {
 		$shipment_point = preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( sanitize_text_field( wp_unslash( $data['shipment_point'] ?? $data['sender_shipment_point'] ?? $base->meta['shipment_point'] ?? '' ) ) ) ) ?? '';
 		$shipment_point_address = sanitize_text_field( wp_unslash( $data['shipment_point_address'] ?? $data['sender_shipment_point_address'] ?? $base->meta['shipment_point_address'] ?? '' ) );
 		$pickup_row = DeliveryType::PICKUP === $delivery_type ? $this->cdek_pickup_row_from_admin_data( $data, $base->meta ) : array();
-		$pickup_code = DeliveryType::PICKUP === $delivery_type ? (string) ( $pickup_row['point_code'] ?? $base->meta['pickup_point_code'] ?? '' ) : '';
+		$pickup_point_found = DeliveryType::PICKUP === $delivery_type && $this->cdek_pickup_row_valid( $pickup_row );
+		$pickup_code = $pickup_point_found ? (string) ( $pickup_row['point_code'] ?? '' ) : '';
 		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? '' ) );
 		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->normalized_address_from_admin_data( $data, $original_address, CdekSettings::SERVICE_KEY ) : array();
 		$shipment_data = $this->shipment_modal_mapper()->parse( $data );
@@ -428,7 +430,7 @@ final class OrderShipmentDraftFactory {
 			$delivery_type,
 			$base->rate_id,
 			$recipient_address,
-			DeliveryType::PICKUP === $delivery_type && '' !== $pickup_code ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, $pickup_code, (string) ( $pickup_row['address'] ?? '' ), $base->pickup_point?->selected_at ?: $this->now() ) : null,
+			DeliveryType::PICKUP === $delivery_type && $pickup_point_found ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, $pickup_code, (string) ( $pickup_row['address'] ?? '' ), $base->pickup_point?->selected_at ?: $this->now() ) : null,
 			array() !== $places ? $places : $base->places,
 			$base->declared_value,
 			false,
@@ -459,10 +461,10 @@ final class OrderShipmentDraftFactory {
 					'cdek_delivery_address' => (string) ( $normalized_address['fields']['cdek_delivery_address'] ?? $base->meta['cdek_delivery_address'] ?? '' ),
 					'cdek_lat' => (string) ( $normalized_address['fields']['cdek_lat'] ?? $base->meta['cdek_lat'] ?? '' ),
 					'cdek_lon' => (string) ( $normalized_address['fields']['cdek_lon'] ?? $base->meta['cdek_lon'] ?? '' ),
-					'delivery_point' => DeliveryType::PICKUP === $delivery_type ? $pickup_code : (string) ( $base->meta['delivery_point'] ?? '' ),
-					'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $pickup_code : (string) ( $base->meta['pickup_point_code'] ?? '' ),
+					'delivery_point' => DeliveryType::PICKUP === $delivery_type ? ( $pickup_point_found ? $pickup_code : '' ) : (string) ( $base->meta['delivery_point'] ?? '' ),
+					'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? ( $pickup_point_found ? $pickup_code : '' ) : (string) ( $base->meta['pickup_point_code'] ?? '' ),
 					'pickup_point_postcode' => DeliveryType::PICKUP === $delivery_type ? (string) ( $pickup_row['postcode'] ?? $base->meta['pickup_point_postcode'] ?? '' ) : (string) ( $base->meta['pickup_point_postcode'] ?? '' ),
-					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? '' !== $pickup_code : ! empty( $base->meta['pickup_point_found'] ),
+					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? $pickup_point_found : ! empty( $base->meta['pickup_point_found'] ),
 					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->safe_pickup_row( $pickup_row ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
 					'shipment_item_rows' => $item_rows,
 				)
@@ -953,7 +955,7 @@ final class OrderShipmentDraftFactory {
 	private function recipient_address( object $order, string $delivery_type, ?array $pickup_row = null, array $normalized_address = array() ): Address {
 		if ( DeliveryType::PICKUP === $delivery_type ) {
 			$row = is_array( $pickup_row ) ? $pickup_row : array();
-			$country_code = strtoupper( trim( (string) ( $row['country_code'] ?? ( method_exists( $order, 'get_shipping_country' ) ? $order->get_shipping_country() : 'RU' ) ) ) );
+			$country_code = strtoupper( trim( $this->first_non_empty( $row['country_code'] ?? '', method_exists( $order, 'get_shipping_country' ) ? $order->get_shipping_country() : '' ) ) );
 			$country_code = $this->cdek_country_code( $country_code );
 
 			return new Address(
@@ -997,7 +999,7 @@ final class OrderShipmentDraftFactory {
 			if ( array() === $pickup_row ) {
 				return $base;
 			}
-			$country_code = strtoupper( trim( (string) ( $pickup_row['country_code'] ?? ( $base->country_code ?: 'RU' ) ) ) );
+			$country_code = strtoupper( trim( $this->first_non_empty( $pickup_row['country_code'] ?? '', $base->country_code ) ) );
 			$country_code = $this->cdek_country_code( $country_code );
 
 			return new Address(
@@ -1166,6 +1168,7 @@ final class OrderShipmentDraftFactory {
 		if ( array() === $row ) {
 			return array();
 		}
+		$has_handout = array_key_exists( 'is_handout', $row ) && null !== $row['is_handout'];
 
 		return array(
 			'point_code' => (string) ( $row['point_code'] ?? '' ),
@@ -1179,7 +1182,7 @@ final class OrderShipmentDraftFactory {
 			'display_title' => (string) ( $row['display_title'] ?? '' ),
 			'cdek_code' => (string) ( $row['cdek_code'] ?? $row['point_code'] ?? '' ),
 			'cdek_city_code' => (int) ( $row['cdek_city_code'] ?? 0 ),
-			'is_handout' => ! array_key_exists( 'is_handout', $row ) || filter_var( $row['is_handout'], FILTER_VALIDATE_BOOLEAN ),
+			'is_handout' => $has_handout ? filter_var( $row['is_handout'], FILTER_VALIDATE_BOOLEAN ) : null,
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 		);
@@ -1292,8 +1295,13 @@ final class OrderShipmentDraftFactory {
 		if ( array() === $pickup ) {
 			return array();
 		}
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 
 		$point_code = $this->cdek_pickup_code( $pickup );
+		$country_code = strtoupper( trim( $this->first_non_empty( $pickup['country_code'] ?? '', $snapshot['country_code'] ?? '' ) ) );
+		$cdek_city_code = (int) $this->first_positive_int( $pickup['cdek_city_code'] ?? null, $snapshot['cdek_city_code'] ?? null, $pickup['city_code'] ?? null, $snapshot['city_code'] ?? null );
+		$has_handout = array_key_exists( 'is_handout', $pickup ) || array_key_exists( 'is_handout', $snapshot );
+		$is_handout = array_key_exists( 'is_handout', $pickup ) ? filter_var( $pickup['is_handout'], FILTER_VALIDATE_BOOLEAN ) : ( array_key_exists( 'is_handout', $snapshot ) ? filter_var( $snapshot['is_handout'], FILTER_VALIDATE_BOOLEAN ) : null );
 
 		return array(
 			'point_code' => $point_code,
@@ -1305,12 +1313,37 @@ final class OrderShipmentDraftFactory {
 			'point_title' => (string) ( $pickup['point_title'] ?? $pickup['display_title'] ?? '' ),
 			'display_title' => (string) ( $pickup['display_title'] ?? '' ),
 			'cdek_code' => $point_code,
-			'country_code' => (string) ( $pickup['country_code'] ?? 'RU' ),
-			'cdek_city_code' => (int) ( $pickup['cdek_city_code'] ?? 0 ),
-			'is_handout' => ! array_key_exists( 'is_handout', $pickup ) || filter_var( $pickup['is_handout'], FILTER_VALIDATE_BOOLEAN ),
+			'country_code' => $country_code,
+			'cdek_city_code' => $cdek_city_code,
+			'is_handout' => $has_handout ? (bool) $is_handout : null,
 			'latitude' => is_numeric( $pickup['lat'] ?? $pickup['latitude'] ?? null ) ? (float) ( $pickup['lat'] ?? $pickup['latitude'] ) : null,
 			'longitude' => is_numeric( $pickup['lng'] ?? $pickup['longitude'] ?? null ) ? (float) ( $pickup['lng'] ?? $pickup['longitude'] ) : null,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function cdek_pickup_row_valid( array $row ): bool {
+		$point_code = (string) ( $row['point_code'] ?? '' );
+		if ( '' === $point_code ) {
+			return false;
+		}
+		$country_code = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
+		$cdek_city_code = (int) ( $row['cdek_city_code'] ?? 0 );
+		$has_handout = array_key_exists( 'is_handout', $row ) && null !== $row['is_handout'];
+		$is_handout = $has_handout ? filter_var( $row['is_handout'], FILTER_VALIDATE_BOOLEAN ) : null;
+		if ( in_array( $country_code, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
+			return $cdek_city_code > 0 && true === $is_handout;
+		}
+		if ( '' !== $country_code && 'RU' !== $country_code ) {
+			return false;
+		}
+		if ( $has_handout ) {
+			return true === $is_handout;
+		}
+
+		return true;
 	}
 
 	/**
@@ -1347,6 +1380,16 @@ final class OrderShipmentDraftFactory {
 		return '';
 	}
 
+	private function first_positive_int( mixed ...$values ): int {
+		foreach ( $values as $value ) {
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
+	}
+
 	/**
 	 * @param array<string,mixed> $data
 	 * @param array<string,mixed> $base_meta
@@ -1367,20 +1410,30 @@ final class OrderShipmentDraftFactory {
 		$address = sanitize_text_field( wp_unslash( $data['pickup_point_address'] ?? $base_row['address'] ?? '' ) );
 		$city = sanitize_text_field( wp_unslash( $data['pickup_point_city'] ?? $base_row['city_name'] ?? '' ) );
 		$region = sanitize_text_field( wp_unslash( $data['pickup_point_region'] ?? $base_row['region_name'] ?? '' ) );
-		$country_code = strtoupper( trim( sanitize_text_field( wp_unslash( $data['pickup_point_country'] ?? $base_row['country_code'] ?? 'RU' ) ) ) );
+		$country_code = strtoupper( trim( sanitize_text_field( wp_unslash( $data['pickup_point_country'] ?? $base_row['country_code'] ?? $base_meta['recipient_address']['country_code'] ?? '' ) ) ) );
 		$country_code = $this->cdek_country_code( $country_code );
-		$is_handout = array_key_exists( 'pickup_point_is_handout', $data )
-			? filter_var( wp_unslash( $data['pickup_point_is_handout'] ), FILTER_VALIDATE_BOOLEAN )
-			: ( ! array_key_exists( 'is_handout', $base_row ) || filter_var( $base_row['is_handout'], FILTER_VALIDATE_BOOLEAN ) );
+		$posted_handout = wp_unslash( $data['pickup_point_is_handout'] ?? '' );
+		$has_posted_handout = array_key_exists( 'pickup_point_is_handout', $data ) && '' !== trim( (string) $posted_handout );
+		$is_handout = $has_posted_handout
+			? filter_var( $posted_handout, FILTER_VALIDATE_BOOLEAN )
+			: ( array_key_exists( 'is_handout', $base_row ) && null !== $base_row['is_handout'] ? filter_var( $base_row['is_handout'], FILTER_VALIDATE_BOOLEAN ) : null );
+		$cdek_city_code = (int) $this->first_positive_int( $data['pickup_point_cdek_city_code'] ?? null, $data['recipient_location_city_id'] ?? null, $base_row['cdek_city_code'] ?? null, $base_meta['cdek_to_city_code'] ?? null );
 		$latitude = is_numeric( $data['pickup_point_lat'] ?? null ) ? (float) $data['pickup_point_lat'] : ( is_numeric( $base_row['lat'] ?? null ) ? (float) $base_row['lat'] : null );
 		$longitude = is_numeric( $data['pickup_point_lng'] ?? null ) ? (float) $data['pickup_point_lng'] : ( is_numeric( $base_row['lng'] ?? null ) ? (float) $base_row['lng'] : null );
-		if ( '' === $point_code || ! $is_handout ) {
+		$row = array(
+			'point_code' => $point_code,
+			'country_code' => $country_code,
+			'cdek_city_code' => $cdek_city_code,
+			'is_handout' => $is_handout,
+		);
+		if ( ! $this->cdek_pickup_row_valid( $row ) ) {
 			return array();
 		}
 
 		return array(
 			'point_code' => $point_code,
 			'country_code' => $country_code,
+			'cdek_city_code' => $cdek_city_code,
 			'postcode' => $postcode,
 			'region_name' => $region,
 			'city_name' => $city,
