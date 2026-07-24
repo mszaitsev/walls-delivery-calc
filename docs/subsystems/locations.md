@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.128.1
+Version: 0.128.2
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 
@@ -19,8 +19,8 @@ Foreign DPD imports use `dpd_city_id` in `wdc_location_delivery_codes` for idemp
 - Courier addresses are normalized when possible; fallback address text is allowed when the normalizer is unavailable or cannot match.
 - Pickup selection stores only fields needed for checkout and carrier shipment creation.
 - Pickup maps/lists must stay scoped to WDC UI and must not override global WooCommerce controls.
-- Russian Post pickup import/settings live under `Службы доставки → Почта России → ПВЗ / ОПС`; pickup database diagnostics live under `Службы доставки → Почта России → Диагностика базы ПВЗ`.
+- Russian Post pickup import/settings live under `РЎР»СѓР¶Р±С‹ РґРѕСЃС‚Р°РІРєРё в†’ РџРѕС‡С‚Р° Р РѕСЃСЃРёРё в†’ РџР’Р— / РћРџРЎ`; pickup database diagnostics live under `РЎР»СѓР¶Р±С‹ РґРѕСЃС‚Р°РІРєРё в†’ РџРѕС‡С‚Р° Р РѕСЃСЃРёРё в†’ Р”РёР°РіРЅРѕСЃС‚РёРєР° Р±Р°Р·С‹ РџР’Р—`.
 
 ## Pickup Styling Ownership
 
-WDC owns the pickup modal, pickup list, selected pickup card, and pickup checkout controls. It must not override global WooCommerce button pseudo-elements or unrelated checkout buttons. External payment/shipping text such as `Оплата по счету от ИП/ООО` belongs to the external plugin or theme that renders it; WDC styles only its scoped `wdc-pickup-*` UI.
+WDC owns the pickup modal, pickup list, selected pickup card, and pickup checkout controls. It must not override global WooCommerce button pseudo-elements or unrelated checkout buttons. External payment/shipping text such as `РћРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ РѕС‚ РРџ/РћРћРћ` belongs to the external plugin or theme that renders it; WDC styles only its scoped `wdc-pickup-*` UI.

@@ -160,13 +160,13 @@ final class CheckoutLocationSearch {
 		return $this->search_service->last_search_meta();
 	}
 
-	public function best_match( string $query ): ?Location {
+	public function best_match( string $query, string $country_code = '' ): ?Location {
 		$normalized = $this->search_service->normalize( $query );
 		if ( '' === $normalized ) {
 			return null;
 		}
 
-		$locations = $this->search_service->search( $query, 50 );
+		$locations = $this->search_service->search( $query, 50, $country_code );
 		if ( array() === $locations ) {
 			return null;
 		}

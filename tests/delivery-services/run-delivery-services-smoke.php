@@ -304,7 +304,7 @@ $run_cdek_eaeu_migration = static function ( array $seed_countries, bool $reset_
 	}
 	$migration_file = $migration_dir . DIRECTORY_SEPARATOR . '0042_seed_cdek_eaeu_countries.php';
 	copy( dirname( __DIR__, 2 ) . '/database/migrations/0042_seed_cdek_eaeu_countries.php', $migration_file );
-	( new MigrationManager( '0.128.1-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.128.2-test', $migration_dir ) )->run();
 	@unlink( $migration_file );
 	@rmdir( $migration_dir );
 
@@ -326,10 +326,10 @@ $yandex = $services->ensure_yandex_delivery_service();
 $yandex_settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService(), $services, $settings );
 wdc_ds_assert( YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE === $yandex_settings->pickup_method_title(), 'Yandex Delivery pickup method title must use default when service setting is absent.' );
 wdc_ds_assert( YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE === $yandex_settings->courier_method_title(), 'Yandex Delivery courier method title must use default when service setting is absent.' );
-$settings->set_setting( (int) $yandex->id, YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY, 'Яндекс кастом ПВЗ', 'string' );
-$settings->set_setting( (int) $yandex->id, YandexDeliverySettings::COURIER_METHOD_TITLE_KEY, 'Яндекс кастом дверь', 'string' );
-wdc_ds_assert( 'Яндекс кастом ПВЗ' === $yandex_settings->pickup_method_title(), 'Yandex Delivery pickup method title must return saved custom value.' );
-wdc_ds_assert( 'Яндекс кастом дверь' === $yandex_settings->courier_method_title(), 'Yandex Delivery courier method title must return saved custom value.' );
+$settings->set_setting( (int) $yandex->id, YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY, 'РЇРЅРґРµРєСЃ РєР°СЃС‚РѕРј РџР’Р—', 'string' );
+$settings->set_setting( (int) $yandex->id, YandexDeliverySettings::COURIER_METHOD_TITLE_KEY, 'РЇРЅРґРµРєСЃ РєР°СЃС‚РѕРј РґРІРµСЂСЊ', 'string' );
+wdc_ds_assert( 'РЇРЅРґРµРєСЃ РєР°СЃС‚РѕРј РџР’Р—' === $yandex_settings->pickup_method_title(), 'Yandex Delivery pickup method title must return saved custom value.' );
+wdc_ds_assert( 'РЇРЅРґРµРєСЃ РєР°СЃС‚РѕРј РґРІРµСЂСЊ' === $yandex_settings->courier_method_title(), 'Yandex Delivery courier method title must return saved custom value.' );
 $domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 wdc_ds_assert( $domestic instanceof DeliveryService && RussianPostDomesticSettings::TITLE === $domestic->title && RussianPostDomesticSettings::CARRIER_KEY === $domestic->carrier_key, 'Unified domestic predefined service must have canonical title and carrier key.' );
 $services->update_service( (int) $domestic->id, array( 'title' => 'Custom domestic title' ) );
@@ -376,9 +376,9 @@ wdc_ds_assert( $custom instanceof DeliveryService && ! $custom->enabled && 10.5 
 $services->update_service( $custom_id, array( 'minimum_price_rub' => '-5,25' ) );
 $custom = $services->find_by_service_key( 'fixed_test' );
 wdc_ds_assert( $custom instanceof DeliveryService && 0.0 === $custom->minimum_price_rub, 'minimum_price_rub must clamp negative values to zero.' );
-$services->update_service( $custom_id, array( 'pickup_customer_comment' => "ПВЗ\nкомментарий", 'courier_customer_comment' => 'Курьерский комментарий' ) );
+$services->update_service( $custom_id, array( 'pickup_customer_comment' => "РџР’Р—\nРєРѕРјРјРµРЅС‚Р°СЂРёР№", 'courier_customer_comment' => 'РљСѓСЂСЊРµСЂСЃРєРёР№ РєРѕРјРјРµРЅС‚Р°СЂРёР№' ) );
 $custom = $services->find_by_service_key( 'fixed_test' );
-wdc_ds_assert( $custom instanceof DeliveryService && "ПВЗ\nкомментарий" === $custom->pickup_customer_comment && 'Курьерский комментарий' === $custom->courier_customer_comment, 'Service customer comments must save and load.' );
+wdc_ds_assert( $custom instanceof DeliveryService && "РџР’Р—\nРєРѕРјРјРµРЅС‚Р°СЂРёР№" === $custom->pickup_customer_comment && 'РљСѓСЂСЊРµСЂСЃРєРёР№ РєРѕРјРјРµРЅС‚Р°СЂРёР№' === $custom->courier_customer_comment, 'Service customer comments must save and load.' );
 $services->update_service( $custom_id, array( 'pickup_customer_comment' => '', 'courier_customer_comment' => '' ) );
 $custom = $services->find_by_service_key( 'fixed_test' );
 wdc_ds_assert( $custom instanceof DeliveryService && '' === $custom->pickup_customer_comment && '' === $custom->courier_customer_comment, 'Service customer comments may be empty.' );
@@ -435,16 +435,16 @@ $comment_service = DeliveryService::from_array(
 		'service_key' => 'commented',
 		'carrier_key' => 'carrier',
 		'title' => 'Commented',
-		'pickup_customer_comment' => 'Комментарий ПВЗ',
-		'courier_customer_comment' => 'Комментарий курьера',
+		'pickup_customer_comment' => 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РџР’Р—',
+		'courier_customer_comment' => 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РєСѓСЂСЊРµСЂР°',
 	)
 );
-$pickup_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'tariff', 'Tariff', DeliveryType::PICKUP, 'Svc', Money::from_rubles( 100 ), null, null, DateRange::range( null, null ), '', '', array( 'Комментарий правила' ) ), $comment_service );
-wdc_ds_assert( array( 'Комментарий ПВЗ', 'Комментарий правила' ) === $pickup_rate->comments && 'yes' === $pickup_rate->meta['service_customer_comment_applied'] && DeliveryType::PICKUP === $pickup_rate->meta['service_customer_comment_type'], 'Pickup service customer comment must be prepended before rule comments.' );
-wdc_ds_assert( ! in_array( 'Комментарий курьера', $pickup_rate->comments, true ), 'Courier customer comment must not appear on pickup rates.' );
+$pickup_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'tariff', 'Tariff', DeliveryType::PICKUP, 'Svc', Money::from_rubles( 100 ), null, null, DateRange::range( null, null ), '', '', array( 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РїСЂР°РІРёР»Р°' ) ), $comment_service );
+wdc_ds_assert( array( 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РџР’Р—', 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РїСЂР°РІРёР»Р°' ) === $pickup_rate->comments && 'yes' === $pickup_rate->meta['service_customer_comment_applied'] && DeliveryType::PICKUP === $pickup_rate->meta['service_customer_comment_type'], 'Pickup service customer comment must be prepended before rule comments.' );
+wdc_ds_assert( ! in_array( 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РєСѓСЂСЊРµСЂР°', $pickup_rate->comments, true ), 'Courier customer comment must not appear on pickup rates.' );
 $courier_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'tariff', 'Tariff', DeliveryType::COURIER, 'Svc', Money::from_rubles( 100 ), null, null, DateRange::range( null, null ) ), $comment_service );
-wdc_ds_assert( array( 'Комментарий курьера' ) === $courier_rate->comments && DeliveryType::COURIER === $courier_rate->meta['service_customer_comment_type'], 'Courier service customer comment must apply only to courier rates.' );
-wdc_ds_assert( ! in_array( 'Комментарий ПВЗ', $courier_rate->comments, true ), 'Pickup customer comment must not appear on courier rates.' );
+wdc_ds_assert( array( 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РєСѓСЂСЊРµСЂР°' ) === $courier_rate->comments && DeliveryType::COURIER === $courier_rate->meta['service_customer_comment_type'], 'Courier service customer comment must apply only to courier rates.' );
+wdc_ds_assert( ! in_array( 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РџР’Р—', $courier_rate->comments, true ), 'Pickup customer comment must not appear on courier rates.' );
 $fallback_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'fallback', 'Fallback', DeliveryType::PICKUP, 'fallback text', Money::from_rubles( 0 ), null, null, DateRange::range( null, null ), '', '', array(), false, '', false, false, array( 'fallback' => true, 'skip_service_post_processing' => true ) ), $comment_service );
 wdc_ds_assert( 'fallback text' === $fallback_rate->title && array() === $fallback_rate->comments && 'no' === $fallback_rate->meta['service_customer_comment_applied'], 'Fallback rate must keep fallback_text as title without service customer comments.' );
 $processed_fallback = $manager->post_process_rate(
@@ -490,7 +490,7 @@ $GLOBALS['wpdb']->services[] = array(
 	'service_key' => 'russian_post_domestic_pickup',
 	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 	'service_type' => DeliveryService::TYPE_API,
-	'title' => 'Почта России до ПВЗ / ОПС',
+	'title' => 'РџРѕС‡С‚Р° Р РѕСЃСЃРёРё РґРѕ РџР’Р— / РћРџРЎ',
 	'enabled' => 1,
 	'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
 	'use_default_rules_when_no_service_rules' => 1,
@@ -510,7 +510,7 @@ $GLOBALS['wpdb']->services[] = array(
 	'service_key' => 'russian_post_domestic_courier',
 	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 	'service_type' => DeliveryService::TYPE_API,
-	'title' => 'Почта России курьером',
+	'title' => 'РџРѕС‡С‚Р° Р РѕСЃСЃРёРё РєСѓСЂСЊРµСЂРѕРј',
 	'enabled' => 1,
 	'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
 	'use_default_rules_when_no_service_rules' => 1,
@@ -621,29 +621,29 @@ wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_p
 
 $delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && ! str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render availability fields inside main tab and not expose a separate availability tab.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && str_contains( $delivery_admin_source, 'Диагностика базы ПВЗ' ) && str_contains( $delivery_admin_source, 'render_russian_post_pickup_diagnostics_tab' ), 'Russian Post domestic admin must expose the pickup diagnostics tab and delegate rendering to the specialized tab component.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && str_contains( $delivery_admin_source, 'Р”РёР°РіРЅРѕСЃС‚РёРєР° Р±Р°Р·С‹ РџР’Р—' ) && str_contains( $delivery_admin_source, 'render_russian_post_pickup_diagnostics_tab' ), 'Russian Post domestic admin must expose the pickup diagnostics tab and delegate rendering to the specialized tab component.' );
 $domestic_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_domestic_service( $service ) )' ), 700 );
 $cdek_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_cdek_service( $service ) )' ), 450 );
 $yandex_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_yandex_delivery_service( $service ) )' ), 450 );
 wdc_ds_assert( str_contains( $domestic_tabs_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && ! str_contains( $cdek_tabs_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && ! str_contains( $yandex_tabs_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ), 'Pickup diagnostics tab must be added only for Russian Post domestic service tabs.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, "'save_availability' => 'main'" ) && str_contains( $delivery_admin_source, 'sanitize_availability_data' ), 'Legacy availability save action must redirect to main while preserving backend save handling.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_embedded_for_context' ), 'Service rules tab must use embedded reusable rules UI.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countries_tab' ) && str_contains( $delivery_admin_source, 'Страны Почты России' ), 'Russian Post countries must be embedded as a service tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countries_tab' ) && str_contains( $delivery_admin_source, 'РЎС‚СЂР°РЅС‹ РџРѕС‡С‚С‹ Р РѕСЃСЃРёРё' ), 'Russian Post countries must be embedded as a service tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_settings' ) && str_contains( $delivery_admin_source, 'DeliveryServiceSettingsRepository' ), 'Russian Post calculation settings must save to delivery service settings storage.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_domestic_api_settings' ) && str_contains( $delivery_admin_source, 'Tariff API endpoint' ) && str_contains( $delivery_admin_source, 'Tariff API token, если выдан Почтой' ), 'Domestic tariff API endpoint/token must save from API / Credentials because the client uses Authorization when token is configured.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'Индекс отправки для расчета доставки' ) && str_contains( $delivery_admin_source, 'Индекс возврата для расчета доставки' ) && ! str_contains( $delivery_admin_source, 'Индексы отделений для отправки' ), 'Domestic calculation index labels must clarify tariff calculation usage.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_domestic_api_settings' ) && str_contains( $delivery_admin_source, 'Tariff API endpoint' ) && str_contains( $delivery_admin_source, 'Tariff API token, РµСЃР»Рё РІС‹РґР°РЅ РџРѕС‡С‚РѕР№' ), 'Domestic tariff API endpoint/token must save from API / Credentials because the client uses Authorization when token is configured.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'РРЅРґРµРєСЃ РѕС‚РїСЂР°РІРєРё РґР»СЏ СЂР°СЃС‡РµС‚Р° РґРѕСЃС‚Р°РІРєРё' ) && str_contains( $delivery_admin_source, 'РРЅРґРµРєСЃ РІРѕР·РІСЂР°С‚Р° РґР»СЏ СЂР°СЃС‡РµС‚Р° РґРѕСЃС‚Р°РІРєРё' ) && ! str_contains( $delivery_admin_source, 'РРЅРґРµРєСЃС‹ РѕС‚РґРµР»РµРЅРёР№ РґР»СЏ РѕС‚РїСЂР°РІРєРё' ), 'Domestic calculation index labels must clarify tariff calculation usage.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, "'default_from_postcode' => array( 'value' => \$string( 'rp_default_from_postcode'" ) && strpos( $delivery_admin_source, 'POSTOFFICE_CODES_KEY' ) < strpos( $delivery_admin_source, 'rp_default_from_postcode' ), 'default_from_postcode must save from API / Credentials after postoffice codes.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_method_title' ) && str_contains( $delivery_admin_source, 'courier_method_title' ) && str_contains( $delivery_admin_source, 'Название варианта до ПВЗ / ОПС' ), 'Domestic pickup/courier method titles must be configurable on the main tab.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'save_cdek_main_settings' ) && str_contains( $delivery_admin_source, 'sanitize_cdek_main_settings_from_post' ) && str_contains( $delivery_admin_source, 'Название варианта до пункта выдачи' ), 'CDEK pickup/courier method titles must be configurable on the main tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_method_title' ) && str_contains( $delivery_admin_source, 'courier_method_title' ) && str_contains( $delivery_admin_source, 'РќР°Р·РІР°РЅРёРµ РІР°СЂРёР°РЅС‚Р° РґРѕ РџР’Р— / РћРџРЎ' ), 'Domestic pickup/courier method titles must be configurable on the main tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'save_cdek_main_settings' ) && str_contains( $delivery_admin_source, 'sanitize_cdek_main_settings_from_post' ) && str_contains( $delivery_admin_source, 'РќР°Р·РІР°РЅРёРµ РІР°СЂРёР°РЅС‚Р° РґРѕ РїСѓРЅРєС‚Р° РІС‹РґР°С‡Рё' ), 'CDEK pickup/courier method titles must be configurable on the main tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'save_yandex_delivery_main_settings' ) && str_contains( $delivery_admin_source, 'sanitize_yandex_delivery_main_settings_from_post' ) && str_contains( $delivery_admin_source, 'YandexDeliverySettings::PICKUP_METHOD_TITLE_KEY' ) && str_contains( $delivery_admin_source, 'YandexDeliverySettings::COURIER_METHOD_TITLE_KEY' ) && str_contains( $delivery_admin_source, 'YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE' ) && str_contains( $delivery_admin_source, 'YandexDeliverySettings::DEFAULT_COURIER_METHOD_TITLE' ), 'Yandex Delivery pickup/courier method titles must be configurable on the main tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'CdekSettings::DEFAULT_PICKUP_METHOD_TITLE' ) && str_contains( $delivery_admin_source, 'CdekSettings::DEFAULT_COURIER_METHOD_TITLE' ), 'CDEK method title defaults must come from CdekSettings.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) && str_contains( $delivery_admin_source, 'QuoteRequest' ) && str_contains( $delivery_admin_source, 'RussianPostInternationalCarrier' ), 'Russian Post service rules simulation must call the real carrier quote flow.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'include_packaging_weight' ) && str_contains( $delivery_admin_source, 'packaging_weight_mode' ) && ! str_contains( $delivery_admin_source, 'rp_packaging_tiers' ), 'Delivery service calculation tab must expose packaging controls and not Russian Post packaging tiers.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'tariff_admin_comment' ) && str_contains( $delivery_admin_source, 'admin_comment' ), 'Domestic tariffs tab must save an internal admin comment.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'Прибавлять к общему весу посылки' ) && str_contains( $delivery_admin_source, 'Добавлять отдельной строкой «Упаковка»' ), 'Packaging mode select must render Russian labels while storing technical values.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_customer_comment' ) && str_contains( $delivery_admin_source, 'courier_customer_comment' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — доставка до ПВЗ' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — курьерская доставка' ), 'Delivery service calculation tab must expose pickup/courier customer comments.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'Справочник перевозчика' ) && str_contains( $delivery_admin_source, 'Только выбранные страны' ) && str_contains( $delivery_admin_source, 'Все страны, кроме выбранных' ) && str_contains( $delivery_admin_source, 'AVAILABILITY_CARRIER_DIRECTORY' ), 'Availability select must render Russian labels while storing technical values.' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'Минимальная цена, руб.' ) && str_contains( $delivery_admin_source, 'Ставка НДС' ), 'Calculation tab must render translated labels.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'РџСЂРёР±Р°РІР»СЏС‚СЊ Рє РѕР±С‰РµРјСѓ РІРµСЃСѓ РїРѕСЃС‹Р»РєРё' ) && str_contains( $delivery_admin_source, 'Р”РѕР±Р°РІР»СЏС‚СЊ РѕС‚РґРµР»СЊРЅРѕР№ СЃС‚СЂРѕРєРѕР№ В«РЈРїР°РєРѕРІРєР°В»' ), 'Packaging mode select must render Russian labels while storing technical values.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_customer_comment' ) && str_contains( $delivery_admin_source, 'courier_customer_comment' ) && str_contains( $delivery_admin_source, 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РґР»СЏ РїРѕРєСѓРїР°С‚РµР»СЏ вЂ” РґРѕСЃС‚Р°РІРєР° РґРѕ РџР’Р—' ) && str_contains( $delivery_admin_source, 'РљРѕРјРјРµРЅС‚Р°СЂРёР№ РґР»СЏ РїРѕРєСѓРїР°С‚РµР»СЏ вЂ” РєСѓСЂСЊРµСЂСЃРєР°СЏ РґРѕСЃС‚Р°РІРєР°' ), 'Delivery service calculation tab must expose pickup/courier customer comments.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'РЎРїСЂР°РІРѕС‡РЅРёРє РїРµСЂРµРІРѕР·С‡РёРєР°' ) && str_contains( $delivery_admin_source, 'РўРѕР»СЊРєРѕ РІС‹Р±СЂР°РЅРЅС‹Рµ СЃС‚СЂР°РЅС‹' ) && str_contains( $delivery_admin_source, 'Р’СЃРµ СЃС‚СЂР°РЅС‹, РєСЂРѕРјРµ РІС‹Р±СЂР°РЅРЅС‹С…' ) && str_contains( $delivery_admin_source, 'AVAILABILITY_CARRIER_DIRECTORY' ), 'Availability select must render Russian labels while storing technical values.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'РњРёРЅРёРјР°Р»СЊРЅР°СЏ С†РµРЅР°, СЂСѓР±.' ) && str_contains( $delivery_admin_source, 'РЎС‚Р°РІРєР° РќР”РЎ' ), 'Calculation tab must render translated labels.' );
 wdc_ds_assert( ! str_contains( $delivery_admin_source, 'Minimum price RUB' ) && ! str_contains( $delivery_admin_source, 'VAT rate' ), 'Calculation tab must not render old English labels.' );
 
 $settings_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
@@ -652,7 +652,7 @@ wdc_ds_assert( ! str_contains( $settings_page_source, 'russian_post_worldwide_pa
 $rules_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
 preg_match( '/private function render_service_simulation_form\(\): void \{(?P<body>.*?)private function render_service_simulation/s', $rules_admin_source, $service_simulation_match );
 $service_simulation_body = (string) ( $service_simulation_match['body'] ?? '' );
-wdc_ds_assert( str_contains( $service_simulation_body, 'postal_code' ) && str_contains( $service_simulation_body, 'Почтовый индекс назначения' ), 'Domestic service simulation form must expose destination postcode.' );
+wdc_ds_assert( str_contains( $service_simulation_body, 'postal_code' ) && str_contains( $service_simulation_body, 'РџРѕС‡С‚РѕРІС‹Р№ РёРЅРґРµРєСЃ РЅР°Р·РЅР°С‡РµРЅРёСЏ' ), 'Domestic service simulation form must expose destination postcode.' );
 wdc_ds_assert( str_contains( $service_simulation_body, 'name="simulation[location_fias_id]"' ) && str_contains( $service_simulation_body, 'name="simulation[city]"' ) && str_contains( $service_simulation_body, 'simulation[country]' ) && str_contains( $service_simulation_body, 'simulation[selected_location_id]' ) && str_contains( $service_simulation_body, 'simulation[delivery_type]' ) && str_contains( $service_simulation_body, 'simulation[length_cm]' ), 'Service simulation form must expose carrier-aware destination, delivery type and package dimensions.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_runtime_carrier_service_rules' ) && str_contains( $delivery_admin_source, 'DpdQuoteCarrier' ) && str_contains( $delivery_admin_source, 'YandexDeliveryCarrier' ), 'DPD and Yandex Delivery service simulations must use the shared runtime carrier quote runner.' );
 
