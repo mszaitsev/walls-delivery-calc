@@ -304,7 +304,7 @@ $run_cdek_eaeu_migration = static function ( array $seed_countries, bool $reset_
 	}
 	$migration_file = $migration_dir . DIRECTORY_SEPARATOR . '0042_seed_cdek_eaeu_countries.php';
 	copy( dirname( __DIR__, 2 ) . '/database/migrations/0042_seed_cdek_eaeu_countries.php', $migration_file );
-	( new MigrationManager( '0.128.2-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.128.3-test', $migration_dir ) )->run();
 	@unlink( $migration_file );
 	@rmdir( $migration_dir );
 

@@ -159,6 +159,7 @@ final class PickupMapCheckout {
 				}
 			}
 		}
+		$context = $this->canonical_pickup_context( $context, $this->active_pickup_rate_country_code() );
 
 		$country_code = strtoupper( (string) ( $context['country_code'] ?? 'RU' ) );
 		$rate_country = $this->active_pickup_rate_country_code();
@@ -182,9 +183,9 @@ final class PickupMapCheckout {
 				'lng'   => $lng,
 				'query' => $this->initial_query( $context ),
 				'location_id' => $context['location_id'] ?? $context['id'] ?? null,
-				'city_code' => $context['city_code'] ?? $context['cdek_city_code'] ?? null,
-				'cdek_city_code' => $context['cdek_city_code'] ?? $context['city_code'] ?? null,
-				'city_name' => $context['city_name'] ?? $context['settlement_name'] ?? $context['place_name'] ?? null,
+				'city_code' => $context['city_code'] ?? null,
+				'cdek_city_code' => $context['cdek_city_code'] ?? null,
+				'city_name' => $context['city_name'] ?? null,
 				'region_name' => $context['region_name'] ?? null,
 				'postcode' => $context['postcode'] ?? $context['postal_code'] ?? null,
 				'country_code' => $country_code,
@@ -203,6 +204,51 @@ final class PickupMapCheckout {
 		$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
 
 		return $location;
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 * @return array<string,mixed>
+	 */
+	private function canonical_pickup_context( array $context, string $rate_country ): array {
+		$city_code = $this->first_text(
+			$context['city_code'] ?? '',
+			$context['cdek_city_code'] ?? '',
+			$context['cdek_to_city_code'] ?? ''
+		);
+		$cdek_city_code = $this->first_text(
+			$context['cdek_city_code'] ?? '',
+			$context['city_code'] ?? '',
+			$context['cdek_to_city_code'] ?? ''
+		);
+		$city_name = $this->first_text(
+			$context['city_name'] ?? '',
+			$context['settlement_name'] ?? '',
+			$context['place_name'] ?? '',
+			$context['cdek_to_city_name'] ?? ''
+		);
+		$country_code = strtoupper(
+			$this->first_text(
+				$context['country_code'] ?? '',
+				$context['cdek_to_country_code'] ?? '',
+				$rate_country
+			)
+		);
+
+		if ( '' !== $city_code ) {
+			$context['city_code'] = $city_code;
+		}
+		if ( '' !== $cdek_city_code ) {
+			$context['cdek_city_code'] = $cdek_city_code;
+		}
+		if ( '' !== $city_name ) {
+			$context['city_name'] = $city_name;
+		}
+		if ( preg_match( '/^[A-Z]{2}$/', $country_code ) ) {
+			$context['country_code'] = $country_code;
+		}
+
+		return $context;
 	}
 
 	/**

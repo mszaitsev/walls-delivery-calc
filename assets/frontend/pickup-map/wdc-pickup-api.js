@@ -110,6 +110,15 @@
 		context = context || {};
 		var params = new URLSearchParams();
 		params.set('carrier', context.carrier || context.carrier_key || currentCarrier());
+		if (!context.city_code && context.cdek_to_city_code) {
+			params.set('city_code', context.cdek_to_city_code);
+		}
+		if (!context.cdek_city_code && context.cdek_to_city_code) {
+			params.set('cdek_city_code', context.cdek_to_city_code);
+		}
+		if (!context.country_code && context.cdek_to_country_code) {
+			params.set('country_code', context.cdek_to_country_code);
+		}
 		[
 			'city_code',
 			'cdek_city_code',

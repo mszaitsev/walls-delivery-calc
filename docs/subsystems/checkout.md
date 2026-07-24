@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.128.2
+Version: 0.128.3
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -27,6 +27,8 @@ The `cdek` delivery service owns CDEK availability for `RU`, `AM`, `BY`, `KZ`, a
 CDEK city resolution uses the quote country, city, optional postcode, optional region for local disambiguation, RU FIAS when present, and coordinates when available. Manual city input is allowed, but a CDEK quote is produced only after an unambiguous exact normalized `/v2/location/cities` match. Ambiguous, missing, or null API city results suppress only the CDEK quote and must not block other carriers.
 
 CDEK pickup and courier branches are available for every enabled CDEK country when the API returns a supported tariff. Delivery modes `1` and `3` map to courier; modes `2` and `4` map to pickup. Modes `6` through `10` may remain diagnostic data but are not checkout delivery types. Pickup requires at least one country- and city-matching CDEK handout point; courier does not depend on pickup points.
+
+When a CDEK manual city has a resolved CDEK city code but no canonical location coordinates, the pickup map may load points directly by city code and fit the initial viewport to the returned point coordinates. That viewport is presentation-only: it is not saved as destination coordinates, city context, location identity, or shipment data.
 
 ## Canonical Requirements
 

@@ -100,12 +100,22 @@
 				map.closePopup();
 			},
 			clearMarkers: clearMarkers,
-			fitToMarkers: function () {
-				if (!markers.length) {
+			fitToMarkers: function (options) {
+				options = options || {};
+				var points = lastPoints.filter(validPointCoordinates);
+				if (!points.length) {
 					return;
 				}
-				var group = window.L.featureGroup(markers);
-				map.fitBounds(group.getBounds(), { padding: [24, 24] });
+				var padding = Number(options.padding || 32);
+				var maxZoom = Number(options.maxZoom || 14);
+				if (1 === points.length) {
+					map.setView([points[0].lat, points[0].lng], Number(options.zoom || 15));
+					return;
+				}
+				var bounds = window.L.latLngBounds(points.map(function (point) {
+					return [point.lat, point.lng];
+				}));
+				map.fitBounds(bounds, { padding: [padding, padding], maxZoom: maxZoom });
 			},
 			getBounds: currentBoundsValue,
 			destroy: function () {
@@ -426,6 +436,12 @@
 		}
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' || type === 'POSTAMAT' ? type : 'OPS';
+	}
+
+	function validPointCoordinates(point) {
+		var lat = parseFloat(point && point.lat);
+		var lng = parseFloat(point && point.lng);
+		return !isNaN(lat) && !isNaN(lng);
 	}
 
 	function debugEnabled() {

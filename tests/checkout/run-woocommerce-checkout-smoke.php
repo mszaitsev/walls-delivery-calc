@@ -371,7 +371,7 @@ function wc_checkout_pickup_map_initial_context( array $rates, array $city_conte
 	$session->save_rates( $rates );
 	$session->save_city_context( $city_context );
 	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
-	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.2' ), new SettingsRepository() );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.3' ), new SettingsRepository() );
 	$method = new ReflectionMethod( $checkout, 'initial_context' );
 	$method->setAccessible( true );
 	$context = $method->invoke( $checkout );
@@ -740,12 +740,14 @@ $cdek_by_pickup_rate = array(
 	'service_key' => 'cdek',
 	'delivery_type' => DeliveryType::PICKUP,
 	'requires_pickup_point' => true,
-	'meta' => array( 'location' => array( 'cdek_to_country_code' => 'BY', 'cdek_to_city_code' => 9220 ), 'country_code' => 'BY' ),
+	'meta' => array( 'location' => array( 'cdek_to_country_code' => 'BY', 'cdek_to_city_code' => 9220, 'cdek_to_city_name' => 'Минск' ), 'country_code' => 'BY' ),
 );
 $cdek_kz_pickup_rate = $cdek_by_pickup_rate;
 $cdek_kz_pickup_rate['meta'] = array( 'location' => array( 'cdek_to_country_code' => 'KZ', 'cdek_to_city_code' => 152 ), 'country_code' => 'KZ' );
 $by_context = wc_checkout_pickup_map_initial_context( array( 'cdek:pickup:136' => $cdek_by_pickup_rate ), array( 'country_code' => 'BY', 'city_name' => 'Minsk', 'city_code' => 9220 ), 'wdc_platform_delivery:cdek:pickup:136' );
 wc_checkout_smoke_assert( 'BY' === (string) ( $by_context['country_code'] ?? '' ) && 9220 === (int) ( $by_context['cdek_city_code'] ?? 0 ), 'Generic pickup map must allow active CDEK BY pickup rate for BY checkout destination.' );
+$by_rate_meta_context = wc_checkout_pickup_map_initial_context( array( 'cdek:pickup:136' => $cdek_by_pickup_rate ), array( 'country_code' => 'BY', 'city_name' => '' ), 'wdc_platform_delivery:cdek:pickup:136' );
+wc_checkout_smoke_assert( 'BY' === (string) ( $by_rate_meta_context['country_code'] ?? '' ) && 9220 === (int) ( $by_rate_meta_context['city_code'] ?? 0 ) && 9220 === (int) ( $by_rate_meta_context['cdek_city_code'] ?? 0 ) && 'Минск' === (string) ( $by_rate_meta_context['city_name'] ?? '' ), 'PickupMapCheckout must canonicalize CDEK rate location cdek_to_* fields for BY manual city context.' );
 $kz_context = wc_checkout_pickup_map_initial_context( array( 'cdek:pickup:136' => $cdek_kz_pickup_rate ), array( 'country_code' => 'KZ', 'city_name' => 'Almaty', 'city_code' => 152 ), 'wdc_platform_delivery:cdek:pickup:136' );
 wc_checkout_smoke_assert( 'KZ' === (string) ( $kz_context['country_code'] ?? '' ) && 152 === (int) ( $kz_context['cdek_city_code'] ?? 0 ), 'Generic pickup map must allow active CDEK KZ pickup rate for KZ checkout destination.' );
 $mismatch_context = wc_checkout_pickup_map_initial_context( array( 'cdek:pickup:136' => $cdek_by_pickup_rate ), array( 'country_code' => 'KZ', 'city_name' => 'Almaty', 'city_code' => 152 ), 'wdc_platform_delivery:cdek:pickup:136' );
