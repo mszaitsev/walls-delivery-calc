@@ -18,14 +18,24 @@
     const country = cdekRecipientCountry(form);
     const row = form.querySelector('[data-wdc-cdek-recipient-document-row]');
     const input = form.querySelector('[data-wdc-cdek-recipient-document]');
+    const help = form.querySelector('[data-wdc-cdek-recipient-document-help]');
     const visible = ['AM', 'BY', 'KZ', 'KG'].includes(country);
     if (row) row.hidden = !visible;
+    if (help) {
+      const descriptions = {
+        KZ: 'ИИН / IIN получателя — необязательно. Значение передаётся только в СДЭК и не сохраняется.',
+        KG: 'ИИН получателя — необязательно. Значение передаётся только в СДЭК и не сохраняется.',
+        AM: 'Номер паспорта получателя — необязательно. Значение передаётся только в СДЭК и не сохраняется.',
+        BY: 'Номер паспорта получателя — необязательно. Значение передаётся только в СДЭК и не сохраняется.'
+      };
+      help.textContent = descriptions[country] || 'Значение передаётся только в СДЭК и не сохраняется.';
+    }
     if (input) {
-      input.required = country === 'KZ';
+      input.required = false;
       input.disabled = !visible;
       if (!visible) input.value = '';
     }
-    return country !== 'KZ' || !input || String(input.value || '').trim() !== '';
+    return true;
   }
   const CDEK_BARCODE_POLL_INTERVAL_MS = 2000;
   const CDEK_BARCODE_TIMEOUT_MS = 300000;

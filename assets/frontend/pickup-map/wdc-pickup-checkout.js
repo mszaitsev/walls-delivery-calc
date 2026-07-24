@@ -597,7 +597,13 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function contextFromFields() {
 		var country = fieldValue('shipping_country') || fieldValue('billing_country');
-		if (country && country.toUpperCase() !== 'RU') {
+		var normalizedCountry = String(country || 'RU').toUpperCase();
+		var activeFamily = shippingMethodFamily(currentShippingMethod() || activeMethod);
+		if (activeFamily === 'cdek:pickup') {
+			if (['RU', 'AM', 'BY', 'KZ', 'KG'].indexOf(normalizedCountry) === -1) {
+				return { countryBlocked: true };
+			}
+		} else if (country && normalizedCountry !== 'RU') {
 			return { countryBlocked: true };
 		}
 		var hiddenLat = fieldValue('wdc_platform_location_lat');
@@ -617,7 +623,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var context = query ? { query: query } : {};
 		context.postcode = postcode;
 		context.display_name = city || hiddenRegion;
-		context.country_code = country || 'RU';
+		context.country_code = normalizedCountry;
 		context.location_id = hiddenLocationId;
 		context.fias_id = hiddenFiasId;
 		context.city_name = visibleDestinationChanged ? visibleCity : (hiddenCity || hiddenDisplay || visibleCity);
@@ -670,6 +676,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function sameDestination(a, b) {
 		if (!a || !b) {
+			return false;
+		}
+		var aCountry = String(a.country_code || 'RU').toUpperCase();
+		var bCountry = String(b.country_code || 'RU').toUpperCase();
+		if (aCountry !== bCountry) {
 			return false;
 		}
 		var aFias = normalizeGuid(a.fias_id || '');

@@ -102,6 +102,9 @@ final class CheckoutPickupPointRestController {
 			if ( array() === $point ) {
 				return $this->error( 'not_found', 'Pickup point not found.', 404 );
 			}
+			if ( array_key_exists( 'is_handout', $point ) && ! filter_var( $point['is_handout'], FILTER_VALIDATE_BOOLEAN ) ) {
+				return $this->error( 'unsupported_pickup_point', 'Selected CDEK point does not support handout.', 400 );
+			}
 			$selection = $this->cdek_selection( $point );
 			$this->save_selection( $selection, 'cdek', $method_id, $selection_intent );
 
@@ -452,6 +455,9 @@ final class CheckoutPickupPointRestController {
 			'cdek_owner_code' => (string) ( $point['cdek_owner_code'] ?? '' ),
 			'cdek_nearest_station' => (string) ( $point['cdek_nearest_station'] ?? '' ),
 			'cdek_note' => (string) ( $point['cdek_note'] ?? '' ),
+			'country_code' => (string) ( $point['country_code'] ?? '' ),
+			'cdek_city_code' => (int) ( $point['cdek_city_code'] ?? 0 ),
+			'is_handout' => ! array_key_exists( 'is_handout', $point ) || filter_var( $point['is_handout'], FILTER_VALIDATE_BOOLEAN ),
 			'raw_sanitized' => is_array( $point['raw_sanitized'] ?? null ) ? $point['raw_sanitized'] : ( is_array( $point['raw'] ?? null ) ? $point['raw'] : array() ),
 		);
 		if ( '' === $snapshot['display_title'] ) {
@@ -488,6 +494,9 @@ final class CheckoutPickupPointRestController {
 			'cdek_owner_code' => $snapshot['cdek_owner_code'],
 			'cdek_nearest_station' => $snapshot['cdek_nearest_station'],
 			'cdek_note' => $snapshot['cdek_note'],
+			'country_code' => $snapshot['country_code'],
+			'cdek_city_code' => $snapshot['cdek_city_code'],
+			'is_handout' => $snapshot['is_handout'],
 			'postcode' => $snapshot['postcode'],
 			'address' => $snapshot['address'],
 			'lat' => $snapshot['lat'],

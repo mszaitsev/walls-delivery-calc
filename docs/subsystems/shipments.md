@@ -12,7 +12,7 @@ CDEK domestic and EAEU shipments share the existing `CdekShipmentAdapter`, reque
 
 Russian CDEK courier preparation keeps the DaData/FIAS plus CDEK location flow. For `AM`, `BY`, `KZ`, and `KG`, courier preparation uses the resolved CDEK city code from calculation or rate metadata plus the raw WooCommerce shipping address and postcode; it does not require Russian DaData or FIAS. International pickup uses the same `/v2/orders` endpoint and the selected CDEK delivery point.
 
-The CDEK modal extension owns the `cdek_recipient_document` field. It is hidden and cleared for `RU`, required for `KZ`, and optional for `AM`, `BY`, and `KG`; when present it maps only to `recipient.tin`. The value is sanitized, kept only in the current admin page memory, redacted from diagnostics, and never stored in order meta, shipment persistence, snapshots, transients, options, notes, analytics, or status payloads.
+The CDEK modal extension owns the `cdek_recipient_document` field. It is hidden and cleared for `RU`, visible and optional for `AM`, `BY`, `KZ`, and `KG`; when present it maps to `recipient.tin` for `KZ`/`KG` and to `recipient.passport_number` for `AM`/`BY`. The value is sanitized, kept only in the current admin page memory, redacted from diagnostics, and never stored in order meta, shipment persistence, snapshots, transients, options, notes, analytics, or status payloads.
 
 ## Canonical Requirements
 

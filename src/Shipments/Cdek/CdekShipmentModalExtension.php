@@ -102,7 +102,7 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		<input type="hidden" name="sender_shipment_point_address" value="<?php echo esc_attr( (string) ( $context['shipment_point_address'] ?? '' ) ); ?>">
 		<input type="hidden" name="sender_pickup_city" value="Новосибирск" data-wdc-sender-pickup-city>
 		<input type="hidden" name="recipient_location_country" value="<?php echo esc_attr( (string) ( $context['recipient_country'] ?? 'RU' ) ); ?>" data-wdc-cdek-recipient-country>
-		<label data-wdc-cdek-recipient-document-row hidden><?php echo esc_html__( 'Документ получателя', 'walls-delivery-calc' ); ?><input type="text" name="cdek_recipient_document" value="" maxlength="30" autocomplete="off" data-wdc-cdek-recipient-document><span class="description"><?php echo esc_html__( 'Для Казахстана укажите ИИН / IIN / TIN. Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ); ?></span></label>
+		<label data-wdc-cdek-recipient-document-row hidden><?php echo esc_html__( 'Документ получателя', 'walls-delivery-calc' ); ?><input type="text" name="cdek_recipient_document" value="" maxlength="30" autocomplete="off" data-wdc-cdek-recipient-document><span class="description" data-wdc-cdek-recipient-document-help><?php echo esc_html__( 'Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ); ?></span></label>
 		<div data-wdc-cdek-sender-door <?php echo ! empty( $context['cdek_sender_door'] ) ? '' : 'hidden'; ?>>
 			<p><strong><?php echo esc_html__( 'Отправитель', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html__( 'от двери', 'walls-delivery-calc' ); ?></p>
 			<p><strong><?php echo esc_html__( 'Адрес отправителя', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== (string) ( $context['sender_from_door_display'] ?? '' ) ? (string) $context['sender_from_door_display'] : '-' ); ?></p>
@@ -127,6 +127,7 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		<input type="hidden" name="pickup_point_city" value="<?php echo esc_attr( (string) ( $context['pickup_city'] ?? '' ) ); ?>" data-wdc-pickup-city-field>
 		<input type="hidden" name="pickup_point_region" value="<?php echo esc_attr( (string) ( $context['pickup_region'] ?? '' ) ); ?>" data-wdc-pickup-region-field>
 		<input type="hidden" name="pickup_point_country" value="<?php echo esc_attr( (string) ( $context['recipient_country'] ?? 'RU' ) ); ?>" data-wdc-pickup-country-field>
+		<input type="hidden" name="pickup_point_is_handout" value="<?php echo ! array_key_exists( 'is_handout', $pickup_row ) || ! empty( $pickup_row['is_handout'] ) ? '1' : '0'; ?>" data-wdc-pickup-handout-field>
 		<?php $this->render_pickup_common_hidden( $pickup_row, $pickup_context, $context, CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, CdekSettings::CARRIER_KEY . ':pickup' ); ?>
 		<p><strong><?php echo esc_html__( 'Код ПВЗ', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pickup-index><?php echo esc_html( '' !== $pickup_code ? $pickup_code : '-' ); ?></span></p>
 		<?php if ( '' !== (string) ( $context['pickup_type_label'] ?? '' ) ) : ?>

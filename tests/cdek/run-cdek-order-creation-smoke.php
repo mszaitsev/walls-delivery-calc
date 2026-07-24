@@ -106,6 +106,7 @@ function set_transient( string $key, mixed $value, int $expiration = 0 ): bool {
 function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_cdek_order_transients'][ $key ] ); return true; }
 function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_textarea_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function sanitize_email( mixed $value ): string { return filter_var( trim( (string) $value ), FILTER_VALIDATE_EMAIL ) ? trim( (string) $value ) : ''; }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function __( string $text, string $domain = '' ): string { return $text; }
@@ -166,6 +167,8 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 	public array $delete_responses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $city_responses = array();
+	/** @var array<int,array<int,array<string,mixed>>> */
+	public array $deliverypoint_responses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $barcode_create_responses = array();
 	/** @var array<int,array<string,mixed>> */
@@ -196,6 +199,22 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 			$response = array() !== $this->city_responses ? array_shift( $this->city_responses ) : array( array( 'code' => 44, 'city' => 'Москва' ) );
 			return new CdekApiResponse( 200, json_encode( $response ) ?: '[]' );
 		}
+		if ( 'GET' === $method && str_contains( $url, '/v2/deliverypoints' ) ) {
+			$response = array() !== $this->deliverypoint_responses ? array_shift( $this->deliverypoint_responses ) : array(
+				array(
+					'code' => 'ADM1',
+					'name' => 'Admin CDEK point',
+					'type' => 'PVZ',
+					'is_handout' => true,
+					'location' => array(
+						'city' => 'Admin city',
+						'city_code' => 1,
+						'address_full' => 'Admin city, point',
+					),
+				),
+			);
+			return new CdekApiResponse( 200, json_encode( $response ) ?: '[]' );
+		}
 		if ( 'POST' === $method && str_contains( $url, '/v2/print/barcodes' ) ) {
 			$response = array_shift( $this->barcode_create_responses ) ?: array( 'entity' => array( 'uuid' => 'print-uuid-1' ) );
 			return new CdekApiResponse( 202, json_encode( $response ) ?: '{}' );
@@ -217,6 +236,21 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 		}
 		$response = array_shift( $this->order_responses ) ?: array( 'entity' => array( 'uuid' => 'order-uuid-1', 'cdek_number' => '100500', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 		return new CdekApiResponse( 200, json_encode( $response ) ?: '{}' );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function lastDeliveryPointQuery(): array {
+		foreach ( array_reverse( $this->requests ) as $request ) {
+			if ( ! str_contains( $request['url'], '/v2/deliverypoints' ) ) {
+				continue;
+			}
+			parse_str( (string) parse_url( $request['url'], PHP_URL_QUERY ), $query );
+			return $query;
+		}
+
+		return array();
 	}
 }
 
@@ -256,6 +290,7 @@ final class CdekOrderFakeOrder {
 	public array $meta = array();
 	public array $notes = array();
 	public array $items = array();
+	public string $shipping_country = 'RU';
 	public function __construct( private int $id = 101 ) {}
 	public function get_id(): int { return $this->id; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
@@ -269,6 +304,7 @@ final class CdekOrderFakeOrder {
 	public function get_billing_last_name(): string { return 'Иванов'; }
 	public function get_billing_phone(): string { return '9131234567'; }
 	public function get_billing_email(): string { return 'buyer@example.com'; }
+	public function get_shipping_country(): string { return $this->shipping_country; }
 	public function get_shipping_postcode(): string { return '650000'; }
 	public function get_shipping_state(): string { return 'Кемеровская область'; }
 	public function get_shipping_city(): string { return 'Кемерово'; }
@@ -298,18 +334,35 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 	$item = new PackageItem( 'SKU-1', 'Товар', 5, Money::from_rubles( $overrides['unit_cost'] ?? 1000 ), Money::from_rubles( ( $overrides['unit_cost'] ?? 1000 ) * 5 ), 100, 10, 8, 3 );
 	$place = new ShipmentPlace( 1, (int) ( $overrides['place_weight'] ?? 1000 ), 20, 15, 10, Money::from_kopecks( 0 ), array( $item ) );
 	$pickup = DeliveryType::PICKUP === $delivery_type ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, 'KEM7', 'Kemerovo', '2026-06-13 12:00:00' ) : null;
+	$recipient = array_filter(
+		array(
+			'name' => $overrides['name'] ?? 'Иван Иванов',
+			'phone' => $overrides['phone'] ?? '9131234567',
+			'email' => $overrides['email'] ?? 'buyer@example.com',
+			'tin' => $overrides['tin'] ?? null,
+			'passport_number' => $overrides['passport_number'] ?? null,
+		),
+		static fn( mixed $value ): bool => null !== $value
+	);
+
 	return new ShipmentCreateRequest(
-		101,
+		$overrides['order_id'] ?? 101,
 		CdekSettings::CARRIER_KEY,
 		$delivery_type,
 		'cdek:' . $delivery_type . ':136',
-		new Address( country_code: 'RU', region_name: 'Кемеровская область', city: 'Кемерово', postcode: '650000', raw_address: DeliveryType::COURIER === $delivery_type ? '650000, Кемерово, Советский 10' : 'KEM7' ),
+		new Address(
+			country_code: $overrides['country_code'] ?? 'RU',
+			region_name: $overrides['region_name'] ?? 'Кемеровская область',
+			city: $overrides['city'] ?? 'Кемерово',
+			postcode: $overrides['postcode'] ?? '650000',
+			raw_address: $overrides['raw_address'] ?? ( DeliveryType::COURIER === $delivery_type ? '650000, Кемерово, Советский 10' : 'KEM7' )
+		),
 		$pickup,
 		array( $place ),
 		Money::from_kopecks( 0 ),
 		false,
 		array(),
-		array( 'name' => $overrides['name'] ?? 'Иван Иванов', 'phone' => $overrides['phone'] ?? '9131234567', 'email' => 'buyer@example.com' ),
+		$recipient,
 		array(
 			'service_key' => CdekSettings::SERVICE_KEY,
 			'order_num' => 'WC-101',
@@ -385,6 +438,21 @@ cdek_order_assert( 'BARCODE' === $pickup_payload['print'], 'CDEK order payload m
 cdek_order_assert( 0 === $pickup_payload['packages'][0]['items'][0]['payment']['value'] && 1000.0 === $pickup_payload['packages'][0]['items'][0]['cost'], 'CDEK item payment/cost mismatch.' );
 cdek_order_assert( is_int( $pickup_payload['packages'][0]['length'] ) && is_int( $pickup_payload['packages'][0]['width'] ) && is_int( $pickup_payload['packages'][0]['height'] ), 'CDEK package dimensions must remain integer-only.' );
 cdek_order_assert( ! isset( $pickup_payload['packages'][0]['items'][0]['length'], $pickup_payload['packages'][0]['items'][0]['width'], $pickup_payload['packages'][0]['items'][0]['height'], $pickup_payload['packages'][0]['items'][0]['length_cm'], $pickup_payload['packages'][0]['items'][0]['width_cm'], $pickup_payload['packages'][0]['items'][0]['height_cm'] ), 'CDEK package items must not send item-level dimensions.' );
+$kz_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => 'KZ', 'tin' => 'KZ-IIN-123' ) ) );
+cdek_order_assert( 'KZ-IIN-123' === (string) ( $kz_payload['recipient']['tin'] ?? '' ) && ! array_key_exists( 'passport_number', $kz_payload['recipient'] ), 'CDEK KZ recipient document must be sent as recipient.tin only.' );
+$kg_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => 'KG', 'tin' => 'KG-IIN-456' ) ) );
+cdek_order_assert( 'KG-IIN-456' === (string) ( $kg_payload['recipient']['tin'] ?? '' ) && ! array_key_exists( 'passport_number', $kg_payload['recipient'] ), 'CDEK KG recipient document must be sent as recipient.tin only.' );
+$am_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => 'AM', 'passport_number' => 'AM-PASS-789' ) ) );
+cdek_order_assert( 'AM-PASS-789' === (string) ( $am_payload['recipient']['passport_number'] ?? '' ) && ! array_key_exists( 'tin', $am_payload['recipient'] ), 'CDEK AM recipient document must be sent as recipient.passport_number only.' );
+$by_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => 'BY', 'passport_number' => 'BY-PASS-321' ) ) );
+cdek_order_assert( 'BY-PASS-321' === (string) ( $by_payload['recipient']['passport_number'] ?? '' ) && ! array_key_exists( 'tin', $by_payload['recipient'] ), 'CDEK BY recipient document must be sent as recipient.passport_number only.' );
+foreach ( array( 'KZ', 'KG', 'AM', 'BY' ) as $document_optional_country ) {
+	$empty_document_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => $document_optional_country, 'tin' => '', 'passport_number' => '' ) );
+	$empty_document_payload = $builder->build( $empty_document_request );
+	cdek_order_assert( array() === $builder->validate( $empty_document_request ) && ! array_key_exists( 'tin', $empty_document_payload['recipient'] ) && ! array_key_exists( 'passport_number', $empty_document_payload['recipient'] ), 'CDEK recipient document must be optional and omitted when empty for ' . $document_optional_country . '.' );
+}
+$ru_document_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'country_code' => 'RU', 'tin' => 'RU-DOC-IGNORED', 'passport_number' => 'RU-PASS-IGNORED' ) ) );
+cdek_order_assert( ! array_key_exists( 'tin', $ru_document_payload['recipient'] ) && ! array_key_exists( 'passport_number', $ru_document_payload['recipient'] ), 'CDEK RU payload must ignore recipient document fields.' );
 $override_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_point' => 'nsk70' ) ) );
 cdek_order_assert( 'NSK70' === $override_payload['shipment_point'], 'CDEK order creation must use temporary sender shipment_point from modal meta.' );
 $postcode_as_point_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '101000' ) );
@@ -555,6 +623,15 @@ $creation = cdek_order_creation_service( $repository, new CdekShipmentAdapter( $
 $order = new CdekOrderFakeOrder();
 $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
+$document_order = new CdekOrderFakeOrder( 121 );
+$document_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'order_id' => 121, 'country_code' => 'KZ', 'tin' => 'KZ-SECRET-DOC-999' ) );
+$document_payload = $builder->build( $document_request );
+$document_result = $creation->create( $document_order, $document_request );
+$document_shipment = $repository->find_by_carrier( $document_order, CdekSettings::CARRIER_KEY );
+$document_persistent_json = (string) wp_json_encode( array( $document_shipment, $document_result->raw_reference ) );
+cdek_order_assert( 'KZ-SECRET-DOC-999' === (string) ( $document_payload['recipient']['tin'] ?? '' ), 'CDEK recipient document must be present in the outgoing API payload.' );
+cdek_order_assert( $document_result->success, 'CDEK order creation with optional recipient document must succeed: ' . $document_result->error_code . ' ' . $document_result->error_message );
+cdek_order_assert( ! str_contains( $document_persistent_json, 'KZ-SECRET-DOC-999' ) && ! str_contains( $document_persistent_json, 'tin' ) && ! str_contains( $document_persistent_json, 'passport_number' ), 'CDEK recipient document must not be persisted in shipment snapshots.' );
 $postamat_result = $builder->build(
 	cdek_order_request(
 		DeliveryType::PICKUP,
@@ -1032,6 +1109,70 @@ cdek_order_assert( 'NEW1' === (string) ( $admin_request->meta['delivery_point'] 
 cdek_order_assert( 'NSK70' === (string) ( $admin_request->meta['shipment_point'] ?? '' ) && 'Новосибирск, новый ПВЗ' === (string) ( $admin_request->meta['shipment_point_address'] ?? '' ), 'Choosing another sender CDEK pickup point in modal must update temporary shipment_point and address.' );
 $decimal_rows = is_array( $admin_request->meta['shipment_item_rows'] ?? null ) ? $admin_request->meta['shipment_item_rows'] : array();
 cdek_order_assert( 80050 === (int) ( $decimal_rows[0]['unit_price_kopecks'] ?? 0 ) && 80050 === (int) ( $decimal_rows[0]['assessed_unit_price_kopecks'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ) && ! array_key_exists( 'cdek_item_rows', $admin_request->meta ), 'Shipment modal item rows must parse canonical shipment_items into canonical kopeck rows only.' );
+cdek_order_assert( ! array_key_exists( 'cdek_recipient_document', $admin_request->meta ) && ! array_key_exists( 'tin', $admin_request->meta ) && ! array_key_exists( 'passport_number', $admin_request->meta ), 'CDEK recipient document must stay out of ShipmentCreateRequest meta.' );
+$cdek_admin_document_data = array(
+	'delivery_type' => DeliveryType::PICKUP,
+	'tariff_object' => '136',
+	'delivery_point' => 'DOC1',
+	'pickup_point_code' => 'DOC1',
+	'pickup_point_address' => 'Document point',
+	'pickup_point_city' => 'Document city',
+	'pickup_point_region' => 'Document region',
+	'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
+	'shipment_items' => array( array( 'item_key' => 'doc-item', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-DOC', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
+);
+foreach ( array( 'KZ' => 'tin', 'KG' => 'tin', 'AM' => 'passport_number', 'BY' => 'passport_number' ) as $document_country => $document_key ) {
+	$document_request = $drafts->create_request_from_admin_data(
+		$draft_order,
+		array_merge(
+			$cdek_admin_document_data,
+			array(
+				'pickup_point_country' => $document_country,
+				'cdek_recipient_document' => $document_country . '-DOC-123',
+			)
+		)
+	);
+	$other_document_key = 'tin' === $document_key ? 'passport_number' : 'tin';
+	cdek_order_assert( $document_country . '-DOC-123' === (string) ( $document_request->recipient[ $document_key ] ?? '' ) && ! array_key_exists( $other_document_key, $document_request->recipient ), 'CDEK admin document must map to ' . $document_key . ' for ' . $document_country . '.' );
+	cdek_order_assert( ! array_key_exists( 'cdek_recipient_document', $document_request->meta ) && ! array_key_exists( 'tin', $document_request->meta ) && ! array_key_exists( 'passport_number', $document_request->meta ), 'CDEK admin document must not be copied to request meta for ' . $document_country . '.' );
+
+	$empty_document_request = $drafts->create_request_from_admin_data(
+		$draft_order,
+		array_merge(
+			$cdek_admin_document_data,
+			array(
+				'pickup_point_country' => $document_country,
+				'cdek_recipient_document' => '',
+			)
+		)
+	);
+	cdek_order_assert( ! array_key_exists( 'tin', $empty_document_request->recipient ) && ! array_key_exists( 'passport_number', $empty_document_request->recipient ) && array() === $builder->validate( $empty_document_request ), 'Empty CDEK admin document must be allowed and omitted for ' . $document_country . '.' );
+}
+$ru_admin_document_request = $drafts->create_request_from_admin_data(
+	$draft_order,
+	array_merge(
+		$cdek_admin_document_data,
+		array(
+			'pickup_point_country' => 'RU',
+			'cdek_recipient_document' => 'RU-DOC-MUST-NOT-LEAK',
+		)
+	)
+);
+cdek_order_assert( ! array_key_exists( 'tin', $ru_admin_document_request->recipient ) && ! array_key_exists( 'passport_number', $ru_admin_document_request->recipient ), 'CDEK RU admin document must be ignored.' );
+$forged_domestic_order = new CdekOrderFakeOrder( 138 );
+$forged_domestic_order->meta['_wdc_platform_carrier_key'] = 'dpd';
+$forged_domestic_order->meta['_wdc_platform_delivery_type'] = DeliveryType::PICKUP;
+$forged_domestic_request = $drafts->create_request_from_admin_data(
+	$forged_domestic_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'tariff_object' => '23030',
+		'pickup_point_code' => '630005',
+		'pickup_point_address' => 'Domestic office',
+		'cdek_recipient_document' => 'FORGED-CDEK-DOC',
+	)
+);
+cdek_order_assert( CdekSettings::CARRIER_KEY !== $forged_domestic_request->carrier_key && ! array_key_exists( 'tin', $forged_domestic_request->recipient ) && ! array_key_exists( 'passport_number', $forged_domestic_request->recipient ) && ! array_key_exists( 'cdek_recipient_document', $forged_domestic_request->meta ), 'Forged CDEK document must be ignored by non-CDEK admin requests.' );
 
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
@@ -1103,6 +1244,62 @@ try {
 } catch ( CdekOrderAjaxResponse $response ) {
 	cdek_order_assert( $response->success, 'ajax_create for CDEK must succeed.' );
 	cdek_order_assert( CdekSettings::CARRIER_KEY === (string) ( $response->data['status']['carrier_key'] ?? '' ), 'ajax_create for CDEK must return CDEK status payload.' );
+}
+
+$admin_pickup_http = new CdekOrderFakeHttp();
+$admin_pickup_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $admin_pickup_http ), $settings, $admin_pickup_http );
+$admin_pickup_service = new \WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService( $admin_pickup_client, $settings, new CdekLocationResolver( $admin_pickup_client, $settings, new Logger() ), new Logger() );
+$admin_pickup_controller = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController( cdek_delivery_points: $admin_pickup_service );
+$_POST = array(
+	'order_id' => 201,
+	'nonce' => 'ok',
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'mode' => 'location',
+	'city_code' => '152',
+	'country_code' => 'KZ',
+	'city' => 'Almaty',
+);
+try {
+	$admin_pickup_controller->handle_search_pickup_points();
+	throw new RuntimeException( 'admin CDEK KZ pickup search did not send JSON.' );
+} catch ( CdekOrderAjaxResponse $response ) {
+	$query = $admin_pickup_http->lastDeliveryPointQuery();
+	cdek_order_assert( $response->success && 'KZ' === (string) ( $response->data['context']['country_code'] ?? '' ) && 'KZ' === (string) ( $query['country_code'] ?? '' ), 'Admin CDEK recipient picker must pass explicit country_code=KZ.' );
+}
+$by_admin_order = new CdekOrderFakeOrder( 202 );
+$by_admin_order->shipping_country = 'BY';
+$GLOBALS['wdc_cdek_order_ajax_order'] = $by_admin_order;
+$_POST = array(
+	'order_id' => 202,
+	'nonce' => 'ok',
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'mode' => 'location',
+	'city_code' => '9220',
+	'city' => 'Minsk',
+);
+try {
+	$admin_pickup_controller->handle_search_pickup_points();
+	throw new RuntimeException( 'admin CDEK BY pickup search did not send JSON.' );
+} catch ( CdekOrderAjaxResponse $response ) {
+	$query = $admin_pickup_http->lastDeliveryPointQuery();
+	cdek_order_assert( $response->success && 'BY' === (string) ( $response->data['context']['country_code'] ?? '' ) && 'BY' === (string) ( $query['country_code'] ?? '' ), 'Admin CDEK recipient picker must fall back to shipping country BY.' );
+}
+$_POST = array(
+	'order_id' => 202,
+	'nonce' => 'ok',
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'mode' => 'location',
+	'purpose' => 'sender_dropoff',
+	'city_code' => '270',
+	'country_code' => 'RU',
+	'city' => 'Novosibirsk',
+);
+try {
+	$admin_pickup_controller->handle_search_pickup_points();
+	throw new RuntimeException( 'admin CDEK sender pickup search did not send JSON.' );
+} catch ( CdekOrderAjaxResponse $response ) {
+	$query = $admin_pickup_http->lastDeliveryPointQuery();
+	cdek_order_assert( $response->success && 'RU' === (string) ( $response->data['context']['country_code'] ?? '' ) && 'RU' === (string) ( $query['country_code'] ?? '' ), 'Admin CDEK sender picker must stay in RU even when recipient order is BY.' );
 }
 
 ob_start();

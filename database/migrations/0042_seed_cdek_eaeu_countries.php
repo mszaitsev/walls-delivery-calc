@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 defined( 'ABSPATH' ) || exit;
 
-return static function ( \wpdb $wpdb ): void {
+return static function (): void {
+	global $wpdb;
+
 	$services_table = $wpdb->prefix . 'wdc_delivery_services';
 	$countries_table = $wpdb->prefix . 'wdc_delivery_service_countries';
 	$service_id = (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$services_table} WHERE service_key = %s AND deleted = 0 ORDER BY id ASC LIMIT 1", 'cdek' ) );

@@ -319,6 +319,69 @@ cdek_pickup_assert( 'cdek:pickup' === (string) ( $rest_postamat['pickup_family']
 cdek_pickup_assert( 'Постамат СДЭК' === (string) ( $rest_postamat['point_title'] ?? '' ) && 'Постамат' === (string) ( $rest_postamat['point_type_label'] ?? '' ) && 'postamat' === (string) ( $rest_postamat['marker_type'] ?? '' ), 'CDEK REST point must expose POSTAMAT presentation fields.' );
 cdek_pickup_assert( 'KEM7' === (string) ( $rest_postamat['display_code'] ?? '' ) && str_contains( (string) ( $rest_postamat['display_title'] ?? '' ), 'KEM7' ), 'CDEK REST point must expose display title/code for popup and side list.' );
 cdek_pickup_assert( is_array( $rest_postamat['snapshot'] ?? null ) && 'cdek:pickup' === (string) ( $rest_postamat['snapshot']['pickup_family'] ?? '' ), 'CDEK REST point must include normalized snapshot.' );
+$handout_fixture = array(
+	array(
+		'code' => 'MIN40',
+		'name' => 'Minsk handout',
+		'type' => 'PVZ',
+		'is_handout' => true,
+		'location' => array(
+			'country_code' => 'BY',
+			'region' => 'Minsk',
+			'city' => 'Minsk',
+			'city_code' => 9220,
+			'postal_code' => '220000',
+			'address_full' => 'Minsk, handout',
+			'latitude' => 53.9,
+			'longitude' => 27.56,
+		),
+	),
+	array(
+		'code' => 'MIN99',
+		'name' => 'Minsk reception only',
+		'type' => 'PVZ',
+		'is_handout' => false,
+		'location' => array(
+			'country_code' => 'BY',
+			'region' => 'Minsk',
+			'city' => 'Minsk',
+			'city_code' => 9220,
+			'postal_code' => '220001',
+			'address_full' => 'Minsk, reception',
+			'latitude' => 53.91,
+			'longitude' => 27.57,
+		),
+	),
+);
+$http->next_deliverypoints_body = $handout_fixture;
+$recipient_by_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code' => 9220, 'country_code' => 'BY', 'refresh' => '1' ) );
+$recipient_by_query = $http->lastDeliveryPointQuery();
+cdek_pickup_assert( 1 === count( $recipient_by_points ) && 'MIN40' === (string) ( $recipient_by_points[0]['point_code'] ?? '' ), 'CDEK recipient REST picker must return only handout points.' );
+cdek_pickup_assert( 'BY' === (string) ( $recipient_by_query['country_code'] ?? '' ) && '9220' === (string) ( $recipient_by_query['city_code'] ?? '' ), 'CDEK recipient REST city_code branch must pass country_code=BY.' );
+cdek_pickup_assert( 'BY' === (string) ( $recipient_by_points[0]['country_code'] ?? '' ) && 9220 === (int) ( $recipient_by_points[0]['cdek_city_code'] ?? 0 ) && true === (bool) ( $recipient_by_points[0]['is_handout'] ?? false ), 'CDEK REST point and snapshot must expose country, city code and is_handout.' );
+$http->next_deliverypoints_body = $handout_fixture;
+$sender_by_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code' => 9220, 'country_code' => 'BY', 'purpose' => 'sender_dropoff', 'refresh' => '1' ) );
+cdek_pickup_assert( 2 === count( $sender_by_points ), 'CDEK sender pickup picker must not use recipient handout-only filter.' );
+$http->next_deliverypoints_body = array(
+	array(
+		'code' => 'ALA1',
+		'name' => 'Almaty handout',
+		'type' => 'PVZ',
+		'is_handout' => true,
+		'location' => array(
+			'country_code' => 'KZ',
+			'city' => 'Almaty',
+			'city_code' => 152,
+			'address_full' => 'Almaty, handout',
+		),
+	),
+);
+$kz_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code' => 152, 'country_code' => 'KZ', 'refresh' => '1' ) );
+$kz_query = $http->lastDeliveryPointQuery();
+cdek_pickup_assert( 1 === count( $kz_points ) && 'KZ' === (string) ( $kz_query['country_code'] ?? '' ) && 'KZ' === (string) ( $kz_points[0]['country_code'] ?? '' ), 'CDEK REST city_code branch must pass and preserve country_code=KZ.' );
+$unsupported_request_count = $http->countDeliveryPointRequests();
+$unsupported_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code' => 9999, 'country_code' => 'UZ', 'refresh' => '1' ) );
+cdek_pickup_assert( array() === $unsupported_points && $unsupported_request_count === $http->countDeliveryPointRequests(), 'Unsupported CDEK pickup country must not fall back to RU or call deliverypoints.' );
 $large_points = array();
 for ( $i = 1; $i <= 490; ++$i ) {
 	$large_points[] = array(
@@ -437,6 +500,27 @@ $rest_saved = $rest_controller->save(
 );
 cdek_pickup_assert( 'KEM7' === (string) ( $rest_saved['pickupSelections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $rest_session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'CDEK REST save must write and return the canonical cdek:pickup bucket.' );
 cdek_pickup_assert( 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'CDEK REST save must persist the canonical bucket in the raw WC session key.' );
+$reception_only_save = $rest_controller->save(
+	array(
+		'carrier' => 'cdek',
+		'point_id' => 'cdek:MIN99',
+		'shipping_method_id' => 'cdek:pickup:136',
+		'point' => array(
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'pickup_family' => 'cdek:pickup',
+			'point_code' => 'MIN99',
+			'point_type' => 'PVZ',
+			'point_name' => 'Minsk reception only',
+			'point_address' => 'Minsk, reception',
+			'city_name' => 'Minsk',
+			'country_code' => 'BY',
+			'cdek_city_code' => 9220,
+			'is_handout' => false,
+		),
+	)
+);
+cdek_pickup_assert( 'unsupported_pickup_point' === (string) ( $reception_only_save['code'] ?? '' ), 'CDEK REST save must reject recipient pickup points with explicit is_handout=false.' );
 $rest_errors = new CdekPickupSmokeErrors();
 ( new CheckoutValidation( $rest_session ) )->validate(
 	array(

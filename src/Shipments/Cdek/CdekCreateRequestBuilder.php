@@ -71,9 +71,6 @@ final class CdekCreateRequestBuilder {
 		if ( '' === $this->phone( (string) ( $request->recipient['phone'] ?? '' ) ) ) {
 			$errors[] = 'Заполните корректный телефон получателя СДЭК.';
 		}
-		if ( 'KZ' === $this->recipient_country_code( $request ) && '' === $this->recipient_tin( $request ) ) {
-			$errors[] = 'Fill CDEK recipient document for Kazakhstan.';
-		}
 		if ( '' === $this->tariff_code( $request ) ) {
 			$errors[] = 'Не выбран tariff_code СДЭК.';
 		}
@@ -214,9 +211,13 @@ final class CdekCreateRequestBuilder {
 		if ( '' !== $email && filter_var( $email, FILTER_VALIDATE_EMAIL ) ) {
 			$recipient['email'] = $email;
 		}
-		$tin = $this->recipient_tin( $request );
-		if ( 'RU' !== $this->recipient_country_code( $request ) && '' !== $tin ) {
-			$recipient['tin'] = $tin;
+		$country = $this->recipient_country_code( $request );
+		$document = $this->recipient_document( $request );
+		if ( '' !== $document && in_array( $country, array( 'KZ', 'KG' ), true ) ) {
+			$recipient['tin'] = $document;
+		}
+		if ( '' !== $document && in_array( $country, array( 'AM', 'BY' ), true ) ) {
+			$recipient['passport_number'] = $document;
 		}
 
 		return $recipient;
@@ -227,8 +228,8 @@ final class CdekCreateRequestBuilder {
 		return in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
 	}
 
-	private function recipient_tin( ShipmentCreateRequest $request ): string {
-		$value = sanitize_text_field( wp_unslash( $request->recipient['tin'] ?? '' ) );
+	private function recipient_document( ShipmentCreateRequest $request ): string {
+		$value = sanitize_text_field( wp_unslash( $request->recipient['tin'] ?? $request->recipient['passport_number'] ?? '' ) );
 		$value = trim( preg_replace( '/[\x00-\x1F\x7F]+/u', '', $value ) ?? $value );
 
 		return function_exists( 'mb_substr' ) ? mb_substr( $value, 0, 30 ) : substr( $value, 0, 30 );

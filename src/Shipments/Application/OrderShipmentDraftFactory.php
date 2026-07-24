@@ -229,7 +229,6 @@ final class OrderShipmentDraftFactory {
 				'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
 				'phone' => sanitize_text_field( wp_unslash( $data['recipient_phone'] ?? $base->recipient['phone'] ?? '' ) ),
 				'email' => sanitize_email( wp_unslash( $data['recipient_email'] ?? $base->recipient['email'] ?? '' ) ),
-				'tin' => $this->cdek_recipient_document_from_admin_data( $data, $base->recipient_address->country_code ),
 			),
 			array_merge(
 				$base->meta,
@@ -408,23 +407,33 @@ final class OrderShipmentDraftFactory {
 		$shipment_data = $this->shipment_modal_mapper()->parse( $data );
 		$places = $shipment_data->places;
 		$item_rows = $shipment_data->item_rows;
+		$recipient_address = DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, array(), '', $pickup_row ) : $this->cdek_courier_address_from_normalized( $base->recipient_address, $normalized_address );
+		$recipient = array(
+			'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
+			'phone' => sanitize_text_field( wp_unslash( $data['recipient_phone'] ?? $base->recipient['phone'] ?? '' ) ),
+			'email' => sanitize_email( wp_unslash( $data['recipient_email'] ?? $base->recipient['email'] ?? '' ) ),
+		);
+		$recipient_document = $this->cdek_recipient_document_from_admin_data( $data, $recipient_address->country_code );
+		$recipient_country = strtoupper( trim( $recipient_address->country_code ) );
+		if ( '' !== $recipient_document && in_array( $recipient_country, array( 'KZ', 'KG' ), true ) ) {
+			$recipient['tin'] = $recipient_document;
+		}
+		if ( '' !== $recipient_document && in_array( $recipient_country, array( 'AM', 'BY' ), true ) ) {
+			$recipient['passport_number'] = $recipient_document;
+		}
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
 			CdekSettings::CARRIER_KEY,
 			$delivery_type,
 			$base->rate_id,
-			DeliveryType::PICKUP === $delivery_type && array() !== $pickup_row ? $this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, array(), '', $pickup_row ) : $this->cdek_courier_address_from_normalized( $base->recipient_address, $normalized_address ),
+			$recipient_address,
 			DeliveryType::PICKUP === $delivery_type && '' !== $pickup_code ? new PickupPointSelection( CdekSettings::CARRIER_KEY, CdekSettings::SERVICE_KEY, $pickup_code, (string) ( $pickup_row['address'] ?? '' ), $base->pickup_point?->selected_at ?: $this->now() ) : null,
 			array() !== $places ? $places : $base->places,
 			$base->declared_value,
 			false,
 			array(),
-			array(
-				'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
-				'phone' => sanitize_text_field( wp_unslash( $data['recipient_phone'] ?? $base->recipient['phone'] ?? '' ) ),
-				'email' => sanitize_email( wp_unslash( $data['recipient_email'] ?? $base->recipient['email'] ?? '' ) ),
-			),
+			$recipient,
 			array_merge(
 				$base->meta,
 				array(
@@ -1169,6 +1178,8 @@ final class OrderShipmentDraftFactory {
 			'point_title' => (string) ( $row['point_title'] ?? '' ),
 			'display_title' => (string) ( $row['display_title'] ?? '' ),
 			'cdek_code' => (string) ( $row['cdek_code'] ?? $row['point_code'] ?? '' ),
+			'cdek_city_code' => (int) ( $row['cdek_city_code'] ?? 0 ),
+			'is_handout' => ! array_key_exists( 'is_handout', $row ) || filter_var( $row['is_handout'], FILTER_VALIDATE_BOOLEAN ),
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 		);
@@ -1294,6 +1305,9 @@ final class OrderShipmentDraftFactory {
 			'point_title' => (string) ( $pickup['point_title'] ?? $pickup['display_title'] ?? '' ),
 			'display_title' => (string) ( $pickup['display_title'] ?? '' ),
 			'cdek_code' => $point_code,
+			'country_code' => (string) ( $pickup['country_code'] ?? 'RU' ),
+			'cdek_city_code' => (int) ( $pickup['cdek_city_code'] ?? 0 ),
+			'is_handout' => ! array_key_exists( 'is_handout', $pickup ) || filter_var( $pickup['is_handout'], FILTER_VALIDATE_BOOLEAN ),
 			'latitude' => is_numeric( $pickup['lat'] ?? $pickup['latitude'] ?? null ) ? (float) ( $pickup['lat'] ?? $pickup['latitude'] ) : null,
 			'longitude' => is_numeric( $pickup['lng'] ?? $pickup['longitude'] ?? null ) ? (float) ( $pickup['lng'] ?? $pickup['longitude'] ) : null,
 		);
@@ -1355,9 +1369,12 @@ final class OrderShipmentDraftFactory {
 		$region = sanitize_text_field( wp_unslash( $data['pickup_point_region'] ?? $base_row['region_name'] ?? '' ) );
 		$country_code = strtoupper( trim( sanitize_text_field( wp_unslash( $data['pickup_point_country'] ?? $base_row['country_code'] ?? 'RU' ) ) ) );
 		$country_code = in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : 'RU';
+		$is_handout = array_key_exists( 'pickup_point_is_handout', $data )
+			? filter_var( wp_unslash( $data['pickup_point_is_handout'] ), FILTER_VALIDATE_BOOLEAN )
+			: ( ! array_key_exists( 'is_handout', $base_row ) || filter_var( $base_row['is_handout'], FILTER_VALIDATE_BOOLEAN ) );
 		$latitude = is_numeric( $data['pickup_point_lat'] ?? null ) ? (float) $data['pickup_point_lat'] : ( is_numeric( $base_row['lat'] ?? null ) ? (float) $base_row['lat'] : null );
 		$longitude = is_numeric( $data['pickup_point_lng'] ?? null ) ? (float) $data['pickup_point_lng'] : ( is_numeric( $base_row['lng'] ?? null ) ? (float) $base_row['lng'] : null );
-		if ( '' === $point_code ) {
+		if ( '' === $point_code || ! $is_handout ) {
 			return array();
 		}
 
@@ -1372,6 +1389,7 @@ final class OrderShipmentDraftFactory {
 			'point_title' => sanitize_text_field( wp_unslash( $data['pickup_point_title'] ?? $base_row['point_title'] ?? '' ) ),
 			'display_title' => sanitize_text_field( wp_unslash( $data['pickup_point_title'] ?? $base_row['display_title'] ?? '' ) ),
 			'cdek_code' => $point_code,
+			'is_handout' => true,
 			'latitude' => $latitude,
 			'longitude' => $longitude,
 		);
@@ -1589,7 +1607,7 @@ final class OrderShipmentDraftFactory {
 	 */
 	private function cdek_recipient_document_from_admin_data( array $data, string $country_code ): string {
 		$country_code = strtoupper( trim( $country_code ) );
-		if ( 'RU' === $country_code ) {
+		if ( 'RU' === $country_code || ! in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ) {
 			return '';
 		}
 		$value = sanitize_text_field( wp_unslash( $data['cdek_recipient_document'] ?? '' ) );

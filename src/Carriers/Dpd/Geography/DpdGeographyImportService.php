@@ -192,7 +192,7 @@ final class DpdGeographyImportService {
 		$country = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
 		if ( 'RU' !== $country ) {
 			if ( in_array( $country, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
-				$this->process_foreign_row( $row, $patch, $country );
+				$this->process_foreign_row( $stage_table, $row, $patch, $country );
 				return;
 			}
 			$this->inc( $patch, 'skipped_non_ru' );
@@ -240,7 +240,7 @@ final class DpdGeographyImportService {
 	 * @param array<string,string> $row
 	 * @param array<string,mixed> $patch
 	 */
-	private function process_foreign_row( array $row, array &$patch, string $country ): void {
+	private function process_foreign_row( string $stage_table, array $row, array &$patch, string $country ): void {
 		$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $row['dpd_city_id'] ?? '' ) ) ?? '';
 		$place = trim( (string) ( $row['settlement'] ?? $row['main_city'] ?? '' ) );
 		if ( '' === $dpd_city_id || '0' === $dpd_city_id || '' === $place ) {
@@ -278,12 +278,24 @@ final class DpdGeographyImportService {
 		}
 
 		$saved_id = $this->locations->save( $location );
-		if ( $saved_id <= 0 || ! $this->delivery_codes->save_dpd_city_id( $saved_id, $dpd_city_id ) ) {
+		if ( $saved_id <= 0 ) {
 			$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
 			$errors[] = 'Failed to save foreign DPD location for dpd_city_id=' . $dpd_city_id;
 			$patch['errors'] = $errors;
 			return;
 		}
+		$result = $this->stage->upsert_candidate( $stage_table, $saved_id, $dpd_city_id, 'foreign' );
+		if ( 'conflict' === $result ) {
+			$this->inc( $patch, 'conflicts' );
+			return;
+		}
+		if ( ! in_array( $result, array( 'inserted', 'unchanged' ), true ) ) {
+			$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
+			$errors[] = 'Failed to stage foreign DPD mapping for dpd_city_id=' . $dpd_city_id;
+			$patch['errors'] = $errors;
+			return;
+		}
+		$this->inc( $patch, 'inserted' === $result ? 'saved_candidates' : 'unchanged_mappings' );
 
 		$this->inc( $patch, null === $existing ? 'foreign_locations_inserted' : 'foreign_locations_updated' );
 		$this->inc( $patch, 'foreign_' . strtolower( $country ) . '_rows' );

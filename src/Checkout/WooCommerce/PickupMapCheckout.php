@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
@@ -157,7 +158,13 @@ final class PickupMapCheckout {
 			}
 		}
 
-		if ( 'RU' !== strtoupper( (string) ( $context['country_code'] ?? 'RU' ) ) ) {
+		$country_code = strtoupper( (string) ( $context['country_code'] ?? 'RU' ) );
+		$active_family = $this->active_pickup_family();
+		if ( CdekSettings::CARRIER_KEY . ':pickup' === $active_family ) {
+			if ( ! in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ) {
+				return array();
+			}
+		} elseif ( 'RU' !== $country_code ) {
 			return array();
 		}
 
@@ -179,8 +186,8 @@ final class PickupMapCheckout {
 				'city_name' => $context['city_name'] ?? $context['settlement_name'] ?? $context['place_name'] ?? null,
 				'region_name' => $context['region_name'] ?? null,
 				'postcode' => $context['postcode'] ?? $context['postal_code'] ?? null,
-				'country_code' => $context['country_code'] ?? 'RU',
-				'selectedPoint' => $this->selected_point_context( $this->active_pickup_family() ),
+				'country_code' => $country_code,
+				'selectedPoint' => $this->selected_point_context( $active_family ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);

@@ -151,9 +151,16 @@ final class ShipmentAddressAjaxController {
 			);
 		}
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_delivery_points instanceof CdekDeliveryPointService ) {
+			$country_code = $this->cdek_pickup_request_country_code();
+			if ( '' === $country_code ) {
+				wp_send_json_success( array( 'points' => array(), 'context' => array( 'country_code' => '' ) ) );
+			}
+			$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? '' ) );
 			$points = $this->cdek_delivery_points->pointsForLocation(
 				array(
-					'country_code' => 'RU',
+					'country_code' => $country_code,
+					'city_code' => sanitize_text_field( wp_unslash( $_POST['city_code'] ?? $_POST['cdek_city_code'] ?? '' ) ),
+					'cdek_city_code' => sanitize_text_field( wp_unslash( $_POST['cdek_city_code'] ?? $_POST['city_code'] ?? '' ) ),
 					'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
 					'city_value' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
 					'region_name' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
@@ -165,7 +172,7 @@ final class ShipmentAddressAjaxController {
 					'gar_id' => sanitize_text_field( wp_unslash( $_POST['gar_id'] ?? '' ) ),
 					'location_id' => sanitize_text_field( wp_unslash( $_POST['location_id'] ?? '' ) ),
 				),
-				array( 'type' => 'ALL' )
+				array( 'type' => 'ALL', 'handout_only' => 'sender_dropoff' !== $purpose )
 			);
 			if ( 'search' === $mode && '' !== $query ) {
 				$needle = $this->normalize_pickup_search_text( $query );
@@ -193,6 +200,7 @@ final class ShipmentAddressAjaxController {
 			wp_send_json_success(
 				array(
 					'points' => array_values( $points ),
+					'context' => array( 'country_code' => $country_code ),
 				)
 			);
 		}
@@ -408,6 +416,24 @@ final class ShipmentAddressAjaxController {
 			),
 			static fn( string $value ): bool => '' !== trim( $value )
 		);
+	}
+
+	private function cdek_pickup_request_country_code(): string {
+		$country_code = strtoupper( trim( sanitize_text_field( wp_unslash( $_POST['country_code'] ?? '' ) ) ) );
+		if ( '' === $country_code ) {
+			$order_id = (int) ( $_POST['order_id'] ?? 0 );
+			if ( $order_id > 0 && function_exists( 'wc_get_order' ) ) {
+				$order = wc_get_order( $order_id );
+				if ( is_object( $order ) && method_exists( $order, 'get_shipping_country' ) ) {
+					$country_code = strtoupper( trim( (string) $order->get_shipping_country() ) );
+				}
+			}
+		}
+		if ( '' === $country_code ) {
+			return 'RU';
+		}
+
+		return in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : '';
 	}
 
 	private function dadata_error_message( string $code ): string {

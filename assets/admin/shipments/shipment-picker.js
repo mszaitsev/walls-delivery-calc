@@ -11,6 +11,7 @@
       pickupFamily: fieldValue(form, '[data-wdc-pickup-family]') || (carrier ? carrier + ':pickup' : ''),
       city: fieldValue(form, '[data-wdc-pickup-location-city]') || fieldValue(form, '[data-wdc-pickup-city-field]'),
       cityId: fieldValue(form, '[data-wdc-pickup-location-city-id]'),
+      countryCode: fieldValue(form, 'input[name="recipient_location_country"]') || fieldValue(form, '[data-wdc-pickup-country-field]') || fieldValue(form, '[data-wdc-pickup-location-country]') || 'RU',
       region: fieldValue(form, '[data-wdc-pickup-location-region]') || fieldValue(form, '[data-wdc-pickup-region-field]'),
       postcode: fieldValue(form, '[data-wdc-pickup-location-postcode]') || fieldValue(form, '[data-wdc-pickup-postcode-field]'),
       address: fieldValue(form, '[data-wdc-pickup-location-address]') || fieldValue(form, '[data-wdc-pickup-address-field]'),
@@ -55,6 +56,9 @@
       region_name: String(point && (point.region_name || point.region) || ''),
       city_name: String(point && (point.city_name || point.city) || ''),
       city: String(point && (point.city || point.city_name) || ''),
+      country_code: String(point && (point.country_code || point.country) || ''),
+      cdek_city_code: point && point.cdek_city_code !== undefined ? point.cdek_city_code : '',
+      is_handout: point && point.is_handout !== undefined ? !!point.is_handout : true,
       address: String(point && (point.address || point.point_address) || ''),
       lat: Number.isFinite(lat) ? lat : null,
       lng: Number.isFinite(lng) ? lng : null
@@ -81,6 +85,7 @@
     data.append('gar_id', context.garId || '');
     data.append('location_id', context.locationId || '');
     data.append('city_id', context.cityId || '');
+    data.append('country_code', context.countryCode || '');
     data.append('lat', context.lat || '');
     data.append('lng', context.lng || '');
     data.append('purpose', context.purpose || '');
@@ -126,6 +131,7 @@
       pickup_point_postcode: point.postcode || point.postal_code || '',
       pickup_point_address: point.address || '',
       pickup_point_country: point.country_code || point.country || '',
+      pickup_point_is_handout: point.is_handout === false ? '0' : '1',
       pickup_point_city: point.city_name || point.city || '',
       pickup_point_region: point.region_name || '',
       pickup_point_type: point.point_type || point.type || '',
@@ -170,6 +176,7 @@
       pickupFamily: fieldValue(form, '[data-wdc-pickup-carrier-key]') === 'dpd' ? 'dpd:pickup' : 'cdek:pickup',
       city: fieldValue(form, '[data-wdc-sender-pickup-city]') || 'Новосибирск',
       cityId: fieldValue(form, '[data-wdc-sender-pickup-city-id]'),
+      countryCode: 'RU',
       region: 'Новосибирская область',
       postcode: '',
       address: fieldValue(form, '[data-wdc-sender-shipment-point-address]'),
@@ -177,7 +184,8 @@
       garId: '',
       locationId: '',
       lat: '',
-      lng: ''
+      lng: '',
+      purpose: 'sender_dropoff'
     };
   }
 
