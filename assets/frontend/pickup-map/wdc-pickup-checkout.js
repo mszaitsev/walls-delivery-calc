@@ -1743,7 +1743,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		window.WDCPickupApi.searchInitial(context.query, prefetchController.signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
-			if (!points[0] || points[0].lat === null || points[0].lng === null) {
+			if (!points[0] || !validCoordinate(points[0].lat, points[0].lng)) {
 				prefetchCache = { key: key, points: [], context: context };
 				return;
 			}
@@ -1752,6 +1752,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function prefetchBounds(context, lat, lng, key, signal, centerSource, centerTrusted) {
+		if (!validCoordinate(lat, lng)) {
+			prefetchCache = { key: key, points: [], context: context };
+			return;
+		}
 		window.WDCPickupApi.points(bboxAround(lat, lng), signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
 			prefetchCache = {
 				key: key,

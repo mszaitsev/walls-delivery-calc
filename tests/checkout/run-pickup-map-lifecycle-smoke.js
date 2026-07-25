@@ -485,6 +485,95 @@ async function yandexPendingFitCanBeCancelled() {
 	provider.destroy();
 }
 
+async function addressSearchWithoutPointsLoadsNewBounds() {
+	let pointRequests = 0;
+	let lastBbox = '';
+	const api = {
+		context: {},
+		addressSearch: () => Promise.resolve({
+			address: { value: 'Minsk, Independence Ave', lat: 53.9, lng: 27.56 },
+			points: []
+		}),
+		points: (bbox) => {
+			pointRequests += 1;
+			lastBbox = bbox;
+			return Promise.resolve([point('min40', 53.901, 27.561), point('min41', 53.902, 27.562)]);
+		}
+	};
+	const harness = createHarness(api);
+	await harness.map.search('Independence Ave');
+	await wait(40);
+	assert.deepStrictEqual(harness.calls.filter((call) => call[0] === 'setCenter').pop().slice(1), [53.9, 27.56, 15], 'address search must center on found address');
+	assert.strictEqual(pointRequests, 1, 'address search without result.points must explicitly load points for new bounds');
+	assert.strictEqual(lastBbox, '27.439999999999998,53.78,27.68,54.019999999999996', 'address search points request must use the address bbox');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 2, 'address search should render current origin marker and loaded points');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 0, 'address search response must not broad auto-fit after claim');
+	assert.strictEqual(harness.map.selected(), null, 'address search must not auto-select a point');
+	harness.map.destroy();
+}
+
+async function addressSearchWithPointsRendersImmediately() {
+	let pointRequests = 0;
+	const api = {
+		context: {},
+		addressSearch: () => Promise.resolve({
+			address: { value: 'Minsk, Independence Ave', lat: 53.9, lng: 27.56 },
+			points: [point('min40', 53.901, 27.561), point('min41', 53.902, 27.562)]
+		}),
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve([]);
+		}
+	};
+	const harness = createHarness(api);
+	await harness.map.search('Independence Ave');
+	await wait(40);
+	assert.strictEqual(pointRequests, 0, 'address search with result.points should not need an extra points request');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'address search result.points should render immediately');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 0, 'address result.points must not override address center with broad fit');
+	assert.strictEqual(harness.map.selected(), null, 'address result.points must not auto-select a point');
+	harness.map.destroy();
+}
+
+async function geolocationResponseDoesNotAutoFit() {
+	let pointRequests = 0;
+	const api = {
+		context: {},
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve([point('near1', 53.901, 27.561), point('near2', 53.902, 27.562)]);
+		}
+	};
+	const harness = createHarness(api);
+	harness.map.useUserLocation(53.9, 27.56);
+	await wait(40);
+	assert.deepStrictEqual(harness.calls.filter((call) => call[0] === 'setCenter').pop().slice(1), [53.9, 27.56, 15], 'geolocation must center on user location');
+	assert.strictEqual(pointRequests, 1, 'geolocation must request points for the user bbox');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length >= 1, true, 'geolocation response must render markers');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 0, 'geolocation response must not run broad initial auto-fit');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'setCenter').length, 2, 'geolocation response must not center again on a point');
+	harness.map.destroy();
+}
+
+async function destroyAfterAddressSearchPreventsLatePointsMutation() {
+	const pending = deferred();
+	const api = {
+		context: {},
+		addressSearch: () => Promise.resolve({
+			address: { value: 'Minsk, Independence Ave', lat: 53.9, lng: 27.56 },
+			points: []
+		}),
+		points: () => pending.promise
+	};
+	const harness = createHarness(api);
+	await harness.map.search('Independence Ave');
+	harness.map.destroy();
+	pending.resolve([point('late', 53.901, 27.561)]);
+	await wait(40);
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'late address-search points must not render after destroy');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 0, 'late address-search points must not fit after destroy');
+}
+
 async function run() {
 	await programmaticSuppressionAllowsFirstUserPan();
 	await lateAsyncDoesNotAutoFitAfterInteraction();
@@ -496,6 +585,10 @@ async function run() {
 	await invalidCoordinatesDoNotDriveViewport();
 	await destroyPreventsLateMutation();
 	await yandexPendingFitCanBeCancelled();
+	await addressSearchWithoutPointsLoadsNewBounds();
+	await addressSearchWithPointsRendersImmediately();
+	await geolocationResponseDoesNotAutoFit();
+	await destroyAfterAddressSearchPreventsLatePointsMutation();
 	console.log('Pickup map lifecycle smoke OK');
 }
 

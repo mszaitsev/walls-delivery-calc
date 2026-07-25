@@ -185,7 +185,7 @@
 				provider.setActivePoint(pointId(point));
 			}
 			if (options.focus !== false && provider.focusPoint) {
-				cancelPendingProviderFit();
+				claimViewportForExplicitAction();
 				beginProgrammaticBoundsSuppression();
 				provider.focusPoint(point);
 			}
@@ -209,7 +209,7 @@
 				provider.setActivePoint(pointId(point));
 			}
 			if (options.focus !== false && provider.focusPoint) {
-				cancelPendingProviderFit();
+				claimViewportForExplicitAction();
 				beginProgrammaticBoundsSuppression();
 				provider.focusPoint(point);
 			}
@@ -467,15 +467,25 @@
 		}
 
 		function applySearchResult(result) {
+			if (!result || !result.address || !validPointCoordinates(result.address)) {
+				card.textContent = labels.addressNotFound || labels.notFound || '';
+				return;
+			}
 			searchAddress = normalizeAddressMarker(result.address);
 			userLocation = null;
-			originStatus = '';
+			originStatus = labels.addressFound || 'Address found.';
 			originStatusType = '';
 			distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
-			cancelPendingProviderFit();
+			claimViewportForExplicitAction();
 			beginProgrammaticBoundsSuppression();
 			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
+			if (Array.isArray(result.points) && result.points.length > 0) {
+				renderMarkers(result.points, labels.empty || '');
+				card.textContent = labels.addressFound || 'Address found.';
+				return;
+			}
 			refreshDistancesFromOrigin();
+			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true });
 			card.textContent = labels.addressFound || 'Адрес найден.';
 		}
 
@@ -666,7 +676,7 @@
 			distanceOrigin = { lat: lat, lng: lng };
 			originStatus = 'Показаны ближайшие пункты к вашему местоположению';
 			originStatusType = '';
-			cancelPendingProviderFit();
+			claimViewportForExplicitAction();
 			beginProgrammaticBoundsSuppression();
 			provider.setCenter(lat, lng, 15);
 			refreshDistancesFromOrigin();
@@ -702,6 +712,11 @@
 			if (provider.fitToMarkers) {
 				provider.fitToMarkers({ padding: 32, maxZoom: 14 });
 			}
+		}
+
+		function claimViewportForExplicitAction() {
+			initialPointsViewportApplied = true;
+			cancelPendingProviderFit();
 		}
 
 		function beginProgrammaticBoundsSuppression() {
