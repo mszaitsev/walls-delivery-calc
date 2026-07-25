@@ -234,6 +234,7 @@ final class DpdGeographyImportService {
 		$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
 		$errors[] = 'Failed to stage mapping for location_id=' . $location_id;
 		$patch['errors'] = $errors;
+		$this->inc( $patch, 'errors_total' );
 	}
 
 	/**
@@ -241,19 +242,28 @@ final class DpdGeographyImportService {
 	 * @param array<string,mixed> $patch
 	 */
 	private function process_foreign_row( string $stage_table, array $row, array &$patch, string $country ): void {
+		$this->inc( $patch, 'foreign_rows' );
+		$this->inc( $patch, 'foreign_' . strtolower( $country ) . '_rows' );
 		$dpd_city_id = preg_replace( '/\D+/', '', (string) ( $row['dpd_city_id'] ?? '' ) ) ?? '';
-		$place = trim( (string) ( $row['settlement'] ?? $row['main_city'] ?? '' ) );
+		$place = trim( (string) ( $row['settlement'] ?? '' ) );
 		if ( '' === $dpd_city_id || '0' === $dpd_city_id || '' === $place ) {
 			$this->inc( $patch, 'skipped_invalid' );
 			return;
 		}
 
 		$region = trim( (string) ( $row['region'] ?? '' ) );
-		$postcode = trim( (string) ( $row['postal_code'] ?? '' ) );
+		$district = trim( (string) ( $row['district'] ?? '' ) );
+		$place_type = $this->normalize_foreign_place_type( (string) ( $row['settlement_type'] ?? '' ) );
+		$region_type = $this->foreign_region_type( $region, $place, $place_type );
+		$district_type = '' !== $district ? 'р-н' : '';
+		$is_city = $this->foreign_place_type_is_city( $place_type );
 		$location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
 		$existing = null !== $location_id ? $this->locations->find_by_id( $location_id ) : null;
 		if ( ! $existing instanceof Location ) {
-			$existing = $this->locations->find_foreign_by_place_identity( $country, $place, $region, $postcode );
+			$existing = $this->locations->find_foreign_by_place_identity( $country, $place, $region, $district, $place_type );
+		}
+		if ( ! $existing instanceof Location ) {
+			$existing = $this->locations->find_legacy_foreign_by_place_identity( $country, $place, $region );
 		}
 
 		$location = Location::from_array(
@@ -261,14 +271,25 @@ final class DpdGeographyImportService {
 				'id' => $existing?->id,
 				'country_code' => $country,
 				'region_name' => $region,
-				'city_name' => trim( (string) ( $row['main_city'] ?? $place ) ),
-				'city_type' => trim( (string) ( $row['settlement_type'] ?? '' ) ),
+				'region_type' => $region_type,
+				'district_name' => $district,
+				'district_type' => $district_type,
+				'city_name' => $is_city ? $place : '',
+				'city_type' => $is_city ? 'г' : '',
 				'settlement_name' => $place,
-				'settlement_type' => trim( (string) ( $row['settlement_type'] ?? '' ) ),
+				'settlement_type' => $place_type,
 				'place_name' => $place,
-				'place_type' => trim( (string) ( $row['settlement_type'] ?? '' ) ),
-				'display_name' => $this->foreign_display_name( $country, $region, $place ),
-				'postal_code' => $postcode,
+				'place_type' => $place_type,
+				'place_level' => 0,
+				'display_name' => $this->foreign_display_name( $country, $region, $region_type, $district, $district_type, $place, $place_type ),
+				'postal_code' => '',
+				'russianpost_courier_calc_postal_code' => '',
+				'fias_id' => '',
+				'gar_object_id' => 0,
+				'gar_id' => '',
+				'kladr_id' => '',
+				'latitude' => null,
+				'longitude' => null,
 				'active' => true,
 			)
 		);
@@ -277,32 +298,85 @@ final class DpdGeographyImportService {
 			return;
 		}
 
-		$saved_id = $this->locations->save( $location );
+		try {
+			$saved_id = $this->locations->save( $location );
+		} catch ( \RuntimeException $exception ) {
+			$this->inc( $patch, 'foreign_save_failed' );
+			$this->add_error(
+				$patch,
+				sprintf(
+					'Failed to save foreign DPD location for dpd_city_id=%s country_code=%s place_name=%s: %s',
+					$dpd_city_id,
+					$country,
+					$place,
+					$this->sanitize_error( $exception->getMessage() )
+				)
+			);
+			return;
+		}
 		if ( $saved_id <= 0 ) {
-			$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
-			$errors[] = 'Failed to save foreign DPD location for dpd_city_id=' . $dpd_city_id;
-			$patch['errors'] = $errors;
+			$this->inc( $patch, 'foreign_save_failed' );
+			$this->add_error( $patch, 'Failed to save foreign DPD location for dpd_city_id=' . $dpd_city_id . ' country_code=' . $country . ' place_name=' . $place . ': missing saved id' );
 			return;
 		}
 		$result = $this->stage->upsert_candidate( $stage_table, $saved_id, $dpd_city_id, 'foreign' );
 		if ( 'conflict' === $result ) {
+			$this->inc( $patch, 'foreign_mapping_conflicts' );
 			$this->inc( $patch, 'conflicts' );
 			return;
 		}
 		if ( ! in_array( $result, array( 'inserted', 'unchanged' ), true ) ) {
-			$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
-			$errors[] = 'Failed to stage foreign DPD mapping for dpd_city_id=' . $dpd_city_id;
-			$patch['errors'] = $errors;
+			$this->add_error( $patch, 'Failed to stage foreign DPD mapping for dpd_city_id=' . $dpd_city_id . ' country_code=' . $country . ' place_name=' . $place );
 			return;
 		}
 		$this->inc( $patch, 'inserted' === $result ? 'saved_candidates' : 'unchanged_mappings' );
 
 		$this->inc( $patch, null === $existing ? 'foreign_locations_inserted' : 'foreign_locations_updated' );
-		$this->inc( $patch, 'foreign_' . strtolower( $country ) . '_rows' );
 	}
 
-	private function foreign_display_name( string $country, string $region, string $place ): string {
-		return implode( ', ', array_values( array_filter( array( $country, $region, $place ), static fn( string $value ): bool => '' !== trim( $value ) ) ) );
+	private function normalize_foreign_place_type( string $type ): string {
+		$type = trim( mb_strtolower( str_replace( 'ё', 'е', $type ), 'UTF-8' ) );
+		$type = trim( str_replace( '.', '', $type ) );
+		return match ( $type ) {
+			'g', 'г', 'город' => 'г',
+			'p', 'п' => 'п',
+			's', 'с' => 'с',
+			default => trim( $type ),
+		};
+	}
+
+	private function foreign_place_type_is_city( string $type ): bool {
+		return 'г' === $this->normalize_foreign_place_type( $type );
+	}
+
+	private function foreign_region_type( string $region, string $place, string $place_type ): string {
+		if ( $this->foreign_place_type_is_city( $place_type ) && '' !== trim( $region ) && $this->normalize_foreign_name_for_compare( $region ) === $this->normalize_foreign_name_for_compare( $place ) ) {
+			return 'г';
+		}
+
+		return '' !== trim( $region ) ? 'обл.' : '';
+	}
+
+	private function normalize_foreign_name_for_compare( string $value ): string {
+		$value = mb_strtolower( str_replace( 'ё', 'е', trim( $value ) ), 'UTF-8' );
+		$value = preg_replace( '/(^|\s)(г|город)\.?\s+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+(обл|область)\.?$/u', '', $value ) ?? $value;
+		$value = preg_replace( '/[\.\s]+/u', '', $value ) ?? $value;
+		return trim( $value );
+	}
+
+	private function foreign_display_name( string $country, string $region, string $region_type, string $district, string $district_type, string $place, string $place_type ): string {
+		$parts = array( $country );
+		$duplicate_region_city = 'г' === $region_type && $this->normalize_foreign_name_for_compare( $region ) === $this->normalize_foreign_name_for_compare( $place );
+		if ( '' !== trim( $region ) && ! $duplicate_region_city ) {
+			$parts[] = trim( trim( $region ) . ( '' !== trim( $region_type ) ? ' ' . trim( $region_type ) : '' ) );
+		}
+		if ( '' !== trim( $district ) ) {
+			$parts[] = trim( trim( $district ) . ( '' !== trim( $district_type ) ? ' ' . trim( $district_type ) : '' ) );
+		}
+		$parts[] = trim( ( '' !== trim( $place_type ) ? trim( $place_type ) . ' ' : '' ) . trim( $place ) );
+
+		return implode( ', ', array_values( array_filter( $parts, static fn( string $value ): bool => '' !== trim( $value ) ) ) );
 	}
 
 	/**
@@ -314,11 +388,18 @@ final class DpdGeographyImportService {
 		if ( '' === $stage_table || ! $this->stage->exists( $stage_table ) ) {
 			return $this->state->fail( 'DPD geography staging table is missing during finalization.' );
 		}
-		$finalized = $this->stage->finalize_into_delivery_codes( $stage_table );
+		try {
+			$finalized = $this->stage->finalize_into_delivery_codes( $stage_table );
+		} catch ( \RuntimeException $exception ) {
+			return $this->state->fail( 'DPD geography finalization failed: ' . $this->sanitize_error( $exception->getMessage() ) );
+		}
+		$finalized_mappings = is_array( $finalized ) ? (int) ( $finalized['mappings'] ?? 0 ) : (int) $finalized;
+		$finalized_changes = is_array( $finalized ) ? (int) ( $finalized['changes'] ?? 0 ) : (int) $finalized;
 		$state = $this->state->update(
 			array(
 				'phase' => 'finalizing',
-				'finalized_mappings' => $finalized,
+				'finalized_mappings' => $finalized_mappings,
+				'finalized_changes' => $finalized_changes,
 				'last_message' => 'DPD geography import is finalizing mappings.',
 			)
 		);
@@ -334,6 +415,22 @@ final class DpdGeographyImportService {
 		}
 		$this->stage->drop( $stage_table );
 
+		if ( (int) ( $state['foreign_save_failed'] ?? 0 ) > 0 || (int) ( $state['errors_total'] ?? 0 ) > 0 ) {
+			$warning_state = $this->state->update(
+				array(
+					'phase' => 'finished',
+					'status' => 'warning',
+					'last_message' => sprintf(
+						'DPD geography import finished with %d errors.',
+						max( (int) ( $state['errors_total'] ?? 0 ), (int) ( $state['foreign_save_failed'] ?? 0 ) )
+					),
+					'finished_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
+				)
+			);
+			$this->settings?->save_geography_import_report( $this->report_from_state( $warning_state ) );
+			return $warning_state;
+		}
+
 		return $this->state->finish( 'DPD geography import finished.' );
 	}
 
@@ -343,17 +440,22 @@ final class DpdGeographyImportService {
 	 */
 	private function report_from_state( array $state ): array {
 		return array(
+			'phase' => (string) ( $state['phase'] ?? '' ),
+			'status' => (string) ( $state['status'] ?? '' ),
 			'source' => (string) ( $state['source'] ?? '' ),
 			'source_file' => (string) ( $state['source_file'] ?? '' ),
 			'file_size' => (int) ( $state['file_size'] ?? 0 ),
 			'total_rows' => (int) ( $state['total_rows'] ?? 0 ),
 			'ru_rows' => (int) ( $state['ru_rows'] ?? 0 ),
+			'foreign_rows' => (int) ( $state['foreign_rows'] ?? 0 ),
 			'foreign_am_rows' => (int) ( $state['foreign_am_rows'] ?? 0 ),
 			'foreign_by_rows' => (int) ( $state['foreign_by_rows'] ?? 0 ),
 			'foreign_kz_rows' => (int) ( $state['foreign_kz_rows'] ?? 0 ),
 			'foreign_kg_rows' => (int) ( $state['foreign_kg_rows'] ?? 0 ),
 			'foreign_locations_inserted' => (int) ( $state['foreign_locations_inserted'] ?? 0 ),
 			'foreign_locations_updated' => (int) ( $state['foreign_locations_updated'] ?? 0 ),
+			'foreign_save_failed' => (int) ( $state['foreign_save_failed'] ?? 0 ),
+			'foreign_mapping_conflicts' => (int) ( $state['foreign_mapping_conflicts'] ?? 0 ),
 			'skipped_non_ru' => (int) ( $state['skipped_non_ru'] ?? 0 ),
 			'skipped_invalid' => (int) ( $state['skipped_invalid'] ?? 0 ),
 			'matched_by_fias' => (int) ( $state['matched_by_fias'] ?? 0 ),
@@ -361,10 +463,12 @@ final class DpdGeographyImportService {
 			'matched_by_name' => (int) ( $state['matched_by_name'] ?? 0 ),
 			'saved_candidates' => (int) ( $state['saved_candidates'] ?? 0 ),
 			'finalized_mappings' => (int) ( $state['finalized_mappings'] ?? 0 ),
+			'finalized_changes' => (int) ( $state['finalized_changes'] ?? 0 ),
 			'unchanged_mappings' => (int) ( $state['unchanged_mappings'] ?? 0 ),
 			'conflicts' => (int) ( $state['conflicts'] ?? 0 ),
 			'ambiguous' => (int) ( $state['ambiguous'] ?? 0 ),
 			'unmatched' => (int) ( $state['unmatched'] ?? 0 ),
+			'errors_total' => (int) ( $state['errors_total'] ?? 0 ),
 			'errors' => is_array( $state['errors'] ?? null ) ? $state['errors'] : array(),
 			'started_at' => (string) ( $state['started_at'] ?? '' ),
 			'finished_at' => (string) ( $state['finished_at'] ?? ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ) ),
@@ -376,6 +480,21 @@ final class DpdGeographyImportService {
 	 */
 	private function inc( array &$patch, string $key ): void {
 		$patch[ $key ] = max( 0, (int) ( $patch[ $key ] ?? $this->state->current()[ $key ] ?? 0 ) + 1 );
+	}
+
+	/**
+	 * @param array<string,mixed> $patch
+	 */
+	private function add_error( array &$patch, string $message ): void {
+		$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
+		$errors[] = $this->sanitize_error( $message );
+		$patch['errors'] = $errors;
+		$this->inc( $patch, 'errors_total' );
+	}
+
+	private function sanitize_error( string $message ): string {
+		$message = preg_replace( '/[\r\n\t]+/', ' ', $message ) ?? $message;
+		return trim( $message );
 	}
 
 	private function copy_to_import_temp( string $source, string $name ): string {

@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000FD A0AC:74BD
+Volume serial number is 0000004B A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -20,6 +20,7 @@ C:.
 |   |   |   rules-admin.css
 |   |   |   rules-admin.js
 |   |   |   russian-post-pickup-import.js
+|   |   |   shipment-cost-analytics.js
 |   |   |   shipments-admin.css
 |   |   |   shipments-admin.js
 |   |   |   yandex-delivery-pickup-v2-runner.js
@@ -116,6 +117,7 @@ C:.
 |           0040_create_yandex_location_manual_overrides_v2.php
 |           0041_create_shipment_cost_analytics_table.php
 |           0042_seed_cdek_eaeu_countries.php
+|           0043_allow_external_locations_without_gar_fias.php
 |
 +---docs
 |   |   README.md
@@ -643,6 +645,7 @@ C:.
 |   |   |   |   ShipmentStatusesAdminPage.php
 |   |   |   |
 |   |   |   \---Ajax
+|   |   |           ShipmentActualCostAjaxController.php
 |   |   |           ShipmentAddressAjaxController.php
 |   |   |           ShipmentAdminAjaxService.php
 |   |   |           ShipmentAdminCarrierUiPayloadBuilder.php
@@ -664,20 +667,20 @@ C:.
 |   |   +---Analytics
 |   |   |   |   CreatedShipmentIdentity.php
 |   |   |   |   CreatedShipmentIdentityResolver.php
-|   |   |       OrderAnalyticsShipmentSelector.php
-|   |   |       OrderSelectedDeliveryIdentity.php
-|   |   |       OrderSelectedDeliveryIdentityResolver.php
-|   |   |       SelectedAnalyticsShipment.php
-|   |   |       ShipmentCostAnalyticsFilter.php
-|   |   |       ShipmentCostAnalyticsIndexer.php
-|   |   |       ShipmentCostAnalyticsQuery.php
-|   |   |       ShipmentCostAnalyticsRecordBuilder.php
-|   |   |       ShipmentCostAnalyticsResult.php
-|   |   |       ShipmentCostAnalyticsRow.php
-|   |   |       ShipmentCostAnalyticsService.php
-|   |   |       ShipmentCostAnalyticsSummary.php
-|   |   |       ShipmentCostThresholdPolicy.php
-|   |   |
+|   |   |   |   OrderAnalyticsShipmentSelector.php
+|   |   |   |   OrderSelectedDeliveryIdentity.php
+|   |   |   |   OrderSelectedDeliveryIdentityResolver.php
+|   |   |   |   SelectedAnalyticsShipment.php
+|   |   |   |   ShipmentCostAnalyticsFilter.php
+|   |   |   |   ShipmentCostAnalyticsIndexer.php
+|   |   |   |   ShipmentCostAnalyticsQuery.php
+|   |   |   |   ShipmentCostAnalyticsRecordBuilder.php
+|   |   |   |   ShipmentCostAnalyticsResult.php
+|   |   |   |   ShipmentCostAnalyticsRow.php
+|   |   |   |   ShipmentCostAnalyticsService.php
+|   |   |   |   ShipmentCostAnalyticsSummary.php
+|   |   |   |   ShipmentCostThresholdPolicy.php
+|   |   |   |
 |   |   |   \---Storage
 |   |   |           ShipmentCostAnalyticsRecord.php
 |   |   |           ShipmentCostAnalyticsRepository.php
@@ -688,6 +691,9 @@ C:.
 |   |   |       OrderShipmentDraftFactory.php
 |   |   |       RussianPostShipmentActualCostExtractor.php
 |   |   |       RussianPostShipmentActualCostLookupService.php
+|   |   |       ShipmentActualCost.php
+|   |   |       ShipmentActualCostResolver.php
+|   |   |       ShipmentActualCostService.php
 |   |   |       ShipmentBacklogService.php
 |   |   |       ShipmentCreationService.php
 |   |   |       ShipmentMetaboxButtonPolicy.php
@@ -890,6 +896,7 @@ C:.
     |       run-no-legacy-smoke.php
     |
     +---shipments
+    |   |   actual-cost-test-helpers.php
     |   |   admin-js-bundle-source.php
     |   |   run-carrier-adapter-registry-smoke.php
     |   |   run-russian-post-cancel-shipment-smoke.php
@@ -897,10 +904,14 @@ C:.
     |   |   run-russian-post-shipment-price-smoke.php
     |   |   run-russian-post-shipments-smoke.php
     |   |   run-shipment-actual-cost-presentation-smoke.php
+    |   |   run-shipment-actual-cost-service-smoke.php
     |   |   run-shipment-admin-ajax-smoke.php
     |   |   run-shipment-admin-js-structure-smoke.php
     |   |   run-shipment-allocation-smoke.php
+    |   |   run-shipment-cost-analytics-indexer-smoke.php
+    |   |   run-shipment-cost-analytics-query-smoke.php
     |   |   run-shipment-cost-analytics-smoke.php
+    |   |   run-shipment-cost-analytics-storage-smoke.php
     |   |   run-shipment-cost-threshold-policy-smoke.php
     |   |   run-shipment-document-actions-smoke.php
     |   |   run-shipment-lifecycle-contract-smoke.php
@@ -909,6 +920,7 @@ C:.
     |   |   run-shipment-regression-profile-smoke.php
     |   |   run-shipment-regression-profile.php
     |   |   run-shipment-status-smoke.php
+    |   |   shipment-cost-analytics-test-helpers.php
     |   |
     |   \---regression
     |           shipment-regression-manifest.php

@@ -27,7 +27,10 @@ final class LocationRepository {
 			$existing = $this->find_by_id( $location->id );
 			$country_changed = ! $existing instanceof Location || $this->normalize_country_code( $existing->country_code ) !== $this->normalize_country_code( $location->country_code );
 			unset( $data['created_at'] );
-			$this->wpdb->update( $this->table_name(), $data, array( 'id' => $location->id ), $this->formats( false ), array( '%d' ) );
+			$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location->id ), $this->formats( false ), array( '%d' ) );
+			if ( false === $result ) {
+				$this->throw_sql_error( 'Location update failed' );
+			}
 			if ( $country_changed ) {
 				$this->mark_country_index_stale();
 			}
@@ -42,14 +45,23 @@ final class LocationRepository {
 		if ( $existing instanceof Location && null !== $existing->id ) {
 			$country_changed = $this->normalize_country_code( $existing->country_code ) !== $this->normalize_country_code( $location->country_code );
 			unset( $data['created_at'] );
-			$this->wpdb->update( $this->table_name(), $data, array( 'id' => $existing->id ), $this->formats( false ), array( '%d' ) );
+			$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $existing->id ), $this->formats( false ), array( '%d' ) );
+			if ( false === $result ) {
+				$this->throw_sql_error( 'Location update failed' );
+			}
 			if ( $country_changed ) {
 				$this->mark_country_index_stale();
 			}
 			return $existing->id;
 		}
 
-		$this->wpdb->insert( $this->table_name(), $data, $this->formats() );
+		$result = $this->wpdb->insert( $this->table_name(), $data, $this->formats() );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location insert failed' );
+		}
+		if ( (int) $this->wpdb->insert_id <= 0 ) {
+			throw new RuntimeException( 'Location insert failed: insert_id is missing after successful insert' );
+		}
 		$this->mark_country_index_stale();
 
 		return (int) $this->wpdb->insert_id;
@@ -110,17 +122,20 @@ final class LocationRepository {
 		return $this->find_one( 'id', $id, '%d' );
 	}
 
-	public function find_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '', string $postal_code = '' ): ?Location {
+	public function find_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '', string $district_name = '', string $place_type = '' ): ?Location {
 		$country_code = $this->normalize_country_code( $country_code );
 		$place_name = trim( $place_name );
 		$region_name = trim( $region_name );
-		$postal_code = trim( $postal_code );
+		$district_name = trim( $district_name );
+		$place_type = trim( $place_type );
 		if ( '' === $country_code || 'RU' === $country_code || '' === $place_name ) {
 			return null;
 		}
 
 		$place_key = $this->normalize_query( $place_name );
 		$region_key = $this->normalize_query( $region_name );
+		$district_key = $this->normalize_query( $district_name );
+		$place_type_key = $this->normalize_query( $place_type );
 		if ( $this->has_test_location_rows() ) {
 			$matches = array();
 			foreach ( $this->test_location_rows() as $row ) {
@@ -129,10 +144,14 @@ final class LocationRepository {
 				}
 				$row_place = $this->normalize_query( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
 				$row_region = $this->normalize_query( (string) ( $row['region_name'] ?? '' ) );
-				if ( $row_place !== $place_key || ( '' !== $region_key && '' !== $row_region && $row_region !== $region_key ) ) {
-					continue;
-				}
-				if ( '' !== $postal_code && '' !== (string) ( $row['postal_code'] ?? '' ) && $postal_code !== (string) $row['postal_code'] ) {
+				$row_district = $this->normalize_query( (string) ( $row['district_name'] ?? '' ) );
+				$row_place_type = $this->normalize_query( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? $row['city_type'] ?? '' ) );
+				if (
+					$row_place !== $place_key
+					|| $row_region !== $region_key
+					|| $row_district !== $district_key
+					|| $row_place_type !== $place_type_key
+				) {
 					continue;
 				}
 				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
@@ -145,16 +164,11 @@ final class LocationRepository {
 			'l.active = 1',
 			'l.country_code = %s',
 			'(LOWER(l.place_name) = %s OR LOWER(l.settlement_name) = %s OR LOWER(l.city_name) = %s)',
+			'LOWER(l.region_name) = %s',
+			'LOWER(l.district_name) = %s',
+			'LOWER(l.place_type) = %s',
 		);
-		$args = array( $country_code, $place_key, $place_key, $place_key );
-		if ( '' !== $region_key ) {
-			$where[] = '(LOWER(l.region_name) = %s OR l.region_name = "")';
-			$args[] = $region_key;
-		}
-		if ( '' !== $postal_code ) {
-			$where[] = '(l.postal_code = %s OR l.postal_code = "")';
-			$args[] = $postal_code;
-		}
+		$args = array( $country_code, $place_key, $place_key, $place_key, $region_key, $district_key, $place_type_key );
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
@@ -164,6 +178,64 @@ final class LocationRepository {
 				WHERE " . implode( ' AND ', $where ) . '
 				LIMIT 2',
 				...$args
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) && 1 === count( $rows ) ? $this->row_to_location( $rows[0] ) : null;
+	}
+
+	public function find_legacy_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '' ): ?Location {
+		$country_code = $this->normalize_country_code( $country_code );
+		$place_name = trim( $place_name );
+		$region_name = trim( $region_name );
+		if ( '' === $country_code || 'RU' === $country_code || '' === $place_name ) {
+			return null;
+		}
+
+		$place_key = $this->normalize_query( $place_name );
+		$region_key = $this->normalize_query( $region_name );
+		if ( $this->has_test_location_rows() ) {
+			$matches = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) || $country_code !== $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ) ) {
+					continue;
+				}
+				if ( (int) ( $row['gar_object_id'] ?? 0 ) > 0 || '' !== trim( (string) ( $row['fias_id'] ?? '' ) ) ) {
+					continue;
+				}
+				if ( '' !== trim( (string) ( $row['district_name'] ?? '' ) ) ) {
+					continue;
+				}
+				$row_place = $this->normalize_query( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
+				$row_region = $this->normalize_query( (string) ( $row['region_name'] ?? '' ) );
+				if ( $row_place !== $place_key || $row_region !== $region_key ) {
+					continue;
+				}
+				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+			}
+
+			return 1 === count( $matches ) ? $matches[0] : null;
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1
+					AND l.country_code = %s
+					AND (LOWER(l.place_name) = %s OR LOWER(l.settlement_name) = %s OR LOWER(l.city_name) = %s)
+					AND LOWER(l.region_name) = %s
+					AND TRIM(l.district_name) = ''
+					AND (l.gar_object_id IS NULL OR l.gar_object_id = 0)
+					AND (l.fias_id IS NULL OR TRIM(l.fias_id) = '')
+				LIMIT 2",
+				$country_code,
+				$place_key,
+				$place_key,
+				$place_key,
+				$region_key
 			),
 			ARRAY_A
 		);
@@ -1808,12 +1880,15 @@ final class LocationRepository {
 		$display     = $location->resolved_display_name();
 		$place_name  = $location->resolved_place_name();
 		$place_type  = $location->resolved_place_type();
+		$gar_object_id = $location->gar_object_id > 0 ? $location->gar_object_id : null;
+		$fias_id = trim( $location->fias_id );
+		$gar_id = trim( $location->gar_id );
 
 		return array(
-			'gar_object_id'          => $location->gar_object_id,
-			'fias_id'                => $location->fias_id,
+			'gar_object_id'          => $gar_object_id,
+			'fias_id'                => '' !== $fias_id ? $fias_id : null,
 			'kladr_id'               => $location->kladr_id,
-			'gar_id'                 => '' !== $location->gar_id ? $location->gar_id : (string) $location->gar_object_id,
+			'gar_id'                 => '' !== $gar_id ? $gar_id : ( null !== $gar_object_id ? (string) $gar_object_id : '' ),
 			'country_code'           => '' !== $location->country_code ? $location->country_code : 'RU',
 			'region_name'            => $location->region_name,
 			'region_code'            => $location->region_code,

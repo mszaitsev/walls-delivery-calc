@@ -2605,7 +2605,7 @@ final class DeliveryServicesAdminPage {
 			<p data-wdc-dpd-summary><?php echo esc_html( sprintf( 'Фаза: %s. Обработано %d строк. Прочитано %.1f%% файла.', $phase, (int) ( $state['rows_read'] ?? 0 ), $percent ) ); ?></p>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
-				<?php foreach ( array( 'phase', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
 						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>
