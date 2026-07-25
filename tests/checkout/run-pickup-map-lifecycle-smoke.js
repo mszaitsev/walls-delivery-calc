@@ -60,6 +60,11 @@ class FakeElement {
 		}));
 	}
 
+	dispatchEvent(event) {
+		this.dispatch(event.type, event.detail);
+		return true;
+	}
+
 	querySelector() {
 		return null;
 	}
@@ -80,11 +85,12 @@ class FakeElement {
 function createHarness(api) {
 	const calls = [];
 	let providerInstance = null;
+	const listSelectButton = new FakeElement('list-select');
 	const listParent = new FakeElement('list-parent');
 	const list = new FakeElement('list');
 	list.parentNode = listParent;
 	listParent.insertBefore = () => {};
-	listParent.querySelector = () => new FakeElement('list-select');
+	listParent.querySelector = () => listSelectButton;
 
 	const element = new FakeElement('map');
 	const card = new FakeElement('card');
@@ -111,6 +117,7 @@ function createHarness(api) {
 							options,
 							selected: null,
 							cancelledFit: 0,
+							pendingFit: false,
 							renderMarkers(points) {
 								calls.push(['renderMarkers', points]);
 							},
@@ -121,10 +128,12 @@ function createHarness(api) {
 								calls.push(['setCenter', Number(lat), Number(lng), zoom]);
 							},
 							fitToMarkers(options) {
+								this.pendingFit = true;
 								calls.push(['fitToMarkers', options]);
 							},
 							cancelPendingFit() {
 								this.cancelledFit += 1;
+								this.pendingFit = false;
 								calls.push(['cancelPendingFit']);
 							},
 							focusPoint(point) {
@@ -173,7 +182,11 @@ function createHarness(api) {
 		},
 		document: {
 			body: new FakeElement('body'),
-			createElement: () => new FakeElement('created'),
+			createElement: () => {
+				const created = new FakeElement('created');
+				created.querySelector = (selector) => selector === '[data-wdc-pickup-list-confirm]' ? listSelectButton : null;
+				return created;
+			},
 			querySelector: () => null
 		},
 		setTimeout,
@@ -210,7 +223,7 @@ function createHarness(api) {
 		selectPoint: 'select'
 	}, api.context || {});
 
-	return { calls, element, card, confirm, provider: () => providerInstance, map };
+	return { calls, element, card, confirm, listSelectButton, provider: () => providerInstance, map };
 }
 
 function point(id, lat, lng) {
@@ -305,6 +318,58 @@ async function selectedPointBeatsPrefetchCenter() {
 	const centers = harness.calls.filter((call) => call[0] === 'setCenter');
 	assert.deepStrictEqual(centers[0].slice(1), [53.9, 27.56, 13], 'selected point coordinates must initialize provider before derived center');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 0, 'selected point should block broad initial fit');
+	harness.map.destroy();
+}
+
+async function popupCommitFocusFalseCancelsPendingFit() {
+	const selected = point('min40', 53.9, 27.56);
+	const api = {
+		context: {
+			preloadedPoints: [selected, point('min41', 53.91, 27.57)]
+		},
+		points: () => Promise.resolve([])
+	};
+	const harness = createHarness(api);
+	let selectedEvents = 0;
+	harness.confirm.addEventListener('wdc:point-selected', () => {
+		selectedEvents += 1;
+	});
+	await wait(20);
+	assert.strictEqual(harness.provider().pendingFit, true, 'preloaded points should create a pending fit in the fake provider');
+	harness.provider().popupSelect(selected);
+	await wait(20);
+	assert.strictEqual(harness.map.selected() && harness.map.selected().id, 'min40', 'popup commit should save selected point');
+	assert.strictEqual(selectedEvents, 1, 'popup commit should dispatch selected event');
+	assert.strictEqual(harness.provider().cancelledFit > 0, true, 'popup commit with focus=false must cancel pending fit');
+	assert.strictEqual(harness.provider().pendingFit, false, 'popup commit should clear fake pending fit');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'focusPoint').length, 0, 'popup commit with focus=false must not focus point');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 1, 'popup commit must not apply a second fit');
+	harness.map.destroy();
+}
+
+async function listCommitFocusFalseCancelsPendingFit() {
+	const selected = point('min40', 53.9, 27.56);
+	const api = {
+		context: {
+			preloadedPoints: [selected, point('min41', 53.91, 27.57)]
+		},
+		points: () => Promise.resolve([])
+	};
+	const harness = createHarness(api);
+	let selectedEvents = 0;
+	harness.confirm.addEventListener('wdc:point-selected', () => {
+		selectedEvents += 1;
+	});
+	await wait(20);
+	harness.provider().pointClick(selected);
+	harness.listSelectButton.dispatch('click');
+	await wait(20);
+	assert.strictEqual(harness.map.selected() && harness.map.selected().id, 'min40', 'list confirmation should save selected point');
+	assert.strictEqual(selectedEvents, 1, 'list confirmation should dispatch selected event');
+	assert.strictEqual(harness.provider().cancelledFit > 0, true, 'list confirmation with focus=false must cancel pending fit');
+	assert.strictEqual(harness.provider().pendingFit, false, 'list confirmation should clear fake pending fit');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'focusPoint').length, 0, 'list confirmation with focus=false must not focus point');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 1, 'list confirmation must not apply a second fit');
 	harness.map.destroy();
 }
 
@@ -580,6 +645,8 @@ async function run() {
 	await preloadedPointsFitOnceWithoutSelection();
 	await emptyThenNonEmptyStillFits();
 	await selectedPointBeatsPrefetchCenter();
+	await popupCommitFocusFalseCancelsPendingFit();
+	await listCommitFocusFalseCancelsPendingFit();
 	await canonicalDestinationBeatsDerivedCenter();
 	await derivedCenterStillAllowsFit();
 	await invalidCoordinatesDoNotDriveViewport();

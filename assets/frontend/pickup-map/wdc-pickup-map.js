@@ -199,6 +199,7 @@
 
 		function commit(point, options) {
 			options = options || {};
+			claimViewportForExplicitAction();
 			committedPoint = point;
 			previewPoint = point;
 			popupManuallyClosed = false;
@@ -209,7 +210,6 @@
 				provider.setActivePoint(pointId(point));
 			}
 			if (options.focus !== false && provider.focusPoint) {
-				claimViewportForExplicitAction();
 				beginProgrammaticBoundsSuppression();
 				provider.focusPoint(point);
 			}
