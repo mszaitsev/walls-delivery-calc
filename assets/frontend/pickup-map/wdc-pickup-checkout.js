@@ -1729,7 +1729,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 		prefetchController = new AbortController();
 		if (validCoordinate(context.lat, context.lng)) {
-			prefetchBounds(context, parseFloat(context.lat), parseFloat(context.lng), key, prefetchController.signal);
+			prefetchBounds(context, parseFloat(context.lat), parseFloat(context.lng), key, prefetchController.signal, 'destination', true);
 			return;
 		}
 		if (context.city_code || context.cdek_city_code) {
@@ -1747,17 +1747,19 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				prefetchCache = { key: key, points: [], context: context };
 				return;
 			}
-			prefetchBounds(context, parseFloat(points[0].lat), parseFloat(points[0].lng), key, prefetchController.signal);
+			prefetchBounds(context, parseFloat(points[0].lat), parseFloat(points[0].lng), key, prefetchController.signal, 'point_search', false);
 		}).catch(function () {});
 	}
 
-	function prefetchBounds(context, lat, lng, key, signal) {
+	function prefetchBounds(context, lat, lng, key, signal, centerSource, centerTrusted) {
 		window.WDCPickupApi.points(bboxAround(lat, lng), signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
 			prefetchCache = {
 				key: key,
 				points: points,
 				centerLat: lat,
 				centerLng: lng,
+				centerSource: centerSource || '',
+				centerTrusted: centerTrusted === true,
 				context: context
 			};
 		}).catch(function () {});
@@ -1774,7 +1776,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return Object.assign({}, context, {
 				preloadedPoints: prefetchCache.points,
 				centerLat: prefetchCache.centerLat,
-				centerLng: prefetchCache.centerLng
+				centerLng: prefetchCache.centerLng,
+				centerSource: prefetchCache.centerSource || '',
+				centerTrusted: prefetchCache.centerTrusted === true
 			});
 		}
 		return context;

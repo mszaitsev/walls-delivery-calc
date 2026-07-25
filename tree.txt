@@ -809,6 +809,7 @@ C:.
     +---checkout
     |       run-checkout-location-picker-smoke.php
     |       run-checkout-smoke.php
+    |       run-pickup-map-lifecycle-smoke.js
     |       run-runtime-stabilization-smoke.php
     |       run-woocommerce-checkout-smoke.php
     |

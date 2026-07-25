@@ -66,10 +66,13 @@
 		return {
 			create: create,
 			setCenter: function (lat, lng, zoom) {
+				if (!validCoordinatePair(lat, lng)) {
+					return;
+				}
 				map.setView([lat, lng], zoom || map.getZoom());
 			},
 			focusPoint: function (point) {
-				if (point && point.lat !== null && point.lng !== null) {
+				if (validPointCoordinates(point)) {
 					map.setView([point.lat, point.lng], Math.max(map.getZoom(), 15));
 				}
 			},
@@ -117,6 +120,7 @@
 				}));
 				map.fitBounds(bounds, { padding: [padding, padding], maxZoom: maxZoom });
 			},
+			cancelPendingFit: function () {},
 			getBounds: currentBoundsValue,
 			destroy: function () {
 				suppressPopupClose = true;
@@ -255,7 +259,7 @@
 			window.setTimeout(function () { suppressPopupClose = false; }, 0);
 		}
 		function renderSearchMarker(marker) {
-			if (!marker || marker.lat === null || marker.lng === null) {
+			if (!validPointCoordinates(marker)) {
 				return;
 			}
 			var shift = searchMarkerShift(marker);
@@ -289,7 +293,7 @@
 			var nearest = null;
 			Object.keys(pointById).forEach(function (id) {
 				var point = pointById[id];
-				if (!point || point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				var pointScreen = map.latLngToContainerPoint([point.lat, point.lng]);
@@ -372,15 +376,13 @@
 
 		function clusterPoints(points) {
 			if (map.getZoom() >= maxClusterZoom) {
-				return points.filter(function (point) {
-					return point.lat !== null && point.lng !== null;
-				}).map(function (point) {
+				return points.filter(validPointCoordinates).map(function (point) {
 					return { points: [point], lat: parseFloat(point.lat), lng: parseFloat(point.lng) };
 				});
 			}
 			var cells = {};
 			points.forEach(function (point) {
-				if (point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				var projected = map.latLngToLayerPoint([point.lat, point.lng]);
@@ -413,6 +415,7 @@
 			renderMarkers: function () {},
 			clearMarkers: function () {},
 			fitToMarkers: function () {},
+			cancelPendingFit: function () {},
 			destroy: function () {},
 			onPointClick: function () {},
 			onPopupSelect: function () {},
@@ -441,7 +444,23 @@
 	function validPointCoordinates(point) {
 		var lat = parseFloat(point && point.lat);
 		var lng = parseFloat(point && point.lng);
-		return !isNaN(lat) && !isNaN(lng);
+		return validCoordinatePair(lat, lng);
+	}
+
+	function validCoordinatePair(lat, lng) {
+		lat = parseFloat(lat);
+		lng = parseFloat(lng);
+		if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+			return false;
+		}
+		if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+			return false;
+		}
+		return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
+	}
+
+	function isFiniteNumber(value) {
+		return typeof Number.isFinite === 'function' ? Number.isFinite(value) : isFinite(value);
 	}
 
 	function debugEnabled() {

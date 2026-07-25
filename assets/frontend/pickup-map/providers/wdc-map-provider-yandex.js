@@ -104,7 +104,7 @@
 			clearMarkers();
 			var useClusterer = map.getZoom() < maxClusterZoom;
 			pendingPoints.forEach(function (point) {
-				if (point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				var id = pointId(point);
@@ -136,7 +136,7 @@
 		}
 
 		function renderSearchMarker(marker) {
-			if (!map || !ymapsApi || !marker || marker.lat === null || marker.lng === null) {
+			if (!map || !ymapsApi || !validPointCoordinates(marker)) {
 				return;
 			}
 			var shift = searchMarkerShift(marker);
@@ -164,7 +164,7 @@
 			var nearest = null;
 			Object.keys(pointById).forEach(function (id) {
 				var point = pointById[id];
-				if (!point || point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				var distance = distanceMeters(parseFloat(marker.lat), parseFloat(marker.lng), parseFloat(point.lat), parseFloat(point.lng));
@@ -177,6 +177,9 @@
 
 		return {
 			setCenter: function (lat, lng, zoom) {
+				if (!validCoordinatePair(lat, lng)) {
+					return;
+				}
 				pendingCenter = normalizeCenter({ lat: lat, lng: lng, zoom: zoom || pendingCenter.zoom || 11 });
 				if (map) {
 					map.setCenter([pendingCenter.lat, pendingCenter.lng], pendingCenter.zoom || map.getZoom());
@@ -186,7 +189,7 @@
 				}
 			},
 			focusPoint: function (point) {
-				if (!point || point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				pendingCenter = normalizeCenter({ lat: point.lat, lng: point.lng, zoom: Math.max(pendingCenter.zoom || 11, 15) });
@@ -215,6 +218,9 @@
 					applyPendingFit();
 				}
 			},
+			cancelPendingFit: function () {
+				pendingFitOptions = null;
+			},
 			getBounds: currentBoundsValue,
 			openPointPopup: function (point, html) {
 				var id = pointId(point);
@@ -237,6 +243,7 @@
 			destroy: function () {
 				destroyed = true;
 				suppressPopupClose = true;
+				pendingFitOptions = null;
 				clearMarkers();
 				if (map) {
 					map.events.remove('boundschange', boundsChanged);
@@ -453,8 +460,8 @@
 		var lat = parseFloat(center.lat);
 		var lng = parseFloat(center.lng);
 		return {
-			lat: isNaN(lat) ? 55.0302 : lat,
-			lng: isNaN(lng) ? 82.9204 : lng,
+			lat: validCoordinatePair(lat, lng) ? lat : 55.0302,
+			lng: validCoordinatePair(lat, lng) ? lng : 82.9204,
 			zoom: parseInt(center.zoom || 11, 10) || 11
 		};
 	}
@@ -478,7 +485,23 @@
 	function validPointCoordinates(point) {
 		var lat = parseFloat(point && point.lat);
 		var lng = parseFloat(point && point.lng);
-		return !isNaN(lat) && !isNaN(lng);
+		return validCoordinatePair(lat, lng);
+	}
+
+	function validCoordinatePair(lat, lng) {
+		lat = parseFloat(lat);
+		lng = parseFloat(lng);
+		if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+			return false;
+		}
+		if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+			return false;
+		}
+		return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
+	}
+
+	function isFiniteNumber(value) {
+		return typeof Number.isFinite === 'function' ? Number.isFinite(value) : isFinite(value);
 	}
 
 	function distanceMeters(fromLat, fromLng, toLat, toLng) {

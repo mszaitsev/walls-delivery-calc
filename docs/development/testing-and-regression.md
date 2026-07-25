@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.128.3
+Version: 0.128.4
 
 ## Commands
 
@@ -17,6 +17,8 @@ php tests/shipments/run-shipment-regression-profile.php
 ```
 
 Also run `php -l` for changed PHP files, `node --check` for changed JS files, docs link checks, and `git diff --check`.
+
+Checkout pickup map lifecycle changes should also run `node tests/checkout/run-pickup-map-lifecycle-smoke.js`. This smoke executes the frontend map controller with fake providers/API and protects one-shot auto-fit, user interaction cancellation, provider pending-fit cancellation, and coordinate validation.
 
 ## Manifest
 
