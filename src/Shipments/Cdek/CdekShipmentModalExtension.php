@@ -94,6 +94,10 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 
 	public function render_fields( object $order, array $draft, array $context ): void {
 		unset( $order, $draft );
+		$recipient_country = strtoupper( trim( (string) ( $context['recipient_country'] ?? 'RU' ) ) );
+		$recipient_country = '' === $recipient_country ? 'RU' : $recipient_country;
+		$document_visible = $this->recipient_document_visible( $recipient_country );
+		$document_help = $this->recipient_document_help( $recipient_country );
 		?>
 		<p><strong><?php echo esc_html__( 'В заказе тариф', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== (string) ( $context['selected_tariff_title'] ?? '' ) ? (string) $context['selected_tariff_title'] : '-' ); ?></p>
 		<input type="hidden" name="shipment_point" value="<?php echo esc_attr( (string) ( $context['shipment_point'] ?? '' ) ); ?>" data-wdc-sender-shipment-point>
@@ -101,8 +105,8 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		<input type="hidden" name="shipment_point_address" value="<?php echo esc_attr( (string) ( $context['shipment_point_address'] ?? '' ) ); ?>" data-wdc-sender-shipment-point-address>
 		<input type="hidden" name="sender_shipment_point_address" value="<?php echo esc_attr( (string) ( $context['shipment_point_address'] ?? '' ) ); ?>">
 		<input type="hidden" name="sender_pickup_city" value="Новосибирск" data-wdc-sender-pickup-city>
-		<input type="hidden" name="recipient_location_country" value="<?php echo esc_attr( (string) ( $context['recipient_country'] ?? 'RU' ) ); ?>" data-wdc-cdek-recipient-country>
-		<label data-wdc-cdek-recipient-document-row hidden><?php echo esc_html__( 'Документ получателя', 'walls-delivery-calc' ); ?><input type="text" name="cdek_recipient_document" value="" maxlength="30" autocomplete="off" data-wdc-cdek-recipient-document><span class="description" data-wdc-cdek-recipient-document-help><?php echo esc_html__( 'Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ); ?></span></label>
+		<input type="hidden" value="<?php echo esc_attr( $recipient_country ); ?>" data-wdc-cdek-recipient-country>
+		<label data-wdc-cdek-recipient-document-row <?php echo $document_visible ? '' : 'hidden'; ?>><?php echo esc_html__( 'Документ получателя', 'walls-delivery-calc' ); ?><input type="text" name="cdek_recipient_document" value="" maxlength="30" autocomplete="off" data-wdc-cdek-recipient-document <?php disabled( ! $document_visible ); ?>><span class="description" data-wdc-cdek-recipient-document-help><?php echo esc_html( $document_help ); ?></span></label>
 		<div data-wdc-cdek-sender-door <?php echo ! empty( $context['cdek_sender_door'] ) ? '' : 'hidden'; ?>>
 			<p><strong><?php echo esc_html__( 'Отправитель', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html__( 'от двери', 'walls-delivery-calc' ); ?></p>
 			<p><strong><?php echo esc_html__( 'Адрес отправителя', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== (string) ( $context['sender_from_door_display'] ?? '' ) ? (string) $context['sender_from_door_display'] : '-' ); ?></p>
@@ -216,6 +220,19 @@ final class CdekShipmentModalExtension implements CarrierShipmentModalExtensionI
 		}
 
 		return 'PVZ' === strtoupper( $type ) ? __( 'ПВЗ', 'walls-delivery-calc' ) : $type;
+	}
+
+	private function recipient_document_visible( string $country_code ): bool {
+		return in_array( strtoupper( trim( $country_code ) ), array( 'AM', 'BY', 'KZ', 'KG' ), true );
+	}
+
+	private function recipient_document_help( string $country_code ): string {
+		return match ( strtoupper( trim( $country_code ) ) ) {
+			'KZ' => __( 'ИИН / IIN получателя — необязательно. Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ),
+			'KG' => __( 'ИИН получателя — необязательно. Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ),
+			'AM', 'BY' => __( 'Номер паспорта получателя — необязательно. Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ),
+			default => __( 'Значение передаётся только в СДЭК и не сохраняется.', 'walls-delivery-calc' ),
+		};
 	}
 
 	/** @param array<string,mixed> $pickup_row @param array<string,mixed> $pickup_context @param array<string,mixed> $context */

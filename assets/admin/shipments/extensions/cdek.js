@@ -10,7 +10,7 @@
   }
 
   function cdekRecipientCountry(form) {
-    return String(fieldValue(form, 'input[name="recipient_location_country"]') || fieldValue(form, '[data-wdc-cdek-recipient-country]') || 'RU').trim().toUpperCase();
+    return String(fieldValue(form, '[data-wdc-cdek-recipient-country]') || fieldValue(form, 'input[name="recipient_location_country"]') || 'RU').trim().toUpperCase();
   }
 
   function updateCdekRecipientDocumentUi(form) {
@@ -245,6 +245,11 @@
       if (event.target.matches('[data-wdc-cdek-recipient-document]')) {
         updateCreateAvailability(form);
       }
+      return false;
+    },
+    afterFormInitialized: function (form) {
+      if (!form || fieldValue(form, 'input[name="carrier_key"]') !== 'cdek') return false;
+      updateCdekRecipientDocumentUi(form);
       return false;
     },
     handleChange: function (event) {

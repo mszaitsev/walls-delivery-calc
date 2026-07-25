@@ -89,6 +89,27 @@ function cdek_order_creation_service( OrderShipmentRepository $repository, CdekS
 	return new ShipmentCreationService( $repository, array( $adapter ), cdek_order_actual_cost_service( $repository ), null, null, array( new CdekShipmentPersistenceMapper() ) );
 }
 
+function cdek_order_render_cdek_fields( string $country_code ): string {
+	ob_start();
+	( new CdekShipmentModalExtension() )->render_fields(
+		new stdClass(),
+		array(),
+		array(
+			'recipient_country' => $country_code,
+			'selected_tariff_title' => 'Test tariff',
+		)
+	);
+	return (string) ob_get_clean();
+}
+
+function cdek_order_first_tag( string $html, string $tag, string $attribute ): string {
+	if ( 1 !== preg_match( '/<' . preg_quote( $tag, '/' ) . '\\b[^>]*' . preg_quote( $attribute, '/' ) . '[^>]*>/i', $html, $matches ) ) {
+		return '';
+	}
+
+	return $matches[0];
+}
+
 function cdek_order_status_service( OrderShipmentRepository $repository, CdekApiClient $client, ?CdekStatusMappingService $status_mapping = null ): CdekOrderStatusService {
 	return new CdekOrderStatusService( $repository, $client, cdek_order_actual_cost_resolver(), cdek_order_actual_cost_service( $repository ), null, $status_mapping );
 }
@@ -748,6 +769,29 @@ cdek_order_assert( ! $blocked->success && 'shipment_already_created' === $blocke
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $cdek_modal_extension_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekShipmentModalExtension.php' );
 cdek_order_assert( str_contains( $metabox_source, 'render_pickup_fields' ) && str_contains( $cdek_modal_extension_source, 'Тип точки' ) && str_contains( $cdek_modal_extension_source, 'pickup_type_label' ) && str_contains( $cdek_modal_extension_source, 'data-wdc-cdek-pickup-type-label' ) && str_contains( $cdek_modal_extension_source, 'ПВЗ СДЭК' ), 'CDEK shipment modal extension must show known pickup point type label.' );
+foreach (
+	array(
+		'BY' => 'Номер паспорта',
+		'AM' => 'Номер паспорта',
+		'KZ' => 'ИИН / IIN',
+		'KG' => 'ИИН',
+	) as $render_country => $help_fragment
+) {
+	$rendered_fields = cdek_order_render_cdek_fields( $render_country );
+	$document_row = cdek_order_first_tag( $rendered_fields, 'label', 'data-wdc-cdek-recipient-document-row' );
+	$document_input = cdek_order_first_tag( $rendered_fields, 'input', 'data-wdc-cdek-recipient-document' );
+	cdek_order_assert( '' !== $document_row && ! str_contains( $document_row, 'hidden' ), 'CDEK modal document row must be initially visible for ' . $render_country . '.' );
+	cdek_order_assert( '' !== $document_input && ! str_contains( $document_input, 'disabled' ) && ! str_contains( $document_input, 'required' ) && str_contains( $document_input, 'value=""' ), 'CDEK modal document input must be enabled, optional and empty for ' . $render_country . '.' );
+	cdek_order_assert( str_contains( $rendered_fields, $help_fragment ) && str_contains( $rendered_fields, 'не сохраняется' ), 'CDEK modal document help must be country-aware for ' . $render_country . '.' );
+	cdek_order_assert( ! str_contains( $rendered_fields, 'name="recipient_location_country" value="' . $render_country . '" data-wdc-cdek-recipient-country' ), 'CDEK modal document country marker must not add a duplicate submitted country field for ' . $render_country . '.' );
+}
+foreach ( array( 'RU', 'UZ' ) as $render_country ) {
+	$rendered_fields = cdek_order_render_cdek_fields( $render_country );
+	$document_row = cdek_order_first_tag( $rendered_fields, 'label', 'data-wdc-cdek-recipient-document-row' );
+	$document_input = cdek_order_first_tag( $rendered_fields, 'input', 'data-wdc-cdek-recipient-document' );
+	cdek_order_assert( '' !== $document_row && str_contains( $document_row, 'hidden' ), 'CDEK modal document row must be hidden for ' . $render_country . '.' );
+	cdek_order_assert( '' !== $document_input && str_contains( $document_input, 'disabled' ) && ! str_contains( $document_input, 'required' ) && str_contains( $document_input, 'value=""' ), 'CDEK modal document input must be disabled, optional and empty for ' . $render_country . '.' );
+}
 
 $http_post_invalid = new CdekOrderFakeHttp();
 $http_post_invalid->post_responses[] = array( 'entity' => array( 'uuid' => 'invalid-uuid' ), 'requests' => array( array( 'request_uuid' => 'invalid-request-uuid', 'state' => 'INVALID', 'errors' => array( array( 'code' => 'v2_bad', 'message' => 'bad request' ) ) ) ) );

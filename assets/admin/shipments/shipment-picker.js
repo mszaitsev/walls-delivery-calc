@@ -153,8 +153,12 @@
       pickup_point_lng: point.lng !== null && point.lng !== undefined ? String(point.lng) : ''
     };
     Object.keys(fields).forEach((name) => {
-      const input = form.querySelector('[name="' + name + '"]');
-      if (input) input.value = fields[name];
+      form.querySelectorAll('[name="' + name + '"]').forEach((input) => {
+        input.value = fields[name];
+      });
+    });
+    form.querySelectorAll('[data-wdc-cdek-recipient-country]').forEach((input) => {
+      input.value = countryCode;
     });
     const index = form.querySelector('[data-wdc-pickup-index]');
     const address = form.querySelector('[data-wdc-pickup-address]');

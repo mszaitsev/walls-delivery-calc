@@ -550,6 +550,7 @@
     if (!form) return;
     updateTariffOptions(form);
     updateScenarioSections(form);
+    dispatchShipmentCarrierHook('afterFormInitialized', form, { refreshPreview: !!refreshPreview });
     const container = form.querySelector('[data-wdc-places]');
     if (container) {
       renumberPlaces(container);

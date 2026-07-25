@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.128.6
+Version: 0.128.7
 
 Stable subsystems:
 
@@ -27,7 +27,7 @@ Recent fixes:
 
 - CDEK now supports RU/AM/BY/KZ/KG through the existing service-country repository. Existing installs receive a one-time migration from empty/RU-only CDEK countries to the five-country default, while fresh installs seed the same defaults only when the built-in service is first created.
 - DPD Geography imports AM/BY/KZ/KG locations into the shared locations table with `dpd_city_id` idempotency and without fake Russian identifiers. CDEK city resolution is country-aware, supports manual city input, and does not persist CDEK city codes.
-- CDEK shipment creation now handles international pickup and courier on the shared adapter/request/status/document pipeline. Non-RU courier uses raw WooCommerce address data plus resolved CDEK city code, and the CDEK-only optional recipient document field maps to `recipient.tin` for KZ/KG or `recipient.passport_number` for AM/BY without persistence or logging.
+- CDEK shipment creation now handles international pickup and courier on the shared adapter/request/status/document pipeline. Non-RU courier uses raw WooCommerce address data plus resolved CDEK city code, and the CDEK-only optional recipient document field is visible from initial modal render for AM/BY/KZ/KG, maps to `recipient.tin` for KZ/KG or `recipient.passport_number` for AM/BY, and is never persisted or logged.
 - CDEK pickup maps for manual EAEU cities reuse the resolved CDEK city code and fit the initial map viewport to loaded pickup point coordinates when no trusted destination coordinates exist. The derived viewport is never persisted as location data, physical user interaction cancels pending initial auto-fit, provider fit events no longer suppress the first subsequent user pan, explicit address/geolocation viewport actions refresh pickup points without being overridden by a later initial fit, and confirmed point selection cancels pending provider fit even when it does not focus the map.
 - Checkout and order delivery recalculation now share a delivery lead-time pipeline: carrier raw lead time, shop processing calendar, optional carrier working-day conversion, delivery date rules, and final planned date. The global processing default is `2` shop working days, the per-service working-day flag defaults to off, and existing manual processing additions in rules should be removed manually where they are no longer wanted.
 - The overview admin page now shows only platform information and delivery quote cache cleanup, while system requirements notices remain handled globally by `AdminNotices`.
