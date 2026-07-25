@@ -93,6 +93,38 @@ final class DpdGeographyImportStateService {
 		);
 	}
 
+	/**
+	 * @param array<string,mixed> $context
+	 * @return array<string,mixed>
+	 */
+	public function fail_new( string $message, array $context = array() ): array {
+		$now = $this->now();
+		$state = array_merge(
+			$this->defaults(),
+			array(
+				'job_id' => (string) ( $context['job_id'] ?? $this->new_job_id() ),
+				'phase' => 'failed',
+				'status' => 'error',
+				'source' => (string) ( $context['source'] ?? '' ),
+				'source_file' => (string) ( $context['source_file'] ?? '' ),
+				'file_path' => (string) ( $context['file_path'] ?? '' ),
+				'index_path' => (string) ( $context['index_path'] ?? '' ),
+				'stage_table' => (string) ( $context['stage_table'] ?? '' ),
+				'delete_file_on_finish' => (bool) ( $context['delete_file_on_finish'] ?? true ),
+				'file_size' => max( 0, (int) ( $context['file_size'] ?? 0 ) ),
+				'errors' => array( $message ),
+				'errors_total' => 1,
+				'started_at' => $now,
+				'updated_at' => $now,
+				'finished_at' => $now,
+				'last_message' => $message,
+			)
+		);
+		$this->save( $state );
+
+		return $state;
+	}
+
 	public function finish( string $message = 'Import finished.', string $status = 'success' ): array {
 		$status = in_array( $status, array( 'success', 'warning' ), true ) ? $status : 'success';
 		return $this->update( array( 'phase' => 'finished', 'status' => $status, 'last_message' => $message, 'finished_at' => $this->now() ) );
@@ -150,6 +182,8 @@ final class DpdGeographyImportStateService {
 			'saved_candidates' => 0,
 			'finalized_mappings' => 0,
 			'finalized_changes' => 0,
+			'stale_cleared' => 0,
+			'stale_cleanup_skipped' => false,
 			'unchanged_mappings' => 0,
 			'conflicts' => 0,
 			'ambiguous' => 0,

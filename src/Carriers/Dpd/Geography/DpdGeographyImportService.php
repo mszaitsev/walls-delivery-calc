@@ -45,12 +45,12 @@ final class DpdGeographyImportService {
 	 */
 	public function start_from_uploaded_file( array $file ): array {
 		if ( (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) !== UPLOAD_ERR_OK ) {
-			return $this->state->fail( 'DPD geography manual import: CSV upload failed.' );
+			return $this->fail_with_report( 'DPD geography manual import: CSV upload failed.', true, array( 'source' => 'manual' ) );
 		}
 		$tmp = (string) ( $file['tmp_name'] ?? '' );
 		$name = function_exists( 'sanitize_file_name' ) ? sanitize_file_name( (string) ( $file['name'] ?? 'manual.csv' ) ) : basename( (string) ( $file['name'] ?? 'manual.csv' ) );
 		if ( '' === $tmp || ! file_exists( $tmp ) || ! str_ends_with( strtolower( $name ), '.csv' ) ) {
-			return $this->state->fail( 'DPD geography manual import: upload must be a CSV file.' );
+			return $this->fail_with_report( 'DPD geography manual import: upload must be a CSV file.', true, array( 'source' => 'manual', 'source_file' => $name ) );
 		}
 
 		$target = $this->copy_to_import_temp( $tmp, $name );
@@ -71,7 +71,7 @@ final class DpdGeographyImportService {
 			return $current;
 		}
 		if ( empty( $download['success'] ) ) {
-			return $this->state->fail( (string) $download['message'] );
+			return $this->fail_with_report( (string) $download['message'], true, array( 'source' => 'ftp', 'source_file' => (string) ( $download['source_file'] ?? '' ) ) );
 		}
 
 		$this->state->update( array( 'phase' => 'downloading', 'last_message' => 'Downloading DPD GeographyNewDPD CSV from SFTP.' ) );
@@ -84,22 +84,22 @@ final class DpdGeographyImportService {
 	public function step( string $job_id = '', int $limit = self::DEFAULT_STEP_LIMIT ): array {
 		$state = $this->state->current();
 		if ( '' !== $job_id && $job_id !== (string) ( $state['job_id'] ?? '' ) ) {
-			return $this->state->fail( 'DPD geography import job_id is stale.' );
+			return $this->fail_with_report( 'DPD geography import job_id is stale.' );
 		}
 		if ( ! in_array( (string) ( $state['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
 			return $this->state->public_state();
 		}
 		$file = (string) ( $state['file_path'] ?? '' );
 		if ( '' === $file || ! file_exists( $file ) ) {
-			return $this->state->fail( 'DPD geography import file is missing.' );
+			return $this->fail_with_report( 'DPD geography import file is missing.' );
 		}
 		$index_path = (string) ( $state['index_path'] ?? '' );
 		if ( '' === $index_path || ! file_exists( $index_path ) ) {
-			return $this->state->fail( 'DPD geography location index is missing.' );
+			return $this->fail_with_report( 'DPD geography location index is missing.' );
 		}
 		$stage_table = (string) ( $state['stage_table'] ?? '' );
 		if ( '' === $stage_table || ! $this->stage->exists( $stage_table ) ) {
-			return $this->state->fail( 'DPD geography staging table is missing.' );
+			return $this->fail_with_report( 'DPD geography staging table is missing.' );
 		}
 
 		$loaded = unserialize( (string) file_get_contents( $index_path ), array( 'allowed_classes' => false ) );
@@ -108,7 +108,7 @@ final class DpdGeographyImportService {
 		try {
 			$step = $this->parser->read_step( $file, (int) $state['byte_offset'], $columns, $limit );
 		} catch ( Throwable $throwable ) {
-			return $this->state->fail( 'DPD geography CSV parse failed: ' . $throwable->getMessage() );
+			return $this->fail_with_report( 'DPD geography CSV parse failed: ' . $throwable->getMessage() );
 		}
 		$patch = array(
 			'phase' => 'importing',
@@ -180,7 +180,11 @@ final class DpdGeographyImportService {
 
 			return $this->state->public_state();
 		} catch ( Throwable $throwable ) {
-			return $this->state->fail( 'DPD geography import start failed: ' . $throwable->getMessage() );
+			return $this->fail_with_report(
+				'DPD geography import start failed: ' . $throwable->getMessage(),
+				true,
+				array( 'source' => $source, 'source_file' => $source_file, 'file_path' => $path, 'delete_file_on_finish' => $delete_on_finish, 'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0 )
+			);
 		}
 	}
 
@@ -386,22 +390,25 @@ final class DpdGeographyImportService {
 	private function finalize( array $state ): array {
 		$stage_table = (string) ( $state['stage_table'] ?? '' );
 		if ( '' === $stage_table || ! $this->stage->exists( $stage_table ) ) {
-			return $this->state->fail( 'DPD geography staging table is missing during finalization.' );
+			return $this->fail_with_report( 'DPD geography staging table is missing during finalization.' );
 		}
+		$has_row_errors = (int) ( $state['errors_total'] ?? 0 ) > 0 || (int) ( $state['foreign_save_failed'] ?? 0 ) > 0;
 		try {
-			$finalized = $this->stage->finalize_into_delivery_codes( $stage_table );
+			$finalized = $this->stage->finalize_into_delivery_codes( $stage_table, ! $has_row_errors );
 		} catch ( \RuntimeException $exception ) {
-			$failed = $this->state->fail( 'DPD geography finalization failed: ' . $this->sanitize_error( $exception->getMessage() ) );
-			$this->settings?->save_geography_import_report( $this->report_from_state( $failed ) );
-			return $failed;
+			return $this->fail_with_report( 'DPD geography finalization failed: ' . $this->sanitize_error( $exception->getMessage() ) );
 		}
 		$finalized_mappings = is_array( $finalized ) ? (int) ( $finalized['mappings'] ?? 0 ) : (int) $finalized;
 		$finalized_changes = is_array( $finalized ) ? (int) ( $finalized['changes'] ?? 0 ) : (int) $finalized;
+		$stale_cleared = is_array( $finalized ) ? (int) ( $finalized['stale_cleared'] ?? 0 ) : 0;
+		$stale_cleanup_skipped = is_array( $finalized ) && ! empty( $finalized['stale_cleanup_skipped'] );
 		$state = $this->state->update(
 			array(
 				'phase' => 'finalizing',
 				'finalized_mappings' => $finalized_mappings,
 				'finalized_changes' => $finalized_changes,
+				'stale_cleared' => $stale_cleared,
+				'stale_cleanup_skipped' => $stale_cleanup_skipped,
 				'last_message' => 'DPD geography import is finalizing mappings.',
 			)
 		);
@@ -415,10 +422,10 @@ final class DpdGeographyImportService {
 		}
 		$this->stage->drop( $stage_table );
 
-		if ( (int) ( $state['foreign_save_failed'] ?? 0 ) > 0 || (int) ( $state['errors_total'] ?? 0 ) > 0 ) {
+		if ( $has_row_errors ) {
 			$warning_state = $this->state->finish(
 				sprintf(
-					'DPD geography import finished with %d errors.',
+					'DPD geography import finished with %d errors; stale mapping cleanup was skipped.',
 					max( (int) ( $state['errors_total'] ?? 0 ), (int) ( $state['foreign_save_failed'] ?? 0 ) )
 				),
 				'warning'
@@ -462,6 +469,8 @@ final class DpdGeographyImportService {
 			'saved_candidates' => (int) ( $state['saved_candidates'] ?? 0 ),
 			'finalized_mappings' => (int) ( $state['finalized_mappings'] ?? 0 ),
 			'finalized_changes' => (int) ( $state['finalized_changes'] ?? 0 ),
+			'stale_cleared' => (int) ( $state['stale_cleared'] ?? 0 ),
+			'stale_cleanup_skipped' => ! empty( $state['stale_cleanup_skipped'] ),
 			'unchanged_mappings' => (int) ( $state['unchanged_mappings'] ?? 0 ),
 			'conflicts' => (int) ( $state['conflicts'] ?? 0 ),
 			'ambiguous' => (int) ( $state['ambiguous'] ?? 0 ),
@@ -494,6 +503,17 @@ final class DpdGeographyImportService {
 	private function sanitize_error( string $message ): string {
 		$message = preg_replace( '/[\r\n\t]+/', ' ', $message ) ?? $message;
 		return trim( $message );
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 * @return array<string,mixed>
+	 */
+	private function fail_with_report( string $message, bool $new_job = false, array $context = array() ): array {
+		$failed = $new_job ? $this->state->fail_new( $message, $context ) : $this->state->fail( $message );
+		$this->settings?->save_geography_import_report( $this->report_from_state( $failed ) );
+
+		return $failed;
 	}
 
 	private function copy_to_import_temp( string $source, string $name ): string {

@@ -85,7 +85,7 @@ final class LocationRepository {
 		}
 
 		// Test doubles used by smoke tests expose in-memory row storage instead of SQL execution.
-		if ( property_exists( $this->wpdb, 'locations' ) ) {
+		if ( $this->has_test_location_rows() ) {
 			$ids = array();
 			foreach ( $locations as $location ) {
 				$id = $this->save( $location );
@@ -153,22 +153,20 @@ final class LocationRepository {
 
 		$where = array( 'l.active = 1', 'l.country_code = %s' );
 		$args = array( $country_code );
-		foreach ( array( $place_key, $region_key, $district_key ) as $token ) {
+		foreach ( $this->foreign_identity_prefilter_tokens( $place_name, $region_name, $district_name ) as $token ) {
 			if ( '' === $token ) {
 				continue;
 			}
-			$where[] = "REPLACE(l.searchable_text, 'ё', 'е') LIKE %s";
+			$where[] = "REPLACE(LOWER(l.searchable_text), 'ё', 'е') LIKE %s";
 			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
 		}
-		$args[] = 200;
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
 				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
 				FROM {$this->table_name()} l
 				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE " . implode( ' AND ', $where ) . '
-				LIMIT %d',
+				WHERE " . implode( ' AND ', $where ),
 				...$args
 			),
 			ARRAY_A
@@ -225,22 +223,20 @@ final class LocationRepository {
 			"(l.fias_id IS NULL OR TRIM(l.fias_id) = '')",
 		);
 		$args = array( $country_code );
-		foreach ( array( $place_key, $region_key ) as $token ) {
+		foreach ( $this->foreign_identity_prefilter_tokens( $place_name, $region_name ) as $token ) {
 			if ( '' === $token ) {
 				continue;
 			}
-			$where[] = "REPLACE(l.searchable_text, 'ё', 'е') LIKE %s";
+			$where[] = "REPLACE(LOWER(l.searchable_text), 'ё', 'е') LIKE %s";
 			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
 		}
-		$args[] = 200;
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
 				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
 				FROM {$this->table_name()} l
 				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE " . implode( ' AND ', $where ) . '
-				LIMIT %d',
+				WHERE " . implode( ' AND ', $where ),
 				...$args
 			),
 			ARRAY_A
@@ -1961,8 +1957,22 @@ final class LocationRepository {
 		}
 
 		$columns = array_keys( $rows[0] );
-		$row_placeholder = '(' . implode( ', ', $formats ) . ')';
-		$values_sql = implode( ', ', array_fill( 0, count( $rows ), $row_placeholder ) );
+		$values = array();
+		$args = array();
+		foreach ( $rows as $row ) {
+			$cells = array();
+			foreach ( $columns as $index => $column ) {
+				$value = $row[ $column ] ?? null;
+				if ( null === $value ) {
+					$cells[] = 'NULL';
+					continue;
+				}
+				$cells[] = $formats[ $index ] ?? '%s';
+				$args[] = $value;
+			}
+			$values[] = '(' . implode( ', ', $cells ) . ')';
+		}
+		$values_sql = implode( ', ', $values );
 		$sql = sprintf(
 			'INSERT %sINTO %s (%s) VALUES %s',
 			$ignore ? 'IGNORE ' : '',
@@ -1975,14 +1985,7 @@ final class LocationRepository {
 			$sql .= ' ON DUPLICATE KEY UPDATE ' . implode( ', ', $update_assignments );
 		}
 
-		$args = array();
-		foreach ( $rows as $row ) {
-			foreach ( $columns as $column ) {
-				$args[] = $row[ $column ] ?? null;
-			}
-		}
-
-		$result = $this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
+		$result = $this->wpdb->query( array() !== $args ? $this->wpdb->prepare( $sql, ...$args ) : $sql );
 		if ( false === $result ) {
 			$this->throw_sql_error( str_contains( $table, 'wdc_locations' ) ? 'Location bulk upsert failed' : 'Location bulk insert failed' );
 		}
@@ -2055,6 +2058,31 @@ final class LocationRepository {
 			's', 'с' => 'с',
 			default => $value,
 		};
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function foreign_identity_prefilter_tokens( string ...$values ): array {
+		$tokens = array();
+		foreach ( $values as $value ) {
+			$normalized = $this->normalize_foreign_identity_value( $value );
+			if ( '' === $normalized ) {
+				continue;
+			}
+			foreach ( preg_split( '/\s+/u', $normalized ) ?: array() as $token ) {
+				$token = trim( (string) $token );
+				if ( '' === $token || ! preg_match( '/[\p{L}\p{N}]/u', $token ) ) {
+					continue;
+				}
+				$tokens[ $token ] = true;
+				if ( count( $tokens ) >= 12 ) {
+					break 2;
+				}
+			}
+		}
+
+		return array_keys( $tokens );
 	}
 
 	/**
@@ -2146,7 +2174,7 @@ final class LocationRepository {
 	}
 
 	private function has_test_location_rows(): bool {
-		return property_exists( $this->wpdb, 'locations' ) || property_exists( $this->wpdb, 'rows' ) || property_exists( $this->wpdb, 'location_rows' );
+		return is_array( $this->wpdb->locations ?? null ) || is_array( $this->wpdb->rows ?? null ) || is_array( $this->wpdb->location_rows ?? null );
 	}
 
 	/**

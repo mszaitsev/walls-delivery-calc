@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 define( 'ABSPATH', __DIR__ . '/../../' );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -11,6 +12,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public bool $fail_dpd_stage_finalize_clear = false;
 		public bool $fail_dpd_stage_finalize_upsert = false;
 		public bool $fail_dpd_stage_finalize_commit = false;
+		/** @var array<int,bool> */
+		public array $fail_location_update_ids = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $delivery_codes = array();
 		/** @var array<int,array<string,mixed>> */
@@ -57,6 +60,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 			unset( $table, $format, $where_format );
 			$this->last_error = '';
 			$id = (int) ( $where['id'] ?? 0 );
+			if ( ! empty( $this->fail_location_update_ids[ $id ] ) ) {
+				$this->last_error = 'forced location update failure for id=' . $id;
+				return false;
+			}
 			foreach ( $this->locations as $row ) {
 				if ( (int) ( $row['id'] ?? 0 ) === $id ) {
 					continue;
@@ -93,6 +100,83 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 			return false;
 		}
+	}
+}
+
+final class DpdProductionPathWpdb extends wpdb {
+	/** @var array<int,array<string,mixed>> */
+	public array $candidate_rows = array();
+	/** @var array<int,mixed> */
+	public array $last_prepare_args = array();
+	/** @var array<int,mixed> */
+	public array $last_insert_args = array();
+	public string $last_sql = '';
+	public string $last_query = '';
+	public string $last_insert_query = '';
+
+	public function __construct() {
+		unset( $this->locations, $this->delivery_codes, $this->dpd_geography_stage_tables );
+	}
+
+	public function prepare( string $query, mixed ...$args ): string {
+		$this->last_sql = $query;
+		$this->last_prepare_args = $args;
+		if ( str_starts_with( ltrim( $query ), 'INSERT ' ) ) {
+			$this->last_insert_args = $args;
+		}
+		return $query;
+	}
+
+	public function esc_like( string $text ): string {
+		return addcslashes( $text, '_%\\' );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function get_results( string $query, string $output = ARRAY_A ): array {
+		unset( $output );
+		$this->last_query = $query;
+		if ( str_contains( $query, 'SELECT id, gar_object_id' ) ) {
+			return array_values(
+				array_filter(
+					array_map(
+						static fn( array $row ): array => array( 'id' => (int) ( $row['id'] ?? 0 ), 'gar_object_id' => (int) ( $row['gar_object_id'] ?? 0 ) ),
+						$this->candidate_rows
+					),
+					static fn( array $row ): bool => (int) $row['gar_object_id'] > 0
+				)
+			);
+		}
+		$args = $this->last_prepare_args;
+		$country = strtoupper( (string) array_shift( $args ) );
+		$tokens = array_map(
+			static fn( mixed $arg ): string => trim( str_replace( array( '%', '\\' ), '', (string) $arg ) ),
+			$args
+		);
+		$rows = array();
+		foreach ( $this->candidate_rows as $row ) {
+			if ( $country !== strtoupper( (string) ( $row['country_code'] ?? '' ) ) ) {
+				continue;
+			}
+			$search = mb_strtolower( strtr( (string) ( $row['searchable_text'] ?? '' ), array( 'Ё' => 'Е', 'ё' => 'е' ) ), 'UTF-8' );
+			foreach ( $tokens as $token ) {
+				if ( '' !== $token && ! str_contains( $search, $token ) ) {
+					continue 2;
+				}
+			}
+			$rows[] = $row;
+		}
+
+		return $rows;
+	}
+
+	public function query( string $query ): int|false {
+		$this->last_query = $query;
+		if ( str_starts_with( ltrim( $query ), 'INSERT ' ) ) {
+			$this->last_insert_query = $query;
+		}
+		return 1;
 	}
 }
 
@@ -141,6 +225,7 @@ use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 
 function dpd_import_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -353,6 +438,9 @@ $oversized_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_E
 $oversized_step = $importer->step( (string) $oversized_job['job_id'], 1 );
 dpd_import_assert( 'failed' === (string) $oversized_step['phase'], 'read_step parser exception becomes failed import state' );
 dpd_import_assert( str_contains( (string) $oversized_step['last_message'], 'DPD geography CSV parse failed' ), 'read_step parser exception is reported as diagnostic message' );
+$oversized_report = $settings->last_geography_import_report();
+dpd_import_assert( 'failed' === (string) ( $oversized_report['phase'] ?? '' ) && 'error' === (string) ( $oversized_report['status'] ?? '' ), 'parser failure is saved as terminal failed/error report.' );
+dpd_import_assert( (string) ( $oversized_report['last_message'] ?? '' ) === (string) ( $oversized_step['last_message'] ?? '' ), 'parser failure report message matches terminal state.' );
 $importer->reset();
 
 $header = $parser->inspect_header( $path );
@@ -447,10 +535,37 @@ $success_report = $settings->last_geography_import_report();
 dpd_import_assert( 'finished' === $success_state['phase'] && 'success' === (string) ( $success_state['status'] ?? '' ), 'step import finishes job state with success status' );
 dpd_import_assert( 'finished' === (string) ( $success_report['phase'] ?? '' ) && 'success' === (string) ( $success_report['status'] ?? '' ), 'success last report is saved from terminal state' );
 dpd_import_assert( (string) ( $success_state['finished_at'] ?? '' ) === (string) ( $success_report['finished_at'] ?? '' ) && (string) ( $success_state['last_message'] ?? '' ) === (string) ( $success_report['last_message'] ?? '' ), 'success report terminal timestamps and message match state' );
+dpd_import_assert( empty( $success_report['stale_cleanup_skipped'] ) && 0 === (int) ( $success_report['stale_cleared'] ?? -1 ), 'clean import records stale cleanup as enabled with no stale rows in the empty working table.' );
 $working_after_success = $GLOBALS['wpdb']->delivery_codes;
 dpd_import_assert( ! file_exists( $import_path ), 'import temp file is deleted on finish' );
 dpd_import_assert( ! file_exists( $upload_index_path ), 'serialized index file is deleted on finish' );
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'staging table is deleted on finish' );
+
+$invalid_upload = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_NO_FILE, 'tmp_name' => '', 'name' => 'broken.csv' ) );
+$invalid_upload_report = $settings->last_geography_import_report();
+dpd_import_assert( 'failed' === (string) ( $invalid_upload['phase'] ?? '' ) && 'error' === (string) ( $invalid_upload['status'] ?? '' ), 'invalid manual upload returns failed/error state.' );
+dpd_import_assert( 'manual' === (string) ( $invalid_upload_report['source'] ?? '' ) && 0 === (int) ( $invalid_upload_report['ru_rows'] ?? -1 ) && 0 === (int) ( $invalid_upload_report['finalized_mappings'] ?? -1 ), 'invalid upload failed report starts from zero counters instead of previous success counters.' );
+dpd_import_assert( 'failed' === (string) ( $invalid_upload_report['phase'] ?? '' ) && 'error' === (string) ( $invalid_upload_report['status'] ?? '' ), 'invalid upload replaces previous success report with terminal failed/error report.' );
+
+$warning_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-warning-' );
+file_put_contents( $warning_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$GLOBALS['wpdb']->delivery_codes = array(
+	array( 'location_id' => 161634, 'dpd_city_id' => '196058326', 'updated_at' => '2026-06-16 00:00:00' ),
+	array( 'location_id' => 777, 'dpd_city_id' => '77777777', 'updated_at' => '2026-06-16 00:00:00' ),
+);
+$GLOBALS['wpdb']->fail_location_update_ids[161634] = true;
+$warning_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $warning_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+while ( in_array( (string) ( $warning_job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
+	$warning_job = $importer->step( (string) $warning_job['job_id'], 10000 );
+}
+unset( $GLOBALS['wpdb']->fail_location_update_ids[161634] );
+$warning_report = $settings->last_geography_import_report();
+dpd_import_assert( 'finished' === (string) ( $warning_job['phase'] ?? '' ) && 'warning' === (string) ( $warning_job['status'] ?? '' ), 'row-level foreign save errors finish import as warning.' );
+dpd_import_assert( ! empty( $warning_report['stale_cleanup_skipped'] ) && 0 === (int) ( $warning_report['stale_cleared'] ?? -1 ), 'warning import skips stale cleanup and reports zero stale clears.' );
+dpd_import_assert( '196058326' === $repository->get_dpd_city_id( 161634 ) && '77777777' === $repository->get_dpd_city_id( 777 ), 'warning import preserves prior working mappings missing from staging.' );
+dpd_import_assert( '49455627' === $repository->get_dpd_city_id( 1 ), 'warning import still applies successful candidate mappings.' );
+dpd_import_assert( (int) ( $warning_report['errors_total'] ?? 0 ) > 0 && (int) ( $warning_report['foreign_save_failed'] ?? 0 ) > 0, 'warning report includes row-level error counters.' );
+dpd_import_assert( (string) ( $warning_report['phase'] ?? '' ) === (string) ( $warning_job['phase'] ?? '' ) && (string) ( $warning_report['status'] ?? '' ) === (string) ( $warning_job['status'] ?? '' ), 'warning report matches terminal state.' );
 
 $conflict_stage = $stage->table_name_for_job( 'conflict-preservation' );
 $stage->create( $conflict_stage );
@@ -461,7 +576,7 @@ $GLOBALS['wpdb']->delivery_codes = array(
 dpd_import_assert( 'inserted' === $stage->upsert_candidate( $conflict_stage, 3, '80000001', 'fias' ), 'conflict preservation setup inserts first candidate.' );
 dpd_import_assert( 'conflict' === $stage->upsert_candidate( $conflict_stage, 3, '80000002', 'fias' ), 'conflict preservation setup creates conflict row.' );
 $conflict_finalize = $stage->finalize_into_delivery_codes( $conflict_stage );
-dpd_import_assert( 0 === (int) $conflict_finalize['mappings'] && 1 === (int) $conflict_finalize['changes'], 'conflict rows are excluded from finalized mappings and changes while stale rows are cleared.' );
+dpd_import_assert( 0 === (int) $conflict_finalize['mappings'] && 1 === (int) $conflict_finalize['changes'] && 1 === (int) ( $conflict_finalize['stale_cleared'] ?? 0 ) && empty( $conflict_finalize['stale_cleanup_skipped'] ), 'conflict rows are excluded from finalized mappings and changes while clean stale rows are cleared.' );
 dpd_import_assert( '80000001' === $repository->get_dpd_city_id( 3 ), 'conflict stage row preserves existing working mapping.' );
 dpd_import_assert( null === $repository->get_dpd_city_id( 999 ), 'stale mapping is cleared only when location_id is absent from stage.' );
 $stage->drop( $conflict_stage );
@@ -517,6 +632,17 @@ try {
 $GLOBALS['wpdb']->fail_dpd_stage_finalize_commit = false;
 dpd_import_assert( $commit_failed && $commit_snapshot === $GLOBALS['wpdb']->delivery_codes, 'commit failure rolls back delivery_codes snapshot.' );
 $stage->drop( $commit_stage );
+
+$missing_stage_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-missing-stage-' );
+file_put_contents( $missing_stage_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$missing_stage_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $missing_stage_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$missing_stage_internal = $state->current();
+unset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ (string) $missing_stage_internal['stage_table'] ] );
+$missing_stage_failed = $importer->step( (string) $missing_stage_job['job_id'], 1 );
+$missing_stage_report = $settings->last_geography_import_report();
+dpd_import_assert( 'failed' === (string) ( $missing_stage_failed['phase'] ?? '' ) && 'error' === (string) ( $missing_stage_failed['status'] ?? '' ), 'missing staging table fails active import job.' );
+dpd_import_assert( 'failed' === (string) ( $missing_stage_report['phase'] ?? '' ) && 'error' === (string) ( $missing_stage_report['status'] ?? '' ) && (string) ( $missing_stage_report['last_message'] ?? '' ) === (string) ( $missing_stage_failed['last_message'] ?? '' ), 'missing stage failure is saved as current terminal report.' );
+$importer->reset();
 
 $warning_state = $state->finish( 'Synthetic warning terminal state.', 'warning' );
 $report_from_state = new ReflectionMethod( $importer, 'report_from_state' );
@@ -580,6 +706,84 @@ dpd_import_assert( file_exists( $existing_reset_path ), 'reset keeps existing CS
 dpd_import_assert( ! file_exists( $existing_reset_index_path ), 'reset deletes serialized index when delete_file_on_finish=false' );
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $existing_reset_stage ] ), 'reset deletes staging table when delete_file_on_finish=false' );
 @unlink( $existing_reset_path );
+
+$production_db = new DpdProductionPathWpdb();
+$production_db->candidate_rows = array(
+	array(
+		'id' => 9001,
+		'gar_object_id' => null,
+		'fias_id' => null,
+		'gar_id' => '',
+		'kladr_id' => '',
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'district_name' => 'Ленинский',
+		'city_name' => '',
+		'settlement_name' => 'им. Ленина',
+		'settlement_type' => 'п',
+		'place_name' => 'им. Ленина',
+		'place_type' => 'п',
+		'display_name' => 'BY, Минская, Ленинский, п им. Ленина',
+		'searchable_text' => 'by минская ленинский п им. ленина',
+		'active' => 1,
+	),
+	array(
+		'id' => 9002,
+		'gar_object_id' => null,
+		'fias_id' => null,
+		'gar_id' => '',
+		'kladr_id' => '',
+		'country_code' => 'BY',
+		'region_name' => 'Берёзовская',
+		'district_name' => 'Берёзовский',
+		'settlement_name' => 'Берёзовка',
+		'settlement_type' => 'с',
+		'place_name' => 'Берёзовка',
+		'place_type' => 'с',
+		'display_name' => 'BY, Берёзовская, Берёзовский, с Берёзовка',
+		'searchable_text' => 'by берёзовская берёзовский с берёзовка',
+		'active' => 1,
+	),
+	array(
+		'id' => 9003,
+		'gar_object_id' => null,
+		'fias_id' => null,
+		'gar_id' => '',
+		'kladr_id' => '',
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'district_name' => 'Минский',
+		'settlement_name' => 'Новая   Жизнь',
+		'settlement_type' => 'г',
+		'place_name' => 'Новая   Жизнь',
+		'place_type' => 'г',
+		'display_name' => 'BY, Минская, Минский, г Новая Жизнь',
+		'searchable_text' => 'by минская минский г новая   жизнь',
+		'active' => 1,
+	),
+);
+$production_repository = new LocationRepository( $production_db );
+$punctuation_location = $production_repository->find_foreign_by_place_identity( 'BY', 'им Ленина', 'Минская', 'Ленинский', 'п.' );
+dpd_import_assert( $punctuation_location instanceof Location && 9001 === (int) $punctuation_location->id, 'production-path foreign identity finds im. Lenina by punctuation-free request.' );
+dpd_import_assert( ! str_contains( $production_db->last_sql, 'LIMIT' ), 'production foreign identity prefilter does not hide exact candidates behind arbitrary LIMIT.' );
+dpd_import_assert( in_array( '%им%', $production_db->last_prepare_args, true ) && in_array( '%ленина%', $production_db->last_prepare_args, true ) && ! in_array( '%им ленина%', $production_db->last_prepare_args, true ), 'production prefilter uses token LIKE patterns instead of one contiguous normalized phrase.' );
+$yo_location = $production_repository->find_foreign_by_place_identity( 'BY', 'Березовка', 'Березовская', 'Березовский', 'с' );
+dpd_import_assert( $yo_location instanceof Location && 9002 === (int) $yo_location->id, 'production-path foreign identity applies Ё/Е normalization.' );
+$space_location = $production_repository->find_foreign_by_place_identity( 'BY', 'Новая Жизнь', 'Минская', 'Минский', 'г.' );
+dpd_import_assert( $space_location instanceof Location && 9003 === (int) $space_location->id, 'production-path foreign identity matches whitespace and type punctuation variants.' );
+
+$bulk_db = new DpdProductionPathWpdb();
+$bulk_repository = new LocationRepository( $bulk_db );
+$bulk_repository->bulk_upsert_locations(
+	array(
+		Location::from_array( array( 'country_code' => 'BY', 'region_name' => 'Минская', 'district_name' => 'Минский', 'place_name' => 'Минск', 'place_type' => 'г', 'settlement_name' => 'Минск', 'settlement_type' => 'г', 'display_name' => 'BY, Минская, Минский, г Минск', 'gar_object_id' => 0, 'fias_id' => '', 'gar_id' => '', 'active' => true ) ),
+		Location::from_array( array( 'country_code' => 'KZ', 'region_name' => 'Алматы', 'place_name' => 'Алматы', 'place_type' => 'г', 'settlement_name' => 'Алматы', 'settlement_type' => 'г', 'display_name' => 'KZ, г Алматы', 'gar_object_id' => 0, 'fias_id' => '', 'gar_id' => '', 'active' => true ) ),
+		Location::from_array( array( 'country_code' => 'RU', 'region_name' => 'Новосибирская', 'place_name' => 'Тест', 'place_type' => 'г', 'settlement_name' => 'Тест', 'settlement_type' => 'г', 'display_name' => 'Тест', 'gar_object_id' => 12345, 'fias_id' => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'gar_id' => '12345', 'active' => true ) ),
+	)
+);
+dpd_import_assert( substr_count( $bulk_db->last_insert_query, 'NULL' ) >= 4, 'bulk location upsert emits SQL NULL literals for missing foreign GAR/FIAS.' );
+dpd_import_assert( str_contains( $bulk_db->last_insert_query, '(NULL, NULL' ), 'bulk location upsert does not bind missing GAR/FIAS through %d/%s placeholders.' );
+dpd_import_assert( in_array( 12345, $bulk_db->last_insert_args, true ) && in_array( 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', $bulk_db->last_insert_args, true ), 'bulk location upsert still binds real positive GAR and non-empty FIAS values.' );
 
 $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
 dpd_import_assert( is_string( $plugin_source ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD dry-run shipment adapter is registered outside geography import.' );

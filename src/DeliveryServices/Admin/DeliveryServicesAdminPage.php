@@ -2603,9 +2603,12 @@ final class DeliveryServicesAdminPage {
 				<div data-wdc-dpd-progress-bar style="height: 18px; width: <?php echo esc_attr( (string) $percent ); ?>%; background: #2271b1;"></div>
 			</div>
 			<p data-wdc-dpd-summary><?php echo esc_html( sprintf( 'Фаза: %s. Обработано %d строк. Прочитано %.1f%% файла.', $phase, (int) ( $state['rows_read'] ?? 0 ), $percent ) ); ?></p>
+			<?php if ( ! empty( $state['stale_cleanup_skipped'] ) ) : ?>
+				<div class="notice notice-warning inline"><p><?php echo esc_html__( 'Очистка устаревших DPD mappings пропущена из-за ошибок отдельных строк. Ранее сохранённые mappings оставлены без изменений.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
-				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'stale_cleared', 'stale_cleanup_skipped', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
 						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>
@@ -2646,6 +2649,9 @@ final class DeliveryServicesAdminPage {
 			</p>
 		</form>
 		<?php if ( array() !== $report ) : ?>
+			<?php if ( ! empty( $report['stale_cleanup_skipped'] ) ) : ?>
+				<div class="notice notice-warning inline" style="max-width: 860px;"><p><?php echo esc_html__( 'Очистка устаревших DPD mappings пропущена из-за ошибок отдельных строк. Ранее сохранённые mappings оставлены без изменений.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
 			<h3><?php echo esc_html__( 'Последний отчет импорта DPD Географии', 'walls-delivery-calc' ); ?></h3>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
@@ -3094,6 +3100,8 @@ final class DeliveryServicesAdminPage {
 				'file_size' => (int) ( $state['file_size'] ?? 0 ),
 				'phase' => $phase,
 				'status' => $status,
+				'stale_cleanup_skipped' => ! empty( $state['stale_cleanup_skipped'] ) ? 'yes' : 'no',
+				'stale_cleared' => (int) ( $state['stale_cleared'] ?? 0 ),
 			)
 		);
 	}
@@ -5201,7 +5209,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 */
 	private function dpd_import_report_message( array $report ): string {
 		return sprintf(
-			'DPD geography import: phase=%s status=%s source=%s file=%s total=%d ru=%d candidates=%d finalized=%d changes=%d unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
+			'DPD geography import: phase=%s status=%s source=%s file=%s total=%d ru=%d candidates=%d finalized=%d changes=%d stale_cleared=%d stale_cleanup_skipped=%s unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
 			(string) ( $report['phase'] ?? '' ),
 			(string) ( $report['status'] ?? '' ),
 			(string) ( $report['source'] ?? '' ),
@@ -5211,6 +5219,8 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			(int) ( $report['saved_candidates'] ?? 0 ),
 			(int) ( $report['finalized_mappings'] ?? 0 ),
 			(int) ( $report['finalized_changes'] ?? 0 ),
+			(int) ( $report['stale_cleared'] ?? 0 ),
+			! empty( $report['stale_cleanup_skipped'] ) ? 'yes' : 'no',
 			(int) ( $report['unchanged_mappings'] ?? 0 ),
 			(int) ( $report['conflicts'] ?? 0 ),
 			(int) ( $report['ambiguous'] ?? 0 ),

@@ -153,13 +153,13 @@ final class DpdGeographyStageRepository {
 	}
 
 	/**
-	 * @return array{mappings:int,changes:int}
+	 * @return array{mappings:int,changes:int,stale_cleared:int,stale_cleanup_skipped:bool}
 	 */
-	public function finalize_into_delivery_codes( string $table_name ): array {
+	public function finalize_into_delivery_codes( string $table_name, bool $allow_stale_cleanup = true ): array {
 		if ( $this->is_test_mode() ) {
 			$this->create_if_missing_for_test( $table_name );
 			$snapshot = $this->wpdb->delivery_codes;
-			if ( ! empty( $this->wpdb->fail_dpd_stage_finalize_clear ) ) {
+			if ( $allow_stale_cleanup && ! empty( $this->wpdb->fail_dpd_stage_finalize_clear ) ) {
 				$this->wpdb->last_error = 'forced stage clear failure';
 				$this->wpdb->delivery_codes = $snapshot;
 				$this->throw_sql_error( 'DPD geography finalization clear failed' );
@@ -173,6 +173,7 @@ final class DpdGeographyStageRepository {
 				}
 			}
 			$changed = 0;
+			$stale_cleared = 0;
 			$existing_ids = array();
 			foreach ( $this->wpdb->delivery_codes as $index => $row ) {
 				$location_id = (int) ( $row['location_id'] ?? 0 );
@@ -185,10 +186,11 @@ final class DpdGeographyStageRepository {
 					}
 					continue;
 				}
-				if ( ! isset( $stage_location_ids[ $location_id ] ) && null !== ( $row['dpd_city_id'] ?? null ) && '' !== (string) ( $row['dpd_city_id'] ?? '' ) ) {
+				if ( $allow_stale_cleanup && ! isset( $stage_location_ids[ $location_id ] ) && null !== ( $row['dpd_city_id'] ?? null ) && '' !== (string) ( $row['dpd_city_id'] ?? '' ) ) {
 					$this->wpdb->delivery_codes[ $index ]['dpd_city_id'] = null;
 					$this->wpdb->delivery_codes[ $index ]['updated_at'] = $this->now();
 					++$changed;
+					++$stale_cleared;
 				}
 			}
 			if ( ! empty( $this->wpdb->fail_dpd_stage_finalize_upsert ) ) {
@@ -208,7 +210,12 @@ final class DpdGeographyStageRepository {
 				$this->wpdb->delivery_codes = $snapshot;
 				$this->throw_sql_error( 'DPD geography finalization commit failed' );
 			}
-			return array( 'mappings' => count( $candidates ), 'changes' => $changed );
+			return array(
+				'mappings' => count( $candidates ),
+				'changes' => $changed,
+				'stale_cleared' => $stale_cleared,
+				'stale_cleanup_skipped' => ! $allow_stale_cleanup,
+			);
 		}
 
 		$delivery_table = $this->wpdb->prefix . 'wdc_location_delivery_codes';
@@ -217,12 +224,6 @@ final class DpdGeographyStageRepository {
 		$this->query_or_throw( 'START TRANSACTION', 'DPD geography finalization transaction start failed' );
 		try {
 			$candidate_count = (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$safe_stage} WHERE status = 'candidate' AND dpd_city_id IS NOT NULL" );
-			$stale_clear_count = (int) $this->wpdb->get_var(
-				"SELECT COUNT(*)
-				FROM {$delivery_table} dc
-				LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id
-				WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL"
-			);
 			$candidate_change_count = (int) $this->wpdb->get_var(
 				"SELECT COUNT(*)
 				FROM {$safe_stage} stage
@@ -231,13 +232,22 @@ final class DpdGeographyStageRepository {
 					AND stage.dpd_city_id IS NOT NULL
 					AND (dc.location_id IS NULL OR dc.dpd_city_id IS NULL OR NOT (dc.dpd_city_id <=> stage.dpd_city_id))"
 			);
-			$this->query_or_throw(
-				"UPDATE {$delivery_table} dc
-				LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id
-				SET dc.dpd_city_id = NULL, dc.updated_at = '" . esc_sql( $now ) . "'
-				WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL",
-				'DPD geography finalization clear failed'
-			);
+			$stale_clear_count = 0;
+			if ( $allow_stale_cleanup ) {
+				$stale_clear_count = (int) $this->wpdb->get_var(
+					"SELECT COUNT(*)
+					FROM {$delivery_table} dc
+					LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id
+					WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL"
+				);
+				$this->query_or_throw(
+					"UPDATE {$delivery_table} dc
+					LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id
+					SET dc.dpd_city_id = NULL, dc.updated_at = '" . esc_sql( $now ) . "'
+					WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL",
+					'DPD geography finalization clear failed'
+				);
+			}
 			$this->query_or_throw(
 				"INSERT INTO {$delivery_table} (location_id, dpd_city_id, updated_at)
 				SELECT location_id, dpd_city_id, '" . esc_sql( $now ) . "'
@@ -254,7 +264,12 @@ final class DpdGeographyStageRepository {
 			throw $exception;
 		}
 
-		return array( 'mappings' => $candidate_count, 'changes' => max( 0, $stale_clear_count ) + max( 0, $candidate_change_count ) );
+		return array(
+			'mappings' => $candidate_count,
+			'changes' => max( 0, $stale_clear_count ) + max( 0, $candidate_change_count ),
+			'stale_cleared' => max( 0, $stale_clear_count ),
+			'stale_cleanup_skipped' => ! $allow_stale_cleanup,
+		);
 	}
 
 	public function exists( string $table_name ): bool {

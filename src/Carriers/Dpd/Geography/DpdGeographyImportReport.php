@@ -35,6 +35,8 @@ final class DpdGeographyImportReport {
 			'saved_candidates' => 0,
 			'finalized_mappings' => 0,
 			'finalized_changes' => 0,
+			'stale_cleared' => 0,
+			'stale_cleanup_skipped' => false,
 			'unchanged_mappings' => 0,
 			'conflicts' => 0,
 			'ambiguous' => 0,
