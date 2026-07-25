@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.128.8
+Version: 0.128.9
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 
@@ -10,7 +10,9 @@ Generic location services own normalized lookup. Carrier pickup services own car
 
 The shared `wdc_locations` table stores canonical locations for all supported countries. Russian locations continue to come from the GAR/FIAS pipeline, and DPD Geography keeps the existing RU matching flow. For CDEK EAEU support, valid DPD Geography rows for `AM`, `BY`, `KZ`, and `KG` are imported directly as foreign canonical locations without fake FIAS, GAR, or KLADR identifiers.
 
-Foreign DPD imports use `dpd_city_id` in `wdc_location_delivery_codes` for idempotency and a country-aware place identity fallback before creating a new location. Same-named cities in different countries and same-named places in different districts must remain separate. External AM/BY/KZ/KG rows that do not have Russian GAR/FIAS identifiers are stored with SQL `NULL` in `gar_object_id` and `fias_id`; real Russian identifiers remain unique. DPD foreign `postal_code` and foreign "Код КЛАДР" values are not promoted into canonical postcode or Russian KLADR fields. Manual checkout city resolution for CDEK does not insert CDEK city codes or free-text cities into `wdc_locations`; the resolved CDEK code lives only in calculation/session/shipment creation context.
+Foreign DPD imports use `dpd_city_id` in `wdc_location_delivery_codes` for idempotency and a country-aware place identity fallback before creating a new location. Same-named cities in different countries and same-named places in different districts must remain separate. External AM/BY/KZ/KG rows that do not have Russian GAR/FIAS identifiers are stored with SQL `NULL` in `gar_object_id` and `fias_id`; real Russian identifiers remain unique. DPD foreign `postal_code` and foreign "Код КЛАДР" values are not promoted into canonical postcode or Russian KLADR fields. Foreign identity is normalized in PHP for both in-memory tests and production SQL candidates, including `ё/е`, whitespace, dots, and short place-type aliases. Manual checkout city resolution for CDEK does not insert CDEK city codes or free-text cities into `wdc_locations`; the resolved CDEK code lives only in calculation/session/shipment creation context.
+
+DPD Geography finalization stages all RU and foreign `dpd_city_id` mappings before changing the working `wdc_location_delivery_codes` table. Candidate rows may insert or update a working mapping, conflict rows preserve any existing working mapping, and stale mappings are cleared only when the location is absent from the stage entirely. Production finalization runs in a transaction and reports `finalized_mappings` as candidate count and `finalized_changes` as logical changes, so an idempotent repeat import can finish with mappings greater than zero and changes equal to zero.
 
 ## Canonical Requirements
 

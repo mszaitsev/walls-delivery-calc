@@ -10,6 +10,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $last_error = '';
 		public bool $fail_dpd_stage_finalize_clear = false;
 		public bool $fail_dpd_stage_finalize_upsert = false;
+		public bool $fail_dpd_stage_finalize_commit = false;
 		/** @var array<int,array<string,mixed>> */
 		public array $delivery_codes = array();
 		/** @var array<int,array<string,mixed>> */
@@ -280,7 +281,10 @@ $csv = implode(
 		'10000003;AM;Ереван;;Ереван;Ереван;г;0010;;AM00000000000',
 		'10000004;KG;Бишкек;;Бишкек;Бишкек;г;720000;;KG00000000000',
 		'196058326;BY;Минская;Минский;Минск2;Минск;г;220000;;BY60011001000',
+		'196058326;BY;  Минская  ;Минский;Минск2;Минск;г.;220002;;BY60011001000',
 		'196058327;BY;Минская;Другой;Минск2;Минск;г;220001;;BY60011001000',
+		'196058328;BY;Берёзовская;Берёзовский;Берёзовка;Берёзовка;с;225210;;BY60011002000',
+		'196058328;BY;Березовская;Березовский;Березовка;Березовка;с;225211;;BY60011002000',
 		'10000005;UZ;Tashkent;;Tashkent;Tashkent;g;100000;;',
 		';RU;Новосибирская;;Пусто;Пусто;г;633040;;',
 	)
@@ -390,15 +394,15 @@ $report = $settings->last_geography_import_report();
 dpd_import_assert( 0 === (int) $report['total_rows'], 'import does not pre-count data rows' );
 dpd_import_assert( (int) $report['file_size'] > 0, 'report stores source file size' );
 dpd_import_assert( 7 === (int) $report['ru_rows'], 'import processes RU rows only' );
-dpd_import_assert( 6 === (int) ( $report['foreign_rows'] ?? 0 ) && 3 === (int) ( $report['foreign_by_rows'] ?? 0 ) && 1 === (int) $report['skipped_non_ru'], 'import counts supported AM/BY/KZ/KG foreign rows and skips unsupported UZ' );
-dpd_import_assert( 4 === (int) ( $report['foreign_locations_inserted'] ?? 0 ) && 2 === (int) ( $report['foreign_locations_updated'] ?? 0 ), 'foreign DPD import inserts distinct locations and updates repeated or legacy same-place rows; inserted=' . (string) ( $report['foreign_locations_inserted'] ?? '' ) . ' updated=' . (string) ( $report['foreign_locations_updated'] ?? '' ) );
+dpd_import_assert( 9 === (int) ( $report['foreign_rows'] ?? 0 ) && 6 === (int) ( $report['foreign_by_rows'] ?? 0 ) && 1 === (int) $report['skipped_non_ru'], 'import counts supported AM/BY/KZ/KG foreign rows and skips unsupported UZ' );
+dpd_import_assert( 5 === (int) ( $report['foreign_locations_inserted'] ?? 0 ) && 4 === (int) ( $report['foreign_locations_updated'] ?? 0 ), 'foreign DPD import inserts distinct locations and updates repeated or legacy same-place rows; inserted=' . (string) ( $report['foreign_locations_inserted'] ?? '' ) . ' updated=' . (string) ( $report['foreign_locations_updated'] ?? '' ) );
 dpd_import_assert( 0 === (int) ( $report['foreign_save_failed'] ?? 0 ) && 0 === (int) ( $report['errors_total'] ?? 0 ), 'foreign DPD imports do not hit unique GAR/FIAS SQL failures' );
 dpd_import_assert( 1 === (int) $report['skipped_invalid'], 'import skips rows without DPD city ID' );
 dpd_import_assert( 4 === (int) $report['matched_by_fias'], 'FIAS exact matches are counted before staging conflict filtering' );
 dpd_import_assert( 1 === (int) $report['matched_by_kladr'], 'KLADR normalized match is saved' );
-dpd_import_assert( 8 === (int) $report['saved_candidates'], 'non-conflicting RU and foreign rows are staged as candidates before finalization' );
-dpd_import_assert( 7 === (int) $report['finalized_mappings'] && 7 === (int) ( $report['finalized_changes'] ?? 0 ), 'RU candidates and foreign imports are finalized into working delivery codes table with candidate and change counters' );
-dpd_import_assert( 2 === (int) $report['unchanged_mappings'], 'duplicate same DPD city ID is idempotent for RU and foreign rows' );
+dpd_import_assert( 9 === (int) $report['saved_candidates'], 'non-conflicting RU and foreign rows are staged as candidates before finalization' );
+dpd_import_assert( 8 === (int) $report['finalized_mappings'] && 8 === (int) ( $report['finalized_changes'] ?? 0 ), 'RU candidates and foreign imports are finalized into working delivery codes table with candidate and change counters' );
+dpd_import_assert( 4 === (int) $report['unchanged_mappings'], 'duplicate same DPD city ID is idempotent for RU and foreign rows' );
 dpd_import_assert( 1 === (int) $report['conflicts'], 'different DPD city IDs for one location are treated as conflict' );
 dpd_import_assert( 1 === (int) $report['ambiguous'], 'ambiguous name match is not saved' );
 dpd_import_assert( '49455627' === $repository->get_dpd_city_id( 1 ), 'FIAS match writes dpd_city_id' );
@@ -406,7 +410,7 @@ dpd_import_assert( '70000001' === $repository->get_dpd_city_id( 2 ), 'KLADR norm
 dpd_import_assert( null === $repository->get_dpd_city_id( 3 ), 'conflicted mapping is not saved' );
 dpd_import_assert( null === $repository->get_dpd_city_id( 4 ) && null === $repository->get_dpd_city_id( 5 ), 'ambiguous name mapping is not saved' );
 $foreign_locations = array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => in_array( (string) ( $row['country_code'] ?? '' ), array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) );
-dpd_import_assert( 5 === count( $foreign_locations ), 'AM/BY/KZ/KG foreign locations are created in canonical locations table and same names in different districts stay separate.' );
+dpd_import_assert( 6 === count( $foreign_locations ), 'AM/BY/KZ/KG foreign locations are created in canonical locations table and same names in different districts stay separate.' );
 foreach ( $foreign_locations as $foreign_row ) {
 	dpd_import_assert( null === ( $foreign_row['gar_object_id'] ?? null ) && null === ( $foreign_row['fias_id'] ?? null ), 'foreign locations persist missing GAR/FIAS as SQL NULL-compatible values.' );
 	dpd_import_assert( '' === (string) ( $foreign_row['gar_id'] ?? '' ) && '' === (string) ( $foreign_row['kladr_id'] ?? '' ), 'foreign locations do not persist fake GAR/KLADR values.' );
@@ -433,12 +437,34 @@ foreach ( array( '10000001', '196058326', '10000003', '10000004', '196058327' ) 
 	$foreign_location_id = $repository->find_location_id_by_dpd_city_id( $foreign_dpd_id );
 	dpd_import_assert( null !== $foreign_location_id && $foreign_dpd_id === $repository->get_dpd_city_id( $foreign_location_id ), 'foreign DPD mapping survives finalization for ' . $foreign_dpd_id );
 }
+$berezovka_rows = array_values( array_filter( $foreign_locations, static fn( array $row ): bool => 'BY' === (string) ( $row['country_code'] ?? '' ) && in_array( (string) ( $row['place_name'] ?? '' ), array( 'Берёзовка', 'Березовка' ), true ) ) );
+dpd_import_assert( 1 === count( $berezovka_rows ), 'Ё/Е foreign identity variants do not create duplicate locations.' );
+dpd_import_assert( null !== $repository->find_location_id_by_dpd_city_id( '196058328' ), 'Ё/Е foreign identity mapping survives finalization.' );
 dpd_import_assert( null === $repository->find_location_id_by_dpd_city_id( '10000005' ), 'unsupported UZ foreign row does not create a DPD mapping.' );
 dpd_import_assert( array() !== $settings->last_geography_import_report(), 'last import report is stored in settings' );
-dpd_import_assert( 'finished' === $state->current()['phase'], 'step import finishes job state' );
+$success_state = $state->current();
+$success_report = $settings->last_geography_import_report();
+dpd_import_assert( 'finished' === $success_state['phase'] && 'success' === (string) ( $success_state['status'] ?? '' ), 'step import finishes job state with success status' );
+dpd_import_assert( 'finished' === (string) ( $success_report['phase'] ?? '' ) && 'success' === (string) ( $success_report['status'] ?? '' ), 'success last report is saved from terminal state' );
+dpd_import_assert( (string) ( $success_state['finished_at'] ?? '' ) === (string) ( $success_report['finished_at'] ?? '' ) && (string) ( $success_state['last_message'] ?? '' ) === (string) ( $success_report['last_message'] ?? '' ), 'success report terminal timestamps and message match state' );
+$working_after_success = $GLOBALS['wpdb']->delivery_codes;
 dpd_import_assert( ! file_exists( $import_path ), 'import temp file is deleted on finish' );
 dpd_import_assert( ! file_exists( $upload_index_path ), 'serialized index file is deleted on finish' );
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'staging table is deleted on finish' );
+
+$conflict_stage = $stage->table_name_for_job( 'conflict-preservation' );
+$stage->create( $conflict_stage );
+$GLOBALS['wpdb']->delivery_codes = array(
+	array( 'location_id' => 3, 'dpd_city_id' => '80000001', 'updated_at' => '2026-06-16 00:00:00' ),
+	array( 'location_id' => 999, 'dpd_city_id' => '99999999', 'updated_at' => '2026-06-16 00:00:00' ),
+);
+dpd_import_assert( 'inserted' === $stage->upsert_candidate( $conflict_stage, 3, '80000001', 'fias' ), 'conflict preservation setup inserts first candidate.' );
+dpd_import_assert( 'conflict' === $stage->upsert_candidate( $conflict_stage, 3, '80000002', 'fias' ), 'conflict preservation setup creates conflict row.' );
+$conflict_finalize = $stage->finalize_into_delivery_codes( $conflict_stage );
+dpd_import_assert( 0 === (int) $conflict_finalize['mappings'] && 1 === (int) $conflict_finalize['changes'], 'conflict rows are excluded from finalized mappings and changes while stale rows are cleared.' );
+dpd_import_assert( '80000001' === $repository->get_dpd_city_id( 3 ), 'conflict stage row preserves existing working mapping.' );
+dpd_import_assert( null === $repository->get_dpd_city_id( 999 ), 'stale mapping is cleared only when location_id is absent from stage.' );
+$stage->drop( $conflict_stage );
 
 $failure_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-finalize-failure-' );
 file_put_contents( $failure_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
@@ -453,8 +479,51 @@ $GLOBALS['wpdb']->fail_dpd_stage_finalize_clear = false;
 dpd_import_assert( 'failed' === (string) $state->current()['phase'], 'finalization SQL failure marks import job failed' );
 dpd_import_assert( str_contains( (string) $state->current()['last_message'], 'DPD geography finalization failed' ), 'finalization SQL failure reports diagnostic message' );
 dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $failure_stage ] ), 'failed finalization keeps staging table for reset/retry diagnostics' );
+$failure_report = $settings->last_geography_import_report();
+dpd_import_assert( 'error' === (string) ( $state->current()['status'] ?? '' ) && 'error' === (string) ( $failure_report['status'] ?? '' ), 'clear failure state and report use error status.' );
 $importer->reset();
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $failure_stage ] ), 'reset clears failed finalization staging table' );
+
+$GLOBALS['wpdb']->delivery_codes = $success_snapshot = array(
+	array( 'location_id' => 1, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-16 01:00:00' ),
+	array( 'location_id' => 777, 'dpd_city_id' => '77777777', 'updated_at' => '2026-06-16 01:00:00' ),
+);
+$upsert_failure_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-upsert-failure-' );
+file_put_contents( $upsert_failure_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$upsert_failure_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $upsert_failure_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$upsert_failure_stage = (string) $state->current()['stage_table'];
+$GLOBALS['wpdb']->fail_dpd_stage_finalize_upsert = true;
+while ( in_array( (string) ( $upsert_failure_job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
+	$upsert_failure_job = $importer->step( (string) $upsert_failure_job['job_id'], 10000 );
+}
+$GLOBALS['wpdb']->fail_dpd_stage_finalize_upsert = false;
+dpd_import_assert( 'failed' === (string) $state->current()['phase'] && 'error' === (string) ( $state->current()['status'] ?? '' ), 'upsert failure after clear marks import failed/error.' );
+dpd_import_assert( $success_snapshot === $GLOBALS['wpdb']->delivery_codes, 'upsert failure rolls back clear and preserves working delivery_codes snapshot.' );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $upsert_failure_stage ] ), 'upsert failure keeps staging table for diagnostics.' );
+dpd_import_assert( 'failed' === (string) ( $settings->last_geography_import_report()['phase'] ?? '' ) && 'error' === (string) ( $settings->last_geography_import_report()['status'] ?? '' ), 'upsert failure report is terminal failed/error.' );
+$importer->reset();
+
+$commit_stage = $stage->table_name_for_job( 'commit-failure' );
+$stage->create( $commit_stage );
+$GLOBALS['wpdb']->delivery_codes = $commit_snapshot = array( array( 'location_id' => 1, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-16 02:00:00' ) );
+$stage->upsert_candidate( $commit_stage, 2, '70000001', 'kladr' );
+$GLOBALS['wpdb']->fail_dpd_stage_finalize_commit = true;
+$commit_failed = false;
+try {
+	$stage->finalize_into_delivery_codes( $commit_stage );
+} catch ( RuntimeException $exception ) {
+	$commit_failed = str_contains( $exception->getMessage(), 'commit failed' );
+}
+$GLOBALS['wpdb']->fail_dpd_stage_finalize_commit = false;
+dpd_import_assert( $commit_failed && $commit_snapshot === $GLOBALS['wpdb']->delivery_codes, 'commit failure rolls back delivery_codes snapshot.' );
+$stage->drop( $commit_stage );
+
+$warning_state = $state->finish( 'Synthetic warning terminal state.', 'warning' );
+$report_from_state = new ReflectionMethod( $importer, 'report_from_state' );
+$report_from_state->setAccessible( true );
+$warning_report = $report_from_state->invoke( $importer, $warning_state );
+dpd_import_assert( 'finished' === (string) ( $warning_state['phase'] ?? '' ) && 'warning' === (string) ( $warning_state['status'] ?? '' ), 'warning terminal state uses finished/warning lifecycle status.' );
+dpd_import_assert( 'finished' === (string) ( $warning_report['phase'] ?? '' ) && 'warning' === (string) ( $warning_report['status'] ?? '' ) && (string) ( $warning_report['last_message'] ?? '' ) === (string) ( $warning_state['last_message'] ?? '' ), 'warning report is built from the terminal warning state.' );
 
 $phase_before_ftp_warning = (string) $state->current()['phase'];
 $ftp_warning = $importer->start_from_ftp( new DpdGeographyFtpClient( $settings ) );
@@ -467,11 +536,15 @@ if ( ! extension_loaded( 'ssh2' ) || ! function_exists( 'ssh2_connect' ) ) {
 
 $cli_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-cli-' );
 file_put_contents( $cli_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$GLOBALS['wpdb']->delivery_codes = $working_after_success;
+$delivery_codes_before_repeat = $GLOBALS['wpdb']->delivery_codes;
 $report = $importer->import_file( $cli_path, 'cli', 'GeographyNewDPD_2026_06_16.csv' );
 $cli_state = $state->current();
 dpd_import_assert( 0 === (int) $report['total_rows'], 'CLI wrapper imports existing file without pre-counting rows' );
-dpd_import_assert( 5 === count( array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => in_array( (string) ( $row['country_code'] ?? '' ), array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) ) ), 'repeat import reuses foreign locations without creating duplicates' );
-dpd_import_assert( 7 === (int) $report['finalized_mappings'] && 0 === (int) ( $report['finalized_changes'] ?? -1 ), 'repeat import reports candidate mappings separately from idempotent finalized changes' );
+dpd_import_assert( 6 === count( array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => in_array( (string) ( $row['country_code'] ?? '' ), array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) ) ), 'repeat import reuses foreign locations without creating duplicates' );
+dpd_import_assert( 8 === (int) $report['finalized_mappings'] && 0 === (int) ( $report['finalized_changes'] ?? -1 ), 'repeat import reports candidate mappings separately from idempotent finalized changes' );
+dpd_import_assert( $delivery_codes_before_repeat === $GLOBALS['wpdb']->delivery_codes, 'repeat import does not update unchanged working mappings or updated_at values' );
+dpd_import_assert( 'finished' === (string) ( $settings->last_geography_import_report()['phase'] ?? '' ) && 'success' === (string) ( $settings->last_geography_import_report()['status'] ?? '' ), 'repeat import report remains terminal success.' );
 dpd_import_assert( false === (bool) $cli_state['delete_file_on_finish'], 'CLI wrapper stores delete_file_on_finish=false' );
 dpd_import_assert( file_exists( $cli_path ), 'CLI wrapper keeps existing CSV on finish' );
 dpd_import_assert( ! file_exists( (string) $cli_state['index_path'] ), 'CLI wrapper deletes serialized index on finish' );
@@ -511,5 +584,9 @@ dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $exist
 $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
 dpd_import_assert( is_string( $plugin_source ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD dry-run shipment adapter is registered outside geography import.' );
 dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdCarrier' ), 'DPD runtime carrier is not registered by geography import' );
+
+$migration_0043_source = file_get_contents( __DIR__ . '/../../database/migrations/0043_allow_external_locations_without_gar_fias.php' );
+dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'gar_object_id BIGINT(20) UNSIGNED NULL' ) && str_contains( $migration_0043_source, 'fias_id CHAR(36) NULL' ), 'migration 0043 keeps GAR/FIAS nullable for external locations.' );
+dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'WHERE gar_object_id = 0' ) && str_contains( $migration_0043_source, "TRIM(fias_id) = ''" ) && str_contains( $migration_0043_source, "gar_id = ''" ), 'migration 0043 normalizes placeholder GAR/FIAS values idempotently.' );
 
 echo "DPD geography import smoke OK\n";

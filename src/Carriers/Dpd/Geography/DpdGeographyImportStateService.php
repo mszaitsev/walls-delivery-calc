@@ -41,6 +41,7 @@ final class DpdGeographyImportStateService {
 			array(
 				'job_id' => (string) ( $context['job_id'] ?? $this->new_job_id() ),
 				'phase' => (string) ( $context['phase'] ?? 'ready' ),
+				'status' => '',
 				'source' => (string) ( $context['source'] ?? 'manual' ),
 				'source_file' => (string) ( $context['source_file'] ?? '' ),
 				'file_path' => (string) ( $context['file_path'] ?? '' ),
@@ -84,6 +85,7 @@ final class DpdGeographyImportStateService {
 		return $this->update(
 			array(
 				'phase' => 'failed',
+				'status' => 'error',
 				'errors' => $errors,
 				'last_message' => $message,
 				'finished_at' => $this->now(),
@@ -91,8 +93,9 @@ final class DpdGeographyImportStateService {
 		);
 	}
 
-	public function finish( string $message = 'Import finished.' ): array {
-		return $this->update( array( 'phase' => 'finished', 'last_message' => $message, 'finished_at' => $this->now() ) );
+	public function finish( string $message = 'Import finished.', string $status = 'success' ): array {
+		$status = in_array( $status, array( 'success', 'warning' ), true ) ? $status : 'success';
+		return $this->update( array( 'phase' => 'finished', 'status' => $status, 'last_message' => $message, 'finished_at' => $this->now() ) );
 	}
 
 	public function reset(): array {
@@ -118,6 +121,7 @@ final class DpdGeographyImportStateService {
 		return array(
 			'job_id' => '',
 			'phase' => 'idle',
+			'status' => '',
 			'source' => '',
 			'source_file' => '',
 			'file_path' => '',

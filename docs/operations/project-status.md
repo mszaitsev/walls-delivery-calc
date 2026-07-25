@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.128.8
+Version: 0.128.9
 
 Stable subsystems:
 
@@ -26,7 +26,7 @@ Active known limitations:
 Recent fixes:
 
 - CDEK now supports RU/AM/BY/KZ/KG through the existing service-country repository. Existing installs receive a one-time migration from empty/RU-only CDEK countries to the five-country default, while fresh installs seed the same defaults only when the built-in service is first created.
-- DPD Geography imports AM/BY/KZ/KG locations into the shared locations table with `dpd_city_id` idempotency and without fake Russian identifiers. Foreign rows without GAR/FIAS use SQL `NULL` identity values, ignore DPD foreign postcode/KLADR as canonical Russian fields, and reconcile the earlier malformed BY/Minsk row instead of requiring manual deletion. CDEK city resolution is country-aware, supports manual city input, and does not persist CDEK city codes.
+- DPD Geography imports AM/BY/KZ/KG locations into the shared locations table with `dpd_city_id` idempotency and without fake Russian identifiers. Foreign rows without GAR/FIAS use SQL `NULL` identity values, ignore DPD foreign postcode/KLADR as canonical Russian fields, and reconcile the earlier malformed BY/Minsk row instead of requiring manual deletion. Mapping finalization is transactional, preserves existing working mappings for conflict rows, reports logical changes separately from candidate count, and uses the same PHP-normalized foreign identity rules in production SQL and in-memory smokes. CDEK city resolution is country-aware, supports manual city input, and does not persist CDEK city codes.
 - CDEK shipment creation now handles international pickup and courier on the shared adapter/request/status/document pipeline. Non-RU courier uses raw WooCommerce address data plus resolved CDEK city code, and the CDEK-only optional recipient document field is visible from initial modal render for AM/BY/KZ/KG, maps to `recipient.tin` for KZ/KG or `recipient.passport_number` for AM/BY, and is never persisted or logged.
 - CDEK pickup maps for manual EAEU cities reuse the resolved CDEK city code and fit the initial map viewport to loaded pickup point coordinates when no trusted destination coordinates exist. The derived viewport is never persisted as location data, physical user interaction cancels pending initial auto-fit, provider fit events no longer suppress the first subsequent user pan, explicit address/geolocation viewport actions refresh pickup points without being overridden by a later initial fit, and confirmed point selection cancels pending provider fit even when it does not focus the map.
 - Checkout and order delivery recalculation now share a delivery lead-time pipeline: carrier raw lead time, shop processing calendar, optional carrier working-day conversion, delivery date rules, and final planned date. The global processing default is `2` shop working days, the per-service working-day flag defaults to off, and existing manual processing additions in rules should be removed manually where they are no longer wanted.

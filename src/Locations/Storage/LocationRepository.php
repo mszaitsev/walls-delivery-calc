@@ -132,26 +132,17 @@ final class LocationRepository {
 			return null;
 		}
 
-		$place_key = $this->normalize_query( $place_name );
-		$region_key = $this->normalize_query( $region_name );
-		$district_key = $this->normalize_query( $district_name );
-		$place_type_key = $this->normalize_query( $place_type );
+		$place_key = $this->normalize_foreign_identity_value( $place_name );
+		$region_key = $this->normalize_foreign_identity_value( $region_name );
+		$district_key = $this->normalize_foreign_identity_value( $district_name );
+		$place_type_key = $this->normalize_foreign_identity_type( $place_type );
 		if ( $this->has_test_location_rows() ) {
 			$matches = array();
 			foreach ( $this->test_location_rows() as $row ) {
 				if ( 1 !== (int) ( $row['active'] ?? 1 ) || $country_code !== $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ) ) {
 					continue;
 				}
-				$row_place = $this->normalize_query( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
-				$row_region = $this->normalize_query( (string) ( $row['region_name'] ?? '' ) );
-				$row_district = $this->normalize_query( (string) ( $row['district_name'] ?? '' ) );
-				$row_place_type = $this->normalize_query( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? $row['city_type'] ?? '' ) );
-				if (
-					$row_place !== $place_key
-					|| $row_region !== $region_key
-					|| $row_district !== $district_key
-					|| $row_place_type !== $place_type_key
-				) {
+				if ( ! $this->foreign_identity_row_matches( $row, $place_key, $region_key, $district_key, $place_type_key ) ) {
 					continue;
 				}
 				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
@@ -160,15 +151,16 @@ final class LocationRepository {
 			return 1 === count( $matches ) ? $matches[0] : null;
 		}
 
-		$where = array(
-			'l.active = 1',
-			'l.country_code = %s',
-			'(LOWER(l.place_name) = %s OR LOWER(l.settlement_name) = %s OR LOWER(l.city_name) = %s)',
-			'LOWER(l.region_name) = %s',
-			'LOWER(l.district_name) = %s',
-			'LOWER(l.place_type) = %s',
-		);
-		$args = array( $country_code, $place_key, $place_key, $place_key, $region_key, $district_key, $place_type_key );
+		$where = array( 'l.active = 1', 'l.country_code = %s' );
+		$args = array( $country_code );
+		foreach ( array( $place_key, $region_key, $district_key ) as $token ) {
+			if ( '' === $token ) {
+				continue;
+			}
+			$where[] = "REPLACE(l.searchable_text, 'ё', 'е') LIKE %s";
+			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
+		}
+		$args[] = 200;
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
@@ -176,13 +168,20 @@ final class LocationRepository {
 				FROM {$this->table_name()} l
 				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
 				WHERE " . implode( ' AND ', $where ) . '
-				LIMIT 2',
+				LIMIT %d',
 				...$args
 			),
 			ARRAY_A
 		);
 
-		return is_array( $rows ) && 1 === count( $rows ) ? $this->row_to_location( $rows[0] ) : null;
+		$matches = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			if ( $this->foreign_identity_row_matches( $row, $place_key, $region_key, $district_key, $place_type_key ) ) {
+				$matches[] = $this->row_to_location( $row );
+			}
+		}
+
+		return 1 === count( $matches ) ? $matches[0] : null;
 	}
 
 	public function find_legacy_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '' ): ?Location {
@@ -193,8 +192,8 @@ final class LocationRepository {
 			return null;
 		}
 
-		$place_key = $this->normalize_query( $place_name );
-		$region_key = $this->normalize_query( $region_name );
+		$place_key = $this->normalize_foreign_identity_value( $place_name );
+		$region_key = $this->normalize_foreign_identity_value( $region_name );
 		if ( $this->has_test_location_rows() ) {
 			$matches = array();
 			foreach ( $this->test_location_rows() as $row ) {
@@ -207,8 +206,8 @@ final class LocationRepository {
 				if ( '' !== trim( (string) ( $row['district_name'] ?? '' ) ) ) {
 					continue;
 				}
-				$row_place = $this->normalize_query( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
-				$row_region = $this->normalize_query( (string) ( $row['region_name'] ?? '' ) );
+				$row_place = $this->normalize_foreign_identity_value( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
+				$row_region = $this->normalize_foreign_identity_value( (string) ( $row['region_name'] ?? '' ) );
 				if ( $row_place !== $place_key || $row_region !== $region_key ) {
 					continue;
 				}
@@ -218,29 +217,45 @@ final class LocationRepository {
 			return 1 === count( $matches ) ? $matches[0] : null;
 		}
 
+		$where = array(
+			'l.active = 1',
+			'l.country_code = %s',
+			"TRIM(l.district_name) = ''",
+			'(l.gar_object_id IS NULL OR l.gar_object_id = 0)',
+			"(l.fias_id IS NULL OR TRIM(l.fias_id) = '')",
+		);
+		$args = array( $country_code );
+		foreach ( array( $place_key, $region_key ) as $token ) {
+			if ( '' === $token ) {
+				continue;
+			}
+			$where[] = "REPLACE(l.searchable_text, 'ё', 'е') LIKE %s";
+			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
+		}
+		$args[] = 200;
+
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
 				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
 				FROM {$this->table_name()} l
 				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE l.active = 1
-					AND l.country_code = %s
-					AND (LOWER(l.place_name) = %s OR LOWER(l.settlement_name) = %s OR LOWER(l.city_name) = %s)
-					AND LOWER(l.region_name) = %s
-					AND TRIM(l.district_name) = ''
-					AND (l.gar_object_id IS NULL OR l.gar_object_id = 0)
-					AND (l.fias_id IS NULL OR TRIM(l.fias_id) = '')
-				LIMIT 2",
-				$country_code,
-				$place_key,
-				$place_key,
-				$place_key,
-				$region_key
+				WHERE " . implode( ' AND ', $where ) . '
+				LIMIT %d',
+				...$args
 			),
 			ARRAY_A
 		);
 
-		return is_array( $rows ) && 1 === count( $rows ) ? $this->row_to_location( $rows[0] ) : null;
+		$matches = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$row_place = $this->normalize_foreign_identity_value( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
+			$row_region = $this->normalize_foreign_identity_value( (string) ( $row['region_name'] ?? '' ) );
+			if ( $row_place === $place_key && $row_region === $region_key ) {
+				$matches[] = $this->row_to_location( $row );
+			}
+		}
+
+		return 1 === count( $matches ) ? $matches[0] : null;
 	}
 
 	public function find_by_gar_object_id( int $gar_object_id ): ?Location {
@@ -2020,6 +2035,41 @@ final class LocationRepository {
 
 	private function normalize_query( string $query ): string {
 		return Location::normalize_search_text( $query );
+	}
+
+	private function normalize_foreign_identity_value( string $value ): string {
+		$value = strtr( trim( $value ), array( 'Ё' => 'Е', 'ё' => 'е' ) );
+		$value = mb_strtolower( $value, 'UTF-8' );
+		$value = preg_replace( '/[.]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+		$value = trim( $value );
+
+		return $this->normalize_query( $value );
+	}
+
+	private function normalize_foreign_identity_type( string $value ): string {
+		$value = $this->normalize_foreign_identity_value( $value );
+		return match ( $value ) {
+			'g', 'г', 'город' => 'г',
+			'p', 'п' => 'п',
+			's', 'с' => 'с',
+			default => $value,
+		};
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function foreign_identity_row_matches( array $row, string $place_key, string $region_key, string $district_key, string $place_type_key ): bool {
+		$row_place = $this->normalize_foreign_identity_value( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
+		$row_region = $this->normalize_foreign_identity_value( (string) ( $row['region_name'] ?? '' ) );
+		$row_district = $this->normalize_foreign_identity_value( (string) ( $row['district_name'] ?? '' ) );
+		$row_place_type = $this->normalize_foreign_identity_type( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? $row['city_type'] ?? '' ) );
+
+		return $row_place === $place_key
+			&& $row_region === $region_key
+			&& $row_district === $district_key
+			&& $row_place_type === $place_type_key;
 	}
 
 	private function normalize_guid( string $value ): string {

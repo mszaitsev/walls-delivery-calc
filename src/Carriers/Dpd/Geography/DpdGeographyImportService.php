@@ -391,7 +391,9 @@ final class DpdGeographyImportService {
 		try {
 			$finalized = $this->stage->finalize_into_delivery_codes( $stage_table );
 		} catch ( \RuntimeException $exception ) {
-			return $this->state->fail( 'DPD geography finalization failed: ' . $this->sanitize_error( $exception->getMessage() ) );
+			$failed = $this->state->fail( 'DPD geography finalization failed: ' . $this->sanitize_error( $exception->getMessage() ) );
+			$this->settings?->save_geography_import_report( $this->report_from_state( $failed ) );
+			return $failed;
 		}
 		$finalized_mappings = is_array( $finalized ) ? (int) ( $finalized['mappings'] ?? 0 ) : (int) $finalized;
 		$finalized_changes = is_array( $finalized ) ? (int) ( $finalized['changes'] ?? 0 ) : (int) $finalized;
@@ -403,8 +405,6 @@ final class DpdGeographyImportService {
 				'last_message' => 'DPD geography import is finalizing mappings.',
 			)
 		);
-		$report = $this->report_from_state( $state );
-		$this->settings?->save_geography_import_report( $report );
 		$file = (string) ( $state['file_path'] ?? '' );
 		if ( ! empty( $state['delete_file_on_finish'] ) && '' !== $file && file_exists( $file ) ) {
 			@unlink( $file );
@@ -416,22 +416,20 @@ final class DpdGeographyImportService {
 		$this->stage->drop( $stage_table );
 
 		if ( (int) ( $state['foreign_save_failed'] ?? 0 ) > 0 || (int) ( $state['errors_total'] ?? 0 ) > 0 ) {
-			$warning_state = $this->state->update(
-				array(
-					'phase' => 'finished',
-					'status' => 'warning',
-					'last_message' => sprintf(
-						'DPD geography import finished with %d errors.',
-						max( (int) ( $state['errors_total'] ?? 0 ), (int) ( $state['foreign_save_failed'] ?? 0 ) )
-					),
-					'finished_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
-				)
+			$warning_state = $this->state->finish(
+				sprintf(
+					'DPD geography import finished with %d errors.',
+					max( (int) ( $state['errors_total'] ?? 0 ), (int) ( $state['foreign_save_failed'] ?? 0 ) )
+				),
+				'warning'
 			);
 			$this->settings?->save_geography_import_report( $this->report_from_state( $warning_state ) );
 			return $warning_state;
 		}
 
-		return $this->state->finish( 'DPD geography import finished.' );
+		$final = $this->state->finish( 'DPD geography import finished.', 'success' );
+		$this->settings?->save_geography_import_report( $this->report_from_state( $final ) );
+		return $final;
 	}
 
 	/**
@@ -472,6 +470,7 @@ final class DpdGeographyImportService {
 			'errors' => is_array( $state['errors'] ?? null ) ? $state['errors'] : array(),
 			'started_at' => (string) ( $state['started_at'] ?? '' ),
 			'finished_at' => (string) ( $state['finished_at'] ?? ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ) ),
+			'last_message' => (string) ( $state['last_message'] ?? '' ),
 		);
 	}
 

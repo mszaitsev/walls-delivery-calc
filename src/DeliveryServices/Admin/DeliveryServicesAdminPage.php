@@ -5201,18 +5201,21 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 */
 	private function dpd_import_report_message( array $report ): string {
 		return sprintf(
-			'DPD geography import: source=%s file=%s total=%d ru=%d candidates=%d finalized=%d unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
+			'DPD geography import: phase=%s status=%s source=%s file=%s total=%d ru=%d candidates=%d finalized=%d changes=%d unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
+			(string) ( $report['phase'] ?? '' ),
+			(string) ( $report['status'] ?? '' ),
 			(string) ( $report['source'] ?? '' ),
 			(string) ( $report['source_file'] ?? '' ),
 			(int) ( $report['total_rows'] ?? 0 ),
 			(int) ( $report['ru_rows'] ?? 0 ),
 			(int) ( $report['saved_candidates'] ?? 0 ),
 			(int) ( $report['finalized_mappings'] ?? 0 ),
+			(int) ( $report['finalized_changes'] ?? 0 ),
 			(int) ( $report['unchanged_mappings'] ?? 0 ),
 			(int) ( $report['conflicts'] ?? 0 ),
 			(int) ( $report['ambiguous'] ?? 0 ),
 			(int) ( $report['unmatched'] ?? 0 ),
-			is_array( $report['errors'] ?? null ) ? count( $report['errors'] ) : 0
+			(int) ( $report['errors_total'] ?? ( is_array( $report['errors'] ?? null ) ? count( $report['errors'] ) : 0 ) )
 		);
 	}
 

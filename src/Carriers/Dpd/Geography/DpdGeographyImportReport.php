@@ -43,6 +43,7 @@ final class DpdGeographyImportReport {
 			'errors' => array(),
 			'started_at' => $now,
 			'finished_at' => '',
+			'last_message' => '',
 		);
 	}
 
