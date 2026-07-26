@@ -22,6 +22,9 @@ final class DpdLocationIndex {
 	) {
 	}
 
+	/**
+	 * @throws \RuntimeException When a location index page cannot be read.
+	 */
 	public function build( int $chunk_size = 5000 ): void {
 		$this->fias = array();
 		$this->kladr = array();

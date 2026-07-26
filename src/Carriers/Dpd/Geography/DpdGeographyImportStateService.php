@@ -95,12 +95,14 @@ final class DpdGeographyImportStateService {
 		$state = $this->current();
 		$errors = is_array( $state['errors'] ?? null ) ? $state['errors'] : array();
 		$errors[] = $message;
+		$errors_total = max( 0, (int) ( $state['errors_total'] ?? 0 ) ) + 1;
 
 		return $this->update(
 			array(
 				'phase' => 'failed',
 				'status' => 'error',
 				'errors' => $errors,
+				'errors_total' => $errors_total,
 				'last_message' => $message,
 				'finished_at' => $this->now(),
 			)

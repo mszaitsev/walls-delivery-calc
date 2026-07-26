@@ -501,21 +501,34 @@ final class LocationRepository {
 			);
 		}
 
-		$rows = $this->wpdb->get_results(
-			$this->wpdb->prepare(
-				'SELECT id, country_code, active, fias_id, city_fias_id, kladr_id, city_kladr_id, region_name, district_name, place_name, settlement_name, city_name, place_type, settlement_type, city_type
-				FROM ' . $this->table_name() . '
-				WHERE active = 1 AND country_code = %s
-				ORDER BY id ASC
-				LIMIT %d OFFSET %d',
-				'RU',
-				$limit,
-				$offset
-			),
-			ARRAY_A
+		$this->wpdb->last_error = '';
+		$sql = $this->wpdb->prepare(
+			'SELECT id, country_code, active, fias_id, city_fias_id, kladr_id, city_kladr_id, region_name, district_name, place_name, settlement_name, city_name, place_type, settlement_type, city_type
+			FROM ' . $this->table_name() . '
+			WHERE active = 1 AND country_code = %s
+			ORDER BY id ASC
+			LIMIT %d OFFSET %d',
+			'RU',
+			$limit,
+			$offset
 		);
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new RuntimeException( 'DPD location index page query failed: SQL preparation returned an invalid result' );
+		}
+		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( 'DPD location index page query failed' );
+		}
+		if ( ! is_array( $rows ) ) {
+			throw new RuntimeException( 'DPD location index page query failed: invalid SQL result' );
+		}
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				throw new RuntimeException( 'DPD location index page query failed: invalid row structure' );
+			}
+		}
 
-		return is_array( $rows ) ? $rows : array();
+		return $rows;
 	}
 
 	public function find_first_by_postal_code( string $postal_code ): ?Location {
@@ -1993,6 +2006,7 @@ final class LocationRepository {
 
 	private function throw_sql_error( string $message ): never {
 		$error = trim( (string) ( $this->wpdb->last_error ?? '' ) );
+		$error = preg_replace( '/[\r\n\t]+/', ' ', $error ) ?? $error;
 		throw new RuntimeException( trim( $message . ': ' . ( '' !== $error ? $error : 'unknown SQL error' ) ) );
 	}
 

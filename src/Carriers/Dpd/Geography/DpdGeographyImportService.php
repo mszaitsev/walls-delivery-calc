@@ -649,6 +649,9 @@ final class DpdGeographyImportService {
 	private function copy_to_import_temp( string $source, string $name ): string {
 		$target = $this->temp_path( $name );
 		if ( ! @copy( $source, $target ) ) {
+			if ( file_exists( $target ) ) {
+				@unlink( $target );
+			}
 			throw new \RuntimeException( 'Unable to copy uploaded DPD geography CSV to import temp directory.' );
 		}
 
