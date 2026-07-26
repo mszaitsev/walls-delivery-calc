@@ -1,6 +1,6 @@
 # Installation And Runtime
 
-Version: 0.128.13
+Version: 0.128.14
 
 The plugin requires WordPress 6.8+, PHP 8.4+, WooCommerce 9.0+, and the main plugin file `walls-delivery-calc.php`.
 

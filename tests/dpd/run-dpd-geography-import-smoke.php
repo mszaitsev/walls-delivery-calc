@@ -7,8 +7,11 @@ defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
+		public string $options = 'wp_options';
 		public int $insert_id = 0;
 		public string $last_error = '';
+		public string $last_query = '';
+		public int|false $next_option_delete_result = 0;
 		public bool $fail_dpd_stage_finalize_clear = false;
 		public bool $fail_dpd_stage_finalize_upsert = false;
 		public bool $fail_dpd_stage_finalize_commit = false;
@@ -102,6 +105,47 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 
 			return false;
+		}
+
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$replacement = is_int( $arg ) || is_float( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+				$query = preg_replace( '/%[sdf]/', $replacement, $query, 1 ) ?? $query;
+			}
+
+			return $query;
+		}
+
+		public function query( string $query ): int|false {
+			$this->last_query = $query;
+			$this->last_error = '';
+			if ( str_starts_with( ltrim( $query ), 'DELETE FROM ' . $this->options ) ) {
+				if ( false === $this->next_option_delete_result ) {
+					$this->next_option_delete_result = 0;
+					$this->last_error = 'forced option delete failure';
+					return false;
+				}
+				if ( 0 !== $this->next_option_delete_result ) {
+					$result = $this->next_option_delete_result;
+					$this->next_option_delete_result = 0;
+					return $result;
+				}
+				if ( ! preg_match( "/option_name = '([^']+)' AND option_value = '((?:\\\\'|[^'])*)'/", $query, $matches ) ) {
+					return 0;
+				}
+				$name = stripslashes( $matches[1] );
+				$value = stripslashes( $matches[2] );
+				$current = $GLOBALS['wdc_dpd_import_options'][ $name ] ?? null;
+				$current_serialized = maybe_serialize( $current );
+				if ( array_key_exists( $name, $GLOBALS['wdc_dpd_import_options'] ?? array() ) && hash_equals( $current_serialized, $value ) ) {
+					unset( $GLOBALS['wdc_dpd_import_options'][ $name ] );
+					return 1;
+				}
+
+				return 0;
+			}
+
+			return 1;
 		}
 	}
 }
@@ -263,6 +307,13 @@ function wp_generate_uuid4(): string {
 	static $seq = 0;
 	++$seq;
 	return sprintf( '00000000-0000-4000-8000-%012d', $seq );
+}
+function maybe_serialize( mixed $data ): mixed {
+	return is_array( $data ) || is_object( $data ) ? serialize( $data ) : $data;
+}
+function wp_cache_delete( string $key, string $group = '' ): bool {
+	$GLOBALS['wdc_dpd_import_cache_deleted'][] = array( $key, $group );
+	return true;
 }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags | JSON_UNESCAPED_UNICODE ); }
 function wp_salt( string $scheme = '' ): string { return 'wdc-test-salt-' . $scheme; }
@@ -515,6 +566,30 @@ $expired_takeover_token = $lock_service->acquire( 'job-lock-test', 600 );
 dpd_import_assert( is_string( $expired_takeover_token ) && '' !== $expired_takeover_token, 'DPD geography import lock can take over an expired lease.' );
 $lock_service->release( $expired_takeover_token );
 
+$compare_and_delete = new ReflectionMethod( DpdGeographyImportLockService::class, 'compare_and_delete' );
+$compare_and_delete->setAccessible( true );
+$old_payload = array( 'job_id' => 'old', 'token' => 'old-token', 'acquired_at' => time() - 700, 'expires_at' => time() - 1 );
+$new_payload = array( 'job_id' => 'new', 'token' => 'new-token', 'acquired_at' => time(), 'expires_at' => time() + 600 );
+update_option( DpdGeographyImportLockService::OPTION_NAME, $old_payload );
+update_option( DpdGeographyImportLockService::OPTION_NAME, $new_payload );
+dpd_import_assert( false === $compare_and_delete->invoke( $lock_service, $old_payload ), 'atomic lock compare-delete does not remove a newer owner payload during expired takeover race.' );
+dpd_import_assert( $new_payload === get_option( DpdGeographyImportLockService::OPTION_NAME ), 'new owner lock survives stale expired takeover compare-delete.' );
+$lock_service->release( 'old-token' );
+dpd_import_assert( $new_payload === get_option( DpdGeographyImportLockService::OPTION_NAME ), 'stale release token does not delete a newer lock owner.' );
+$lock_service->release( 'new-token' );
+dpd_import_assert( array() === get_option( DpdGeographyImportLockService::OPTION_NAME, array() ), 'owner release deletes the exact current lock payload.' );
+update_option( DpdGeographyImportLockService::OPTION_NAME, $new_payload );
+$GLOBALS['wpdb']->next_option_delete_result = false;
+$delete_failed_closed = false;
+try {
+	$compare_and_delete->invoke( $lock_service, $new_payload );
+} catch ( RuntimeException $exception ) {
+	$delete_failed_closed = str_contains( $exception->getMessage(), 'compare-delete failed' );
+}
+dpd_import_assert( $delete_failed_closed && $new_payload === get_option( DpdGeographyImportLockService::OPTION_NAME ), 'lock compare-delete SQL error fails closed and preserves existing lock.' );
+delete_option( DpdGeographyImportLockService::OPTION_NAME );
+dpd_import_assert( in_array( array( DpdGeographyImportLockService::OPTION_NAME, 'options' ), $GLOBALS['wdc_dpd_import_cache_deleted'] ?? array(), true ), 'lock compare-delete invalidates the option cache after a successful owner release.' );
+
 $index_sql_db = new DpdIndexQueryFailureWpdb();
 $index_sql_repository = new LocationRepository( $index_sql_db );
 $index_sql_db->index_mode = 'non_array';
@@ -748,7 +823,7 @@ $reset_busy_import_path = (string) $reset_busy_internal['file_path'];
 $reset_busy_index_path = (string) $reset_busy_internal['index_path'];
 $reset_busy_token = $lock_service->acquire( (string) $reset_busy_internal['job_id'], 600 );
 $reset_busy_response = $importer->reset();
-dpd_import_assert( 'busy' === (string) ( $reset_busy_response['step_control']['outcome'] ?? '' ), 'reset returns busy while an import step owns the lock.' );
+dpd_import_assert( 'busy' === (string) ( $reset_busy_response['operation_control']['outcome'] ?? '' ), 'reset returns busy while an import step owns the lock.' );
 dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_busy_stage ] ) && file_exists( $reset_busy_import_path ) && file_exists( $reset_busy_index_path ), 'busy reset leaves stage, CSV, and index artifacts in place.' );
 $lock_service->release( (string) $reset_busy_token );
 $reset_after_release = $importer->reset();
@@ -761,9 +836,86 @@ $active_internal = $state->current();
 $active_second_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-active-second-' );
 file_put_contents( $active_second_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
 $active_rejected = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $active_second_path, 'name' => 'SecondGeographyNewDPD.csv' ) );
-dpd_import_assert( 'busy' === (string) ( $active_rejected['step_control']['outcome'] ?? '' ) && (string) $active_internal['job_id'] === (string) $state->current()['job_id'], 'new DPD geography import start is rejected while an active job exists.' );
+dpd_import_assert( 'busy' === (string) ( $active_rejected['operation_control']['outcome'] ?? '' ) && (string) $active_internal['job_id'] === (string) $state->current()['job_id'], 'new DPD geography import start is rejected while an active job exists.' );
 dpd_import_assert( (string) $active_internal['stage_table'] === (string) $state->current()['stage_table'] && file_exists( (string) $active_internal['file_path'] ), 'rejected active start preserves existing job artifacts.' );
 @unlink( $active_second_path );
+$importer->reset();
+
+$start_busy_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-start-busy-' );
+file_put_contents( $start_busy_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$stage_count_before_start_busy = count( $GLOBALS['wpdb']->dpd_geography_stage_tables );
+$start_busy_token = $lock_service->acquire( 'dpd-geography-start', 600 );
+$start_busy_response = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $start_busy_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+dpd_import_assert( 'busy' === (string) ( $start_busy_response['operation_control']['outcome'] ?? '' ), 'busy DPD geography start lock returns operation_control busy.' );
+dpd_import_assert( file_exists( $start_busy_path ) && $stage_count_before_start_busy === count( $GLOBALS['wpdb']->dpd_geography_stage_tables ), 'busy start does not copy/unlink upload or create a staging table.' );
+$lock_service->release( (string) $start_busy_token );
+@unlink( $start_busy_path );
+
+$failed_artifact_file = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-failed-artifact-' );
+$failed_artifact_index = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-failed-index-' );
+file_put_contents( $failed_artifact_file, 'csv' );
+file_put_contents( $failed_artifact_index, 'index' );
+$failed_artifact_stage = 'wp_wdc_dpd_stage_failed_artifacts';
+$GLOBALS['wpdb']->dpd_geography_stage_tables[ $failed_artifact_stage ] = array();
+$failed_artifact_state = $state->fail_new(
+	'Synthetic failed import with artifacts.',
+	array(
+		'source' => 'manual',
+		'source_file' => 'failed.csv',
+		'file_path' => $failed_artifact_file,
+		'index_path' => $failed_artifact_index,
+		'stage_table' => $failed_artifact_stage,
+	)
+);
+$failed_artifact_start_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-failed-artifact-new-' );
+file_put_contents( $failed_artifact_start_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$failed_artifact_rejected = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $failed_artifact_start_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+dpd_import_assert( 'reset_required' === (string) ( $failed_artifact_rejected['operation_control']['outcome'] ?? '' ) && (string) $failed_artifact_state['job_id'] === (string) $state->current()['job_id'], 'failed DPD geography job with internal artifacts requires reset before a new start.' );
+dpd_import_assert( file_exists( $failed_artifact_file ) && file_exists( $failed_artifact_index ) && isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $failed_artifact_stage ] ) && file_exists( $failed_artifact_start_path ), 'reset-required start preserves old artifacts and does not consume the new upload.' );
+@unlink( $failed_artifact_start_path );
+$importer->reset();
+dpd_import_assert( ! file_exists( $failed_artifact_file ) && ! file_exists( $failed_artifact_index ) && ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $failed_artifact_stage ] ), 'reset removes failed job artifacts before a new DPD geography start.' );
+
+$state->fail_new( 'Synthetic failed import without artifacts.', array( 'source' => 'manual', 'source_file' => 'no-artifacts.csv', 'delete_file_on_finish' => false ) );
+$failed_without_artifacts_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-failed-no-artifacts-' );
+file_put_contents( $failed_without_artifacts_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$failed_without_artifacts_start = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $failed_without_artifacts_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+dpd_import_assert( 'ready' === (string) ( $failed_without_artifacts_start['phase'] ?? '' ) && 1 === (int) ( $failed_without_artifacts_start['runner_protocol_version'] ?? 0 ), 'failed DPD geography job without artifacts allows a new start.' );
+$importer->reset();
+
+$legacy_file = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-legacy-' );
+$legacy_index = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-legacy-index-' );
+file_put_contents( $legacy_file, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+file_put_contents( $legacy_index, 'legacy-index' );
+$legacy_stage = 'wp_wdc_dpd_stage_legacy';
+$GLOBALS['wpdb']->dpd_geography_stage_tables[ $legacy_stage ] = array();
+$legacy_state = $state->start(
+	array(
+		'job_id' => 'legacy-runner-job',
+		'phase' => 'importing',
+		'source' => 'manual',
+		'source_file' => 'legacy.csv',
+		'file_path' => $legacy_file,
+		'index_path' => $legacy_index,
+		'stage_table' => $legacy_stage,
+		'delete_file_on_finish' => true,
+		'byte_offset' => 45527215,
+	)
+);
+$state->update( array( 'rows_read' => 240000 ) );
+$legacy_public = $importer->current_state();
+dpd_import_assert( 'reset_required' === (string) ( $legacy_public['operation_control']['outcome'] ?? '' ) && str_contains( (string) ( $legacy_public['last_message'] ?? '' ), 'runner' ), 'legacy DPD geography runner job requires reset in current_state.' );
+$legacy_step = $importer->step( 'legacy-runner-job', 1, 45527215 );
+dpd_import_assert( 'reset_required' === (string) ( $legacy_step['operation_control']['outcome'] ?? '' ) && 240000 === (int) ( $state->current()['rows_read'] ?? 0 ), 'legacy DPD geography runner job does not process CSV rows on step.' );
+$importer->reset();
+dpd_import_assert( ! file_exists( $legacy_file ) && ! file_exists( $legacy_index ) && ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $legacy_stage ] ), 'reset removes legacy runner artifacts without migrating progress.' );
+
+$revision_a = $state->start( array( 'job_id' => 'revision-a', 'phase' => 'ready', 'source' => 'manual', 'source_file' => 'a.csv', 'runner_protocol_version' => 1 ) );
+$revision_reset = $state->reset();
+$revision_b = $state->start( array( 'job_id' => 'revision-b', 'phase' => 'ready', 'source' => 'manual', 'source_file' => 'b.csv', 'runner_protocol_version' => 1 ) );
+$revision_failed = $state->fail_new( 'revision failure', array( 'source' => 'manual' ) );
+$revision_update = $state->update( array( 'last_message' => 'revision update' ) );
+dpd_import_assert( (int) $revision_a['state_revision'] < (int) $revision_reset['state_revision'] && (int) $revision_reset['state_revision'] < (int) $revision_b['state_revision'] && (int) $revision_b['state_revision'] < (int) $revision_failed['state_revision'] && (int) $revision_failed['state_revision'] < (int) $revision_update['state_revision'], 'DPD geography state_revision stays globally monotonic across start, reset, fail_new, and update.' );
 $importer->reset();
 
 $job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
@@ -1176,5 +1328,11 @@ dpd_import_assert( is_string( $step_segment ) && str_contains( $step_segment, 'j
 dpd_import_assert( is_string( $admin_source ) && str_contains( $admin_source, 'private const DPD_GEOGRAPHY_AJAX_STEP_LIMIT = 500' ), 'browser DPD geography import step limit is capped at 500 rows.' );
 $runner_source = file_get_contents( __DIR__ . '/../../assets/admin/dpd-geography-import.js' );
 dpd_import_assert( is_string( $runner_source ) && ! str_contains( $runner_source, 'setInterval' ) && str_contains( $runner_source, 'wdc_dpd_geography_import_step' ) && str_contains( $runner_source, 'expected_byte_offset' ), 'DPD geography browser runner uses separate sequential step requests without setInterval.' );
+dpd_import_assert( is_string( $runner_source ) && str_contains( $runner_source, 'operationControl.outcome === \'reset_required\'' ) && str_contains( $runner_source, 'Этот импорт создан предыдущей версией runner' ), 'DPD geography browser runner stops legacy protocol jobs until reset.' );
+$lock_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportLockService.php' );
+dpd_import_assert( is_string( $lock_source ) && str_contains( $lock_source, 'DELETE FROM {$this->wpdb->options}' ) && str_contains( $lock_source, 'option_value = %s' ) && ! str_contains( $lock_source, 'delete_option( self::OPTION_NAME' ), 'DPD geography import lock release/takeover uses atomic SQL compare-delete instead of unconditional delete_option.' );
+dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, 'START_LOCK_TTL_SECONDS' ) && str_contains( $import_service_source, 'run_locked_start' ) && str_contains( $import_service_source, 'start_from_existing_file_unlocked' ), 'DPD geography import start lifecycle runs under a single start lock before creating job artifacts.' );
+dpd_import_assert( is_string( $import_service_source ) && ! str_contains( $import_service_source, "'phase' => 'downloading'" ) && str_contains( $import_service_source, 'runner_protocol_version' ), 'DPD geography SFTP start no longer self-blocks with a downloading phase and new jobs carry runner protocol version.' );
+dpd_import_assert( is_string( $admin_source ) && str_contains( $admin_source, 'dpd_import_action_succeeded' ) && str_contains( $admin_source, "'reset_required'" ) && str_contains( $admin_source, '$reset_busy ?' ), 'DPD geography admin notices classify busy/reset-required start and reset responses as warnings instead of success.' );
 
 echo "DPD geography import smoke OK\n";

@@ -1037,22 +1037,24 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( 'run_dpd_geography_ftp_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_ftp instanceof DpdGeographyFtpClient && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$state = $this->dpd_geography_importer->start_from_ftp( $this->dpd_geography_ftp );
-				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography FTP import job: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->dpd_settings->save_connection_result( $this->dpd_import_action_succeeded( $state ), 'DPD geography FTP import job: ' . (string) ( $state['last_message'] ?? '' ) );
 				$this->save_dpd_import_action_result( 'DPD SFTP import', $state );
 			}
 			if ( 'upload_dpd_geography_csv_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$upload = $_FILES['dpd_geography_csv'] ?? null;
 				$state = is_array( $upload ) ? $this->dpd_geography_importer->start_from_uploaded_file( $upload ) : array( 'phase' => 'failed', 'last_message' => 'DPD geography manual import: CSV upload failed.' );
-				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography manual import job: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->dpd_settings->save_connection_result( $this->dpd_import_action_succeeded( $state ), 'DPD geography manual import job: ' . (string) ( $state['last_message'] ?? '' ) );
 				$this->save_dpd_import_action_result( 'DPD Geography import', $state );
 			}
 			if ( 'reset_dpd_geography_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$state = $this->dpd_geography_importer->reset();
-				$this->dpd_settings->save_connection_result( true, 'DPD geography import reset: ' . (string) ( $state['last_message'] ?? '' ) );
+				$reset_busy = 'busy' === (string) ( $state['operation_control']['outcome'] ?? ( $state['step_control']['outcome'] ?? '' ) );
+				$reset_failed = 'failed' === (string) ( $state['phase'] ?? '' ) || 'error' === (string) ( $state['status'] ?? '' );
+				$this->dpd_settings->save_connection_result( ! $reset_busy && ! $reset_failed, 'DPD geography import reset: ' . (string) ( $state['last_message'] ?? '' ) );
 				$this->save_dpd_geography_action_result(
-					'info',
+					$reset_failed ? 'error' : ( $reset_busy ? 'warning' : 'info' ),
 					'DPD Geography import reset',
-					'Import state was reset.',
+					$reset_busy ? (string) ( $state['last_message'] ?? 'DPD geography import reset is busy.' ) : ( 'cancelled' === (string) ( $state['phase'] ?? '' ) ? 'Импорт и служебные данные сброшены.' : (string) ( $state['last_message'] ?? 'DPD geography import reset finished.' ) ),
 					array(
 						'phase' => (string) ( $state['phase'] ?? '' ),
 						'message' => (string) ( $state['last_message'] ?? '' ),
@@ -3110,7 +3112,8 @@ final class DeliveryServicesAdminPage {
 	private function save_dpd_import_action_result( string $title, array $state ): void {
 		$phase = (string) ( $state['phase'] ?? '' );
 		$status = (string) ( $state['status'] ?? '' );
-		$type = 'failed' === $phase ? 'error' : ( 'warning' === $status ? 'warning' : 'success' );
+		$control = (string) ( $state['operation_control']['outcome'] ?? ( $state['step_control']['outcome'] ?? '' ) );
+		$type = 'failed' === $phase || 'error' === $status ? 'error' : ( in_array( $control, array( 'busy', 'reset_required' ), true ) || 'warning' === $status ? 'warning' : 'success' );
 		$message = (string) ( $state['last_message'] ?? ( $state['message'] ?? 'Import job created.' ) );
 		$this->save_dpd_geography_action_result(
 			$type,
@@ -3122,10 +3125,23 @@ final class DeliveryServicesAdminPage {
 				'file_size' => (int) ( $state['file_size'] ?? 0 ),
 				'phase' => $phase,
 				'status' => $status,
+				'operation_control' => $control,
 				'stale_cleanup_skipped' => ! empty( $state['stale_cleanup_skipped'] ) ? 'yes' : 'no',
 				'stale_cleared' => (int) ( $state['stale_cleared'] ?? 0 ),
 			)
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 */
+	private function dpd_import_action_succeeded( array $state ): bool {
+		$control = (string) ( $state['operation_control']['outcome'] ?? ( $state['step_control']['outcome'] ?? '' ) );
+		if ( in_array( $control, array( 'busy', 'reset_required' ), true ) ) {
+			return false;
+		}
+
+		return 'failed' !== (string) ( $state['phase'] ?? '' ) && 'error' !== (string) ( $state['status'] ?? '' );
 	}
 
 	/**

@@ -15,6 +15,9 @@ final class DpdGeographyImportService {
 	private const DEFAULT_STEP_LIMIT = 3000;
 	private const INDEX_FORMAT_VERSION = 1;
 	private const LOCK_BUSY_RETRY_MS = 1500;
+	private const STEP_LOCK_TTL_SECONDS = 600;
+	private const START_LOCK_TTL_SECONDS = 1800;
+	private const RUNNER_PROTOCOL_VERSION = 1;
 
 	public function __construct(
 		private DpdGeographyCsvParser $parser,
@@ -36,7 +39,10 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function import_file( string $path, string $source, string $source_file ): array {
-		$job = $this->start_from_existing_file( $path, $source, $source_file, false );
+		$job = $this->run_locked_start(
+			$source,
+			fn(): array => $this->start_from_existing_file_unlocked( $path, $source, $source_file, false )
+		);
 		while ( in_array( (string) ( $job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
 			$job = $this->step( (string) $job['job_id'], 10000 );
 		}
@@ -48,56 +54,59 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function start_from_uploaded_file( array $file ): array {
-		if ( $this->active_import_exists() ) {
-			return $this->active_import_response();
-		}
-		if ( (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) !== UPLOAD_ERR_OK ) {
-			return $this->fail_with_report( 'DPD geography manual import: CSV upload failed.', true, array( 'source' => 'manual' ) );
-		}
-		$tmp = (string) ( $file['tmp_name'] ?? '' );
-		$name = function_exists( 'sanitize_file_name' ) ? sanitize_file_name( (string) ( $file['name'] ?? 'manual.csv' ) ) : basename( (string) ( $file['name'] ?? 'manual.csv' ) );
-		if ( '' === $tmp || ! file_exists( $tmp ) || ! str_ends_with( strtolower( $name ), '.csv' ) ) {
-			return $this->fail_with_report( 'DPD geography manual import: upload must be a CSV file.', true, array( 'source' => 'manual', 'source_file' => $name ) );
-		}
+		return $this->run_locked_start(
+			'manual',
+			function () use ( $file ): array {
+				if ( (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) !== UPLOAD_ERR_OK ) {
+					return $this->fail_with_report( 'DPD geography manual import: CSV upload failed.', true, array( 'source' => 'manual' ) );
+				}
+				$tmp = (string) ( $file['tmp_name'] ?? '' );
+				$name = function_exists( 'sanitize_file_name' ) ? sanitize_file_name( (string) ( $file['name'] ?? 'manual.csv' ) ) : basename( (string) ( $file['name'] ?? 'manual.csv' ) );
+				if ( '' === $tmp || ! file_exists( $tmp ) || ! str_ends_with( strtolower( $name ), '.csv' ) ) {
+					return $this->fail_with_report( 'DPD geography manual import: upload must be a CSV file.', true, array( 'source' => 'manual', 'source_file' => $name ) );
+				}
 
-		try {
-			$target = $this->copy_to_import_temp( $tmp, $name );
-		} catch ( Throwable ) {
-			return $this->fail_with_report(
-				'DPD geography manual import: unable to copy uploaded CSV.',
-				true,
-				array(
-					'source' => 'manual',
-					'source_file' => $name,
-					'file_size' => is_file( $tmp ) ? (int) filesize( $tmp ) : 0,
-				)
-			);
-		}
-		@unlink( $tmp );
+				try {
+					$target = $this->copy_to_import_temp( $tmp, $name );
+				} catch ( Throwable ) {
+					return $this->fail_with_report(
+						'DPD geography manual import: unable to copy uploaded CSV.',
+						true,
+						array(
+							'source' => 'manual',
+							'source_file' => $name,
+							'file_size' => is_file( $tmp ) ? (int) filesize( $tmp ) : 0,
+						)
+					);
+				}
+				@unlink( $tmp );
 
-		return $this->start_from_existing_file( $target, 'manual', $name, true );
+				return $this->start_from_existing_file_unlocked( $target, 'manual', $name, true );
+			}
+		);
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
 	public function start_from_ftp( DpdGeographyFtpClient $ftp ): array {
-		if ( $this->active_import_exists() ) {
-			return $this->active_import_response();
-		}
-		$download = $ftp->download_latest();
-		if ( 'warning' === (string) ( $download['status'] ?? '' ) ) {
-			$current = $this->state->public_state();
-			$current['status'] = 'warning';
-			$current['last_message'] = (string) $download['message'];
-			return $current;
-		}
-		if ( empty( $download['success'] ) ) {
-			return $this->fail_with_report( (string) $download['message'], true, array( 'source' => 'ftp', 'source_file' => (string) ( $download['source_file'] ?? '' ) ) );
-		}
+		return $this->run_locked_start(
+			'ftp',
+			function () use ( $ftp ): array {
+				$download = $ftp->download_latest();
+				if ( 'warning' === (string) ( $download['status'] ?? '' ) ) {
+					$current = $this->state->public_state();
+					$current['status'] = 'warning';
+					$current['last_message'] = (string) $download['message'];
+					return $current;
+				}
+				if ( empty( $download['success'] ) ) {
+					return $this->fail_with_report( (string) $download['message'], true, array( 'source' => 'ftp', 'source_file' => (string) ( $download['source_file'] ?? '' ) ) );
+				}
 
-		$this->state->update( array( 'phase' => 'downloading', 'last_message' => 'Downloading DPD GeographyNewDPD CSV from SFTP.' ) );
-		return $this->start_from_existing_file( (string) $download['path'], 'ftp', (string) $download['source_file'], true );
+				return $this->start_from_existing_file_unlocked( (string) $download['path'], 'ftp', (string) $download['source_file'], true );
+			}
+		);
 	}
 
 	/**
@@ -105,6 +114,9 @@ final class DpdGeographyImportService {
 	 */
 	public function step( string $job_id = '', int $limit = self::DEFAULT_STEP_LIMIT, ?int $expected_byte_offset = null ): array {
 		$state = $this->state->current();
+		if ( $this->legacy_runner_protocol( $state ) ) {
+			return $this->legacy_runner_response();
+		}
 		if ( '' !== $job_id && $job_id !== (string) ( $state['job_id'] ?? '' ) ) {
 			return $this->with_step_control( $this->state->public_state(), 'stale' );
 		}
@@ -112,12 +124,15 @@ final class DpdGeographyImportService {
 			return $this->state->public_state();
 		}
 		$lock_job_id = (string) ( $state['job_id'] ?? $job_id );
-		$token = $this->lock?->acquire( $lock_job_id );
+		$token = $this->lock?->acquire( $lock_job_id, self::STEP_LOCK_TTL_SECONDS );
 		if ( null === $token ) {
 			return $this->with_step_control( $this->state->public_state(), 'busy' );
 		}
 		try {
 			$state = $this->state->current();
+			if ( $this->legacy_runner_protocol( $state ) ) {
+				return $this->legacy_runner_response();
+			}
 			if ( '' !== $job_id && $job_id !== (string) ( $state['job_id'] ?? '' ) ) {
 				return $this->with_step_control( $this->state->public_state(), 'stale' );
 			}
@@ -194,6 +209,10 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function current_state(): array {
+		if ( $this->legacy_runner_protocol( $this->state->current() ) ) {
+			return $this->legacy_runner_response();
+		}
+
 		return $this->state->public_state();
 	}
 
@@ -202,9 +221,9 @@ final class DpdGeographyImportService {
 	 */
 	public function reset(): array {
 		$current = $this->state->current();
-		$token = $this->lock?->acquire( (string) ( $current['job_id'] ?? 'reset' ) );
+		$token = $this->lock?->acquire( (string) ( $current['job_id'] ?? 'reset' ), self::STEP_LOCK_TTL_SECONDS );
 		if ( null === $token ) {
-			$state = $this->with_step_control( $this->state->public_state(), 'busy' );
+			$state = $this->with_operation_control( $this->state->public_state(), 'busy' );
 			$state['last_message'] = 'DPD geography import step is still running. Try reset again in a few seconds.';
 			return $state;
 		}
@@ -225,11 +244,18 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	private function start_from_existing_file( string $path, string $source, string $source_file, bool $delete_on_finish ): array {
+		return $this->run_locked_start(
+			$source,
+			fn(): array => $this->start_from_existing_file_unlocked( $path, $source, $source_file, $delete_on_finish )
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function start_from_existing_file_unlocked( string $path, string $source, string $source_file, bool $delete_on_finish ): array {
 		$index_path = '';
 		$stage_table = '';
-		if ( $this->active_import_exists() ) {
-			return $this->active_import_response();
-		}
 		try {
 			$inspect = $this->parser->inspect_header( $path );
 			$this->index->build();
@@ -252,6 +278,7 @@ final class DpdGeographyImportService {
 					'index_size' => (int) $index_metadata['index_size'],
 					'index_sha256' => (string) $index_metadata['index_sha256'],
 					'index_stats' => $index_metadata['index_stats'],
+					'runner_protocol_version' => self::RUNNER_PROTOCOL_VERSION,
 					'delete_file_on_finish' => $delete_on_finish,
 					'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0,
 					'total_rows' => 0,
@@ -719,20 +746,100 @@ final class DpdGeographyImportService {
 		return $state;
 	}
 
-	private function active_import_exists(): bool {
-		return in_array(
-			(string) ( $this->state->current()['phase'] ?? '' ),
-			array( 'preparing', 'indexing_locations', 'downloading', 'ready', 'importing', 'finalizing' ),
-			true
+	/**
+	 * @param array<string,mixed> $state
+	 * @return array<string,mixed>
+	 */
+	private function with_operation_control( array $state, string $outcome, int $retry_after_ms = self::LOCK_BUSY_RETRY_MS ): array {
+		$state['operation_control'] = array(
+			'outcome' => $outcome,
+			'retry_after_ms' => max( 250, $retry_after_ms ),
 		);
+
+		return $state;
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function active_import_response(): array {
-		$state = $this->with_step_control( $this->state->public_state(), 'busy' );
-		$state['last_message'] = 'DPD geography import is already running. Wait for it to finish or reset it first.';
+	private function run_locked_start( string $source, callable $callback ): array {
+		$token = $this->lock?->acquire( 'dpd-geography-start', self::START_LOCK_TTL_SECONDS );
+		if ( null === $token ) {
+			$state = $this->with_operation_control( $this->state->public_state(), 'busy' );
+			$state['last_message'] = 'Другой запуск или шаг импорта уже выполняется.';
+			return $state;
+		}
+
+		try {
+			$reason = $this->start_block_reason( $this->state->current() );
+			if ( '' !== $reason ) {
+				return $this->start_block_response( $reason );
+			}
+
+			return $callback();
+		} catch ( Throwable $throwable ) {
+			return $this->fail_with_report(
+				'DPD geography import start failed: ' . $this->sanitize_error( $throwable->getMessage() ),
+				true,
+				array( 'source' => $source )
+			);
+		} finally {
+			$this->lock?->release( $token );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 */
+	private function start_block_reason( array $state ): string {
+		$phase = (string) ( $state['phase'] ?? '' );
+		if ( in_array( $phase, array( 'preparing', 'indexing_locations', 'downloading', 'ready', 'importing', 'finalizing' ), true ) ) {
+			return 'active';
+		}
+		if (
+			'failed' === $phase
+			&& (
+				'' !== (string) ( $state['file_path'] ?? '' )
+				|| '' !== (string) ( $state['index_path'] ?? '' )
+				|| '' !== (string) ( $state['stage_table'] ?? '' )
+			)
+		) {
+			return 'reset_required';
+		}
+
+		return '';
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function start_block_response( string $reason ): array {
+		if ( 'reset_required' === $reason ) {
+			$state = $this->with_operation_control( $this->state->public_state(), 'reset_required' );
+			$state['last_message'] = 'Предыдущий неуспешный импорт содержит служебные данные. Сначала выполните сброс.';
+			return $state;
+		}
+
+		$state = $this->with_operation_control( $this->state->public_state(), 'busy' );
+		$state['last_message'] = 'Импорт уже выполняется. Сначала дождитесь завершения или выполните сброс.';
+
+		return $state;
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 */
+	private function legacy_runner_protocol( array $state ): bool {
+		return in_array( (string) ( $state['phase'] ?? '' ), array( 'ready', 'importing', 'finalizing' ), true )
+			&& self::RUNNER_PROTOCOL_VERSION !== (int) ( $state['runner_protocol_version'] ?? 0 );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function legacy_runner_response(): array {
+		$state = $this->with_operation_control( $this->state->public_state(), 'reset_required' );
+		$state['last_message'] = 'Этот импорт создан предыдущей версией runner. Выполните сброс и запустите импорт заново.';
 
 		return $state;
 	}

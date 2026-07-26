@@ -32,16 +32,16 @@
 
 	function labelPhase(phase) {
 		var labels = {
-			idle: 'idle',
-			preparing: 'preparing',
-			indexing_locations: 'indexing locations',
-			downloading: 'downloading',
-			ready: 'ready',
-			importing: 'importing',
-			finalizing: 'finalizing',
-			finished: 'finished',
-			failed: 'failed',
-			cancelled: 'cancelled'
+			idle: 'ожидание',
+			preparing: 'подготовка',
+			indexing_locations: 'индексация населённых пунктов',
+			downloading: 'загрузка',
+			ready: 'готов к импорту',
+			importing: 'импорт',
+			finalizing: 'завершение',
+			finished: 'завершён',
+			failed: 'ошибка',
+			cancelled: 'сброшен'
 		};
 		return labels[phase] || phase || '-';
 	}
@@ -51,7 +51,7 @@
 			return value.join('; ');
 		}
 		if (typeof value === 'boolean') {
-			return value ? 'yes' : 'no';
+			return value ? 'да' : 'нет';
 		}
 		return value === null || typeof value === 'undefined' ? '' : String(value);
 	}
@@ -90,7 +90,7 @@
 			bar.style.width = Math.max(0, Math.min(100, percent)) + '%';
 		}
 		if (summary) {
-			summary.textContent = 'Phase: ' + labelPhase(phase) + '. Processed ' + read + ' rows. Read ' + Math.max(0, Math.min(100, percent)).toFixed(1) + '% of file.';
+			summary.textContent = 'Фаза: ' + labelPhase(phase) + '. Обработано ' + read + ' строк. Прочитано ' + Math.max(0, Math.min(100, percent)).toFixed(1) + '% файла.';
 		}
 		[
 			'phase',
@@ -188,6 +188,17 @@
 	}
 
 	function continueFromState(state) {
+		var operationControl = state && state.operation_control ? state.operation_control : null;
+		if (operationControl && operationControl.outcome === 'reset_required') {
+			showTransportMessage('Этот импорт создан предыдущей версией runner. Выполните сброс и запустите импорт заново.');
+			stopRunner();
+			return;
+		}
+		if (operationControl && operationControl.outcome === 'busy') {
+			showTransportMessage('Другой запуск или шаг импорта уже выполняется. Ожидание...');
+			schedule(requestStatus, Number(operationControl.retry_after_ms || busyRetryMs));
+			return;
+		}
 		var phase = String((state && state.phase) || 'idle');
 		if (activePhase(phase)) {
 			schedule(requestStep, stepDelayMs);
@@ -210,11 +221,13 @@
 		clearTimer();
 		return post('wdc_dpd_geography_import_status')
 			.then(function (state) {
-				render(state);
+				if (!render(state)) {
+					return;
+				}
 				continueFromState(state);
 			})
 			.catch(function () {
-				showTransportMessage('Connection to server was interrupted. Checking import state...');
+				showTransportMessage('Связь с сервером прервана. Проверяем состояние импорта...');
 				schedule(requestStatus, statusRetryMs);
 			})
 			.finally(function () {
@@ -231,9 +244,11 @@
 		return post('wdc_dpd_geography_import_step')
 			.then(function (state) {
 				var control = state && state.step_control ? state.step_control : null;
-				render(state);
+				if (!render(state)) {
+					return;
+				}
 				if (control && control.outcome === 'busy') {
-					showTransportMessage('Previous import step is still running. Waiting...');
+					showTransportMessage('Предыдущий шаг ещё выполняется. Ожидание...');
 					schedule(requestStatus, Number(control.retry_after_ms || busyRetryMs));
 					return;
 				}
@@ -244,7 +259,7 @@
 				continueFromState(state);
 			})
 			.catch(function () {
-				showTransportMessage('Connection to server was interrupted. Checking import state...');
+				showTransportMessage('Связь с сервером прервана. Проверяем состояние импорта...');
 				schedule(requestStatus, statusRetryMs);
 			})
 			.finally(function () {

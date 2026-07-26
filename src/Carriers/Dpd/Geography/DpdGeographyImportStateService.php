@@ -46,15 +46,17 @@ final class DpdGeographyImportStateService {
 	 */
 	public function start( array $context ): array {
 		$now = $this->now();
+		$current = $this->current();
 		$state = array_merge(
 			$this->defaults(),
 			array(
 				'job_id' => (string) ( $context['job_id'] ?? $this->new_job_id() ),
-				'state_revision' => 1,
+				'state_revision' => max( 0, (int) ( $current['state_revision'] ?? 0 ) ) + 1,
 				'phase' => (string) ( $context['phase'] ?? 'ready' ),
 				'status' => '',
 				'source' => (string) ( $context['source'] ?? 'manual' ),
 				'source_file' => (string) ( $context['source_file'] ?? '' ),
+				'runner_protocol_version' => max( 0, (int) ( $context['runner_protocol_version'] ?? 0 ) ),
 				'file_path' => (string) ( $context['file_path'] ?? '' ),
 				'index_path' => (string) ( $context['index_path'] ?? '' ),
 				'stage_table' => (string) ( $context['stage_table'] ?? '' ),
@@ -118,15 +120,17 @@ final class DpdGeographyImportStateService {
 	 */
 	public function fail_new( string $message, array $context = array() ): array {
 		$now = $this->now();
+		$current = $this->current();
 		$state = array_merge(
 			$this->defaults(),
 			array(
 				'job_id' => (string) ( $context['job_id'] ?? $this->new_job_id() ),
-				'state_revision' => 1,
+				'state_revision' => max( 0, (int) ( $current['state_revision'] ?? 0 ) ) + 1,
 				'phase' => 'failed',
 				'status' => 'error',
 				'source' => (string) ( $context['source'] ?? '' ),
 				'source_file' => (string) ( $context['source_file'] ?? '' ),
+				'runner_protocol_version' => max( 0, (int) ( $context['runner_protocol_version'] ?? 0 ) ),
 				'file_path' => (string) ( $context['file_path'] ?? '' ),
 				'index_path' => (string) ( $context['index_path'] ?? '' ),
 				'stage_table' => (string) ( $context['stage_table'] ?? '' ),
@@ -181,6 +185,7 @@ final class DpdGeographyImportStateService {
 			'status' => '',
 			'source' => '',
 			'source_file' => '',
+			'runner_protocol_version' => 0,
 			'file_path' => '',
 			'index_path' => '',
 			'stage_table' => '',

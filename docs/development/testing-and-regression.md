@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.128.13
+Version: 0.128.14
 
 ## Commands
 
@@ -20,7 +20,7 @@ Also run `php -l` for changed PHP files, `node --check` for changed JS files, do
 
 Checkout pickup map lifecycle changes should also run `node tests/checkout/run-pickup-map-lifecycle-smoke.js`. This smoke executes the frontend map controller with fake providers/API and protects one-shot auto-fit, user interaction cancellation, provider pending-fit cancellation, and coordinate validation.
 
-DPD Geography browser-import lifecycle changes should also run `node tests/dpd/run-dpd-geography-import-runner-smoke.js` in addition to `php tests/dpd/run-dpd-geography-import-smoke.php`. The Node smoke executes the admin runner with a fake DOM/fetch/timer harness and protects the read-only status endpoint contract, sequential step scheduling, network recovery through status, busy/stale step handling, foreign counter rendering, and the no-`setInterval` source guard.
+DPD Geography browser-import lifecycle changes should also run `node tests/dpd/run-dpd-geography-import-runner-smoke.js` in addition to `php tests/dpd/run-dpd-geography-import-smoke.php`. The Node smoke executes the admin runner with a fake DOM/fetch/timer harness and protects the read-only status endpoint contract, sequential step scheduling, network recovery through status, busy/stale step handling, legacy runner reset-required handling, monotonic cross-job `state_revision` rendering, foreign counter rendering, and the no-`setInterval` source guard. The PHP geography smoke owns the server lock/start/reset contract, including atomic compare-and-delete lease races, failed-artifact reset requirements, SFTP start continuation, and legacy job refusal before reset.
 
 ## Manifest
 

@@ -8,6 +8,18 @@ defined( 'ABSPATH' ) || exit;
 final class DpdGeographyImportLockService {
 	public const OPTION_NAME = 'wdc_dpd_geography_import_step_lock';
 
+	private \wpdb $wpdb;
+
+	public function __construct( ?\wpdb $db = null ) {
+		if ( $db instanceof \wpdb ) {
+			$this->wpdb = $db;
+			return;
+		}
+
+		global $wpdb;
+		$this->wpdb = $wpdb;
+	}
+
 	/**
 	 * @return string|null Lock token when acquired, null when another live lease owns the lock.
 	 */
@@ -29,7 +41,7 @@ final class DpdGeographyImportLockService {
 		$current = get_option( self::OPTION_NAME, array() );
 		if ( ! is_array( $current ) || (int) ( $current['expires_at'] ?? 0 ) <= $now ) {
 			$expected = is_array( $current ) ? $current : array();
-			if ( $this->delete_if_current( $expected ) && add_option( self::OPTION_NAME, $payload, '', 'no' ) ) {
+			if ( $this->compare_and_delete( $expected ) && add_option( self::OPTION_NAME, $payload, '', 'no' ) ) {
 				return $token;
 			}
 		}
@@ -40,17 +52,37 @@ final class DpdGeographyImportLockService {
 	public function release( string $token ): void {
 		$current = get_option( self::OPTION_NAME, array() );
 		if ( is_array( $current ) && hash_equals( (string) ( $current['token'] ?? '' ), $token ) ) {
-			delete_option( self::OPTION_NAME );
+			$this->compare_and_delete( $current );
 		}
 	}
 
-	private function delete_if_current( array $expected ): bool {
-		$current = get_option( self::OPTION_NAME, array() );
-		if ( $current !== $expected ) {
+	private function compare_and_delete( array $expected ): bool {
+		$serialized = function_exists( 'maybe_serialize' ) ? maybe_serialize( $expected ) : serialize( $expected );
+		$this->wpdb->last_error = '';
+		$sql = $this->wpdb->prepare(
+			"DELETE FROM {$this->wpdb->options} WHERE option_name = %s AND option_value = %s LIMIT 1",
+			self::OPTION_NAME,
+			$serialized
+		);
+		$result = $this->wpdb->query( $sql );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'DPD geography import lock compare-delete failed: ' . $this->sanitize_sql_error( (string) $this->wpdb->last_error ) );
+		}
+		if ( 1 !== (int) $result ) {
 			return false;
 		}
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			wp_cache_delete( self::OPTION_NAME, 'options' );
+			wp_cache_delete( 'notoptions', 'options' );
+			wp_cache_delete( 'alloptions', 'options' );
+		}
 
-		return delete_option( self::OPTION_NAME );
+		return true;
+	}
+
+	private function sanitize_sql_error( string $message ): string {
+		$message = preg_replace( '/[\r\n\t]+/', ' ', $message ) ?? $message;
+		return trim( $message );
 	}
 
 	private function new_token(): string {
