@@ -14,6 +14,7 @@ defined( 'ABSPATH' ) || exit;
 final class DpdGeographyImportService {
 	private const DEFAULT_STEP_LIMIT = 3000;
 	private const INDEX_FORMAT_VERSION = 1;
+	private const LOCK_BUSY_RETRY_MS = 1500;
 
 	public function __construct(
 		private DpdGeographyCsvParser $parser,
@@ -23,8 +24,10 @@ final class DpdGeographyImportService {
 		private DpdGeographyStageRepository $stage,
 		private LocationRepository $locations,
 		private LocationDeliveryCodeRepository $delivery_codes,
-		private ?DpdSettings $settings = null
+		private ?DpdSettings $settings = null,
+		private ?DpdGeographyImportLockService $lock = null
 	) {
+		$this->lock ??= new DpdGeographyImportLockService();
 	}
 
 	/**
@@ -45,6 +48,9 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function start_from_uploaded_file( array $file ): array {
+		if ( $this->active_import_exists() ) {
+			return $this->active_import_response();
+		}
 		if ( (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) !== UPLOAD_ERR_OK ) {
 			return $this->fail_with_report( 'DPD geography manual import: CSV upload failed.', true, array( 'source' => 'manual' ) );
 		}
@@ -76,6 +82,9 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function start_from_ftp( DpdGeographyFtpClient $ftp ): array {
+		if ( $this->active_import_exists() ) {
+			return $this->active_import_response();
+		}
 		$download = $ftp->download_latest();
 		if ( 'warning' === (string) ( $download['status'] ?? '' ) ) {
 			$current = $this->state->public_state();
@@ -94,14 +103,43 @@ final class DpdGeographyImportService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function step( string $job_id = '', int $limit = self::DEFAULT_STEP_LIMIT ): array {
+	public function step( string $job_id = '', int $limit = self::DEFAULT_STEP_LIMIT, ?int $expected_byte_offset = null ): array {
 		$state = $this->state->current();
 		if ( '' !== $job_id && $job_id !== (string) ( $state['job_id'] ?? '' ) ) {
-			return $this->fail_with_report( 'DPD geography import job_id is stale.' );
+			return $this->with_step_control( $this->state->public_state(), 'stale' );
 		}
 		if ( ! in_array( (string) ( $state['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
 			return $this->state->public_state();
 		}
+		$lock_job_id = (string) ( $state['job_id'] ?? $job_id );
+		$token = $this->lock?->acquire( $lock_job_id );
+		if ( null === $token ) {
+			return $this->with_step_control( $this->state->public_state(), 'busy' );
+		}
+		try {
+			$state = $this->state->current();
+			if ( '' !== $job_id && $job_id !== (string) ( $state['job_id'] ?? '' ) ) {
+				return $this->with_step_control( $this->state->public_state(), 'stale' );
+			}
+			if ( ! in_array( (string) ( $state['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
+				return $this->state->public_state();
+			}
+			if ( null !== $expected_byte_offset && $expected_byte_offset !== (int) ( $state['byte_offset'] ?? 0 ) ) {
+				return $this->with_step_control( $this->state->public_state(), 'stale' );
+			}
+			return $this->step_unlocked( $state, max( 1, $limit ) );
+		} finally {
+			$this->lock?->release( $token );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 * @return array<string,mixed>
+	 */
+	private function step_unlocked( array $state, int $limit ): array {
+		$start_job_id = (string) ( $state['job_id'] ?? '' );
+		$start_offset = (int) ( $state['byte_offset'] ?? 0 );
 		$file = (string) ( $state['file_path'] ?? '' );
 		if ( '' === $file || ! file_exists( $file ) ) {
 			return $this->fail_with_report( 'DPD geography import file is missing.' );
@@ -122,7 +160,7 @@ final class DpdGeographyImportService {
 		}
 		$columns = is_array( $state['columns'] ?? null ) ? $state['columns'] : array();
 		try {
-			$step = $this->parser->read_step( $file, (int) $state['byte_offset'], $columns, $limit );
+			$step = $this->parser->read_step( $file, $start_offset, $columns, $limit );
 		} catch ( Throwable $throwable ) {
 			return $this->fail_with_report( 'DPD geography CSV parse failed: ' . $throwable->getMessage() );
 		}
@@ -136,6 +174,14 @@ final class DpdGeographyImportService {
 			$this->process_row( $stage_table, $row, $patch );
 		}
 
+		$current = $this->state->current();
+		if (
+			$start_job_id !== (string) ( $current['job_id'] ?? '' )
+			|| ! in_array( (string) ( $current['phase'] ?? '' ), array( 'ready', 'importing' ), true )
+			|| $start_offset !== (int) ( $current['byte_offset'] ?? 0 )
+		) {
+			return $this->with_step_control( $this->state->public_state(), 'stale' );
+		}
 		$state = $this->state->update( $patch );
 		if ( ! empty( $step['eof'] ) ) {
 			$state = $this->finalize( $state );
@@ -156,12 +202,23 @@ final class DpdGeographyImportService {
 	 */
 	public function reset(): array {
 		$current = $this->state->current();
-		$stage_table = (string) ( $current['stage_table'] ?? '' );
-		if ( '' !== $stage_table ) {
-			$this->stage->drop( $stage_table );
+		$token = $this->lock?->acquire( (string) ( $current['job_id'] ?? 'reset' ) );
+		if ( null === $token ) {
+			$state = $this->with_step_control( $this->state->public_state(), 'busy' );
+			$state['last_message'] = 'DPD geography import step is still running. Try reset again in a few seconds.';
+			return $state;
 		}
-		$this->state->reset();
-		return $this->state->public_state();
+		try {
+			$current = $this->state->current();
+			$stage_table = (string) ( $current['stage_table'] ?? '' );
+			if ( '' !== $stage_table ) {
+				$this->stage->drop( $stage_table );
+			}
+			$this->state->reset();
+			return $this->state->public_state();
+		} finally {
+			$this->lock?->release( $token );
+		}
 	}
 
 	/**
@@ -170,6 +227,9 @@ final class DpdGeographyImportService {
 	private function start_from_existing_file( string $path, string $source, string $source_file, bool $delete_on_finish ): array {
 		$index_path = '';
 		$stage_table = '';
+		if ( $this->active_import_exists() ) {
+			return $this->active_import_response();
+		}
 		try {
 			$inspect = $this->parser->inspect_header( $path );
 			$this->index->build();
@@ -644,6 +704,37 @@ final class DpdGeographyImportService {
 		$this->settings?->save_geography_import_report( $this->report_from_state( $failed ) );
 
 		return $this->state->public_state();
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 * @return array<string,mixed>
+	 */
+	private function with_step_control( array $state, string $outcome, int $retry_after_ms = self::LOCK_BUSY_RETRY_MS ): array {
+		$state['step_control'] = array(
+			'outcome' => $outcome,
+			'retry_after_ms' => max( 250, $retry_after_ms ),
+		);
+
+		return $state;
+	}
+
+	private function active_import_exists(): bool {
+		return in_array(
+			(string) ( $this->state->current()['phase'] ?? '' ),
+			array( 'preparing', 'indexing_locations', 'downloading', 'ready', 'importing', 'finalizing' ),
+			true
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function active_import_response(): array {
+		$state = $this->with_step_control( $this->state->public_state(), 'busy' );
+		$state['last_message'] = 'DPD geography import is already running. Wait for it to finish or reset it first.';
+
+		return $state;
 	}
 
 	private function copy_to_import_temp( string $source, string $name ): string {

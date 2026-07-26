@@ -50,6 +50,7 @@ final class DpdGeographyImportStateService {
 			$this->defaults(),
 			array(
 				'job_id' => (string) ( $context['job_id'] ?? $this->new_job_id() ),
+				'state_revision' => 1,
 				'phase' => (string) ( $context['phase'] ?? 'ready' ),
 				'status' => '',
 				'source' => (string) ( $context['source'] ?? 'manual' ),
@@ -81,7 +82,9 @@ final class DpdGeographyImportStateService {
 	 * @return array<string,mixed>
 	 */
 	public function update( array $patch ): array {
-		$state = array_merge( $this->current(), $patch );
+		$current = $this->current();
+		$state = array_merge( $current, $patch );
+		$state['state_revision'] = max( 0, (int) ( $current['state_revision'] ?? 0 ) ) + 1;
 		$state['updated_at'] = $this->now();
 		if ( isset( $state['errors'] ) && is_array( $state['errors'] ) ) {
 			$state['errors'] = array_slice( array_map( 'strval', $state['errors'] ), -self::MAX_ERRORS );
@@ -119,6 +122,7 @@ final class DpdGeographyImportStateService {
 			$this->defaults(),
 			array(
 				'job_id' => (string) ( $context['job_id'] ?? $this->new_job_id() ),
+				'state_revision' => 1,
 				'phase' => 'failed',
 				'status' => 'error',
 				'source' => (string) ( $context['source'] ?? '' ),
@@ -160,7 +164,7 @@ final class DpdGeographyImportStateService {
 		if ( '' !== $index && file_exists( $index ) ) {
 			@unlink( $index );
 		}
-		$reset = array_merge( $this->defaults(), array( 'phase' => 'cancelled', 'last_message' => 'Import was reset by admin.', 'updated_at' => $this->now(), 'finished_at' => $this->now() ) );
+		$reset = array_merge( $this->defaults(), array( 'phase' => 'cancelled', 'state_revision' => max( 0, (int) ( $state['state_revision'] ?? 0 ) ) + 1, 'last_message' => 'Import was reset by admin.', 'updated_at' => $this->now(), 'finished_at' => $this->now() ) );
 		$this->save( $reset );
 
 		return $reset;
@@ -172,6 +176,7 @@ final class DpdGeographyImportStateService {
 	public function defaults(): array {
 		return array(
 			'job_id' => '',
+			'state_revision' => 0,
 			'phase' => 'idle',
 			'status' => '',
 			'source' => '',

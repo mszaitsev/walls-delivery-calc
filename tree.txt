@@ -225,6 +225,7 @@ C:.
 |   |   |   |       DpdDaDataDeliveryFallbackService.php
 |   |   |   |       DpdGeographyCsvParser.php
 |   |   |   |       DpdGeographyFtpClient.php
+|   |   |   |       DpdGeographyImportLockService.php
 |   |   |   |       DpdGeographyImportReport.php
 |   |   |   |       DpdGeographyImportService.php
 |   |   |   |       DpdGeographyImportStateService.php
@@ -837,6 +838,7 @@ C:.
     |       run-dpd-event-sync-smoke.php
     |       run-dpd-foundation-smoke.php
     |       run-dpd-geography-import-smoke.php
+    |       run-dpd-geography-import-runner-smoke.js
     |       run-dpd-location-index-smoke.php
     |       run-dpd-order-recalculation-smoke.php
     |       run-dpd-parcel-builder-smoke.php

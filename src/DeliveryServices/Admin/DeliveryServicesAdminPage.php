@@ -86,6 +86,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DeliveryServicesAdminPage {
 	public const MENU_SLUG = 'wdc-delivery-services';
+	private const DPD_GEOGRAPHY_AJAX_STEP_LIMIT = 500;
 
 	public function __construct(
 		private DeliveryServiceRepository $services,
@@ -153,6 +154,7 @@ final class DeliveryServicesAdminPage {
 		$this->russian_post_pickup_diagnostics->register();
 		add_action( 'wp_ajax_wdc_russian_post_pickup_import_status', array( $this, 'ajax_pickup_import_status' ) );
 		add_action( 'wp_ajax_wdc_dpd_geography_import_status', array( $this, 'ajax_dpd_geography_import_status' ) );
+		add_action( 'wp_ajax_wdc_dpd_geography_import_step', array( $this, 'ajax_dpd_geography_import_step' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start_import', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start_import' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_step', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_step' ) );
@@ -213,7 +215,10 @@ final class DeliveryServicesAdminPage {
 				'wdcDpdGeographyImport',
 				array(
 					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-					'nonce' => wp_create_nonce( 'wdc_dpd_geography_import_status' ),
+					'nonce' => wp_create_nonce( 'wdc_dpd_geography_import' ),
+					'stepLimit' => self::DPD_GEOGRAPHY_AJAX_STEP_LIMIT,
+					'stepDelayMs' => 250,
+					'busyRetryMs' => 1500,
 				)
 			);
 		}
@@ -271,12 +276,29 @@ final class DeliveryServicesAdminPage {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
 		}
-		if ( ! check_ajax_referer( 'wdc_dpd_geography_import_status', 'nonce', false ) ) {
+		if ( ! check_ajax_referer( 'wdc_dpd_geography_import', 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
 		}
 
 		$state = $this->dpd_geography_importer instanceof DpdGeographyImportService
-			? $this->dpd_geography_importer->step( '', 3000 )
+			? $this->dpd_geography_importer->current_state()
+			: array();
+
+		wp_send_json_success( $state );
+	}
+
+	public function ajax_dpd_geography_import_step(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! check_ajax_referer( 'wdc_dpd_geography_import', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_text_field( wp_unslash( $_POST['job_id'] ) ) : '';
+		$expected_byte_offset = isset( $_POST['expected_byte_offset'] ) ? max( 0, (int) $_POST['expected_byte_offset'] ) : null;
+		$state = $this->dpd_geography_importer instanceof DpdGeographyImportService
+			? $this->dpd_geography_importer->step( $job_id, self::DPD_GEOGRAPHY_AJAX_STEP_LIMIT, $expected_byte_offset )
 			: array();
 
 		wp_send_json_success( $state );

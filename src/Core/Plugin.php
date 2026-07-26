@@ -34,6 +34,7 @@ use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyCsvParser;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyFtpClient;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportService;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportStateService;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportLockService;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
@@ -385,8 +386,9 @@ final class Plugin {
 		$this->container->register( DpdLocationIndex::class, fn(): DpdLocationIndex => new DpdLocationIndex( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( DpdGeographyMatcher::class, fn(): DpdGeographyMatcher => new DpdGeographyMatcher( $this->container->get( DpdLocationIndex::class ) ) );
 		$this->container->register( DpdGeographyImportStateService::class, fn(): DpdGeographyImportStateService => new DpdGeographyImportStateService() );
+		$this->container->register( DpdGeographyImportLockService::class, fn(): DpdGeographyImportLockService => new DpdGeographyImportLockService() );
 		$this->container->register( DpdGeographyStageRepository::class, fn(): DpdGeographyStageRepository => new DpdGeographyStageRepository() );
-		$this->container->register( DpdGeographyImportService::class, fn(): DpdGeographyImportService => new DpdGeographyImportService( $this->container->get( DpdGeographyCsvParser::class ), $this->container->get( DpdGeographyMatcher::class ), $this->container->get( DpdLocationIndex::class ), $this->container->get( DpdGeographyImportStateService::class ), $this->container->get( DpdGeographyStageRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdSettings::class ) ) );
+		$this->container->register( DpdGeographyImportService::class, fn(): DpdGeographyImportService => new DpdGeographyImportService( $this->container->get( DpdGeographyCsvParser::class ), $this->container->get( DpdGeographyMatcher::class ), $this->container->get( DpdLocationIndex::class ), $this->container->get( DpdGeographyImportStateService::class ), $this->container->get( DpdGeographyStageRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( DpdGeographyImportLockService::class ) ) );
 		$this->container->register( DpdGeographyFtpClient::class, fn(): DpdGeographyFtpClient => new DpdGeographyFtpClient( $this->container->get( DpdSettings::class ) ) );
 		$this->container->register( DpdDaDataDeliveryClientInterface::class, fn(): DpdDaDataDeliveryClientInterface => new WpDpdDaDataDeliveryClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdDaDataDeliveryFallbackService::class, fn(): DpdDaDataDeliveryFallbackService => new DpdDaDataDeliveryFallbackService( $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdDaDataDeliveryClientInterface::class ) ) );
