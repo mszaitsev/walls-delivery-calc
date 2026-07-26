@@ -227,6 +227,190 @@ final class DpdProductionPathWpdb extends wpdb {
 	}
 }
 
+final class DpdProductionFinalizationWpdb extends wpdb {
+	/** @var array<int,array<string,mixed>> */
+	public array $stage_rows = array();
+	/** @var array<int,string> */
+	public array $queries = array();
+	/** @var array<int,array<string,mixed>> */
+	private array $transaction_snapshot = array();
+	public bool $fail_dpd_stage_finalize_update_existing = false;
+	public bool $fail_dpd_stage_finalize_insert_missing = false;
+
+	public function __construct() {
+		unset( $this->dpd_geography_stage_tables );
+	}
+
+	public function get_var( string $query ): int|string|null {
+		$this->last_query = $query;
+		$this->last_error = '';
+		if ( str_contains( $query, "FROM wp_wdc_dpd_stage_production" ) && str_contains( $query, "status = 'candidate'" ) && ! str_contains( $query, 'LEFT JOIN' ) ) {
+			return count( $this->candidate_rows() );
+		}
+		if ( str_contains( $query, 'LEFT JOIN wp_wdc_location_delivery_codes dc ON dc.location_id = stage.location_id' ) ) {
+			$count = 0;
+			foreach ( $this->candidate_rows() as $candidate ) {
+				$existing = $this->delivery_row_by_location( (int) $candidate['location_id'] );
+				if ( null === $existing || null === ( $existing['dpd_city_id'] ?? null ) || (string) $existing['dpd_city_id'] !== (string) $candidate['dpd_city_id'] ) {
+					++$count;
+				}
+			}
+			return $count;
+		}
+		if ( str_contains( $query, 'FROM wp_wdc_location_delivery_codes dc' ) && str_contains( $query, 'LEFT JOIN wp_wdc_dpd_stage_production stage ON stage.location_id = dc.location_id' ) ) {
+			$stage_ids = $this->stage_location_ids();
+			$count = 0;
+			foreach ( $this->delivery_codes as $row ) {
+				$location_id = (int) ( $row['location_id'] ?? 0 );
+				if ( ! isset( $stage_ids[ $location_id ] ) && null !== ( $row['dpd_city_id'] ?? null ) ) {
+					++$count;
+				}
+			}
+			return $count;
+		}
+
+		return 0;
+	}
+
+	public function query( string $query ): int|false {
+		$this->last_query = $query;
+		$this->last_error = '';
+		$this->queries[] = $query;
+		$trimmed = ltrim( $query );
+		if ( 'START TRANSACTION' === $trimmed ) {
+			$this->transaction_snapshot = $this->delivery_codes;
+			return 1;
+		}
+		if ( 'ROLLBACK' === $trimmed ) {
+			$this->delivery_codes = $this->transaction_snapshot;
+			return 1;
+		}
+		if ( 'COMMIT' === $trimmed ) {
+			if ( ! empty( $this->fail_dpd_stage_finalize_commit ) ) {
+				$this->last_error = 'forced production commit failure';
+				return false;
+			}
+			$this->transaction_snapshot = array();
+			return 1;
+		}
+		if ( str_contains( $query, 'SET dc.dpd_city_id = NULL' ) ) {
+			return $this->apply_stale_cleanup( $query );
+		}
+		if ( str_starts_with( $trimmed, 'UPDATE wp_wdc_location_delivery_codes AS dc' ) ) {
+			if ( $this->fail_dpd_stage_finalize_update_existing ) {
+				$this->last_error = 'forced production existing update failure';
+				return false;
+			}
+			return $this->apply_existing_update( $query );
+		}
+		if ( str_starts_with( $trimmed, 'INSERT INTO wp_wdc_location_delivery_codes' ) ) {
+			if ( $this->fail_dpd_stage_finalize_insert_missing ) {
+				$this->last_error = 'forced production missing insert failure';
+				return false;
+			}
+			return $this->apply_missing_insert( $query );
+		}
+
+		return 1;
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function candidate_rows(): array {
+		return array_values(
+			array_filter(
+				$this->stage_rows,
+				static fn( array $row ): bool => 'candidate' === (string) ( $row['status'] ?? '' ) && null !== ( $row['dpd_city_id'] ?? null )
+			)
+		);
+	}
+
+	/**
+	 * @return array<int,bool>
+	 */
+	private function stage_location_ids(): array {
+		$ids = array();
+		foreach ( $this->stage_rows as $row ) {
+			$ids[ (int) ( $row['location_id'] ?? 0 ) ] = true;
+		}
+		return $ids;
+	}
+
+	private function delivery_row_by_location( int $location_id ): ?array {
+		foreach ( $this->delivery_codes as $row ) {
+			if ( $location_id === (int) ( $row['location_id'] ?? 0 ) ) {
+				return $row;
+			}
+		}
+		return null;
+	}
+
+	private function apply_stale_cleanup( string $query ): int {
+		$stage_ids = $this->stage_location_ids();
+		$updated_at = $this->extract_sql_datetime( $query );
+		$changed = 0;
+		foreach ( $this->delivery_codes as $index => $row ) {
+			$location_id = (int) ( $row['location_id'] ?? 0 );
+			if ( ! isset( $stage_ids[ $location_id ] ) && null !== ( $row['dpd_city_id'] ?? null ) ) {
+				$this->delivery_codes[ $index ]['dpd_city_id'] = null;
+				$this->delivery_codes[ $index ]['updated_at'] = $updated_at;
+				++$changed;
+			}
+		}
+		return $changed;
+	}
+
+	private function apply_existing_update( string $query ): int {
+		$updated_at = $this->extract_sql_datetime( $query );
+		$changed = 0;
+		foreach ( $this->candidate_rows() as $candidate ) {
+			foreach ( $this->delivery_codes as $index => $row ) {
+				if ( (int) $candidate['location_id'] !== (int) ( $row['location_id'] ?? 0 ) ) {
+					continue;
+				}
+				if ( (string) ( $row['dpd_city_id'] ?? '' ) === (string) $candidate['dpd_city_id'] ) {
+					continue;
+				}
+				$this->delivery_codes[ $index ]['dpd_city_id'] = (string) $candidate['dpd_city_id'];
+				$this->delivery_codes[ $index ]['updated_at'] = $updated_at;
+				++$changed;
+			}
+		}
+		return $changed;
+	}
+
+	private function apply_missing_insert( string $query ): int {
+		$updated_at = $this->extract_sql_datetime( $query );
+		$existing_ids = array();
+		foreach ( $this->delivery_codes as $row ) {
+			$existing_ids[ (int) ( $row['location_id'] ?? 0 ) ] = true;
+		}
+		$inserted = 0;
+		foreach ( $this->candidate_rows() as $candidate ) {
+			$location_id = (int) $candidate['location_id'];
+			if ( isset( $existing_ids[ $location_id ] ) ) {
+				continue;
+			}
+			$this->delivery_codes[] = array(
+				'location_id' => $location_id,
+				'dpd_city_id' => (string) $candidate['dpd_city_id'],
+				'updated_at' => $updated_at,
+			);
+			$existing_ids[ $location_id ] = true;
+			++$inserted;
+		}
+		return $inserted;
+	}
+
+	private function extract_sql_datetime( string $query ): string {
+		if ( preg_match( "/'([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})'/", $query, $matches ) ) {
+			return $matches[1];
+		}
+		return 'production-new';
+	}
+}
+
 final class DpdIndexQueryFailureWpdb extends wpdb {
 	public string $index_mode = 'first_error';
 	public int $index_calls = 0;
@@ -317,6 +501,7 @@ function wp_cache_delete( string $key, string $group = '' ): bool {
 }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags | JSON_UNESCAPED_UNICODE ); }
 function wp_salt( string $scheme = '' ): string { return 'wdc-test-salt-' . $scheme; }
+function esc_sql( string $value ): string { return addslashes( $value ); }
 function wp_tempnam( string $filename = '' ): string|false {
 	unset( $filename );
 	$queued = $GLOBALS['wdc_dpd_import_tempnam_queue'] ?? array();
@@ -1141,6 +1326,83 @@ $GLOBALS['wpdb']->fail_dpd_stage_finalize_commit = false;
 dpd_import_assert( $commit_failed && $commit_snapshot === $GLOBALS['wpdb']->delivery_codes, 'commit failure rolls back delivery_codes snapshot.' );
 $stage->drop( $commit_stage );
 
+$production_stage_rows = array(
+	array( 'location_id' => 1, 'dpd_city_id' => '100', 'status' => 'candidate' ),
+	array( 'location_id' => 2, 'dpd_city_id' => '222', 'status' => 'candidate' ),
+	array( 'location_id' => 3, 'dpd_city_id' => '333', 'status' => 'candidate' ),
+	array( 'location_id' => 4, 'dpd_city_id' => '444', 'status' => 'candidate' ),
+	array( 'location_id' => 5, 'dpd_city_id' => null, 'status' => 'conflict' ),
+);
+$production_delivery_snapshot = array(
+	array( 'location_id' => 1, 'dpd_city_id' => '100', 'updated_at' => 'old-1' ),
+	array( 'location_id' => 2, 'dpd_city_id' => '200', 'updated_at' => 'old-2' ),
+	array( 'location_id' => 3, 'dpd_city_id' => null, 'updated_at' => 'old-3' ),
+	array( 'location_id' => 5, 'dpd_city_id' => '500', 'updated_at' => 'old-5' ),
+	array( 'location_id' => 9, 'dpd_city_id' => '900', 'updated_at' => 'old-9' ),
+);
+$production_db = new DpdProductionFinalizationWpdb();
+$production_db->delivery_codes = $production_delivery_snapshot;
+$production_db->stage_rows = $production_stage_rows;
+$production_stage_repository = new DpdGeographyStageRepository( $production_db );
+$production_clean = $production_stage_repository->finalize_into_delivery_codes( 'wp_wdc_dpd_stage_production', true );
+$production_by_location = array_column( $production_db->delivery_codes, null, 'location_id' );
+dpd_import_assert( 4 === (int) $production_clean['mappings'] && 4 === (int) $production_clean['changes'] && 1 === (int) $production_clean['stale_cleared'] && empty( $production_clean['stale_cleanup_skipped'] ), 'production-path clean finalization preserves logical counters for candidates, changes, and stale clears.' );
+dpd_import_assert( '100' === (string) $production_by_location[1]['dpd_city_id'] && 'old-1' === (string) $production_by_location[1]['updated_at'], 'production-path unchanged mapping keeps old updated_at.' );
+dpd_import_assert( '222' === (string) $production_by_location[2]['dpd_city_id'] && 'old-2' !== (string) $production_by_location[2]['updated_at'], 'production-path existing changed mapping is updated.' );
+dpd_import_assert( '333' === (string) $production_by_location[3]['dpd_city_id'] && 'old-3' !== (string) $production_by_location[3]['updated_at'], 'production-path NULL working mapping changes to staged DPD ID.' );
+dpd_import_assert( '444' === (string) $production_by_location[4]['dpd_city_id'], 'production-path missing candidate mapping is inserted.' );
+dpd_import_assert( '500' === (string) $production_by_location[5]['dpd_city_id'] && 'old-5' === (string) $production_by_location[5]['updated_at'], 'production-path conflict row preserves existing working mapping.' );
+dpd_import_assert( null === $production_by_location[9]['dpd_city_id'] && 'old-9' !== (string) $production_by_location[9]['updated_at'], 'production-path clean finalization clears stale mapping.' );
+$production_sql = implode( "\n", $production_db->queries );
+dpd_import_assert( ! str_contains( $production_sql, 'ON DUPLICATE KEY UPDATE' ) && ! str_contains( $production_sql, 'VALUES(dpd_city_id)' ) && ! str_contains( $production_sql, 'VALUES(updated_at)' ), 'production-path finalization SQL no longer uses ON DUPLICATE or VALUES().' );
+dpd_import_assert( str_contains( $production_sql, 'UPDATE wp_wdc_location_delivery_codes AS dc' ) && str_contains( $production_sql, 'INNER JOIN wp_wdc_dpd_stage_production AS stage ON stage.location_id = dc.location_id' ) && str_contains( $production_sql, 'dc.dpd_city_id = stage.dpd_city_id' ) && str_contains( $production_sql, "stage.status = 'candidate'" ), 'production-path finalization uses qualified UPDATE for existing changed mappings.' );
+dpd_import_assert( str_contains( $production_sql, 'INSERT INTO wp_wdc_location_delivery_codes' ) && str_contains( $production_sql, 'SELECT stage.location_id, stage.dpd_city_id' ) && str_contains( $production_sql, 'LEFT JOIN wp_wdc_location_delivery_codes AS dc ON dc.location_id = stage.location_id' ) && str_contains( $production_sql, 'dc.location_id IS NULL' ), 'production-path finalization uses qualified INSERT SELECT for missing mappings.' );
+dpd_import_assert( ! str_contains( $production_sql, 'SELECT location_id, dpd_city_id' ) && ! preg_match( '/[^.]dpd_city_id\s*<=>/', $production_sql ), 'production-path finalization SQL avoids unqualified selected columns and unqualified dpd_city_id null-safe comparisons.' );
+
+$production_warning_db = new DpdProductionFinalizationWpdb();
+$production_warning_db->delivery_codes = $production_delivery_snapshot;
+$production_warning_db->stage_rows = $production_stage_rows;
+$production_warning = ( new DpdGeographyStageRepository( $production_warning_db ) )->finalize_into_delivery_codes( 'wp_wdc_dpd_stage_production', false );
+$warning_by_location = array_column( $production_warning_db->delivery_codes, null, 'location_id' );
+dpd_import_assert( 4 === (int) $production_warning['mappings'] && 3 === (int) $production_warning['changes'] && 0 === (int) $production_warning['stale_cleared'] && ! empty( $production_warning['stale_cleanup_skipped'] ), 'production-path warning finalization skips stale cleanup while applying successful candidates.' );
+dpd_import_assert( '222' === (string) $warning_by_location[2]['dpd_city_id'] && '333' === (string) $warning_by_location[3]['dpd_city_id'] && '444' === (string) $warning_by_location[4]['dpd_city_id'] && '500' === (string) $warning_by_location[5]['dpd_city_id'] && '900' === (string) $warning_by_location[9]['dpd_city_id'], 'production-path warning finalization updates/inserts candidates, preserves conflicts, and keeps stale mappings.' );
+
+$production_update_failure_db = new DpdProductionFinalizationWpdb();
+$production_update_failure_db->delivery_codes = $production_delivery_snapshot;
+$production_update_failure_db->stage_rows = $production_stage_rows;
+$production_update_failure_db->fail_dpd_stage_finalize_update_existing = true;
+$production_update_failed = false;
+try {
+	( new DpdGeographyStageRepository( $production_update_failure_db ) )->finalize_into_delivery_codes( 'wp_wdc_dpd_stage_production', true );
+} catch ( RuntimeException $exception ) {
+	$production_update_failed = str_contains( $exception->getMessage(), 'existing mappings update failed' );
+}
+dpd_import_assert( $production_update_failed && $production_delivery_snapshot === $production_update_failure_db->delivery_codes && $production_stage_rows === $production_update_failure_db->stage_rows, 'production-path existing UPDATE failure rolls back working mappings and keeps stage rows.' );
+
+$production_insert_failure_db = new DpdProductionFinalizationWpdb();
+$production_insert_failure_db->delivery_codes = $production_delivery_snapshot;
+$production_insert_failure_db->stage_rows = $production_stage_rows;
+$production_insert_failure_db->fail_dpd_stage_finalize_insert_missing = true;
+$production_insert_failed = false;
+try {
+	( new DpdGeographyStageRepository( $production_insert_failure_db ) )->finalize_into_delivery_codes( 'wp_wdc_dpd_stage_production', true );
+} catch ( RuntimeException $exception ) {
+	$production_insert_failed = str_contains( $exception->getMessage(), 'missing mappings insert failed' );
+}
+dpd_import_assert( $production_insert_failed && $production_delivery_snapshot === $production_insert_failure_db->delivery_codes && $production_stage_rows === $production_insert_failure_db->stage_rows, 'production-path missing INSERT failure rolls back working mappings and keeps stage rows.' );
+
+$production_commit_failure_db = new DpdProductionFinalizationWpdb();
+$production_commit_failure_db->delivery_codes = $production_delivery_snapshot;
+$production_commit_failure_db->stage_rows = $production_stage_rows;
+$production_commit_failure_db->fail_dpd_stage_finalize_commit = true;
+$production_commit_failed = false;
+try {
+	( new DpdGeographyStageRepository( $production_commit_failure_db ) )->finalize_into_delivery_codes( 'wp_wdc_dpd_stage_production', true );
+} catch ( RuntimeException $exception ) {
+	$production_commit_failed = str_contains( $exception->getMessage(), 'commit failed' );
+}
+dpd_import_assert( $production_commit_failed && $production_delivery_snapshot === $production_commit_failure_db->delivery_codes && $production_stage_rows === $production_commit_failure_db->stage_rows, 'production-path commit failure rolls back transaction-local UPDATE/INSERT changes and keeps stage rows.' );
+
 $missing_stage_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-missing-stage-' );
 file_put_contents( $missing_stage_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
 $missing_stage_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $missing_stage_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
@@ -1314,6 +1576,8 @@ dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_
 dpd_import_assert( is_string( $import_service_source ) && ! str_contains( $import_service_source, 'is_array( $loaded ) ? $loaded : array()' ), 'DPD geography index load no longer falls back to an empty index on corrupt payloads.' );
 $stage_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php' );
 dpd_import_assert( is_string( $stage_source ) && str_contains( $stage_source, 'get_count_or_throw' ) && ! str_contains( $stage_source, '(int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$safe_stage}' ), 'DPD geography finalization count queries fail closed instead of coercing SQL errors to zero.' );
+dpd_import_assert( is_string( $stage_source ) && ! str_contains( $stage_source, 'ON DUPLICATE KEY UPDATE' ) && ! str_contains( $stage_source, 'VALUES(dpd_city_id)' ) && ! str_contains( $stage_source, 'VALUES(updated_at)' ), 'DPD geography production finalization does not use ambiguous ON DUPLICATE/VALUES SQL.' );
+dpd_import_assert( is_string( $stage_source ) && str_contains( $stage_source, 'UPDATE {$delivery_table} AS dc' ) && str_contains( $stage_source, 'INNER JOIN {$safe_stage} AS stage ON stage.location_id = dc.location_id' ) && str_contains( $stage_source, 'INSERT INTO {$delivery_table} (location_id, dpd_city_id, updated_at)' ) && str_contains( $stage_source, 'SELECT stage.location_id, stage.dpd_city_id' ), 'DPD geography production finalization applies candidates through qualified UPDATE and INSERT SELECT statements.' );
 $location_repository_source = file_get_contents( __DIR__ . '/../../src/Locations/Storage/LocationRepository.php' );
 dpd_import_assert( is_string( $location_repository_source ) && str_contains( $location_repository_source, 'DPD location index page query failed' ) && str_contains( $location_repository_source, '$this->wpdb->last_error = \'\'' ) && str_contains( $location_repository_source, 'invalid SQL result' ), 'DPD location index page queries fail closed on SQL and non-array result errors.' );
 dpd_import_assert( is_string( $import_service_source ) && strpos( $import_service_source, '$this->index->build()' ) < strpos( $import_service_source, 'DpdLocationIndex::validate_export' ) && strpos( $import_service_source, 'DpdLocationIndex::validate_export' ) < strpos( $import_service_source, '$index_path = $this->temp_path' ) && strpos( $import_service_source, 'persist_location_index' ) < strpos( $import_service_source, '$this->stage->create' ), 'DPD geography import start builds and validates the index before persisting artifacts or creating staging tables.' );

@@ -266,14 +266,24 @@ final class DpdGeographyStageRepository {
 				);
 			}
 			$this->query_or_throw(
+				"UPDATE {$delivery_table} AS dc
+				INNER JOIN {$safe_stage} AS stage ON stage.location_id = dc.location_id
+				SET dc.dpd_city_id = stage.dpd_city_id,
+					dc.updated_at = '" . esc_sql( $now ) . "'
+				WHERE stage.status = 'candidate'
+					AND stage.dpd_city_id IS NOT NULL
+					AND NOT (dc.dpd_city_id <=> stage.dpd_city_id)",
+				'DPD geography finalization existing mappings update failed'
+			);
+			$this->query_or_throw(
 				"INSERT INTO {$delivery_table} (location_id, dpd_city_id, updated_at)
-				SELECT location_id, dpd_city_id, '" . esc_sql( $now ) . "'
-				FROM {$safe_stage}
-				WHERE status = 'candidate' AND dpd_city_id IS NOT NULL
-				ON DUPLICATE KEY UPDATE
-					updated_at = IF(NOT (dpd_city_id <=> VALUES(dpd_city_id)), VALUES(updated_at), updated_at),
-					dpd_city_id = VALUES(dpd_city_id)",
-				'DPD geography finalization upsert failed'
+				SELECT stage.location_id, stage.dpd_city_id, '" . esc_sql( $now ) . "'
+				FROM {$safe_stage} AS stage
+				LEFT JOIN {$delivery_table} AS dc ON dc.location_id = stage.location_id
+				WHERE stage.status = 'candidate'
+					AND stage.dpd_city_id IS NOT NULL
+					AND dc.location_id IS NULL",
+				'DPD geography finalization missing mappings insert failed'
 			);
 			$this->query_or_throw( 'COMMIT', 'DPD geography finalization commit failed' );
 		} catch ( \RuntimeException $exception ) {
@@ -298,7 +308,7 @@ final class DpdGeographyStageRepository {
 	}
 
 	private function is_test_mode(): bool {
-		return property_exists( $this->wpdb, 'dpd_geography_stage_tables' );
+		return isset( $this->wpdb->dpd_geography_stage_tables );
 	}
 
 	private function create_if_missing_for_test( string $table_name ): void {
