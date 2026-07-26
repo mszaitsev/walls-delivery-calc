@@ -13,6 +13,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyImportService {
 	private const DEFAULT_STEP_LIMIT = 3000;
+	private const INDEX_FORMAT_VERSION = 1;
 
 	public function __construct(
 		private DpdGeographyCsvParser $parser,
@@ -53,7 +54,19 @@ final class DpdGeographyImportService {
 			return $this->fail_with_report( 'DPD geography manual import: upload must be a CSV file.', true, array( 'source' => 'manual', 'source_file' => $name ) );
 		}
 
-		$target = $this->copy_to_import_temp( $tmp, $name );
+		try {
+			$target = $this->copy_to_import_temp( $tmp, $name );
+		} catch ( Throwable ) {
+			return $this->fail_with_report(
+				'DPD geography manual import: unable to copy uploaded CSV.',
+				true,
+				array(
+					'source' => 'manual',
+					'source_file' => $name,
+					'file_size' => is_file( $tmp ) ? (int) filesize( $tmp ) : 0,
+				)
+			);
+		}
 		@unlink( $tmp );
 
 		return $this->start_from_existing_file( $target, 'manual', $name, true );
@@ -102,8 +115,11 @@ final class DpdGeographyImportService {
 			return $this->fail_with_report( 'DPD geography staging table is missing.' );
 		}
 
-		$loaded = unserialize( (string) file_get_contents( $index_path ), array( 'allowed_classes' => false ) );
-		$this->index->load( is_array( $loaded ) ? $loaded : array() );
+		try {
+			$this->load_location_index_from_state( $state );
+		} catch ( \RuntimeException $exception ) {
+			return $this->fail_with_report( $exception->getMessage() );
+		}
 		$columns = is_array( $state['columns'] ?? null ) ? $state['columns'] : array();
 		try {
 			$step = $this->parser->read_step( $file, (int) $state['byte_offset'], $columns, $limit );
@@ -152,11 +168,14 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	private function start_from_existing_file( string $path, string $source, string $source_file, bool $delete_on_finish ): array {
+		$index_path = '';
+		$stage_table = '';
 		try {
 			$inspect = $this->parser->inspect_header( $path );
 			$this->index->build();
+			$index_data = DpdLocationIndex::validate_export( $this->index->export() );
 			$index_path = $this->temp_path( 'index-' . $source_file . '.ser' );
-			file_put_contents( $index_path, serialize( $this->index->export() ) );
+			$index_metadata = $this->persist_location_index( $index_path, $index_data );
 			$job_id = sha1( microtime( true ) . '|' . $source . '|' . $source_file . '|' . ( function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX ) ) );
 			$stage_table = $this->stage->table_name_for_job( $job_id );
 			$this->stage->create( $stage_table );
@@ -169,6 +188,10 @@ final class DpdGeographyImportService {
 					'file_path' => $path,
 					'index_path' => $index_path,
 					'stage_table' => $stage_table,
+					'index_format_version' => (int) $index_metadata['index_format_version'],
+					'index_size' => (int) $index_metadata['index_size'],
+					'index_sha256' => (string) $index_metadata['index_sha256'],
+					'index_stats' => $index_metadata['index_stats'],
 					'delete_file_on_finish' => $delete_on_finish,
 					'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0,
 					'total_rows' => 0,
@@ -183,7 +206,7 @@ final class DpdGeographyImportService {
 			return $this->fail_with_report(
 				'DPD geography import start failed: ' . $throwable->getMessage(),
 				true,
-				array( 'source' => $source, 'source_file' => $source_file, 'file_path' => $path, 'delete_file_on_finish' => $delete_on_finish, 'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0 )
+				array( 'source' => $source, 'source_file' => $source_file, 'file_path' => $path, 'index_path' => $index_path, 'stage_table' => $stage_table, 'delete_file_on_finish' => $delete_on_finish, 'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0 )
 			);
 		}
 	}
@@ -506,6 +529,113 @@ final class DpdGeographyImportService {
 	}
 
 	/**
+	 * @param array<string,mixed> $index_data
+	 * @return array{index_format_version:int,index_size:int,index_sha256:string,index_stats:array<string,int>}
+	 */
+	private function persist_location_index( string $index_path, array $index_data ): array {
+		$validated = DpdLocationIndex::validate_export( $index_data );
+		$serialized = serialize( $validated );
+		if ( '' === $serialized ) {
+			throw new \RuntimeException( 'DPD geography location index persistence failed: empty payload.' );
+		}
+		$expected_size = strlen( $serialized );
+		$written = file_put_contents( $index_path, $serialized, LOCK_EX );
+		if ( false === $written || (int) $written !== $expected_size ) {
+			throw new \RuntimeException( 'DPD geography location index persistence failed: incomplete write.' );
+		}
+		clearstatcache( true, $index_path );
+		if ( ! file_exists( $index_path ) || ! is_readable( $index_path ) ) {
+			throw new \RuntimeException( 'DPD geography location index persistence failed: written file is not readable.' );
+		}
+		$actual_size = filesize( $index_path );
+		if ( false === $actual_size || (int) $actual_size !== $expected_size ) {
+			throw new \RuntimeException( 'DPD geography location index persistence failed: size mismatch.' );
+		}
+		$expected_hash = hash( 'sha256', $serialized );
+		$actual_hash = hash_file( 'sha256', $index_path );
+		if ( ! is_string( $actual_hash ) || 64 !== strlen( $actual_hash ) || ! hash_equals( $expected_hash, $actual_hash ) ) {
+			throw new \RuntimeException( 'DPD geography location index persistence failed: checksum mismatch.' );
+		}
+
+		return array(
+			'index_format_version' => self::INDEX_FORMAT_VERSION,
+			'index_size' => $expected_size,
+			'index_sha256' => $actual_hash,
+			'index_stats' => $this->index_stats( $validated ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 */
+	private function load_location_index_from_state( array $state ): void {
+		$prefix = 'DPD geography location index validation failed: ';
+		$index_path = (string) ( $state['index_path'] ?? '' );
+		$expected_size = max( 0, (int) ( $state['index_size'] ?? 0 ) );
+		$expected_hash = (string) ( $state['index_sha256'] ?? '' );
+		$expected_version = max( 0, (int) ( $state['index_format_version'] ?? 0 ) );
+		$expected_stats = is_array( $state['index_stats'] ?? null ) ? $state['index_stats'] : array();
+		if ( '' === $index_path || ! file_exists( $index_path ) || ! is_readable( $index_path ) ) {
+			throw new \RuntimeException( $prefix . 'file is missing.' );
+		}
+		if ( self::INDEX_FORMAT_VERSION !== $expected_version ) {
+			throw new \RuntimeException( $prefix . 'unsupported format version.' );
+		}
+		if ( $expected_size <= 0 || ! preg_match( '/^[a-f0-9]{64}$/', $expected_hash ) ) {
+			throw new \RuntimeException( $prefix . 'missing integrity metadata.' );
+		}
+		$raw = file_get_contents( $index_path );
+		if ( ! is_string( $raw ) || '' === $raw ) {
+			throw new \RuntimeException( $prefix . 'empty file.' );
+		}
+		if ( strlen( $raw ) !== $expected_size ) {
+			throw new \RuntimeException( $prefix . 'size mismatch.' );
+		}
+		$actual_hash = hash( 'sha256', $raw );
+		if ( ! hash_equals( $expected_hash, $actual_hash ) ) {
+			throw new \RuntimeException( $prefix . 'checksum mismatch.' );
+		}
+		$loaded = unserialize( $raw, array( 'allowed_classes' => false ) );
+		if ( ! is_array( $loaded ) ) {
+			throw new \RuntimeException( $prefix . 'invalid serialized payload.' );
+		}
+		try {
+			$validated = DpdLocationIndex::validate_export( $loaded );
+		} catch ( \InvalidArgumentException $exception ) {
+			throw new \RuntimeException( $prefix . $this->sanitize_error( $exception->getMessage() ) );
+		}
+		if ( $this->index_stats( $validated ) !== $this->normalize_index_stats( $expected_stats ) ) {
+			throw new \RuntimeException( $prefix . 'stats mismatch.' );
+		}
+
+		$this->index->load( $validated );
+	}
+
+	/**
+	 * @param array{fias:array<string,int>,kladr:array<string,int>,name:array<string,int>} $index_data
+	 * @return array<string,int>
+	 */
+	private function index_stats( array $index_data ): array {
+		return array(
+			'fias_keys' => count( $index_data['fias'] ?? array() ),
+			'kladr_keys' => count( $index_data['kladr'] ?? array() ),
+			'name_keys' => count( $index_data['name'] ?? array() ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $stats
+	 * @return array<string,int>
+	 */
+	private function normalize_index_stats( array $stats ): array {
+		return array(
+			'fias_keys' => max( 0, (int) ( $stats['fias_keys'] ?? 0 ) ),
+			'kladr_keys' => max( 0, (int) ( $stats['kladr_keys'] ?? 0 ) ),
+			'name_keys' => max( 0, (int) ( $stats['name_keys'] ?? 0 ) ),
+		);
+	}
+
+	/**
 	 * @param array<string,mixed> $context
 	 * @return array<string,mixed>
 	 */
@@ -513,12 +643,12 @@ final class DpdGeographyImportService {
 		$failed = $new_job ? $this->state->fail_new( $message, $context ) : $this->state->fail( $message );
 		$this->settings?->save_geography_import_report( $this->report_from_state( $failed ) );
 
-		return $failed;
+		return $this->state->public_state();
 	}
 
 	private function copy_to_import_temp( string $source, string $name ): string {
 		$target = $this->temp_path( $name );
-		if ( ! copy( $source, $target ) ) {
+		if ( ! @copy( $source, $target ) ) {
 			throw new \RuntimeException( 'Unable to copy uploaded DPD geography CSV to import temp directory.' );
 		}
 

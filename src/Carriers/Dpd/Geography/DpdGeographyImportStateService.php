@@ -22,7 +22,17 @@ final class DpdGeographyImportStateService {
 	 */
 	public function public_state(): array {
 		$state = $this->current();
-		unset( $state['file_path'], $state['index_path'], $state['stage_table'], $state['delete_file_on_finish'], $state['columns'] );
+		unset(
+			$state['file_path'],
+			$state['index_path'],
+			$state['stage_table'],
+			$state['delete_file_on_finish'],
+			$state['columns'],
+			$state['index_format_version'],
+			$state['index_size'],
+			$state['index_sha256'],
+			$state['index_stats']
+		);
 		$file_size = max( 0, (int) ( $state['file_size'] ?? 0 ) );
 		$byte_offset = max( 0, (int) ( $state['byte_offset'] ?? 0 ) );
 		$state['percent_complete'] = $file_size > 0 ? min( 100, round( $byte_offset / $file_size * 100, 1 ) ) : 0;
@@ -47,6 +57,10 @@ final class DpdGeographyImportStateService {
 				'file_path' => (string) ( $context['file_path'] ?? '' ),
 				'index_path' => (string) ( $context['index_path'] ?? '' ),
 				'stage_table' => (string) ( $context['stage_table'] ?? '' ),
+				'index_format_version' => max( 0, (int) ( $context['index_format_version'] ?? 0 ) ),
+				'index_size' => max( 0, (int) ( $context['index_size'] ?? 0 ) ),
+				'index_sha256' => (string) ( $context['index_sha256'] ?? '' ),
+				'index_stats' => is_array( $context['index_stats'] ?? null ) ? $context['index_stats'] : array(),
 				'delete_file_on_finish' => (bool) ( $context['delete_file_on_finish'] ?? true ),
 				'file_size' => max( 0, (int) ( $context['file_size'] ?? 0 ) ),
 				'total_rows' => max( 0, (int) ( $context['total_rows'] ?? 0 ) ),
@@ -110,6 +124,10 @@ final class DpdGeographyImportStateService {
 				'file_path' => (string) ( $context['file_path'] ?? '' ),
 				'index_path' => (string) ( $context['index_path'] ?? '' ),
 				'stage_table' => (string) ( $context['stage_table'] ?? '' ),
+				'index_format_version' => max( 0, (int) ( $context['index_format_version'] ?? 0 ) ),
+				'index_size' => max( 0, (int) ( $context['index_size'] ?? 0 ) ),
+				'index_sha256' => (string) ( $context['index_sha256'] ?? '' ),
+				'index_stats' => is_array( $context['index_stats'] ?? null ) ? $context['index_stats'] : array(),
 				'delete_file_on_finish' => (bool) ( $context['delete_file_on_finish'] ?? true ),
 				'file_size' => max( 0, (int) ( $context['file_size'] ?? 0 ) ),
 				'errors' => array( $message ),
@@ -159,6 +177,10 @@ final class DpdGeographyImportStateService {
 			'file_path' => '',
 			'index_path' => '',
 			'stage_table' => '',
+			'index_format_version' => 0,
+			'index_size' => 0,
+			'index_sha256' => '',
+			'index_stats' => array(),
 			'delete_file_on_finish' => true,
 			'file_size' => 0,
 			'byte_offset' => 0,

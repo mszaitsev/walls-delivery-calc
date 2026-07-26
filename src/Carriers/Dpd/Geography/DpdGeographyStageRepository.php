@@ -159,6 +159,21 @@ final class DpdGeographyStageRepository {
 		if ( $this->is_test_mode() ) {
 			$this->create_if_missing_for_test( $table_name );
 			$snapshot = $this->wpdb->delivery_codes;
+			if ( ! empty( $this->wpdb->fail_dpd_stage_candidate_count ) ) {
+				$this->wpdb->last_error = 'forced stage candidate count failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization candidate count failed' );
+			}
+			if ( ! empty( $this->wpdb->fail_dpd_stage_candidate_change_count ) ) {
+				$this->wpdb->last_error = 'forced stage candidate change count failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization candidate change count failed' );
+			}
+			if ( $allow_stale_cleanup && ! empty( $this->wpdb->fail_dpd_stage_stale_count ) ) {
+				$this->wpdb->last_error = 'forced stage stale count failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization stale count failed' );
+			}
 			if ( $allow_stale_cleanup && ! empty( $this->wpdb->fail_dpd_stage_finalize_clear ) ) {
 				$this->wpdb->last_error = 'forced stage clear failure';
 				$this->wpdb->delivery_codes = $snapshot;
@@ -223,22 +238,24 @@ final class DpdGeographyStageRepository {
 		$now = $this->now();
 		$this->query_or_throw( 'START TRANSACTION', 'DPD geography finalization transaction start failed' );
 		try {
-			$candidate_count = (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$safe_stage} WHERE status = 'candidate' AND dpd_city_id IS NOT NULL" );
-			$candidate_change_count = (int) $this->wpdb->get_var(
+			$candidate_count = $this->get_count_or_throw( "SELECT COUNT(*) FROM {$safe_stage} WHERE status = 'candidate' AND dpd_city_id IS NOT NULL", 'DPD geography finalization candidate count failed' );
+			$candidate_change_count = $this->get_count_or_throw(
 				"SELECT COUNT(*)
 				FROM {$safe_stage} stage
 				LEFT JOIN {$delivery_table} dc ON dc.location_id = stage.location_id
 				WHERE stage.status = 'candidate'
 					AND stage.dpd_city_id IS NOT NULL
-					AND (dc.location_id IS NULL OR dc.dpd_city_id IS NULL OR NOT (dc.dpd_city_id <=> stage.dpd_city_id))"
+					AND (dc.location_id IS NULL OR dc.dpd_city_id IS NULL OR NOT (dc.dpd_city_id <=> stage.dpd_city_id))",
+				'DPD geography finalization candidate change count failed'
 			);
 			$stale_clear_count = 0;
 			if ( $allow_stale_cleanup ) {
-				$stale_clear_count = (int) $this->wpdb->get_var(
+				$stale_clear_count = $this->get_count_or_throw(
 					"SELECT COUNT(*)
 					FROM {$delivery_table} dc
 					LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id
-					WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL"
+					WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL",
+					'DPD geography finalization stale count failed'
 				);
 				$this->query_or_throw(
 					"UPDATE {$delivery_table} dc
@@ -320,5 +337,18 @@ final class DpdGeographyStageRepository {
 		}
 
 		return (int) $result;
+	}
+
+	private function get_count_or_throw( string $sql, string $message ): int {
+		$this->wpdb->last_error = '';
+		$value = $this->wpdb->get_var( $sql );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( $message );
+		}
+		if ( null === $value || ! is_numeric( $value ) ) {
+			throw new \RuntimeException( $message . ': unknown or non-numeric SQL result' );
+		}
+
+		return max( 0, (int) $value );
 	}
 }

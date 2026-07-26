@@ -12,6 +12,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public bool $fail_dpd_stage_finalize_clear = false;
 		public bool $fail_dpd_stage_finalize_upsert = false;
 		public bool $fail_dpd_stage_finalize_commit = false;
+		public bool $fail_dpd_stage_candidate_count = false;
+		public bool $fail_dpd_stage_candidate_change_count = false;
+		public bool $fail_dpd_stage_stale_count = false;
 		/** @var array<int,bool> */
 		public array $fail_location_update_ids = array();
 		/** @var array<int,array<string,mixed>> */
@@ -234,6 +237,15 @@ function dpd_import_assert( bool $condition, string $message ): void {
 	}
 }
 
+/**
+ * @param array<string,mixed> $state
+ */
+function dpd_import_assert_public_state_redacted( array $state, string $message ): void {
+	foreach ( array( 'file_path', 'index_path', 'stage_table', 'delete_file_on_finish', 'columns', 'index_sha256', 'index_size', 'index_stats', 'index_format_version' ) as $key ) {
+		dpd_import_assert( ! array_key_exists( $key, $state ), $message . ': public state contains internal key ' . $key );
+	}
+}
+
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wdc_dpd_import_options'] = array();
 $GLOBALS['wpdb']->locations = array(
@@ -435,13 +447,77 @@ dpd_import_assert( $oversized_header_failed, 'oversized CSV header without line 
 $oversized_row_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-oversized-row-' );
 file_put_contents( $oversized_row_path, mb_convert_encoding( "ID НП;Код страны;Регион\n", 'Windows-1251', 'UTF-8' ) . str_repeat( '1', 270000 ) . "\n" );
 $oversized_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $oversized_row_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+dpd_import_assert_public_state_redacted( $oversized_job, 'oversized parser job start response is redacted' );
 $oversized_step = $importer->step( (string) $oversized_job['job_id'], 1 );
 dpd_import_assert( 'failed' === (string) $oversized_step['phase'], 'read_step parser exception becomes failed import state' );
-dpd_import_assert( str_contains( (string) $oversized_step['last_message'], 'DPD geography CSV parse failed' ), 'read_step parser exception is reported as diagnostic message' );
+dpd_import_assert( str_contains( (string) $oversized_step['last_message'], 'DPD geography CSV parse failed' ), 'read_step parser exception is reported as diagnostic message: ' . (string) ( $oversized_step['last_message'] ?? '' ) );
+dpd_import_assert_public_state_redacted( $oversized_step, 'parser failure response is redacted' );
 $oversized_report = $settings->last_geography_import_report();
 dpd_import_assert( 'failed' === (string) ( $oversized_report['phase'] ?? '' ) && 'error' === (string) ( $oversized_report['status'] ?? '' ), 'parser failure is saved as terminal failed/error report.' );
 dpd_import_assert( (string) ( $oversized_report['last_message'] ?? '' ) === (string) ( $oversized_step['last_message'] ?? '' ), 'parser failure report message matches terminal state.' );
 $importer->reset();
+
+$index_failure_snapshot = array(
+	array( 'location_id' => 1, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-16 02:00:00' ),
+	array( 'location_id' => 2, 'dpd_city_id' => '70000001', 'updated_at' => '2026-06-16 02:00:00' ),
+);
+
+$empty_index_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-empty-index-' );
+file_put_contents( $empty_index_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$GLOBALS['wpdb']->delivery_codes = $index_failure_snapshot;
+$empty_index_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $empty_index_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$empty_index_internal = $state->current();
+$empty_index_stage = (string) $empty_index_internal['stage_table'];
+$empty_index_import_path = (string) $empty_index_internal['file_path'];
+$empty_index_file = (string) $empty_index_internal['index_path'];
+file_put_contents( $empty_index_file, '' );
+$empty_index_failed = $importer->step( (string) $empty_index_job['job_id'], 1 );
+dpd_import_assert( 'failed' === (string) ( $empty_index_failed['phase'] ?? '' ) && 'error' === (string) ( $empty_index_failed['status'] ?? '' ), 'empty serialized index fails import job.' );
+dpd_import_assert( str_contains( (string) ( $empty_index_failed['last_message'] ?? '' ), 'location index validation failed' ), 'empty serialized index reports validation failure.' );
+dpd_import_assert_public_state_redacted( $empty_index_failed, 'empty index failure response is redacted' );
+dpd_import_assert( 0 === (int) ( $state->current()['rows_read'] ?? -1 ), 'empty index failure does not process CSV rows.' );
+dpd_import_assert( $index_failure_snapshot === $GLOBALS['wpdb']->delivery_codes, 'empty index failure leaves working mappings unchanged.' );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $empty_index_stage ] ), 'empty index failure keeps staging table until reset.' );
+dpd_import_assert( file_exists( $empty_index_import_path ) && file_exists( $empty_index_file ), 'empty index failure keeps source and index artifacts until reset.' );
+$empty_index_report = $settings->last_geography_import_report();
+dpd_import_assert( 'failed' === (string) ( $empty_index_report['phase'] ?? '' ) && 'error' === (string) ( $empty_index_report['status'] ?? '' ) && (string) ( $empty_index_report['last_message'] ?? '' ) === (string) ( $empty_index_failed['last_message'] ?? '' ), 'empty index failure is saved as terminal report.' );
+$importer->reset();
+dpd_import_assert( ! file_exists( $empty_index_import_path ) && ! file_exists( $empty_index_file ) && ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $empty_index_stage ] ), 'reset removes artifacts after empty index failure.' );
+
+$checksum_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-checksum-index-' );
+file_put_contents( $checksum_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$GLOBALS['wpdb']->delivery_codes = $index_failure_snapshot;
+$checksum_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $checksum_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$checksum_internal = $state->current();
+$checksum_raw = (string) file_get_contents( (string) $checksum_internal['index_path'] );
+$checksum_raw[0] = 'a' === $checksum_raw[0] ? 'b' : 'a';
+file_put_contents( (string) $checksum_internal['index_path'], $checksum_raw );
+$checksum_failed = $importer->step( (string) $checksum_job['job_id'], 1 );
+dpd_import_assert( 'failed' === (string) ( $checksum_failed['phase'] ?? '' ) && str_contains( (string) ( $checksum_failed['last_message'] ?? '' ), 'checksum mismatch' ), 'checksum mismatch fails import before CSV processing.' );
+dpd_import_assert_public_state_redacted( $checksum_failed, 'checksum failure response is redacted' );
+dpd_import_assert( $index_failure_snapshot === $GLOBALS['wpdb']->delivery_codes && 0 === (int) ( $state->current()['rows_read'] ?? -1 ), 'checksum mismatch leaves rows and mappings untouched.' );
+$importer->reset();
+
+$invalid_structure_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-invalid-index-' );
+file_put_contents( $invalid_structure_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$GLOBALS['wpdb']->delivery_codes = $index_failure_snapshot;
+$invalid_structure_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $invalid_structure_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$invalid_structure_internal = $state->current();
+$invalid_payload = serialize( array( 'fias' => array(), 'kladr' => 'not-an-array', 'name' => array() ) );
+file_put_contents( (string) $invalid_structure_internal['index_path'], $invalid_payload );
+$state->update(
+	array(
+		'index_size' => strlen( $invalid_payload ),
+		'index_sha256' => hash( 'sha256', $invalid_payload ),
+		'index_stats' => array( 'fias_keys' => 0, 'kladr_keys' => 0, 'name_keys' => 0 ),
+	)
+);
+$invalid_structure_failed = $importer->step( (string) $invalid_structure_job['job_id'], 1 );
+dpd_import_assert( 'failed' === (string) ( $invalid_structure_failed['phase'] ?? '' ) && str_contains( (string) ( $invalid_structure_failed['last_message'] ?? '' ), 'invalid' ), 'invalid serialized index structure fails import before CSV processing.' );
+dpd_import_assert_public_state_redacted( $invalid_structure_failed, 'invalid structure failure response is redacted' );
+dpd_import_assert( $index_failure_snapshot === $GLOBALS['wpdb']->delivery_codes && 0 === (int) ( $state->current()['rows_read'] ?? -1 ), 'invalid index structure leaves rows and mappings untouched.' );
+$importer->reset();
+$GLOBALS['wpdb']->delivery_codes = array();
 
 $header = $parser->inspect_header( $path );
 dpd_import_assert( ! array_key_exists( 'total_rows', $header ), 'inspect_header does not perform a full-row count' );
@@ -455,9 +531,10 @@ $import_path = (string) $internal['file_path'];
 $upload_index_path = (string) $internal['index_path'];
 dpd_import_assert( 'ready' === (string) $job['phase'], 'start creates ready import job' );
 dpd_import_assert( '' !== $stage_table && isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'start creates staging table' );
-dpd_import_assert( ! array_key_exists( 'stage_table', $job ) && ! array_key_exists( 'file_path', $job ), 'public state hides internal paths and stage table' );
-dpd_import_assert( ! array_key_exists( 'delete_file_on_finish', $job ), 'public state hides delete_file_on_finish flag' );
+dpd_import_assert_public_state_redacted( $job, 'start public state hides internal paths and index metadata' );
 dpd_import_assert( true === (bool) $internal['delete_file_on_finish'], 'manual upload marks imported temp file for deletion' );
+dpd_import_assert( 1 === (int) ( $internal['index_format_version'] ?? 0 ) && (int) ( $internal['index_size'] ?? 0 ) > 0 && preg_match( '/^[a-f0-9]{64}$/', (string) ( $internal['index_sha256'] ?? '' ) ), 'internal state stores serialized index integrity metadata' );
+dpd_import_assert( is_array( $internal['index_stats'] ?? null ) && (int) ( $internal['index_stats']['fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['kladr_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['name_keys'] ?? 0 ) > 0, 'internal state stores serialized index stats' );
 dpd_import_assert( (int) $internal['file_size'] > 0, 'start stores file_size for progress' );
 dpd_import_assert( 0 === (int) $internal['total_rows'], 'start does not pre-count total CSV rows' );
 dpd_import_assert( (float) $job['percent_complete'] > 0, 'start progress is calculated from byte_offset and file_size' );
@@ -544,8 +621,16 @@ dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage
 $invalid_upload = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_NO_FILE, 'tmp_name' => '', 'name' => 'broken.csv' ) );
 $invalid_upload_report = $settings->last_geography_import_report();
 dpd_import_assert( 'failed' === (string) ( $invalid_upload['phase'] ?? '' ) && 'error' === (string) ( $invalid_upload['status'] ?? '' ), 'invalid manual upload returns failed/error state.' );
+dpd_import_assert_public_state_redacted( $invalid_upload, 'invalid upload failure response is redacted' );
 dpd_import_assert( 'manual' === (string) ( $invalid_upload_report['source'] ?? '' ) && 0 === (int) ( $invalid_upload_report['ru_rows'] ?? -1 ) && 0 === (int) ( $invalid_upload_report['finalized_mappings'] ?? -1 ), 'invalid upload failed report starts from zero counters instead of previous success counters.' );
 dpd_import_assert( 'failed' === (string) ( $invalid_upload_report['phase'] ?? '' ) && 'error' === (string) ( $invalid_upload_report['status'] ?? '' ), 'invalid upload replaces previous success report with terminal failed/error report.' );
+
+$copy_failure = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => sys_get_temp_dir(), 'name' => 'broken-copy.csv' ) );
+$copy_failure_report = $settings->last_geography_import_report();
+dpd_import_assert( 'failed' === (string) ( $copy_failure['phase'] ?? '' ) && 'error' === (string) ( $copy_failure['status'] ?? '' ), 'manual upload copy failure returns failed/error state.' );
+dpd_import_assert( str_contains( (string) ( $copy_failure['last_message'] ?? '' ), 'unable to copy uploaded CSV' ), 'manual upload copy failure uses sanitized public message.' );
+dpd_import_assert_public_state_redacted( $copy_failure, 'copy failure response is redacted' );
+dpd_import_assert( 'failed' === (string) ( $copy_failure_report['phase'] ?? '' ) && 'error' === (string) ( $copy_failure_report['status'] ?? '' ) && 0 === (int) ( $copy_failure_report['finalized_mappings'] ?? -1 ), 'copy failure replaces previous report with zero-counter failed/error report.' );
 
 $warning_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-warning-' );
 file_put_contents( $warning_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
@@ -593,6 +678,7 @@ while ( in_array( (string) ( $failure_job['phase'] ?? '' ), array( 'ready', 'imp
 $GLOBALS['wpdb']->fail_dpd_stage_finalize_clear = false;
 dpd_import_assert( 'failed' === (string) $state->current()['phase'], 'finalization SQL failure marks import job failed' );
 dpd_import_assert( str_contains( (string) $state->current()['last_message'], 'DPD geography finalization failed' ), 'finalization SQL failure reports diagnostic message' );
+dpd_import_assert_public_state_redacted( $failure_job, 'clear finalization failure response is redacted' );
 dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $failure_stage ] ), 'failed finalization keeps staging table for reset/retry diagnostics' );
 $failure_report = $settings->last_geography_import_report();
 dpd_import_assert( 'error' === (string) ( $state->current()['status'] ?? '' ) && 'error' === (string) ( $failure_report['status'] ?? '' ), 'clear failure state and report use error status.' );
@@ -613,9 +699,31 @@ while ( in_array( (string) ( $upsert_failure_job['phase'] ?? '' ), array( 'ready
 }
 $GLOBALS['wpdb']->fail_dpd_stage_finalize_upsert = false;
 dpd_import_assert( 'failed' === (string) $state->current()['phase'] && 'error' === (string) ( $state->current()['status'] ?? '' ), 'upsert failure after clear marks import failed/error.' );
+dpd_import_assert_public_state_redacted( $upsert_failure_job, 'upsert finalization failure response is redacted' );
 dpd_import_assert( $success_snapshot === $GLOBALS['wpdb']->delivery_codes, 'upsert failure rolls back clear and preserves working delivery_codes snapshot.' );
 dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $upsert_failure_stage ] ), 'upsert failure keeps staging table for diagnostics.' );
 dpd_import_assert( 'failed' === (string) ( $settings->last_geography_import_report()['phase'] ?? '' ) && 'error' === (string) ( $settings->last_geography_import_report()['status'] ?? '' ), 'upsert failure report is terminal failed/error.' );
+$importer->reset();
+
+$GLOBALS['wpdb']->delivery_codes = $count_failure_snapshot = array(
+	array( 'location_id' => 1, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-16 01:10:00' ),
+	array( 'location_id' => 777, 'dpd_city_id' => '77777777', 'updated_at' => '2026-06-16 01:10:00' ),
+);
+$count_failure_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-count-failure-' );
+file_put_contents( $count_failure_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$count_failure_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $count_failure_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$count_failure_stage = (string) $state->current()['stage_table'];
+$GLOBALS['wpdb']->fail_dpd_stage_candidate_change_count = true;
+while ( in_array( (string) ( $count_failure_job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
+	$count_failure_job = $importer->step( (string) $count_failure_job['job_id'], 10000 );
+}
+$GLOBALS['wpdb']->fail_dpd_stage_candidate_change_count = false;
+dpd_import_assert( 'failed' === (string) ( $count_failure_job['phase'] ?? '' ) && 'error' === (string) ( $count_failure_job['status'] ?? '' ), 'candidate-change count SQL failure marks import failed/error.' );
+dpd_import_assert( str_contains( (string) ( $count_failure_job['last_message'] ?? '' ), 'candidate change count failed' ), 'candidate-change count SQL failure is reported.' );
+dpd_import_assert_public_state_redacted( $count_failure_job, 'count finalization failure response is redacted' );
+dpd_import_assert( $count_failure_snapshot === $GLOBALS['wpdb']->delivery_codes, 'count SQL failure leaves working mappings unchanged.' );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $count_failure_stage ] ), 'count SQL failure keeps staging table for diagnostics.' );
+dpd_import_assert( 'failed' === (string) ( $settings->last_geography_import_report()['phase'] ?? '' ) && 'error' === (string) ( $settings->last_geography_import_report()['status'] ?? '' ), 'count SQL failure report is terminal failed/error.' );
 $importer->reset();
 
 $commit_stage = $stage->table_name_for_job( 'commit-failure' );
@@ -641,6 +749,7 @@ unset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ (string) $missing_stage_int
 $missing_stage_failed = $importer->step( (string) $missing_stage_job['job_id'], 1 );
 $missing_stage_report = $settings->last_geography_import_report();
 dpd_import_assert( 'failed' === (string) ( $missing_stage_failed['phase'] ?? '' ) && 'error' === (string) ( $missing_stage_failed['status'] ?? '' ), 'missing staging table fails active import job.' );
+dpd_import_assert_public_state_redacted( $missing_stage_failed, 'missing stage failure response is redacted' );
 dpd_import_assert( 'failed' === (string) ( $missing_stage_report['phase'] ?? '' ) && 'error' === (string) ( $missing_stage_report['status'] ?? '' ) && (string) ( $missing_stage_report['last_message'] ?? '' ) === (string) ( $missing_stage_failed['last_message'] ?? '' ), 'missing stage failure is saved as current terminal report.' );
 $importer->reset();
 
@@ -792,5 +901,10 @@ dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source
 $migration_0043_source = file_get_contents( __DIR__ . '/../../database/migrations/0043_allow_external_locations_without_gar_fias.php' );
 dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'gar_object_id BIGINT(20) UNSIGNED NULL' ) && str_contains( $migration_0043_source, 'fias_id CHAR(36) NULL' ), 'migration 0043 keeps GAR/FIAS nullable for external locations.' );
 dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'WHERE gar_object_id = 0' ) && str_contains( $migration_0043_source, "TRIM(fias_id) = ''" ) && str_contains( $migration_0043_source, "gar_id = ''" ), 'migration 0043 normalizes placeholder GAR/FIAS values idempotently.' );
+$import_service_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportService.php' );
+dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, 'LOCK_EX' ) && str_contains( $import_service_source, 'hash_file( \'sha256\'' ) && str_contains( $import_service_source, 'allowed_classes\' => false' ), 'DPD geography serialized location index is persisted and loaded with integrity checks.' );
+dpd_import_assert( is_string( $import_service_source ) && ! str_contains( $import_service_source, 'is_array( $loaded ) ? $loaded : array()' ), 'DPD geography index load no longer falls back to an empty index on corrupt payloads.' );
+$stage_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php' );
+dpd_import_assert( is_string( $stage_source ) && str_contains( $stage_source, 'get_count_or_throw' ) && ! str_contains( $stage_source, '(int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$safe_stage}' ), 'DPD geography finalization count queries fail closed instead of coercing SQL errors to zero.' );
 
 echo "DPD geography import smoke OK\n";
