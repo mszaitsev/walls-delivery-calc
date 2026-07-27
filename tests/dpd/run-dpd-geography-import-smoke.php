@@ -726,7 +726,7 @@ function dpd_run_lookup_import( DpdForeignIdentityLookupWpdb $db, string $csv, D
 	$state = new DpdGeographyImportStateService();
 	$importer = new DpdGeographyImportService(
 		new DpdGeographyCsvParser(),
-		new DpdGeographyMatcher( $index ),
+		new DpdGeographyMatcher( $index, $locations ),
 		$index,
 		$state,
 		new DpdGeographyStageRepository( $db ),
@@ -912,7 +912,7 @@ $state = new DpdGeographyImportStateService();
 $stage = new DpdGeographyStageRepository( $GLOBALS['wpdb'] );
 $importer = new DpdGeographyImportService(
 	new DpdGeographyCsvParser(),
-	new DpdGeographyMatcher( $index ),
+	new DpdGeographyMatcher( $index, $location_repository ),
 	$index,
 	$state,
 	$stage,
@@ -921,6 +921,55 @@ $importer = new DpdGeographyImportService(
 	$settings
 );
 $parser = new DpdGeographyCsvParser();
+
+delete_option( DpdGeographyImportLockService::OPTION_NAME );
+$large_db = new wpdb();
+for ( $i = 1; $i <= 6000; ++$i ) {
+	$large_db->locations[] = array(
+		'id' => 300000 + $i,
+		'fias_id' => sprintf( '%08d-aaaa-bbbb-cccc-%012d', $i, $i ),
+		'city_fias_id' => '',
+		'gar_id' => (string) ( 300000 + $i ),
+		'gar_object_id' => 300000 + $i,
+		'kladr_id' => sprintf( '540%010d', $i ),
+		'country_code' => 'RU',
+		'region_code' => '54',
+		'region_name' => 'LargeRegion',
+		'district_name' => '',
+		'city_name' => 'LargeCity' . $i,
+		'city_type' => 'g',
+		'settlement_name' => 'LargeCity' . $i,
+		'place_name' => 'LargeCity' . $i,
+		'place_type' => 'g',
+		'display_name' => 'LargeCity' . $i,
+		'active' => 1,
+	);
+}
+$large_db->locations[] = $GLOBALS['wpdb']->locations[0];
+$large_locations = new LocationRepository( $large_db );
+$large_index = new DpdLocationIndex( $large_locations );
+$large_state = new DpdGeographyImportStateService();
+$large_stage = new DpdGeographyStageRepository( $large_db );
+$large_codes = new LocationDeliveryCodeRepository( $large_db );
+$large_importer = new DpdGeographyImportService(
+	new DpdGeographyCsvParser(),
+	new DpdGeographyMatcher( $large_index, $large_locations ),
+	$large_index,
+	$large_state,
+	$large_stage,
+	$large_locations,
+	$large_codes,
+	$settings
+);
+$large_csv = implode( "\n", array_slice( explode( "\n", $csv ), 0, 2 ) );
+$large_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-large-index-' );
+file_put_contents( $large_path, mb_convert_encoding( $large_csv, 'Windows-1251', 'UTF-8' ) );
+$large_report = $large_importer->import_file( $large_path, 'cli', 'large-index.csv' );
+@unlink( $large_path );
+dpd_import_assert( 'finished' === (string) ( $large_report['phase'] ?? '' ) && 'success' === (string) ( $large_report['status'] ?? '' ) && '49455627' === $large_codes->get_dpd_city_id( 92468 ), 'large DPD geography fixture imports through compact separated FIAS index without metadata blow-up.' );
+dpd_import_assert( ! property_exists( DpdLocationIndex::class, 'location_meta' ), 'DPD geography compact index has no location_meta property after build.' );
+dpd_import_assert( ! array_key_exists( 'locations', $large_index->export() ), 'DPD geography compact index export has no per-location metadata map.' );
+delete_option( DpdGeographyImportLockService::OPTION_NAME );
 
 delete_option( DpdGeographyImportLockService::OPTION_NAME );
 $lock_service = new DpdGeographyImportLockService();
@@ -985,7 +1034,7 @@ $empty_index_rows = $index_sql_repository->dpd_location_index_rows();
 dpd_import_assert( array() === $empty_index_rows, 'production DPD location index rows allow a successful empty SQL page.' );
 $empty_sql_index = new DpdLocationIndex( $index_sql_repository );
 $empty_sql_index->build( 100 );
-dpd_import_assert( array( 'own_fias' => array(), 'city_fias' => array(), 'kladr' => array(), 'name' => array(), 'locations' => array() ) === DpdLocationIndex::validate_export( $empty_sql_index->export() ), 'legitimate empty DPD location index export remains structurally valid.' );
+dpd_import_assert( array( 'own_fias' => array(), 'city_fias' => array(), 'kladr' => array(), 'name' => array() ) === DpdLocationIndex::validate_export( $empty_sql_index->export() ), 'legitimate empty DPD location index export remains structurally valid.' );
 
 $first_page_db = new DpdIndexQueryFailureWpdb();
 $first_page_db->delivery_codes = $first_page_snapshot = array(
@@ -997,7 +1046,7 @@ $first_page_stage = new DpdGeographyStageRepository( $first_page_db );
 $first_page_locations = new LocationRepository( $first_page_db );
 $first_page_codes = new LocationDeliveryCodeRepository( $first_page_db );
 $first_page_index = new DpdLocationIndex( $first_page_locations );
-$first_page_importer = new DpdGeographyImportService( new DpdGeographyCsvParser(), new DpdGeographyMatcher( $first_page_index ), $first_page_index, $first_page_state, $first_page_stage, $first_page_locations, $first_page_codes, $settings );
+$first_page_importer = new DpdGeographyImportService( new DpdGeographyCsvParser(), new DpdGeographyMatcher( $first_page_index, $first_page_locations ), $first_page_index, $first_page_state, $first_page_stage, $first_page_locations, $first_page_codes, $settings );
 $first_page_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-index-page-fail-' );
 file_put_contents( $first_page_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
 $first_page_failed = $first_page_importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $first_page_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
@@ -1306,7 +1355,7 @@ dpd_import_assert( 'ready' === (string) $job['phase'], 'start creates ready impo
 dpd_import_assert( '' !== $stage_table && isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'start creates staging table' );
 dpd_import_assert_public_state_redacted( $job, 'start public state hides internal paths and index metadata' );
 dpd_import_assert( true === (bool) $internal['delete_file_on_finish'], 'manual upload marks imported temp file for deletion' );
-dpd_import_assert( 2 === (int) ( $internal['index_format_version'] ?? 0 ) && (int) ( $internal['index_size'] ?? 0 ) > 0 && preg_match( '/^[a-f0-9]{64}$/', (string) ( $internal['index_sha256'] ?? '' ) ), 'internal state stores serialized index integrity metadata' );
+dpd_import_assert( 3 === (int) ( $internal['index_format_version'] ?? 0 ) && (int) ( $internal['index_size'] ?? 0 ) > 0 && preg_match( '/^[a-f0-9]{64}$/', (string) ( $internal['index_sha256'] ?? '' ) ), 'internal state stores serialized index integrity metadata' );
 dpd_import_assert( is_array( $internal['index_stats'] ?? null ) && (int) ( $internal['index_stats']['fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['own_fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['kladr_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['name_keys'] ?? 0 ) > 0, 'internal state stores serialized index stats' );
 dpd_import_assert( (int) $internal['file_size'] > 0, 'start stores file_size for progress' );
 dpd_import_assert( 0 === (int) $internal['total_rows'], 'start does not pre-count total CSV rows' );

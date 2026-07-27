@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyImportService {
 	private const DEFAULT_STEP_LIMIT = 3000;
-	private const INDEX_FORMAT_VERSION = 2;
+	private const INDEX_FORMAT_VERSION = 3;
 	private const LOCK_BUSY_RETRY_MS = 1500;
 	private const STEP_LOCK_TTL_SECONDS = 600;
 	private const START_LOCK_TTL_SECONDS = 1800;

@@ -157,9 +157,10 @@ $GLOBALS['wpdb']->locations = array(
 	),
 );
 
-$index = new DpdLocationIndex( new LocationRepository( $GLOBALS['wpdb'] ) );
+$locations = new LocationRepository( $GLOBALS['wpdb'] );
+$index = new DpdLocationIndex( $locations );
 $index->build( 2 );
-$matcher = new DpdGeographyMatcher( $index );
+$matcher = new DpdGeographyMatcher( $index, $locations );
 
 $own_shadow_match = $matcher->match( array( 'country_code' => 'RU', 'fias' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'region' => 'Novosibirskaya', 'district' => '', 'settlement' => 'Novosibirsk', 'settlement_type' => 'g' ) );
 dpd_location_index_assert( 'matched' === $own_shadow_match['status'] && 'own_fias' === $own_shadow_match['method'] && 10 === (int) $own_shadow_match['location_id'], 'own FIAS wins over a different row using the same GUID as city_fias_id.' );
@@ -177,7 +178,9 @@ dpd_location_index_assert( array() === $index->match_own_fias( '33333333-2222-33
 $stats = $index->stats();
 dpd_location_index_assert( (int) $stats['own_fias_keys'] > 0 && (int) $stats['city_fias_keys'] > 0, 'index stats report separated own and city FIAS buckets.' );
 $export = $index->export();
-$loaded = new DpdLocationIndex( new LocationRepository( $GLOBALS['wpdb'] ) );
+dpd_location_index_assert( ! property_exists( DpdLocationIndex::class, 'location_meta' ), 'DPD location index no longer stores per-location metadata.' );
+dpd_location_index_assert( ! array_key_exists( 'locations', $export ), 'DPD location index export no longer serializes per-location metadata.' );
+$loaded = new DpdLocationIndex( $locations );
 $loaded->load( $export );
 dpd_location_index_assert( 10 === $loaded->match_kladr( '5400000100000' ), 'export/load preserves KLADR index' );
 dpd_location_index_assert( array( 10 ) === $loaded->match_own_fias( '8dea00e3-9aab-4d8e-887c-ef2aaa546456' ) && array( 14 ) === $loaded->match_city_fias( '8dea00e3-9aab-4d8e-887c-ef2aaa546456' ), 'export/load preserves separated FIAS indexes.' );

@@ -384,7 +384,7 @@ final class Plugin {
 		$this->container->register( DpdGeographyDiagnosticService::class, fn(): DpdGeographyDiagnosticService => new DpdGeographyDiagnosticService( $this->container->get( DpdCityResolver::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( DpdGeographyCsvParser::class, fn(): DpdGeographyCsvParser => new DpdGeographyCsvParser() );
 		$this->container->register( DpdLocationIndex::class, fn(): DpdLocationIndex => new DpdLocationIndex( $this->container->get( LocationRepository::class ) ) );
-		$this->container->register( DpdGeographyMatcher::class, fn(): DpdGeographyMatcher => new DpdGeographyMatcher( $this->container->get( DpdLocationIndex::class ) ) );
+		$this->container->register( DpdGeographyMatcher::class, fn(): DpdGeographyMatcher => new DpdGeographyMatcher( $this->container->get( DpdLocationIndex::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( DpdGeographyImportStateService::class, fn(): DpdGeographyImportStateService => new DpdGeographyImportStateService() );
 		$this->container->register( DpdGeographyImportLockService::class, fn(): DpdGeographyImportLockService => new DpdGeographyImportLockService() );
 		$this->container->register( DpdGeographyStageRepository::class, fn(): DpdGeographyStageRepository => new DpdGeographyStageRepository() );

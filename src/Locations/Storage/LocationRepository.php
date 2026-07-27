@@ -122,6 +122,66 @@ final class LocationRepository {
 		return $this->find_one( 'id', $id, '%d' );
 	}
 
+	/**
+	 * @param array<int,int> $ids
+	 * @return array<int,Location>
+	 */
+	public function find_locations_by_ids( array $ids ): array {
+		$ids = array_values(
+			array_unique(
+				array_filter(
+					array_map( 'intval', $ids ),
+					static fn( int $id ): bool => $id > 0
+				)
+			)
+		);
+		sort( $ids, SORT_NUMERIC );
+		if ( array() === $ids ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool => in_array( (int) ( $row['id'] ?? 0 ), $ids, true )
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
+
+			return $this->rows_to_locations( array_map( fn( array $row ): array => $this->join_region_for_test_double( $row ), $rows ) );
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$sql = $this->wpdb->prepare(
+			"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+			FROM {$this->table_name()} l
+			LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+			WHERE l.id IN ({$placeholders})
+			ORDER BY l.id ASC",
+			...$ids
+		);
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new RuntimeException( 'Location lookup by ids failed: SQL preparation returned an invalid result' );
+		}
+
+		$this->wpdb->last_error = '';
+		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		if ( '' !== (string) $this->wpdb->last_error ) {
+			$this->throw_sql_error( 'Location lookup by ids failed' );
+		}
+		if ( ! is_array( $rows ) ) {
+			throw new RuntimeException( 'Location lookup by ids failed: invalid SQL result' );
+		}
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				throw new RuntimeException( 'Location lookup by ids failed: invalid row structure' );
+			}
+		}
+
+		return $this->rows_to_locations( $rows );
+	}
+
 	public function find_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '', string $district_name = '', string $place_type = '' ): ?Location {
 		$matches = $this->find_foreign_by_place_identity_matches( $country_code, $place_name, $region_name, $district_name, $place_type );
 

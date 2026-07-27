@@ -18,8 +18,6 @@ final class DpdLocationIndex {
 	private array $kladr = array();
 	/** @var array<string,int> */
 	private array $name = array();
-	/** @var array<int,array{country_code:string,active:bool,region:string,district:string,name:string,type:string}> */
-	private array $location_meta = array();
 
 	public function __construct(
 		private LocationRepository $locations
@@ -34,7 +32,6 @@ final class DpdLocationIndex {
 		$this->city_fias = array();
 		$this->kladr = array();
 		$this->name = array();
-		$this->location_meta = array();
 		$offset = 0;
 		do {
 			$rows = $this->locations->dpd_location_index_rows( $chunk_size, $offset );
@@ -47,7 +44,7 @@ final class DpdLocationIndex {
 	}
 
 	/**
-	 * @return array{own_fias:array<string,array<int,int>>,city_fias:array<string,array<int,int>>,kladr:array<string,int>,name:array<string,int>,locations:array<int,array<string,mixed>>}
+	 * @return array{own_fias:array<string,array<int,int>>,city_fias:array<string,array<int,int>>,kladr:array<string,int>,name:array<string,int>}
 	 */
 	public function export(): array {
 		return array(
@@ -55,13 +52,12 @@ final class DpdLocationIndex {
 			'city_fias' => $this->city_fias,
 			'kladr' => $this->kladr,
 			'name' => $this->name,
-			'locations' => $this->location_meta,
 		);
 	}
 
 	/**
 	 * @param array<string,mixed> $data
-	 * @return array{own_fias:array<string,array<int,int>>,city_fias:array<string,array<int,int>>,kladr:array<string,int>,name:array<string,int>,locations:array<int,array{country_code:string,active:bool,region:string,district:string,name:string,type:string}>}
+	 * @return array{own_fias:array<string,array<int,int>>,city_fias:array<string,array<int,int>>,kladr:array<string,int>,name:array<string,int>}
 	 */
 	public static function validate_export( array $data ): array {
 		$validated = array();
@@ -114,24 +110,6 @@ final class DpdLocationIndex {
 				$validated[ $bucket ][ trim( $key ) ] = $id;
 			}
 		}
-		if ( ! array_key_exists( 'locations', $data ) || ! is_array( $data['locations'] ) ) {
-			throw new \InvalidArgumentException( 'DPD location index payload is invalid: missing map locations.' );
-		}
-		$validated['locations'] = array();
-		foreach ( $data['locations'] as $key => $value ) {
-			if ( ! is_numeric( $key ) || (int) $key <= 0 || ! is_array( $value ) ) {
-				throw new \InvalidArgumentException( 'DPD location index payload is invalid: malformed location metadata.' );
-			}
-			$validated['locations'][ (int) $key ] = array(
-				'country_code' => strtoupper( trim( (string) ( $value['country_code'] ?? '' ) ) ),
-				'active' => ! empty( $value['active'] ),
-				'region' => trim( (string) ( $value['region'] ?? '' ) ),
-				'district' => trim( (string) ( $value['district'] ?? '' ) ),
-				'name' => trim( (string) ( $value['name'] ?? '' ) ),
-				'type' => trim( (string) ( $value['type'] ?? '' ) ),
-			);
-		}
-
 		return $validated;
 	}
 
@@ -144,7 +122,6 @@ final class DpdLocationIndex {
 		$this->city_fias = $validated['city_fias'];
 		$this->kladr = $validated['kladr'];
 		$this->name = $validated['name'];
-		$this->location_meta = $validated['locations'];
 	}
 
 	/**
@@ -176,47 +153,6 @@ final class DpdLocationIndex {
 		return $this->lookup( $this->name, $this->name_key( $region, $district, $name, $type ) );
 	}
 
-	/**
-	 * @param array<int,int> $location_ids
-	 * @param array<string,string> $row
-	 * @return array<int,int>
-	 */
-	public function disambiguate_fias_candidates( array $location_ids, array $row ): array {
-		$row_country = strtoupper( trim( (string) ( $row['country_code'] ?? 'RU' ) ) );
-		$row_region = $this->normalize_text( (string) ( $row['region'] ?? '' ) );
-		$row_district = $this->normalize_text( (string) ( $row['district'] ?? '' ) );
-		$row_name = $this->normalize_text( (string) ( $row['settlement'] ?? '' ) );
-		$row_type = $this->normalize_type( (string) ( $row['settlement_type'] ?? '' ) );
-		$matches = array();
-		foreach ( $location_ids as $location_id ) {
-			$metadata = $this->location_meta[ $location_id ] ?? null;
-			if ( ! is_array( $metadata ) || empty( $metadata['active'] ) ) {
-				continue;
-			}
-			if ( '' !== $row_country && $row_country !== (string) $metadata['country_code'] ) {
-				continue;
-			}
-			if ( '' !== $row_name && $row_name !== (string) $metadata['name'] ) {
-				continue;
-			}
-			if ( '' !== $row_type && '' !== (string) $metadata['type'] && $row_type !== (string) $metadata['type'] ) {
-				continue;
-			}
-			if ( '' !== $row_region && '' !== (string) $metadata['region'] && $row_region !== (string) $metadata['region'] ) {
-				continue;
-			}
-			if ( '' !== $row_district && '' !== (string) $metadata['district'] && $row_district !== (string) $metadata['district'] ) {
-				continue;
-			}
-			$matches[] = $location_id;
-		}
-
-		$matches = array_values( array_unique( $matches ) );
-		sort( $matches, SORT_NUMERIC );
-
-		return $matches;
-	}
-
 	public function is_ambiguous( int $location_id ): bool {
 		return self::AMBIGUOUS === $location_id;
 	}
@@ -242,7 +178,6 @@ final class DpdLocationIndex {
 		if ( $location_id <= 0 ) {
 			return;
 		}
-		$this->location_meta[ $location_id ] = $this->location_metadata( $row );
 		$key = $this->normalize_guid( (string) ( $row['fias_id'] ?? '' ) );
 		if ( '' !== $key ) {
 			$this->add_candidate( $this->own_fias, $key, $location_id );
@@ -262,24 +197,6 @@ final class DpdLocationIndex {
 		if ( '' !== $key ) {
 			$this->add_unique( $this->name, $key, $location_id );
 		}
-	}
-
-	/**
-	 * @param array<string,mixed> $row
-	 * @return array{country_code:string,active:bool,region:string,district:string,name:string,type:string}
-	 */
-	private function location_metadata( array $row ): array {
-		$name = $this->first_non_empty( $row, array( 'place_name', 'settlement_name', 'city_name' ) );
-		$type = $this->first_non_empty( $row, array( 'place_type', 'settlement_type', 'city_type' ) );
-
-		return array(
-			'country_code' => strtoupper( trim( (string) ( $row['country_code'] ?? 'RU' ) ) ),
-			'active' => 1 === (int) ( $row['active'] ?? 1 ),
-			'region' => $this->normalize_text( (string) ( $row['region_name'] ?? '' ) ),
-			'district' => $this->normalize_text( (string) ( $row['district_name'] ?? '' ) ),
-			'name' => $this->normalize_text( $name ),
-			'type' => $this->normalize_type( $type ),
-		);
 	}
 
 	/**
