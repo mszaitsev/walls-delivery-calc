@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.128.18
+Version: 0.128.19
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 
@@ -19,6 +19,7 @@ The browser-driven DPD Geography import uses separate AJAX contracts for read-on
 ## Canonical Requirements
 
 - City search uses the local locations database and should prefer exact and region-relevant matches.
+- Checkout may display contextual local-location labels, but the selected WooCommerce city value must be the own typed place only; region, district, country, and canonical city/place values travel separately in hidden metadata and session context.
 - Fallback typed cities may be used at checkout but must not be silently promoted into the canonical locations database.
 - Courier addresses are normalized when possible; fallback address text is allowed when the normalizer is unavailable or cannot match.
 - Pickup selection stores only fields needed for checkout and carrier shipment creation.

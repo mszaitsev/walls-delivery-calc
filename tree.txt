@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 0000004B A0AC:74BD
+Volume serial number is 000000CF A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -814,6 +814,7 @@ C:.
     |       run-cdek-tariffs-sync-smoke.php
     |
     +---checkout
+    |       run-checkout-city-selector-smoke.js
     |       run-checkout-location-picker-smoke.php
     |       run-checkout-smoke.php
     |       run-pickup-map-lifecycle-smoke.js
@@ -837,8 +838,8 @@ C:.
     |       run-dpd-documents-smoke.php
     |       run-dpd-event-sync-smoke.php
     |       run-dpd-foundation-smoke.php
-    |       run-dpd-geography-import-smoke.php
     |       run-dpd-geography-import-runner-smoke.js
+    |       run-dpd-geography-import-smoke.php
     |       run-dpd-location-index-smoke.php
     |       run-dpd-order-recalculation-smoke.php
     |       run-dpd-parcel-builder-smoke.php

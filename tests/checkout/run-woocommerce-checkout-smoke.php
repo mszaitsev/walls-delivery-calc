@@ -253,6 +253,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Normalization\AddressNormalizerInterface;
+use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
@@ -375,7 +376,7 @@ function wc_checkout_pickup_map_initial_context( array $rates, array $city_conte
 	$session->save_rates( $rates );
 	$session->save_city_context( $city_context );
 	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
-	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.18' ), new SettingsRepository() );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.19' ), new SettingsRepository() );
 	$method = new ReflectionMethod( $checkout, 'initial_context' );
 	$method->setAccessible( true );
 	$context = $method->invoke( $checkout );
@@ -896,6 +897,119 @@ $manual_context = $manual_session->city_context();
 wc_checkout_smoke_assert( 'BY' === (string) ( $manual_context['country_code'] ?? '' ) && 'Минск' === (string) ( $manual_context['city_name'] ?? '' ), 'Manual BY checkout city context must preserve country and city when local BY location is absent.' );
 wc_checkout_smoke_assert( 'Минская область' === (string) ( $manual_context['region_name'] ?? '' ), 'Manual BY checkout city context must preserve shipping_state region.' );
 wc_checkout_smoke_assert( '' === (string) ( $manual_context['postcode'] ?? '' ), 'Manual BY checkout city context must not autofill postcode from RU namesake.' );
+
+$checkout_formatter = LocationDisplayNameFormatter::from_rules( array() );
+$formatter_minsk = Location::from_array(
+	array(
+		'id' => 210003,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'область',
+		'district_name' => 'Минский',
+		'district_type' => 'р-н',
+		'city_name' => 'Минск',
+		'city_type' => 'г',
+		'settlement_name' => 'Минск',
+		'settlement_type' => 'г',
+		'place_name' => 'Минск',
+		'place_type' => 'г',
+		'display_name' => 'Минская обл., Минский р-н, г Минск',
+		'active' => true,
+	)
+);
+$formatter_dzerzhinsk = Location::from_array(
+	array(
+		'id' => 210005,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'область',
+		'district_name' => 'Дзержинский',
+		'district_type' => 'р-н',
+		'city_name' => 'Дзержинск',
+		'city_type' => 'г',
+		'settlement_name' => 'Дзержинск',
+		'settlement_type' => 'г',
+		'place_name' => 'Дзержинск',
+		'place_type' => 'г',
+		'display_name' => 'Минская обл., Дзержинский р-н, г Дзержинск',
+		'active' => true,
+	)
+);
+$formatter_aleksandrovo = Location::from_array(
+	array(
+		'id' => 228315,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'область',
+		'district_name' => 'Минский',
+		'district_type' => 'р-н',
+		'settlement_name' => 'Александрово',
+		'settlement_type' => 'д',
+		'place_name' => 'Александрово',
+		'place_type' => 'д',
+		'display_name' => 'Минская обл., Минский р-н, д Александрово',
+		'active' => true,
+	)
+);
+wc_checkout_smoke_assert( 'г Минск - Минский р-н, Минская область' === $checkout_formatter->format_checkout_location_option( $formatter_minsk ), 'BY Minsk picker option must keep contextual district and region.' );
+wc_checkout_smoke_assert( 'г Минск' === $checkout_formatter->format_checkout_city_value( $formatter_minsk ), 'BY Minsk checkout city_value must be own city only.' );
+wc_checkout_smoke_assert( 'Минская область' === $checkout_formatter->format_checkout_state_value( $formatter_minsk ), 'BY Minsk checkout state_value must be region only.' );
+wc_checkout_smoke_assert( 'г Дзержинск' === $checkout_formatter->format_checkout_city_value( $formatter_dzerzhinsk ), 'BY Dzerzhinsk checkout city_value must be own city only.' );
+wc_checkout_smoke_assert( 'д Александрово' === $checkout_formatter->format_checkout_city_value( $formatter_aleksandrovo ), 'BY Aleksandrovo checkout city_value must preserve village type.' );
+
+$selected_location_session = new CheckoutSessionManager();
+$selected_location_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$selected_location_session
+);
+$selected_location_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_state' => 'Минская область',
+		'shipping_city' => 'г Минск',
+		'shipping_postcode' => '',
+		'shipping_address_1' => 'проспект Независимости',
+		'wdc_platform_location_id' => '210003',
+		'wdc_platform_location_country_code' => 'BY',
+		'wdc_platform_location_city_name' => 'Минск',
+		'wdc_platform_location_city_type' => 'г',
+		'wdc_platform_location_place_name' => 'Минск',
+		'wdc_platform_location_place_type' => 'г',
+		'wdc_platform_location_district_name' => 'Минский',
+		'wdc_platform_location_district_type' => 'р-н',
+		'wdc_platform_location_region_name' => 'Минская',
+		'wdc_platform_location_region_type' => 'обл.',
+		'wdc_platform_location_display_name' => 'Минская обл., Минский р-н, г Минск',
+		'wdc_platform_location_selected_source' => 'modal',
+	)
+);
+$selected_location_context = $selected_location_session->city_context();
+wc_checkout_smoke_assert( 'BY' === (string) ( $selected_location_context['country_code'] ?? '' ) && '210003' === (string) ( $selected_location_context['location_id'] ?? '' ), 'Hidden BY selected location must save local DB city context.' );
+wc_checkout_smoke_assert( 'Минск' === (string) ( $selected_location_context['city_name'] ?? '' ) && 'Минск' === (string) ( $selected_location_context['settlement_name'] ?? '' ), 'Hidden BY selected location must keep canonical city/settlement names without type or hierarchy.' );
+wc_checkout_smoke_assert( 'Минская' === (string) ( $selected_location_context['region_name'] ?? '' ), 'Hidden BY selected location must keep canonical region name.' );
+wc_checkout_smoke_assert( 'local_db' !== (string) ( $selected_location_context['source'] ?? '' ) || 'г Минск' !== (string) ( $selected_location_context['city_name'] ?? '' ), 'Hidden selected location must not save visible typed city as canonical city_name.' );
+
+$country_mismatch_session = new CheckoutSessionManager();
+$country_mismatch_session->save_city_context( array( 'country_code' => 'RU', 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская область' ) );
+$country_mismatch_runtime = new CheckoutAddressRuntime(
+	new CheckoutAddressNormalizer( new WdcCheckoutSmokeFallbackNormalizer(), new WdcCheckoutSmokeFallbackNormalizer() ),
+	$manual_city_resolver,
+	$country_mismatch_session
+);
+$country_mismatch_runtime->resolve_checkout_address(
+	array(
+		'shipping_country' => 'BY',
+		'shipping_city' => '',
+		'shipping_state' => '',
+		'wdc_platform_location_id' => '101',
+		'wdc_platform_location_country_code' => 'RU',
+		'wdc_platform_location_city_name' => 'Новосибирск',
+		'wdc_platform_location_display_name' => 'Новосибирская обл., г Новосибирск',
+	)
+);
+$country_mismatch_context = $country_mismatch_session->city_context();
+wc_checkout_smoke_assert( 'RU' !== (string) ( $country_mismatch_context['country_code'] ?? '' ) && '101' !== (string) ( $country_mismatch_context['location_id'] ?? '' ), 'Server-side checkout runtime must reject selected location metadata from another country.' );
 
 $large_region_db = new class extends wpdb {
 	public array $locations = array();

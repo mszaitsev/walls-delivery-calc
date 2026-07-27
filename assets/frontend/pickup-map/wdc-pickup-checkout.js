@@ -2138,6 +2138,12 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		resetSelection('location_changed');
 		schedulePrefetch();
 	});
+	document.body.addEventListener('wdc:location-cleared', function () {
+		invalidatePrefetch();
+		updateCurrentContext(contextFromFields());
+		resetSelection('destination_changed');
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+	});
 	document.addEventListener('DOMContentLoaded', boot);
 	document.addEventListener('click', function (event) {
 		var openButton = event.target && event.target.closest ? event.target.closest('[data-wdc-pickup-open]') : null;

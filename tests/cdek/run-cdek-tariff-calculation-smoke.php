@@ -563,6 +563,8 @@ $by_postcode_http->location_responses = array(
 $by_postcode_result = ( new CdekLocationResolver( $by_postcode_client, $by_postcode_settings, new Logger() ) )->resolve( cdek_tariff_location_request_for_country( 'BY', 'Минск', 'Минская область', '220000' ) );
 cdek_tariff_assert( true === (bool) ( $by_postcode_result['success'] ?? false ) && 9220 === (int) ( $by_postcode_result['city_code'] ?? 0 ), 'Production-like BY Minsk city_postcode fixture must resolve CDEK city code 9220.' );
 cdek_tariff_assert( 'city_postcode' === (string) ( $by_postcode_result['selected_attempt_label'] ?? '' ), 'BY Minsk matching postcode must select city_postcode attempt.' );
+$by_postcode_queries = cdek_tariff_location_queries( $by_postcode_http );
+cdek_tariff_assert( 'Минск' === (string) ( $by_postcode_queries[0]['city'] ?? '' ) && ! str_contains( (string) ( $by_postcode_queries[0]['city'] ?? '' ), 'р-н' ), 'CDEK BY Minsk lookup must receive own city name, not checkout hierarchy text.' );
 $by_postcode_candidates = (array) ( $by_postcode_result['attempts'][0]['candidates'] ?? array() );
 cdek_tariff_assert( true === (bool) ( $by_postcode_candidates[0]['accepted'] ?? false ) && true === ( $by_postcode_candidates[0]['postcode_match'] ?? null ), 'CDEK resolver diagnostics must mark accepted BY postcode candidate.' );
 

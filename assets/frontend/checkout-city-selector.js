@@ -25,8 +25,10 @@
 	var locationStore = {};
 	var locationSeq = 0;
 	var lastCountryCode = '';
+	var isClearingCountryFields = false;
 	var hiddenNames = [
 		'wdc_platform_location_id',
+		'wdc_platform_location_country_code',
 		'wdc_platform_location_fias_id',
 		'wdc_platform_location_gar_object_id',
 		'wdc_platform_location_kladr_id',
@@ -74,15 +76,27 @@
 		if ( activeCityField && isUsableField( activeCityField ) ) {
 			return $( activeCityField );
 		}
-		return firstUsableField( [ '#shipping_city', 'input[name="shipping_city"]', '#billing_city', 'input[name="billing_city"]' ] );
+		if ( shippingAddressActive() ) {
+			return firstUsableField( [ '#shipping_city', 'input[name="shipping_city"]', '#billing_city', 'input[name="billing_city"]' ] );
+		}
+
+		return firstUsableField( [ '#billing_city', 'input[name="billing_city"]', '#shipping_city', 'input[name="shipping_city"]' ] );
 	}
 
 	function postcodeField() {
-		return firstUsableField( [ '#shipping_postcode', 'input[name="shipping_postcode"]', '#billing_postcode', 'input[name="billing_postcode"]' ] );
+		if ( shippingAddressActive() ) {
+			return firstUsableField( [ '#shipping_postcode', 'input[name="shipping_postcode"]', '#billing_postcode', 'input[name="billing_postcode"]' ] );
+		}
+
+		return firstUsableField( [ '#billing_postcode', 'input[name="billing_postcode"]', '#shipping_postcode', 'input[name="shipping_postcode"]' ] );
 	}
 
 	function stateField() {
-		return firstUsableField( [ '#shipping_state', 'select[name="shipping_state"]', 'input[name="shipping_state"]', '#billing_state', 'select[name="billing_state"]', 'input[name="billing_state"]' ] );
+		if ( shippingAddressActive() ) {
+			return firstUsableField( [ '#shipping_state', 'select[name="shipping_state"]', 'input[name="shipping_state"]', '#billing_state', 'select[name="billing_state"]', 'input[name="billing_state"]' ] );
+		}
+
+		return firstUsableField( [ '#billing_state', 'select[name="billing_state"]', 'input[name="billing_state"]', '#shipping_state', 'select[name="shipping_state"]', 'input[name="shipping_state"]' ] );
 	}
 
 	function countryField( prefix ) {
@@ -120,16 +134,7 @@
 		var country = currentCountryCode();
 		var supported = localDatabaseAvailable();
 		if ( lastCountryCode && country !== lastCountryCode ) {
-			lastCountryCode = country;
-			activeSearchSeq = ++searchRequestSeq;
-			lastSearchQuery = '';
-			lastSearchForceRegionCode = '';
-			forceRegionCode = '';
-			if ( pickerOpen ) {
-				closePicker();
-			}
-			clearHidden();
-			explicitSelection = false;
+			clearDestinationFieldsForCountryChange( country );
 		}
 		lastCountryCode = country;
 		if ( ! supported ) {
@@ -141,6 +146,54 @@
 			clearHidden();
 		}
 		return supported;
+	}
+
+	function resetSearchState() {
+		window.clearTimeout( timer );
+		window.clearTimeout( autoResolveTimer );
+		activeSearchSeq = ++searchRequestSeq;
+		currentSearchQuery = '';
+		currentSearchForceRegionCode = '';
+		currentBaseQuery = '';
+		lastSearchQuery = '';
+		lastSearchForceRegionCode = '';
+		forceRegionCode = '';
+		locationStore = {};
+		locationSeq = 0;
+		explicitSelection = false;
+	}
+
+	function clearFieldValueSilently( $field ) {
+		if ( ! $field.length ) {
+			return;
+		}
+
+		$field.val( '' );
+	}
+
+	function clearDestinationFieldsForCountryChange( country ) {
+		isClearingCountryFields = true;
+		suppressSearch = true;
+		window.clearTimeout( suppressTimer );
+		resetSearchState();
+		if ( pickerOpen ) {
+			closePicker();
+		}
+		clearHidden();
+		clearFieldValueSilently( cityField() );
+		clearFieldValueSilently( stateField() );
+		clearFieldValueSilently( postcodeField() );
+		document.body.dispatchEvent( new CustomEvent( 'wdc:location-cleared', {
+			detail: {
+				reason: 'country_changed',
+				country_code: country || ''
+			}
+		} ) );
+		$( document.body ).trigger( 'update_checkout' );
+		isClearingCountryFields = false;
+		suppressTimer = window.setTimeout( function () {
+			suppressSearch = false;
+		}, 100 );
 	}
 
 	function checkoutForm( $field ) {
@@ -596,6 +649,7 @@
 		} );
 
 		setHidden( 'wdc_platform_location_id', location.id );
+		setHidden( 'wdc_platform_location_country_code', location.country_code || currentCountryCode() );
 		setHidden( 'wdc_platform_location_fias_id', location.fias_id );
 		setHidden( 'wdc_platform_location_gar_object_id', location.gar_object_id || location.gar_id );
 		setHidden( 'wdc_platform_location_kladr_id', location.kladr_id );
@@ -667,6 +721,10 @@
 	};
 
 	function handleExternalCityChanged( event ) {
+		if ( isClearingCountryFields ) {
+			return;
+		}
+
 		var $field = $( event.target );
 		if ( suppressSearch ) {
 			debug( 'search suppressed', event.type );
@@ -738,7 +796,7 @@
 	}
 
 	function hasSelectedLocation() {
-		return !! ( hiddenValue( 'wdc_platform_location_fias_id' ) && hiddenValue( 'wdc_platform_location_display_name' ) );
+		return !! ( ( hiddenValue( 'wdc_platform_location_id' ) || hiddenValue( 'wdc_platform_location_fias_id' ) ) && hiddenValue( 'wdc_platform_location_display_name' ) );
 	}
 
 	function scheduleAutoResolve() {
@@ -781,7 +839,7 @@
 				return;
 			}
 			if ( response && response.success && 'resolved' === body.status && body.selected ) {
-				if ( hiddenValue( 'wdc_platform_location_fias_id' ) === String( body.selected.fias_id || '' ) ) {
+				if ( hiddenValue( 'wdc_platform_location_id' ) === String( body.selected.id || '' ) || ( hiddenValue( 'wdc_platform_location_fias_id' ) && hiddenValue( 'wdc_platform_location_fias_id' ) === String( body.selected.fias_id || '' ) ) ) {
 					restoreSelectedNotice();
 					return;
 				}
@@ -806,6 +864,9 @@
 	} );
 	$( document.body ).off( 'change.wdcCitySelector blur.wdcCitySelector', '#shipping_state, select[name="shipping_state"], input[name="shipping_state"], #billing_state, select[name="billing_state"], input[name="billing_state"]' );
 	$( document.body ).on( 'change.wdcCitySelector blur.wdcCitySelector', '#shipping_state, select[name="shipping_state"], input[name="shipping_state"], #billing_state, select[name="billing_state"], input[name="billing_state"]', function () {
+		if ( isClearingCountryFields ) {
+			return;
+		}
 		if ( ! isSelecting && ! suppressSearch ) {
 			explicitSelection = false;
 			clearHidden();
