@@ -376,7 +376,7 @@ function wc_checkout_pickup_map_initial_context( array $rates, array $city_conte
 	$session->save_rates( $rates );
 	$session->save_city_context( $city_context );
 	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
-	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.21' ), new SettingsRepository() );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.22' ), new SettingsRepository() );
 	$method = new ReflectionMethod( $checkout, 'initial_context' );
 	$method->setAccessible( true );
 	$context = $method->invoke( $checkout );

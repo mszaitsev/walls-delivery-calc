@@ -221,14 +221,7 @@ final class DpdGeographyImportService {
 	 */
 	public function reset(): array {
 		$current = $this->state->current();
-		$token = $this->lock?->acquire( (string) ( $current['job_id'] ?? 'reset' ), self::STEP_LOCK_TTL_SECONDS );
-		if ( null === $token ) {
-			$state = $this->with_operation_control( $this->state->public_state(), 'busy' );
-			$state['last_message'] = 'DPD geography import step is still running. Try reset again in a few seconds.';
-			return $state;
-		}
 		try {
-			$current = $this->state->current();
 			$stage_table = (string) ( $current['stage_table'] ?? '' );
 			if ( '' !== $stage_table ) {
 				$this->stage->drop( $stage_table );
@@ -236,7 +229,7 @@ final class DpdGeographyImportService {
 			$this->state->reset();
 			return $this->state->public_state();
 		} finally {
-			$this->lock?->release( $token );
+			$this->lock?->force_release();
 		}
 	}
 
