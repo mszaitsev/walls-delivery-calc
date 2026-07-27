@@ -1176,6 +1176,7 @@ dpd_import_assert( 'Минский' === (string) ( $minsk_main['district_name'] 
 dpd_import_assert( 'Минск' === (string) ( $minsk_main['city_name'] ?? '' ) && 'г' === (string) ( $minsk_main['city_type'] ?? '' ), 'production BY Minsk uses settlement as city instead of main_city=Минск2.' );
 dpd_import_assert( 'Минск' === (string) ( $minsk_main['settlement_name'] ?? '' ) && 'г' === (string) ( $minsk_main['settlement_type'] ?? '' ), 'production BY Minsk settlement fields are canonical.' );
 dpd_import_assert( 'Минск' === (string) ( $minsk_main['place_name'] ?? '' ) && 'г' === (string) ( $minsk_main['place_type'] ?? '' ), 'production BY Minsk place fields are canonical.' );
+dpd_import_assert( 'Минская обл., Минский р-н, г Минск' === (string) ( $minsk_main['display_name'] ?? '' ), 'production BY Minsk display_name omits country prefix and keeps region/district/type.' );
 dpd_import_assert( false === str_contains( (string) ( $minsk_main['display_name'] ?? '' ), 'Минск2' ) && false === str_contains( (string) ( $minsk_main['display_name'] ?? '' ), '119049' ), 'production BY Minsk display_name excludes DPD main_city and postal_code.' );
 foreach ( array( '10000001', '196058326', '10000003', '10000004', '196058327' ) as $foreign_dpd_id ) {
 	$foreign_location_id = $repository->find_location_id_by_dpd_city_id( $foreign_dpd_id );
@@ -1455,6 +1456,103 @@ dpd_import_assert( file_exists( $cli_path ), 'CLI wrapper keeps existing CSV on 
 dpd_import_assert( ! file_exists( (string) $cli_state['index_path'] ), 'CLI wrapper deletes serialized index on finish' );
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ (string) $cli_state['stage_table'] ] ), 'CLI wrapper deletes staging table on finish' );
 @unlink( $cli_path );
+
+$repeat_locations_snapshot = $GLOBALS['wpdb']->locations;
+$repeat_delivery_snapshot = $GLOBALS['wpdb']->delivery_codes;
+$foreign_header = 'ID НП;Код страны;Регион;Район;Основной город;Населённый пункт;Тип НП;Индекс НП;ФИАС;Код КЛАДР';
+
+$GLOBALS['wpdb']->locations = array();
+$GLOBALS['wpdb']->delivery_codes = array();
+$alexandrovo_rows = array_fill( 0, 7, '30000001;BY;Минская;Минский;Минск2;Александрово;д;220010;;BY60011003000' );
+$alexandrovo_csv = $foreign_header . "\n" . implode( "\n", $alexandrovo_rows );
+$alexandrovo_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-alex-clean-' );
+file_put_contents( $alexandrovo_path, mb_convert_encoding( $alexandrovo_csv, 'Windows-1251', 'UTF-8' ) );
+$alexandrovo_report = $importer->import_file( $alexandrovo_path, 'cli', 'Alexandrovo.csv' );
+$alexandrovo_locations = array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => 'BY' === (string) ( $row['country_code'] ?? '' ) && 'Минская' === (string) ( $row['region_name'] ?? '' ) && 'Минский' === (string) ( $row['district_name'] ?? '' ) && 'Александрово' === (string) ( $row['place_name'] ?? '' ) && 'д' === (string) ( $row['place_type'] ?? '' ) ) );
+dpd_import_assert( 1 === count( $alexandrovo_locations ), 'seven identical clean DPD rows for BY Alexandrovo create one canonical foreign location.' );
+dpd_import_assert( 1 === (int) ( $alexandrovo_report['foreign_locations_inserted'] ?? 0 ) && 0 === (int) ( $alexandrovo_report['foreign_mapping_conflicts'] ?? 0 ), 'identical Alexandrovo rows insert one location and do not create mapping conflict.' );
+dpd_import_assert( 'Минская обл., Минский р-н, д Александрово' === (string) ( $alexandrovo_locations[0]['display_name'] ?? '' ), 'BY Alexandrovo display_name omits country prefix and keeps region/district/type.' );
+$alexandrovo_id = (int) ( $alexandrovo_locations[0]['id'] ?? 0 );
+$alexandrovo_repeat_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-alex-repeat-' );
+file_put_contents( $alexandrovo_repeat_path, mb_convert_encoding( $alexandrovo_csv, 'Windows-1251', 'UTF-8' ) );
+$alexandrovo_repeat_report = $importer->import_file( $alexandrovo_repeat_path, 'cli', 'Alexandrovo.csv' );
+$alexandrovo_repeat_locations = array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => 'BY' === (string) ( $row['country_code'] ?? '' ) && 'Минская' === (string) ( $row['region_name'] ?? '' ) && 'Минский' === (string) ( $row['district_name'] ?? '' ) && 'Александрово' === (string) ( $row['place_name'] ?? '' ) && 'д' === (string) ( $row['place_type'] ?? '' ) ) );
+dpd_import_assert( 1 === count( $alexandrovo_repeat_locations ) && $alexandrovo_id === (int) ( $alexandrovo_repeat_locations[0]['id'] ?? 0 ) && 0 === (int) ( $alexandrovo_repeat_report['foreign_locations_inserted'] ?? -1 ), 'repeat Alexandrovo import reuses the same canonical location id without inserting duplicates.' );
+@unlink( $alexandrovo_path );
+@unlink( $alexandrovo_repeat_path );
+
+$GLOBALS['wpdb']->locations = array();
+$GLOBALS['wpdb']->delivery_codes = array();
+$alexandrovo_conflict_csv = $foreign_header . "\n"
+	. '30000011;BY;Минская;Минский;Минск2;Александрово;д;220010;;BY60011003000' . "\n"
+	. '30000012;BY;Минская;Минский;Минск2;Александрово;д;220011;;BY60011003000';
+$alexandrovo_conflict_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-alex-conflict-' );
+file_put_contents( $alexandrovo_conflict_path, mb_convert_encoding( $alexandrovo_conflict_csv, 'Windows-1251', 'UTF-8' ) );
+$alexandrovo_conflict_report = $importer->import_file( $alexandrovo_conflict_path, 'cli', 'AlexandrovoConflict.csv' );
+$alexandrovo_conflict_locations = array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => 'BY' === (string) ( $row['country_code'] ?? '' ) && 'Минская' === (string) ( $row['region_name'] ?? '' ) && 'Минский' === (string) ( $row['district_name'] ?? '' ) && 'Александрово' === (string) ( $row['place_name'] ?? '' ) && 'д' === (string) ( $row['place_type'] ?? '' ) ) );
+dpd_import_assert( 1 === count( $alexandrovo_conflict_locations ) && 1 === (int) ( $alexandrovo_conflict_report['foreign_mapping_conflicts'] ?? 0 ), 'same Alexandrovo identity with different DPD IDs creates a staging conflict without duplicate locations.' );
+@unlink( $alexandrovo_conflict_path );
+
+$GLOBALS['wpdb']->locations = array();
+foreach ( array( 228315, 228316, 231660, 231670, 238125, 247802, 252230 ) as $duplicate_id ) {
+	$GLOBALS['wpdb']->locations[] = array(
+		'id' => $duplicate_id,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'обл.',
+		'district_name' => 'Минский',
+		'district_type' => 'р-н',
+		'city_name' => '',
+		'city_type' => '',
+		'settlement_name' => 'Александрово',
+		'settlement_type' => 'д',
+		'place_name' => 'Александрово',
+		'place_type' => 'д',
+		'display_name' => 'BY, Минская обл., Минский р-н, д Александрово',
+		'searchable_text' => 'by минская обл минский р-н д александрово',
+		'gar_object_id' => null,
+		'fias_id' => null,
+		'gar_id' => '',
+		'kladr_id' => '',
+		'active' => 1,
+	);
+}
+$GLOBALS['wpdb']->delivery_codes = array( array( 'location_id' => 231660, 'dpd_city_id' => '30000021', 'updated_at' => 'old-mapped' ) );
+$existing_duplicates_csv = $foreign_header . "\n" . '30000021;BY;Минская;Минский;Минск2;Александрово;д;220010;;BY60011003000';
+$existing_duplicates_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-alex-existing-' );
+file_put_contents( $existing_duplicates_path, mb_convert_encoding( $existing_duplicates_csv, 'Windows-1251', 'UTF-8' ) );
+$existing_duplicates_report = $importer->import_file( $existing_duplicates_path, 'cli', 'AlexandrovoExistingDuplicates.csv' );
+$existing_duplicate_ids = array_values( array_filter( array_map( static fn( array $row ): int => 'BY' === (string) ( $row['country_code'] ?? '' ) && 'Александрово' === (string) ( $row['place_name'] ?? '' ) ? (int) ( $row['id'] ?? 0 ) : 0, $GLOBALS['wpdb']->locations ) ) );
+dpd_import_assert( 7 === count( $existing_duplicate_ids ) && in_array( 231660, $existing_duplicate_ids, true ), 'existing seven Alexandrovo duplicates are not destructively merged or expanded.' );
+dpd_import_assert( 1 === (int) ( $existing_duplicates_report['foreign_duplicate_identity_rows'] ?? 0 ) && 0 === (int) ( $existing_duplicates_report['errors_total'] ?? -1 ), 'existing duplicate foreign identity rows increment diagnostic counter without becoming row errors.' );
+$mapped_duplicate_row = array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => 231660 === (int) ( $row['id'] ?? 0 ) ) )[0] ?? array();
+dpd_import_assert( 'Минская обл., Минский р-н, д Александрово' === (string) ( $mapped_duplicate_row['display_name'] ?? '' ), 'existing mapped duplicate canonical row is updated with display_name without country prefix.' );
+@unlink( $existing_duplicates_path );
+
+$GLOBALS['wpdb']->delivery_codes = array();
+$lowest_duplicates_csv = $foreign_header . "\n" . '30000022;BY;Минская;Минский;Минск2;Александрово;д.;220010;;BY60011003000';
+$lowest_duplicates_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-alex-lowest-' );
+file_put_contents( $lowest_duplicates_path, mb_convert_encoding( $lowest_duplicates_csv, 'Windows-1251', 'UTF-8' ) );
+$lowest_duplicates_report = $importer->import_file( $lowest_duplicates_path, 'cli', 'AlexandrovoLowestDuplicate.csv' );
+dpd_import_assert( 7 === count( array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => 'BY' === (string) ( $row['country_code'] ?? '' ) && 'Александрово' === (string) ( $row['place_name'] ?? '' ) ) ) ) && '30000022' === $repository->get_dpd_city_id( 228315 ), 'existing duplicate resolver falls back to the lowest positive location id and treats д. as д.' );
+dpd_import_assert( 1 === (int) ( $lowest_duplicates_report['foreign_duplicate_identity_rows'] ?? 0 ), 'lowest-id duplicate resolution increments duplicate identity diagnostics.' );
+@unlink( $lowest_duplicates_path );
+
+$GLOBALS['wpdb']->locations = array();
+$GLOBALS['wpdb']->delivery_codes = array();
+$identity_distinct_csv = $foreign_header . "\n"
+	. '30000031;BY;Минская;Минский;Минск2;Александрово;деревня;220010;;BY60011003000' . "\n"
+	. '30000032;BY;Минская;Дзержинский;Минск2;Александрово;д;220011;;BY60011004000' . "\n"
+	. '30000033;BY;Минская;Минский;Минск2;Александрово;п;220012;;BY60011005000';
+$identity_distinct_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-alex-distinct-' );
+file_put_contents( $identity_distinct_path, mb_convert_encoding( $identity_distinct_csv, 'Windows-1251', 'UTF-8' ) );
+$identity_distinct_report = $importer->import_file( $identity_distinct_path, 'cli', 'AlexandrovoDistinct.csv' );
+$identity_distinct_locations = array_values( array_filter( $GLOBALS['wpdb']->locations, static fn( array $row ): bool => 'BY' === (string) ( $row['country_code'] ?? '' ) && 'Александрово' === (string) ( $row['place_name'] ?? '' ) ) );
+dpd_import_assert( 3 === count( $identity_distinct_locations ) && 3 === (int) ( $identity_distinct_report['foreign_locations_inserted'] ?? 0 ), 'different districts and different place types remain distinct foreign identities while деревня normalizes to д.' );
+@unlink( $identity_distinct_path );
+
+$GLOBALS['wpdb']->locations = $repeat_locations_snapshot;
+$GLOBALS['wpdb']->delivery_codes = $repeat_delivery_snapshot;
 
 $reset_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-reset-' );
 file_put_contents( $reset_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );

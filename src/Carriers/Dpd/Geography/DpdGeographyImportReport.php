@@ -27,6 +27,7 @@ final class DpdGeographyImportReport {
 			'foreign_locations_updated' => 0,
 			'foreign_save_failed' => 0,
 			'foreign_mapping_conflicts' => 0,
+			'foreign_duplicate_identity_rows' => 0,
 			'skipped_non_ru' => 0,
 			'skipped_invalid' => 0,
 			'matched_by_fias' => 0,

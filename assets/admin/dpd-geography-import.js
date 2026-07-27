@@ -110,6 +110,7 @@
 			'foreign_locations_updated',
 			'foreign_save_failed',
 			'foreign_mapping_conflicts',
+			'foreign_duplicate_identity_rows',
 			'skipped_non_ru',
 			'skipped_invalid',
 			'matched_by_fias',

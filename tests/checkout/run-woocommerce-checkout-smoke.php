@@ -139,6 +139,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return $query;
 		}
 
+		public function esc_like( string $text ): string {
+			return addcslashes( $text, '_%\\' );
+		}
+
 		public function insert( string $table, array $data, array $format = array() ): bool {
 			$this->insert_id++;
 
@@ -371,7 +375,7 @@ function wc_checkout_pickup_map_initial_context( array $rates, array $city_conte
 	$session->save_rates( $rates );
 	$session->save_city_context( $city_context );
 	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
-	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.15' ), new SettingsRepository() );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.16' ), new SettingsRepository() );
 	$method = new ReflectionMethod( $checkout, 'initial_context' );
 	$method->setAccessible( true );
 	$context = $method->invoke( $checkout );
@@ -892,6 +896,140 @@ $manual_context = $manual_session->city_context();
 wc_checkout_smoke_assert( 'BY' === (string) ( $manual_context['country_code'] ?? '' ) && 'Минск' === (string) ( $manual_context['city_name'] ?? '' ), 'Manual BY checkout city context must preserve country and city when local BY location is absent.' );
 wc_checkout_smoke_assert( 'Минская область' === (string) ( $manual_context['region_name'] ?? '' ), 'Manual BY checkout city context must preserve shipping_state region.' );
 wc_checkout_smoke_assert( '' === (string) ( $manual_context['postcode'] ?? '' ), 'Manual BY checkout city context must not autofill postcode from RU namesake.' );
+
+$large_region_db = new class extends wpdb {
+	public array $locations = array();
+};
+$large_region_db->locations[] = array(
+	'id' => 210003,
+	'country_code' => 'BY',
+	'region_name' => 'Минская',
+	'region_type' => 'обл.',
+	'district_name' => 'Минский',
+	'district_type' => 'р-н',
+	'city_name' => 'Минск',
+	'city_type' => 'г',
+	'settlement_name' => 'Минск',
+	'settlement_type' => 'г',
+	'place_name' => 'Минск',
+	'place_type' => 'г',
+	'display_name' => 'Минская обл., Минский р-н, г Минск',
+	'searchable_text' => 'by минская обл минский р-н г минск',
+	'active' => 1,
+);
+$large_region_db->locations[] = array(
+	'id' => 210004,
+	'country_code' => 'RU',
+	'region_name' => 'Московская область',
+	'city_name' => 'Минск',
+	'place_name' => 'Минск',
+	'place_type' => 'г',
+	'display_name' => 'Московская область, г Минск',
+	'searchable_text' => 'московская область г минск',
+	'active' => 1,
+);
+$large_region_db->locations[] = array(
+	'id' => 210005,
+	'country_code' => 'BY',
+	'region_name' => 'Минская',
+	'region_type' => 'обл.',
+	'district_name' => 'Дзержинский',
+	'district_type' => 'р-н',
+	'city_name' => 'Дзержинск',
+	'city_type' => 'г',
+	'settlement_name' => 'Дзержинск',
+	'settlement_type' => 'г',
+	'place_name' => 'Дзержинск',
+	'place_type' => 'г',
+	'display_name' => 'Минская обл., Дзержинский р-н, г Дзержинск',
+	'searchable_text' => 'by минская обл дзержинский р-н г дзержинск',
+	'active' => 1,
+);
+$large_region_db->locations[] = array(
+	'id' => 210006,
+	'country_code' => 'RU',
+	'region_name' => 'Новосибирская',
+	'region_type' => 'обл.',
+	'district_name' => '',
+	'city_name' => 'Новосибирск',
+	'city_type' => 'г',
+	'settlement_name' => 'Новосибирск',
+	'place_name' => 'Новосибирск',
+	'place_type' => 'г',
+	'display_name' => 'Новосибирск',
+	'searchable_text' => 'новосибирская обл г новосибирск',
+	'fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456',
+	'gar_object_id' => 210006,
+	'active' => 1,
+);
+foreach ( range( 1, 1200 ) as $index ) {
+	$name = sprintf( 'А-региональный-%04d', $index );
+	$large_region_db->locations[] = array(
+		'id' => 211000 + $index,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'обл.',
+		'district_name' => 'Минский',
+		'district_type' => 'р-н',
+		'city_name' => '',
+		'city_type' => '',
+		'settlement_name' => $name,
+		'settlement_type' => 'д',
+		'place_name' => $name,
+		'place_type' => 'д',
+		'display_name' => 'Минская обл., Минский р-н, д ' . $name,
+		'searchable_text' => 'by минская обл минский р-н д ' . mb_strtolower( $name, 'UTF-8' ),
+		'active' => 1,
+	);
+}
+$large_region_search = new CheckoutLocationSearch( new LocationSearchService( new LocationRepository( $large_region_db ) ) );
+$large_minsk = $large_region_search->search_for_picker( 'минск', 100, 10, '', 'BY' );
+$large_minsk_ids = array_map( static fn( Location $location ): int => (int) $location->id, $large_minsk['items'] ?? array() );
+wc_checkout_smoke_assert( 210003 === (int) ( $large_minsk_ids[0] ?? 0 ), 'BY Minsk checkout search must keep exact own-name result ahead of large Minsk-region context matches.' );
+wc_checkout_smoke_assert( ! in_array( 210004, $large_minsk_ids, true ), 'BY checkout search must exclude RU namesake when country_code=BY.' );
+$large_region = $large_region_search->search_for_picker( 'минская область', 100, 10, '', 'BY' );
+wc_checkout_smoke_assert( (int) ( $large_region['total'] ?? 0 ) > 10 && ! empty( $large_region['groups'] ), 'BY region search must still return Minsk-region context results and groups.' );
+$large_dzerzhinsk = $large_region_search->search_for_picker( 'дзержинск', 100, 10, '', 'BY' );
+wc_checkout_smoke_assert( 210005 === (int) ( ( $large_dzerzhinsk['items'][0] ?? null ) instanceof Location ? $large_dzerzhinsk['items'][0]->id : 0 ), 'BY Dzerzhinsk checkout search keeps exact own-name result.' );
+$ru_novosibirsk = $large_region_search->search_for_picker( 'новосибирск', 100, 10, '', 'RU' );
+wc_checkout_smoke_assert( 210006 === (int) ( ( $ru_novosibirsk['items'][0] ?? null ) instanceof Location ? $ru_novosibirsk['items'][0]->id : 0 ), 'RU checkout exact city search still works with country_code=RU.' );
+$ru_moscow_region = $large_region_search->search_for_picker( 'московская область', 100, 10, '', 'RU' );
+wc_checkout_smoke_assert( in_array( 210004, array_map( static fn( Location $location ): int => (int) $location->id, $ru_moscow_region['items'] ?? array() ), true ), 'RU region search still returns region-context locations.' );
+
+$production_search_db = new class extends wpdb {
+	public array $direct_rows = array();
+	public array $broad_rows = array();
+	public array $queries = array();
+	public array $last_prepare_args = array();
+
+	public function __construct() {
+		unset( $this->locations );
+	}
+
+	public function prepare( string $query, mixed ...$args ): string {
+		$this->queries[] = $query;
+		$this->last_prepare_args = $args;
+
+		return $query;
+	}
+
+	public function get_results( string $query, mixed $output = null ): array {
+		unset( $output );
+		if ( str_contains( $query, 'l.region_name LIKE' ) || str_contains( $query, 'l.district_name LIKE' ) ) {
+			return $this->broad_rows;
+		}
+
+		return $this->direct_rows;
+	}
+};
+$production_search_db->direct_rows = array( $large_region_db->locations[0] );
+$production_search_db->broad_rows = array_slice( $large_region_db->locations, 4, 900 );
+$production_picker = new CheckoutLocationSearch( new LocationSearchService( new LocationRepository( $production_search_db ) ) );
+$production_minsk = $production_picker->search_for_picker( 'минск', 100, 10, '', 'BY' );
+$production_minsk_ids = array_map( static fn( Location $location ): int => (int) $location->id, $production_minsk['items'] ?? array() );
+$production_sql = implode( "\n", $production_search_db->queries );
+wc_checkout_smoke_assert( 210003 === (int) ( $production_minsk_ids[0] ?? 0 ), 'production-path checkout search includes direct BY Minsk before broad region candidates.' );
+wc_checkout_smoke_assert( str_contains( $production_sql, 'l.place_name LIKE' ) && str_contains( $production_sql, 'l.city_name LIKE' ) && str_contains( $production_sql, 'l.settlement_name LIKE' ) && str_contains( $production_sql, 'l.region_name LIKE' ), 'production-path checkout search runs separate direct own-name and broad hierarchy candidate queries.' );
 
 $settings = new SettingsRepository();
 $settings->set( 'checkout_sort_mode', RateSorter::CHEAPEST );

@@ -372,9 +372,11 @@ final class DpdGeographyImportService {
 		$district_type = '' !== $district ? 'р-н' : '';
 		$is_city = $this->foreign_place_type_is_city( $place_type );
 		$location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
-		$existing = null !== $location_id ? $this->locations->find_by_id( $location_id ) : null;
-		if ( ! $existing instanceof Location ) {
-			$existing = $this->locations->find_foreign_by_place_identity( $country, $place, $region, $district, $place_type );
+		$mapped_existing = null !== $location_id ? $this->locations->find_by_id( $location_id ) : null;
+		$resolution = $this->resolve_foreign_canonical_location( $country, $place, $region, $district, $place_type, $dpd_city_id );
+		$existing = $resolution['location'] instanceof Location ? $resolution['location'] : $mapped_existing;
+		if ( (int) $resolution['match_count'] > 1 ) {
+			$this->inc( $patch, 'foreign_duplicate_identity_rows' );
 		}
 		if ( ! $existing instanceof Location ) {
 			$existing = $this->locations->find_legacy_foreign_by_place_identity( $country, $place, $region );
@@ -451,6 +453,9 @@ final class DpdGeographyImportService {
 	private function normalize_foreign_place_type( string $type ): string {
 		$type = trim( mb_strtolower( str_replace( 'ё', 'е', $type ), 'UTF-8' ) );
 		$type = trim( str_replace( '.', '', $type ) );
+		if ( in_array( $type, array( 'd', 'д', 'деревня', 'derevnya' ), true ) ) {
+			return 'д';
+		}
 		return match ( $type ) {
 			'g', 'г', 'город' => 'г',
 			'p', 'п' => 'п',
@@ -479,8 +484,45 @@ final class DpdGeographyImportService {
 		return trim( $value );
 	}
 
+	/**
+	 * @return array{location:?Location,duplicate_ids:array<int,int>,match_count:int,method:string}
+	 */
+	private function resolve_foreign_canonical_location( string $country, string $place, string $region, string $district, string $place_type, string $dpd_city_id ): array {
+		$matches = $this->locations->find_foreign_by_place_identity_matches( $country, $place, $region, $district, $place_type );
+		$count = count( $matches );
+		if ( 0 === $count ) {
+			return array( 'location' => null, 'duplicate_ids' => array(), 'match_count' => 0, 'method' => 'new' );
+		}
+		if ( 1 === $count ) {
+			return array( 'location' => $matches[0], 'duplicate_ids' => array(), 'match_count' => 1, 'method' => 'single' );
+		}
+
+		$duplicate_ids = array_values(
+			array_filter(
+				array_map( static fn( Location $location ): int => null !== $location->id ? (int) $location->id : 0, $matches ),
+				static fn( int $id ): bool => $id > 0
+			)
+		);
+		$mapped_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
+		if ( null !== $mapped_id ) {
+			foreach ( $matches as $location ) {
+				if ( null !== $location->id && (int) $location->id === $mapped_id ) {
+					return array( 'location' => $location, 'duplicate_ids' => $duplicate_ids, 'match_count' => $count, 'method' => 'existing_dpd_mapping' );
+				}
+			}
+		}
+
+		usort(
+			$matches,
+			static fn( Location $a, Location $b ): int => ( null !== $a->id && $a->id > 0 ? $a->id : PHP_INT_MAX ) <=> ( null !== $b->id && $b->id > 0 ? $b->id : PHP_INT_MAX )
+		);
+
+		return array( 'location' => $matches[0], 'duplicate_ids' => $duplicate_ids, 'match_count' => $count, 'method' => 'lowest_id' );
+	}
+
 	private function foreign_display_name( string $country, string $region, string $region_type, string $district, string $district_type, string $place, string $place_type ): string {
-		$parts = array( $country );
+		unset( $country );
+		$parts = array();
 		$duplicate_region_city = 'г' === $region_type && $this->normalize_foreign_name_for_compare( $region ) === $this->normalize_foreign_name_for_compare( $place );
 		if ( '' !== trim( $region ) && ! $duplicate_region_city ) {
 			$parts[] = trim( trim( $region ) . ( '' !== trim( $region_type ) ? ' ' . trim( $region_type ) : '' ) );
@@ -571,6 +613,7 @@ final class DpdGeographyImportService {
 			'foreign_locations_updated' => (int) ( $state['foreign_locations_updated'] ?? 0 ),
 			'foreign_save_failed' => (int) ( $state['foreign_save_failed'] ?? 0 ),
 			'foreign_mapping_conflicts' => (int) ( $state['foreign_mapping_conflicts'] ?? 0 ),
+			'foreign_duplicate_identity_rows' => (int) ( $state['foreign_duplicate_identity_rows'] ?? 0 ),
 			'skipped_non_ru' => (int) ( $state['skipped_non_ru'] ?? 0 ),
 			'skipped_invalid' => (int) ( $state['skipped_invalid'] ?? 0 ),
 			'matched_by_fias' => (int) ( $state['matched_by_fias'] ?? 0 ),

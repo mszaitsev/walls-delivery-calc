@@ -123,13 +123,22 @@ final class LocationRepository {
 	}
 
 	public function find_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '', string $district_name = '', string $place_type = '' ): ?Location {
+		$matches = $this->find_foreign_by_place_identity_matches( $country_code, $place_name, $region_name, $district_name, $place_type );
+
+		return 1 === count( $matches ) ? $matches[0] : null;
+	}
+
+	/**
+	 * @return array<int,Location>
+	 */
+	public function find_foreign_by_place_identity_matches( string $country_code, string $place_name, string $region_name = '', string $district_name = '', string $place_type = '' ): array {
 		$country_code = $this->normalize_country_code( $country_code );
 		$place_name = trim( $place_name );
 		$region_name = trim( $region_name );
 		$district_name = trim( $district_name );
 		$place_type = trim( $place_type );
 		if ( '' === $country_code || 'RU' === $country_code || '' === $place_name ) {
-			return null;
+			return array();
 		}
 
 		$place_key = $this->normalize_foreign_identity_value( $place_name );
@@ -148,7 +157,7 @@ final class LocationRepository {
 				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
 			}
 
-			return 1 === count( $matches ) ? $matches[0] : null;
+			return $this->deduplicate_locations_by_id( $matches );
 		}
 
 		$where = array( 'l.active = 1', 'l.country_code = %s' );
@@ -179,7 +188,7 @@ final class LocationRepository {
 			}
 		}
 
-		return 1 === count( $matches ) ? $matches[0] : null;
+		return $this->deduplicate_locations_by_id( $matches );
 	}
 
 	public function find_legacy_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '' ): ?Location {
@@ -715,7 +724,8 @@ final class LocationRepository {
 		}
 
 		if ( $this->has_test_location_rows() ) {
-			$rows = array();
+			$direct_rows = array();
+			$broad_rows = array();
 			foreach ( $this->test_location_rows() as $row ) {
 				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
 					continue;
@@ -726,59 +736,34 @@ final class LocationRepository {
 				if ( '' !== $force_region_code && $force_region_code !== (string) ( $row['region_code'] ?? '' ) ) {
 					continue;
 				}
+				if ( array() === $tokens || $this->row_has_checkout_direct_prefix_match( $row, $tokens ) ) {
+					$direct_rows[] = $this->join_region_for_test_double( $row );
+				}
 				if ( array() === $tokens || $this->row_has_checkout_prefix_match( $row, $tokens ) ) {
-					$rows[] = $this->join_region_for_test_double( $row );
+					$broad_rows[] = $this->join_region_for_test_double( $row );
 				}
 			}
 
-			return $this->rows_to_locations( array_slice( $rows, 0, $limit ) );
+			return $this->rows_to_locations( $this->merge_location_rows_by_id( $direct_rows, $broad_rows, $limit ) );
 		}
 
-		$where = array( 'l.active = 1' );
-		$args = array();
+		$base_where = array( 'l.active = 1' );
+		$base_args = array();
 		if ( '' !== $country_code ) {
-			$where[] = 'l.country_code = %s';
-			$args[] = $country_code;
+			$base_where[] = 'l.country_code = %s';
+			$base_args[] = $country_code;
 		}
 		if ( '' !== $force_region_code ) {
-			$where[] = 'l.region_code = %s';
-			$args[] = $force_region_code;
+			$base_where[] = 'l.region_code = %s';
+			$base_args[] = $force_region_code;
 		}
 
-		if ( array() !== $tokens ) {
-			$token_where = array();
-			foreach ( $tokens as $token ) {
-				foreach ( array( 'region_name', 'district_name', 'city_name', 'place_name', 'settlement_name' ) as $column ) {
-					$token_where[] = "l.{$column} LIKE %s";
-					$args[] = $this->wpdb->esc_like( $token ) . '%';
-				}
-				$token_where[] = 'l.fias_id = %s';
-				$args[] = $token;
-				$token_where[] = 'l.kladr_id = %s';
-				$args[] = $token;
-				if ( is_numeric( $token ) ) {
-					$token_where[] = 'l.gar_object_id = %d';
-					$args[] = (int) $token;
-				}
-			}
-			$where[] = '(' . implode( ' OR ', $token_where ) . ')';
-		}
-		$args[] = $limit;
+		$direct_limit = min( $limit, max( 100, (int) ceil( $limit / 4 ) ) );
+		$broad_limit = $limit;
+		$direct_rows = $this->checkout_hierarchy_query_rows( $base_where, $base_args, $tokens, array( 'place_name', 'city_name', 'settlement_name' ), false, $direct_limit );
+		$broad_rows = $this->checkout_hierarchy_query_rows( $base_where, $base_args, $tokens, array( 'region_name', 'district_name', 'city_name', 'place_name', 'settlement_name' ), true, $broad_limit );
 
-		$rows = $this->wpdb->get_results(
-			$this->wpdb->prepare(
-				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
-				FROM {$this->table_name()} l
-				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE " . implode( ' AND ', $where ) . '
-				ORDER BY l.display_name ASC
-				LIMIT %d',
-				...$args
-			),
-			ARRAY_A
-		);
-
-		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+		return $this->rows_to_locations( $this->merge_location_rows_by_id( $direct_rows, $broad_rows, $limit ) );
 	}
 
 	/**
@@ -1866,6 +1851,128 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @param array<int,array<string,mixed>> $direct_rows
+	 * @param array<int,array<string,mixed>> $broad_rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function merge_location_rows_by_id( array $direct_rows, array $broad_rows, int $limit ): array {
+		$merged = array();
+		foreach ( array_merge( $direct_rows, $broad_rows ) as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$id = (int) ( $row['id'] ?? 0 );
+			$key = $id > 0 ? 'id:' . $id : md5( json_encode( $row ) ?: serialize( $row ) );
+			if ( isset( $merged[ $key ] ) ) {
+				continue;
+			}
+			$merged[ $key ] = $row;
+			if ( count( $merged ) >= $limit ) {
+				break;
+			}
+		}
+
+		return array_values( $merged );
+	}
+
+	/**
+	 * @param array<int,Location> $locations
+	 * @return array<int,Location>
+	 */
+	private function deduplicate_locations_by_id( array $locations ): array {
+		$deduplicated = array();
+		foreach ( $locations as $location ) {
+			$key = null !== $location->id && $location->id > 0 ? 'id:' . $location->id : spl_object_hash( $location );
+			$deduplicated[ $key ] = $location;
+		}
+
+		return array_values( $deduplicated );
+	}
+
+	/**
+	 * @param array<int,string> $base_where
+	 * @param array<int,mixed> $base_args
+	 * @param array<int,string> $tokens
+	 * @param array<int,string> $columns
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function checkout_hierarchy_query_rows( array $base_where, array $base_args, array $tokens, array $columns, bool $include_identifiers, int $limit ): array {
+		$where = $base_where;
+		$args = $base_args;
+		$exact_args = array();
+		$prefix_args = array();
+
+		if ( array() !== $tokens ) {
+			$token_where = array();
+			$exact_parts = array();
+			$prefix_parts = array();
+			foreach ( $tokens as $token ) {
+				foreach ( $columns as $column ) {
+					$token_where[] = "l.{$column} LIKE %s";
+					$args[] = $this->wpdb->esc_like( $token ) . '%';
+					$exact_parts[] = "LOWER(l.{$column}) = %s";
+					$exact_args[] = $token;
+					$prefix_parts[] = "l.{$column} LIKE %s";
+					$prefix_args[] = $this->wpdb->esc_like( $token ) . '%';
+				}
+				if ( $include_identifiers ) {
+					$token_where[] = 'l.fias_id = %s';
+					$args[] = $token;
+					$token_where[] = 'l.kladr_id = %s';
+					$args[] = $token;
+					if ( is_numeric( $token ) ) {
+						$token_where[] = 'l.gar_object_id = %d';
+						$args[] = (int) $token;
+					}
+				}
+			}
+			$where[] = '(' . implode( ' OR ', $token_where ) . ')';
+		}
+
+		$order_sql = '';
+		if ( array() !== $tokens ) {
+			$order_sql = 'CASE
+					WHEN ' . implode( ' OR ', $exact_parts ) . ' THEN 0
+					WHEN ' . implode( ' OR ', $prefix_parts ) . ' THEN 1
+					ELSE 2
+				END, ';
+		}
+
+		$args = array_merge( $args, $exact_args, $prefix_args, array( $limit ) );
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE " . implode( ' AND ', $where ) . "
+				ORDER BY {$order_sql}l.display_name ASC
+				LIMIT %d",
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @param array<int,string> $tokens
+	 */
+	private function row_has_checkout_direct_prefix_match( array $row, array $tokens ): bool {
+		foreach ( $tokens as $token ) {
+			foreach ( array( 'place_name', 'city_name', 'settlement_name' ) as $column ) {
+				$value = $this->normalize_query( (string) ( $row[ $column ] ?? '' ) );
+				if ( '' !== $value && ( $value === $token || str_starts_with( $value, $token ) ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * @param array<string,mixed> $row
 	 * @param array<int,string> $tokens
 	 */
@@ -2066,6 +2173,9 @@ final class LocationRepository {
 
 	private function normalize_foreign_identity_type( string $value ): string {
 		$value = $this->normalize_foreign_identity_value( $value );
+		if ( in_array( $value, array( 'd', 'д', 'деревня', 'derevnya' ), true ) ) {
+			return 'д';
+		}
 		return match ( $value ) {
 			'g', 'г', 'город' => 'г',
 			'p', 'п' => 'п',
