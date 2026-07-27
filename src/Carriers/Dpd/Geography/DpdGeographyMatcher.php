@@ -13,15 +13,34 @@ final class DpdGeographyMatcher {
 
 	/**
 	 * @param array<string,string> $row
-	 * @return array{status:string,method:string,location_id:int}
+	 * @return array{status:string,method:string,location_id:int,resolved_after_fias_disambiguation?:bool,true_fias_ambiguity?:bool}
 	 */
 	public function match( array $row ): array {
-		$location_id = $this->index->match_fias( (string) ( $row['fias'] ?? '' ) );
-		if ( 0 !== $location_id ) {
-			if ( $this->index->is_ambiguous( $location_id ) ) {
-				return array( 'status' => 'ambiguous', 'method' => 'fias', 'location_id' => 0 );
+		$fias = (string) ( $row['fias'] ?? '' );
+		$own_candidates = $this->index->match_own_fias( $fias );
+		if ( 1 === count( $own_candidates ) ) {
+			return $this->matched( 'own_fias', $own_candidates[0] );
+		}
+		if ( count( $own_candidates ) > 1 ) {
+			$resolved = $this->index->disambiguate_fias_candidates( $own_candidates, $row );
+			if ( 1 === count( $resolved ) ) {
+				return array(
+					'status' => 'matched',
+					'method' => 'own_fias',
+					'location_id' => $resolved[0],
+					'resolved_after_fias_disambiguation' => true,
+				);
 			}
-			return $this->matched( 'fias', $location_id );
+
+			return array( 'status' => 'ambiguous', 'method' => 'own_fias', 'location_id' => 0, 'true_fias_ambiguity' => true );
+		}
+
+		$city_candidates = $this->index->match_city_fias( $fias );
+		if ( 1 === count( $city_candidates ) ) {
+			return $this->matched( 'city_fias', $city_candidates[0] );
+		}
+		if ( count( $city_candidates ) > 1 ) {
+			return array( 'status' => 'ambiguous', 'method' => 'city_fias', 'location_id' => 0 );
 		}
 
 		$location_id = $this->index->match_kladr( (string) ( $row['kladr'] ?? '' ) );

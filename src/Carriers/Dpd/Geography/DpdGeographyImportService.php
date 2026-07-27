@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyImportService {
 	private const DEFAULT_STEP_LIMIT = 3000;
-	private const INDEX_FORMAT_VERSION = 1;
+	private const INDEX_FORMAT_VERSION = 2;
 	private const LOCK_BUSY_RETRY_MS = 1500;
 	private const STEP_LOCK_TTL_SECONDS = 600;
 	private const START_LOCK_TTL_SECONDS = 1800;
@@ -321,6 +321,9 @@ final class DpdGeographyImportService {
 		$match = $this->matcher->match( $row );
 		if ( 'ambiguous' === $match['status'] ) {
 			$this->inc( $patch, 'ambiguous' );
+			if ( ! empty( $match['true_fias_ambiguity'] ) ) {
+				$this->inc( $patch, 'true_fias_ambiguity' );
+			}
 			return;
 		}
 		$location_id = (int) ( $match['location_id'] ?? 0 );
@@ -331,6 +334,12 @@ final class DpdGeographyImportService {
 		$method = (string) ( $match['method'] ?? '' );
 		if ( '' !== $method ) {
 			$this->inc( $patch, 'matched_by_' . $method );
+			if ( 'own_fias' === $method || 'city_fias' === $method ) {
+				$this->inc( $patch, 'matched_by_fias' );
+			}
+		}
+		if ( ! empty( $match['resolved_after_fias_disambiguation'] ) ) {
+			$this->inc( $patch, 'resolved_after_fias_disambiguation' );
 		}
 		$result = $this->stage->upsert_candidate( $stage_table, $location_id, $dpd_city_id, $method );
 		if ( 'inserted' === $result ) {
@@ -617,6 +626,10 @@ final class DpdGeographyImportService {
 			'skipped_non_ru' => (int) ( $state['skipped_non_ru'] ?? 0 ),
 			'skipped_invalid' => (int) ( $state['skipped_invalid'] ?? 0 ),
 			'matched_by_fias' => (int) ( $state['matched_by_fias'] ?? 0 ),
+			'matched_by_own_fias' => (int) ( $state['matched_by_own_fias'] ?? 0 ),
+			'matched_by_city_fias' => (int) ( $state['matched_by_city_fias'] ?? 0 ),
+			'resolved_after_fias_disambiguation' => (int) ( $state['resolved_after_fias_disambiguation'] ?? 0 ),
+			'true_fias_ambiguity' => (int) ( $state['true_fias_ambiguity'] ?? 0 ),
 			'matched_by_kladr' => (int) ( $state['matched_by_kladr'] ?? 0 ),
 			'matched_by_name' => (int) ( $state['matched_by_name'] ?? 0 ),
 			'saved_candidates' => (int) ( $state['saved_candidates'] ?? 0 ),
@@ -742,12 +755,17 @@ final class DpdGeographyImportService {
 	}
 
 	/**
-	 * @param array{fias:array<string,int>,kladr:array<string,int>,name:array<string,int>} $index_data
+	 * @param array<string,mixed> $index_data
 	 * @return array<string,int>
 	 */
 	private function index_stats( array $index_data ): array {
+		$own_fias_keys = count( $index_data['own_fias'] ?? array() );
+		$city_fias_keys = count( $index_data['city_fias'] ?? array() );
+
 		return array(
-			'fias_keys' => count( $index_data['fias'] ?? array() ),
+			'fias_keys' => $own_fias_keys + $city_fias_keys,
+			'own_fias_keys' => $own_fias_keys,
+			'city_fias_keys' => $city_fias_keys,
 			'kladr_keys' => count( $index_data['kladr'] ?? array() ),
 			'name_keys' => count( $index_data['name'] ?? array() ),
 		);
@@ -760,6 +778,8 @@ final class DpdGeographyImportService {
 	private function normalize_index_stats( array $stats ): array {
 		return array(
 			'fias_keys' => max( 0, (int) ( $stats['fias_keys'] ?? 0 ) ),
+			'own_fias_keys' => max( 0, (int) ( $stats['own_fias_keys'] ?? 0 ) ),
+			'city_fias_keys' => max( 0, (int) ( $stats['city_fias_keys'] ?? 0 ) ),
 			'kladr_keys' => max( 0, (int) ( $stats['kladr_keys'] ?? 0 ) ),
 			'name_keys' => max( 0, (int) ( $stats['name_keys'] ?? 0 ) ),
 		);

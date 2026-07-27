@@ -746,7 +746,7 @@ $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wdc_dpd_import_options'] = array();
 $GLOBALS['wpdb']->locations = array(
 	array(
-		'id' => 1,
+		'id' => 92468,
 		'fias_id' => '8DEA00E3-9AAB-4D8E-887C-EF2AAA546456',
 		'city_fias_id' => '',
 		'gar_id' => '1',
@@ -762,6 +762,25 @@ $GLOBALS['wpdb']->locations = array(
 		'place_name' => 'Новосибирск',
 		'place_type' => 'г',
 		'display_name' => 'Новосибирск',
+		'active' => 1,
+	),
+	array(
+		'id' => 92469,
+		'fias_id' => '',
+		'city_fias_id' => '8DEA00E3-9AAB-4D8E-887C-EF2AAA546456',
+		'gar_id' => '92469',
+		'gar_object_id' => 92469,
+		'kladr_id' => '',
+		'country_code' => 'RU',
+		'region_code' => '54',
+		'region_name' => 'Новосибирская',
+		'district_name' => 'Тень',
+		'city_name' => 'Новосибирск',
+		'city_type' => 'г',
+		'settlement_name' => 'Тень',
+		'place_name' => 'Тень',
+		'place_type' => 'с',
+		'display_name' => 'Тень',
 		'active' => 1,
 	),
 	array(
@@ -966,7 +985,7 @@ $empty_index_rows = $index_sql_repository->dpd_location_index_rows();
 dpd_import_assert( array() === $empty_index_rows, 'production DPD location index rows allow a successful empty SQL page.' );
 $empty_sql_index = new DpdLocationIndex( $index_sql_repository );
 $empty_sql_index->build( 100 );
-dpd_import_assert( array( 'fias' => array(), 'kladr' => array(), 'name' => array() ) === DpdLocationIndex::validate_export( $empty_sql_index->export() ), 'legitimate empty DPD location index export remains structurally valid.' );
+dpd_import_assert( array( 'own_fias' => array(), 'city_fias' => array(), 'kladr' => array(), 'name' => array(), 'locations' => array() ) === DpdLocationIndex::validate_export( $empty_sql_index->export() ), 'legitimate empty DPD location index export remains structurally valid.' );
 
 $first_page_db = new DpdIndexQueryFailureWpdb();
 $first_page_db->delivery_codes = $first_page_snapshot = array(
@@ -1126,13 +1145,13 @@ file_put_contents( $invalid_structure_path, mb_convert_encoding( $csv, 'Windows-
 $GLOBALS['wpdb']->delivery_codes = $index_failure_snapshot;
 $invalid_structure_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $invalid_structure_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
 $invalid_structure_internal = $state->current();
-$invalid_payload = serialize( array( 'fias' => array(), 'kladr' => 'not-an-array', 'name' => array() ) );
+$invalid_payload = serialize( array( 'own_fias' => array(), 'city_fias' => array(), 'kladr' => 'not-an-array', 'name' => array(), 'locations' => array() ) );
 file_put_contents( (string) $invalid_structure_internal['index_path'], $invalid_payload );
 $state->update(
 	array(
 		'index_size' => strlen( $invalid_payload ),
 		'index_sha256' => hash( 'sha256', $invalid_payload ),
-		'index_stats' => array( 'fias_keys' => 0, 'kladr_keys' => 0, 'name_keys' => 0 ),
+		'index_stats' => array( 'fias_keys' => 0, 'own_fias_keys' => 0, 'city_fias_keys' => 0, 'kladr_keys' => 0, 'name_keys' => 0 ),
 	)
 );
 $invalid_structure_failed = $importer->step( (string) $invalid_structure_job['job_id'], 1 );
@@ -1287,8 +1306,8 @@ dpd_import_assert( 'ready' === (string) $job['phase'], 'start creates ready impo
 dpd_import_assert( '' !== $stage_table && isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'start creates staging table' );
 dpd_import_assert_public_state_redacted( $job, 'start public state hides internal paths and index metadata' );
 dpd_import_assert( true === (bool) $internal['delete_file_on_finish'], 'manual upload marks imported temp file for deletion' );
-dpd_import_assert( 1 === (int) ( $internal['index_format_version'] ?? 0 ) && (int) ( $internal['index_size'] ?? 0 ) > 0 && preg_match( '/^[a-f0-9]{64}$/', (string) ( $internal['index_sha256'] ?? '' ) ), 'internal state stores serialized index integrity metadata' );
-dpd_import_assert( is_array( $internal['index_stats'] ?? null ) && (int) ( $internal['index_stats']['fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['kladr_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['name_keys'] ?? 0 ) > 0, 'internal state stores serialized index stats' );
+dpd_import_assert( 2 === (int) ( $internal['index_format_version'] ?? 0 ) && (int) ( $internal['index_size'] ?? 0 ) > 0 && preg_match( '/^[a-f0-9]{64}$/', (string) ( $internal['index_sha256'] ?? '' ) ), 'internal state stores serialized index integrity metadata' );
+dpd_import_assert( is_array( $internal['index_stats'] ?? null ) && (int) ( $internal['index_stats']['fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['own_fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['kladr_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['name_keys'] ?? 0 ) > 0, 'internal state stores serialized index stats' );
 dpd_import_assert( (int) $internal['file_size'] > 0, 'start stores file_size for progress' );
 dpd_import_assert( 0 === (int) $internal['total_rows'], 'start does not pre-count total CSV rows' );
 dpd_import_assert( (float) $job['percent_complete'] > 0, 'start progress is calculated from byte_offset and file_size' );
@@ -1296,8 +1315,8 @@ dpd_import_assert( ! array_key_exists( 'seen_mappings', $internal ) && ! array_k
 
 $job = $importer->step( (string) $job['job_id'], 1 );
 dpd_import_assert( array() === $GLOBALS['wpdb']->delivery_codes, 'step import does not write directly to working delivery codes table' );
-dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][1] ), 'candidate is saved in staging table' );
-dpd_import_assert( 'candidate' === $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][1]['status'], 'staged candidate has candidate status' );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][92468] ), 'candidate is saved in staging table' );
+dpd_import_assert( 'candidate' === $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][92468]['status'], 'staged candidate has candidate status' );
 
 $job = $importer->step( (string) $job['job_id'], 4 );
 dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][3] ), 'conflicted location exists in staging table' );
@@ -1318,13 +1337,15 @@ dpd_import_assert( 5 === (int) ( $report['foreign_locations_inserted'] ?? 0 ) &&
 dpd_import_assert( 0 === (int) ( $report['foreign_save_failed'] ?? 0 ) && 0 === (int) ( $report['errors_total'] ?? 0 ), 'foreign DPD imports do not hit unique GAR/FIAS SQL failures' );
 dpd_import_assert( 1 === (int) $report['skipped_invalid'], 'import skips rows without DPD city ID' );
 dpd_import_assert( 4 === (int) $report['matched_by_fias'], 'FIAS exact matches are counted before staging conflict filtering' );
+dpd_import_assert( 4 === (int) ( $report['matched_by_own_fias'] ?? 0 ) && 0 === (int) ( $report['matched_by_city_fias'] ?? -1 ), 'own FIAS matches are counted separately and city FIAS fallback is not used for shadowed own FIAS rows.' );
+dpd_import_assert( 0 === (int) ( $report['true_fias_ambiguity'] ?? -1 ), 'shadowed city_fias rows do not create true own-FIAS ambiguity.' );
 dpd_import_assert( 1 === (int) $report['matched_by_kladr'], 'KLADR normalized match is saved' );
 dpd_import_assert( 9 === (int) $report['saved_candidates'], 'non-conflicting RU and foreign rows are staged as candidates before finalization' );
 dpd_import_assert( 8 === (int) $report['finalized_mappings'] && 8 === (int) ( $report['finalized_changes'] ?? 0 ), 'RU candidates and foreign imports are finalized into working delivery codes table with candidate and change counters' );
 dpd_import_assert( 4 === (int) $report['unchanged_mappings'], 'duplicate same DPD city ID is idempotent for RU and foreign rows' );
 dpd_import_assert( 1 === (int) $report['conflicts'], 'different DPD city IDs for one location are treated as conflict' );
 dpd_import_assert( 1 === (int) $report['ambiguous'], 'ambiguous name match is not saved' );
-dpd_import_assert( '49455627' === $repository->get_dpd_city_id( 1 ), 'FIAS match writes dpd_city_id' );
+dpd_import_assert( '49455627' === $repository->get_dpd_city_id( 92468 ), 'Novosibirsk own FIAS match writes dpd_city_id for production location_id=92468' );
 dpd_import_assert( '70000001' === $repository->get_dpd_city_id( 2 ), 'KLADR normalized match writes dpd_city_id' );
 dpd_import_assert( null === $repository->get_dpd_city_id( 3 ), 'conflicted mapping is not saved' );
 dpd_import_assert( null === $repository->get_dpd_city_id( 4 ) && null === $repository->get_dpd_city_id( 5 ), 'ambiguous name mapping is not saved' );
@@ -1409,7 +1430,7 @@ $warning_report = $settings->last_geography_import_report();
 dpd_import_assert( 'finished' === (string) ( $warning_job['phase'] ?? '' ) && 'warning' === (string) ( $warning_job['status'] ?? '' ), 'row-level foreign save errors finish import as warning.' );
 dpd_import_assert( ! empty( $warning_report['stale_cleanup_skipped'] ) && 0 === (int) ( $warning_report['stale_cleared'] ?? -1 ), 'warning import skips stale cleanup and reports zero stale clears.' );
 dpd_import_assert( '196058326' === $repository->get_dpd_city_id( 161634 ) && '77777777' === $repository->get_dpd_city_id( 777 ), 'warning import preserves prior working mappings missing from staging.' );
-dpd_import_assert( '49455627' === $repository->get_dpd_city_id( 1 ), 'warning import still applies successful candidate mappings.' );
+dpd_import_assert( '49455627' === $repository->get_dpd_city_id( 92468 ), 'warning import still applies successful candidate mappings.' );
 dpd_import_assert( (int) ( $warning_report['errors_total'] ?? 0 ) > 0 && (int) ( $warning_report['foreign_save_failed'] ?? 0 ) > 0, 'warning report includes row-level error counters.' );
 dpd_import_assert( (string) ( $warning_report['phase'] ?? '' ) === (string) ( $warning_job['phase'] ?? '' ) && (string) ( $warning_report['status'] ?? '' ) === (string) ( $warning_job['status'] ?? '' ), 'warning report matches terminal state.' );
 

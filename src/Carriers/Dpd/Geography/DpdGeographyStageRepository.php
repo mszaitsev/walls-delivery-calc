@@ -327,7 +327,7 @@ final class DpdGeographyStageRepository {
 
 	private function normalize_match_method( string $method ): string {
 		$method = preg_replace( '/[^a-z0-9_]/', '', strtolower( $method ) ) ?? '';
-		return in_array( $method, array( 'fias', 'kladr', 'name', 'foreign' ), true ) ? $method : 'unknown';
+		return in_array( $method, array( 'fias', 'own_fias', 'city_fias', 'kladr', 'name', 'foreign' ), true ) ? $method : 'unknown';
 	}
 
 	private function now(): string {

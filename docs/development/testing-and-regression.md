@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.128.19
+Version: 0.128.20
 
 ## Commands
 
@@ -22,7 +22,7 @@ Checkout pickup map lifecycle changes should also run `node tests/checkout/run-p
 
 Checkout city selector changes should also run `node tests/checkout/run-checkout-city-selector-smoke.js`. This smoke executes the frontend selector with a minimal DOM/timer harness and protects selected local-location field application, canonical hidden fields, country-change clearing, first-load and same-country no-op behavior, active shipping/billing scope handling, and the single `update_checkout` recalculation contract.
 
-DPD Geography browser-import lifecycle changes should also run `node tests/dpd/run-dpd-geography-import-runner-smoke.js` in addition to `php tests/dpd/run-dpd-geography-import-smoke.php`. The Node smoke executes the admin runner with a fake DOM/fetch/timer harness and protects the read-only status endpoint contract, sequential step scheduling, network recovery through status, busy/stale step handling, legacy runner reset-required handling, monotonic cross-job `state_revision` rendering, foreign counter rendering, and the no-`setInterval` source guard. The PHP geography smoke owns the server lock/start/reset contract, including atomic compare-and-delete lease races, failed-artifact reset requirements, SFTP start continuation, and legacy job refusal before reset.
+DPD Geography browser-import lifecycle changes should also run `node tests/dpd/run-dpd-geography-import-runner-smoke.js` in addition to `php tests/dpd/run-dpd-geography-import-smoke.php`. The Node smoke executes the admin runner with a fake DOM/fetch/timer harness and protects the read-only status endpoint contract, sequential step scheduling, network recovery through status, busy/stale step handling, legacy runner reset-required handling, monotonic cross-job `state_revision` rendering, foreign counter rendering, and the no-`setInterval` source guard. The PHP geography smoke owns the server lock/start/reset contract, including atomic compare-and-delete lease races, failed-artifact reset requirements, SFTP start continuation, legacy job refusal before reset, and RU DPD matcher regressions where own `fias_id` must not be hidden by another row's `city_fias_id`. `php tests/dpd/run-dpd-location-index-smoke.php` covers the separated own/city FIAS buckets, own-FIAS disambiguation, true own-FIAS ambiguity, and city-FIAS fallback.
 
 ## Manifest
 
