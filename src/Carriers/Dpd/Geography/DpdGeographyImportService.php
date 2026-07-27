@@ -373,9 +373,9 @@ final class DpdGeographyImportService {
 		$is_city = $this->foreign_place_type_is_city( $place_type );
 
 		try {
-			$location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
-			$mapped_existing = null !== $location_id ? $this->locations->find_by_id( $location_id ) : null;
-			$resolution = $this->resolve_foreign_canonical_location( $country, $place, $region, $district, $place_type, $dpd_city_id );
+			$mapped_location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
+			$mapped_existing = null !== $mapped_location_id ? $this->locations->find_by_id( $mapped_location_id ) : null;
+			$resolution = $this->resolve_foreign_canonical_location( $country, $place, $region, $district, $place_type, $mapped_location_id );
 			$existing = $resolution['location'] instanceof Location ? $resolution['location'] : $mapped_existing;
 			if ( (int) $resolution['match_count'] > 1 ) {
 				$this->inc( $patch, 'foreign_duplicate_identity_rows' );
@@ -488,7 +488,7 @@ final class DpdGeographyImportService {
 	/**
 	 * @return array{location:?Location,duplicate_ids:array<int,int>,match_count:int,method:string}
 	 */
-	private function resolve_foreign_canonical_location( string $country, string $place, string $region, string $district, string $place_type, string $dpd_city_id ): array {
+	private function resolve_foreign_canonical_location( string $country, string $place, string $region, string $district, string $place_type, ?int $mapped_location_id ): array {
 		$matches = $this->locations->find_foreign_by_place_identity_matches( $country, $place, $region, $district, $place_type );
 		$count = count( $matches );
 		if ( 0 === $count ) {
@@ -504,10 +504,9 @@ final class DpdGeographyImportService {
 				static fn( int $id ): bool => $id > 0
 			)
 		);
-		$mapped_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
-		if ( null !== $mapped_id ) {
+		if ( null !== $mapped_location_id ) {
 			foreach ( $matches as $location ) {
-				if ( null !== $location->id && (int) $location->id === $mapped_id ) {
+				if ( null !== $location->id && (int) $location->id === $mapped_location_id ) {
 					return array( 'location' => $location, 'duplicate_ids' => $duplicate_ids, 'match_count' => $count, 'method' => 'existing_dpd_mapping' );
 				}
 			}

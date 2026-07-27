@@ -58,6 +58,12 @@ final class LocationDeliveryCodeRepository {
 		if ( '' === $dpd_city_id || '0' === $dpd_city_id ) {
 			return null;
 		}
+		if ( property_exists( $this->wpdb, 'dpd_mapping_lookup_calls' ) ) {
+			$this->wpdb->dpd_mapping_lookup_calls = max( 0, (int) $this->wpdb->dpd_mapping_lookup_calls ) + 1;
+		}
+		if ( property_exists( $this->wpdb, 'fail_dpd_mapping_lookup' ) && true === (bool) $this->wpdb->fail_dpd_mapping_lookup ) {
+			throw new \RuntimeException( 'DPD delivery code lookup failed: forced mapping lookup failure' );
+		}
 
 		if ( $this->has_test_rows() ) {
 			$matches = array();

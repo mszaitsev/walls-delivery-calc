@@ -1,6 +1,6 @@
 # Walls Delivery Calc
 
-Version: 0.128.17
+Version: 0.128.18
 
 WooCommerce delivery calculation and shipment management plugin.
 

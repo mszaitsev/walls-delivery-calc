@@ -12,6 +12,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $last_error = '';
 		public string $last_query = '';
 		public int|false $next_option_delete_result = 0;
+		public int $dpd_mapping_lookup_calls = 0;
+		public bool $fail_dpd_mapping_lookup = false;
 		public bool $fail_dpd_stage_finalize_clear = false;
 		public bool $fail_dpd_stage_finalize_upsert = false;
 		public bool $fail_dpd_stage_finalize_commit = false;
@@ -1657,6 +1659,57 @@ $canonical_alexandrovo_row = array(
 	'active' => 1,
 );
 $lookup_failure_csv = $foreign_header . "\n" . '30000001;BY;Минская;Минский;Минск2;Александрово;д;220010;;BY60011003000';
+
+$mapped_once_db = new DpdForeignIdentityLookupWpdb();
+$mapped_once_db->foreign_rows = array( $canonical_alexandrovo_row );
+$mapped_once_db->delivery_codes = array( array( 'location_id' => 228315, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) );
+$mapped_once_db->dpd_mapping_lookup_calls = 0;
+list( $mapped_once_report ) = dpd_run_lookup_import( $mapped_once_db, $lookup_failure_csv, $lookup_settings, 'LookupMappedOnce.csv' );
+dpd_import_assert( 1 === $mapped_once_db->dpd_mapping_lookup_calls && 0 === (int) ( $mapped_once_report['errors_total'] ?? -1 ), 'foreign row with existing mapping performs one DPD mapping lookup and imports without row errors.' );
+
+$missing_mapping_once_db = new DpdForeignIdentityLookupWpdb();
+$missing_mapping_once_db->identity_mode = 'empty';
+$missing_mapping_once_db->legacy_mode = 'empty';
+$missing_mapping_once_db->dpd_mapping_lookup_calls = 0;
+list( $missing_mapping_once_report ) = dpd_run_lookup_import( $missing_mapping_once_db, $lookup_failure_csv, $lookup_settings, 'LookupMissingOnce.csv' );
+dpd_import_assert( 1 === $missing_mapping_once_db->dpd_mapping_lookup_calls && 1 === (int) ( $missing_mapping_once_report['foreign_locations_inserted'] ?? 0 ), 'foreign row without existing mapping performs one DPD mapping lookup and creates the new canonical location.' );
+
+$duplicate_rows_for_priority = array();
+foreach ( array( 228315, 228316, 231660 ) as $duplicate_id ) {
+	$duplicate = $canonical_alexandrovo_row;
+	$duplicate['id'] = $duplicate_id;
+	$duplicate_rows_for_priority[] = $duplicate;
+}
+$mapped_priority_db = new DpdForeignIdentityLookupWpdb();
+$mapped_priority_db->foreign_rows = $duplicate_rows_for_priority;
+$mapped_priority_db->delivery_codes = array( array( 'location_id' => 231660, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) );
+$mapped_priority_db->dpd_mapping_lookup_calls = 0;
+list( $mapped_priority_report ) = dpd_run_lookup_import( $mapped_priority_db, $lookup_failure_csv, $lookup_settings, 'LookupMappedPriority.csv' );
+$mapped_priority_rows = array_column( $mapped_priority_db->foreign_rows, null, 'id' );
+dpd_import_assert( 1 === $mapped_priority_db->dpd_mapping_lookup_calls && 1 === (int) ( $mapped_priority_report['foreign_duplicate_identity_rows'] ?? 0 ) && ! str_starts_with( (string) ( $mapped_priority_rows[231660]['display_name'] ?? '' ), 'BY,' ), 'mapped duplicate priority selects the mapped exact identity row with one DPD mapping lookup.' );
+
+$lowest_once_db = new DpdForeignIdentityLookupWpdb();
+$lowest_once_db->foreign_rows = $duplicate_rows_for_priority;
+$lowest_once_db->dpd_mapping_lookup_calls = 0;
+list( $lowest_once_report ) = dpd_run_lookup_import( $lowest_once_db, $lookup_failure_csv, $lookup_settings, 'LookupLowestOnce.csv' );
+$lowest_once_rows = array_column( $lowest_once_db->foreign_rows, null, 'id' );
+dpd_import_assert( 1 === $lowest_once_db->dpd_mapping_lookup_calls && 1 === (int) ( $lowest_once_report['foreign_duplicate_identity_rows'] ?? 0 ) && '30000001' === (string) ( $lowest_once_db->delivery_codes[0]['dpd_city_id'] ?? '' ) && ! str_starts_with( (string) ( $lowest_once_rows[228315]['display_name'] ?? '' ), 'BY,' ), 'duplicate identity without a mapped id falls back to the lowest positive location id with one lookup.' );
+
+$outside_identity_db = new DpdForeignIdentityLookupWpdb();
+$outside_identity_db->foreign_rows = array_slice( $duplicate_rows_for_priority, 0, 2 );
+$outside_identity_db->foreign_rows[] = array_merge( $canonical_alexandrovo_row, array( 'id' => 999999, 'district_name' => 'Другой', 'searchable_text' => 'минская другой д александрово' ) );
+$outside_identity_db->delivery_codes = array( array( 'location_id' => 999999, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) );
+$outside_identity_db->dpd_mapping_lookup_calls = 0;
+list( $outside_identity_report ) = dpd_run_lookup_import( $outside_identity_db, $lookup_failure_csv, $lookup_settings, 'LookupOutsideIdentity.csv' );
+$outside_identity_rows = array_column( $outside_identity_db->foreign_rows, null, 'id' );
+dpd_import_assert( 1 === $outside_identity_db->dpd_mapping_lookup_calls && 1 === (int) ( $outside_identity_report['foreign_duplicate_identity_rows'] ?? 0 ) && 'Другой' === (string) ( $outside_identity_rows[999999]['district_name'] ?? '' ) && ! str_starts_with( (string) ( $outside_identity_rows[228315]['display_name'] ?? '' ), 'BY,' ), 'mapped location outside exact identity matches is ignored by resolver, which falls back to the lowest exact id.' );
+
+$mapping_failure_db = new DpdForeignIdentityLookupWpdb();
+$mapping_failure_db->foreign_rows = array( $canonical_alexandrovo_row );
+$mapping_failure_db->fail_dpd_mapping_lookup = true;
+$mapping_failure_db->dpd_mapping_lookup_calls = 0;
+list( $mapping_failure_report ) = dpd_run_lookup_import( $mapping_failure_db, $lookup_failure_csv, $lookup_settings, 'LookupMappingFailure.csv' );
+dpd_import_assert( 1 === $mapping_failure_db->dpd_mapping_lookup_calls && 1 === count( $mapping_failure_db->foreign_rows ) && 1 === (int) ( $mapping_failure_report['foreign_save_failed'] ?? 0 ) && 1 === (int) ( $mapping_failure_report['errors_total'] ?? 0 ) && true === (bool) ( $mapping_failure_report['stale_cleanup_skipped'] ?? false ), 'mapping lookup failure is a single row-level warning without a second lookup or new location.' );
 
 $canonical_error_db = new DpdForeignIdentityLookupWpdb();
 $canonical_error_db->foreign_rows = array( $canonical_alexandrovo_row );
