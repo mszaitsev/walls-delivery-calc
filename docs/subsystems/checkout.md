@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.128.16
+Version: 0.128.17
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -30,7 +30,7 @@ CDEK pickup and courier branches are available for every enabled CDEK country wh
 
 When a CDEK manual city has a resolved CDEK city code but no canonical location coordinates, the pickup map may load points directly by city code and fit the initial viewport to the returned point coordinates. That viewport is presentation-only: it is not saved as destination coordinates, city context, location identity, or shipment data. Programmatic initial viewport changes suppress only their own map event burst; the first later user pan or zoom must load points normally, and any physical user interaction cancels pending initial auto-fit for that modal instance. Explicit viewport actions such as address search, geolocation, selected-point focus, and confirmed point selection claim the viewport, cancel pending provider fit, and load or render points directly without waiting for suppressed map events.
 
-Checkout location search builds its preliminary pool in two tiers: direct own-name candidates from `place_name`, `city_name`, and `settlement_name` are fetched before broader hierarchy/context candidates from region, district, city, place, and settlement fields. The final ranking remains in PHP, but exact city/place matches such as BY Minsk cannot be cut off by a large region-only SQL result set before scoring. Country filtering remains part of the query and does not rely on visual display names.
+Checkout location search builds its preliminary pool in two tiers: direct own-name candidates from `place_name`, `city_name`, and `settlement_name` are fetched before broader hierarchy/context candidates from region, district, city, place, and settlement fields. Direct candidates are ordered consistently in production SQL and in-memory smokes as exact own-name, then prefix own-name, then display name. The final ranking remains in PHP, but exact city/place matches such as BY Minsk cannot be cut off by a large region-only SQL result set before scoring. Country filtering remains part of the query and does not rely on visual display names.
 
 ## Canonical Requirements
 

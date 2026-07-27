@@ -375,7 +375,7 @@ function wc_checkout_pickup_map_initial_context( array $rates, array $city_conte
 	$session->save_rates( $rates );
 	$session->save_city_context( $city_context );
 	WC()->session->set( 'chosen_shipping_methods', array( $chosen_method ) );
-	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.16' ), new SettingsRepository() );
+	$checkout = new PickupMapCheckout( $session, new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.128.17' ), new SettingsRepository() );
 	$method = new ReflectionMethod( $checkout, 'initial_context' );
 	$method->setAccessible( true );
 	$context = $method->invoke( $checkout );
@@ -996,6 +996,51 @@ wc_checkout_smoke_assert( 210006 === (int) ( ( $ru_novosibirsk['items'][0] ?? nu
 $ru_moscow_region = $large_region_search->search_for_picker( 'московская область', 100, 10, '', 'RU' );
 wc_checkout_smoke_assert( in_array( 210004, array_map( static fn( Location $location ): int => (int) $location->id, $ru_moscow_region['items'] ?? array() ), true ), 'RU region search still returns region-context locations.' );
 
+$exact_after_prefix_db = new class extends wpdb {
+	public array $locations = array();
+};
+foreach ( range( 1, 1200 ) as $index ) {
+	$name = sprintf( 'Минск-%04d', $index );
+	$exact_after_prefix_db->locations[] = array(
+		'id' => 220000 + $index,
+		'country_code' => 'BY',
+		'region_name' => 'Минская',
+		'region_type' => 'обл.',
+		'district_name' => 'Минский',
+		'district_type' => 'р-н',
+		'city_name' => '',
+		'city_type' => '',
+		'settlement_name' => $name,
+		'settlement_type' => 'д',
+		'place_name' => $name,
+		'place_type' => 'д',
+		'display_name' => 'Минская обл., Минский р-н, д ' . $name,
+		'searchable_text' => 'by минская обл минский р-н д ' . mb_strtolower( $name, 'UTF-8' ),
+		'active' => 1,
+	);
+}
+$exact_after_prefix_db->locations[] = array(
+	'id' => 210003,
+	'country_code' => 'BY',
+	'region_name' => 'Минская',
+	'region_type' => 'обл.',
+	'district_name' => 'Минский',
+	'district_type' => 'р-н',
+	'city_name' => 'Минск',
+	'city_type' => 'г',
+	'settlement_name' => 'Минск',
+	'settlement_type' => 'г',
+	'place_name' => 'Минск',
+	'place_type' => 'г',
+	'display_name' => 'Минская обл., Минский р-н, г Минск',
+	'searchable_text' => 'by минская обл минский р-н г минск',
+	'active' => 1,
+);
+$exact_after_prefix_search = new CheckoutLocationSearch( new LocationSearchService( new LocationRepository( $exact_after_prefix_db ) ) );
+$exact_after_prefix = $exact_after_prefix_search->search_for_picker( 'минск', 100, 10, '', 'BY' );
+$exact_after_prefix_ids = array_map( static fn( Location $location ): int => (int) $location->id, $exact_after_prefix['items'] ?? array() );
+wc_checkout_smoke_assert( 210003 === (int) ( $exact_after_prefix_ids[0] ?? 0 ), 'in-memory direct candidate ordering keeps exact BY Minsk before 1200 prefix own-name rows.' );
+
 $production_search_db = new class extends wpdb {
 	public array $direct_rows = array();
 	public array $broad_rows = array();
@@ -1030,6 +1075,7 @@ $production_minsk_ids = array_map( static fn( Location $location ): int => (int)
 $production_sql = implode( "\n", $production_search_db->queries );
 wc_checkout_smoke_assert( 210003 === (int) ( $production_minsk_ids[0] ?? 0 ), 'production-path checkout search includes direct BY Minsk before broad region candidates.' );
 wc_checkout_smoke_assert( str_contains( $production_sql, 'l.place_name LIKE' ) && str_contains( $production_sql, 'l.city_name LIKE' ) && str_contains( $production_sql, 'l.settlement_name LIKE' ) && str_contains( $production_sql, 'l.region_name LIKE' ), 'production-path checkout search runs separate direct own-name and broad hierarchy candidate queries.' );
+wc_checkout_smoke_assert( str_contains( $production_sql, 'CASE' ) && str_contains( $production_sql, 'LOWER(l.place_name) = ' ) && str_contains( $production_sql, 'LOWER(l.city_name) = ' ) && str_contains( $production_sql, 'LOWER(l.settlement_name) = ' ), 'production-path direct checkout query keeps exact own-name CASE ordering.' );
 
 $settings = new SettingsRepository();
 $settings->set( 'checkout_sort_mode', RateSorter::CHEAPEST );

@@ -170,19 +170,31 @@ final class LocationRepository {
 			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
 		}
 
-		$rows = $this->wpdb->get_results(
-			$this->wpdb->prepare(
-				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
-				FROM {$this->table_name()} l
-				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE " . implode( ' AND ', $where ),
-				...$args
-			),
-			ARRAY_A
+		$sql = $this->wpdb->prepare(
+			"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+			FROM {$this->table_name()} l
+			LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+			WHERE " . implode( ' AND ', $where ),
+			...$args
 		);
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new RuntimeException( 'Foreign location identity lookup failed: SQL preparation returned an invalid result' );
+		}
+
+		$this->wpdb->last_error = '';
+		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( 'Foreign location identity lookup failed' );
+		}
+		if ( ! is_array( $rows ) ) {
+			throw new RuntimeException( 'Foreign location identity lookup failed: invalid SQL result' );
+		}
 
 		$matches = array();
-		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				throw new RuntimeException( 'Foreign location identity lookup failed: invalid row structure' );
+			}
 			if ( $this->foreign_identity_row_matches( $row, $place_key, $region_key, $district_key, $place_type_key ) ) {
 				$matches[] = $this->row_to_location( $row );
 			}
@@ -240,19 +252,31 @@ final class LocationRepository {
 			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
 		}
 
-		$rows = $this->wpdb->get_results(
-			$this->wpdb->prepare(
-				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
-				FROM {$this->table_name()} l
-				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE " . implode( ' AND ', $where ),
-				...$args
-			),
-			ARRAY_A
+		$sql = $this->wpdb->prepare(
+			"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+			FROM {$this->table_name()} l
+			LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+			WHERE " . implode( ' AND ', $where ),
+			...$args
 		);
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new RuntimeException( 'Legacy foreign location identity lookup failed: SQL preparation returned an invalid result' );
+		}
+
+		$this->wpdb->last_error = '';
+		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( 'Legacy foreign location identity lookup failed' );
+		}
+		if ( ! is_array( $rows ) ) {
+			throw new RuntimeException( 'Legacy foreign location identity lookup failed: invalid SQL result' );
+		}
 
 		$matches = array();
-		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				throw new RuntimeException( 'Legacy foreign location identity lookup failed: invalid row structure' );
+			}
 			$row_place = $this->normalize_foreign_identity_value( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
 			$row_region = $this->normalize_foreign_identity_value( (string) ( $row['region_name'] ?? '' ) );
 			if ( $row_place === $place_key && $row_region === $region_key ) {
@@ -743,6 +767,10 @@ final class LocationRepository {
 					$broad_rows[] = $this->join_region_for_test_double( $row );
 				}
 			}
+			usort(
+				$direct_rows,
+				fn( array $a, array $b ): int => $this->checkout_direct_row_rank( $a, $tokens ) <=> $this->checkout_direct_row_rank( $b, $tokens )
+			);
 
 			return $this->rows_to_locations( $this->merge_location_rows_by_id( $direct_rows, $broad_rows, $limit ) );
 		}
@@ -1970,6 +1998,36 @@ final class LocationRepository {
 		}
 
 		return false;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @param array<int,string> $tokens
+	 * @return array{0:int,1:string,2:int}
+	 */
+	private function checkout_direct_row_rank( array $row, array $tokens ): array {
+		$rank = 2;
+		foreach ( $tokens as $token ) {
+			foreach ( array( 'place_name', 'city_name', 'settlement_name' ) as $column ) {
+				$value = $this->normalize_query( (string) ( $row[ $column ] ?? '' ) );
+				if ( '' === $value ) {
+					continue;
+				}
+				if ( $value === $token ) {
+					$rank = min( $rank, 0 );
+					continue;
+				}
+				if ( str_starts_with( $value, $token ) ) {
+					$rank = min( $rank, 1 );
+				}
+			}
+		}
+
+		return array(
+			$rank,
+			$this->normalize_query( (string) ( $row['display_name'] ?? '' ) ),
+			max( 0, (int) ( $row['id'] ?? 0 ) ),
+		);
 	}
 
 	/**

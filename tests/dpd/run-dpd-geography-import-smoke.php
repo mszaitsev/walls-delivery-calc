@@ -227,6 +227,154 @@ final class DpdProductionPathWpdb extends wpdb {
 	}
 }
 
+final class DpdForeignIdentityLookupWpdb extends wpdb {
+	/** @var array<int,array<string,mixed>> */
+	public array $foreign_rows = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $delivery_codes = array();
+	/** @var array<string,array<int,array<string,mixed>>> */
+	public array $dpd_geography_stage_tables = array();
+	/** @var array<int,mixed> */
+	public array $last_prepare_args = array();
+	public string $identity_mode = 'ok';
+	public string $legacy_mode = 'ok';
+	public string $last_sql = '';
+
+	public function __construct() {
+		unset( $this->locations );
+	}
+
+	public function prepare( string $query, mixed ...$args ): string {
+		$this->last_sql = $query;
+		$this->last_prepare_args = $args;
+
+		return $query;
+	}
+
+	public function esc_like( string $text ): string {
+		return addcslashes( $text, '_%\\' );
+	}
+
+	public function get_results( string $query, string $output = ARRAY_A ): mixed {
+		unset( $output );
+		$this->last_sql = $query;
+		if ( str_contains( $query, 'SELECT id, gar_object_id' ) || ! str_contains( $query, 'REPLACE(LOWER(l.searchable_text)' ) ) {
+			$this->last_error = '';
+			return array();
+		}
+
+		$is_legacy = str_contains( $query, "TRIM(l.district_name) = ''" );
+		$mode = $is_legacy ? $this->legacy_mode : $this->identity_mode;
+		if ( 'sql_error' === $mode ) {
+			$this->last_error = $is_legacy ? 'forced legacy foreign identity SQL failure' : 'forced foreign identity SQL failure';
+			return null;
+		}
+		$this->last_error = '';
+		if ( 'non_array' === $mode ) {
+			return null;
+		}
+		if ( 'invalid_row' === $mode ) {
+			return array( 'not-an-array-row' );
+		}
+		if ( 'empty' === $mode ) {
+			return array();
+		}
+
+		return $this->foreign_rows;
+	}
+
+	public function get_row( string $query, mixed $output = null ): ?array {
+		unset( $query, $output );
+		$id = (int) ( $this->last_prepare_args[0] ?? 0 );
+		foreach ( $this->foreign_rows as $row ) {
+			if ( (int) ( $row['id'] ?? 0 ) === $id ) {
+				return $row;
+			}
+		}
+
+		return null;
+	}
+
+	public function insert( string $table, array $data, array $format = array() ): bool {
+		unset( $table, $format );
+		$ids = array_map( static fn( array $row ): int => (int) ( $row['id'] ?? 0 ), $this->foreign_rows );
+		$this->insert_id = ( $ids ? max( $ids ) : 0 ) + 1;
+		$data['id'] = $this->insert_id;
+		$this->foreign_rows[] = $data;
+		$this->last_error = '';
+
+		return true;
+	}
+
+	public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+		unset( $table, $format, $where_format );
+		$id = (int) ( $where['id'] ?? 0 );
+		foreach ( $this->foreign_rows as $index => $row ) {
+			if ( (int) ( $row['id'] ?? 0 ) === $id ) {
+				$this->foreign_rows[ $index ] = array_merge( $row, $data, array( 'id' => $id ) );
+				$this->last_error = '';
+				return true;
+			}
+		}
+
+		$this->last_error = 'foreign row not found';
+		return false;
+	}
+
+	public function query( string $query ): int|false {
+		$this->last_sql = $query;
+		$this->last_error = '';
+
+		return 1;
+	}
+}
+
+final class DpdDeliveryCodeProductionWpdb extends wpdb {
+	/** @var array<int,array<string,mixed>> */
+	public array $mapping_rows = array();
+	public bool $fail_mapping_lookup = false;
+	public mixed $forced_value = null;
+	public string $last_sql = '';
+
+	public function __construct() {
+		unset( $this->delivery_codes );
+	}
+
+	public function prepare( string $query, mixed ...$args ): string {
+		foreach ( $args as $arg ) {
+			$replacement = is_int( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[sd]/', $replacement, $query, 1 ) ?? $query;
+		}
+		$this->last_sql = $query;
+
+		return $query;
+	}
+
+	public function get_var( string $query ): mixed {
+		$this->last_sql = $query;
+		if ( $this->fail_mapping_lookup ) {
+			$this->last_error = 'forced DPD mapping SQL failure';
+			return null;
+		}
+		$this->last_error = '';
+		if ( null !== $this->forced_value ) {
+			return $this->forced_value;
+		}
+		if ( ! preg_match( '/dpd_city_id = ([0-9]+)/', $query, $matches ) ) {
+			return null;
+		}
+		$dpd_city_id = (string) $matches[1];
+		$ids = array();
+		foreach ( $this->mapping_rows as $row ) {
+			if ( (string) ( $row['dpd_city_id'] ?? '' ) === $dpd_city_id && (int) ( $row['location_id'] ?? 0 ) > 0 ) {
+				$ids[] = (int) $row['location_id'];
+			}
+		}
+
+		return array() !== $ids ? min( $ids ) : null;
+	}
+}
+
 final class DpdProductionFinalizationWpdb extends wpdb {
 	/** @var array<int,array<string,mixed>> */
 	public array $stage_rows = array();
@@ -565,6 +713,31 @@ function dpd_import_assert_public_state_redacted( array $state, string $message 
 	foreach ( array( 'file_path', 'index_path', 'stage_table', 'delete_file_on_finish', 'columns', 'index_sha256', 'index_size', 'index_stats', 'index_format_version' ) as $key ) {
 		dpd_import_assert( ! array_key_exists( $key, $state ), $message . ': public state contains internal key ' . $key );
 	}
+}
+
+/**
+ * @return array{0:array<string,mixed>,1:DpdGeographyImportStateService}
+ */
+function dpd_run_lookup_import( DpdForeignIdentityLookupWpdb $db, string $csv, DpdSettings $settings, string $source_file ): array {
+	$locations = new LocationRepository( $db );
+	$index = new DpdLocationIndex( $locations );
+	$state = new DpdGeographyImportStateService();
+	$importer = new DpdGeographyImportService(
+		new DpdGeographyCsvParser(),
+		new DpdGeographyMatcher( $index ),
+		$index,
+		$state,
+		new DpdGeographyStageRepository( $db ),
+		$locations,
+		new LocationDeliveryCodeRepository( $db ),
+		$settings
+	);
+	$path = tempnam( sys_get_temp_dir(), 'wdc-dpd-lookup-' );
+	file_put_contents( $path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+	$report = $importer->import_file( $path, 'cli', $source_file );
+	@unlink( $path );
+
+	return array( $report, $state );
 }
 
 $GLOBALS['wpdb'] = new wpdb();
@@ -1460,6 +1633,82 @@ dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ (strin
 $repeat_locations_snapshot = $GLOBALS['wpdb']->locations;
 $repeat_delivery_snapshot = $GLOBALS['wpdb']->delivery_codes;
 $foreign_header = 'ID НП;Код страны;Регион;Район;Основной город;Населённый пункт;Тип НП;Индекс НП;ФИАС;Код КЛАДР';
+
+$lookup_settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
+$canonical_alexandrovo_row = array(
+	'id' => 228315,
+	'country_code' => 'BY',
+	'region_name' => 'Минская',
+	'region_type' => 'обл.',
+	'district_name' => 'Минский',
+	'district_type' => 'р-н',
+	'city_name' => '',
+	'city_type' => '',
+	'settlement_name' => 'Александрово',
+	'settlement_type' => 'д',
+	'place_name' => 'Александрово',
+	'place_type' => 'д',
+	'display_name' => 'Минская обл., Минский р-н, д Александрово',
+	'searchable_text' => 'минская обл минский р-н д александрово',
+	'gar_object_id' => null,
+	'fias_id' => null,
+	'gar_id' => '',
+	'kladr_id' => '',
+	'active' => 1,
+);
+$lookup_failure_csv = $foreign_header . "\n" . '30000001;BY;Минская;Минский;Минск2;Александрово;д;220010;;BY60011003000';
+
+$canonical_error_db = new DpdForeignIdentityLookupWpdb();
+$canonical_error_db->foreign_rows = array( $canonical_alexandrovo_row );
+$canonical_error_db->delivery_codes = array( array( 'location_id' => 228315, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) );
+$canonical_error_db->identity_mode = 'sql_error';
+list( $canonical_error_report ) = dpd_run_lookup_import( $canonical_error_db, $lookup_failure_csv, $lookup_settings, 'LookupCanonicalSqlError.csv' );
+dpd_import_assert( 1 === count( $canonical_error_db->foreign_rows ), 'canonical identity SQL error does not create a duplicate foreign location.' );
+dpd_import_assert( 1 === (int) ( $canonical_error_report['foreign_save_failed'] ?? 0 ) && 1 === (int) ( $canonical_error_report['errors_total'] ?? 0 ), 'canonical identity SQL error is reported as one row-level foreign save failure.' );
+dpd_import_assert( str_contains( implode( "\n", (array) ( $canonical_error_report['errors'] ?? array() ) ), 'Foreign location identity lookup failed' ), 'canonical identity SQL error is visible in warning diagnostics.' );
+dpd_import_assert( 'finished' === (string) ( $canonical_error_report['phase'] ?? '' ) && 'warning' === (string) ( $canonical_error_report['status'] ?? '' ) && true === (bool) ( $canonical_error_report['stale_cleanup_skipped'] ?? false ), 'canonical identity SQL error finishes as warning with stale cleanup skipped.' );
+dpd_import_assert( array( array( 'location_id' => 228315, 'dpd_city_id' => '30000001', 'updated_at' => 'old' ) ) === $canonical_error_db->delivery_codes, 'canonical identity SQL error preserves existing working mapping.' );
+
+foreach ( array( 'non_array' => 'invalid SQL result', 'invalid_row' => 'invalid row structure' ) as $mode => $expected_message ) {
+	$invalid_lookup_db = new DpdForeignIdentityLookupWpdb();
+	$invalid_lookup_db->foreign_rows = array( $canonical_alexandrovo_row );
+	$invalid_lookup_db->identity_mode = $mode;
+	list( $invalid_lookup_report ) = dpd_run_lookup_import( $invalid_lookup_db, $lookup_failure_csv, $lookup_settings, 'Lookup' . $mode . '.csv' );
+	dpd_import_assert( 1 === count( $invalid_lookup_db->foreign_rows ), $mode . ' foreign identity lookup does not create a duplicate location.' );
+	dpd_import_assert( 1 === (int) ( $invalid_lookup_report['foreign_save_failed'] ?? 0 ) && str_contains( implode( "\n", (array) ( $invalid_lookup_report['errors'] ?? array() ) ), $expected_message ), $mode . ' foreign identity lookup is a row-level warning diagnostic.' );
+}
+
+$empty_lookup_db = new DpdForeignIdentityLookupWpdb();
+$empty_lookup_db->identity_mode = 'empty';
+$empty_lookup_db->legacy_mode = 'empty';
+list( $empty_lookup_report ) = dpd_run_lookup_import( $empty_lookup_db, $lookup_failure_csv, $lookup_settings, 'LookupEmpty.csv' );
+dpd_import_assert( 1 === count( $empty_lookup_db->foreign_rows ) && 1 === (int) ( $empty_lookup_report['foreign_locations_inserted'] ?? 0 ) && 0 === (int) ( $empty_lookup_report['errors_total'] ?? -1 ), 'successful empty foreign identity lookup creates one new canonical location without row errors.' );
+
+$legacy_error_db = new DpdForeignIdentityLookupWpdb();
+$legacy_error_db->identity_mode = 'empty';
+$legacy_error_db->legacy_mode = 'sql_error';
+list( $legacy_error_report ) = dpd_run_lookup_import( $legacy_error_db, $lookup_failure_csv, $lookup_settings, 'LookupLegacySqlError.csv' );
+dpd_import_assert( array() === $legacy_error_db->foreign_rows, 'legacy foreign identity SQL error does not create a new foreign location.' );
+dpd_import_assert( 1 === (int) ( $legacy_error_report['foreign_save_failed'] ?? 0 ) && 1 === (int) ( $legacy_error_report['errors_total'] ?? 0 ) && str_contains( implode( "\n", (array) ( $legacy_error_report['errors'] ?? array() ) ), 'Legacy foreign location identity lookup failed' ), 'legacy foreign identity SQL error is a row-level warning diagnostic.' );
+
+$duplicate_mapping_db = new wpdb();
+$duplicate_mapping_db->delivery_codes = array(
+	array( 'location_id' => 231660, 'dpd_city_id' => '30000021', 'updated_at' => 'later' ),
+	array( 'location_id' => 228315, 'dpd_city_id' => '30000021', 'updated_at' => 'earlier' ),
+);
+dpd_import_assert( 228315 === ( new LocationDeliveryCodeRepository( $duplicate_mapping_db ) )->find_location_id_by_dpd_city_id( '30000021' ), 'in-memory duplicate DPD mappings resolve to the lowest location_id.' );
+$production_mapping_db = new DpdDeliveryCodeProductionWpdb();
+$production_mapping_db->mapping_rows = $duplicate_mapping_db->delivery_codes;
+dpd_import_assert( 228315 === ( new LocationDeliveryCodeRepository( $production_mapping_db ) )->find_location_id_by_dpd_city_id( '30000021' ), 'production duplicate DPD mappings resolve to the lowest location_id.' );
+dpd_import_assert( str_contains( $production_mapping_db->last_sql, 'ORDER BY location_id ASC LIMIT 1' ), 'production DPD mapping lookup orders duplicate rows by location_id.' );
+$production_mapping_db->fail_mapping_lookup = true;
+$mapping_failed = false;
+try {
+	( new LocationDeliveryCodeRepository( $production_mapping_db ) )->find_location_id_by_dpd_city_id( '30000021' );
+} catch ( RuntimeException $exception ) {
+	$mapping_failed = str_contains( $exception->getMessage(), 'DPD delivery code lookup failed' );
+}
+dpd_import_assert( $mapping_failed, 'production DPD mapping lookup SQL error fails closed instead of returning not_found.' );
 
 $GLOBALS['wpdb']->locations = array();
 $GLOBALS['wpdb']->delivery_codes = array();

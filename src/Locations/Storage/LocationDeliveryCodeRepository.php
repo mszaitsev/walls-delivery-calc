@@ -60,21 +60,34 @@ final class LocationDeliveryCodeRepository {
 		}
 
 		if ( $this->has_test_rows() ) {
+			$matches = array();
 			foreach ( $this->wpdb->delivery_codes as $row ) {
 				if ( (string) ( $row['dpd_city_id'] ?? '' ) === $dpd_city_id && (int) ( $row['location_id'] ?? 0 ) > 0 ) {
-					return (int) $row['location_id'];
+					$matches[] = (int) $row['location_id'];
 				}
 			}
 
-			return null;
+			return array() !== $matches ? min( $matches ) : null;
 		}
 
-		$value = $this->wpdb->get_var(
-			$this->wpdb->prepare(
-				'SELECT location_id FROM ' . $this->table_name() . ' WHERE dpd_city_id = %d LIMIT 1',
-				(int) $dpd_city_id
-			)
+		$sql = $this->wpdb->prepare(
+			'SELECT location_id FROM ' . $this->table_name() . ' WHERE dpd_city_id = %d ORDER BY location_id ASC LIMIT 1',
+			(int) $dpd_city_id
 		);
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new \RuntimeException( 'DPD delivery code lookup failed: SQL preparation returned an invalid result' );
+		}
+
+		$this->wpdb->last_error = '';
+		$value = $this->wpdb->get_var( $sql );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$error = trim( (string) $this->wpdb->last_error );
+			$error = preg_replace( '/[\r\n\t]+/', ' ', $error ) ?? $error;
+			throw new \RuntimeException( 'DPD delivery code lookup failed: ' . $error );
+		}
+		if ( null !== $value && ! is_numeric( $value ) ) {
+			throw new \RuntimeException( 'DPD delivery code lookup failed: invalid SQL result' );
+		}
 
 		return is_numeric( $value ) && (int) $value > 0 ? (int) $value : null;
 	}
@@ -176,7 +189,7 @@ final class LocationDeliveryCodeRepository {
 	}
 
 	private function has_test_rows(): bool {
-		return property_exists( $this->wpdb, 'delivery_codes' );
+		return is_array( $this->wpdb->delivery_codes ?? null );
 	}
 
 	/**

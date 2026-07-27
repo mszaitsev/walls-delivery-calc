@@ -371,57 +371,58 @@ final class DpdGeographyImportService {
 		$region_type = $this->foreign_region_type( $region, $place, $place_type );
 		$district_type = '' !== $district ? 'р-н' : '';
 		$is_city = $this->foreign_place_type_is_city( $place_type );
-		$location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
-		$mapped_existing = null !== $location_id ? $this->locations->find_by_id( $location_id ) : null;
-		$resolution = $this->resolve_foreign_canonical_location( $country, $place, $region, $district, $place_type, $dpd_city_id );
-		$existing = $resolution['location'] instanceof Location ? $resolution['location'] : $mapped_existing;
-		if ( (int) $resolution['match_count'] > 1 ) {
-			$this->inc( $patch, 'foreign_duplicate_identity_rows' );
-		}
-		if ( ! $existing instanceof Location ) {
-			$existing = $this->locations->find_legacy_foreign_by_place_identity( $country, $place, $region );
-		}
-
-		$location = Location::from_array(
-			array(
-				'id' => $existing?->id,
-				'country_code' => $country,
-				'region_name' => $region,
-				'region_type' => $region_type,
-				'district_name' => $district,
-				'district_type' => $district_type,
-				'city_name' => $is_city ? $place : '',
-				'city_type' => $is_city ? 'г' : '',
-				'settlement_name' => $place,
-				'settlement_type' => $place_type,
-				'place_name' => $place,
-				'place_type' => $place_type,
-				'place_level' => 0,
-				'display_name' => $this->foreign_display_name( $country, $region, $region_type, $district, $district_type, $place, $place_type ),
-				'postal_code' => '',
-				'russianpost_courier_calc_postal_code' => '',
-				'fias_id' => '',
-				'gar_object_id' => 0,
-				'gar_id' => '',
-				'kladr_id' => '',
-				'latitude' => null,
-				'longitude' => null,
-				'active' => true,
-			)
-		);
-		if ( array() !== $location->validate() ) {
-			$this->inc( $patch, 'skipped_invalid' );
-			return;
-		}
 
 		try {
+			$location_id = $this->delivery_codes->find_location_id_by_dpd_city_id( $dpd_city_id );
+			$mapped_existing = null !== $location_id ? $this->locations->find_by_id( $location_id ) : null;
+			$resolution = $this->resolve_foreign_canonical_location( $country, $place, $region, $district, $place_type, $dpd_city_id );
+			$existing = $resolution['location'] instanceof Location ? $resolution['location'] : $mapped_existing;
+			if ( (int) $resolution['match_count'] > 1 ) {
+				$this->inc( $patch, 'foreign_duplicate_identity_rows' );
+			}
+			if ( ! $existing instanceof Location ) {
+				$existing = $this->locations->find_legacy_foreign_by_place_identity( $country, $place, $region );
+			}
+
+			$location = Location::from_array(
+				array(
+					'id' => $existing?->id,
+					'country_code' => $country,
+					'region_name' => $region,
+					'region_type' => $region_type,
+					'district_name' => $district,
+					'district_type' => $district_type,
+					'city_name' => $is_city ? $place : '',
+					'city_type' => $is_city ? 'г' : '',
+					'settlement_name' => $place,
+					'settlement_type' => $place_type,
+					'place_name' => $place,
+					'place_type' => $place_type,
+					'place_level' => 0,
+					'display_name' => $this->foreign_display_name( $country, $region, $region_type, $district, $district_type, $place, $place_type ),
+					'postal_code' => '',
+					'russianpost_courier_calc_postal_code' => '',
+					'fias_id' => '',
+					'gar_object_id' => 0,
+					'gar_id' => '',
+					'kladr_id' => '',
+					'latitude' => null,
+					'longitude' => null,
+					'active' => true,
+				)
+			);
+			if ( array() !== $location->validate() ) {
+				$this->inc( $patch, 'skipped_invalid' );
+				return;
+			}
+
 			$saved_id = $this->locations->save( $location );
 		} catch ( \RuntimeException $exception ) {
 			$this->inc( $patch, 'foreign_save_failed' );
 			$this->add_error(
 				$patch,
 				sprintf(
-					'Failed to save foreign DPD location for dpd_city_id=%s country_code=%s place_name=%s: %s',
+					'Failed to resolve or save foreign DPD location for dpd_city_id=%s country_code=%s place_name=%s: %s',
 					$dpd_city_id,
 					$country,
 					$place,
