@@ -17,6 +17,7 @@ function wdc_ds_assert( bool $condition, string $message ): void {
 function current_time( string $type ): string { return '2026-05-25 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
+function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -147,6 +148,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( preg_match( "/SHOW TABLES LIKE '([^']+)'/", $query, $matches ) ) {
 				return $matches[1];
 			}
+			if ( str_contains( $query, 'wdc_delivery_services' ) && preg_match( "/service_key = '([^']+)'/", $query, $matches ) ) {
+				foreach ( $this->services as $row ) {
+					if ( (string) ( $row['service_key'] ?? '' ) === $matches[1] && ( ! str_contains( $query, 'deleted = 0' ) || empty( $row['deleted'] ) ) ) {
+						return (int) ( $row['id'] ?? 0 );
+					}
+				}
+			}
 			if ( str_contains( $query, 'wdc_delivery_service_settings' ) && preg_match( "/service_id = ([0-9]+).*setting_key = '([^']+)'/", $query, $matches ) ) {
 				foreach ( $this->settings as $row ) {
 					if ( (int) $row['service_id'] === (int) $matches[1] && $row['setting_key'] === $matches[2] ) {
@@ -243,6 +251,7 @@ use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
@@ -283,6 +292,36 @@ $legacy_domestic_rows = array_values( array_filter( $GLOBALS['wpdb']->services, 
 wdc_ds_assert( 1 === count( $domestic_rows ) && array() === $legacy_domestic_rows, 'Repeated domestic bootstrap must create one unified domestic service and no legacy pickup/courier services.' );
 $cdek = $services->ensure_cdek_service();
 wdc_ds_assert( CdekSettings::SERVICE_KEY === $cdek->service_key && CdekSettings::CARRIER_KEY === $cdek->carrier_key && ! $cdek->enabled, 'CDEK predefined service must be disabled by default.' );
+
+$run_cdek_eaeu_migration = static function ( array $seed_countries, bool $reset_applied = true ) use ( $countries, $cdek ): array {
+	if ( $reset_applied ) {
+		unset( $GLOBALS['wdc_options']['wdc_applied_migrations'], $GLOBALS['wdc_options']['wdc_db_version'] );
+	}
+	$countries->replace_countries( (int) $cdek->id, $seed_countries );
+	$migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-cdek-0042-' . uniqid( '', true );
+	if ( ! mkdir( $migration_dir ) && ! is_dir( $migration_dir ) ) {
+		throw new RuntimeException( 'Unable to create temp migration directory.' );
+	}
+	$migration_file = $migration_dir . DIRECTORY_SEPARATOR . '0042_seed_cdek_eaeu_countries.php';
+	copy( dirname( __DIR__, 2 ) . '/database/migrations/0042_seed_cdek_eaeu_countries.php', $migration_file );
+	( new MigrationManager( '0.128.19-test', $migration_dir ) )->run();
+	@unlink( $migration_file );
+	@rmdir( $migration_dir );
+
+	return $countries->countries( (int) $cdek->id );
+};
+
+$default_cdek_countries = array( 'RU', 'AM', 'BY', 'KZ', 'KG' );
+wdc_ds_assert( $default_cdek_countries === $run_cdek_eaeu_migration( array() ), 'CDEK 0042 migration must seed empty countries through MigrationManager without ArgumentCountError.' );
+wdc_ds_assert( in_array( '0042_seed_cdek_eaeu_countries.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'CDEK 0042 migration must be marked as applied.' );
+wdc_ds_assert( $default_cdek_countries === $run_cdek_eaeu_migration( array( 'RU' ) ), 'CDEK 0042 migration must expand RU-only countries to EAEU defaults.' );
+wdc_ds_assert( array( 'RU', 'BY' ) === $run_cdek_eaeu_migration( array( 'RU', 'BY' ) ), 'CDEK 0042 migration must preserve custom country selection.' );
+unset( $GLOBALS['wdc_options']['wdc_applied_migrations'], $GLOBALS['wdc_options']['wdc_db_version'] );
+$countries->replace_countries( (int) $cdek->id, array() );
+$run_cdek_eaeu_migration( array(), false );
+$countries->delete_countries( (int) $cdek->id );
+$after_admin_empty = $run_cdek_eaeu_migration( array(), false );
+wdc_ds_assert( array() === $after_admin_empty, 'CDEK 0042 migration must not reseed an admin-empty country selection after it is already applied.' );
 $yandex = $services->ensure_yandex_delivery_service();
 $yandex_settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService(), $services, $settings );
 wdc_ds_assert( YandexDeliverySettings::DEFAULT_PICKUP_METHOD_TITLE === $yandex_settings->pickup_method_title(), 'Yandex Delivery pickup method title must use default when service setting is absent.' );

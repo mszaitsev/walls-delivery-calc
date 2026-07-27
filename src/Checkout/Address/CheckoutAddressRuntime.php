@@ -63,7 +63,7 @@ final class CheckoutAddressRuntime {
 			return $result;
 		}
 
-		$location = $this->city_resolver->resolve_city( (string) $context['city'] );
+		$location = $this->city_resolver->resolve_city( (string) $context['city'], (string) $context['country_code'] );
 		if ( $location instanceof Location ) {
 			$location_data = $location->to_array();
 			$location_data = $this->enrich_location_coordinates( $location_data );
@@ -171,8 +171,14 @@ final class CheckoutAddressRuntime {
 	 * @param array<string,mixed> $selection
 	 */
 	private function posted_destination_conflicts_with_pickup( array $context, array $selection ): bool {
-		$posted_fias = $this->normalized_guid( (string) ( $context['selected_fias_id'] ?? '' ) );
 		$selection_snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$posted_country = strtoupper( trim( (string) ( $context['country_code'] ?? '' ) ) );
+		$point_country = strtoupper( trim( (string) ( $selection['country_code'] ?? $selection_snapshot['country_code'] ?? '' ) ) );
+		if ( '' !== $posted_country && '' !== $point_country && $posted_country !== $point_country ) {
+			return true;
+		}
+
+		$posted_fias = $this->normalized_guid( (string) ( $context['selected_fias_id'] ?? '' ) );
 		$point_fias = $this->normalized_guid( (string) ( $selection_snapshot['fias_location_guid'] ?? $selection['fias_location_guid'] ?? '' ) );
 		if ( '' !== $posted_fias && '' !== $point_fias ) {
 			return $posted_fias !== $point_fias;
@@ -205,9 +211,15 @@ final class CheckoutAddressRuntime {
 	private function context_from_checkout_data( array $checkoutData ): array {
 		$country   = $this->value( $checkoutData, 'shipping_country', 'billing_country', $this->value( $checkoutData, 'country', 'country', 'RU' ) );
 		$city      = $this->value( $checkoutData, 'shipping_city', 'billing_city', $this->value( $checkoutData, 'city', 'city', '' ) );
+		$region    = $this->value( $checkoutData, 'shipping_state', 'billing_state', $this->value( $checkoutData, 'state', 'region', '' ) );
 		$postcode  = $this->value( $checkoutData, 'shipping_postcode', 'billing_postcode', $this->value( $checkoutData, 'postcode', 'postcode', '' ) );
 		$address_1 = $this->value( $checkoutData, 'shipping_address_1', 'billing_address_1', $this->value( $checkoutData, 'address', 'street', '' ) );
 		$address_2 = $this->value( $checkoutData, 'shipping_address_2', 'billing_address_2', '' );
+		$selected_region = $this->value( $checkoutData, 'wdc_platform_location_region_name', 'wdc_platform_location_region_name', '' );
+		$selected_region_type = $this->value( $checkoutData, 'wdc_platform_location_region_type', 'wdc_platform_location_region_type', '' );
+		if ( '' !== $selected_region ) {
+			$region = $selected_region;
+		}
 
 		$selected_postcode = $this->value( $checkoutData, 'wdc_platform_location_postcode', 'wdc_platform_location_postcode', '' );
 		if ( '' !== $selected_postcode ) {
@@ -215,12 +227,13 @@ final class CheckoutAddressRuntime {
 		}
 
 		if ( '' === $postcode && '' !== $city ) {
-			$postcode = (string) ( $this->city_resolver->resolve_postcode( $city ) ?? '' );
+			$postcode = (string) ( $this->city_resolver->resolve_postcode( $city, $country ) ?? '' );
 		}
 
 		return array(
 			'country_code'          => strtoupper( $country ),
 			'city'                  => $city,
+			'region_name'           => $region,
 			'postcode'              => $postcode,
 			'address_1'             => $address_1,
 			'address_2'             => $address_2,
@@ -229,7 +242,16 @@ final class CheckoutAddressRuntime {
 			'selected_gar_id'       => $this->value( $checkoutData, 'wdc_platform_location_gar_id', 'wdc_platform_location_gar_id', '' ),
 			'selected_gar_object_id' => $this->value( $checkoutData, 'wdc_platform_location_gar_object_id', 'wdc_platform_location_gar_object_id', '' ),
 			'selected_display_name' => $this->value( $checkoutData, 'wdc_platform_location_display_name', 'wdc_platform_location_display_name', '' ),
-			'selected_region_name'  => $this->value( $checkoutData, 'wdc_platform_location_region_name', 'wdc_platform_location_region_name', '' ),
+			'selected_country_code' => strtoupper( $this->value( $checkoutData, 'wdc_platform_location_country_code', 'wdc_platform_location_country_code', '' ) ),
+			'selected_region_name'  => $selected_region,
+			'selected_region_type'  => $selected_region_type,
+			'selected_district_name' => $this->value( $checkoutData, 'wdc_platform_location_district_name', 'wdc_platform_location_district_name', '' ),
+			'selected_district_type' => $this->value( $checkoutData, 'wdc_platform_location_district_type', 'wdc_platform_location_district_type', '' ),
+			'selected_city_name'    => $this->value( $checkoutData, 'wdc_platform_location_city_name', 'wdc_platform_location_city_name', '' ),
+			'selected_city_type'    => $this->value( $checkoutData, 'wdc_platform_location_city_type', 'wdc_platform_location_city_type', '' ),
+			'selected_place_name'   => $this->value( $checkoutData, 'wdc_platform_location_place_name', 'wdc_platform_location_place_name', '' ),
+			'selected_place_type'   => $this->value( $checkoutData, 'wdc_platform_location_place_type', 'wdc_platform_location_place_type', '' ),
+			'selected_source'       => $this->value( $checkoutData, 'wdc_platform_location_selected_source', 'wdc_platform_location_selected_source', '' ),
 			'selected_lat'          => $this->value( $checkoutData, 'wdc_platform_location_lat', 'wdc_platform_location_lat', '' ),
 			'selected_lng'          => $this->value( $checkoutData, 'wdc_platform_location_lng', 'wdc_platform_location_lng', '' ),
 		);
@@ -244,23 +266,37 @@ final class CheckoutAddressRuntime {
 			return array();
 		}
 
+		if ( '' !== $context['selected_country_code'] && $context['selected_country_code'] !== $context['country_code'] ) {
+			return array();
+		}
+
+		$selected_city_name = '' !== $context['selected_city_name'] ? $context['selected_city_name'] : $context['city'];
+		$selected_place_name = '' !== $context['selected_place_name'] ? $context['selected_place_name'] : $selected_city_name;
+
 		return array(
 			'id'              => $context['selected_location_id'],
 			'fias_id'         => $context['selected_fias_id'],
 			'gar_id'          => $context['selected_gar_id'],
 			'gar_object_id'   => $context['selected_gar_object_id'],
 			'country_code'    => $context['country_code'],
-			'region_name'     => $context['selected_region_name'],
+			'region_name'     => '' !== $context['selected_region_name'] ? $context['selected_region_name'] : $context['region_name'],
+			'region_type'     => $context['selected_region_type'],
+			'district_name'   => $context['selected_district_name'],
+			'district_type'   => $context['selected_district_type'],
 			'region_code'     => '',
-			'city_name'       => $context['city'],
-			'settlement_name' => '',
-			'settlement_type' => 'город',
+			'city_name'       => $selected_city_name,
+			'city_type'       => $context['selected_city_type'],
+			'settlement_name' => $selected_place_name,
+			'settlement_type' => $context['selected_place_type'],
+			'place_name'      => $selected_place_name,
+			'place_type'      => $context['selected_place_type'],
 			'display_name'    => $context['selected_display_name'],
 			'postal_code'     => $context['postcode'],
 			'latitude'        => $context['selected_lat'],
 			'longitude'       => $context['selected_lng'],
 			'active'          => true,
 			'source'          => 'local_db',
+			'selected_source' => $context['selected_source'],
 			'is_manual_city'  => false,
 		);
 	}
@@ -270,10 +306,21 @@ final class CheckoutAddressRuntime {
 	 * @return array<string,mixed>
 	 */
 	private function city_context_from_location( array $location ): array {
+		$city_name = trim( (string) ( $location['city_name'] ?? '' ) );
+		$place_name = trim( (string) ( $location['place_name'] ?? $location['settlement_name'] ?? '' ) );
+		if ( '' === $city_name ) {
+			$city_name = $place_name;
+		}
+		$settlement_name = trim( (string) ( $location['settlement_name'] ?? '' ) );
+		if ( '' === $settlement_name ) {
+			$settlement_name = '' !== $place_name ? $place_name : $city_name;
+		}
+
 		$context = array(
+			'country_code'    => strtoupper( (string) ( $location['country_code'] ?? 'RU' ) ),
 			'location_id'     => (string) ( $location['id'] ?? '' ),
-			'city_name'       => (string) ( $location['city_name'] ?? '' ),
-			'settlement_name' => (string) ( $location['settlement_name'] ?? '' ),
+			'city_name'       => $city_name,
+			'settlement_name' => $settlement_name,
 			'display_name'    => (string) ( $location['display_name'] ?? '' ),
 			'region_name'     => (string) ( $location['region_name'] ?? '' ),
 			'region_code'     => (string) ( $location['region_code'] ?? '' ),
@@ -301,11 +348,12 @@ final class CheckoutAddressRuntime {
 	 */
 	private function manual_city_context( array $context ): array {
 		return array(
+			'country_code'    => strtoupper( (string) ( $context['country_code'] ?? 'RU' ) ),
 			'location_id'     => '',
 			'city_name'       => $context['city'],
 			'settlement_name' => '',
 			'display_name'    => $context['city'],
-			'region_name'     => '',
+			'region_name'     => (string) ( $context['region_name'] ?? '' ),
 			'region_code'     => '',
 			'postcode'        => $context['postcode'],
 			'fias_id'         => '',

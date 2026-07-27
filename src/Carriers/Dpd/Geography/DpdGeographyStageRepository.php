@@ -99,28 +99,34 @@ final class DpdGeographyStageRepository {
 			$this->wpdb->prepare( 'SELECT dpd_city_id, status FROM ' . $this->safe_table_name( $table_name ) . ' WHERE location_id = %d LIMIT 1', $location_id ),
 			ARRAY_A
 		);
-		if ( is_array( $row ) ) {
-			if ( 'conflict' === (string) ( $row['status'] ?? '' ) ) {
-				return 'conflict';
-			}
+			if ( is_array( $row ) ) {
+				if ( 'conflict' === (string) ( $row['status'] ?? '' ) ) {
+					return 'conflict';
+				}
 			if ( (string) ( $row['dpd_city_id'] ?? '' ) === $dpd_city_id ) {
 				return 'unchanged';
 			}
-			$this->wpdb->update(
+			$result = $this->wpdb->update(
 				$table_name,
 				array( 'dpd_city_id' => null, 'match_method' => $match_method, 'status' => 'conflict', 'updated_at' => $now ),
 				array( 'location_id' => $location_id ),
 				array( '%d', '%s', '%s', '%s' ),
 				array( '%d' )
 			);
+			if ( false === $result ) {
+				$this->throw_sql_error( 'DPD geography stage conflict update failed' );
+			}
 			return 'conflict';
 		}
 
-		$this->wpdb->insert(
+		$result = $this->wpdb->insert(
 			$table_name,
 			array( 'location_id' => $location_id, 'dpd_city_id' => (int) $dpd_city_id, 'match_method' => $match_method, 'status' => 'candidate', 'updated_at' => $now ),
 			array( '%d', '%d', '%s', '%s', '%s' )
 		);
+		if ( false === $result ) {
+			$this->throw_sql_error( 'DPD geography stage insert failed' );
+		}
 
 		return 'inserted';
 	}
@@ -146,33 +152,66 @@ final class DpdGeographyStageRepository {
 		);
 	}
 
-	public function finalize_into_delivery_codes( string $table_name ): int {
+	/**
+	 * @return array{mappings:int,changes:int,stale_cleared:int,stale_cleanup_skipped:bool}
+	 */
+	public function finalize_into_delivery_codes( string $table_name, bool $allow_stale_cleanup = true ): array {
 		if ( $this->is_test_mode() ) {
 			$this->create_if_missing_for_test( $table_name );
+			$snapshot = $this->wpdb->delivery_codes;
+			if ( ! empty( $this->wpdb->fail_dpd_stage_candidate_count ) ) {
+				$this->wpdb->last_error = 'forced stage candidate count failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization candidate count failed' );
+			}
+			if ( ! empty( $this->wpdb->fail_dpd_stage_candidate_change_count ) ) {
+				$this->wpdb->last_error = 'forced stage candidate change count failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization candidate change count failed' );
+			}
+			if ( $allow_stale_cleanup && ! empty( $this->wpdb->fail_dpd_stage_stale_count ) ) {
+				$this->wpdb->last_error = 'forced stage stale count failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization stale count failed' );
+			}
+			if ( $allow_stale_cleanup && ! empty( $this->wpdb->fail_dpd_stage_finalize_clear ) ) {
+				$this->wpdb->last_error = 'forced stage clear failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization clear failed' );
+			}
 			$candidates = array();
+			$stage_location_ids = array();
 			foreach ( $this->wpdb->dpd_geography_stage_tables[ $table_name ] as $row ) {
+				$stage_location_ids[ (int) ( $row['location_id'] ?? 0 ) ] = true;
 				if ( 'candidate' === (string) ( $row['status'] ?? '' ) && ! empty( $row['dpd_city_id'] ) ) {
 					$candidates[ (int) $row['location_id'] ] = (string) $row['dpd_city_id'];
 				}
 			}
 			$changed = 0;
+			$stale_cleared = 0;
 			$existing_ids = array();
 			foreach ( $this->wpdb->delivery_codes as $index => $row ) {
 				$location_id = (int) ( $row['location_id'] ?? 0 );
 				$existing_ids[ $location_id ] = true;
 				if ( isset( $candidates[ $location_id ] ) ) {
 					if ( (string) ( $row['dpd_city_id'] ?? '' ) !== $candidates[ $location_id ] ) {
+						$this->wpdb->delivery_codes[ $index ]['dpd_city_id'] = $candidates[ $location_id ];
+						$this->wpdb->delivery_codes[ $index ]['updated_at'] = $this->now();
 						++$changed;
 					}
-					$this->wpdb->delivery_codes[ $index ]['dpd_city_id'] = $candidates[ $location_id ];
-					$this->wpdb->delivery_codes[ $index ]['updated_at'] = $this->now();
 					continue;
 				}
-				if ( null !== ( $row['dpd_city_id'] ?? null ) && '' !== (string) ( $row['dpd_city_id'] ?? '' ) ) {
+				if ( $allow_stale_cleanup && ! isset( $stage_location_ids[ $location_id ] ) && null !== ( $row['dpd_city_id'] ?? null ) && '' !== (string) ( $row['dpd_city_id'] ?? '' ) ) {
 					$this->wpdb->delivery_codes[ $index ]['dpd_city_id'] = null;
 					$this->wpdb->delivery_codes[ $index ]['updated_at'] = $this->now();
 					++$changed;
+					++$stale_cleared;
 				}
+			}
+			if ( ! empty( $this->wpdb->fail_dpd_stage_finalize_upsert ) ) {
+				$this->wpdb->last_error = 'forced stage upsert failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization upsert failed' );
 			}
 			foreach ( $candidates as $location_id => $dpd_city_id ) {
 				if ( isset( $existing_ids[ $location_id ] ) ) {
@@ -181,27 +220,83 @@ final class DpdGeographyStageRepository {
 				$this->wpdb->delivery_codes[] = array( 'location_id' => $location_id, 'dpd_city_id' => $dpd_city_id, 'updated_at' => $this->now() );
 				++$changed;
 			}
-			return $changed;
+			if ( ! empty( $this->wpdb->fail_dpd_stage_finalize_commit ) ) {
+				$this->wpdb->last_error = 'forced stage commit failure';
+				$this->wpdb->delivery_codes = $snapshot;
+				$this->throw_sql_error( 'DPD geography finalization commit failed' );
+			}
+			return array(
+				'mappings' => count( $candidates ),
+				'changes' => $changed,
+				'stale_cleared' => $stale_cleared,
+				'stale_cleanup_skipped' => ! $allow_stale_cleanup,
+			);
 		}
 
 		$delivery_table = $this->wpdb->prefix . 'wdc_location_delivery_codes';
 		$safe_stage = $this->safe_table_name( $table_name );
 		$now = $this->now();
-		$cleared = $this->wpdb->query(
-			"UPDATE {$delivery_table} dc
-			LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id AND stage.status = 'candidate'
-			SET dc.dpd_city_id = NULL, dc.updated_at = '" . esc_sql( $now ) . "'
-			WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL"
-		);
-		$inserted = $this->wpdb->query(
-			"INSERT INTO {$delivery_table} (location_id, dpd_city_id, updated_at)
-			SELECT location_id, dpd_city_id, '" . esc_sql( $now ) . "'
-			FROM {$safe_stage}
-			WHERE status = 'candidate' AND dpd_city_id IS NOT NULL
-			ON DUPLICATE KEY UPDATE dpd_city_id = VALUES(dpd_city_id), updated_at = VALUES(updated_at)"
-		);
+		$this->query_or_throw( 'START TRANSACTION', 'DPD geography finalization transaction start failed' );
+		try {
+			$candidate_count = $this->get_count_or_throw( "SELECT COUNT(*) FROM {$safe_stage} WHERE status = 'candidate' AND dpd_city_id IS NOT NULL", 'DPD geography finalization candidate count failed' );
+			$candidate_change_count = $this->get_count_or_throw(
+				"SELECT COUNT(*)
+				FROM {$safe_stage} stage
+				LEFT JOIN {$delivery_table} dc ON dc.location_id = stage.location_id
+				WHERE stage.status = 'candidate'
+					AND stage.dpd_city_id IS NOT NULL
+					AND (dc.location_id IS NULL OR dc.dpd_city_id IS NULL OR NOT (dc.dpd_city_id <=> stage.dpd_city_id))",
+				'DPD geography finalization candidate change count failed'
+			);
+			$stale_clear_count = 0;
+			if ( $allow_stale_cleanup ) {
+				$stale_clear_count = $this->get_count_or_throw(
+					"SELECT COUNT(*)
+					FROM {$delivery_table} dc
+					LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id
+					WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL",
+					'DPD geography finalization stale count failed'
+				);
+				$this->query_or_throw(
+					"UPDATE {$delivery_table} dc
+					LEFT JOIN {$safe_stage} stage ON stage.location_id = dc.location_id
+					SET dc.dpd_city_id = NULL, dc.updated_at = '" . esc_sql( $now ) . "'
+					WHERE stage.location_id IS NULL AND dc.dpd_city_id IS NOT NULL",
+					'DPD geography finalization clear failed'
+				);
+			}
+			$this->query_or_throw(
+				"UPDATE {$delivery_table} AS dc
+				INNER JOIN {$safe_stage} AS stage ON stage.location_id = dc.location_id
+				SET dc.dpd_city_id = stage.dpd_city_id,
+					dc.updated_at = '" . esc_sql( $now ) . "'
+				WHERE stage.status = 'candidate'
+					AND stage.dpd_city_id IS NOT NULL
+					AND NOT (dc.dpd_city_id <=> stage.dpd_city_id)",
+				'DPD geography finalization existing mappings update failed'
+			);
+			$this->query_or_throw(
+				"INSERT INTO {$delivery_table} (location_id, dpd_city_id, updated_at)
+				SELECT stage.location_id, stage.dpd_city_id, '" . esc_sql( $now ) . "'
+				FROM {$safe_stage} AS stage
+				LEFT JOIN {$delivery_table} AS dc ON dc.location_id = stage.location_id
+				WHERE stage.status = 'candidate'
+					AND stage.dpd_city_id IS NOT NULL
+					AND dc.location_id IS NULL",
+				'DPD geography finalization missing mappings insert failed'
+			);
+			$this->query_or_throw( 'COMMIT', 'DPD geography finalization commit failed' );
+		} catch ( \RuntimeException $exception ) {
+			$this->wpdb->query( 'ROLLBACK' );
+			throw $exception;
+		}
 
-		return max( 0, (int) $cleared ) + max( 0, (int) $inserted );
+		return array(
+			'mappings' => $candidate_count,
+			'changes' => max( 0, $stale_clear_count ) + max( 0, $candidate_change_count ),
+			'stale_cleared' => max( 0, $stale_clear_count ),
+			'stale_cleanup_skipped' => ! $allow_stale_cleanup,
+		);
 	}
 
 	public function exists( string $table_name ): bool {
@@ -213,7 +308,7 @@ final class DpdGeographyStageRepository {
 	}
 
 	private function is_test_mode(): bool {
-		return property_exists( $this->wpdb, 'dpd_geography_stage_tables' );
+		return isset( $this->wpdb->dpd_geography_stage_tables );
 	}
 
 	private function create_if_missing_for_test( string $table_name ): void {
@@ -232,10 +327,38 @@ final class DpdGeographyStageRepository {
 
 	private function normalize_match_method( string $method ): string {
 		$method = preg_replace( '/[^a-z0-9_]/', '', strtolower( $method ) ) ?? '';
-		return in_array( $method, array( 'fias', 'kladr', 'name' ), true ) ? $method : 'unknown';
+		return in_array( $method, array( 'fias', 'kladr', 'name', 'foreign' ), true ) ? $method : 'unknown';
 	}
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	private function throw_sql_error( string $message ): never {
+		$error = trim( (string) ( $this->wpdb->last_error ?? '' ) );
+		$error = preg_replace( '/[\r\n\t]+/', ' ', $error ) ?? $error;
+		throw new \RuntimeException( trim( $message . ': ' . ( '' !== $error ? $error : 'unknown SQL error' ) ) );
+	}
+
+	private function query_or_throw( string $sql, string $message ): int {
+		$result = $this->wpdb->query( $sql );
+		if ( false === $result ) {
+			$this->throw_sql_error( $message );
+		}
+
+		return (int) $result;
+	}
+
+	private function get_count_or_throw( string $sql, string $message ): int {
+		$this->wpdb->last_error = '';
+		$value = $this->wpdb->get_var( $sql );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( $message );
+		}
+		if ( null === $value || ! is_numeric( $value ) ) {
+			throw new \RuntimeException( $message . ': unknown or non-numeric SQL result' );
+		}
+
+		return max( 0, (int) $value );
 	}
 }

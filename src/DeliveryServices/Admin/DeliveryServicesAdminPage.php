@@ -86,6 +86,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DeliveryServicesAdminPage {
 	public const MENU_SLUG = 'wdc-delivery-services';
+	private const DPD_GEOGRAPHY_AJAX_STEP_LIMIT = 500;
 
 	public function __construct(
 		private DeliveryServiceRepository $services,
@@ -153,6 +154,7 @@ final class DeliveryServicesAdminPage {
 		$this->russian_post_pickup_diagnostics->register();
 		add_action( 'wp_ajax_wdc_russian_post_pickup_import_status', array( $this, 'ajax_pickup_import_status' ) );
 		add_action( 'wp_ajax_wdc_dpd_geography_import_status', array( $this, 'ajax_dpd_geography_import_status' ) );
+		add_action( 'wp_ajax_wdc_dpd_geography_import_step', array( $this, 'ajax_dpd_geography_import_step' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start_import', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start_import' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_step', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_step' ) );
@@ -213,7 +215,10 @@ final class DeliveryServicesAdminPage {
 				'wdcDpdGeographyImport',
 				array(
 					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-					'nonce' => wp_create_nonce( 'wdc_dpd_geography_import_status' ),
+					'nonce' => wp_create_nonce( 'wdc_dpd_geography_import' ),
+					'stepLimit' => self::DPD_GEOGRAPHY_AJAX_STEP_LIMIT,
+					'stepDelayMs' => 250,
+					'busyRetryMs' => 1500,
 				)
 			);
 		}
@@ -271,12 +276,29 @@ final class DeliveryServicesAdminPage {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
 		}
-		if ( ! check_ajax_referer( 'wdc_dpd_geography_import_status', 'nonce', false ) ) {
+		if ( ! check_ajax_referer( 'wdc_dpd_geography_import', 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
 		}
 
 		$state = $this->dpd_geography_importer instanceof DpdGeographyImportService
-			? $this->dpd_geography_importer->step( '', 3000 )
+			? $this->dpd_geography_importer->current_state()
+			: array();
+
+		wp_send_json_success( $state );
+	}
+
+	public function ajax_dpd_geography_import_step(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! check_ajax_referer( 'wdc_dpd_geography_import', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_text_field( wp_unslash( $_POST['job_id'] ) ) : '';
+		$expected_byte_offset = isset( $_POST['expected_byte_offset'] ) ? max( 0, (int) $_POST['expected_byte_offset'] ) : null;
+		$state = $this->dpd_geography_importer instanceof DpdGeographyImportService
+			? $this->dpd_geography_importer->step( $job_id, self::DPD_GEOGRAPHY_AJAX_STEP_LIMIT, $expected_byte_offset )
 			: array();
 
 		wp_send_json_success( $state );
@@ -822,7 +844,13 @@ final class DeliveryServicesAdminPage {
 				}
 			}
 			if ( in_array( $action, array( 'save', 'save_main', 'save_availability' ), true ) ) {
-				$this->countries->replace_countries( $id, $this->countries_from_post() );
+				$countries = $this->countries_from_post();
+				$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+				$current_service = $id > 0 ? $this->services->find_by_id( $id ) : null;
+				if ( CdekSettings::SERVICE_KEY === $service_key || ( $current_service instanceof DeliveryService && CdekSettings::SERVICE_KEY === $current_service->service_key ) ) {
+					$countries = array_values( array_intersect( array_map( 'strtoupper', $countries ), CdekSettings::SUPPORTED_COUNTRIES ) );
+				}
+				$this->countries->replace_countries( $id, $countries );
 			}
 			if ( 'save_main' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
@@ -1009,22 +1037,24 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( 'run_dpd_geography_ftp_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_ftp instanceof DpdGeographyFtpClient && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$state = $this->dpd_geography_importer->start_from_ftp( $this->dpd_geography_ftp );
-				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography FTP import job: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->dpd_settings->save_connection_result( $this->dpd_import_action_succeeded( $state ), 'DPD geography FTP import job: ' . (string) ( $state['last_message'] ?? '' ) );
 				$this->save_dpd_import_action_result( 'DPD SFTP import', $state );
 			}
 			if ( 'upload_dpd_geography_csv_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$upload = $_FILES['dpd_geography_csv'] ?? null;
 				$state = is_array( $upload ) ? $this->dpd_geography_importer->start_from_uploaded_file( $upload ) : array( 'phase' => 'failed', 'last_message' => 'DPD geography manual import: CSV upload failed.' );
-				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography manual import job: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->dpd_settings->save_connection_result( $this->dpd_import_action_succeeded( $state ), 'DPD geography manual import job: ' . (string) ( $state['last_message'] ?? '' ) );
 				$this->save_dpd_import_action_result( 'DPD Geography import', $state );
 			}
 			if ( 'reset_dpd_geography_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$state = $this->dpd_geography_importer->reset();
-				$this->dpd_settings->save_connection_result( true, 'DPD geography import reset: ' . (string) ( $state['last_message'] ?? '' ) );
+				$reset_busy = 'busy' === (string) ( $state['operation_control']['outcome'] ?? ( $state['step_control']['outcome'] ?? '' ) );
+				$reset_failed = 'failed' === (string) ( $state['phase'] ?? '' ) || 'error' === (string) ( $state['status'] ?? '' );
+				$this->dpd_settings->save_connection_result( ! $reset_busy && ! $reset_failed, 'DPD geography import reset: ' . (string) ( $state['last_message'] ?? '' ) );
 				$this->save_dpd_geography_action_result(
-					'info',
+					$reset_failed ? 'error' : ( $reset_busy ? 'warning' : 'info' ),
 					'DPD Geography import reset',
-					'Import state was reset.',
+					$reset_busy ? (string) ( $state['last_message'] ?? 'DPD geography import reset is busy.' ) : ( 'cancelled' === (string) ( $state['phase'] ?? '' ) ? 'Импорт и служебные данные сброшены.' : (string) ( $state['last_message'] ?? 'DPD geography import reset finished.' ) ),
 					array(
 						'phase' => (string) ( $state['phase'] ?? '' ),
 						'message' => (string) ( $state['last_message'] ?? '' ),
@@ -1518,7 +1548,7 @@ final class DeliveryServicesAdminPage {
 					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до ПВЗ / ОПС', 'walls-delivery-calc' ), (string) ( $domestic['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ) ); ?>
 					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $domestic['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ) ); ?>
 				<?php elseif ( CdekSettings::SERVICE_KEY === $service->service_key ) : ?>
-					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'СДЭК на текущем этапе доступен только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
+					<?php $this->render_cdek_country_checkboxes( $service ); ?>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
 					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до пункта выдачи', 'walls-delivery-calc' ), (string) ( $cdek['pickup_method_title'] ?? CdekSettings::DEFAULT_PICKUP_METHOD_TITLE ) ); ?>
 					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $cdek['courier_method_title'] ?? CdekSettings::DEFAULT_COURIER_METHOD_TITLE ) ); ?>
@@ -2597,9 +2627,12 @@ final class DeliveryServicesAdminPage {
 				<div data-wdc-dpd-progress-bar style="height: 18px; width: <?php echo esc_attr( (string) $percent ); ?>%; background: #2271b1;"></div>
 			</div>
 			<p data-wdc-dpd-summary><?php echo esc_html( sprintf( 'Фаза: %s. Обработано %d строк. Прочитано %.1f%% файла.', $phase, (int) ( $state['rows_read'] ?? 0 ), $percent ) ); ?></p>
+			<?php if ( ! empty( $state['stale_cleanup_skipped'] ) ) : ?>
+				<div class="notice notice-warning inline"><p><?php echo esc_html__( 'Очистка устаревших DPD mappings пропущена из-за ошибок отдельных строк. Ранее сохранённые mappings оставлены без изменений.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
-				<?php foreach ( array( 'phase', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'foreign_duplicate_identity_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'stale_cleared', 'stale_cleanup_skipped', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
 						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>
@@ -2640,6 +2673,9 @@ final class DeliveryServicesAdminPage {
 			</p>
 		</form>
 		<?php if ( array() !== $report ) : ?>
+			<?php if ( ! empty( $report['stale_cleanup_skipped'] ) ) : ?>
+				<div class="notice notice-warning inline" style="max-width: 860px;"><p><?php echo esc_html__( 'Очистка устаревших DPD mappings пропущена из-за ошибок отдельных строк. Ранее сохранённые mappings оставлены без изменений.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
 			<h3><?php echo esc_html__( 'Последний отчет импорта DPD Географии', 'walls-delivery-calc' ); ?></h3>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
@@ -3076,7 +3112,8 @@ final class DeliveryServicesAdminPage {
 	private function save_dpd_import_action_result( string $title, array $state ): void {
 		$phase = (string) ( $state['phase'] ?? '' );
 		$status = (string) ( $state['status'] ?? '' );
-		$type = 'failed' === $phase ? 'error' : ( 'warning' === $status ? 'warning' : 'success' );
+		$control = (string) ( $state['operation_control']['outcome'] ?? ( $state['step_control']['outcome'] ?? '' ) );
+		$type = 'failed' === $phase || 'error' === $status ? 'error' : ( in_array( $control, array( 'busy', 'reset_required' ), true ) || 'warning' === $status ? 'warning' : 'success' );
 		$message = (string) ( $state['last_message'] ?? ( $state['message'] ?? 'Import job created.' ) );
 		$this->save_dpd_geography_action_result(
 			$type,
@@ -3088,8 +3125,24 @@ final class DeliveryServicesAdminPage {
 				'file_size' => (int) ( $state['file_size'] ?? 0 ),
 				'phase' => $phase,
 				'status' => $status,
+				'operation_control' => $control,
+				'stale_cleanup_skipped' => ! empty( $state['stale_cleanup_skipped'] ) ? 'yes' : 'no',
+				'stale_cleared' => (int) ( $state['stale_cleared'] ?? 0 ),
+				'foreign_duplicate_identity_rows' => (int) ( $state['foreign_duplicate_identity_rows'] ?? 0 ),
 			)
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 */
+	private function dpd_import_action_succeeded( array $state ): bool {
+		$control = (string) ( $state['operation_control']['outcome'] ?? ( $state['step_control']['outcome'] ?? '' ) );
+		if ( in_array( $control, array( 'busy', 'reset_required' ), true ) ) {
+			return false;
+		}
+
+		return 'failed' !== (string) ( $state['phase'] ?? '' ) && 'error' !== (string) ( $state['status'] ?? '' );
 	}
 
 	/**
@@ -4630,7 +4683,37 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 * @return array<int,string>
 	 */
 	private function countries_from_post(): array {
-		return array_filter( array_map( 'trim', explode( ',', (string) wp_unslash( $_POST['countries'] ?? '' ) ) ) );
+		$raw = wp_unslash( $_POST['countries'] ?? '' );
+		if ( is_array( $raw ) ) {
+			return array_values( array_filter( array_map( 'trim', array_map( 'strval', $raw ) ) ) );
+		}
+
+		return array_filter( array_map( 'trim', explode( ',', (string) $raw ) ) );
+	}
+
+	private function render_cdek_country_checkboxes( DeliveryService $service ): void {
+		$selected = null === $service->id ? array() : $this->countries->countries( (int) $service->id );
+		$labels = array(
+			'RU' => __( 'Россия', 'walls-delivery-calc' ),
+			'AM' => __( 'Армения', 'walls-delivery-calc' ),
+			'BY' => __( 'Беларусь', 'walls-delivery-calc' ),
+			'KZ' => __( 'Казахстан', 'walls-delivery-calc' ),
+			'KG' => __( 'Киргизия', 'walls-delivery-calc' ),
+		);
+		?>
+		<tr>
+			<th scope="row"><?php echo esc_html__( 'Страны СДЭК', 'walls-delivery-calc' ); ?></th>
+			<td>
+				<?php foreach ( CdekSettings::SUPPORTED_COUNTRIES as $country ) : ?>
+					<label style="display:block;margin:0 0 6px;">
+						<input type="checkbox" name="countries[]" value="<?php echo esc_attr( $country ); ?>" <?php checked( in_array( $country, $selected, true ) ); ?>>
+						<?php echo esc_html( $country . ' — ' . ( $labels[ $country ] ?? $country ) ); ?>
+					</label>
+				<?php endforeach; ?>
+				<p class="description"><?php echo esc_html__( 'Снятая страна полностью отключает службу СДЭК для этой страны. Можно снять все страны; глобальный статус службы сохраняется отдельно.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
+		<?php
 	}
 
 	private function countries_summary( DeliveryService $service ): string {
@@ -5165,18 +5248,24 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 */
 	private function dpd_import_report_message( array $report ): string {
 		return sprintf(
-			'DPD geography import: source=%s file=%s total=%d ru=%d candidates=%d finalized=%d unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
+			'DPD geography import: phase=%s status=%s source=%s file=%s total=%d ru=%d candidates=%d finalized=%d changes=%d stale_cleared=%d stale_cleanup_skipped=%s duplicate_identity_rows=%d unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
+			(string) ( $report['phase'] ?? '' ),
+			(string) ( $report['status'] ?? '' ),
 			(string) ( $report['source'] ?? '' ),
 			(string) ( $report['source_file'] ?? '' ),
 			(int) ( $report['total_rows'] ?? 0 ),
 			(int) ( $report['ru_rows'] ?? 0 ),
 			(int) ( $report['saved_candidates'] ?? 0 ),
 			(int) ( $report['finalized_mappings'] ?? 0 ),
+			(int) ( $report['finalized_changes'] ?? 0 ),
+			(int) ( $report['stale_cleared'] ?? 0 ),
+			! empty( $report['stale_cleanup_skipped'] ) ? 'yes' : 'no',
+			(int) ( $report['foreign_duplicate_identity_rows'] ?? 0 ),
 			(int) ( $report['unchanged_mappings'] ?? 0 ),
 			(int) ( $report['conflicts'] ?? 0 ),
 			(int) ( $report['ambiguous'] ?? 0 ),
 			(int) ( $report['unmatched'] ?? 0 ),
-			is_array( $report['errors'] ?? null ) ? count( $report['errors'] ) : 0
+			(int) ( $report['errors_total'] ?? ( is_array( $report['errors'] ?? null ) ? count( $report['errors'] ) : 0 ) )
 		);
 	}
 

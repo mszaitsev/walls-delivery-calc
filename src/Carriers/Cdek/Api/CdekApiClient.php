@@ -262,7 +262,7 @@ final class CdekApiClient {
 			$sanitized = array();
 			foreach ( $value as $key => $item ) {
 				$key_text = strtolower( (string) $key );
-				if ( in_array( $key_text, array( 'access_token', 'authorization', 'client_secret', 'secure_password', 'account' ), true ) ) {
+				if ( in_array( $key_text, array( 'access_token', 'authorization', 'client_secret', 'secure_password', 'account', 'tin', 'passport_number', 'passport_series', 'cdek_recipient_document' ), true ) ) {
 					$sanitized[ $key ] = '[redacted]';
 					continue;
 				}

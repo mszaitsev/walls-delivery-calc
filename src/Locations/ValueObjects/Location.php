@@ -140,15 +140,16 @@ final class Location {
 			$errors[] = 'country_code is required';
 		}
 
-		if ( '' === trim( $this->region_code ) ) {
+		$country_code = strtoupper( trim( $this->country_code ) );
+		if ( 'RU' === $country_code && '' === trim( $this->region_code ) ) {
 			$errors[] = 'region_code is required';
 		}
 
-		if ( 0 >= $this->gar_object_id && '' === trim( $this->gar_id ) ) {
+		if ( 'RU' === $country_code && 0 >= $this->gar_object_id && '' === trim( $this->gar_id ) ) {
 			$errors[] = 'gar_object_id is required';
 		}
 
-		if ( '' === trim( $this->fias_id ) ) {
+		if ( 'RU' === $country_code && '' === trim( $this->fias_id ) ) {
 			$errors[] = 'fias_id is required';
 		}
 

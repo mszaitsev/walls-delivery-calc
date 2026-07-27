@@ -22,6 +22,9 @@ final class DpdLocationIndex {
 	) {
 	}
 
+	/**
+	 * @throws \RuntimeException When a location index page cannot be read.
+	 */
 	public function build( int $chunk_size = 5000 ): void {
 		$this->fias = array();
 		$this->kladr = array();
@@ -46,11 +49,42 @@ final class DpdLocationIndex {
 
 	/**
 	 * @param array<string,mixed> $data
+	 * @return array{fias:array<string,int>,kladr:array<string,int>,name:array<string,int>}
+	 */
+	public static function validate_export( array $data ): array {
+		$validated = array();
+		foreach ( array( 'fias', 'kladr', 'name' ) as $bucket ) {
+			if ( ! array_key_exists( $bucket, $data ) || ! is_array( $data[ $bucket ] ) ) {
+				throw new \InvalidArgumentException( 'DPD location index payload is invalid: missing map ' . $bucket . '.' );
+			}
+			$validated[ $bucket ] = array();
+			foreach ( $data[ $bucket ] as $key => $value ) {
+				$key = is_int( $key ) ? (string) $key : $key;
+				if ( ! is_string( $key ) || '' === trim( $key ) ) {
+					throw new \InvalidArgumentException( 'DPD location index payload is invalid: empty map key.' );
+				}
+				if ( is_array( $value ) || is_object( $value ) || ! is_numeric( $value ) ) {
+					throw new \InvalidArgumentException( 'DPD location index payload is invalid: non-numeric location id.' );
+				}
+				$id = (int) $value;
+				if ( self::AMBIGUOUS !== $id && $id <= 0 ) {
+					throw new \InvalidArgumentException( 'DPD location index payload is invalid: non-positive location id.' );
+				}
+				$validated[ $bucket ][ trim( $key ) ] = $id;
+			}
+		}
+
+		return $validated;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
 	 */
 	public function load( array $data ): void {
-		$this->fias = is_array( $data['fias'] ?? null ) ? array_map( 'intval', $data['fias'] ) : array();
-		$this->kladr = is_array( $data['kladr'] ?? null ) ? array_map( 'intval', $data['kladr'] ) : array();
-		$this->name = is_array( $data['name'] ?? null ) ? array_map( 'intval', $data['name'] ) : array();
+		$validated = self::validate_export( $data );
+		$this->fias = $validated['fias'];
+		$this->kladr = $validated['kladr'];
+		$this->name = $validated['name'];
 	}
 
 	public function match_fias( string $fias ): int {

@@ -1,10 +1,18 @@
 # Shipments
 
-Version: 0.127.6
+Version: 0.128.19
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 
 Carrier-specific shipment implementations currently exist for CDEK, DPD, Russian Post, and Yandex Delivery. Shared behavior is documented in [shipment-framework.md](../architecture/shipment-framework.md). Use that document and [new-carrier-guide.md](../development/new-carrier-guide.md) before changing carrier shipment code.
+
+## CDEK EAEU Shipments
+
+CDEK domestic and EAEU shipments share the existing `CdekShipmentAdapter`, request builder, persistence mapper, status service, barcode print service, document provider, and modal extension. Shipment Framework contracts, registries, lifecycle endpoints, status polling, manual attach, cancel, local remove, actual cost, and barcode PDF behavior remain shared.
+
+Russian CDEK courier preparation keeps the DaData/FIAS plus CDEK location flow. For `AM`, `BY`, `KZ`, and `KG`, courier preparation uses the resolved CDEK city code from calculation or rate metadata plus the raw WooCommerce shipping address and postcode; it does not require Russian DaData or FIAS. International pickup uses the same `/v2/orders` endpoint and the selected CDEK delivery point.
+
+The CDEK modal extension owns the `cdek_recipient_document` field. It is server-rendered hidden and cleared for `RU`, visible and optional for `AM`, `BY`, `KZ`, and `KG`, then re-synchronized by the CDEK admin JS hook during form initialization and later country changes; this visibility does not depend on preview responses. When present it maps to `recipient.tin` for `KZ`/`KG` and to `recipient.passport_number` for `AM`/`BY`. The value is sanitized, kept only in the current admin page memory, redacted from diagnostics, and never stored in order meta, shipment persistence, snapshots, transients, options, notes, analytics, or status payloads.
 
 ## Canonical Requirements
 

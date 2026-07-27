@@ -8,6 +8,7 @@
 	var preferredShippingMethodPending = false;
 	var preferredShippingMethodRecoveryUpdateSent = false;
 	var activePickupFamily = String(checkoutConfig.activePickupFamily || checkoutConfig.active_pickup_family || '').trim();
+	var activePickupCountryCode = String(checkoutConfig.activePickupCountryCode || checkoutConfig.active_pickup_country_code || '').trim().toUpperCase();
 	var currentContext = checkoutConfig.currentContext || checkoutConfig.initialContext || {};
 	var prefetchTimer = 0;
 	var prefetchController = null;
@@ -39,6 +40,7 @@
 window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 window.wdcPickupCheckout.activePickupFamily = activePickupFamily;
+window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
 var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
@@ -513,7 +515,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			pickup_family: family || shippingMethodFamily(method),
 			shipping_method_id: method
 		};
-		return window.WDCPickupApi.reset(payload).catch(function () {});
+		return window.WDCPickupApi.reset(payload).then(function (response) {
+			mergePickupSelectionsFromResponse(response || {});
+			return response;
+		}).catch(function () {});
 	}
 
 	function currentShippingMethod() {
@@ -565,10 +570,14 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			lat: config.lat || '',
 			lng: config.lng || '',
 			query: config.query || '',
-			city_code: config.city_code || config.cdek_city_code || '',
-			cdek_city_code: config.cdek_city_code || config.city_code || '',
-			city_name: config.city_name || '',
+			city_code: contextCityCode(config),
+			cdek_city_code: contextCdekCityCode(config),
+			cdek_to_city_code: config.cdek_to_city_code || '',
+			city_name: contextCityName(config),
+			cdek_to_city_name: config.cdek_to_city_name || '',
 			region_name: config.region_name || '',
+			country_code: contextCountryCode(config),
+			cdek_to_country_code: config.cdek_to_country_code || '',
 			selectedPoint: activeSelected || config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
@@ -583,21 +592,50 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			query: fieldContext.query || runtimeContext.query || localizedContext.query,
 			postcode: fieldContext.postcode || runtimeContext.postcode || localizedContext.postcode || '',
 			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || '',
-			city_code: fieldContext.city_code || runtimeContext.city_code || localizedContext.city_code || '',
-			cdek_city_code: fieldContext.cdek_city_code || runtimeContext.cdek_city_code || localizedContext.cdek_city_code || '',
+			city_code: contextCityCode(fieldContext) || contextCityCode(runtimeContext) || contextCityCode(localizedContext),
+			cdek_city_code: contextCdekCityCode(fieldContext) || contextCdekCityCode(runtimeContext) || contextCdekCityCode(localizedContext),
+			cdek_to_city_code: fieldContext.cdek_to_city_code || runtimeContext.cdek_to_city_code || localizedContext.cdek_to_city_code || '',
 			location_id: fieldContext.location_id || runtimeContext.location_id || localizedContext.location_id || '',
 			fias_id: fieldContext.fias_id || runtimeContext.fias_id || localizedContext.fias_id || '',
-			city_name: fieldContext.city_name || runtimeContext.city_name || localizedContext.city_name || '',
+			city_name: contextCityName(fieldContext) || contextCityName(runtimeContext) || contextCityName(localizedContext),
+			cdek_to_city_name: fieldContext.cdek_to_city_name || runtimeContext.cdek_to_city_name || localizedContext.cdek_to_city_name || '',
 			region_name: fieldContext.region_name || runtimeContext.region_name || localizedContext.region_name || '',
-			country_code: fieldContext.country_code || runtimeContext.country_code || localizedContext.country_code || 'RU',
+			country_code: contextCountryCode(fieldContext) || contextCountryCode(runtimeContext) || contextCountryCode(localizedContext) || 'RU',
+			cdek_to_country_code: fieldContext.cdek_to_country_code || runtimeContext.cdek_to_country_code || localizedContext.cdek_to_country_code || '',
 			selectedPoint: activeSelected || localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
 		return result;
 	}
 
+	function contextCityCode(context) {
+		context = context || {};
+		return context.city_code || context.cdek_city_code || context.cdek_to_city_code || '';
+	}
+
+	function contextCdekCityCode(context) {
+		context = context || {};
+		return context.cdek_city_code || context.city_code || context.cdek_to_city_code || '';
+	}
+
+	function contextCityName(context) {
+		context = context || {};
+		return context.city_name || context.settlement_name || context.place_name || context.cdek_to_city_name || '';
+	}
+
+	function contextCountryCode(context) {
+		context = context || {};
+		return String(context.country_code || context.cdek_to_country_code || '').trim().toUpperCase();
+	}
+
 	function contextFromFields() {
 		var country = fieldValue('shipping_country') || fieldValue('billing_country');
-		if (country && country.toUpperCase() !== 'RU') {
+		var normalizedCountry = String(country || 'RU').toUpperCase();
+		var activeFamily = shippingMethodFamily(currentShippingMethod() || activeMethod);
+		if (activePickupCountryCode) {
+			if (normalizedCountry !== activePickupCountryCode) {
+				return { countryBlocked: true };
+			}
+		} else if (country && normalizedCountry !== 'RU') {
 			return { countryBlocked: true };
 		}
 		var hiddenLat = fieldValue('wdc_platform_location_lat');
@@ -617,7 +655,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var context = query ? { query: query } : {};
 		context.postcode = postcode;
 		context.display_name = city || hiddenRegion;
-		context.country_code = country || 'RU';
+		context.country_code = normalizedCountry;
 		context.location_id = hiddenLocationId;
 		context.fias_id = hiddenFiasId;
 		context.city_name = visibleDestinationChanged ? visibleCity : (hiddenCity || hiddenDisplay || visibleCity);
@@ -672,6 +710,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (!a || !b) {
 			return false;
 		}
+		var aCountry = String(a.country_code || 'RU').toUpperCase();
+		var bCountry = String(b.country_code || 'RU').toUpperCase();
+		if (aCountry !== bCountry) {
+			return false;
+		}
 		var aFias = normalizeGuid(a.fias_id || '');
 		var bFias = normalizeGuid(b.fias_id || '');
 		if (aFias && bFias) {
@@ -692,6 +735,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function sameLocationContext(oldContext, newContext) {
 		if (!oldContext || !newContext) {
+			return false;
+		}
+		var oldCountry = String(oldContext.country_code || '').trim().toUpperCase();
+		var newCountry = String(newContext.country_code || '').trim().toUpperCase();
+		if (oldCountry && newCountry && oldCountry !== newCountry) {
 			return false;
 		}
 		var oldLocationId = normalizeText(oldContext.location_id || '');
@@ -744,6 +792,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var snapshot = pointSnapshot(point);
 		var pointFingerprint = String(point.destination_fingerprint || snapshot.destination_fingerprint || '').trim();
 		var contextFingerprint = destinationFingerprint(context);
+		var pointCountry = String(point.country_code || snapshot.country_code || fingerprintValue(pointFingerprint, 'country') || '').trim().toUpperCase();
+		var contextCountry = String(context.country_code || '').trim().toUpperCase();
 		var pointLocationId = normalizeText(point.destination_location_id || snapshot.destination_location_id || point.location_id || snapshot.location_id || fingerprintValue(pointFingerprint, 'location_id') || '');
 		var contextLocationId = normalizeText(context.location_id || context.id || '');
 		var pointFias = normalizeGuid(point.destination_fias_id || snapshot.destination_fias_id || point.fias_id || point.fias_location_guid || snapshot.fias_id || snapshot.fias_location_guid || fingerprintValue(pointFingerprint, 'fias_id') || '');
@@ -757,7 +807,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var pointPostcode = normalizeText(point.destination_postcode || point.checkout_postcode || snapshot.destination_postcode || snapshot.checkout_postcode || '');
 		var contextPostcode = normalizeText(context.postcode || context.postal_code || '');
 		var matchedBy = '';
-		if (pointLocationId && contextLocationId && pointLocationId === contextLocationId) {
+		if (pointCountry && contextCountry && pointCountry !== contextCountry) {
+			matchedBy = '';
+		} else if (pointLocationId && contextLocationId && pointLocationId === contextLocationId) {
 			matchedBy = 'location_id';
 		} else if (pointFias && contextFias && pointFias === contextFias) {
 			matchedBy = 'fias_id';
@@ -785,6 +837,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			context_postcode: contextPostcode,
 			point_destination_fingerprint: pointFingerprint,
 			context_destination_fingerprint: contextFingerprint,
+			point_country_code: pointCountry,
+			context_country_code: contextCountry,
 			matched_by: matchedBy
 		};
 	}
@@ -809,8 +863,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 		return [
 			context.carrier || '',
-			context.city_code || '',
-			context.cdek_city_code || '',
+			normalizeText(context.country_code || ''),
+			contextCityCode(context),
+			contextCdekCityCode(context),
 			coordinateKey(context.lat),
 			coordinateKey(context.lng),
 			normalizeText(context.postcode || ''),
@@ -954,27 +1009,27 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function contextFromState(context) {
 		context = context || {};
 		var postcode = String(context.postcode || context.postal_code || '').trim();
-		var displayName = String(context.display_name || context.city_name || context.settlement_name || '').trim();
+		var displayName = String(context.display_name || contextCityName(context)).trim();
 		var query = [postcode, displayName].filter(Boolean).join(' ').trim();
 		return {
 			lat: context.lat || context.latitude || '',
 			lng: context.lng || context.longitude || '',
 			postcode: postcode,
 			display_name: displayName,
-			city_code: context.city_code || context.cdek_city_code || '',
-			cdek_city_code: context.cdek_city_code || context.city_code || '',
+			city_code: contextCityCode(context),
+			cdek_city_code: contextCdekCityCode(context),
 			region_name: context.region_name || '',
 			region_code: context.region_code || '',
 			region_type: context.region_type || '',
 			district_name: context.district_name || '',
 			district_type: context.district_type || '',
 			query: query,
-			country_code: context.country_code || 'RU',
+			country_code: contextCountryCode(context) || 'RU',
 			location_id: context.location_id || '',
 			fias_id: context.fias_id || '',
 			gar_object_id: context.gar_object_id || context.gar_id || '',
 			kladr_id: context.kladr_id || '',
-			city_name: context.city_name || context.city_value || displayName,
+			city_name: contextCityName(context) || context.city_value || displayName,
 			city_type: context.city_type || '',
 			place_name: context.place_name || context.settlement_name || '',
 			place_type: context.place_type || '',
@@ -1013,6 +1068,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			presentation_comment: point.presentation_comment || snapshot.presentation_comment || '',
 			marker_type: point.marker_type || snapshot.marker_type || pickupPresentation(point).marker_type || '',
 			cdek_code: point.cdek_code || point.delivery_point || snapshot.cdek_code || snapshot.delivery_point || '',
+			country_code: point.country_code || snapshot.country_code || '',
+			cdek_city_code: point.cdek_city_code || snapshot.cdek_city_code || point.city_code || snapshot.city_code || '',
+			is_handout: point.is_handout !== undefined && point.is_handout !== null ? !!point.is_handout : (snapshot.is_handout !== undefined && snapshot.is_handout !== null ? !!snapshot.is_handout : undefined),
 			cdek_type: point.cdek_type || snapshot.cdek_type || point.point_type || snapshot.point_type || '',
 			location_id: point.location_id || snapshot.location_id || '',
 			fias_id: point.fias_id || point.fias_location_guid || snapshot.fias_id || snapshot.fias_location_guid || '',
@@ -1086,10 +1144,16 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (!response) {
 			return;
 		}
-		if (response.activePickupFamily || response.active_pickup_family) {
+		if (Object.prototype.hasOwnProperty.call(response, 'activePickupFamily') || Object.prototype.hasOwnProperty.call(response, 'active_pickup_family')) {
 			activePickupFamily = String(response.activePickupFamily || response.active_pickup_family || '').trim();
 			if (window.wdcPickupCheckout) {
 				window.wdcPickupCheckout.activePickupFamily = activePickupFamily;
+			}
+		}
+		if (Object.prototype.hasOwnProperty.call(response, 'activePickupCountryCode') || Object.prototype.hasOwnProperty.call(response, 'active_pickup_country_code')) {
+			activePickupCountryCode = String(response.activePickupCountryCode || response.active_pickup_country_code || '').trim().toUpperCase();
+			if (window.wdcPickupCheckout) {
+				window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
 			}
 		}
 		selectedPickupPoints = mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));
@@ -1144,6 +1208,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		point = point || {};
 		var context = currentContext && destinationFingerprint(currentContext) ? currentContext : contextFromFields();
 		var snapshot = pointSnapshot(point);
+		var pointCountry = String(point.country_code || snapshot.country_code || '').trim().toUpperCase();
+		var contextCountry = String(context.country_code || '').trim().toUpperCase();
+		point.country_code = pointCountry || contextCountry || '';
 		point.location_id = point.location_id || context.location_id || context.id || '';
 		point.fias_id = point.fias_id || point.fias_location_guid || context.fias_id || context.city_fias_id || '';
 		point.gar_object_id = point.gar_object_id || point.gar_id || context.gar_object_id || context.gar_id || '';
@@ -1157,6 +1224,14 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		point.destination_region_name = point.destination_region_name || context.region_name || context.state_value || '';
 		point.destination_postcode = point.destination_postcode || context.postcode || context.postal_code || '';
 		point.destination_fingerprint = point.destination_fingerprint || snapshot.destination_fingerprint || destinationFingerprint(context);
+		point.cdek_city_code = point.cdek_city_code || snapshot.cdek_city_code || point.city_code || snapshot.city_code || contextCdekCityCode(context);
+		if (point.is_handout === undefined && snapshot.is_handout !== undefined) {
+			point.is_handout = !!snapshot.is_handout;
+		}
+		if (point.is_handout === undefined && point.raw && point.raw.is_handout !== undefined) {
+			point.is_handout = !!point.raw.is_handout;
+		}
+		snapshot.country_code = snapshot.country_code || point.country_code || '';
 		snapshot.location_id = snapshot.location_id || point.location_id || '';
 		snapshot.fias_id = snapshot.fias_id || point.fias_id || '';
 		snapshot.gar_object_id = snapshot.gar_object_id || point.gar_object_id || '';
@@ -1167,6 +1242,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		snapshot.destination_region_name = snapshot.destination_region_name || point.destination_region_name || '';
 		snapshot.destination_postcode = snapshot.destination_postcode || point.destination_postcode || '';
 		snapshot.destination_fingerprint = snapshot.destination_fingerprint || point.destination_fingerprint || '';
+		snapshot.cdek_city_code = snapshot.cdek_city_code || point.cdek_city_code || '';
+		if (snapshot.is_handout === undefined && point.is_handout !== undefined) {
+			snapshot.is_handout = !!point.is_handout;
+		}
 		point.snapshot = snapshot;
 		return point;
 	}
@@ -1226,6 +1305,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			address: point.address || point.point_address || snapshot.address || '',
 			point_address: point.point_address || point.address || snapshot.address || '',
 			point_postcode: point.point_postcode || point.postcode || point.postal_code || point.display_code || snapshot.point_postcode || snapshot.postcode || snapshot.postal_code || snapshot.display_code || '',
+			country_code: point.country_code || snapshot.country_code || '',
+			cdek_city_code: point.cdek_city_code || snapshot.cdek_city_code || '',
+			is_handout: point.is_handout !== undefined && point.is_handout !== null ? !!point.is_handout : (snapshot.is_handout !== undefined && snapshot.is_handout !== null ? !!snapshot.is_handout : undefined),
 			work_time: point.work_time || snapshot.work_time || '',
 			description: point.description || snapshot.description || '',
 			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
@@ -1647,7 +1729,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 		prefetchController = new AbortController();
 		if (validCoordinate(context.lat, context.lng)) {
-			prefetchBounds(context, parseFloat(context.lat), parseFloat(context.lng), key, prefetchController.signal);
+			prefetchBounds(context, parseFloat(context.lat), parseFloat(context.lng), key, prefetchController.signal, 'destination', true);
 			return;
 		}
 		if (context.city_code || context.cdek_city_code) {
@@ -1661,21 +1743,27 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		window.WDCPickupApi.searchInitial(context.query, prefetchController.signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
-			if (!points[0] || points[0].lat === null || points[0].lng === null) {
+			if (!points[0] || !validCoordinate(points[0].lat, points[0].lng)) {
 				prefetchCache = { key: key, points: [], context: context };
 				return;
 			}
-			prefetchBounds(context, parseFloat(points[0].lat), parseFloat(points[0].lng), key, prefetchController.signal);
+			prefetchBounds(context, parseFloat(points[0].lat), parseFloat(points[0].lng), key, prefetchController.signal, 'point_search', false);
 		}).catch(function () {});
 	}
 
-	function prefetchBounds(context, lat, lng, key, signal) {
+	function prefetchBounds(context, lat, lng, key, signal, centerSource, centerTrusted) {
+		if (!validCoordinate(lat, lng)) {
+			prefetchCache = { key: key, points: [], context: context };
+			return;
+		}
 		window.WDCPickupApi.points(bboxAround(lat, lng), signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
 			prefetchCache = {
 				key: key,
 				points: points,
 				centerLat: lat,
 				centerLng: lng,
+				centerSource: centerSource || '',
+				centerTrusted: centerTrusted === true,
 				context: context
 			};
 		}).catch(function () {});
@@ -1692,7 +1780,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return Object.assign({}, context, {
 				preloadedPoints: prefetchCache.points,
 				centerLat: prefetchCache.centerLat,
-				centerLng: prefetchCache.centerLng
+				centerLng: prefetchCache.centerLng,
+				centerSource: prefetchCache.centerSource || '',
+				centerTrusted: prefetchCache.centerTrusted === true
 			});
 		}
 		return context;
@@ -2047,6 +2137,12 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		lastDestinationFingerprint = newFingerprint;
 		resetSelection('location_changed');
 		schedulePrefetch();
+	});
+	document.body.addEventListener('wdc:location-cleared', function () {
+		invalidatePrefetch();
+		updateCurrentContext(contextFromFields());
+		resetSelection('destination_changed');
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 	});
 	document.addEventListener('DOMContentLoaded', boot);
 	document.addEventListener('click', function (event) {

@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.127.6
+Version: 0.128.19
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -19,6 +19,22 @@ Checkout and order-admin recalculation use the same runtime order:
 Carrier adapters return the raw carrier `DateRange`. `DeliveryLeadTimeNormalizer` adds the global `shop_processing_working_days` setting, default `2`, using `CalendarTypes::SHOP`, then converts carrier working days through `CalendarTypes::CARRIER_RU` only when the service-level `delivery_days_are_working` checkbox is enabled. That checkbox defaults to `false`.
 
 The current calculation day is not counted for shop processing, and the handoff day is not counted when carrier working days are converted. Rules run only after the base duration is normalized into calendar days. The planned date is calculated after rules from the final minimum delivery-days boundary, so checkout comments and order metadata stay aligned with rule changes.
+
+## CDEK EAEU Availability
+
+The `cdek` delivery service owns CDEK availability for `RU`, `AM`, `BY`, `KZ`, and `KG`. Administrators configure those countries with the existing service-country checkboxes, persisted in `wdc_delivery_service_countries`; the global service enabled flag remains independent. Checkout must not create a `cdek_international` service or bypass the delivery-service country selection.
+
+CDEK city resolution uses the quote country, city, optional postcode, optional region for local disambiguation, RU FIAS when present, and coordinates when available. Manual city input is allowed, but a CDEK quote is produced only after an unambiguous exact normalized `/v2/location/cities` match. Ambiguous, missing, or null API city results suppress only the CDEK quote and must not block other carriers.
+
+CDEK pickup and courier branches are available for every enabled CDEK country when the API returns a supported tariff. Delivery modes `1` and `3` map to courier; modes `2` and `4` map to pickup. Modes `6` through `10` may remain diagnostic data but are not checkout delivery types. Pickup requires at least one country- and city-matching CDEK handout point; courier does not depend on pickup points.
+
+When a CDEK manual city has a resolved CDEK city code but no canonical location coordinates, the pickup map may load points directly by city code and fit the initial viewport to the returned point coordinates. That viewport is presentation-only: it is not saved as destination coordinates, city context, location identity, or shipment data. Programmatic initial viewport changes suppress only their own map event burst; the first later user pan or zoom must load points normally, and any physical user interaction cancels pending initial auto-fit for that modal instance. Explicit viewport actions such as address search, geolocation, selected-point focus, and confirmed point selection claim the viewport, cancel pending provider fit, and load or render points directly without waiting for suppressed map events.
+
+Checkout location search builds its preliminary pool in two tiers: direct own-name candidates from `place_name`, `city_name`, and `settlement_name` are fetched before broader hierarchy/context candidates from region, district, city, place, and settlement fields. Direct candidates are ordered consistently in production SQL and in-memory smokes as exact own-name, then prefix own-name, then display name. The final ranking remains in PHP, but exact city/place matches such as BY Minsk cannot be cut off by a large region-only SQL result set before scoring. Country filtering remains part of the query and does not rely on visual display names.
+
+When a local DB location is selected, the picker option remains contextual, for example `г Минск - Минский р-н, Минская область`, but the WooCommerce city field receives only the own typed place, for example `г Минск`. Region, district, city, and place canonical values are submitted through `wdc_platform_location_*` hidden fields and the checkout runtime stores `city_context.city_name` and `settlement_name` without hierarchy text, so CDEK receives `Минск` rather than `Минский р-н, г Минск`. Hidden selected-location country must match the posted checkout country; mismatches are ignored server-side.
+
+Changing the actual destination country after initial checkout load clears the active destination scope's city, state, postcode, selected local-location hidden fields, selected notice, picker search state, pickup selection, and cached quote state through the existing checkout recalculation flow. A first load with an existing country and repeated same-country events do not clear fields.
 
 ## Canonical Requirements
 

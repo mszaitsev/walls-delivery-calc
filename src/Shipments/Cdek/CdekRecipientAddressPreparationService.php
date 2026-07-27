@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Cdek;
 
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekLocationResolver;
 use WallsShop\WDC\Checkout\Address\AddressLineParser;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
@@ -29,6 +30,11 @@ final class CdekRecipientAddressPreparationService {
 	 * @return array<string,mixed>
 	 */
 	public function prepare( object $order, string $original_address, array $location_context, string $service_key = 'cdek' ): array {
+		$country_code = $this->country_code( $location_context );
+		if ( 'RU' !== $country_code ) {
+			return $this->prepare_international( $original_address, $location_context, $service_key, $country_code );
+		}
+
 		if ( ! $this->settings->enabled() || ! $this->settings->has_any_configured_token() ) {
 			return $this->failure( 'Подсказки DaData не настроены. Невозможно проверить адрес СДЭК.', $service_key, $original_address );
 		}
@@ -114,6 +120,77 @@ final class CdekRecipientAddressPreparationService {
 			'message' => $message,
 			'fields' => array(),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location_context
+	 * @return array<string,mixed>
+	 */
+	private function prepare_international( string $original_address, array $location_context, string $service_key, string $country_code ): array {
+		if ( ! in_array( $country_code, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
+			return $this->international_failure( 'CDEK country is not supported for international address preparation.', $service_key, $original_address );
+		}
+		$city_code = $this->known_city_code( $location_context );
+		if ( $city_code <= 0 ) {
+			return $this->international_failure( self::CITY_CODE_ERROR, $service_key, $original_address );
+		}
+		$address = $this->normalize_spaces( $original_address );
+		if ( '' === $address ) {
+			return $this->international_failure( 'Fill CDEK recipient delivery address.', $service_key, $original_address );
+		}
+
+		$city = $this->clean_city_name( (string) ( $location_context['city_name'] ?? $location_context['city_value'] ?? '' ) );
+		$postcode = preg_replace( '/\D+/', '', (string) ( $location_context['postal_code'] ?? $location_context['postcode'] ?? '' ) ) ?: '';
+		$display = trim( implode( ', ', array_filter( array( $country_code, $postcode, $city, $address ), static fn( string $part ): bool => '' !== trim( $part ) ) ) );
+
+		return array(
+			'success' => true,
+			'source' => 'cdek_eaeu_raw_address',
+			'service_key' => $service_key,
+			'original_hash' => $this->original_address_hash( $original_address ),
+			'display' => $display,
+			'message' => 'CDEK international address is ready',
+			'fields' => array(
+				'country_code' => $country_code,
+				'cdek_city_code' => $city_code,
+				'cdek_city_name' => $city,
+				'cdek_postal_code' => $postcode,
+				'cdek_delivery_address' => $address,
+				'postal_code' => $postcode,
+				'region' => (string) ( $location_context['region_name'] ?? $location_context['state_value'] ?? '' ),
+				'city' => $city,
+				'fias_id' => '',
+				'kladr_id' => '',
+			),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function international_failure( string $message, string $service_key, string $original_address ): array {
+		return array(
+			'success' => false,
+			'source' => 'cdek_eaeu_raw_address',
+			'service_key' => $service_key,
+			'original_hash' => $this->original_address_hash( $original_address ),
+			'display' => '',
+			'message' => $message,
+			'fields' => array(),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location_context
+	 */
+	private function country_code( array $location_context ): string {
+		$country_code = strtoupper( trim( (string) ( $location_context['country_code'] ?? '' ) ) );
+		return '' === $country_code ? 'RU' : $country_code;
+	}
+
+	private function normalize_spaces( string $value ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
 	}
 
 	private function clean_city_name( string $city ): string {
@@ -247,15 +324,16 @@ final class CdekRecipientAddressPreparationService {
 	 * @param array<string,mixed> $location_context
 	 */
 	private function city_code_from_resolver( array $payload, array $location_context, string $city, string $postal_code, ?float $lat, ?float $lng ): int {
+		$country_code = $this->country_code( $location_context );
 		$request = new QuoteRequest(
-			'RU',
+			$country_code,
 			new Address(
-				country_code: 'RU',
+				country_code: $country_code,
 				region_name: (string) ( $payload['region'] ?? $location_context['region_name'] ?? $location_context['state_value'] ?? '' ),
 				city: $city,
 				settlement: (string) ( $payload['settlement'] ?? $location_context['settlement'] ?? '' ),
 				postcode: $postal_code,
-				fias_id: (string) ( $payload['fias_id'] ?? $location_context['fias_id'] ?? '' )
+				fias_id: 'RU' === $country_code ? (string) ( $payload['fias_id'] ?? $location_context['fias_id'] ?? '' ) : ''
 			),
 			new Package( array(), Money::from_kopecks( 0 ), Money::from_kopecks( 0 ), 1, 0, 1, 1, 1, 1 ),
 			'',
@@ -265,7 +343,7 @@ final class CdekRecipientAddressPreparationService {
 				'city_name' => $city,
 				'selected_location_name' => (string) ( $location_context['city_name'] ?? $location_context['city_value'] ?? $city ),
 				'selected_location_region' => (string) ( $location_context['region_name'] ?? $location_context['state_value'] ?? '' ),
-				'selected_location_fias_id' => (string) ( $location_context['fias_id'] ?? '' ),
+				'selected_location_fias_id' => 'RU' === $country_code ? (string) ( $location_context['fias_id'] ?? '' ) : '',
 				'lat' => null !== $lat ? (string) $lat : '',
 				'lng' => null !== $lng ? (string) $lng : '',
 			)

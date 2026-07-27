@@ -149,10 +149,11 @@ final class CdekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	 */
 	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array {
 		$errors = $this->builder->validate( $request );
+		$body = array() === $errors ? $this->builder->build( $request ) : array();
 		return array(
 			'method' => 'POST',
 			'path' => '/v2/orders',
-			'body' => array() === $errors ? $this->builder->build( $request ) : array(),
+			'body' => array() === $errors ? $this->sanitize_request_snapshot( $request, $body ) : array(),
 			'errors' => $errors,
 		);
 	}

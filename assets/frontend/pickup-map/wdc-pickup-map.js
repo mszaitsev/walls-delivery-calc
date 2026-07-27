@@ -3,11 +3,16 @@
 
 	function debounce(fn, wait) {
 		var timer = 0;
-		return function () {
+		function debounced() {
 			var args = arguments;
 			clearTimeout(timer);
 			timer = setTimeout(function () { fn.apply(null, args); }, wait);
+		}
+		debounced.cancel = function () {
+			clearTimeout(timer);
+			timer = 0;
 		};
+		return debounced;
 	}
 
 	function createMap(element, card, confirmButton, labels, initialContext) {
@@ -16,7 +21,10 @@
 		var providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[providerName];
 		var list = findList(element, card);
 		var controller = null;
-		var suppressNextMoveLoad = false;
+		var programmaticBoundsSuppressed = false;
+		var programmaticBoundsReleaseTimer = 0;
+		var userViewportInteracted = false;
+		var destroyed = false;
 		var context = initialContext || {};
 		var initialSelectedPoint = normalizeInitialSelectedPoint(context.selectedPoint || context.selectedPickupPoint);
 		var listSelectButton = createListSelectButton(list);
@@ -24,10 +32,26 @@
 		var committedPoint = initialSelectedPoint;
 		var preloadedPoints = Array.isArray(context.preloadedPoints) ? context.preloadedPoints : [];
 		var hasPreloadedPoints = preloadedPoints.length > 0;
-		var initialLat = parseFloat(context.centerLat || (initialSelectedPoint && initialSelectedPoint.lat) || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
-		var initialLng = parseFloat(context.centerLng || (initialSelectedPoint && initialSelectedPoint.lng) || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
-		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
-		var distanceOrigin = hasInitialCoordinates ? { lat: initialLat, lng: initialLng } : null;
+		var selectedPointHasCoordinates = !!(initialSelectedPoint && validPointCoordinates(initialSelectedPoint));
+		var selectedPointCoordinates = selectedPointHasCoordinates ? coordinatePair(initialSelectedPoint.lat, initialSelectedPoint.lng) : null;
+		var canonicalDestinationCoordinates = coordinatePair(context.lat, context.lng);
+		var explicitlyTrustedCenter = truthy(context.centerTrusted) ? coordinatePair(context.centerLat, context.centerLng) : null;
+		var trustedInitialCoordinates = firstValidCoordinatePair([
+			selectedPointCoordinates,
+			canonicalDestinationCoordinates,
+			explicitlyTrustedCenter
+		]);
+		var derivedPointCoordinates = trustedInitialCoordinates ? null : firstValidCoordinatePair([
+			{ lat: context.centerLat, lng: context.centerLng },
+			firstValidCoordinatePair(preloadedPoints)
+		]);
+		var initialCoordinates = trustedInitialCoordinates || derivedPointCoordinates;
+		var initialLat = initialCoordinates ? initialCoordinates.lat : NaN;
+		var initialLng = initialCoordinates ? initialCoordinates.lng : NaN;
+		var hasTrustedInitialCoordinates = !!trustedInitialCoordinates;
+		var hasInitialCoordinates = !!initialCoordinates;
+		var initialPointsViewportApplied = hasTrustedInitialCoordinates || selectedPointHasCoordinates;
+		var distanceOrigin = selectedPointCoordinates || canonicalDestinationCoordinates || explicitlyTrustedCenter || null;
 		var searchAddress = null;
 		var hasInitialQuery = !!(context.query && String(context.query).trim());
 		var provider = null;
@@ -52,6 +76,10 @@
 
 		function boundsChanged(bbox) {
 			lastBbox = bbox || lastBbox;
+			if (programmaticBoundsSuppressed) {
+				scheduleProgrammaticBoundsRelease();
+				return;
+			}
 			if (yandexCityListMode && visiblePoints.length) {
 				renderCurrentList();
 				updateListSelectButton();
@@ -76,6 +104,7 @@
 		}
 		if (provider.onMapClick) {
 			provider.onMapClick(function () {
+				markUserViewportInteraction();
 				if (suppressNextMapClick) {
 					suppressNextMapClick = false;
 					return;
@@ -93,6 +122,7 @@
 				}
 			});
 		}
+		attachUserViewportListeners();
 
 		function renderPointPopup(point, selected) {
 			var rows = [];
@@ -155,6 +185,8 @@
 				provider.setActivePoint(pointId(point));
 			}
 			if (options.focus !== false && provider.focusPoint) {
+				claimViewportForExplicitAction();
+				beginProgrammaticBoundsSuppression();
 				provider.focusPoint(point);
 			}
 			renderCurrentList();
@@ -167,6 +199,7 @@
 
 		function commit(point, options) {
 			options = options || {};
+			claimViewportForExplicitAction();
 			committedPoint = point;
 			previewPoint = point;
 			popupManuallyClosed = false;
@@ -177,6 +210,7 @@
 				provider.setActivePoint(pointId(point));
 			}
 			if (options.focus !== false && provider.focusPoint) {
+				beginProgrammaticBoundsSuppression();
 				provider.focusPoint(point);
 			}
 			renderCurrentList();
@@ -315,10 +349,6 @@
 			if (!bbox) {
 				return;
 			}
-			if (!options.force && suppressNextMoveLoad) {
-				suppressNextMoveLoad = false;
-				return;
-			}
 			if (yandexCityListMode && visiblePoints.length) {
 				renderCurrentList();
 				updateListSelectButton();
@@ -330,7 +360,11 @@
 			controller = new AbortController();
 			card.textContent = labels.loading || 'Loading...';
 			window.WDCPickupApi.points(bbox, controller.signal, context).then(function (points) {
+				if (destroyed) {
+					return;
+				}
 				renderMarkers(points, labels.empty || '');
+				applyInitialPointsViewport(visiblePoints);
 				if (options.previewNearest && visiblePoints[0]) {
 					preview(visiblePoints[0], { focus: false, initial: true });
 				}
@@ -360,6 +394,7 @@
 
 		if (hasPreloadedPoints) {
 			renderMarkers(preloadedPoints, labels.empty || '');
+			applyInitialPointsViewport(visiblePoints);
 		}
 
 		function search(query) {
@@ -379,9 +414,13 @@
 			if (initial) {
 				var initialRequest = window.WDCPickupApi.searchInitial || window.WDCPickupApi.search;
 				return initialRequest(query, controller.signal, context).then(function (points) {
-					if (points[0] && points[0].lat !== null && points[0].lng !== null) {
+					if (destroyed) {
+						return;
+					}
+					if (points[0] && validPointCoordinates(points[0])) {
 						var point = enrichPoints([points[0]])[0];
-						suppressNextMoveLoad = true;
+						cancelPendingProviderFit();
+						beginProgrammaticBoundsSuppression();
 						provider.setCenter(point.lat, point.lng, 15);
 						preview(point, { focus: false, initial: true });
 						loadBounds(bboxAround(point.lat, point.lng), { force: true });
@@ -396,7 +435,11 @@
 			}
 			if (!window.WDCPickupApi.addressSearch) {
 				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
+					if (destroyed) {
+						return;
+					}
 					renderMarkers(points, labels.empty || '');
+					applyInitialPointsViewport(visiblePoints);
 				});
 			}
 			card.textContent = labels.searchingAddress || 'Ищем адрес...';
@@ -408,7 +451,10 @@
 						return;
 					}
 				}
-				if (result && result.address && result.address.lat !== null && result.address.lng !== null) {
+				if (destroyed) {
+					return;
+				}
+				if (result && result.address && validPointCoordinates(result.address)) {
 					applySearchResult(result);
 					return;
 				}
@@ -421,24 +467,40 @@
 		}
 
 		function applySearchResult(result) {
+			if (!result || !result.address || !validPointCoordinates(result.address)) {
+				card.textContent = labels.addressNotFound || labels.notFound || '';
+				return;
+			}
 			searchAddress = normalizeAddressMarker(result.address);
 			userLocation = null;
-			originStatus = '';
+			originStatus = labels.addressFound || 'Address found.';
 			originStatusType = '';
 			distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
-			suppressNextMoveLoad = true;
+			claimViewportForExplicitAction();
+			beginProgrammaticBoundsSuppression();
 			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
+			if (Array.isArray(result.points) && result.points.length > 0) {
+				renderMarkers(result.points, labels.empty || '');
+				card.textContent = labels.addressFound || 'Address found.';
+				return;
+			}
 			refreshDistancesFromOrigin();
+			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true });
 			card.textContent = labels.addressFound || 'Адрес найден.';
 		}
 
 		setTimeout(function () {
+			if (destroyed) {
+				return;
+			}
 			provider.invalidateSize();
 			if (hasPreloadedPoints) {
 				return;
 			}
 			if (hasInitialCoordinates) {
 				loadBounds(bboxAround(initialLat, initialLng));
+			} else if (isCdekContext(context) && (context.city_code || context.cdek_city_code)) {
+				loadBounds('city-code', { force: true });
 			} else if (hasInitialQuery) {
 				initialSearch(String(context.query));
 			} else {
@@ -452,9 +514,16 @@
 			setStatus: setStatus,
 			useUserLocation: useUserLocation,
 			destroy: function () {
+				destroyed = true;
 				if (controller) {
 					controller.abort();
 				}
+				if (debouncedLoad.cancel) {
+					debouncedLoad.cancel();
+				}
+				endProgrammaticBoundsSuppression();
+				detachUserViewportListeners();
+				cancelPendingProviderFit();
 				provider.clearMarkers();
 				if (provider.closePopup) {
 					provider.closePopup();
@@ -598,7 +667,7 @@
 		function useUserLocation(lat, lng) {
 			lat = parseFloat(lat);
 			lng = parseFloat(lng);
-			if (isNaN(lat) || isNaN(lng)) {
+			if (!validCoordinatePair(lat, lng)) {
 				setStatus('Не удалось определить местоположение. Используйте поиск адреса.', 'error');
 				return;
 			}
@@ -607,7 +676,8 @@
 			distanceOrigin = { lat: lat, lng: lng };
 			originStatus = 'Показаны ближайшие пункты к вашему местоположению';
 			originStatusType = '';
-			suppressNextMoveLoad = true;
+			claimViewportForExplicitAction();
+			beginProgrammaticBoundsSuppression();
 			provider.setCenter(lat, lng, 15);
 			refreshDistancesFromOrigin();
 			loadBounds(bboxAround(lat, lng), { force: true });
@@ -622,6 +692,80 @@
 
 		function activeOriginMarker() {
 			return userLocation || searchAddress;
+		}
+
+		function applyInitialPointsViewport(points) {
+			if (initialPointsViewportApplied || hasTrustedInitialCoordinates || selectedPointHasCoordinates || userViewportInteracted) {
+				return;
+			}
+			var validPoints = (Array.isArray(points) ? points : []).filter(validPointCoordinates);
+			if (!validPoints.length) {
+				return;
+			}
+			initialPointsViewportApplied = true;
+			cancelPendingProviderFit();
+			beginProgrammaticBoundsSuppression();
+			if (1 === validPoints.length) {
+				provider.setCenter(validPoints[0].lat, validPoints[0].lng, 15);
+				return;
+			}
+			if (provider.fitToMarkers) {
+				provider.fitToMarkers({ padding: 32, maxZoom: 14 });
+			}
+		}
+
+		function claimViewportForExplicitAction() {
+			initialPointsViewportApplied = true;
+			cancelPendingProviderFit();
+		}
+
+		function beginProgrammaticBoundsSuppression() {
+			programmaticBoundsSuppressed = true;
+			window.clearTimeout(programmaticBoundsReleaseTimer);
+			programmaticBoundsReleaseTimer = 0;
+		}
+
+		function scheduleProgrammaticBoundsRelease() {
+			window.clearTimeout(programmaticBoundsReleaseTimer);
+			programmaticBoundsReleaseTimer = window.setTimeout(endProgrammaticBoundsSuppression, 120);
+		}
+
+		function endProgrammaticBoundsSuppression() {
+			programmaticBoundsSuppressed = false;
+			window.clearTimeout(programmaticBoundsReleaseTimer);
+			programmaticBoundsReleaseTimer = 0;
+		}
+
+		function markUserViewportInteraction() {
+			userViewportInteracted = true;
+			endProgrammaticBoundsSuppression();
+			cancelPendingProviderFit();
+		}
+
+		function cancelPendingProviderFit() {
+			if (provider && typeof provider.cancelPendingFit === 'function') {
+				provider.cancelPendingFit();
+			}
+		}
+
+		function attachUserViewportListeners() {
+			if (!element || !element.addEventListener) {
+				return;
+			}
+			element.addEventListener('pointerdown', markUserViewportInteraction);
+			element.addEventListener('touchstart', markUserViewportInteraction, supportsPassiveListeners() ? { passive: true } : false);
+			element.addEventListener('wheel', markUserViewportInteraction, supportsPassiveListeners() ? { passive: true } : false);
+			element.addEventListener('keydown', markUserViewportInteraction);
+		}
+
+		function detachUserViewportListeners() {
+			if (!element || !element.removeEventListener) {
+				return;
+			}
+			element.removeEventListener('pointerdown', markUserViewportInteraction);
+			element.removeEventListener('touchstart', markUserViewportInteraction);
+			element.removeEventListener('wheel', markUserViewportInteraction);
+			element.removeEventListener('keydown', markUserViewportInteraction);
 		}
 
 	}
@@ -675,6 +819,12 @@
 			|| String(context.pickup_family || '').trim() === 'yandex_delivery:pickup';
 	}
 
+	function isCdekContext(context) {
+		context = context || {};
+		return String(context.carrier || context.carrier_key || '').trim() === 'cdek'
+			|| String(context.pickup_family || '').trim() === 'cdek:pickup';
+	}
+
 	function pointInsideBounds(point, bbox) {
 		var bounds = parseBounds(bbox);
 		if (!bounds || !validPointCoordinates(point || {})) {
@@ -694,7 +844,7 @@
 		var south = parseFloat(values[1]);
 		var east = parseFloat(values[2]);
 		var north = parseFloat(values[3]);
-		if ([west, south, east, north].some(function (value) { return isNaN(value); })) {
+		if ([west, south, east, north].some(function (value) { return !isFiniteNumber(value); })) {
 			return null;
 		}
 		return { west: west, south: south, east: east, north: north };
@@ -861,9 +1011,51 @@
 	}
 
 	function validPointCoordinates(point) {
-		var lat = parseFloat(point.lat);
-		var lng = parseFloat(point.lng);
-		return !isNaN(lat) && !isNaN(lng);
+		var lat = parseFloat(point && point.lat);
+		var lng = parseFloat(point && point.lng);
+		return validCoordinatePair(lat, lng);
+	}
+
+	function validCoordinatePair(lat, lng) {
+		lat = parseFloat(lat);
+		lng = parseFloat(lng);
+		if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+			return false;
+		}
+		if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+			return false;
+		}
+		return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
+	}
+
+	function coordinatePair(lat, lng) {
+		if (!validCoordinatePair(lat, lng)) {
+			return null;
+		}
+		return { lat: parseFloat(lat), lng: parseFloat(lng) };
+	}
+
+	function isFiniteNumber(value) {
+		return typeof Number.isFinite === 'function' ? Number.isFinite(value) : isFinite(value);
+	}
+
+	function truthy(value) {
+		return value === true || value === 1 || value === '1' || value === 'true';
+	}
+
+	function supportsPassiveListeners() {
+		return false;
+	}
+
+	function firstValidCoordinatePair(items) {
+		var list = Array.isArray(items) ? items : [];
+		for (var i = 0; i < list.length; i++) {
+			if (!list[i] || !validPointCoordinates(list[i])) {
+				continue;
+			}
+			return { lat: parseFloat(list[i].lat), lng: parseFloat(list[i].lng) };
+		}
+		return null;
 	}
 
 	function distanceMeters(fromLat, fromLng, toLat, toLng) {
@@ -997,6 +1189,8 @@
 		return {
 			selected: function () { return null; },
 			search: function () { return Promise.resolve(); },
+			setStatus: function () {},
+			useUserLocation: function () {},
 			destroy: function () {}
 		};
 	}

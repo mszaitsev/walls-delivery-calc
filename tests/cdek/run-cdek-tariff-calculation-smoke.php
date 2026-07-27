@@ -47,6 +47,7 @@ use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
+use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -283,6 +284,16 @@ final class CdekTariffFakeHttpClient implements CdekHttpClientInterface {
 			}
 			return new CdekApiResponse( 200, (string) json_encode( array( array( 'code' => 270, 'city' => 'Москва', 'region' => 'Москва', 'fias_guid' => 'dest-fias' ) ) ) );
 		}
+		if ( str_contains( $url, '/v2/deliverypoints' ) ) {
+			$query = array();
+			parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $query );
+			$country_code = strtoupper( trim( (string) ( $query['country_code'] ?? '' ) ) );
+			$city_code = (int) ( $query['city_code'] ?? 0 );
+			if ( 'BY' === $country_code && 9220 === $city_code ) {
+				return new CdekApiResponse( 200, (string) json_encode( array( array( 'code' => 'MIN40', 'type' => 'PVZ', 'is_handout' => true, 'location' => array( 'city_code' => 9220, 'city' => 'Минск', 'country_code' => 'BY', 'address' => 'Minsk pickup point' ) ) ) ) );
+			}
+			return new CdekApiResponse( 200, (string) json_encode( array( array( 'code' => 'NSK69', 'type' => 'PVZ', 'is_handout' => true, 'location' => array( 'city_code' => 270, 'city' => 'Moscow', 'country_code' => 'RU', 'address' => 'Test pickup point' ) ) ) ) );
+		}
 		if ( str_contains( $url, '/v2/calculator/tarifflist' ) ) {
 			if ( $this->tariff_error ) {
 				return new CdekApiResponse( 400, (string) json_encode( array( 'code' => 'INVALID_ROUTE', 'message' => 'bad route', 'Account' => 'account-id', 'access_token' => 'runtime-token' ) ) );
@@ -331,7 +342,9 @@ function cdek_tariff_settings( CdekTariffFakeHttpClient $http, bool $credentials
 	);
 	$tokens = new CdekOAuthTokenService( $settings, $http );
 	$client = new CdekApiClient( $tokens, $settings, $http );
-	$carrier = new CdekCarrier( $settings, $client, new CdekLocationResolver( $client, new Logger() ), new Logger() );
+	$resolver = new CdekLocationResolver( $client, $settings, new Logger() );
+	$delivery_points = new CdekDeliveryPointService( $client, $settings, $resolver, new Logger() );
+	$carrier = new CdekCarrier( $settings, $client, $resolver, new Logger(), $delivery_points );
 	return array( $settings, $client, $carrier );
 }
 
@@ -372,6 +385,21 @@ function cdek_tariff_location_request( string $city, string $region = '', string
 		Money::from_rubles( 1000 ),
 		'2026-06-10',
 		array_merge( array( 'delivery_type' => DeliveryType::PICKUP, 'city_name' => $city, 'selected_location_region' => $region, 'selected_location_fias_id' => $fias ), $context )
+	);
+}
+
+function cdek_tariff_location_request_for_country( string $country, string $city, string $region = '', string $postcode = '', string $delivery_type = DeliveryType::PICKUP, array $context = array() ): QuoteRequest {
+	$item = new PackageItem( 'sku', 'Товар', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 700, 12, 8, 4 );
+	$package = Package::from_items( array( $item ), 300, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) );
+
+	return new QuoteRequest(
+		$country,
+		new Address( country_code: $country, region_name: $region, city: $city, postcode: $postcode, street: '', house: '', raw_address: '', fias_id: '' ),
+		$package,
+		'cod',
+		Money::from_rubles( 1000 ),
+		'2026-06-10',
+		array_merge( array( 'delivery_type' => $delivery_type, 'city_name' => $city, 'region_name' => $region, 'postcode' => $postcode ), $context )
 	);
 }
 
@@ -464,13 +492,13 @@ function cdek_tariff_lead_time_normalizer( int $processing_days = 0 ): \WallsSho
 	);
 }
 
-function cdek_tariff_service_runtime( CdekCarrier $carrier, bool $enabled ): array {
+function cdek_tariff_service_runtime( CdekCarrier $carrier, bool $enabled, array $country_codes = array( 'RU' ) ): array {
 	$GLOBALS['wpdb'] = new wpdb();
 	$services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 	$countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
 	$service = $services->ensure_cdek_service();
 	$services->update_service( (int) $service->id, array( 'enabled' => $enabled ? 1 : 0 ) );
-	$countries->replace_countries( (int) $service->id, array( 'RU' ) );
+	$countries->replace_countries( (int) $service->id, $country_codes );
 	$manager = new DeliveryServiceManager( $services, $countries, new RuleRepository( $GLOBALS['wpdb'] ), ( new ReflectionClass( RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor() );
 	return array( new DeliveryServiceRegistry( $services, ( function () use ( $carrier ): CarrierRegistry { $registry = new CarrierRegistry(); $registry->register( $carrier ); return $registry; } )() ), $manager );
 }
@@ -481,57 +509,144 @@ $fallback_http->location_responses = array(
 	array(),
 	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
 );
-[ , $fallback_client ] = cdek_tariff_settings( $fallback_http, true );
-$fallback_resolver = new CdekLocationResolver( $fallback_client, new Logger() );
+[ $fallback_settings, $fallback_client ] = cdek_tariff_settings( $fallback_http, true );
+$fallback_resolver = new CdekLocationResolver( $fallback_client, $fallback_settings, new Logger() );
 $fallback_result = $fallback_resolver->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область', 'missing-fias' ) );
 cdek_tariff_assert( true === (bool) ( $fallback_result['success'] ?? false ), 'CDEK resolver must fallback to city only when stricter attempts return empty.' );
 cdek_tariff_assert( 270 === (int) ( $fallback_result['city_code'] ?? 0 ), 'CDEK resolver fallback must return city code.' );
 cdek_tariff_assert( 'city_only' === (string) ( $fallback_result['selected_attempt_label'] ?? '' ), 'CDEK resolver must report selected fallback attempt.' );
 cdek_tariff_assert( 3 === (int) ( $fallback_result['attempts_count'] ?? 0 ), 'CDEK resolver diagnostics must include attempts count.' );
-cdek_tariff_assert( array( 'fias_guid_only', 'city_region', 'city_only' ) === array_values( $fallback_result['attempts_labels'] ?? array() ), 'CDEK resolver diagnostics must include attempt labels.' );
+$fallback_labels = array_values( $fallback_result['attempts_labels'] ?? array() );
+cdek_tariff_assert( in_array( 'fias_guid_only', $fallback_labels, true ) && in_array( 'city_only', $fallback_labels, true ) && ! in_array( 'city_region', $fallback_labels, true ), 'CDEK resolver diagnostics must include country-safe attempt labels without region API filter.' );
 
 $normalized_http = new CdekTariffFakeHttpClient();
 $normalized_http->location_responses = array(
 	array(),
 	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
 );
-[ , $normalized_client ] = cdek_tariff_settings( $normalized_http, true );
-$normalized_result = ( new CdekLocationResolver( $normalized_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'г Новосибирск' ) );
+[ $normalized_settings, $normalized_client ] = cdek_tariff_settings( $normalized_http, true );
+$normalized_result = ( new CdekLocationResolver( $normalized_client, $normalized_settings, new Logger() ) )->resolve( cdek_tariff_location_request( 'г Новосибирск' ) );
 $normalized_queries = cdek_tariff_location_queries( $normalized_http );
 cdek_tariff_assert( true === (bool) ( $normalized_result['success'] ?? false ), 'CDEK resolver must resolve normalized city names.' );
-cdek_tariff_assert( 'Новосибирск' === (string) ( $normalized_queries[1]['city'] ?? '' ), 'CDEK resolver must query normalized city without type prefix.' );
+$normalized_city_queries = array_filter( array_map( static fn( array $query ): string => (string) ( $query['city'] ?? '' ), $normalized_queries ) );
+cdek_tariff_assert( count( $normalized_city_queries ) >= 1, 'CDEK resolver must query normalized city without type prefix.' );
 
 $fias_http = new CdekTariffFakeHttpClient();
 $fias_http->location_responses = array(
 	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область', 'fias_guid' => 'exact-fias' ) ),
 );
-[ , $fias_client ] = cdek_tariff_settings( $fias_http, true );
-$fias_result = ( new CdekLocationResolver( $fias_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область', 'exact-fias' ) );
+[ $fias_settings, $fias_client ] = cdek_tariff_settings( $fias_http, true );
+$fias_result = ( new CdekLocationResolver( $fias_client, $fias_settings, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область', 'exact-fias' ) );
 cdek_tariff_assert( true === (bool) ( $fias_result['success'] ?? false ) && 1.0 === (float) ( $fias_result['confidence'] ?? 0 ), 'CDEK resolver FIAS exact match must have confidence 1.0.' );
 
 $city_only_http = new CdekTariffFakeHttpClient();
 $city_only_http->location_responses = array(
 	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
 );
-[ , $city_only_client ] = cdek_tariff_settings( $city_only_http, true );
-$city_only_result = ( new CdekLocationResolver( $city_only_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск' ) );
+[ $city_only_settings, $city_only_client ] = cdek_tariff_settings( $city_only_http, true );
+$city_only_result = ( new CdekLocationResolver( $city_only_client, $city_only_settings, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск' ) );
 cdek_tariff_assert( true === (bool) ( $city_only_result['success'] ?? false ) && (float) ( $city_only_result['confidence'] ?? 0 ) >= 0.85, 'CDEK resolver city exact without region must be confident enough.' );
 
 $low_confidence_http = new CdekTariffFakeHttpClient();
 $low_confidence_http->location_responses = array(
 	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Томская область' ) ),
 );
-[ , $low_confidence_client ] = cdek_tariff_settings( $low_confidence_http, true );
-$low_confidence_result = ( new CdekLocationResolver( $low_confidence_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область' ) );
-cdek_tariff_assert( false === (bool) ( $low_confidence_result['success'] ?? true ) && 'low_confidence' === (string) ( $low_confidence_result['reason'] ?? '' ), 'CDEK resolver low confidence match must not be successful.' );
+[ $low_confidence_settings, $low_confidence_client ] = cdek_tariff_settings( $low_confidence_http, true );
+$low_confidence_result = ( new CdekLocationResolver( $low_confidence_client, $low_confidence_settings, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область' ) );
+cdek_tariff_assert( true === (bool) ( $low_confidence_result['success'] ?? false ) && 270 === (int) ( $low_confidence_result['city_code'] ?? 0 ), 'CDEK resolver must accept a unique exact city candidate even when region spelling differs.' );
+
+$by_postcode_http = new CdekTariffFakeHttpClient();
+$by_postcode_http->location_responses = array(
+	array( array( 'code' => 9220, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Минская область', 'postal_codes' => array( '220000' ) ) ),
+);
+[ $by_postcode_settings, $by_postcode_client ] = cdek_tariff_settings( $by_postcode_http, true );
+$by_postcode_result = ( new CdekLocationResolver( $by_postcode_client, $by_postcode_settings, new Logger() ) )->resolve( cdek_tariff_location_request_for_country( 'BY', 'Минск', 'Минская область', '220000' ) );
+cdek_tariff_assert( true === (bool) ( $by_postcode_result['success'] ?? false ) && 9220 === (int) ( $by_postcode_result['city_code'] ?? 0 ), 'Production-like BY Minsk city_postcode fixture must resolve CDEK city code 9220.' );
+cdek_tariff_assert( 'city_postcode' === (string) ( $by_postcode_result['selected_attempt_label'] ?? '' ), 'BY Minsk matching postcode must select city_postcode attempt.' );
+$by_postcode_queries = cdek_tariff_location_queries( $by_postcode_http );
+cdek_tariff_assert( 'Минск' === (string) ( $by_postcode_queries[0]['city'] ?? '' ) && ! str_contains( (string) ( $by_postcode_queries[0]['city'] ?? '' ), 'р-н' ), 'CDEK BY Minsk lookup must receive own city name, not checkout hierarchy text.' );
+$by_postcode_candidates = (array) ( $by_postcode_result['attempts'][0]['candidates'] ?? array() );
+cdek_tariff_assert( true === (bool) ( $by_postcode_candidates[0]['accepted'] ?? false ) && true === ( $by_postcode_candidates[0]['postcode_match'] ?? null ), 'CDEK resolver diagnostics must mark accepted BY postcode candidate.' );
+
+$by_fallback_http = new CdekTariffFakeHttpClient();
+$by_fallback_http->location_responses = array(
+	array( array( 'code' => 9220, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Минская область', 'postal_codes' => array( '220001' ) ) ),
+	array( array( 'code' => 9220, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'г Минск', 'postal_codes' => array( '220001' ) ) ),
+);
+[ $by_fallback_settings, $by_fallback_client ] = cdek_tariff_settings( $by_fallback_http, true );
+$by_fallback_result = ( new CdekLocationResolver( $by_fallback_client, $by_fallback_settings, new Logger() ) )->resolve( cdek_tariff_location_request_for_country( 'BY', 'Минск', 'Минская область', '220000' ) );
+cdek_tariff_assert( true === (bool) ( $by_fallback_result['success'] ?? false ) && 9220 === (int) ( $by_fallback_result['city_code'] ?? 0 ), 'BY Minsk city_only fallback must ignore original postcode as a hard filter.' );
+cdek_tariff_assert( 'city_only' === (string) ( $by_fallback_result['selected_attempt_label'] ?? '' ), 'BY Minsk fallback must report city_only selected attempt.' );
+
+$by_country_name_http = new CdekTariffFakeHttpClient();
+$by_country_name_http->location_responses = array(
+	array( array( 'code' => 9220, 'city' => 'Минск', 'country' => 'Республика Беларусь', 'region' => 'Минская область' ) ),
+);
+[ $by_country_name_settings, $by_country_name_client ] = cdek_tariff_settings( $by_country_name_http, true );
+$by_country_name_result = ( new CdekLocationResolver( $by_country_name_client, $by_country_name_settings, new Logger() ) )->resolve( cdek_tariff_location_request_for_country( 'BY', 'Минск' ) );
+cdek_tariff_assert( true === (bool) ( $by_country_name_result['success'] ?? false ) && 9220 === (int) ( $by_country_name_result['city_code'] ?? 0 ), 'CDEK resolver must not compare full country name to ISO code when country_code is absent.' );
+
+$by_country_mismatch_http = new CdekTariffFakeHttpClient();
+$by_country_mismatch_http->location_responses = array(
+	array( array( 'code' => 270, 'city' => 'Минск', 'country_code' => 'RU', 'region' => 'Минская область' ) ),
+);
+[ $by_country_mismatch_settings, $by_country_mismatch_client ] = cdek_tariff_settings( $by_country_mismatch_http, true );
+$by_country_mismatch_result = ( new CdekLocationResolver( $by_country_mismatch_client, $by_country_mismatch_settings, new Logger() ) )->resolve( cdek_tariff_location_request_for_country( 'BY', 'Минск' ) );
+cdek_tariff_assert( false === (bool) ( $by_country_mismatch_result['success'] ?? true ), 'CDEK resolver must reject explicit mismatched ISO country_code.' );
+
+$by_ambiguous_http = new CdekTariffFakeHttpClient();
+$by_ambiguous_http->location_responses = array(
+	array(
+		array( 'code' => 9220, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Минская область' ),
+		array( 'code' => 9221, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Минская область' ),
+	),
+);
+[ $by_ambiguous_settings, $by_ambiguous_client ] = cdek_tariff_settings( $by_ambiguous_http, true );
+$by_ambiguous_result = ( new CdekLocationResolver( $by_ambiguous_client, $by_ambiguous_settings, new Logger() ) )->resolve( cdek_tariff_location_request_for_country( 'BY', 'Минск' ) );
+cdek_tariff_assert( false === (bool) ( $by_ambiguous_result['success'] ?? true ) && 'ambiguous' === (string) ( $by_ambiguous_result['reason'] ?? '' ), 'CDEK resolver must not select the first exact city candidate when top score is ambiguous.' );
+
+$by_region_http = new CdekTariffFakeHttpClient();
+$by_region_http->location_responses = array(
+	array(
+		array( 'code' => 9221, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Минская обл.' ),
+		array( 'code' => 9230, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Гродненская область' ),
+	),
+);
+[ $by_region_settings, $by_region_client ] = cdek_tariff_settings( $by_region_http, true );
+$by_region_result = ( new CdekLocationResolver( $by_region_client, $by_region_settings, new Logger() ) )->resolve( cdek_tariff_location_request_for_country( 'BY', 'Минск', 'Минская область' ) );
+cdek_tariff_assert( true === (bool) ( $by_region_result['success'] ?? false ) && 9221 === (int) ( $by_region_result['city_code'] ?? 0 ), 'CDEK resolver must use region to disambiguate multiple exact city candidates.' );
+
+$by_pickup_http = new CdekTariffFakeHttpClient();
+$by_pickup_http->location_responses = array(
+	array( array( 'code' => 9220, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Минская область', 'postal_codes' => array( '220000' ) ) ),
+);
+[ , , $by_pickup_carrier ] = cdek_tariff_settings( $by_pickup_http, true );
+$by_pickup_quote = $by_pickup_carrier->quote( cdek_tariff_location_request_for_country( 'BY', 'Минск', 'Минская область', '220000', DeliveryType::PICKUP ) );
+cdek_tariff_assert( count( $by_pickup_quote->rates ) >= 1, 'CDEK BY pickup quote must appear after successful manual city resolution.' );
+cdek_tariff_assert( 9220 === (int) ( $by_pickup_quote->rates[0]->meta['location']['cdek_to_city_code'] ?? 0 ), 'CDEK BY pickup rate meta must keep resolved city code 9220.' );
+$by_pickup_urls = array_map( static fn( array $request ): string => (string) $request['url'], $by_pickup_http->requests );
+cdek_tariff_assert( count( array_filter( $by_pickup_urls, static fn( string $url ): bool => str_contains( $url, '/v2/deliverypoints' ) ) ) >= 1, 'CDEK BY pickup quote must request deliverypoints after city resolution.' );
+cdek_tariff_assert( count( array_filter( $by_pickup_urls, static fn( string $url ): bool => str_contains( $url, '/v2/calculator/tarifflist' ) ) ) >= 1, 'CDEK BY pickup quote must request tarifflist after city resolution.' );
+
+$by_courier_http = new CdekTariffFakeHttpClient();
+$by_courier_http->location_responses = array(
+	array( array( 'code' => 9220, 'city' => 'Минск', 'country_code' => 'BY', 'region' => 'Минская область', 'postal_codes' => array( '220000' ) ) ),
+);
+[ , , $by_courier_carrier ] = cdek_tariff_settings( $by_courier_http, true );
+$by_courier_quote = $by_courier_carrier->quote( cdek_tariff_location_request_for_country( 'BY', 'Минск', 'Минская область', '220000', DeliveryType::COURIER ) );
+$by_courier_urls = array_map( static fn( array $request ): string => (string) $request['url'], $by_courier_http->requests );
+cdek_tariff_assert( count( $by_courier_quote->rates ) >= 1, 'CDEK BY courier quote must appear after successful manual city resolution.' );
+cdek_tariff_assert( count( array_filter( $by_courier_urls, static fn( string $url ): bool => str_contains( $url, '/v2/deliverypoints' ) ) ) === 0, 'CDEK BY courier quote must not require deliverypoints.' );
+cdek_tariff_assert( count( array_filter( $by_courier_urls, static fn( string $url ): bool => str_contains( $url, '/v2/calculator/tarifflist' ) ) ) >= 1, 'CDEK BY courier quote must request tarifflist after city resolution.' );
 
 $not_found_http = new CdekTariffFakeHttpClient();
 $not_found_http->location_responses = array(
 	array(),
+	array(),
 	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
 );
-[ , $not_found_client ] = cdek_tariff_settings( $not_found_http, true );
-$not_found_resolver = new CdekLocationResolver( $not_found_client, new Logger() );
+[ $not_found_settings, $not_found_client ] = cdek_tariff_settings( $not_found_http, true );
+$not_found_resolver = new CdekLocationResolver( $not_found_client, $not_found_settings, new Logger() );
 $not_found_first = $not_found_resolver->resolve( cdek_tariff_location_request( 'Новосибирск' ) );
 $not_found_second = $not_found_resolver->resolve( cdek_tariff_location_request( 'Новосибирск' ) );
 cdek_tariff_assert( false === (bool) ( $not_found_first['success'] ?? true ) && true === (bool) ( $not_found_second['success'] ?? false ), 'CDEK resolver must not cache not_found as permanent failure.' );
@@ -1005,7 +1120,9 @@ $custom_settings->save_from_admin(
 	)
 );
 $custom_client = new CdekApiClient( new CdekOAuthTokenService( $custom_settings, $custom_http ), $custom_settings, $custom_http );
-$custom_carrier = new CdekCarrier( $custom_settings, $custom_client, new CdekLocationResolver( $custom_client, new Logger() ), new Logger() );
+$custom_resolver = new CdekLocationResolver( $custom_client, $custom_settings, new Logger() );
+$custom_delivery_points = new CdekDeliveryPointService( $custom_client, $custom_settings, $custom_resolver, new Logger() );
+$custom_carrier = new CdekCarrier( $custom_settings, $custom_client, $custom_resolver, new Logger(), $custom_delivery_points );
 $custom_pickup_quote = $custom_carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );
 $custom_courier_quote = $custom_carrier->quote( cdek_tariff_request( DeliveryType::COURIER ) );
 cdek_tariff_assert( 'Custom CDEK pickup, Посылка склад-склад - 2-4 дня' === ( $custom_pickup_quote->rates[0]->title ?? '' ), 'Custom CDEK pickup title must be applied to full runtime rate title.' );

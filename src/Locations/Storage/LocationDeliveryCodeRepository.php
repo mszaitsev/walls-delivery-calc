@@ -53,6 +53,51 @@ final class LocationDeliveryCodeRepository {
 		return $row['dpd_city_id'];
 	}
 
+	public function find_location_id_by_dpd_city_id( string|int $dpd_city_id ): ?int {
+		$dpd_city_id = preg_replace( '/\D+/', '', (string) $dpd_city_id ) ?? '';
+		if ( '' === $dpd_city_id || '0' === $dpd_city_id ) {
+			return null;
+		}
+		if ( property_exists( $this->wpdb, 'dpd_mapping_lookup_calls' ) ) {
+			$this->wpdb->dpd_mapping_lookup_calls = max( 0, (int) $this->wpdb->dpd_mapping_lookup_calls ) + 1;
+		}
+		if ( property_exists( $this->wpdb, 'fail_dpd_mapping_lookup' ) && true === (bool) $this->wpdb->fail_dpd_mapping_lookup ) {
+			throw new \RuntimeException( 'DPD delivery code lookup failed: forced mapping lookup failure' );
+		}
+
+		if ( $this->has_test_rows() ) {
+			$matches = array();
+			foreach ( $this->wpdb->delivery_codes as $row ) {
+				if ( (string) ( $row['dpd_city_id'] ?? '' ) === $dpd_city_id && (int) ( $row['location_id'] ?? 0 ) > 0 ) {
+					$matches[] = (int) $row['location_id'];
+				}
+			}
+
+			return array() !== $matches ? min( $matches ) : null;
+		}
+
+		$sql = $this->wpdb->prepare(
+			'SELECT location_id FROM ' . $this->table_name() . ' WHERE dpd_city_id = %d ORDER BY location_id ASC LIMIT 1',
+			(int) $dpd_city_id
+		);
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new \RuntimeException( 'DPD delivery code lookup failed: SQL preparation returned an invalid result' );
+		}
+
+		$this->wpdb->last_error = '';
+		$value = $this->wpdb->get_var( $sql );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$error = trim( (string) $this->wpdb->last_error );
+			$error = preg_replace( '/[\r\n\t]+/', ' ', $error ) ?? $error;
+			throw new \RuntimeException( 'DPD delivery code lookup failed: ' . $error );
+		}
+		if ( null !== $value && ! is_numeric( $value ) ) {
+			throw new \RuntimeException( 'DPD delivery code lookup failed: invalid SQL result' );
+		}
+
+		return is_numeric( $value ) && (int) $value > 0 ? (int) $value : null;
+	}
+
 	public function save_dpd_city_id( int $location_id, string|int $dpd_city_id ): bool {
 		$location_id = max( 0, $location_id );
 		$dpd_city_id = preg_replace( '/\D+/', '', (string) $dpd_city_id ) ?? '';
@@ -150,7 +195,7 @@ final class LocationDeliveryCodeRepository {
 	}
 
 	private function has_test_rows(): bool {
-		return property_exists( $this->wpdb, 'delivery_codes' );
+		return is_array( $this->wpdb->delivery_codes ?? null );
 	}
 
 	/**

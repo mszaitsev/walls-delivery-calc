@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Pickup\Rest;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -98,9 +99,23 @@ final class CheckoutPickupPointRestController {
 		}
 
 		if ( 'cdek' === $carrier ) {
-			$point = $this->cdek_point_from_request( $request, $point_id_raw );
+			$rate = $this->rate_for_shipping_method( $method_id );
+			if ( ! $this->is_cdek_pickup_rate( $rate, $method_id ) ) {
+				return $this->error( 'unsupported_shipping_method', 'Pickup point can only be saved for a CDEK pickup rate.', 400 );
+			}
+			$destination = $this->cdek_expected_destination( $rate );
+			if ( '' === $destination['country_code'] || ! in_array( $destination['country_code'], CdekSettings::SUPPORTED_COUNTRIES, true ) ) {
+				return $this->error( 'unsupported_country', 'CDEK pickup is not available for the selected country.', 400 );
+			}
+			if ( $destination['city_code'] <= 0 ) {
+				return $this->error( 'missing_city_code', 'CDEK pickup city is not resolved for the selected rate.', 400 );
+			}
+			$point = $this->cdek_point_from_request( $request, $point_id_raw, $destination );
 			if ( array() === $point ) {
 				return $this->error( 'not_found', 'Pickup point not found.', 404 );
+			}
+			if ( true !== ( $point['is_handout'] ?? false ) ) {
+				return $this->error( 'unsupported_pickup_point', 'Selected CDEK point does not support handout.', 400 );
 			}
 			$selection = $this->cdek_selection( $point );
 			$this->save_selection( $selection, 'cdek', $method_id, $selection_intent );
@@ -172,6 +187,8 @@ final class CheckoutPickupPointRestController {
 				'pickupSelections' => $this->session_manager->pickup_selections(),
 				'active_pickup_family' => '' !== $family ? $family : null,
 				'activePickupFamily' => '' !== $family ? $family : null,
+				'active_pickup_country_code' => $this->active_pickup_country_code(),
+				'activePickupCountryCode' => $this->active_pickup_country_code(),
 			)
 		);
 	}
@@ -190,6 +207,8 @@ final class CheckoutPickupPointRestController {
 				'pickupSelections' => $this->session_manager->pickup_selections(),
 				'active_pickup_family' => $active_family,
 				'activePickupFamily' => $active_family,
+				'active_pickup_country_code' => $this->active_pickup_country_code(),
+				'activePickupCountryCode' => $this->active_pickup_country_code(),
 				'city_context' => $this->city_context(),
 			)
 		);
@@ -333,6 +352,9 @@ final class CheckoutPickupPointRestController {
 			'fias_id' => $selection['fias_id'] ?? $snapshot['fias_id'] ?? '',
 			'gar_object_id' => $selection['gar_object_id'] ?? $snapshot['gar_object_id'] ?? '',
 			'destination_fingerprint' => $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '',
+			'country_code' => $selection['country_code'] ?? $snapshot['country_code'] ?? '',
+			'cdek_city_code' => $selection['cdek_city_code'] ?? $snapshot['cdek_city_code'] ?? 0,
+			'is_handout' => $selection['is_handout'] ?? $snapshot['is_handout'] ?? false,
 			'description' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
 			'point_comment' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
 			'work_time' => (string) ( $selection['work_time'] ?? $selection['point_work_time'] ?? $selection['snapshot']['work_time'] ?? '' ),
@@ -390,28 +412,50 @@ final class CheckoutPickupPointRestController {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function cdek_point_from_request( mixed $request, string $point_id_raw ): array {
-		$point = $this->array_param( $request, 'point' );
-		if ( array() !== $point && 'cdek' === (string) ( $point['carrier_key'] ?? $point['carrier'] ?? '' ) ) {
-			return $point;
-		}
+	private function cdek_point_from_request( mixed $request, string $point_id_raw, array $destination ): array {
 		if ( ! $this->cdek_points instanceof CdekDeliveryPointService ) {
 			return array();
 		}
-		$code = $this->param( $request, 'point_code' );
-		if ( '' === $code && str_starts_with( $point_id_raw, 'cdek:' ) ) {
-			$code = substr( $point_id_raw, 5 );
-		}
+		$code = $this->cdek_point_code_from_request( $request, $point_id_raw );
 		if ( '' === $code ) {
 			return array();
 		}
-		foreach ( $this->cdek_points->pointsForLocation( $this->city_context() ?? array() ) as $candidate ) {
+		foreach ( $this->cdek_points->pointsByCityCode( $destination['city_code'], array( 'country_code' => $destination['country_code'], 'handout_only' => true ) ) as $candidate ) {
 			if ( $code === (string) ( $candidate['point_code'] ?? '' ) ) {
+				$point_country = strtoupper( trim( (string) ( $candidate['country_code'] ?? '' ) ) );
+				$point_city = (int) ( $candidate['cdek_city_code'] ?? 0 );
+				if ( '' !== $point_country && $point_country !== $destination['country_code'] ) {
+					return array();
+				}
+				if ( $point_city > 0 && $point_city !== $destination['city_code'] ) {
+					return array();
+				}
+				if ( '' === $point_country ) {
+					$candidate['country_code'] = $destination['country_code'];
+				}
+				if ( $point_city <= 0 ) {
+					$candidate['cdek_city_code'] = $destination['city_code'];
+				}
 				return $candidate;
 			}
 		}
 
 		return array();
+	}
+
+	private function cdek_point_code_from_request( mixed $request, string $point_id_raw ): string {
+		$code = $this->param( $request, 'point_code' );
+		if ( str_starts_with( $code, 'cdek:' ) ) {
+			$code = substr( $code, 5 );
+		}
+		if ( '' === $code && str_starts_with( $point_id_raw, 'cdek:' ) ) {
+			$code = substr( $point_id_raw, 5 );
+		}
+		if ( '' === $code ) {
+			$code = $point_id_raw;
+		}
+
+		return preg_replace( '/[^A-Za-z0-9_\\-]/', '', $code ) ?? '';
 	}
 
 	/**
@@ -452,6 +496,9 @@ final class CheckoutPickupPointRestController {
 			'cdek_owner_code' => (string) ( $point['cdek_owner_code'] ?? '' ),
 			'cdek_nearest_station' => (string) ( $point['cdek_nearest_station'] ?? '' ),
 			'cdek_note' => (string) ( $point['cdek_note'] ?? '' ),
+			'country_code' => (string) ( $point['country_code'] ?? '' ),
+			'cdek_city_code' => (int) ( $point['cdek_city_code'] ?? 0 ),
+			'is_handout' => array_key_exists( 'is_handout', $point ) && filter_var( $point['is_handout'], FILTER_VALIDATE_BOOLEAN ),
 			'raw_sanitized' => is_array( $point['raw_sanitized'] ?? null ) ? $point['raw_sanitized'] : ( is_array( $point['raw'] ?? null ) ? $point['raw'] : array() ),
 		);
 		if ( '' === $snapshot['display_title'] ) {
@@ -488,6 +535,9 @@ final class CheckoutPickupPointRestController {
 			'cdek_owner_code' => $snapshot['cdek_owner_code'],
 			'cdek_nearest_station' => $snapshot['cdek_nearest_station'],
 			'cdek_note' => $snapshot['cdek_note'],
+			'country_code' => $snapshot['country_code'],
+			'cdek_city_code' => $snapshot['cdek_city_code'],
+			'is_handout' => $snapshot['is_handout'],
 			'postcode' => $snapshot['postcode'],
 			'address' => $snapshot['address'],
 			'lat' => $snapshot['lat'],
@@ -722,6 +772,8 @@ final class CheckoutPickupPointRestController {
 				'pickupSelections' => $selections,
 				'active_pickup_family' => $family,
 				'activePickupFamily' => $family,
+				'active_pickup_country_code' => $this->active_pickup_country_code(),
+				'activePickupCountryCode' => $this->active_pickup_country_code(),
 			)
 		);
 	}
@@ -742,6 +794,34 @@ final class CheckoutPickupPointRestController {
 		}
 
 		return '';
+	}
+
+	private function active_pickup_country_code(): string {
+		$rate = $this->rate_for_shipping_method( $this->active_shipping_method_id() );
+		if ( array() === $rate || 'pickup' !== (string) ( $rate['delivery_type'] ?? $this->rate_meta( $rate )['delivery_type'] ?? '' ) || empty( $rate['requires_pickup_point'] ) ) {
+			return '';
+		}
+		$meta = $this->rate_meta( $rate );
+		$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
+		$request_payload = is_array( $meta['request_payload_sanitized'] ?? null ) ? $meta['request_payload_sanitized'] : array();
+		$api = is_array( $meta['api'] ?? null ) ? $meta['api'] : array();
+		if ( array() === $request_payload && is_array( $api['request_payload_sanitized'] ?? null ) ) {
+			$request_payload = $api['request_payload_sanitized'];
+		}
+		$to_location = is_array( $request_payload['to_location'] ?? null ) ? $request_payload['to_location'] : array();
+		$country = strtoupper(
+			trim(
+				$this->first_text_value(
+					$location['cdek_to_country_code'] ?? null,
+					$location['country_code'] ?? null,
+					$meta['country_code'] ?? null,
+					$rate['country_code'] ?? null,
+					$to_location['country_code'] ?? null
+				)
+			)
+		);
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
 	}
 
 	/**
@@ -862,13 +942,112 @@ final class CheckoutPickupPointRestController {
 
 	private function is_supported_shipping_method( string $method_id, string $carrier ): bool {
 		if ( 'cdek' === $carrier ) {
-			return str_starts_with( $method_id, 'cdek:' );
+			return $this->is_cdek_pickup_rate( $this->rate_for_shipping_method( $method_id ), $method_id );
 		}
 		if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier ) {
 			return RussianPostDomesticSettings::is_pickup_rate_id( $method_id );
 		}
 
 		return str_ends_with( $this->session_manager->shipping_method_family( $method_id ), ':pickup' );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function rate_for_shipping_method( string $method_id ): array {
+		$method_id = $this->session_manager->normalize_rate_id( $method_id );
+		$rates = $this->session_manager->rates();
+		if ( isset( $rates[ $method_id ] ) && is_array( $rates[ $method_id ] ) ) {
+			return $rates[ $method_id ];
+		}
+		foreach ( $rates as $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			if ( $rate_id === $method_id ) {
+				return $rate;
+			}
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_cdek_pickup_rate( array $rate, string $method_id ): bool {
+		if ( array() === $rate ) {
+			return false;
+		}
+		$meta = $this->rate_meta( $rate );
+
+		return CdekSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $meta['carrier_key'] ?? '' )
+			&& CdekSettings::SERVICE_KEY === (string) ( $rate['service_key'] ?? $meta['service_key'] ?? CdekSettings::SERVICE_KEY )
+			&& 'pickup' === (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' )
+			&& ! empty( $rate['requires_pickup_point'] )
+			&& CdekSettings::CARRIER_KEY . ':pickup' === $this->session_manager->shipping_method_family( $method_id );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array{country_code:string,city_code:int}
+	 */
+	private function cdek_expected_destination( array $rate ): array {
+		$meta = $this->rate_meta( $rate );
+		$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
+		$request_payload = is_array( $meta['request_payload_sanitized'] ?? null ) ? $meta['request_payload_sanitized'] : array();
+		$api = is_array( $meta['api'] ?? null ) ? $meta['api'] : array();
+		if ( array() === $request_payload && is_array( $api['request_payload_sanitized'] ?? null ) ) {
+			$request_payload = $api['request_payload_sanitized'];
+		}
+		$to_location = is_array( $request_payload['to_location'] ?? null ) ? $request_payload['to_location'] : array();
+		$city_context = $this->city_context() ?? array();
+		$country_code = strtoupper(
+			trim(
+				$this->first_text_value(
+					$location['cdek_to_country_code'] ?? null,
+					$meta['country_code'] ?? null,
+					$rate['country_code'] ?? null,
+					$to_location['country_code'] ?? null,
+					$city_context['country_code'] ?? null
+				)
+			)
+		);
+		if ( '' === $country_code ) {
+			$country_code = 'RU';
+		}
+		$city_code = $this->first_positive_int(
+			$location['cdek_to_city_code'] ?? null,
+			$api['cdek_to_city_code'] ?? null,
+			$meta['cdek_to_city_code'] ?? null,
+			$to_location['code'] ?? null,
+			$city_context['cdek_city_code'] ?? null,
+			$city_context['city_code'] ?? null
+		);
+
+		return array( 'country_code' => $country_code, 'city_code' => $city_code );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function rate_meta( array $rate ): array {
+		$meta = is_array( $rate['meta'] ?? null ) ? $rate['meta'] : array();
+		$legacy_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+
+		return array_replace_recursive( $legacy_meta, $meta );
+	}
+
+	private function first_positive_int( mixed ...$values ): int {
+		foreach ( $values as $value ) {
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
 	}
 
 	private function normalize_shipping_method_id( string $method_id ): string {

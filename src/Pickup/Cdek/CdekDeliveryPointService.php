@@ -43,7 +43,7 @@ final class CdekDeliveryPointService {
 			return array();
 		}
 
-		return $this->pointsByCityCode( $city_code, $options );
+		return $this->pointsByCityCode( $city_code, array_merge( $options, array( 'country_code' => $this->country_code_from_location( $location ) ) ) );
 	}
 
 	/**
@@ -56,12 +56,16 @@ final class CdekDeliveryPointService {
 		}
 
 		$type = $this->normalize_type( (string) ( $options['type'] ?? self::DEFAULT_TYPE ) );
+		$country_code = $this->supported_country_code( (string) ( $options['country_code'] ?? '' ) );
+		if ( '' === $country_code ) {
+			return array();
+		}
 		$query = array(
 			'city_code' => $city_code,
-			'country_code' => 'RU',
+			'country_code' => $country_code,
 			'type' => $type,
 		);
-		$cache_key = $this->cache_key( $query );
+		$cache_key = $this->cache_key( array_merge( $query, array( 'handout_only' => ! empty( $options['handout_only'] ) ? 1 : 0 ) ) );
 		$bypass_cache = ! empty( $options['refresh'] ) || ! empty( $options['bypass_cache'] );
 		if ( ! $bypass_cache ) {
 			$cached = $this->cached( $cache_key );
@@ -89,7 +93,15 @@ final class CdekDeliveryPointService {
 		}
 
 		$body = is_array( $result['body'] ?? null ) ? $result['body'] : array();
-		$points = array_values( array_filter( array_map( array( $this, 'normalize' ), $body ) ) );
+		$points = array_values(
+			array_filter(
+				array_map(
+					fn( array $point ): array => $this->normalize( array_merge( array( '_wdc_country_code' => $country_code ), $point ) ),
+					array_values( array_filter( $body, 'is_array' ) )
+				),
+				static fn( array $point ): bool => array() !== $point && ( empty( $options['handout_only'] ) || ! empty( $point['is_handout'] ) )
+			)
+		);
 		$this->store( $cache_key, $points );
 
 		return $points;
@@ -129,6 +141,7 @@ final class CdekDeliveryPointService {
 			'carrier' => CdekSettings::CARRIER_KEY,
 			'carrier_key' => CdekSettings::CARRIER_KEY,
 			'service_key' => CdekSettings::CARRIER_KEY,
+			'country_code' => $this->supported_country_code( (string) ( $point['country_code'] ?? $location['country_code'] ?? $point['_wdc_country_code'] ?? 'RU' ) ),
 			'pickup_family' => CdekSettings::CARRIER_KEY . ':pickup',
 			'point_code' => $code,
 			'point_type' => $type,
@@ -159,6 +172,8 @@ final class CdekDeliveryPointService {
 			'cdek_owner_code' => (string) ( $point['owner_code'] ?? '' ),
 			'cdek_nearest_station' => (string) ( $point['nearest_station'] ?? '' ),
 			'cdek_note' => (string) ( $point['note'] ?? '' ),
+			'is_handout' => array_key_exists( 'is_handout', $point ) && filter_var( $point['is_handout'], FILTER_VALIDATE_BOOLEAN ),
+			'cdek_city_code' => is_numeric( $location['city_code'] ?? $location['code'] ?? null ) ? (int) ( $location['city_code'] ?? $location['code'] ) : 0,
 			'raw' => $this->sanitize_raw( $point ),
 		);
 	}
@@ -178,6 +193,22 @@ final class CdekDeliveryPointService {
 
 	/**
 	 * @param array<string,mixed> $location
+	 */
+	private function country_code_from_location( array $location ): string {
+		return $this->supported_country_code( (string) ( $location['country_code'] ?? $location['country'] ?? '' ) );
+	}
+
+	private function supported_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+		if ( '' === $country_code ) {
+			return 'RU';
+		}
+
+		return in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $location
 	 * @return array<string,mixed>
 	 */
 	private function resolve_location( array $location ): array {
@@ -192,7 +223,7 @@ final class CdekDeliveryPointService {
 			normalized: true
 		);
 		$request = new QuoteRequest(
-			'RU',
+			$address->country_code,
 			$address,
 			new Package( array(), Money::from_rubles( 0 ), Money::from_rubles( 0 ), 1, 0, 1, source: 'manual' ),
 			'',

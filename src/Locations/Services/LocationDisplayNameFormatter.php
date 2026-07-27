@@ -117,26 +117,15 @@ final class LocationDisplayNameFormatter {
 	}
 
 	public function format_checkout_city_value( Location $location ): string {
-		$city = $this->format_part( 'city', $location->city_type, $location->city_name );
-		$place = $this->format_part( 'place', $location->resolved_place_type(), $location->resolved_place_name() );
-		if ( '' !== trim( $location->city_name ) && Location::normalize_search_text( $location->city_name ) === Location::normalize_search_text( $location->resolved_place_name() ) ) {
-			$place = '';
+		$place_name = '' !== trim( $location->place_name ) ? $location->place_name : $location->settlement_name;
+		$place_type = '' !== trim( $location->place_type ) ? $location->place_type : $location->settlement_type;
+		$place      = $this->format_part( 'place', $place_type, $place_name );
+
+		if ( '' !== trim( $place ) ) {
+			return $place;
 		}
-		$parts = array(
-			$this->format_district( $location->district_type, $location->district_name ),
-			$city,
-			$place,
-		);
 
-		$region = $this->format_checkout_state_value( $location );
-		$parts = array_values(
-			array_filter(
-				array_unique( array_map( 'trim', $parts ) ),
-				static fn( string $part ): bool => '' !== $part && $part !== $region
-			)
-		);
-
-		return implode( ', ', $parts );
+		return $this->format_part( 'city', $location->city_type, $location->city_name );
 	}
 
 	/**

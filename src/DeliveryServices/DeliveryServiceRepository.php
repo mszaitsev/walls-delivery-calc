@@ -248,6 +248,10 @@ final class DeliveryServiceRepository {
 		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => CdekSettings::SERVICE_KEY, 'carrier_key' => CdekSettings::CARRIER_KEY, 'title' => CdekSettings::TITLE, 'enabled' => 0 ) );
 	}
 
+	public function cdek_service_exists(): bool {
+		return $this->find_any_by_service_key( CdekSettings::SERVICE_KEY ) instanceof DeliveryService;
+	}
+
 	public function ensure_dpd_service(): DeliveryService {
 		$existing = $this->find_any_by_service_key( DpdSettings::SERVICE_KEY );
 		if ( $existing instanceof DeliveryService ) {

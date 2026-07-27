@@ -25,6 +25,7 @@
 		var searchMarkerLayout = null;
 		var maxClusterZoom = 18;
 		var suppressPopupClose = false;
+		var pendingFitOptions = null;
 
 		loadApi(settings.yandexApiKey || '').then(function (ymaps) {
 			if (destroyed) {
@@ -57,6 +58,7 @@
 			if (pendingPoints.length || pendingSearchMarker) {
 				renderMarkers(pendingPoints);
 			}
+			applyPendingFit();
 			if (pendingCenterChanged) {
 				map.setCenter([pendingCenter.lat, pendingCenter.lng], pendingCenter.zoom || map.getZoom());
 			}
@@ -102,7 +104,7 @@
 			clearMarkers();
 			var useClusterer = map.getZoom() < maxClusterZoom;
 			pendingPoints.forEach(function (point) {
-				if (point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				var id = pointId(point);
@@ -113,6 +115,7 @@
 			});
 			renderSearchMarker(options && Object.prototype.hasOwnProperty.call(options, 'searchMarker') ? options.searchMarker : pendingSearchMarker);
 			suppressPopupClose = false;
+			applyPendingFit();
 		}
 
 		function clearMarkers() {
@@ -133,7 +136,7 @@
 		}
 
 		function renderSearchMarker(marker) {
-			if (!map || !ymapsApi || !marker || marker.lat === null || marker.lng === null) {
+			if (!map || !ymapsApi || !validPointCoordinates(marker)) {
 				return;
 			}
 			var shift = searchMarkerShift(marker);
@@ -161,7 +164,7 @@
 			var nearest = null;
 			Object.keys(pointById).forEach(function (id) {
 				var point = pointById[id];
-				if (!point || point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				var distance = distanceMeters(parseFloat(marker.lat), parseFloat(marker.lng), parseFloat(point.lat), parseFloat(point.lng));
@@ -174,6 +177,9 @@
 
 		return {
 			setCenter: function (lat, lng, zoom) {
+				if (!validCoordinatePair(lat, lng)) {
+					return;
+				}
 				pendingCenter = normalizeCenter({ lat: lat, lng: lng, zoom: zoom || pendingCenter.zoom || 11 });
 				if (map) {
 					map.setCenter([pendingCenter.lat, pendingCenter.lng], pendingCenter.zoom || map.getZoom());
@@ -183,7 +189,7 @@
 				}
 			},
 			focusPoint: function (point) {
-				if (!point || point.lat === null || point.lng === null) {
+				if (!validPointCoordinates(point)) {
 					return;
 				}
 				pendingCenter = normalizeCenter({ lat: point.lat, lng: point.lng, zoom: Math.max(pendingCenter.zoom || 11, 15) });
@@ -206,10 +212,14 @@
 				clearMarkers();
 				suppressPopupClose = false;
 			},
-			fitToMarkers: function () {
-				if (map && collection && Object.keys(placemarkById).length) {
-					map.setBounds(collection.getBounds(), { checkZoomRange: true, zoomMargin: 24 });
+			fitToMarkers: function (options) {
+				pendingFitOptions = options || {};
+				if (map && ymapsApi) {
+					applyPendingFit();
 				}
+			},
+			cancelPendingFit: function () {
+				pendingFitOptions = null;
 			},
 			getBounds: currentBoundsValue,
 			openPointPopup: function (point, html) {
@@ -233,6 +243,7 @@
 			destroy: function () {
 				destroyed = true;
 				suppressPopupClose = true;
+				pendingFitOptions = null;
 				clearMarkers();
 				if (map) {
 					map.events.remove('boundschange', boundsChanged);
@@ -264,6 +275,57 @@
 			if (map && map.container && map.container.fitToViewport) {
 				map.container.fitToViewport();
 			}
+		}
+
+		function applyPendingFit() {
+			if (!pendingFitOptions || !map || !ymapsApi) {
+				return;
+			}
+			var options = pendingFitOptions;
+			var points = pendingPoints.filter(validPointCoordinates);
+			if (!points.length) {
+				return;
+			}
+			pendingFitOptions = null;
+			var maxZoom = Number(options.maxZoom || 14);
+			if (1 === points.length) {
+				map.setCenter([points[0].lat, points[0].lng], Number(options.zoom || 15));
+				return;
+			}
+			var bounds = pointsBounds(points);
+			var result = map.setBounds(
+				[
+					[bounds.south, bounds.west],
+					[bounds.north, bounds.east]
+				],
+				{ checkZoomRange: true, zoomMargin: Number(options.padding || options.zoomMargin || 32) }
+			);
+			var clampZoom = function () {
+				if (map && typeof map.getZoom === 'function' && typeof map.setZoom === 'function' && map.getZoom() > maxZoom) {
+					map.setZoom(maxZoom);
+				}
+			};
+			if (result && typeof result.then === 'function') {
+				result.then(clampZoom);
+				return;
+			}
+			window.setTimeout(clampZoom, 0);
+		}
+
+		function pointsBounds(points) {
+			var south = Infinity;
+			var west = Infinity;
+			var north = -Infinity;
+			var east = -Infinity;
+			points.forEach(function (point) {
+				var lat = parseFloat(point.lat);
+				var lng = parseFloat(point.lng);
+				south = Math.min(south, lat);
+				north = Math.max(north, lat);
+				west = Math.min(west, lng);
+				east = Math.max(east, lng);
+			});
+			return { south: south, west: west, north: north, east: east };
 		}
 
 		function updateActivePlacemarks() {
@@ -398,8 +460,8 @@
 		var lat = parseFloat(center.lat);
 		var lng = parseFloat(center.lng);
 		return {
-			lat: isNaN(lat) ? 55.0302 : lat,
-			lng: isNaN(lng) ? 82.9204 : lng,
+			lat: validCoordinatePair(lat, lng) ? lat : 55.0302,
+			lng: validCoordinatePair(lat, lng) ? lng : 82.9204,
 			zoom: parseInt(center.zoom || 11, 10) || 11
 		};
 	}
@@ -418,6 +480,28 @@
 		}
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' || type === 'POSTAMAT' ? type : 'OPS';
+	}
+
+	function validPointCoordinates(point) {
+		var lat = parseFloat(point && point.lat);
+		var lng = parseFloat(point && point.lng);
+		return validCoordinatePair(lat, lng);
+	}
+
+	function validCoordinatePair(lat, lng) {
+		lat = parseFloat(lat);
+		lng = parseFloat(lng);
+		if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+			return false;
+		}
+		if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+			return false;
+		}
+		return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
+	}
+
+	function isFiniteNumber(value) {
+		return typeof Number.isFinite === 'function' ? Number.isFinite(value) : isFinite(value);
 	}
 
 	function distanceMeters(fromLat, fromLng, toLat, toLng) {

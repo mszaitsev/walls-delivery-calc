@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Pickup\Rest;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -224,8 +225,15 @@ final class PickupPointsRestController {
 			return array();
 		}
 		$city_code = (int) $this->param( $request, 'city_code' );
+		$country_code = $this->cdek_country_code( $this->param( $request, 'country_code' ) );
+		if ( '' === $country_code ) {
+			return array();
+		}
+		$purpose = sanitize_key( $this->param( $request, 'purpose' ) );
 		$options = array(
 			'type' => $this->param( $request, 'type' ) ?: 'ALL',
+			'country_code' => $country_code,
+			'handout_only' => 'sender_dropoff' !== $purpose,
 			'refresh' => in_array( strtolower( $this->param( $request, 'refresh' ) ), array( '1', 'true', 'yes' ), true ),
 		);
 		if ( $city_code > 0 ) {
@@ -349,6 +357,9 @@ final class PickupPointsRestController {
 			'cdek_owner_code' => (string) ( $point['cdek_owner_code'] ?? '' ),
 			'cdek_nearest_station' => (string) ( $point['cdek_nearest_station'] ?? '' ),
 			'cdek_note' => (string) ( $point['cdek_note'] ?? '' ),
+			'country_code' => (string) ( $point['country_code'] ?? '' ),
+			'cdek_city_code' => (int) ( $point['cdek_city_code'] ?? 0 ),
+			'is_handout' => ! empty( $point['is_handout'] ),
 		);
 		$snapshot['display_code'] = (string) ( $point['display_code'] ?? $snapshot['cdek_code'] );
 		$snapshot['display_title'] = (string) ( $point['display_title'] ?? trim( $snapshot['point_title'] . ' ' . $snapshot['display_code'] ) );
@@ -390,8 +401,20 @@ final class PickupPointsRestController {
 			'cdek_owner_code' => $snapshot['cdek_owner_code'],
 			'cdek_nearest_station' => $snapshot['cdek_nearest_station'],
 			'cdek_note' => $snapshot['cdek_note'],
+			'country_code' => $snapshot['country_code'],
+			'cdek_city_code' => $snapshot['cdek_city_code'],
+			'is_handout' => $snapshot['is_handout'],
 			'snapshot' => $snapshot,
 		);
+	}
+
+	private function cdek_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+		if ( '' === $country_code ) {
+			return 'RU';
+		}
+
+		return in_array( $country_code, CdekSettings::SUPPORTED_COUNTRIES, true ) ? $country_code : '';
 	}
 
 	/**
