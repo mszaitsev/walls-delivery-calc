@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyImportService {
 	private const DEFAULT_STEP_LIMIT = 3000;
-	private const INDEX_FORMAT_VERSION = 3;
+	private const MATCH_BATCH_SIZE = 500;
 	private const LOCK_BUSY_RETRY_MS = 1500;
 	private const STEP_LOCK_TTL_SECONDS = 600;
 	private const START_LOCK_TTL_SECONDS = 1800;
@@ -22,7 +22,6 @@ final class DpdGeographyImportService {
 	public function __construct(
 		private DpdGeographyCsvParser $parser,
 		private DpdGeographyMatcher $matcher,
-		private DpdLocationIndex $index,
 		private DpdGeographyImportStateService $state,
 		private DpdGeographyStageRepository $stage,
 		private LocationRepository $locations,
@@ -159,25 +158,19 @@ final class DpdGeographyImportService {
 		if ( '' === $file || ! file_exists( $file ) ) {
 			return $this->fail_with_report( 'DPD geography import file is missing.' );
 		}
-		$index_path = (string) ( $state['index_path'] ?? '' );
-		if ( '' === $index_path || ! file_exists( $index_path ) ) {
-			return $this->fail_with_report( 'DPD geography location index is missing.' );
-		}
 		$stage_table = (string) ( $state['stage_table'] ?? '' );
 		if ( '' === $stage_table || ! $this->stage->exists( $stage_table ) ) {
 			return $this->fail_with_report( 'DPD geography staging table is missing.' );
 		}
 
-		try {
-			$this->load_location_index_from_state( $state );
-		} catch ( \RuntimeException $exception ) {
-			return $this->fail_with_report( $exception->getMessage() );
-		}
 		$columns = is_array( $state['columns'] ?? null ) ? $state['columns'] : array();
 		try {
 			$step = $this->parser->read_step( $file, $start_offset, $columns, $limit );
 		} catch ( Throwable $throwable ) {
 			return $this->fail_with_report( 'DPD geography CSV parse failed: ' . $throwable->getMessage() );
+		}
+		if ( $this->step_state_is_stale( $start_job_id, $start_offset ) ) {
+			return $this->with_step_control( $this->state->public_state(), 'stale' );
 		}
 		$patch = array(
 			'phase' => 'importing',
@@ -185,20 +178,24 @@ final class DpdGeographyImportService {
 			'rows_read' => (int) $state['rows_read'] + (int) $step['rows_read_count'],
 			'last_message' => 'DPD geography import is processing CSV rows.',
 		);
-		foreach ( $step['rows'] as $row ) {
-			$this->process_row( $stage_table, $row, $patch );
+		foreach ( array_chunk( $step['rows'], self::MATCH_BATCH_SIZE ) as $rows ) {
+			$context = $this->match_context_for_rows( $rows, $patch );
+			foreach ( $rows as $row ) {
+				$this->process_row( $stage_table, $row, $patch, $context );
+			}
+			if ( $this->step_state_is_stale( $start_job_id, $start_offset ) ) {
+				return $this->with_step_control( $this->state->public_state(), 'stale' );
+			}
 		}
 
-		$current = $this->state->current();
-		if (
-			$start_job_id !== (string) ( $current['job_id'] ?? '' )
-			|| ! in_array( (string) ( $current['phase'] ?? '' ), array( 'ready', 'importing' ), true )
-			|| $start_offset !== (int) ( $current['byte_offset'] ?? 0 )
-		) {
+		if ( $this->step_state_is_stale( $start_job_id, $start_offset ) ) {
 			return $this->with_step_control( $this->state->public_state(), 'stale' );
 		}
 		$state = $this->state->update( $patch );
 		if ( ! empty( $step['eof'] ) ) {
+			if ( $this->step_job_is_stale( $start_job_id ) ) {
+				return $this->with_step_control( $this->state->public_state(), 'stale' );
+			}
 			$state = $this->finalize( $state );
 		}
 
@@ -221,7 +218,14 @@ final class DpdGeographyImportService {
 	 */
 	public function reset(): array {
 		$current = $this->state->current();
+		$token = $this->lock?->acquire( (string) ( $current['job_id'] ?? 'dpd-geography-reset' ), self::STEP_LOCK_TTL_SECONDS );
+		if ( null === $token ) {
+			$state = $this->with_operation_control( $this->state->public_state(), 'busy' );
+			$state['last_message'] = 'Шаг импорта действительно выполняется. Подождите завершения либо используйте принудительную отмену.';
+			return $state;
+		}
 		try {
+			$current = $this->state->current();
 			$stage_table = (string) ( $current['stage_table'] ?? '' );
 			if ( '' !== $stage_table ) {
 				$this->stage->drop( $stage_table );
@@ -229,8 +233,18 @@ final class DpdGeographyImportService {
 			$this->state->reset();
 			return $this->state->public_state();
 		} finally {
-			$this->lock?->force_release();
+			$this->lock?->release( $token );
 		}
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function force_cancel(): array {
+		$this->state->force_cancel( 'DPD geography import was force-cancelled by admin.' );
+		$this->lock?->force_release();
+
+		return $this->state->public_state();
 	}
 
 	/**
@@ -247,14 +261,9 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	private function start_from_existing_file_unlocked( string $path, string $source, string $source_file, bool $delete_on_finish ): array {
-		$index_path = '';
 		$stage_table = '';
 		try {
 			$inspect = $this->parser->inspect_header( $path );
-			$this->index->build();
-			$index_data = DpdLocationIndex::validate_export( $this->index->export() );
-			$index_path = $this->temp_path( 'index-' . $source_file . '.ser' );
-			$index_metadata = $this->persist_location_index( $index_path, $index_data );
 			$job_id = sha1( microtime( true ) . '|' . $source . '|' . $source_file . '|' . ( function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX ) ) );
 			$stage_table = $this->stage->table_name_for_job( $job_id );
 			$this->stage->create( $stage_table );
@@ -265,12 +274,12 @@ final class DpdGeographyImportService {
 					'source' => $source,
 					'source_file' => $source_file,
 					'file_path' => $path,
-					'index_path' => $index_path,
+					'index_path' => '',
 					'stage_table' => $stage_table,
-					'index_format_version' => (int) $index_metadata['index_format_version'],
-					'index_size' => (int) $index_metadata['index_size'],
-					'index_sha256' => (string) $index_metadata['index_sha256'],
-					'index_stats' => $index_metadata['index_stats'],
+					'index_format_version' => 0,
+					'index_size' => 0,
+					'index_sha256' => '',
+					'index_stats' => array(),
 					'runner_protocol_version' => self::RUNNER_PROTOCOL_VERSION,
 					'delete_file_on_finish' => $delete_on_finish,
 					'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0,
@@ -286,7 +295,7 @@ final class DpdGeographyImportService {
 			return $this->fail_with_report(
 				'DPD geography import start failed: ' . $throwable->getMessage(),
 				true,
-				array( 'source' => $source, 'source_file' => $source_file, 'file_path' => $path, 'index_path' => $index_path, 'stage_table' => $stage_table, 'delete_file_on_finish' => $delete_on_finish, 'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0 )
+				array( 'source' => $source, 'source_file' => $source_file, 'file_path' => $path, 'index_path' => '', 'stage_table' => $stage_table, 'delete_file_on_finish' => $delete_on_finish, 'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0 )
 			);
 		}
 	}
@@ -295,7 +304,7 @@ final class DpdGeographyImportService {
 	 * @param array<string,string> $row
 	 * @param array<string,mixed> $patch
 	 */
-	private function process_row( string $stage_table, array $row, array &$patch ): void {
+	private function process_row( string $stage_table, array $row, array &$patch, DpdGeographyMatchContext $context ): void {
 		$country = strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) );
 		if ( 'RU' !== $country ) {
 			if ( in_array( $country, array( 'AM', 'BY', 'KZ', 'KG' ), true ) ) {
@@ -311,7 +320,7 @@ final class DpdGeographyImportService {
 			$this->inc( $patch, 'skipped_invalid' );
 			return;
 		}
-		$match = $this->matcher->match( $row );
+		$match = $this->matcher->match( $row, $context );
 		if ( 'ambiguous' === $match['status'] ) {
 			$this->inc( $patch, 'ambiguous' );
 			if ( ! empty( $match['true_fias_ambiguity'] ) ) {
@@ -625,6 +634,10 @@ final class DpdGeographyImportService {
 			'true_fias_ambiguity' => (int) ( $state['true_fias_ambiguity'] ?? 0 ),
 			'matched_by_kladr' => (int) ( $state['matched_by_kladr'] ?? 0 ),
 			'matched_by_name' => (int) ( $state['matched_by_name'] ?? 0 ),
+			'match_batches' => (int) ( $state['match_batches'] ?? 0 ),
+			'max_match_batch_rows' => (int) ( $state['max_match_batch_rows'] ?? 0 ),
+			'lookup_query_groups' => (int) ( $state['lookup_query_groups'] ?? 0 ),
+			'match_context_candidates_peak' => (int) ( $state['match_context_candidates_peak'] ?? 0 ),
 			'saved_candidates' => (int) ( $state['saved_candidates'] ?? 0 ),
 			'finalized_mappings' => (int) ( $state['finalized_mappings'] ?? 0 ),
 			'finalized_changes' => (int) ( $state['finalized_changes'] ?? 0 ),
@@ -665,117 +678,54 @@ final class DpdGeographyImportService {
 	}
 
 	/**
-	 * @param array<string,mixed> $index_data
-	 * @return array{index_format_version:int,index_size:int,index_sha256:string,index_stats:array<string,int>}
+	 * @param array<int,array<string,string>> $rows
+	 * @param array<string,mixed> $patch
 	 */
-	private function persist_location_index( string $index_path, array $index_data ): array {
-		$validated = DpdLocationIndex::validate_export( $index_data );
-		$serialized = serialize( $validated );
-		if ( '' === $serialized ) {
-			throw new \RuntimeException( 'DPD geography location index persistence failed: empty payload.' );
-		}
-		$expected_size = strlen( $serialized );
-		$written = file_put_contents( $index_path, $serialized, LOCK_EX );
-		if ( false === $written || (int) $written !== $expected_size ) {
-			throw new \RuntimeException( 'DPD geography location index persistence failed: incomplete write.' );
-		}
-		clearstatcache( true, $index_path );
-		if ( ! file_exists( $index_path ) || ! is_readable( $index_path ) ) {
-			throw new \RuntimeException( 'DPD geography location index persistence failed: written file is not readable.' );
-		}
-		$actual_size = filesize( $index_path );
-		if ( false === $actual_size || (int) $actual_size !== $expected_size ) {
-			throw new \RuntimeException( 'DPD geography location index persistence failed: size mismatch.' );
-		}
-		$expected_hash = hash( 'sha256', $serialized );
-		$actual_hash = hash_file( 'sha256', $index_path );
-		if ( ! is_string( $actual_hash ) || 64 !== strlen( $actual_hash ) || ! hash_equals( $expected_hash, $actual_hash ) ) {
-			throw new \RuntimeException( 'DPD geography location index persistence failed: checksum mismatch.' );
+	private function match_context_for_rows( array $rows, array &$patch ): DpdGeographyMatchContext {
+		$keys = DpdGeographyLookupKeys::from_rows( $rows );
+		$context = new DpdGeographyMatchContext();
+		$query_groups = 0;
+
+		$fias = $keys->fias_guids();
+		if ( array() !== $fias ) {
+			$context->add_own_fias_rows( $this->locations->dpd_find_own_fias_candidates( $fias ) );
+			$context->add_city_fias_rows( $this->locations->dpd_find_city_fias_candidates( $fias ) );
+			$query_groups += 2;
 		}
 
-		return array(
-			'index_format_version' => self::INDEX_FORMAT_VERSION,
-			'index_size' => $expected_size,
-			'index_sha256' => $actual_hash,
-			'index_stats' => $this->index_stats( $validated ),
-		);
+		$kladr = $keys->kladr_keys();
+		if ( array() !== $kladr ) {
+			$context->add_kladr_rows( $this->locations->dpd_find_kladr_candidates( $kladr ) );
+			++$query_groups;
+		}
+
+		$names = $keys->names();
+		if ( array() !== $names ) {
+			$context->add_name_rows( $this->locations->dpd_find_name_candidates( $names ) );
+			++$query_groups;
+		}
+
+		$this->inc( $patch, 'match_batches' );
+		$patch['max_match_batch_rows'] = max( (int) ( $patch['max_match_batch_rows'] ?? $this->state->current()['max_match_batch_rows'] ?? 0 ), count( $rows ) );
+		$patch['lookup_query_groups'] = max( 0, (int) ( $patch['lookup_query_groups'] ?? $this->state->current()['lookup_query_groups'] ?? 0 ) + $query_groups );
+		$patch['match_context_candidates_peak'] = max( (int) ( $patch['match_context_candidates_peak'] ?? $this->state->current()['match_context_candidates_peak'] ?? 0 ), $context->candidate_count() );
+
+		return $context;
 	}
 
 	/**
-	 * @param array<string,mixed> $state
 	 */
-	private function load_location_index_from_state( array $state ): void {
-		$prefix = 'DPD geography location index validation failed: ';
-		$index_path = (string) ( $state['index_path'] ?? '' );
-		$expected_size = max( 0, (int) ( $state['index_size'] ?? 0 ) );
-		$expected_hash = (string) ( $state['index_sha256'] ?? '' );
-		$expected_version = max( 0, (int) ( $state['index_format_version'] ?? 0 ) );
-		$expected_stats = is_array( $state['index_stats'] ?? null ) ? $state['index_stats'] : array();
-		if ( '' === $index_path || ! file_exists( $index_path ) || ! is_readable( $index_path ) ) {
-			throw new \RuntimeException( $prefix . 'file is missing.' );
-		}
-		if ( self::INDEX_FORMAT_VERSION !== $expected_version ) {
-			throw new \RuntimeException( $prefix . 'unsupported format version.' );
-		}
-		if ( $expected_size <= 0 || ! preg_match( '/^[a-f0-9]{64}$/', $expected_hash ) ) {
-			throw new \RuntimeException( $prefix . 'missing integrity metadata.' );
-		}
-		$raw = file_get_contents( $index_path );
-		if ( ! is_string( $raw ) || '' === $raw ) {
-			throw new \RuntimeException( $prefix . 'empty file.' );
-		}
-		if ( strlen( $raw ) !== $expected_size ) {
-			throw new \RuntimeException( $prefix . 'size mismatch.' );
-		}
-		$actual_hash = hash( 'sha256', $raw );
-		if ( ! hash_equals( $expected_hash, $actual_hash ) ) {
-			throw new \RuntimeException( $prefix . 'checksum mismatch.' );
-		}
-		$loaded = unserialize( $raw, array( 'allowed_classes' => false ) );
-		if ( ! is_array( $loaded ) ) {
-			throw new \RuntimeException( $prefix . 'invalid serialized payload.' );
-		}
-		try {
-			$validated = DpdLocationIndex::validate_export( $loaded );
-		} catch ( \InvalidArgumentException $exception ) {
-			throw new \RuntimeException( $prefix . $this->sanitize_error( $exception->getMessage() ) );
-		}
-		if ( $this->index_stats( $validated ) !== $this->normalize_index_stats( $expected_stats ) ) {
-			throw new \RuntimeException( $prefix . 'stats mismatch.' );
-		}
-
-		$this->index->load( $validated );
+	private function step_state_is_stale( string $job_id, int $byte_offset ): bool {
+		$current = $this->state->current();
+		return $job_id !== (string) ( $current['job_id'] ?? '' )
+			|| ! in_array( (string) ( $current['phase'] ?? '' ), array( 'ready', 'importing' ), true )
+			|| $byte_offset !== (int) ( $current['byte_offset'] ?? 0 );
 	}
 
-	/**
-	 * @param array<string,mixed> $index_data
-	 * @return array<string,int>
-	 */
-	private function index_stats( array $index_data ): array {
-		$own_fias_keys = count( $index_data['own_fias'] ?? array() );
-		$city_fias_keys = count( $index_data['city_fias'] ?? array() );
-
-		return array(
-			'fias_keys' => $own_fias_keys + $city_fias_keys,
-			'own_fias_keys' => $own_fias_keys,
-			'city_fias_keys' => $city_fias_keys,
-			'kladr_keys' => count( $index_data['kladr'] ?? array() ),
-			'name_keys' => count( $index_data['name'] ?? array() ),
-		);
-	}
-
-	/**
-	 * @param array<string,mixed> $stats
-	 * @return array<string,int>
-	 */
-	private function normalize_index_stats( array $stats ): array {
-		return array(
-			'fias_keys' => max( 0, (int) ( $stats['fias_keys'] ?? 0 ) ),
-			'own_fias_keys' => max( 0, (int) ( $stats['own_fias_keys'] ?? 0 ) ),
-			'city_fias_keys' => max( 0, (int) ( $stats['city_fias_keys'] ?? 0 ) ),
-			'kladr_keys' => max( 0, (int) ( $stats['kladr_keys'] ?? 0 ) ),
-			'name_keys' => max( 0, (int) ( $stats['name_keys'] ?? 0 ) ),
-		);
+	private function step_job_is_stale( string $job_id ): bool {
+		$current = $this->state->current();
+		return $job_id !== (string) ( $current['job_id'] ?? '' )
+			|| ! in_array( (string) ( $current['phase'] ?? '' ), array( 'ready', 'importing' ), true );
 	}
 
 	/**

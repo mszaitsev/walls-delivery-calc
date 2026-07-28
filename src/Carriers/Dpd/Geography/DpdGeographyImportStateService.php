@@ -174,6 +174,17 @@ final class DpdGeographyImportStateService {
 		return $reset;
 	}
 
+	public function force_cancel( string $message ): array {
+		return $this->update(
+			array(
+				'phase' => 'cancelled',
+				'status' => '',
+				'last_message' => $message,
+				'finished_at' => $this->now(),
+			)
+		);
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -218,6 +229,10 @@ final class DpdGeographyImportStateService {
 			'true_fias_ambiguity' => 0,
 			'matched_by_kladr' => 0,
 			'matched_by_name' => 0,
+			'match_batches' => 0,
+			'max_match_batch_rows' => 0,
+			'lookup_query_groups' => 0,
+			'match_context_candidates_peak' => 0,
 			'saved_candidates' => 0,
 			'finalized_mappings' => 0,
 			'finalized_changes' => 0,

@@ -14,8 +14,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 require_once __DIR__ . '/../../src/Locations/ValueObjects/Location.php';
 require_once __DIR__ . '/../../src/Locations/Storage/LocationRepository.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdLocationIndex.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyLookupKeys.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyMatchContext.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyMatcher.php';
 
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatchContext;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
@@ -160,16 +163,21 @@ $GLOBALS['wpdb']->locations = array(
 $locations = new LocationRepository( $GLOBALS['wpdb'] );
 $index = new DpdLocationIndex( $locations );
 $index->build( 2 );
-$matcher = new DpdGeographyMatcher( $index, $locations );
+$context = new DpdGeographyMatchContext();
+$context->add_own_fias_rows( $GLOBALS['wpdb']->locations );
+$context->add_city_fias_rows( $GLOBALS['wpdb']->locations );
+$context->add_kladr_rows( $GLOBALS['wpdb']->locations );
+$context->add_name_rows( $GLOBALS['wpdb']->locations );
+$matcher = new DpdGeographyMatcher();
 
-$own_shadow_match = $matcher->match( array( 'country_code' => 'RU', 'fias' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'region' => 'Novosibirskaya', 'district' => '', 'settlement' => 'Novosibirsk', 'settlement_type' => 'g' ) );
+$own_shadow_match = $matcher->match( array( 'country_code' => 'RU', 'fias' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'region' => 'Novosibirskaya', 'district' => '', 'settlement' => 'Novosibirsk', 'settlement_type' => 'g' ), $context );
 dpd_location_index_assert( 'matched' === $own_shadow_match['status'] && 'own_fias' === $own_shadow_match['method'] && 10 === (int) $own_shadow_match['location_id'], 'own FIAS wins over a different row using the same GUID as city_fias_id.' );
 dpd_location_index_assert( array( 10 ) === $index->match_own_fias( '8dea00e3-9aab-4d8e-887c-ef2aaa546456' ) && array( 14 ) === $index->match_city_fias( '8dea00e3-9aab-4d8e-887c-ef2aaa546456' ), 'own FIAS and city FIAS candidate buckets are separated.' );
-$resolved_own_ambiguity = $matcher->match( array( 'country_code' => 'RU', 'fias' => '99999999-2222-3333-4444-555555555555', 'region' => 'Novosibirskaya', 'district' => 'One', 'settlement' => 'OwnDuplicate', 'settlement_type' => 's' ) );
+$resolved_own_ambiguity = $matcher->match( array( 'country_code' => 'RU', 'fias' => '99999999-2222-3333-4444-555555555555', 'region' => 'Novosibirskaya', 'district' => 'One', 'settlement' => 'OwnDuplicate', 'settlement_type' => 's' ), $context );
 dpd_location_index_assert( 'matched' === $resolved_own_ambiguity['status'] && 20 === (int) $resolved_own_ambiguity['location_id'] && ! empty( $resolved_own_ambiguity['resolved_after_fias_disambiguation'] ), 'ambiguous own FIAS can be resolved by row hierarchy metadata.' );
-$true_own_ambiguity = $matcher->match( array( 'country_code' => 'RU', 'fias' => '99999999-2222-3333-4444-555555555555', 'region' => 'Novosibirskaya', 'district' => '', 'settlement' => '', 'settlement_type' => '' ) );
+$true_own_ambiguity = $matcher->match( array( 'country_code' => 'RU', 'fias' => '99999999-2222-3333-4444-555555555555', 'region' => 'Novosibirskaya', 'district' => '', 'settlement' => '', 'settlement_type' => '' ), $context );
 dpd_location_index_assert( 'ambiguous' === $true_own_ambiguity['status'] && 'own_fias' === $true_own_ambiguity['method'] && ! empty( $true_own_ambiguity['true_fias_ambiguity'] ), 'true duplicate own FIAS remains ambiguous instead of falling back.' );
-$city_fias_fallback = $matcher->match( array( 'country_code' => 'RU', 'fias' => '77777777-2222-3333-4444-555555555555', 'region' => 'Novosibirskaya', 'district' => '', 'settlement' => 'CityFallback', 'settlement_type' => 'g' ) );
+$city_fias_fallback = $matcher->match( array( 'country_code' => 'RU', 'fias' => '77777777-2222-3333-4444-555555555555', 'region' => 'Novosibirskaya', 'district' => '', 'settlement' => 'CityFallback', 'settlement_type' => 'g' ), $context );
 dpd_location_index_assert( 'matched' === $city_fias_fallback['status'] && 'city_fias' === $city_fias_fallback['method'] && 30 === (int) $city_fias_fallback['location_id'], 'city_fias remains available as a fallback only when own FIAS has no candidates.' );
 dpd_location_index_assert( 10 === $index->match_kladr( 'RU54000001000' ), 'KLADR RU prefix and trailing zero normalization matches location_id' );
 dpd_location_index_assert( $index->is_ambiguous( $index->match_name( 'Novosibirskaya', 'One', 'DuplicateName', 's' ) ), 'duplicate conservative name key is ambiguous' );

@@ -679,6 +679,8 @@ require_once __DIR__ . '/../../src/Carriers/YandexDelivery/YandexDeliverySetting
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportReport.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyCsvParser.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdLocationIndex.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyLookupKeys.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyMatchContext.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyMatcher.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportStateService.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportLockService.php';
@@ -722,12 +724,10 @@ function dpd_import_assert_public_state_redacted( array $state, string $message 
  */
 function dpd_run_lookup_import( DpdForeignIdentityLookupWpdb $db, string $csv, DpdSettings $settings, string $source_file ): array {
 	$locations = new LocationRepository( $db );
-	$index = new DpdLocationIndex( $locations );
 	$state = new DpdGeographyImportStateService();
 	$importer = new DpdGeographyImportService(
 		new DpdGeographyCsvParser(),
-		new DpdGeographyMatcher( $index, $locations ),
-		$index,
+		new DpdGeographyMatcher(),
 		$state,
 		new DpdGeographyStageRepository( $db ),
 		$locations,
@@ -912,8 +912,7 @@ $state = new DpdGeographyImportStateService();
 $stage = new DpdGeographyStageRepository( $GLOBALS['wpdb'] );
 $importer = new DpdGeographyImportService(
 	new DpdGeographyCsvParser(),
-	new DpdGeographyMatcher( $index, $location_repository ),
-	$index,
+	new DpdGeographyMatcher(),
 	$state,
 	$stage,
 	$location_repository,
@@ -953,8 +952,7 @@ $large_stage = new DpdGeographyStageRepository( $large_db );
 $large_codes = new LocationDeliveryCodeRepository( $large_db );
 $large_importer = new DpdGeographyImportService(
 	new DpdGeographyCsvParser(),
-	new DpdGeographyMatcher( $large_index, $large_locations ),
-	$large_index,
+	new DpdGeographyMatcher(),
 	$large_state,
 	$large_stage,
 	$large_locations,
@@ -966,7 +964,9 @@ $large_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-large-index-' );
 file_put_contents( $large_path, mb_convert_encoding( $large_csv, 'Windows-1251', 'UTF-8' ) );
 $large_report = $large_importer->import_file( $large_path, 'cli', 'large-index.csv' );
 @unlink( $large_path );
-dpd_import_assert( 'finished' === (string) ( $large_report['phase'] ?? '' ) && 'success' === (string) ( $large_report['status'] ?? '' ) && '49455627' === $large_codes->get_dpd_city_id( 92468 ), 'large DPD geography fixture imports through compact separated FIAS index without metadata blow-up.' );
+dpd_import_assert( 'finished' === (string) ( $large_report['phase'] ?? '' ) && 'success' === (string) ( $large_report['status'] ?? '' ) && '49455627' === $large_codes->get_dpd_city_id( 92468 ), 'large DPD geography fixture imports through bounded batch matching without metadata blow-up.' );
+dpd_import_assert( 1 === (int) ( $large_report['match_batches'] ?? 0 ) && 1 === (int) ( $large_report['max_match_batch_rows'] ?? 0 ) && (int) ( $large_report['match_context_candidates_peak'] ?? 0 ) < 20, 'large DPD geography fixture builds only a small per-step match context instead of indexing all locations.' );
+dpd_import_assert( '' === (string) ( $large_state->current()['index_path'] ?? 'unexpected' ) && 0 === (int) ( $large_state->current()['index_size'] ?? -1 ), 'large DPD geography fixture creates no serialized location index artifact.' );
 dpd_import_assert( ! property_exists( DpdLocationIndex::class, 'location_meta' ), 'DPD geography compact index has no location_meta property after build.' );
 dpd_import_assert( ! array_key_exists( 'locations', $large_index->export() ), 'DPD geography compact index export has no per-location metadata map.' );
 delete_option( DpdGeographyImportLockService::OPTION_NAME );
@@ -1017,82 +1017,6 @@ try {
 dpd_import_assert( $delete_failed_closed && $new_payload === get_option( DpdGeographyImportLockService::OPTION_NAME ), 'lock compare-delete SQL error fails closed and preserves existing lock.' );
 delete_option( DpdGeographyImportLockService::OPTION_NAME );
 dpd_import_assert( in_array( array( DpdGeographyImportLockService::OPTION_NAME, 'options' ), $GLOBALS['wdc_dpd_import_cache_deleted'] ?? array(), true ), 'lock compare-delete invalidates the option cache after a successful owner release.' );
-
-$index_sql_db = new DpdIndexQueryFailureWpdb();
-$index_sql_repository = new LocationRepository( $index_sql_db );
-$index_sql_db->index_mode = 'non_array';
-$non_array_failed = false;
-try {
-	$index_sql_repository->dpd_location_index_rows();
-} catch ( RuntimeException $exception ) {
-	$non_array_failed = str_contains( $exception->getMessage(), 'invalid SQL result' );
-}
-dpd_import_assert( $non_array_failed, 'production DPD location index rows reject non-array SQL result without last_error.' );
-
-$index_sql_db->index_mode = 'empty';
-$empty_index_rows = $index_sql_repository->dpd_location_index_rows();
-dpd_import_assert( array() === $empty_index_rows, 'production DPD location index rows allow a successful empty SQL page.' );
-$empty_sql_index = new DpdLocationIndex( $index_sql_repository );
-$empty_sql_index->build( 100 );
-dpd_import_assert( array( 'own_fias' => array(), 'city_fias' => array(), 'kladr' => array(), 'name' => array() ) === DpdLocationIndex::validate_export( $empty_sql_index->export() ), 'legitimate empty DPD location index export remains structurally valid.' );
-
-$first_page_db = new DpdIndexQueryFailureWpdb();
-$first_page_db->delivery_codes = $first_page_snapshot = array(
-	array( 'location_id' => 1, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-16 03:00:00' ),
-	array( 'location_id' => 2, 'dpd_city_id' => '70000001', 'updated_at' => '2026-06-16 03:00:00' ),
-);
-$first_page_state = new DpdGeographyImportStateService();
-$first_page_stage = new DpdGeographyStageRepository( $first_page_db );
-$first_page_locations = new LocationRepository( $first_page_db );
-$first_page_codes = new LocationDeliveryCodeRepository( $first_page_db );
-$first_page_index = new DpdLocationIndex( $first_page_locations );
-$first_page_importer = new DpdGeographyImportService( new DpdGeographyCsvParser(), new DpdGeographyMatcher( $first_page_index, $first_page_locations ), $first_page_index, $first_page_state, $first_page_stage, $first_page_locations, $first_page_codes, $settings );
-$first_page_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-index-page-fail-' );
-file_put_contents( $first_page_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
-$first_page_failed = $first_page_importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $first_page_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
-$first_page_internal = $first_page_state->current();
-dpd_import_assert( 'failed' === (string) ( $first_page_failed['phase'] ?? '' ) && 'error' === (string) ( $first_page_failed['status'] ?? '' ), 'first DPD location index SQL page failure returns failed/error state.' );
-dpd_import_assert( str_contains( (string) ( $first_page_failed['last_message'] ?? '' ), 'DPD location index page query failed' ), 'first DPD location index SQL page failure is reported.' );
-dpd_import_assert_public_state_redacted( $first_page_failed, 'first DPD location index page failure response is redacted' );
-dpd_import_assert( $first_page_snapshot === $first_page_db->delivery_codes, 'first DPD location index page failure leaves working mappings unchanged.' );
-dpd_import_assert( 0 === (int) ( $first_page_internal['rows_read'] ?? -1 ) && 0 === (int) ( $first_page_internal['finalized_mappings'] ?? -1 ), 'first DPD location index page failure does not read CSV rows or finalize mappings.' );
-dpd_import_assert( '' !== (string) ( $first_page_internal['file_path'] ?? '' ) && file_exists( (string) $first_page_internal['file_path'] ) && ! array_key_exists( (string) ( $first_page_internal['stage_table'] ?? '' ), $first_page_db->dpd_geography_stage_tables ), 'first DPD location index page failure stores copied CSV for reset and creates no stage table.' );
-dpd_import_assert( '' === (string) ( $first_page_internal['index_path'] ?? '' ), 'first DPD location index page failure creates no index artifact.' );
-$first_page_report = $settings->last_geography_import_report();
-dpd_import_assert( 'failed' === (string) ( $first_page_report['phase'] ?? '' ) && 'error' === (string) ( $first_page_report['status'] ?? '' ) && (string) ( $first_page_report['last_message'] ?? '' ) === (string) ( $first_page_failed['last_message'] ?? '' ), 'first DPD location index page failure replaces last report.' );
-$first_page_copied_path = (string) $first_page_internal['file_path'];
-$first_page_importer->reset();
-dpd_import_assert( ! file_exists( $first_page_copied_path ), 'reset removes copied CSV after first index page failure.' );
-
-$second_page_db = new DpdIndexQueryFailureWpdb();
-$second_page_db->index_mode = 'second_error';
-for ( $i = 1; $i <= 100; ++$i ) {
-	$second_page_db->first_page_rows[] = array(
-		'id' => $i,
-		'country_code' => 'RU',
-		'active' => 1,
-		'fias_id' => sprintf( 'aaaaaaaa-bbbb-cccc-dddd-%012d', $i ),
-		'city_fias_id' => '',
-		'kladr_id' => str_pad( (string) $i, 13, '0', STR_PAD_LEFT ),
-		'city_kladr_id' => '',
-		'region_name' => 'РўРµСЃС‚',
-		'district_name' => '',
-		'place_name' => 'РўРµСЃС‚ ' . $i,
-		'settlement_name' => 'РўРµСЃС‚ ' . $i,
-		'city_name' => 'РўРµСЃС‚ ' . $i,
-		'place_type' => 'Рі',
-		'settlement_type' => 'Рі',
-		'city_type' => 'Рі',
-	);
-}
-$second_page_index = new DpdLocationIndex( new LocationRepository( $second_page_db ) );
-$second_page_failed = false;
-try {
-	$second_page_index->build( 100 );
-} catch ( RuntimeException $exception ) {
-	$second_page_failed = str_contains( $exception->getMessage(), 'DPD location index page query failed' );
-}
-dpd_import_assert( $second_page_failed && 2 === $second_page_db->index_calls, 'second DPD location index SQL page failure interrupts partial index build.' );
 
 foreach ( array( 'LF' => "\n", 'CRLF' => "\r\n", 'CR' => "\r" ) as $ending_name => $line_ending ) {
 	$ending_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-ending-' );
@@ -1145,71 +1069,6 @@ dpd_import_assert( (string) ( $oversized_report['last_message'] ?? '' ) === (str
 dpd_import_assert( 1 === (int) ( $oversized_step['errors_total'] ?? 0 ) && 1 === (int) ( $oversized_report['errors_total'] ?? 0 ), 'parser fatal failure increments errors_total.' );
 $importer->reset();
 
-$index_failure_snapshot = array(
-	array( 'location_id' => 1, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-16 02:00:00' ),
-	array( 'location_id' => 2, 'dpd_city_id' => '70000001', 'updated_at' => '2026-06-16 02:00:00' ),
-);
-
-$empty_index_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-empty-index-' );
-file_put_contents( $empty_index_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
-$GLOBALS['wpdb']->delivery_codes = $index_failure_snapshot;
-$empty_index_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $empty_index_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
-$empty_index_internal = $state->current();
-$empty_index_stage = (string) $empty_index_internal['stage_table'];
-$empty_index_import_path = (string) $empty_index_internal['file_path'];
-$empty_index_file = (string) $empty_index_internal['index_path'];
-file_put_contents( $empty_index_file, '' );
-$empty_index_failed = $importer->step( (string) $empty_index_job['job_id'], 1 );
-dpd_import_assert( 'failed' === (string) ( $empty_index_failed['phase'] ?? '' ) && 'error' === (string) ( $empty_index_failed['status'] ?? '' ), 'empty serialized index fails import job.' );
-dpd_import_assert( str_contains( (string) ( $empty_index_failed['last_message'] ?? '' ), 'location index validation failed' ), 'empty serialized index reports validation failure.' );
-dpd_import_assert_public_state_redacted( $empty_index_failed, 'empty index failure response is redacted' );
-$empty_index_state = $state->current();
-dpd_import_assert( 0 === (int) ( $empty_index_state['rows_read'] ?? -1 ), 'empty index failure does not process CSV rows.' );
-dpd_import_assert( 1 === (int) ( $empty_index_state['errors_total'] ?? 0 ) && in_array( (string) ( $empty_index_failed['last_message'] ?? '' ), (array) ( $empty_index_state['errors'] ?? array() ), true ), 'empty index fatal failure increments errors_total and stores diagnostic error.' );
-dpd_import_assert( $index_failure_snapshot === $GLOBALS['wpdb']->delivery_codes, 'empty index failure leaves working mappings unchanged.' );
-dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $empty_index_stage ] ), 'empty index failure keeps staging table until reset.' );
-dpd_import_assert( file_exists( $empty_index_import_path ) && file_exists( $empty_index_file ), 'empty index failure keeps source and index artifacts until reset.' );
-$empty_index_report = $settings->last_geography_import_report();
-dpd_import_assert( 'failed' === (string) ( $empty_index_report['phase'] ?? '' ) && 'error' === (string) ( $empty_index_report['status'] ?? '' ) && (string) ( $empty_index_report['last_message'] ?? '' ) === (string) ( $empty_index_failed['last_message'] ?? '' ), 'empty index failure is saved as terminal report.' );
-dpd_import_assert( 1 === (int) ( $empty_index_report['errors_total'] ?? 0 ), 'empty index failed report contains fatal errors_total.' );
-$importer->reset();
-dpd_import_assert( ! file_exists( $empty_index_import_path ) && ! file_exists( $empty_index_file ) && ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $empty_index_stage ] ), 'reset removes artifacts after empty index failure.' );
-
-$checksum_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-checksum-index-' );
-file_put_contents( $checksum_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
-$GLOBALS['wpdb']->delivery_codes = $index_failure_snapshot;
-$checksum_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $checksum_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
-$checksum_internal = $state->current();
-$checksum_raw = (string) file_get_contents( (string) $checksum_internal['index_path'] );
-$checksum_raw[0] = 'a' === $checksum_raw[0] ? 'b' : 'a';
-file_put_contents( (string) $checksum_internal['index_path'], $checksum_raw );
-$checksum_failed = $importer->step( (string) $checksum_job['job_id'], 1 );
-dpd_import_assert( 'failed' === (string) ( $checksum_failed['phase'] ?? '' ) && str_contains( (string) ( $checksum_failed['last_message'] ?? '' ), 'checksum mismatch' ), 'checksum mismatch fails import before CSV processing.' );
-dpd_import_assert_public_state_redacted( $checksum_failed, 'checksum failure response is redacted' );
-dpd_import_assert( $index_failure_snapshot === $GLOBALS['wpdb']->delivery_codes && 0 === (int) ( $state->current()['rows_read'] ?? -1 ), 'checksum mismatch leaves rows and mappings untouched.' );
-$importer->reset();
-
-$invalid_structure_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-invalid-index-' );
-file_put_contents( $invalid_structure_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
-$GLOBALS['wpdb']->delivery_codes = $index_failure_snapshot;
-$invalid_structure_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $invalid_structure_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
-$invalid_structure_internal = $state->current();
-$invalid_payload = serialize( array( 'own_fias' => array(), 'city_fias' => array(), 'kladr' => 'not-an-array', 'name' => array(), 'locations' => array() ) );
-file_put_contents( (string) $invalid_structure_internal['index_path'], $invalid_payload );
-$state->update(
-	array(
-		'index_size' => strlen( $invalid_payload ),
-		'index_sha256' => hash( 'sha256', $invalid_payload ),
-		'index_stats' => array( 'fias_keys' => 0, 'own_fias_keys' => 0, 'city_fias_keys' => 0, 'kladr_keys' => 0, 'name_keys' => 0 ),
-	)
-);
-$invalid_structure_failed = $importer->step( (string) $invalid_structure_job['job_id'], 1 );
-dpd_import_assert( 'failed' === (string) ( $invalid_structure_failed['phase'] ?? '' ) && str_contains( (string) ( $invalid_structure_failed['last_message'] ?? '' ), 'invalid' ), 'invalid serialized index structure fails import before CSV processing.' );
-dpd_import_assert_public_state_redacted( $invalid_structure_failed, 'invalid structure failure response is redacted' );
-dpd_import_assert( $index_failure_snapshot === $GLOBALS['wpdb']->delivery_codes && 0 === (int) ( $state->current()['rows_read'] ?? -1 ), 'invalid index structure leaves rows and mappings untouched.' );
-$importer->reset();
-$GLOBALS['wpdb']->delivery_codes = array();
-
 $header = $parser->inspect_header( $path );
 dpd_import_assert( ! array_key_exists( 'total_rows', $header ), 'inspect_header does not perform a full-row count' );
 dpd_import_assert( (int) $header['data_offset'] > 0, 'inspect_header reads only header and returns data offset' );
@@ -1250,15 +1109,19 @@ $reset_busy_stage = (string) $reset_busy_internal['stage_table'];
 $reset_busy_import_path = (string) $reset_busy_internal['file_path'];
 $reset_busy_index_path = (string) $reset_busy_internal['index_path'];
 $reset_busy_token = $lock_service->acquire( (string) $reset_busy_internal['job_id'], 600 );
-dpd_import_assert( is_string( $reset_busy_token ) && '' !== $reset_busy_token, 'test fixture acquires an import lock before forced reset.' );
+dpd_import_assert( is_string( $reset_busy_token ) && '' !== $reset_busy_token, 'test fixture acquires an import lock before reset.' );
 $reset_busy_response = $importer->reset();
-dpd_import_assert( 'cancelled' === (string) ( $reset_busy_response['phase'] ?? '' ), 'reset force-cancels import even when a stale/crashed lock exists.' );
-dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_busy_stage ] ) && ! file_exists( $reset_busy_import_path ) && ! file_exists( $reset_busy_index_path ), 'forced reset removes stage, CSV, and index artifacts under an existing lock.' );
-dpd_import_assert( array() === get_option( DpdGeographyImportLockService::OPTION_NAME, array() ), 'forced reset removes the import lock option.' );
-dpd_import_assert( is_string( $lock_service->acquire( 'job-after-forced-reset', 600 ) ), 'new import lock can be acquired immediately after forced reset.' );
+dpd_import_assert( 'busy' === (string) ( $reset_busy_response['operation_control']['outcome'] ?? '' ), 'normal reset returns busy when a live import lock exists.' );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_busy_stage ] ) && file_exists( $reset_busy_import_path ) && ( '' === $reset_busy_index_path || ! file_exists( $reset_busy_index_path ) ), 'normal busy reset does not delete stage or CSV and no new index artifact exists.' );
+dpd_import_assert( array() !== get_option( DpdGeographyImportLockService::OPTION_NAME, array() ), 'normal busy reset preserves the existing import lock option.' );
+$force_cancel_response = $importer->force_cancel();
+dpd_import_assert( 'cancelled' === (string) ( $force_cancel_response['phase'] ?? '' ), 'force cancel invalidates the current DPD geography job.' );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_busy_stage ] ) && file_exists( $reset_busy_import_path ), 'force cancel does not immediately delete old stage or CSV while an old request may still be running.' );
+dpd_import_assert( array() === get_option( DpdGeographyImportLockService::OPTION_NAME, array() ), 'force cancel removes the import lock option.' );
+dpd_import_assert( is_string( $lock_service->acquire( 'job-after-forced-reset', 600 ) ), 'new import lock can be acquired immediately after force cancel.' );
 delete_option( DpdGeographyImportLockService::OPTION_NAME );
 $reset_without_lock = $importer->reset();
-dpd_import_assert( 'cancelled' === (string) ( $reset_without_lock['phase'] ?? '' ), 'reset without an existing lock succeeds without errors.' );
+dpd_import_assert( 'cancelled' === (string) ( $reset_without_lock['phase'] ?? '' ) && ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_busy_stage ] ) && ! file_exists( $reset_busy_import_path ), 'reset without an existing lock succeeds and can clean a force-cancelled job later.' );
 
 $active_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-active-' );
 file_put_contents( $active_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
@@ -1358,14 +1221,14 @@ dpd_import_assert( 'ready' === (string) $job['phase'], 'start creates ready impo
 dpd_import_assert( '' !== $stage_table && isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'start creates staging table' );
 dpd_import_assert_public_state_redacted( $job, 'start public state hides internal paths and index metadata' );
 dpd_import_assert( true === (bool) $internal['delete_file_on_finish'], 'manual upload marks imported temp file for deletion' );
-dpd_import_assert( 3 === (int) ( $internal['index_format_version'] ?? 0 ) && (int) ( $internal['index_size'] ?? 0 ) > 0 && preg_match( '/^[a-f0-9]{64}$/', (string) ( $internal['index_sha256'] ?? '' ) ), 'internal state stores serialized index integrity metadata' );
-dpd_import_assert( is_array( $internal['index_stats'] ?? null ) && (int) ( $internal['index_stats']['fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['own_fias_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['kladr_keys'] ?? 0 ) > 0 && (int) ( $internal['index_stats']['name_keys'] ?? 0 ) > 0, 'internal state stores serialized index stats' );
+dpd_import_assert( '' === $upload_index_path && 0 === (int) ( $internal['index_format_version'] ?? -1 ) && 0 === (int) ( $internal['index_size'] ?? -1 ) && '' === (string) ( $internal['index_sha256'] ?? '' ) && array() === (array) ( $internal['index_stats'] ?? array() ), 'new DPD geography job does not create a serialized location index artifact.' );
 dpd_import_assert( (int) $internal['file_size'] > 0, 'start stores file_size for progress' );
 dpd_import_assert( 0 === (int) $internal['total_rows'], 'start does not pre-count total CSV rows' );
 dpd_import_assert( (float) $job['percent_complete'] > 0, 'start progress is calculated from byte_offset and file_size' );
 dpd_import_assert( ! array_key_exists( 'seen_mappings', $internal ) && ! array_key_exists( 'saved_by_job', $internal ) && ! array_key_exists( 'blocked_locations', $internal ), 'state does not contain large in-memory mapping arrays' );
 
 $job = $importer->step( (string) $job['job_id'], 1 );
+dpd_import_assert( 1 === (int) ( $state->current()['match_batches'] ?? 0 ) && 1 === (int) ( $state->current()['max_match_batch_rows'] ?? 0 ) && (int) ( $state->current()['match_context_candidates_peak'] ?? 0 ) > 0, 'step builds bounded ephemeral DPD match context for the processed sub-batch.' );
 dpd_import_assert( array() === $GLOBALS['wpdb']->delivery_codes, 'step import does not write directly to working delivery codes table' );
 dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][92468] ), 'candidate is saved in staging table' );
 dpd_import_assert( 'candidate' === $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][92468]['status'], 'staged candidate has candidate status' );
@@ -2045,15 +1908,16 @@ $migration_0043_source = file_get_contents( __DIR__ . '/../../database/migration
 dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'gar_object_id BIGINT(20) UNSIGNED NULL' ) && str_contains( $migration_0043_source, 'fias_id CHAR(36) NULL' ), 'migration 0043 keeps GAR/FIAS nullable for external locations.' );
 dpd_import_assert( is_string( $migration_0043_source ) && str_contains( $migration_0043_source, 'WHERE gar_object_id = 0' ) && str_contains( $migration_0043_source, "TRIM(fias_id) = ''" ) && str_contains( $migration_0043_source, "gar_id = ''" ), 'migration 0043 normalizes placeholder GAR/FIAS values idempotently.' );
 $import_service_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportService.php' );
-dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, 'LOCK_EX' ) && str_contains( $import_service_source, 'hash_file( \'sha256\'' ) && str_contains( $import_service_source, 'allowed_classes\' => false' ), 'DPD geography serialized location index is persisted and loaded with integrity checks.' );
-dpd_import_assert( is_string( $import_service_source ) && ! str_contains( $import_service_source, 'is_array( $loaded ) ? $loaded : array()' ), 'DPD geography index load no longer falls back to an empty index on corrupt payloads.' );
+$location_repository_source = file_get_contents( __DIR__ . '/../../src/Locations/Storage/LocationRepository.php' );
+dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, 'MATCH_BATCH_SIZE' ) && str_contains( $import_service_source, 'DpdGeographyLookupKeys::from_rows' ) && str_contains( $import_service_source, 'DpdGeographyMatchContext' ), 'DPD geography import builds ephemeral batch match contexts instead of serialized location indexes.' );
+dpd_import_assert( is_string( $location_repository_source ) && str_contains( $location_repository_source, 'dpd_find_own_fias_candidates' ) && str_contains( $location_repository_source, 'dpd_find_city_fias_candidates' ) && str_contains( $location_repository_source, 'dpd_find_kladr_candidates' ) && str_contains( $location_repository_source, 'dpd_find_name_candidates' ) && str_contains( $location_repository_source, 'invalid SQL result' ), 'DPD geography repository exposes fail-closed batch candidate lookup APIs.' );
 $stage_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php' );
 dpd_import_assert( is_string( $stage_source ) && str_contains( $stage_source, 'get_count_or_throw' ) && ! str_contains( $stage_source, '(int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$safe_stage}' ), 'DPD geography finalization count queries fail closed instead of coercing SQL errors to zero.' );
 dpd_import_assert( is_string( $stage_source ) && ! str_contains( $stage_source, 'ON DUPLICATE KEY UPDATE' ) && ! str_contains( $stage_source, 'VALUES(dpd_city_id)' ) && ! str_contains( $stage_source, 'VALUES(updated_at)' ), 'DPD geography production finalization does not use ambiguous ON DUPLICATE/VALUES SQL.' );
 dpd_import_assert( is_string( $stage_source ) && str_contains( $stage_source, 'UPDATE {$delivery_table} AS dc' ) && str_contains( $stage_source, 'INNER JOIN {$safe_stage} AS stage ON stage.location_id = dc.location_id' ) && str_contains( $stage_source, 'INSERT INTO {$delivery_table} (location_id, dpd_city_id, updated_at)' ) && str_contains( $stage_source, 'SELECT stage.location_id, stage.dpd_city_id' ), 'DPD geography production finalization applies candidates through qualified UPDATE and INSERT SELECT statements.' );
 $location_repository_source = file_get_contents( __DIR__ . '/../../src/Locations/Storage/LocationRepository.php' );
-dpd_import_assert( is_string( $location_repository_source ) && str_contains( $location_repository_source, 'DPD location index page query failed' ) && str_contains( $location_repository_source, '$this->wpdb->last_error = \'\'' ) && str_contains( $location_repository_source, 'invalid SQL result' ), 'DPD location index page queries fail closed on SQL and non-array result errors.' );
-dpd_import_assert( is_string( $import_service_source ) && strpos( $import_service_source, '$this->index->build()' ) < strpos( $import_service_source, 'DpdLocationIndex::validate_export' ) && strpos( $import_service_source, 'DpdLocationIndex::validate_export' ) < strpos( $import_service_source, '$index_path = $this->temp_path' ) && strpos( $import_service_source, 'persist_location_index' ) < strpos( $import_service_source, '$this->stage->create' ), 'DPD geography import start builds and validates the index before persisting artifacts or creating staging tables.' );
+dpd_import_assert( is_string( $location_repository_source ) && str_contains( $location_repository_source, 'dpd_get_candidate_rows_or_throw' ) && str_contains( $location_repository_source, '$this->wpdb->last_error = \'\'' ) && str_contains( $location_repository_source, 'invalid SQL result' ), 'DPD batch candidate lookup queries fail closed on SQL and non-array result errors.' );
+dpd_import_assert( is_string( $import_service_source ) && ! str_contains( $import_service_source, '$this->index->build()' ) && ! str_contains( $import_service_source, 'DpdLocationIndex::validate_export' ) && ! str_contains( $import_service_source, '$index_path = $this->temp_path' ) && ! str_contains( $import_service_source, 'persist_location_index' ) && strpos( $import_service_source, '$inspect = $this->parser->inspect_header' ) < strpos( $import_service_source, '$this->stage->create' ), 'DPD geography import start inspects the CSV and creates staging without building a persistent location index.' );
 $admin_source = file_get_contents( __DIR__ . '/../../src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $status_start = is_string( $admin_source ) ? strpos( $admin_source, 'public function ajax_dpd_geography_import_status' ) : false;
 $step_start = is_string( $admin_source ) ? strpos( $admin_source, 'public function ajax_dpd_geography_import_step' ) : false;
@@ -2068,9 +1932,11 @@ dpd_import_assert( is_string( $runner_source ) && ! str_contains( $runner_source
 dpd_import_assert( is_string( $runner_source ) && str_contains( $runner_source, 'operationControl.outcome === \'reset_required\'' ) && str_contains( $runner_source, 'Этот импорт создан предыдущей версией runner' ), 'DPD geography browser runner stops legacy protocol jobs until reset.' );
 $lock_source = file_get_contents( __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportLockService.php' );
 dpd_import_assert( is_string( $lock_source ) && str_contains( $lock_source, 'DELETE FROM {$this->wpdb->options}' ) && str_contains( $lock_source, 'option_value = %s' ) && str_contains( $lock_source, 'public function force_release' ) && str_contains( $lock_source, 'delete_option( self::OPTION_NAME' ), 'DPD geography import lock release/takeover uses atomic SQL compare-delete, while admin force reset can delete the lock option.' );
-dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, '$this->lock?->force_release()' ), 'DPD geography reset force-releases the import lock after cleanup.' );
+dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, 'public function force_cancel' ) && str_contains( $import_service_source, '$this->lock?->force_release()' ) && strpos( $import_service_source, 'public function reset' ) < strpos( $import_service_source, 'public function force_cancel' ), 'DPD geography normal reset and explicit force cancel are separate service operations.' );
+dpd_import_assert( is_string( $import_service_source ) && ! str_contains( $import_service_source, '$this->index->build()' ) && ! str_contains( $import_service_source, 'persist_location_index' ) && ! str_contains( $import_service_source, 'load_location_index_from_state' ) && str_contains( $import_service_source, 'match_context_for_rows' ), 'DPD geography production import no longer builds, persists, or loads a full serialized location index.' );
 dpd_import_assert( is_string( $import_service_source ) && str_contains( $import_service_source, 'START_LOCK_TTL_SECONDS' ) && str_contains( $import_service_source, 'run_locked_start' ) && str_contains( $import_service_source, 'start_from_existing_file_unlocked' ), 'DPD geography import start lifecycle runs under a single start lock before creating job artifacts.' );
 dpd_import_assert( is_string( $import_service_source ) && ! str_contains( $import_service_source, "'phase' => 'downloading'" ) && str_contains( $import_service_source, 'runner_protocol_version' ), 'DPD geography SFTP start no longer self-blocks with a downloading phase and new jobs carry runner protocol version.' );
 dpd_import_assert( is_string( $admin_source ) && str_contains( $admin_source, 'dpd_import_action_succeeded' ) && str_contains( $admin_source, "'reset_required'" ) && str_contains( $admin_source, '$reset_busy ?' ), 'DPD geography admin notices classify busy/reset-required start and reset responses as warnings instead of success.' );
+dpd_import_assert( is_string( $admin_source ) && str_contains( $admin_source, 'force_cancel_dpd_geography_import' ) && str_contains( $admin_source, 'Принудительно отменить импорт' ), 'DPD geography admin exposes an explicit force-cancel action separate from normal reset.' );
 
 echo "DPD geography import smoke OK\n";

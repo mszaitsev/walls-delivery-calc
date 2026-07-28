@@ -768,6 +768,7 @@ final class DeliveryServicesAdminPage {
 				'run_dpd_geography_ftp_import',
 				'upload_dpd_geography_csv_import',
 				'reset_dpd_geography_import',
+				'force_cancel_dpd_geography_import',
 				'check_dpd_geography',
 				'save_dpd_city_mapping',
 				'test_dpd_dadata_fallback',
@@ -821,6 +822,7 @@ final class DeliveryServicesAdminPage {
 					'run_dpd_geography_ftp_import',
 					'upload_dpd_geography_csv_import',
 					'reset_dpd_geography_import',
+					'force_cancel_dpd_geography_import',
 					'check_dpd_geography',
 					'save_dpd_city_mapping',
 					'test_dpd_dadata_fallback',
@@ -1061,6 +1063,19 @@ final class DeliveryServicesAdminPage {
 					)
 				);
 			}
+			if ( 'force_cancel_dpd_geography_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
+				$state = $this->dpd_geography_importer->force_cancel();
+				$this->dpd_settings->save_connection_result( true, 'DPD geography import force cancel: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->save_dpd_geography_action_result(
+					'warning',
+					'DPD Geography import force cancel',
+					(string) ( $state['last_message'] ?? 'DPD geography import was force-cancelled.' ),
+					array(
+						'phase' => (string) ( $state['phase'] ?? '' ),
+						'message' => (string) ( $state['last_message'] ?? '' ),
+					)
+				);
+			}
 			if ( in_array( $action, array( 'check_dpd_geography', 'save_dpd_city_mapping' ), true ) && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_diagnostics instanceof DpdGeographyDiagnosticService ) {
 				$location_id = isset( $_POST['dpd_geography_location_id'] ) ? max( 0, (int) $_POST['dpd_geography_location_id'] ) : 0;
 				$city_id = isset( $_POST['dpd_geography_city_id'] ) ? sanitize_text_field( wp_unslash( $_POST['dpd_geography_city_id'] ) ) : '';
@@ -1211,6 +1226,7 @@ final class DeliveryServicesAdminPage {
 			'run_dpd_geography_ftp_import',
 			'upload_dpd_geography_csv_import',
 			'reset_dpd_geography_import',
+			'force_cancel_dpd_geography_import',
 			'check_dpd_geography',
 			'save_dpd_city_mapping',
 			'test_dpd_dadata_fallback',
@@ -1238,7 +1254,7 @@ final class DeliveryServicesAdminPage {
 				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
 				'save_yandex_delivery_settings', 'check_yandex_delivery_connection' => 'yandex_delivery_settings',
 				'save_yandex_delivery_statuses' => 'yandex_delivery_statuses',
-				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
+				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'force_cancel_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
 				'save_dpd_tariff_settings' => 'dpd_tariff',
 				'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' => 'dpd_pickup',
 				'save_cdek_calculation' => 'calculation',
@@ -2604,6 +2620,13 @@ final class DeliveryServicesAdminPage {
 		<div style="max-width: 860px; margin-top: 12px; padding: 10px; border-left: 4px solid <?php echo esc_attr( $sftp_available ? '#00a32a' : '#dba617' ); ?>; background: #fff;">
 			<strong><?php echo esc_html( $sftp_available ? '[OK]' : '[WARNING]' ); ?></strong>
 			<?php echo esc_html( $sftp_available ? __( 'SFTP extension available.', 'walls-delivery-calc' ) : __( 'SFTP extension is not available. Manual CSV upload remains available.', 'walls-delivery-calc' ) ); ?>
+			<form method="post" style="margin-top: 8px;" onsubmit="return window.confirm('<?php echo esc_js( __( 'Текущий запуск будет признан недействительным. Используйте это после аварийного завершения или зависшего импорта.', 'walls-delivery-calc' ) ); ?>');">
+				<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+				<input type="hidden" name="wdc_delivery_services_action" value="force_cancel_dpd_geography_import">
+				<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+				<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+				<?php submit_button( __( 'Принудительно отменить импорт', 'walls-delivery-calc' ), 'delete', 'submit', false ); ?>
+			</form>
 		</div>
 		<form method="post" style="margin-top: 16px; max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -2632,7 +2655,7 @@ final class DeliveryServicesAdminPage {
 			<?php endif; ?>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
-				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'foreign_duplicate_identity_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_own_fias', 'matched_by_city_fias', 'resolved_after_fias_disambiguation', 'true_fias_ambiguity', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'stale_cleared', 'stale_cleanup_skipped', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+				<?php foreach ( array( 'phase', 'status', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'foreign_rows', 'foreign_am_rows', 'foreign_by_rows', 'foreign_kz_rows', 'foreign_kg_rows', 'foreign_locations_inserted', 'foreign_locations_updated', 'foreign_save_failed', 'foreign_mapping_conflicts', 'foreign_duplicate_identity_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_own_fias', 'matched_by_city_fias', 'resolved_after_fias_disambiguation', 'true_fias_ambiguity', 'matched_by_kladr', 'matched_by_name', 'match_batches', 'max_match_batch_rows', 'lookup_query_groups', 'match_context_candidates_peak', 'saved_candidates', 'finalized_mappings', 'finalized_changes', 'stale_cleared', 'stale_cleanup_skipped', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors_total', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
 						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>

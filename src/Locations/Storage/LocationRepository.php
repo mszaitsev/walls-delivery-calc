@@ -624,6 +624,241 @@ final class LocationRepository {
 		return $rows;
 	}
 
+	/**
+	 * @param array<int,string> $guids
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function dpd_find_own_fias_candidates( array $guids ): array {
+		return $this->dpd_candidate_rows_by_guid_column( 'fias_id', $guids, 'DPD own FIAS candidate lookup failed' );
+	}
+
+	/**
+	 * @param array<int,string> $guids
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function dpd_find_city_fias_candidates( array $guids ): array {
+		return $this->dpd_candidate_rows_by_guid_column( 'city_fias_id', $guids, 'DPD city FIAS candidate lookup failed' );
+	}
+
+	/**
+	 * @param array<int,string> $keys
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function dpd_find_kladr_candidates( array $keys ): array {
+		$values = array();
+		foreach ( $keys as $key ) {
+			$key = preg_replace( '/\D+/', '', strtoupper( preg_replace( '/^RU/i', '', trim( (string) $key ) ) ) ) ?? '';
+			if ( '' === $key ) {
+				continue;
+			}
+			$values[ $key ] = $key;
+			$values[ 'RU' . $key ] = 'RU' . $key;
+		}
+
+		return $this->dpd_candidate_rows_by_columns( array( 'kladr_id', 'city_kladr_id' ), array_values( $values ), 'DPD KLADR candidate lookup failed' );
+	}
+
+	/**
+	 * @param array<int,string> $names
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function dpd_find_name_candidates( array $names ): array {
+		$values = array();
+		foreach ( $names as $name ) {
+			$name = $this->normalize_query( (string) $name );
+			if ( '' !== $name ) {
+				$values[ $name ] = $name;
+			}
+		}
+		if ( array() === $values ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			return $this->dpd_candidate_rows_from_test(
+				static function ( array $row ) use ( $values ): bool {
+					foreach ( array( 'place_name', 'settlement_name', 'city_name' ) as $column ) {
+						$value = trim( (string) ( $row[ $column ] ?? '' ) );
+						$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( str_replace( array( 'Ё', 'ё' ), array( 'Е', 'е' ), $value ), 'UTF-8' ) : strtolower( $value );
+						$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+						if ( isset( $values[ $value ] ) ) {
+							return true;
+						}
+					}
+
+					return false;
+				}
+			);
+		}
+
+		$chunks = array_chunk( array_values( $values ), 500 );
+		$rows = array();
+		foreach ( $chunks as $chunk ) {
+			$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			$args = array_merge( $chunk, $chunk, $chunk );
+			$sql = $this->wpdb->prepare(
+				'SELECT ' . $this->dpd_candidate_columns_sql() . '
+				FROM ' . $this->table_name() . " l
+				WHERE l.active = 1 AND l.country_code = 'RU'
+				  AND (LOWER(l.place_name) IN ({$placeholders}) OR LOWER(l.settlement_name) IN ({$placeholders}) OR LOWER(l.city_name) IN ({$placeholders}))
+				ORDER BY l.id ASC",
+				...$args
+			);
+			$rows = array_merge( $rows, $this->dpd_get_candidate_rows_or_throw( $sql, 'DPD name candidate lookup failed' ) );
+		}
+
+		return $this->deduplicate_candidate_rows_by_id( $rows );
+	}
+
+	/**
+	 * @param array<int,string> $guids
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_candidate_rows_by_guid_column( string $column, array $guids, string $error_message ): array {
+		if ( ! in_array( $column, array( 'fias_id', 'city_fias_id' ), true ) ) {
+			throw new RuntimeException( 'DPD candidate lookup failed: invalid GUID column' );
+		}
+		$values = array();
+		foreach ( $guids as $guid ) {
+			foreach ( $this->dpd_guid_variants( (string) $guid ) as $variant ) {
+				$values[ $variant ] = $variant;
+			}
+		}
+
+		return $this->dpd_candidate_rows_by_columns( array( $column ), array_values( $values ), $error_message );
+	}
+
+	/**
+	 * @param array<int,string> $columns
+	 * @param array<int,string> $values
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_candidate_rows_by_columns( array $columns, array $values, string $error_message ): array {
+		$columns = array_values( array_intersect( $columns, array( 'fias_id', 'city_fias_id', 'kladr_id', 'city_kladr_id' ) ) );
+		$values = array_values( array_unique( array_filter( array_map( 'strval', $values ), static fn( string $value ): bool => '' !== trim( $value ) ) ) );
+		if ( array() === $columns || array() === $values ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			return $this->dpd_candidate_rows_from_test(
+				static function ( array $row ) use ( $columns, $values ): bool {
+					foreach ( $columns as $column ) {
+						if ( in_array( (string) ( $row[ $column ] ?? '' ), $values, true ) ) {
+							return true;
+						}
+						if ( in_array( strtoupper( (string) ( $row[ $column ] ?? '' ) ), $values, true ) ) {
+							return true;
+						}
+					}
+
+					return false;
+				}
+			);
+		}
+
+		$rows = array();
+		foreach ( array_chunk( $values, 500 ) as $chunk ) {
+			$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			$where = array();
+			$args = array();
+			foreach ( $columns as $column ) {
+				$where[] = "l.{$column} IN ({$placeholders})";
+				$args = array_merge( $args, $chunk );
+			}
+			$sql = $this->wpdb->prepare(
+				'SELECT ' . $this->dpd_candidate_columns_sql() . '
+				FROM ' . $this->table_name() . " l
+				WHERE l.active = 1 AND l.country_code = 'RU'
+				  AND (" . implode( ' OR ', $where ) . ')
+				ORDER BY l.id ASC',
+				...$args
+			);
+			$rows = array_merge( $rows, $this->dpd_get_candidate_rows_or_throw( $sql, $error_message ) );
+		}
+
+		return $this->deduplicate_candidate_rows_by_id( $rows );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function dpd_guid_variants( string $value ): array {
+		$normalized = strtolower( preg_replace( '/[^a-f0-9]/i', '', $value ) ?? '' );
+		if ( 32 !== strlen( $normalized ) ) {
+			return array();
+		}
+		$canonical = substr( $normalized, 0, 8 ) . '-' . substr( $normalized, 8, 4 ) . '-' . substr( $normalized, 12, 4 ) . '-' . substr( $normalized, 16, 4 ) . '-' . substr( $normalized, 20 );
+
+		return array_values( array_unique( array( $canonical, strtoupper( $canonical ), $normalized, strtoupper( $normalized ) ) ) );
+	}
+
+	private function dpd_candidate_columns_sql(): string {
+		return 'l.id, l.country_code, l.active, l.fias_id, l.city_fias_id, l.kladr_id, l.city_kladr_id, l.region_name, l.district_name, l.place_name, l.settlement_name, l.city_name, l.place_type, l.settlement_type, l.city_type';
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_get_candidate_rows_or_throw( mixed $sql, string $message ): array {
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new RuntimeException( $message . ': SQL preparation returned an invalid result' );
+		}
+		$this->wpdb->last_error = '';
+		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( $message );
+		}
+		if ( ! is_array( $rows ) ) {
+			throw new RuntimeException( $message . ': invalid SQL result' );
+		}
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				throw new RuntimeException( $message . ': invalid row structure' );
+			}
+		}
+
+		return $rows;
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_candidate_rows_from_test( callable $predicate ): array {
+		$columns = array( 'id', 'country_code', 'active', 'fias_id', 'city_fias_id', 'kladr_id', 'city_kladr_id', 'region_name', 'district_name', 'place_name', 'settlement_name', 'city_name', 'place_type', 'settlement_type', 'city_type' );
+		$rows = array();
+		foreach ( $this->test_location_rows() as $row ) {
+			if ( 1 !== (int) ( $row['active'] ?? 1 ) || 'RU' !== strtoupper( (string) ( $row['country_code'] ?? 'RU' ) ) || ! $predicate( $row ) ) {
+				continue;
+			}
+			$filtered = array();
+			foreach ( $columns as $column ) {
+				$filtered[ $column ] = $row[ $column ] ?? '';
+			}
+			$rows[] = $filtered;
+		}
+		usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
+
+		return $this->deduplicate_candidate_rows_by_id( $rows );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function deduplicate_candidate_rows_by_id( array $rows ): array {
+		$deduped = array();
+		foreach ( $rows as $row ) {
+			$id = (int) ( $row['id'] ?? 0 );
+			if ( $id > 0 ) {
+				$deduped[ $id ] = $row;
+			}
+		}
+		ksort( $deduped, SORT_NUMERIC );
+
+		return array_values( $deduped );
+	}
+
 	public function find_first_by_postal_code( string $postal_code ): ?Location {
 		$postal_code = preg_replace( '/\D+/', '', $postal_code ) ?? '';
 		if ( '' === $postal_code ) {
