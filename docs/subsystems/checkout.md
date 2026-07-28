@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.128.23
+Version: 0.129.0
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -39,6 +39,7 @@ Changing the actual destination country after initial checkout load clears the a
 ## Canonical Requirements
 
 - Rates are produced through WooCommerce shipping rates.
+- A pickup delivery method does not automatically require a concrete pickup point. The canonical flag is `DeliveryRate::requires_pickup_point`; Jet Logistic returns a pickup rate with this flag disabled because Jet does not provide warehouse identifiers.
 - The customer sees carrier, delivery type, delivery days/date, and final customer price.
 - Pickup point UI appears only for pickup delivery methods.
 - Courier address validation applies only when courier delivery is selected.

@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.128.23
+Version: 0.129.0
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 
@@ -17,6 +17,8 @@ DPD Geography finalization stages all RU and foreign `dpd_city_id` mappings befo
 The browser-driven DPD Geography import uses separate AJAX contracts for read-only status and mutating steps. `wdc_dpd_geography_import_status` returns `current_state()` only. `wdc_dpd_geography_import_step` processes one server-capped browser chunk of 500 rows, receives the last rendered `job_id` and `expected_byte_offset`, and runs under an atomic option lease so multiple tabs or retries cannot process the same CSV range concurrently. The lease uses SQL compare-and-delete for expired takeover and release, and start, step, and reset all use the same global lock so concurrent uploads cannot orphan index/stage artifacts and reset cannot delete files under a running step. Busy or stale step requests return transient `step_control` metadata without changing import state; busy start/reset and failed jobs with saved artifacts return transient `operation_control` metadata and require reset before another start. Active jobs created before the runner protocol version are exposed as `reset_required` and are not continued automatically. `state_revision` is globally monotonic across reset and new jobs so old browser responses cannot replace newer job state. The admin runner self-schedules with `setTimeout` only after the previous fetch settles; `setInterval` must not be reintroduced for mutating import progress.
 
 ## Canonical Requirements
+
+Jet Logistic owns separate geography tables for vendor city snapshots and manual overrides. Imports ignore RU rows, preserve manual overrides, deactivate missing vendor rows, and use stable identities from normalized source city/region/country rather than CSV row numbers. Matched Jet countries are stored through the shared delivery-service country repository; newly discovered countries are enabled once, while countries disabled by an administrator are not re-enabled on later imports.
 
 - City search uses the local locations database and should prefer exact and region-relevant matches.
 - Checkout may display contextual local-location labels, but the selected WooCommerce city value must be the own typed place only; region, district, country, and canonical city/place values travel separately in hidden metadata and session context.

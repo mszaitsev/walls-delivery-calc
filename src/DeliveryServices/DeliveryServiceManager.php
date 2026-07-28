@@ -16,7 +16,8 @@ final class DeliveryServiceManager {
 		private DeliveryServiceRepository $services,
 		private DeliveryServiceCountryRepository $countries,
 		private RuleRepository $rules,
-		private RussianPostCountryDirectory $russian_post_countries
+		private RussianPostCountryDirectory $russian_post_countries,
+		private ?DeliveryServiceSettingsRepository $service_settings = null
 	) {
 	}
 
@@ -38,6 +39,10 @@ final class DeliveryServiceManager {
 		$yandex_delivery = $this->services->ensure_yandex_delivery_service();
 		if ( null !== $yandex_delivery->id ) {
 			$this->countries->replace_countries( (int) $yandex_delivery->id, array( 'RU' ) );
+		}
+		$jet = $this->services->ensure_jet_logistic_service();
+		if ( null !== $jet->id && $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
+			$this->service_settings->set_setting( (int) $jet->id, DeliveryServiceSettingsRepository::DELIVERY_DAYS_ARE_WORKING_KEY, true, 'bool' );
 		}
 	}
 

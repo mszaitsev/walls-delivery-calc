@@ -1,6 +1,6 @@
 # Shipment Framework
 
-Version: 0.128.23
+Version: 0.129.0
 
 The Shipment Framework lets carriers share admin creation, persistence, lifecycle, documents, modal UI, status presentation, polling, and regression coverage. It is not one linear pipeline; each runtime flow has its own owner.
 
@@ -121,3 +121,5 @@ Adding a new carrier must not require:
 - adding carrier-prefixed actual cost fields or manual actual-cost UI.
 
 Registration in `Plugin.php` is expected because it is the composition root.
+
+Jet Logistic participates in the framework without API shipment creation. The adapter supports presentation, manual attach through the shared AJAX endpoint, status payload/update, local remove, tracking identifier, and shared autosync. `preview/create` and carrier cancellation return unsupported results. Jet persistence for manual attach/status/local remove is owned by its shipment service, not by generic creation flow or a fake persistence mapper.

@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.128.23
+Version: 0.129.0
 
 Stable subsystems:
 
@@ -15,6 +15,7 @@ Stable subsystems:
 - unified shipment regression profile.
 - shipment cost analytics on the overview admin page, comparing the selected order delivery's base API planned cost with canonical actual shipment cost.
 - CDEK EAEU support through the single `cdek` carrier/service with configurable `RU`, `AM`, `BY`, `KZ`, and `KG` availability.
+- Jet Logistic support through one carrier/service with separate geography import, two quote rates from one API calculation, manual tracking attach, status mappings, and shared autosync.
 
 Active known limitations:
 
