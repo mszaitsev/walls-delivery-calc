@@ -10,8 +10,10 @@ defined( 'ABSPATH' ) || exit;
 final class DpdLocationIndex {
 	private const AMBIGUOUS = -1;
 
-	/** @var array<string,int> */
-	private array $fias = array();
+	/** @var array<string,array<int,int>> */
+	private array $own_fias = array();
+	/** @var array<string,array<int,int>> */
+	private array $city_fias = array();
 	/** @var array<string,int> */
 	private array $kladr = array();
 	/** @var array<string,int> */
@@ -26,7 +28,8 @@ final class DpdLocationIndex {
 	 * @throws \RuntimeException When a location index page cannot be read.
 	 */
 	public function build( int $chunk_size = 5000 ): void {
-		$this->fias = array();
+		$this->own_fias = array();
+		$this->city_fias = array();
 		$this->kladr = array();
 		$this->name = array();
 		$offset = 0;
@@ -41,19 +44,53 @@ final class DpdLocationIndex {
 	}
 
 	/**
-	 * @return array{fias:array<string,int>,kladr:array<string,int>,name:array<string,int>}
+	 * @return array{own_fias:array<string,array<int,int>>,city_fias:array<string,array<int,int>>,kladr:array<string,int>,name:array<string,int>}
 	 */
 	public function export(): array {
-		return array( 'fias' => $this->fias, 'kladr' => $this->kladr, 'name' => $this->name );
+		return array(
+			'own_fias' => $this->own_fias,
+			'city_fias' => $this->city_fias,
+			'kladr' => $this->kladr,
+			'name' => $this->name,
+		);
 	}
 
 	/**
 	 * @param array<string,mixed> $data
-	 * @return array{fias:array<string,int>,kladr:array<string,int>,name:array<string,int>}
+	 * @return array{own_fias:array<string,array<int,int>>,city_fias:array<string,array<int,int>>,kladr:array<string,int>,name:array<string,int>}
 	 */
 	public static function validate_export( array $data ): array {
 		$validated = array();
-		foreach ( array( 'fias', 'kladr', 'name' ) as $bucket ) {
+		foreach ( array( 'own_fias', 'city_fias' ) as $bucket ) {
+			if ( ! array_key_exists( $bucket, $data ) || ! is_array( $data[ $bucket ] ) ) {
+				throw new \InvalidArgumentException( 'DPD location index payload is invalid: missing map ' . $bucket . '.' );
+			}
+			$validated[ $bucket ] = array();
+			foreach ( $data[ $bucket ] as $key => $value ) {
+				$key = is_int( $key ) ? (string) $key : $key;
+				if ( ! is_string( $key ) || '' === trim( $key ) ) {
+					throw new \InvalidArgumentException( 'DPD location index payload is invalid: empty map key.' );
+				}
+				if ( ! is_array( $value ) ) {
+					throw new \InvalidArgumentException( 'DPD location index payload is invalid: non-array FIAS candidates.' );
+				}
+				$ids = array();
+				foreach ( $value as $candidate ) {
+					if ( is_array( $candidate ) || is_object( $candidate ) || ! is_numeric( $candidate ) ) {
+						throw new \InvalidArgumentException( 'DPD location index payload is invalid: non-numeric FIAS candidate id.' );
+					}
+					$id = (int) $candidate;
+					if ( $id <= 0 ) {
+						throw new \InvalidArgumentException( 'DPD location index payload is invalid: non-positive FIAS candidate id.' );
+					}
+					$ids[] = $id;
+				}
+				$ids = array_values( array_unique( $ids ) );
+				sort( $ids, SORT_NUMERIC );
+				$validated[ $bucket ][ trim( $key ) ] = $ids;
+			}
+		}
+		foreach ( array( 'kladr', 'name' ) as $bucket ) {
 			if ( ! array_key_exists( $bucket, $data ) || ! is_array( $data[ $bucket ] ) ) {
 				throw new \InvalidArgumentException( 'DPD location index payload is invalid: missing map ' . $bucket . '.' );
 			}
@@ -73,7 +110,6 @@ final class DpdLocationIndex {
 				$validated[ $bucket ][ trim( $key ) ] = $id;
 			}
 		}
-
 		return $validated;
 	}
 
@@ -82,13 +118,24 @@ final class DpdLocationIndex {
 	 */
 	public function load( array $data ): void {
 		$validated = self::validate_export( $data );
-		$this->fias = $validated['fias'];
+		$this->own_fias = $validated['own_fias'];
+		$this->city_fias = $validated['city_fias'];
 		$this->kladr = $validated['kladr'];
 		$this->name = $validated['name'];
 	}
 
-	public function match_fias( string $fias ): int {
-		return $this->lookup( $this->fias, $this->normalize_guid( $fias ) );
+	/**
+	 * @return array<int,int>
+	 */
+	public function match_own_fias( string $fias ): array {
+		return $this->lookup_candidates( $this->own_fias, $this->normalize_guid( $fias ) );
+	}
+
+	/**
+	 * @return array<int,int>
+	 */
+	public function match_city_fias( string $fias ): array {
+		return $this->lookup_candidates( $this->city_fias, $this->normalize_guid( $fias ) );
 	}
 
 	public function match_kladr( string $kladr ): int {
@@ -115,7 +162,9 @@ final class DpdLocationIndex {
 	 */
 	public function stats(): array {
 		return array(
-			'fias_keys' => count( $this->fias ),
+			'fias_keys' => count( $this->own_fias ) + count( $this->city_fias ),
+			'own_fias_keys' => count( $this->own_fias ),
+			'city_fias_keys' => count( $this->city_fias ),
 			'kladr_keys' => count( $this->kladr ),
 			'name_keys' => count( $this->name ),
 		);
@@ -129,23 +178,56 @@ final class DpdLocationIndex {
 		if ( $location_id <= 0 ) {
 			return;
 		}
-		foreach ( array( 'fias_id', 'city_fias_id' ) as $column ) {
-			$key = $this->normalize_guid( (string) ( $row[ $column ] ?? '' ) );
-			if ( '' !== $key ) {
-				$this->add_unique( $this->fias, $key, $location_id );
-			}
+		$key = $this->normalize_guid( (string) ( $row['fias_id'] ?? '' ) );
+		if ( '' !== $key ) {
+			$this->add_candidate( $this->own_fias, $key, $location_id );
+		}
+		$key = $this->normalize_guid( (string) ( $row['city_fias_id'] ?? '' ) );
+		if ( '' !== $key ) {
+			$this->add_candidate( $this->city_fias, $key, $location_id );
 		}
 		foreach ( array( 'kladr_id', 'city_kladr_id' ) as $column ) {
 			foreach ( $this->kladr_variants( (string) ( $row[ $column ] ?? '' ) ) as $key ) {
 				$this->add_unique( $this->kladr, $key, $location_id );
 			}
 		}
-		$name = (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' );
-		$type = (string) ( $row['place_type'] ?? $row['settlement_type'] ?? $row['city_type'] ?? '' );
+		$name = $this->first_non_empty( $row, array( 'place_name', 'settlement_name', 'city_name' ) );
+		$type = $this->first_non_empty( $row, array( 'place_type', 'settlement_type', 'city_type' ) );
 		$key = $this->name_key( (string) ( $row['region_name'] ?? '' ), (string) ( $row['district_name'] ?? '' ), $name, $type );
 		if ( '' !== $key ) {
 			$this->add_unique( $this->name, $key, $location_id );
 		}
+	}
+
+	/**
+	 * @param array<string,array<int,int>> $index
+	 */
+	private function add_candidate( array &$index, string $key, int $location_id ): void {
+		if ( '' === $key ) {
+			return;
+		}
+		if ( ! isset( $index[ $key ] ) ) {
+			$index[ $key ] = array();
+		}
+		if ( ! in_array( $location_id, $index[ $key ], true ) ) {
+			$index[ $key ][] = $location_id;
+			sort( $index[ $key ], SORT_NUMERIC );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @param array<int,string> $keys
+	 */
+	private function first_non_empty( array $row, array $keys ): string {
+		foreach ( $keys as $key ) {
+			$value = trim( (string) ( $row[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
 	}
 
 	/**
@@ -173,6 +255,18 @@ final class DpdLocationIndex {
 		}
 
 		return (int) $index[ $key ];
+	}
+
+	/**
+	 * @param array<string,array<int,int>> $index
+	 * @return array<int,int>
+	 */
+	private function lookup_candidates( array $index, string $key ): array {
+		if ( '' === $key || ! array_key_exists( $key, $index ) || ! is_array( $index[ $key ] ) ) {
+			return array();
+		}
+
+		return array_values( array_map( 'intval', $index[ $key ] ) );
 	}
 
 	/**

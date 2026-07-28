@@ -56,6 +56,11 @@ final class DpdGeographyImportLockService {
 		}
 	}
 
+	public function force_release(): void {
+		delete_option( self::OPTION_NAME );
+		$this->clear_option_cache();
+	}
+
 	private function compare_and_delete( array $expected ): bool {
 		$serialized = function_exists( 'maybe_serialize' ) ? maybe_serialize( $expected ) : serialize( $expected );
 		$this->wpdb->last_error = '';
@@ -71,13 +76,17 @@ final class DpdGeographyImportLockService {
 		if ( 1 !== (int) $result ) {
 			return false;
 		}
+		$this->clear_option_cache();
+
+		return true;
+	}
+
+	private function clear_option_cache(): void {
 		if ( function_exists( 'wp_cache_delete' ) ) {
 			wp_cache_delete( self::OPTION_NAME, 'options' );
 			wp_cache_delete( 'notoptions', 'options' );
 			wp_cache_delete( 'alloptions', 'options' );
 		}
-
-		return true;
 	}
 
 	private function sanitize_sql_error( string $message ): string {
