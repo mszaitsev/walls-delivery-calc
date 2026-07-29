@@ -1053,7 +1053,7 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( 'upload_dpd_geography_csv_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$upload = $_FILES['dpd_geography_csv'] ?? null;
-				$state = is_array( $upload ) ? $this->dpd_geography_importer->start_from_uploaded_file( $upload ) : array( 'phase' => 'failed', 'last_message' => 'DPD geography manual import: CSV upload failed.' );
+				$state = is_array( $upload ) ? $this->dpd_geography_importer->start_from_uploaded_file( $upload ) : array( 'phase' => 'failed', 'last_message' => 'Не удалось загрузить CSV-файл географии DPD.' );
 				$this->dpd_settings->save_connection_result( $this->dpd_import_action_succeeded( $state ), 'DPD geography manual import job: ' . (string) ( $state['last_message'] ?? '' ) );
 				$this->save_dpd_import_action_result( 'DPD Geography import', $state );
 			}
@@ -1290,12 +1290,12 @@ final class DeliveryServicesAdminPage {
 
 		try {
 			$result = match ( $action ) {
-				'save_jet_settings' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_settings_from_post( $_POST ) : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
-				'import_jet_geography_remote' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_remote_csv() : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
-				'import_jet_geography_csv' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_uploaded_csv( $_FILES ) : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
-				'save_jet_geography_override' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_override_from_post( $_POST ) : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
-				'save_jet_status_mapping' => $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ? $this->jet_logistic_statuses->save_mapping_from_post( $_POST ) : array( 'success' => false, 'message' => 'Jet Logistic status admin component is unavailable.' ),
-				default => array( 'success' => false, 'message' => 'Unknown Jet Logistic admin action.' ),
+				'save_jet_settings' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_settings_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
+				'import_jet_geography_remote' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_remote_csv() : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
+				'import_jet_geography_csv' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_uploaded_csv( $_FILES ) : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
+				'save_jet_geography_override' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_override_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
+				'save_jet_status_mapping' => $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ? $this->jet_logistic_statuses->save_mapping_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления статусами Jet Logistic недоступен.' ),
+				default => array( 'success' => false, 'message' => 'Неизвестное административное действие Jet Logistic.' ),
 			};
 			if ( in_array( $action, array( 'save_jet_settings', 'import_jet_geography_remote', 'import_jet_geography_csv', 'save_jet_geography_override' ), true ) ) {
 				$this->clear_delivery_quote_cache();
@@ -1304,8 +1304,8 @@ final class DeliveryServicesAdminPage {
 			$result = array(
 				'success' => false,
 				'message' => 'import_jet_geography_remote' === $action
-					? 'Не удалось скачать cities.csv Jet Logistic: ' . $exception->getMessage() . ' Можно загрузить файл вручную ниже.'
-					: $exception->getMessage(),
+					? $exception->getMessage() . ' Можно загрузить файл вручную ниже.'
+					: $this->jet_action_failure_message( $action ),
 			);
 		}
 
@@ -1323,9 +1323,19 @@ final class DeliveryServicesAdminPage {
 	private function jet_notice_from_result( array $result ): array {
 		return array(
 			'type' => ! empty( $result['success'] ) ? 'success' : 'error',
-			'message' => sanitize_text_field( (string) ( $result['message'] ?? ( ! empty( $result['success'] ) ? 'Jet Logistic operation completed.' : 'Jet Logistic operation failed.' ) ) ),
+			'message' => sanitize_text_field( (string) ( $result['message'] ?? ( ! empty( $result['success'] ) ? 'Операция Jet Logistic успешно выполнена.' : 'Не удалось выполнить операцию Jet Logistic.' ) ) ),
 			'details' => $this->sanitize_jet_notice_details( is_array( $result['stats'] ?? null ) ? $result['stats'] : ( is_array( $result['details'] ?? null ) ? $result['details'] : array() ), (int) ( $result['rows'] ?? 0 ) ),
 		);
+	}
+
+	private function jet_action_failure_message( string $action ): string {
+		return match ( $action ) {
+			'save_jet_settings' => 'Не удалось сохранить настройки Jet Logistic.',
+			'import_jet_geography_csv' => 'Не удалось импортировать загруженный файл cities.csv.',
+			'save_jet_geography_override' => 'Не удалось применить ручное сопоставление Jet Logistic.',
+			'save_jet_status_mapping' => 'Не удалось сохранить сопоставление статуса Jet Logistic.',
+			default => 'Не удалось выполнить операцию Jet Logistic.',
+		};
 	}
 
 	/** @param array<string,mixed> $details @return array<string,mixed> */
@@ -1371,7 +1381,7 @@ final class DeliveryServicesAdminPage {
 				array(
 					'source' => 'uploaded_file',
 					'type' => $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->unload_type() : 'ALL',
-					'errors' => array( 'Pickup import file upload failed or no file was selected.' ),
+					'errors' => array( 'Не удалось загрузить файл импорта ПВЗ или файл не выбран.' ),
 				)
 			);
 			return;
@@ -4153,7 +4163,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			'Extract stage timed out/stale. Check PHP ZipArchive extension or use extracted JSON/TXT import.' => 'Этап распаковки завис или превысил лимит ожидания. Проверьте PHP ZipArchive или загрузите распакованный TXT/JSON.',
 			'Batch stage timed out/stale.' => 'Batch-обработка зависла или превысила лимит ожидания.',
 			'Import was manually cancelled/reset by admin.' => 'Импорт был вручную отменен/сброшен администратором.',
-			'Pickup import file upload failed or no file was selected.' => 'Не удалось загрузить файл импорта или файл не выбран.',
+			'Не удалось загрузить файл импорта ПВЗ или файл не выбран.' => 'Не удалось загрузить файл импорта ПВЗ или файл не выбран.',
 			'Only ZIP, TXT, or JSON files are allowed for Russian Post pickup import.' => 'Для импорта ПВЗ Почты России разрешены только ZIP, TXT или JSON-файлы.',
 			'Uploaded file failed ZIP/TXT/JSON type validation.' => 'Загруженный файл не прошел проверку типа ZIP/TXT/JSON.',
 			'Unable to store uploaded pickup import file.' => 'Не удалось сохранить загруженный файл импорта ПВЗ.',

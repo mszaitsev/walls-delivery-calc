@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Carriers\JetLogistic\Admin;
 
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyRepository;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvClient;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCountrySyncService;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyOverrideRepository;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticCredentials;
@@ -20,6 +21,7 @@ final class JetLogisticGeographyAdminPage {
 		private JetLogisticCitiesCsvClient $cities,
 		private JetLogisticGeographyOverrideRepository $overrides,
 		private JetLogisticGeographyRepository $geography,
+		private JetLogisticCountrySyncService $country_sync,
 		private LocationRepository $locations,
 		private JetLogisticSettings $settings,
 		private JetLogisticCredentials $credentials
@@ -34,7 +36,7 @@ final class JetLogisticGeographyAdminPage {
 		} else {
 			$token = trim( (string) ( $post['jet_logistic_access_token'] ?? '' ) );
 			if ( '' !== $token ) {
-			$this->credentials->save_access_token( sanitize_text_field( wp_unslash( $token ) ) );
+				$this->credentials->save_access_token( sanitize_text_field( wp_unslash( $token ) ) );
 			}
 		}
 
@@ -49,10 +51,28 @@ final class JetLogisticGeographyAdminPage {
 	/** @return array<string,mixed> */
 	public function import_uploaded_csv( array $files ): array {
 		$file = $files['cities_csv'] ?? null;
-		if ( ! is_array( $file ) || UPLOAD_ERR_OK !== (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) || empty( $file['tmp_name'] ) ) {
-			return array( 'success' => false, 'message' => 'Jet Logistic CSV upload failed.' );
+		if ( ! is_array( $file ) ) {
+			return array( 'success' => false, 'message' => 'Файл cities.csv не выбран.' );
 		}
-		$csv = (string) file_get_contents( (string) $file['tmp_name'] );
+		$error = (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE );
+		if ( UPLOAD_ERR_OK !== $error ) {
+			return array( 'success' => false, 'message' => $this->upload_error_message( $error ) );
+		}
+		$tmp_name = (string) ( $file['tmp_name'] ?? '' );
+		if ( '' === $tmp_name || ! file_exists( $tmp_name ) || ! is_readable( $tmp_name ) ) {
+			return array( 'success' => false, 'message' => 'Не удалось загрузить файл cities.csv. Выберите корректный CSV-файл и повторите попытку.' );
+		}
+		$size = filesize( $tmp_name );
+		if ( false === $size || 0 === (int) $size ) {
+			return array( 'success' => false, 'message' => 'Файл городов Jet Logistic пуст.' );
+		}
+		if ( (int) $size > JetLogisticCitiesCsvClient::MAX_RESPONSE_BYTES ) {
+			return array( 'success' => false, 'message' => 'Размер файла городов Jet Logistic превышает допустимый лимит 20 МБ.' );
+		}
+		$csv = file_get_contents( $tmp_name );
+		if ( false === $csv ) {
+			return array( 'success' => false, 'message' => 'Не удалось прочитать загруженный файл cities.csv.' );
+		}
 
 		return $this->imports->import_csv( $csv );
 	}
@@ -68,18 +88,24 @@ final class JetLogisticGeographyAdminPage {
 		if ( null === $location || ! $location->active ) {
 			return array( 'success' => false, 'message' => 'Выбранный населённый пункт не найден или неактивен.' );
 		}
+		$previous = $this->overrides->find( $identity );
 		if ( ! $this->overrides->save( $identity, $location_id, $location->country_code ) ) {
 			return array( 'success' => false, 'message' => 'Не удалось сохранить ручное сопоставление Jet Logistic.' );
 		}
 		if ( ! $this->geography->apply_manual_override( $identity, $location_id, $location->country_code ) ) {
-			$this->overrides->delete( $identity );
+			if ( array() !== $previous ) {
+				$this->overrides->save( (string) $previous['source_identity'], (int) $previous['location_id'], (string) $previous['country_code'] );
+			} else {
+				$this->overrides->delete( $identity );
+			}
 			return array( 'success' => false, 'message' => 'Не удалось применить ручное сопоставление к текущей географии Jet Logistic.' );
 		}
+		$this->country_sync->ensure_country_enabled( (string) $location->country_code );
 
 		return array(
 			'success' => true,
-			'message' => 'Ручное сопоставление применено.',
-			'details' => array( 'source_identity' => $identity, 'location_id' => $location_id ),
+			'message' => 'Ручное сопоставление Jet Logistic применено.',
+			'details' => array( 'source_identity' => $identity, 'location_id' => $location_id, 'country_code' => strtoupper( (string) $location->country_code ) ),
 		);
 	}
 
@@ -97,9 +123,9 @@ final class JetLogisticGeographyAdminPage {
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<table class="form-table" role="presentation">
-				<tr><th scope="row">HTTP timeout</th><td><input type="number" min="1" max="60" name="<?php echo esc_attr( JetLogisticSettings::REQUEST_TIMEOUT_KEY ); ?>" value="<?php echo esc_attr( (string) $this->settings->request_timeout() ); ?>"></td></tr>
-				<tr><th scope="row">Origin city</th><td><select name="<?php echo esc_attr( JetLogisticSettings::ORIGIN_SOURCE_IDENTITY_KEY ); ?>"><option value="">Не выбран</option><?php foreach ( $origins as $origin ) : ?><option value="<?php echo esc_attr( (string) ( $origin['source_identity'] ?? '' ) ); ?>" <?php selected( $this->settings->origin_source_identity(), (string) ( $origin['source_identity'] ?? '' ) ); ?>><?php echo esc_html( (string) ( $origin['source_city'] ?? '' ) . ' ' . (string) ( $origin['country_code'] ?? '' ) ); ?></option><?php endforeach; ?></select></td></tr>
-				<tr><th scope="row">Jet API access token</th><td><input type="password" class="regular-text" name="jet_logistic_access_token" value="" autocomplete="new-password" placeholder="<?php echo esc_attr( $has_token ? __( 'задано', 'walls-delivery-calc' ) : __( 'не задано', 'walls-delivery-calc' ) ); ?>"><p class="description"><?php echo esc_html__( 'Оставьте поле пустым, чтобы сохранить текущий токен.', 'walls-delivery-calc' ); ?> <?php echo esc_html( $has_token ? __( 'Токен сохранён.', 'walls-delivery-calc' ) : __( 'Токен не задан.', 'walls-delivery-calc' ) ); ?></p><label><input type="checkbox" name="jet_logistic_clear_access_token" value="1"> <?php echo esc_html__( 'Очистить сохранённый токен', 'walls-delivery-calc' ); ?></label></td></tr>
+				<tr><th scope="row">Тайм-аут HTTP, сек.</th><td><input type="number" min="1" max="60" name="<?php echo esc_attr( JetLogisticSettings::REQUEST_TIMEOUT_KEY ); ?>" value="<?php echo esc_attr( (string) $this->settings->request_timeout() ); ?>"></td></tr>
+				<tr><th scope="row">Город отправления</th><td><select name="<?php echo esc_attr( JetLogisticSettings::ORIGIN_SOURCE_IDENTITY_KEY ); ?>"><option value="">Не выбран</option><?php foreach ( $origins as $origin ) : ?><option value="<?php echo esc_attr( (string) ( $origin['source_identity'] ?? '' ) ); ?>" <?php selected( $this->settings->origin_source_identity(), (string) ( $origin['source_identity'] ?? '' ) ); ?>><?php echo esc_html( (string) ( $origin['source_city'] ?? '' ) . ' ' . (string) ( $origin['country_code'] ?? '' ) ); ?></option><?php endforeach; ?></select></td></tr>
+				<tr><th scope="row">Токен API Jet Logistic</th><td><input type="password" class="regular-text" name="jet_logistic_access_token" value="" autocomplete="new-password" placeholder="<?php echo esc_attr( $has_token ? __( 'задано', 'walls-delivery-calc' ) : __( 'не задано', 'walls-delivery-calc' ) ); ?>"><p class="description"><?php echo esc_html__( 'Оставьте поле пустым, чтобы сохранить текущий токен.', 'walls-delivery-calc' ); ?> <?php echo esc_html( $has_token ? __( 'Токен сохранён.', 'walls-delivery-calc' ) : __( 'Токен не задан.', 'walls-delivery-calc' ) ); ?></p><label><input type="checkbox" name="jet_logistic_clear_access_token" value="1"> <?php echo esc_html__( 'Очистить сохранённый токен', 'walls-delivery-calc' ); ?></label></td></tr>
 			</table>
 			<?php submit_button( __( 'Сохранить настройки Jet', 'walls-delivery-calc' ) ); ?>
 		</form>
@@ -125,13 +151,13 @@ final class JetLogisticGeographyAdminPage {
 		<h3><?php echo esc_html__( 'Статистика сопоставления', 'walls-delivery-calc' ); ?></h3>
 		<table class="widefat striped" style="max-width: 760px;"><tbody>
 			<?php foreach ( array( 'matched', 'ambiguous', 'unmatched', 'ignored', 'invalid' ) as $status ) : ?>
-				<tr><th scope="row"><?php echo esc_html( $status ); ?></th><td><?php echo esc_html( (string) ( $stats[ $status ] ?? 0 ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html( $this->match_status_label( $status ) ); ?></th><td><?php echo esc_html( (string) ( $stats[ $status ] ?? 0 ) ); ?></td></tr>
 			<?php endforeach; ?>
 		</tbody></table>
 
 		<h3><?php echo esc_html__( 'Ручное сопоставление', 'walls-delivery-calc' ); ?></h3>
 		<table class="widefat striped" style="max-width: 1180px;">
-			<thead><tr><th>Source</th><th>Город</th><th>Регион</th><th>Страна</th><th>Status</th><th>Match source</th><th>Location ID</th><th>Override</th></tr></thead>
+			<thead><tr><th>Идентификатор Jet</th><th>Город</th><th>Регион</th><th>Страна</th><th>Статус</th><th>Источник сопоставления</th><th>ID населённого пункта</th><th>Ручное сопоставление</th></tr></thead>
 			<tbody>
 			<?php foreach ( $rows as $row ) : ?>
 				<tr>
@@ -139,8 +165,8 @@ final class JetLogisticGeographyAdminPage {
 					<td><?php echo esc_html( (string) ( $row['source_city'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['source_region'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['country_code'] ?? '' ) ); ?></td>
-					<td><?php echo esc_html( (string) ( $row['match_status'] ?? '' ) ); ?></td>
-					<td><?php echo esc_html( (string) ( $row['match_source'] ?? '' ) ); ?></td>
+					<td><?php echo esc_html( $this->match_status_label( (string) ( $row['match_status'] ?? '' ) ) ); ?></td>
+					<td><?php echo esc_html( $this->match_source_label( (string) ( $row['match_source'] ?? '' ) ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['location_id'] ?? '' ) ); ?></td>
 					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="1" name="location_id" value="<?php echo esc_attr( (string) ( $row['location_id'] ?? '' ) ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
 				</tr>
@@ -165,11 +191,56 @@ final class JetLogisticGeographyAdminPage {
 			echo '<ul>';
 			foreach ( $details as $key => $value ) {
 				if ( is_scalar( $value ) ) {
-					echo '<li>' . esc_html( (string) $key . ': ' . (string) $value ) . '</li>';
+					echo '<li>' . esc_html( $this->notice_detail_label( (string) $key ) . ': ' . (string) $value ) . '</li>';
 				}
 			}
 			echo '</ul>';
 		}
 		echo '</div>';
+	}
+
+	private function upload_error_message( int $error ): string {
+		return match ( $error ) {
+			UPLOAD_ERR_NO_FILE => 'Файл cities.csv не выбран.',
+			UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'Размер файла превышает допустимый лимит.',
+			UPLOAD_ERR_PARTIAL => 'Файл был загружен только частично.',
+			UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION => 'Не удалось сохранить временный загруженный файл.',
+			default => 'Не удалось загрузить файл cities.csv. Выберите корректный CSV-файл и повторите попытку.',
+		};
+	}
+
+	private function notice_detail_label( string $key ): string {
+		return match ( $key ) {
+			'rows' => 'Строк импортировано',
+			'matched' => 'Сопоставлено',
+			'ambiguous' => 'Требует уточнения',
+			'unmatched' => 'Не сопоставлено',
+			'ignored' => 'Пропущено',
+			'invalid' => 'Некорректных строк',
+			'location_id' => 'ID населённого пункта',
+			'source_identity' => 'Идентификатор Jet',
+			'country_code' => 'Страна',
+			default => $key,
+		};
+	}
+
+	private function match_status_label( string $status ): string {
+		return match ( $status ) {
+			'matched' => 'сопоставлено',
+			'ambiguous' => 'требует уточнения',
+			'unmatched' => 'не сопоставлено',
+			'ignored' => 'пропущено',
+			'invalid' => 'некорректная строка',
+			default => $status,
+		};
+	}
+
+	private function match_source_label( string $source ): string {
+		return match ( $source ) {
+			'manual_override' => 'ручное сопоставление',
+			'auto_exact' => 'автоматически: точное совпадение',
+			'auto_alias' => 'автоматически: алиас',
+			default => $source,
+		};
 	}
 }

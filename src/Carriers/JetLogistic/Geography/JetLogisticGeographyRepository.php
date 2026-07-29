@@ -94,7 +94,7 @@ final class JetLogisticGeographyRepository {
 			return false;
 		}
 
-		return (bool) $this->wpdb->update(
+		$result = $this->wpdb->update(
 			$this->table(),
 			array(
 				'location_id' => $location_id,
@@ -108,6 +108,8 @@ final class JetLogisticGeographyRepository {
 			array( '%d', '%s', '%s', '%s', '%d', '%s' ),
 			array( '%s' )
 		);
+
+		return false !== $result;
 	}
 
 	/** @return array<int,array<string,mixed>> */

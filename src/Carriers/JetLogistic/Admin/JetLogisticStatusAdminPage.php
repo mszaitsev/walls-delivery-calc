@@ -18,12 +18,15 @@ final class JetLogisticStatusAdminPage {
 		$external = sanitize_text_field( wp_unslash( (string) ( $post['external_status'] ?? '' ) ) );
 		$universal = sanitize_key( wp_unslash( (string) ( $post['universal_status'] ?? '' ) ) );
 		$active = ! empty( $post['active'] );
-		if ( '' !== $external && ( '' === $universal || DeliveryStatus::is_valid( $universal ) ) ) {
-			$this->repository->save_mapping( $external, $universal, $active );
-			return array( 'success' => true, 'message' => 'Сопоставление статуса сохранено.' );
+		if ( '' === $external ) {
+			return array( 'success' => false, 'message' => 'Укажите внешний статус Jet Logistic.' );
 		}
+		if ( '' !== $universal && ! DeliveryStatus::is_valid( $universal ) ) {
+			return array( 'success' => false, 'message' => 'Выбран неизвестный универсальный статус.' );
+		}
+		$this->repository->save_mapping( $external, $universal, $active );
 
-		return array( 'success' => false, 'message' => 'Не удалось сохранить сопоставление статуса Jet Logistic.' );
+		return array( 'success' => true, 'message' => 'Сопоставление статуса Jet Logistic сохранено.' );
 	}
 
 	public function render_embedded( DeliveryService $service, array $notice = array() ): void {
@@ -42,13 +45,13 @@ final class JetLogisticStatusAdminPage {
 			<p><button class="button button-primary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></p>
 		</form>
 		<table class="widefat striped" style="max-width: 1180px;">
-			<thead><tr><th>Внешний статус</th><th>Универсальный статус</th><th>Активно</th><th>Last seen</th><th>Count</th></tr></thead>
+			<thead><tr><th>Внешний статус</th><th>Универсальный статус</th><th>Активно</th><th>Последнее событие</th><th>Количество</th></tr></thead>
 			<tbody>
 			<?php foreach ( $rows as $row ) : ?>
 				<tr>
 					<td><?php echo esc_html( (string) ( $row['external_status'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['universal_status'] ?? '' ) ); ?></td>
-					<td><?php echo ! empty( $row['active'] ) ? 'yes' : 'no'; ?></td>
+					<td><?php echo ! empty( $row['active'] ) ? 'да' : 'нет'; ?></td>
 					<td><?php echo esc_html( (string) ( $row['last_seen'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['occurrence_count'] ?? 0 ) ); ?></td>
 				</tr>
