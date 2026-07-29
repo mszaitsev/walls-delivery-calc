@@ -24,6 +24,7 @@ use WallsShop\WDC\Carriers\Runtime\JetLogisticCarrier;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -51,6 +52,12 @@ function update_option( string $option, mixed $value, bool|string $autoload = fa
 function wp_salt( string $scheme = 'auth' ): string { return 'jet-salt-' . $scheme; }
 function sanitize_text_field( mixed $value ): string { return trim( preg_replace( '/[\r\n\t]+/', ' ', (string) $value ) ?? (string) $value ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function esc_attr( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
+function esc_html( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
+function esc_html__( string $text, string $domain = 'default' ): string { return $text; }
+function __( string $text, string $domain = 'default' ): string { return $text; }
+function selected( mixed $selected, mixed $current, bool $display = true ): string { $result = (string) $selected === (string) $current ? ' selected="selected"' : ''; if ( $display ) { echo $result; } return $result; }
+function submit_button( string $text = 'Save', string $type = 'primary', string $name = 'submit', bool $wrap = true ): void { echo '<button class="button button-' . esc_attr( $type ) . '" name="' . esc_attr( $name ) . '">' . esc_html( $text ) . '</button>'; }
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 function add_action( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool { $GLOBALS['wdc_actions'][] = array( $hook, $callback, $priority, $accepted_args ); return true; }
 function add_submenu_page( mixed ...$args ): string { $GLOBALS['wdc_submenu_pages'][] = $args; return (string) ( $args[4] ?? '' ); }
@@ -148,42 +155,21 @@ $GLOBALS['wdc_actions'] = array();
 $GLOBALS['wdc_submenu_pages'] = array();
 $GLOBALS['wpdb'] = new wpdb();
 
-$geography_page = ( new ReflectionClass( JetLogisticGeographyAdminPage::class ) )->newInstanceWithoutConstructor();
-$status_page = ( new ReflectionClass( JetLogisticStatusAdminPage::class ) )->newInstanceWithoutConstructor();
-$geography_page->register();
-$status_page->register();
-jet_assert( 2 === count( $GLOBALS['wdc_actions'] ), 'Jet admin pages must register admin_menu callbacks during bootstrap.' );
-jet_assert( empty( $GLOBALS['wdc_submenu_pages'] ), 'Jet admin pages must not register submenu pages during bootstrap.' );
-jet_assert(
-	'admin_menu' === $GLOBALS['wdc_actions'][0][0]
-	&& $GLOBALS['wdc_actions'][0][1] === array( $geography_page, 'add_submenu_page' )
-	&& 20 === $GLOBALS['wdc_actions'][0][2],
-	'Jet geography admin page must defer submenu registration to admin_menu priority 20.'
-);
-jet_assert(
-	'admin_menu' === $GLOBALS['wdc_actions'][1][0]
-	&& $GLOBALS['wdc_actions'][1][1] === array( $status_page, 'add_submenu_page' )
-	&& 20 === $GLOBALS['wdc_actions'][1][2],
-	'Jet status admin page must defer submenu registration to admin_menu priority 20.'
-);
-( $GLOBALS['wdc_actions'][0][1] )();
-( $GLOBALS['wdc_actions'][1][1] )();
-jet_assert( 2 === count( $GLOBALS['wdc_submenu_pages'] ), 'Jet admin pages must register both submenu pages.' );
-jet_assert(
-	AdminMenu::MENU_SLUG === (string) $GLOBALS['wdc_submenu_pages'][0][0]
-	&& AdminMenu::MENU_SLUG === (string) $GLOBALS['wdc_submenu_pages'][1][0],
-	'Jet admin pages must register under AdminMenu::MENU_SLUG.'
-);
-jet_assert(
-	AdminMenu::CAPABILITY === (string) $GLOBALS['wdc_submenu_pages'][0][3]
-	&& AdminMenu::CAPABILITY === (string) $GLOBALS['wdc_submenu_pages'][1][3],
-	'Jet admin pages must use AdminMenu::CAPABILITY.'
-);
-jet_assert(
-	'wdc-jet-logistic-geography' === (string) $GLOBALS['wdc_submenu_pages'][0][4]
-	&& 'wdc-jet-logistic-statuses' === (string) $GLOBALS['wdc_submenu_pages'][1][4],
-	'Jet admin pages must keep stable submenu slugs.'
-);
+$root = dirname( __DIR__, 2 );
+$geography_admin_source = (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Admin/JetLogisticGeographyAdminPage.php' );
+$status_admin_source = (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Admin/JetLogisticStatusAdminPage.php' );
+$delivery_admin_source = (string) file_get_contents( $root . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+$plugin_source = (string) file_get_contents( $root . '/src/Core/Plugin.php' );
+foreach ( array( $geography_admin_source, $status_admin_source ) as $source ) {
+	jet_assert( ! str_contains( $source, 'add_menu_page' ) && ! str_contains( $source, 'add_submenu_page' ) && ! str_contains( $source, "add_action( 'admin_menu'" ) && ! str_contains( $source, 'AdminMenu::MENU_SLUG' ), 'Jet admin embedded components must not register WordPress menu pages.' );
+}
+jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . $plugin_source, 'wdc-jet-logistic-geography' ) && ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . $plugin_source, 'wdc-jet-logistic-statuses' ), 'Production code must not keep standalone Jet submenu slugs.' );
+jet_assert( str_contains( $delivery_admin_source, "JetLogisticSettings::SERVICE_KEY === \$service->service_key" ) && str_contains( $delivery_admin_source, "\$tabs['jet_geography']" ) && str_contains( $delivery_admin_source, "\$tabs['jet_statuses']" ), 'Jet tabs must be scoped to the Jet Logistic delivery service.' );
+jet_assert( str_contains( $delivery_admin_source, "'jet_geography' => \$this->render_jet_geography_tab( \$service )" ) && str_contains( $delivery_admin_source, "'jet_statuses' => \$this->render_jet_statuses_tab( \$service )" ), 'Jet tabs must delegate to embedded renderers.' );
+jet_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'save_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "check_admin_referer( 'wdc_delivery_services' )" ) && str_contains( $delivery_admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Jet POST actions must be handled by the shared delivery services action pipeline.' );
+jet_assert( str_contains( $delivery_admin_source, "service_tab_url_by_key( JetLogisticSettings::SERVICE_KEY, \$tab )" ) && str_contains( $delivery_admin_source, "'save_jet_status_mapping' => 'jet_statuses'" ), 'Jet POST actions must redirect back to their embedded tabs.' );
+jet_assert( ! str_contains( $plugin_source, 'JetLogisticGeographyAdminPage::class )->register()' ) && ! str_contains( $plugin_source, 'JetLogisticStatusAdminPage::class )->register()' ), 'Plugin hooks must not register standalone Jet admin pages.' );
+jet_assert( str_contains( $delivery_admin_source, "page=' . self::MENU_SLUG . '&service=' . rawurlencode( \$service->service_key ) . '&tab=' . rawurlencode( \$tab_key )" ) && str_contains( $delivery_admin_source, "http_build_query( array( 'page' => self::MENU_SLUG, 'service' => \$service_key, 'tab' => \$tab )" ), 'Jet tab URLs must use the delivery services service-tab URL helpers.' );
 
 $GLOBALS['wdc_db_delta'] = array();
 $migration_0044 = require dirname( __DIR__, 2 ) . '/database/migrations/0044_create_jet_logistic_geography_tables.php';
@@ -207,15 +193,15 @@ $GLOBALS['wdc_options'] = array();
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
 $failed = false;
 try {
-	( new MigrationManager( '0.129.3-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.129.4-test', $migration_dir ) )->run();
 } catch ( RuntimeException ) {
 	$failed = true;
 }
 jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
-( new MigrationManager( '0.129.3-test', $migration_dir ) )->run();
-jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.3-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
-( new MigrationManager( '0.129.3-test', $migration_dir ) )->run();
+( new MigrationManager( '0.129.4-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.4-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.4-test', $migration_dir ) )->run();
 jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
 unlink( $migration_file );
 rmdir( $migration_dir );

@@ -21,6 +21,9 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportReport;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
+use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
+use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunnerService;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnrichmentRunner;
@@ -144,6 +147,8 @@ final class DeliveryServicesAdminPage {
 		private ?DpdQuoteCarrier $dpd_carrier = null,
 		private ?YandexDeliveryCarrier $yandex_delivery_carrier = null,
 		private ?SettingsRepository $global_settings = null,
+		private ?JetLogisticGeographyAdminPage $jet_logistic_geography = null,
+		private ?JetLogisticStatusAdminPage $jet_logistic_statuses = null,
 	) {
 	}
 
@@ -736,6 +741,10 @@ final class DeliveryServicesAdminPage {
 			$this->handle_yandex_region_mapping_v2_action( $action );
 			return;
 		}
+		if ( in_array( $action, array( 'save_jet_settings', 'import_jet_geography_csv', 'save_jet_geography_override', 'save_jet_status_mapping' ), true ) ) {
+			$this->handle_jet_logistic_action( $action );
+			return;
+		}
 		if ( in_array( $action, array(
 				'save_global_delivery_settings',
 				'save',
@@ -1271,6 +1280,38 @@ final class DeliveryServicesAdminPage {
 		exit;
 	}
 
+	private function handle_jet_logistic_action( string $action ): void {
+		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+		$service = $this->services->find_by_service_key( $service_key );
+		if ( ! $service instanceof DeliveryService || JetLogisticSettings::SERVICE_KEY !== $service->service_key ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG ) );
+			exit;
+		}
+
+		if ( 'save_jet_settings' === $action && $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ) {
+			$this->jet_logistic_geography->save_settings_from_post( $_POST );
+			$this->clear_delivery_quote_cache();
+		}
+		if ( 'import_jet_geography_csv' === $action && $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ) {
+			$this->jet_logistic_geography->import_uploaded_csv( $_FILES );
+			$this->clear_delivery_quote_cache();
+		}
+		if ( 'save_jet_geography_override' === $action && $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ) {
+			$this->jet_logistic_geography->save_override_from_post( $_POST );
+			$this->clear_delivery_quote_cache();
+		}
+		if ( 'save_jet_status_mapping' === $action && $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ) {
+			$this->jet_logistic_statuses->save_mapping_from_post( $_POST );
+		}
+
+		$tab = match ( $action ) {
+			'save_jet_status_mapping' => 'jet_statuses',
+			default => 'jet_geography',
+		};
+		wp_safe_redirect( $this->service_tab_url_by_key( JetLogisticSettings::SERVICE_KEY, $tab ) );
+		exit;
+	}
+
 	private function handle_russian_post_pickup_file_upload(): void {
 		if ( ! $this->pickup_importer instanceof RussianPostPickupImporter ) {
 			return;
@@ -1489,6 +1530,10 @@ final class DeliveryServicesAdminPage {
 			$tabs['dpd_tariff'] = 'DPD Расчет';
 			$tabs['dpd_statuses'] = 'Статусы DPD';
 		}
+		if ( JetLogisticSettings::SERVICE_KEY === $service->service_key ) {
+			$tabs['jet_geography'] = 'География';
+			$tabs['jet_statuses'] = 'Статусы';
+		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
@@ -1518,6 +1563,8 @@ final class DeliveryServicesAdminPage {
 			'dpd_statuses' => $this->render_dpd_statuses_tab( $service ),
 			'cdek_statuses' => $this->render_cdek_statuses_tab( $service ),
 			'russian_post_countries' => $this->render_russian_post_countries_tab( $service ),
+			'jet_geography' => $this->render_jet_geography_tab( $service ),
+			'jet_statuses' => $this->render_jet_statuses_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
 		?>
@@ -3378,6 +3425,23 @@ final class DeliveryServicesAdminPage {
 		</form>
 		<?php
 	}
+
+	private function render_jet_geography_tab( DeliveryService $service ): void {
+		if ( JetLogisticSettings::SERVICE_KEY !== $service->service_key || ! $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ) {
+			return;
+		}
+
+		$this->jet_logistic_geography->render_embedded( $service );
+	}
+
+	private function render_jet_statuses_tab( DeliveryService $service ): void {
+		if ( JetLogisticSettings::SERVICE_KEY !== $service->service_key || ! $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ) {
+			return;
+		}
+
+		$this->jet_logistic_statuses->render_embedded( $service );
+	}
+
 	private function render_diagnostics_tab( DeliveryService $service ): void {
 		if ( ! $this->is_domestic_service( $service ) ) {
 			return;

@@ -781,7 +781,7 @@ final class Plugin {
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
-		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
+		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
@@ -841,6 +841,8 @@ final class Plugin {
 				$this->container->get( DpdQuoteCarrier::class ),
 				$this->container->get( YandexDeliveryCarrier::class ),
 				$this->container->get( SettingsRepository::class ),
+				$this->container->get( JetLogisticGeographyAdminPage::class ),
+				$this->container->get( JetLogisticStatusAdminPage::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );
@@ -927,8 +929,6 @@ final class Plugin {
 			$this->container->get( RulesAdminPage::class )->register();
 			$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
 			$this->container->get( DeliveryServicesAdminPage::class )->register();
-			$this->container->get( JetLogisticGeographyAdminPage::class )->register();
-			$this->container->get( JetLogisticStatusAdminPage::class )->register();
 			$this->container->get( ShipmentStatusesAdminPage::class )->register();
 			$this->container->get( OrderDeliveryMetabox::class )->register();
 			$this->container->get( OrderShipmentsMetabox::class )->register();

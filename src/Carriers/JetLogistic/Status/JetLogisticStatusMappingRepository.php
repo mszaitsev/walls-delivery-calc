@@ -68,6 +68,12 @@ final class JetLogisticStatusMappingRepository {
 		return is_array( $row ) ? $row : array();
 	}
 
+	/** @return array<int,array<string,mixed>> */
+	public function admin_rows(): array {
+		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} ORDER BY active DESC, updated_at DESC, external_status ASC", ARRAY_A );
+		return is_array( $rows ) ? $rows : array();
+	}
+
 	public function save_mapping( string $external_status, string $universal_status, bool $active, bool $observed = false ): void {
 		if ( '' !== $universal_status && ! DeliveryStatus::is_valid( $universal_status ) ) {
 			return;

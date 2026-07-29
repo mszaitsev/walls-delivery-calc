@@ -94,6 +94,27 @@ final class JetLogisticGeographyRepository {
 		return is_array( $rows ) ? $rows : array();
 	}
 
+	/** @return array<int,array<string,mixed>> */
+	public function admin_rows( int $limit = 100 ): array {
+		$limit = max( 1, min( 500, $limit ) );
+		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} ORDER BY active DESC, country_code ASC, source_city ASC LIMIT {$limit}", ARRAY_A );
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/** @return array<string,int> */
+	public function match_status_counts(): array {
+		$stats = array( 'matched' => 0, 'ambiguous' => 0, 'unmatched' => 0, 'ignored' => 0, 'invalid' => 0 );
+		$rows = $this->wpdb->get_results( "SELECT match_status, COUNT(*) AS total FROM {$this->table()} GROUP BY match_status", ARRAY_A );
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$status = (string) ( $row['match_status'] ?? '' );
+			if ( array_key_exists( $status, $stats ) ) {
+				$stats[ $status ] = (int) ( $row['total'] ?? 0 );
+			}
+		}
+
+		return $stats;
+	}
+
 	/** @return array<int,string> */
 	public function matched_country_codes(): array {
 		$rows = $this->wpdb->get_col( "SELECT DISTINCT country_code FROM {$this->table()} WHERE active = 1 AND match_status = 'matched' AND country_code <> 'RU' ORDER BY country_code ASC" );
