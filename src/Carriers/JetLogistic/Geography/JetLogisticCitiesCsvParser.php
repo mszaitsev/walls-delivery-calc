@@ -74,8 +74,12 @@ final class JetLogisticCitiesCsvParser {
 				continue;
 			}
 			$rows[] = array(
-				'source_identity' => $this->source_identity( $city, $region ),
-				'legacy_source_identity' => $this->normalizer->identity( $raw_city, '', 'RU' ),
+				'source_identity' => $this->source_identity( $city, $region, $place_type ),
+				'legacy_source_identity' => $this->legacy_source_identity( $city, $region ),
+				'legacy_source_identities' => array(
+					$this->legacy_source_identity( $city, $region ),
+					$this->normalizer->identity( $raw_city, '', 'RU' ),
+				),
 				'source_city' => $city,
 				'source_place_type' => $place_type,
 				'source_region' => $region,
@@ -118,7 +122,11 @@ final class JetLogisticCitiesCsvParser {
 		return array( 'city' => $city, 'place_type' => '' );
 	}
 
-	private function source_identity( string $city, string $region ): string {
+	private function source_identity( string $city, string $region, string $place_type ): string {
+		return hash( 'sha256', $this->region_normalizer->normalize( $region ) . '|' . $this->normalizer->normalize( $city ) . '|' . $this->normalizer->normalize( $place_type ) );
+	}
+
+	private function legacy_source_identity( string $city, string $region ): string {
 		return hash( 'sha256', $this->region_normalizer->normalize( $region ) . '|' . $this->normalizer->normalize( $city ) );
 	}
 

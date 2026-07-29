@@ -35,11 +35,22 @@ final class JetLogisticGeographyMatcher {
 		$identity = (string) ( $row['source_identity'] ?? '' );
 		$override = $this->overrides->find( $identity );
 		if ( array() === $override ) {
-			$legacy_identity = (string) ( $row['legacy_source_identity'] ?? '' );
-			$legacy_override = '' !== $legacy_identity && $legacy_identity !== $identity ? $this->overrides->find( $legacy_identity ) : array();
-			if ( array() !== $legacy_override && $this->overrides->save( $identity, (int) $legacy_override['location_id'], (string) $legacy_override['country_code'] ) ) {
-				$this->overrides->delete( $legacy_identity );
-				$override = $this->overrides->find( $identity );
+			$legacy_identities = array_filter(
+				array_unique(
+					array_merge(
+						array( (string) ( $row['legacy_source_identity'] ?? '' ) ),
+						array_map( 'strval', (array) ( $row['legacy_source_identities'] ?? array() ) )
+					)
+				),
+				static fn( string $legacy_identity ): bool => '' !== $legacy_identity && $legacy_identity !== $identity
+			);
+			foreach ( $legacy_identities as $legacy_identity ) {
+				$legacy_override = $this->overrides->find( $legacy_identity );
+				if ( array() !== $legacy_override && $this->overrides->save( $identity, (int) $legacy_override['location_id'], (string) $legacy_override['country_code'] ) ) {
+					$this->overrides->delete( $legacy_identity );
+					$override = $this->overrides->find( $identity );
+					break;
+				}
 			}
 		}
 		if ( (int) ( $override['location_id'] ?? 0 ) > 0 ) {
@@ -55,7 +66,7 @@ final class JetLogisticGeographyMatcher {
 			: $this->locations->find_active_by_place_and_region_matches( $city, $normalized_region, $place_type );
 		$count = count( $matches );
 		if ( $count > 1 ) {
-			return array_merge( $row, array( 'match_status' => 'ambiguous', 'match_source' => '' !== $country ? 'exact_name_region_multiple' : 'exact_name_region_multiple', 'active' => 0 ) );
+			return array_merge( $row, array( 'match_status' => 'ambiguous', 'match_source' => 'exact_name_region_multiple', 'active' => 0 ) );
 		}
 		if ( 1 === $count ) {
 			$location = $matches[0];
@@ -66,6 +77,6 @@ final class JetLogisticGeographyMatcher {
 			return array_merge( $row, array( 'location_id' => $location->id, 'country_code' => $location->country_code, 'match_status' => 'matched', 'match_source' => '' === $country ? 'exact_name_region_inferred_country' : 'exact_name_region', 'active' => 1 ) );
 		}
 
-		return array_merge( $row, array( 'match_status' => 'unmatched', 'match_source' => 'exact_name_region_not_found', 'active' => 0 ) );
+		return array_merge( $row, array( 'match_status' => 'unmatched', 'match_source' => '' !== $place_type ? 'place_type_mismatch' : 'exact_name_region_not_found', 'active' => 0 ) );
 	}
 }

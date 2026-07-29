@@ -77,6 +77,7 @@ final class JetLogisticGeographyImportService {
 			array(
 				'source_city' => (string) ( $row['source_city'] ?? '' ),
 				'source_region' => (string) ( $row['source_region'] ?? '' ),
+				'source_place_type' => (string) ( $row['source_place_type'] ?? '' ),
 				'country_code' => strtoupper( (string) ( $row['country_code'] ?? '' ) ),
 			),
 			JSON_UNESCAPED_UNICODE

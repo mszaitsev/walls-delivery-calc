@@ -284,7 +284,7 @@ final class LocationRepository {
 		if ( $this->has_test_location_rows() ) {
 			$matches = $this->active_place_region_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, $place_type_key );
 			if ( array() === $matches && '' !== $place_type_key ) {
-				$matches = $this->active_place_region_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, '' );
+				$matches = $this->active_place_region_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, '', true );
 			}
 
 			return $this->deduplicate_locations_by_id( $matches );
@@ -331,7 +331,7 @@ final class LocationRepository {
 		}
 		if ( array() === $matches && '' !== $place_type_key ) {
 			foreach ( $rows as $row ) {
-				if ( is_array( $row ) && $this->active_place_region_row_matches( $row, $place_key, $region_key, '' ) ) {
+				if ( is_array( $row ) && $this->active_place_region_row_matches( $row, $place_key, $region_key, '', true ) ) {
 					$matches[] = $this->row_to_location( $row );
 				}
 			}
@@ -2662,13 +2662,13 @@ final class LocationRepository {
 	 * @param array<int,array<string,mixed>> $rows
 	 * @return array<int,Location>
 	 */
-	private function active_place_region_matches_for_rows( array $rows, string $place_key, string $region_key, string $place_type_key ): array {
+	private function active_place_region_matches_for_rows( array $rows, string $place_key, string $region_key, string $place_type_key, bool $require_empty_place_type = false ): array {
 		$matches = array();
 		foreach ( $rows as $row ) {
 			if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
 				continue;
 			}
-			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key, $place_type_key ) ) {
+			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key, $place_type_key, $require_empty_place_type ) ) {
 				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
 			}
 		}
@@ -2676,13 +2676,16 @@ final class LocationRepository {
 		return $matches;
 	}
 
-	private function active_place_region_row_matches( array $row, string $place_key, string $region_key, string $place_type_key ): bool {
+	private function active_place_region_row_matches( array $row, string $place_key, string $region_key, string $place_type_key, bool $require_empty_place_type = false ): bool {
 		$row_region = $this->normalize_foreign_identity_value( (string) ( $row['joined_region_name'] ?? $row['region_name'] ?? '' ) );
 		if ( $row_region !== $region_key ) {
 			return false;
 		}
-		if ( '' !== $place_type_key ) {
+		if ( '' !== $place_type_key || $require_empty_place_type ) {
 			$row_place_type = $this->normalize_foreign_identity_type( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? $row['city_type'] ?? '' ) );
+			if ( $require_empty_place_type && '' !== $row_place_type ) {
+				return false;
+			}
 			if ( $row_place_type !== $place_type_key ) {
 				return false;
 			}
