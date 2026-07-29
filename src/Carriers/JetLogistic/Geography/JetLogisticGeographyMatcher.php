@@ -102,6 +102,8 @@ final class JetLogisticGeographyMatcher {
 		$automatic_requests = array();
 		$pending = array();
 		$matched = array();
+		$manual_rows = array();
+		$manual_location_ids = array();
 		foreach ( $rows as $index => $row ) {
 			if ( 'ambiguous' === (string) ( $row['match_status'] ?? '' ) && 'duplicate_conflict' === (string) ( $row['match_source'] ?? '' ) ) {
 				$matched[ $index ] = array_merge( $row, array( 'active' => 0 ) );
@@ -109,12 +111,40 @@ final class JetLogisticGeographyMatcher {
 			}
 			$manual = $this->manual_override_for_row( $row, $overrides, $migration_failures );
 			if ( array() !== $manual ) {
-				$location = $this->locations->find_by_id( (int) $manual['location_id'] );
-				if ( null !== $location && $location->active ) {
-					$matched[ $index ] = array_merge( $row, array( 'location_id' => $location->id, 'country_code' => $location->country_code ?: strtoupper( (string) ( $row['country_code'] ?? '' ) ), 'match_status' => 'matched', 'match_source' => 'manual_override', 'active' => 1 ) );
-					continue;
+				$manual_rows[ $index ] = array( 'row' => $row, 'manual' => $manual );
+				$manual_location_ids[] = (int) $manual['location_id'];
+				continue;
+			}
+			$city = trim( (string) ( $row['source_city'] ?? '' ) );
+			$region = trim( (string) ( $row['source_region'] ?? '' ) );
+			if ( '' === $city ) {
+				$matched[ $index ] = array_merge( $row, array( 'match_status' => 'invalid', 'match_source' => 'missing_city', 'active' => 0 ) );
+				continue;
+			}
+			if ( '' === $region ) {
+				$matched[ $index ] = array_merge( $row, array( 'match_status' => 'unmatched', 'match_source' => 'missing_region', 'active' => 0 ) );
+				continue;
+			}
+			$request = array(
+				'source_city' => $city,
+				'normalized_region' => $this->region_normalizer->normalize( $region ),
+				'source_place_type' => trim( (string) ( $row['source_place_type'] ?? '' ) ),
+				'country_code' => strtoupper( (string) ( $row['country_code'] ?? '' ) ),
+			);
+			$pending[ $index ] = $request;
+			$automatic_requests[] = $request;
+		}
+
+		foreach ( $this->locations->find_active_map_by_ids( $manual_location_ids ) as $location_id => $location ) {
+			foreach ( $manual_rows as $index => $manual_row ) {
+				if ( (int) ( $manual_row['manual']['location_id'] ?? 0 ) === (int) $location_id ) {
+					$matched[ $index ] = array_merge( $manual_row['row'], array( 'location_id' => $location->id, 'country_code' => $location->country_code ?: strtoupper( (string) ( $manual_row['row']['country_code'] ?? '' ) ), 'match_status' => 'matched', 'match_source' => 'manual_override', 'active' => 1 ) );
+					unset( $manual_rows[ $index ] );
 				}
 			}
+		}
+		foreach ( $manual_rows as $index => $manual_row ) {
+			$row = $manual_row['row'];
 			$city = trim( (string) ( $row['source_city'] ?? '' ) );
 			$region = trim( (string) ( $row['source_region'] ?? '' ) );
 			if ( '' === $city ) {

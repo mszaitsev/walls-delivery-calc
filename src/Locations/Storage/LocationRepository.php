@@ -119,7 +119,61 @@ final class LocationRepository {
 	}
 
 	public function find_by_id( int $id ): ?Location {
+		if ( property_exists( $this->wpdb, 'location_find_by_id_calls' ) ) {
+			++$this->wpdb->location_find_by_id_calls;
+		}
 		return $this->find_one( 'id', $id, '%d' );
+	}
+
+	/**
+	 * @param array<int,int> $location_ids
+	 * @return array<int,Location>
+	 */
+	public function find_active_map_by_ids( array $location_ids ): array {
+		if ( property_exists( $this->wpdb, 'location_find_many_by_ids_calls' ) ) {
+			++$this->wpdb->location_find_many_by_ids_calls;
+		}
+		$location_ids = array_values( array_unique( array_filter( array_map( 'intval', $location_ids ), static fn( int $id ): bool => $id > 0 ) ) );
+		if ( array() === $location_ids ) {
+			return array();
+		}
+		$locations = array();
+		if ( $this->has_test_location_rows() ) {
+			$id_map = array_flip( $location_ids );
+			foreach ( $this->test_location_rows() as $row ) {
+				$id = (int) ( $row['id'] ?? 0 );
+				if ( isset( $id_map[ $id ] ) && 1 === (int) ( $row['active'] ?? 1 ) ) {
+					$locations[ $id ] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
+			return $locations;
+		}
+
+		foreach ( array_chunk( $location_ids, 500 ) as $chunk ) {
+			$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%d' ) );
+			$sql = $this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1 AND l.id IN ({$placeholders})",
+				...$chunk
+			);
+			$this->wpdb->last_error = '';
+			$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+			if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+				$this->throw_sql_error( 'Active location id batch lookup failed' );
+			}
+			foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+				if ( is_array( $row ) ) {
+					$location = $this->row_to_location( $row );
+					if ( null !== $location->id ) {
+						$locations[ $location->id ] = $location;
+					}
+				}
+			}
+		}
+
+		return $locations;
 	}
 
 	/**
@@ -276,7 +330,7 @@ final class LocationRepository {
 	 */
 	public function resolve_active_place_region_batch( array $requests ): array {
 		$normalized_requests = array();
-		$groups = array();
+		$place_name_variants = array();
 		foreach ( $requests as $request ) {
 			$place_name = trim( (string) ( $request['source_city'] ?? '' ) );
 			$region_name = trim( (string) ( $request['normalized_region'] ?? '' ) );
@@ -295,17 +349,12 @@ final class LocationRepository {
 			if ( '' === $place_key || '' === $region_key ) {
 				continue;
 			}
-			$groups[ $country_code . '|' . $region_key ] = array(
-				'country_code' => $country_code,
-				'region_key' => $region_key,
-				'region_name' => $region_name,
-			);
+			foreach ( $this->place_name_lookup_variants( $place_name ) as $variant ) {
+				$place_name_variants[ $variant ] = true;
+			}
 		}
 
-		$locations_by_group = array();
-		foreach ( $groups as $group_key => $group ) {
-			$locations_by_group[ $group_key ] = $this->active_place_region_candidates_for_group( $group['country_code'], $group['region_key'], $group['region_name'] );
-		}
+		$locations_by_place = $this->index_locations_by_normalized_place( $this->active_location_rows_by_place_names( array_keys( $place_name_variants ) ) );
 
 		$results = array();
 		foreach ( $normalized_requests as $key => $request ) {
@@ -314,8 +363,11 @@ final class LocationRepository {
 				continue;
 			}
 			$base_matches = array();
-			foreach ( $locations_by_group[ $request['country_code'] . '|' . $request['region_key'] ] ?? array() as $location ) {
-				if ( $this->location_matches_place_key( $location, $request['place_key'] ) ) {
+			foreach ( $locations_by_place[ $request['place_key'] ] ?? array() as $location ) {
+				if ( '' !== $request['country_code'] && $request['country_code'] !== $this->normalize_country_code( $location->country_code ) ) {
+					continue;
+				}
+				if ( $request['region_key'] === $this->normalize_foreign_identity_value( $location->region_name ) ) {
 					$base_matches[] = $location;
 				}
 			}
@@ -400,73 +452,117 @@ final class LocationRepository {
 	}
 
 	/**
-	 * @return array<int,Location>
+	 * @param array<int,string> $place_names
+	 * @return array<int,array<string,mixed>>
 	 */
-	private function active_place_region_candidates_for_group( string $country_code, string $region_key, string $region_name ): array {
-		if ( property_exists( $this->wpdb, 'location_batch_query_calls' ) ) {
-			++$this->wpdb->location_batch_query_calls;
+	private function active_location_rows_by_place_names( array $place_names ): array {
+		$place_names = array_values( array_unique( array_filter( array_map( static fn( mixed $value ): string => trim( (string) $value ), $place_names ) ) ) );
+		if ( array() === $place_names ) {
+			return array();
 		}
 		if ( $this->has_test_location_rows() ) {
-			$matches = array();
+			$rows = array();
+			$lookup = array_flip( $place_names );
+			foreach ( array_chunk( $place_names, 200 ) as $_chunk ) {
+				if ( property_exists( $this->wpdb, 'location_place_name_batch_query_calls' ) ) {
+					++$this->wpdb->location_place_name_batch_query_calls;
+				}
+			}
 			foreach ( $this->test_location_rows() as $row ) {
 				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
 					continue;
 				}
-				if ( '' !== $country_code && $country_code !== $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ) ) {
-					continue;
-				}
-				$row_region = $this->normalize_foreign_identity_value( (string) ( $row['joined_region_name'] ?? $row['region_name'] ?? '' ) );
-				if ( $row_region === $region_key ) {
-					$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				foreach ( array( 'place_name', 'settlement_name', 'city_name' ) as $column ) {
+					if ( isset( $lookup[ (string) ( $row[ $column ] ?? '' ) ] ) ) {
+						$rows[] = $this->join_region_for_test_double( $row );
+						break;
+					}
 				}
 			}
-			return $this->deduplicate_locations_by_id( $matches );
+			return $rows;
 		}
 
-		$where = array( 'l.active = 1' );
-		$args = array();
-		if ( '' !== $country_code ) {
-			$where[] = 'l.country_code = %s';
-			$args[] = $country_code;
+		$rows_by_id = array();
+		foreach ( array_chunk( $place_names, 200 ) as $chunk ) {
+			if ( property_exists( $this->wpdb, 'location_place_name_batch_query_calls' ) ) {
+				++$this->wpdb->location_place_name_batch_query_calls;
+			}
+			$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			$args = array_merge( $chunk, $chunk, $chunk );
+			$sql = $this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1
+				AND (
+					l.place_name IN ({$placeholders})
+					OR l.settlement_name IN ({$placeholders})
+					OR l.city_name IN ({$placeholders})
+				)",
+				...$args
+			);
+			if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+				throw new RuntimeException( 'Active location batch place-name lookup failed: SQL preparation returned an invalid result' );
+			}
+			$this->wpdb->last_error = '';
+			$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+			if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+				$this->throw_sql_error( 'Active location batch place-name lookup failed' );
+			}
+			if ( ! is_array( $rows ) ) {
+				throw new RuntimeException( 'Active location batch place-name lookup failed: invalid SQL result' );
+			}
+			foreach ( $rows as $row ) {
+				if ( is_array( $row ) ) {
+					$rows_by_id[ (int) ( $row['id'] ?? 0 ) ] = $row;
+				}
+			}
 		}
-		foreach ( $this->foreign_identity_prefilter_tokens( $region_name ) as $token ) {
-			if ( '' === $token ) {
+
+		return array_values( $rows_by_id );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<string,array<int,Location>>
+	 */
+	private function index_locations_by_normalized_place( array $rows ): array {
+		$index = array();
+		foreach ( $rows as $row ) {
+			$location = $this->row_to_location( $row );
+			if ( null === $location->id ) {
 				continue;
 			}
-			$where[] = "REPLACE(LOWER(CONCAT_WS(' ', l.region_name, r.region_name)), 'ё', 'е') LIKE %s";
-			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
+			foreach ( array( $location->place_name, $location->settlement_name, $location->city_name ) as $value ) {
+				$key = $this->normalize_foreign_identity_value( (string) $value );
+				if ( '' !== $key ) {
+					$index[ $key ][ $location->id ] = $location;
+				}
+			}
 		}
-		$sql = $this->wpdb->prepare(
-			"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
-			FROM {$this->table_name()} l
-			LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-			WHERE " . implode( ' AND ', $where ),
-			...$args
+
+		return $index;
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function place_name_lookup_variants( string $place_name ): array {
+		$place_name = trim( $place_name );
+		if ( '' === $place_name ) {
+			return array();
+		}
+		return array_values(
+			array_unique(
+				array_filter(
+					array(
+						$place_name,
+						strtr( $place_name, array( 'Ё' => 'Е', 'ё' => 'е' ) ),
+					),
+					static fn( string $value ): bool => '' !== trim( $value )
+				)
+			)
 		);
-		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
-			throw new RuntimeException( 'Active location batch place and region lookup failed: SQL preparation returned an invalid result' );
-		}
-		$this->wpdb->last_error = '';
-		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
-		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
-			$this->throw_sql_error( 'Active location batch place and region lookup failed' );
-		}
-		if ( ! is_array( $rows ) ) {
-			throw new RuntimeException( 'Active location batch place and region lookup failed: invalid SQL result' );
-		}
-
-		$matches = array();
-		foreach ( $rows as $row ) {
-			if ( ! is_array( $row ) ) {
-				throw new RuntimeException( 'Active location batch place and region lookup failed: invalid row structure' );
-			}
-			$row_region = $this->normalize_foreign_identity_value( (string) ( $row['joined_region_name'] ?? $row['region_name'] ?? '' ) );
-			if ( $row_region === $region_key ) {
-				$matches[] = $this->row_to_location( $row );
-			}
-		}
-
-		return $this->deduplicate_locations_by_id( $matches );
 	}
 
 	public function find_legacy_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '' ): ?Location {

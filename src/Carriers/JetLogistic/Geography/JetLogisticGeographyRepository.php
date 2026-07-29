@@ -45,7 +45,7 @@ final class JetLogisticGeographyRepository {
 	/** @param array<int,array<string,mixed>> $rows */
 	public function replace_snapshot( array $rows ): void {
 		$now = current_time( 'mysql' );
-		$import_token = hash( 'sha256', $now . '|' . spl_object_id( $this ) . '|' . count( $rows ) );
+		$import_token = $this->new_import_token();
 		$prepared = $this->prepare_snapshot_rows( $rows, $now, $import_token );
 		if ( property_exists( $this->wpdb, 'jet_cities' ) ) {
 			$this->replace_snapshot_in_memory( $prepared, $import_token );
@@ -235,6 +235,14 @@ final class JetLogisticGeographyRepository {
 	private function sanitize_sql_error( string $error ): string {
 		$error = trim( preg_replace( '/\s+/', ' ', $error ) ?? $error );
 		return '' !== $error ? mb_substr( $error, 0, 300, 'UTF-8' ) : 'unknown SQL error';
+	}
+
+	private function new_import_token(): string {
+		try {
+			return bin2hex( random_bytes( 32 ) );
+		} catch ( \Throwable ) {
+			return hash( 'sha256', microtime( true ) . '|' . uniqid( '', true ) . '|' . spl_object_id( $this ) );
+		}
 	}
 
 	private function table(): string {
