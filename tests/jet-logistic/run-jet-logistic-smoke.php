@@ -87,9 +87,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		public int $insert_id = 0;
+		public string $last_error = '';
 		public array $jet_cities = array();
 		public array $jet_overrides = array();
 		public array $jet_statuses = array();
+		public array $jet_status_columns = array( 'active' => true, 'last_seen' => true, 'occurrence_count' => true );
+		public array $jet_status_indexes = array( 'active_status' => true, 'last_seen' => true, 'normalized_external_status' => true );
 		public array $locations = array();
 		public array $services = array();
 		public array $countries = array();
@@ -105,6 +108,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public int $override_single_lookup_calls = 0;
 		public int $snapshot_bulk_upsert_calls = 0;
 		public int $snapshot_single_replace_calls = 0;
+		public int $status_mapping_insert_calls = 0;
+		public int $status_mapping_update_calls = 0;
+		public int $status_mapping_delete_calls = 0;
 		public bool $jet_import_lock_busy = false;
 		public bool $jet_import_lock_acquired = false;
 		public bool $jet_fail_next_snapshot_bulk = false;
@@ -139,6 +145,17 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return true;
 		}
 		public function insert( string $table, array $data, array $formats = array() ): bool {
+			if ( str_contains( $table, 'wdc_jet_logistic_status_mappings' ) ) {
+				++$this->status_mapping_insert_calls;
+				$key = (string) $data['normalized_external_status'];
+				if ( isset( $this->jet_statuses[ $key ] ) ) {
+					$this->last_error = 'Duplicate entry';
+					return false;
+				}
+				$this->jet_statuses[ $key ] = array_merge( array( 'id' => ++$this->insert_id ), $data );
+				$this->last_error = '';
+				return true;
+			}
 			if ( str_contains( $table, 'wdc_delivery_service_countries' ) ) {
 				$this->countries[] = $data;
 			}
@@ -146,11 +163,21 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 		public function update( string $table, array $data, array $where, array $formats = array(), array $where_formats = array() ): int|bool {
 			if ( str_contains( $table, 'wdc_jet_logistic_status_mappings' ) ) {
+				++$this->status_mapping_update_calls;
 				foreach ( $this->jet_statuses as $key => $row ) {
 					if ( (int) ( $row['id'] ?? 0 ) === (int) ( $where['id'] ?? 0 ) ) {
-						$this->jet_statuses[ $key ] = array_merge( $row, $data );
+						$new_key = (string) ( $data['normalized_external_status'] ?? $key );
+						if ( $new_key !== $key && isset( $this->jet_statuses[ $new_key ] ) ) {
+							$this->last_error = 'Duplicate entry';
+							return false;
+						}
+						unset( $this->jet_statuses[ $key ] );
+						$this->jet_statuses[ $new_key ] = array_merge( $row, $data );
+						$this->last_error = '';
+						return 1;
 					}
 				}
+				return false;
 			}
 			if ( str_contains( $table, 'wdc_jet_logistic_cities' ) ) {
 				$key = (string) ( $where['source_identity'] ?? '' );
@@ -172,6 +199,16 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return true;
 		}
 		public function delete( string $table, array $where, array $formats = array() ): bool {
+			if ( str_contains( $table, 'wdc_jet_logistic_status_mappings' ) ) {
+				++$this->status_mapping_delete_calls;
+				foreach ( $this->jet_statuses as $key => $row ) {
+					if ( (int) ( $row['id'] ?? 0 ) === (int) ( $where['id'] ?? 0 ) ) {
+						unset( $this->jet_statuses[ $key ] );
+						return true;
+					}
+				}
+				return false;
+			}
 			if ( str_contains( $table, 'wdc_jet_logistic_location_overrides' ) ) {
 				unset( $this->jet_overrides[ (string) ( $where['source_identity'] ?? '' ) ] );
 			}
@@ -182,6 +219,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 		public function query( string $query ): int|bool {
 			$this->queries[] = $query;
+			if ( preg_match( '/DROP INDEX ([a-z_]+) ON/', $query, $m ) ) {
+				unset( $this->jet_status_indexes[ $m[1] ] );
+			}
+			if ( preg_match( '/DROP COLUMN ([a-z_]+)/', $query, $m ) ) {
+				unset( $this->jet_status_columns[ $m[1] ] );
+			}
 			if ( 'START TRANSACTION' === trim( $query ) || 'COMMIT' === trim( $query ) || 'ROLLBACK' === trim( $query ) ) {
 				return true;
 			}
@@ -209,6 +252,14 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return null;
 		}
 		public function get_row( string $query, string $output = ARRAY_A ): ?array {
+			if ( preg_match( '/WHERE id = (\d+)/', $query, $m ) && str_contains( $query, 'wdc_jet_logistic_status_mappings' ) ) {
+				foreach ( $this->jet_statuses as $row ) {
+					if ( (int) ( $row['id'] ?? 0 ) === (int) $m[1] ) {
+						return $row;
+					}
+				}
+				return null;
+			}
 			if ( preg_match( "/source_identity = '([^']+)'/", $query, $m ) && str_contains( $query, 'wdc_jet_logistic_cities' ) ) {
 				return $this->jet_cities[ $m[1] ] ?? null;
 			}
@@ -235,6 +286,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return null;
 		}
 		public function get_results( string $query, string $output = ARRAY_A ): array {
+			if ( str_contains( $query, 'SHOW COLUMNS FROM' ) && str_contains( $query, 'wdc_jet_logistic_status_mappings' ) ) {
+				return preg_match( "/LIKE '([^']+)'/", $query, $m ) && ! empty( $this->jet_status_columns[ $m[1] ] ) ? array( array( 'Field' => $m[1] ) ) : array();
+			}
+			if ( str_contains( $query, 'SHOW INDEX FROM' ) && str_contains( $query, 'wdc_jet_logistic_status_mappings' ) ) {
+				return preg_match( "/Key_name = '([^']+)'/", $query, $m ) && ! empty( $this->jet_status_indexes[ $m[1] ] ) ? array( array( 'Key_name' => $m[1] ) ) : array();
+			}
 			if ( str_contains( $query, 'wdc_jet_logistic_location_overrides' ) ) {
 				if ( preg_match_all( "/'([^']+)'/", $query, $matches ) ) {
 					return array_values( array_intersect_key( $this->jet_overrides, array_flip( $matches[1] ) ) );
@@ -288,8 +345,8 @@ foreach ( array( $geography_admin_source, $status_admin_source ) as $source ) {
 jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . $plugin_source, 'wdc-jet-logistic-geography' ) && ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . $plugin_source, 'wdc-jet-logistic-statuses' ), 'Production code must not keep standalone Jet submenu slugs.' );
 jet_assert( str_contains( $delivery_admin_source, "JetLogisticSettings::SERVICE_KEY === \$service->service_key" ) && str_contains( $delivery_admin_source, "\$tabs['jet_geography']" ) && str_contains( $delivery_admin_source, "\$tabs['jet_statuses']" ), 'Jet tabs must be scoped to the Jet Logistic delivery service.' );
 jet_assert( str_contains( $delivery_admin_source, "'jet_geography' => \$this->render_jet_geography_tab( \$service )" ) && str_contains( $delivery_admin_source, "'jet_statuses' => \$this->render_jet_statuses_tab( \$service )" ), 'Jet tabs must delegate to embedded renderers.' );
-jet_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_remote'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'save_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "check_admin_referer( 'wdc_delivery_services' )" ) && str_contains( $delivery_admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Jet POST actions must be handled by the shared delivery services action pipeline.' );
-jet_assert( str_contains( $delivery_admin_source, 'jet_logistic_redirect_url( $action, $tab )' ) && str_contains( $delivery_admin_source, "'save_jet_status_mapping' => 'jet_statuses'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override' === \$action" ), 'Jet POST actions must redirect back to their embedded tabs and preserve Jet geography pagination state for manual overrides.' );
+jet_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_remote'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'update_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'delete_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "check_admin_referer( 'wdc_delivery_services' )" ) && str_contains( $delivery_admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Jet POST actions must be handled by the shared delivery services action pipeline.' );
+jet_assert( str_contains( $delivery_admin_source, 'jet_logistic_redirect_url( $action, $tab )' ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping', 'update_jet_status_mapping', 'delete_jet_status_mapping' => 'jet_statuses'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override' === \$action" ), 'Jet POST actions must redirect back to their embedded tabs and preserve Jet geography pagination state for manual overrides.' );
 jet_assert( str_contains( $geography_admin_source, "JetLogisticCitiesCsvClient::DEFAULT_URL" ) && ! str_contains( $geography_admin_source, "\$_POST['url'" ) && ! str_contains( $geography_admin_source, 'wp_remote_get' ), 'Jet remote geography import must use the fixed client URL and not read arbitrary POST URLs.' );
 jet_assert( str_contains( $delivery_admin_source, 'set_transient( $this->jet_admin_notice_key()' ) && str_contains( $delivery_admin_source, 'get_transient( $key )' ) && str_contains( $delivery_admin_source, 'delete_transient( $key )' ), 'Jet admin actions must use one-shot flash notices.' );
 jet_assert( ! str_contains( $plugin_source, 'JetLogisticGeographyAdminPage::class )->register()' ) && ! str_contains( $plugin_source, 'JetLogisticStatusAdminPage::class )->register()' ), 'Plugin hooks must not register standalone Jet admin pages.' );
@@ -308,7 +365,7 @@ foreach ( array( 'География Jet Logistic успешно импорти�
 	jet_assert( str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $russian_message ), 'Jet admin must expose Russian message or label: ' . $russian_message );
 }
 
-$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.15' ) );
+$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.16' ) );
 $register_services = new ReflectionMethod( Plugin::class, 'register_services' );
 $register_services->setAccessible( true );
 $register_services->invoke( $plugin );
@@ -349,7 +406,7 @@ jet_assert( function_exists( 'dbDelta' ) && 2 === count( $GLOBALS['wdc_db_delta'
 $migration_0045 = require dirname( __DIR__, 2 ) . '/database/migrations/0045_create_jet_logistic_status_mappings.php';
 jet_assert( is_callable( $migration_0045 ) && 2 === count( $GLOBALS['wdc_db_delta'] ), 'Jet migration 0045 must return a callable and not execute schema on require.' );
 $migration_0045();
-jet_assert( 3 === count( $GLOBALS['wdc_db_delta'] ) && count( $GLOBALS['wpdb']->jet_statuses ) >= 2, 'Jet migration 0045 must create status schema and seed default mappings after explicit callback execution.' );
+jet_assert( 3 === count( $GLOBALS['wdc_db_delta'] ) && 0 === count( $GLOBALS['wpdb']->jet_statuses ), 'Jet migration 0045 must create status schema without restoring default mappings on schema creation.' );
 
 $repository_root = dirname( __DIR__, 2 ) . '/src/Carriers/JetLogistic';
 jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Geography/JetLogisticGeographyRepository.php' ), '\\dbDelta(' ), 'Jet geography repository must call global dbDelta.' );
@@ -360,6 +417,16 @@ $migration_0046 = require dirname( __DIR__, 2 ) . '/database/migrations/0046_add
 jet_assert( is_callable( $migration_0046 ), 'Jet migration 0046 must return a callable.' );
 jet_assert( str_contains( $migration_0046_source, 'import_token' ), 'Jet migration 0046 must add import_token column.' );
 jet_assert( str_contains( $migration_0046_source, 'KEY import_token' ), 'Jet migration 0046 must add import_token index.' );
+$migration_0047_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0047_simplify_jet_logistic_status_mappings.php' );
+$migration_0047 = require dirname( __DIR__, 2 ) . '/database/migrations/0047_simplify_jet_logistic_status_mappings.php';
+jet_assert( is_callable( $migration_0047 ), 'Jet migration 0047 must return a callable.' );
+$GLOBALS['wpdb']->jet_statuses = array(
+	'доставка груза на склад' => array( 'id' => 9001, 'external_status' => 'Доставка груза на склад', 'normalized_external_status' => 'доставка груза на склад', 'universal_status' => DeliveryStatus::READY_FOR_PICKUP, 'active' => 1, 'last_seen' => '2026-07-28 10:00:00', 'occurrence_count' => 5 ),
+);
+$migration_0047();
+jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад выдачи'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['груз выдан'] ), 'Jet migration 0047 must delete broad status default and insert precise defaults.' );
+jet_assert( empty( $GLOBALS['wpdb']->jet_status_columns['active'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['last_seen'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['occurrence_count'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['active_status'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['last_seen'] ), 'Jet migration 0047 must drop obsolete active/last_seen/occurrence_count columns and indexes idempotently.' );
+jet_assert( str_contains( $migration_0047_source, '0047' ) || str_contains( $migration_0047_source, 'active_status' ), 'Jet migration 0047 source must be present for migration registration by filename.' );
 
 $migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-jet-migration-' . str_replace( '.', '', uniqid( '', true ) );
 mkdir( $migration_dir );
@@ -368,15 +435,15 @@ $GLOBALS['wdc_options'] = array();
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
 $failed = false;
 try {
-	( new MigrationManager( '0.129.15-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.129.16-test', $migration_dir ) )->run();
 } catch ( RuntimeException ) {
 	$failed = true;
 }
 jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
-( new MigrationManager( '0.129.15-test', $migration_dir ) )->run();
-jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.15-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
-( new MigrationManager( '0.129.15-test', $migration_dir ) )->run();
+( new MigrationManager( '0.129.16-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.16-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.16-test', $migration_dir ) )->run();
 jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
 unlink( $migration_file );
 rmdir( $migration_dir );
@@ -770,10 +837,45 @@ jet_assert( 20000 === (int) $payload['cost'] && 1 === (int) $payload['dops']['D_
 $GLOBALS['wpdb']->jet_statuses = array();
 $status_repo = new JetLogisticStatusMappingRepository( $GLOBALS['wpdb'] );
 $status_repo->ensure_default_mappings();
+jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ) && '' === $status_repo->map( 'Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)' ) && '' === $status_repo->map( 'Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)' ), 'Jet status defaults must remove the broad warehouse rule and map only precise pickup warehouse delivery phrases.' );
+jet_assert( DeliveryStatus::DELIVERED === $status_repo->map( 'Груз выдан' ) && DeliveryStatus::DELIVERED === $status_repo->map( 'Груз выдан : 26 июня 2026 г.' ) && DeliveryStatus::DELIVERED === $status_repo->map( 'ГРУЗ ВЫДАН: 26 июня 2026 г.' ) && DeliveryStatus::DELIVERED === $status_repo->map( '  Груз   выдан : 26 июня 2026 г.' ), 'Jet status mapping must use normalized literal substring matching.' );
+$status_repo->create_mapping( 'склад', DeliveryStatus::IN_TRANSIT );
+jet_assert( DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана' ), 'Jet status mapping must apply the longest matching phrase before shorter substring rules.' );
+$status_count_before_unknown = count( $GLOBALS['wpdb']->jet_statuses );
+$GLOBALS['wpdb']->status_mapping_insert_calls = 0;
+$GLOBALS['wpdb']->status_mapping_update_calls = 0;
+jet_assert( '' === ( new JetLogisticStatusMapper( $status_repo ) )->map( 'Совершенно неизвестное событие Jet' ) && $status_count_before_unknown === count( $GLOBALS['wpdb']->jet_statuses ) && 0 === $GLOBALS['wpdb']->status_mapping_insert_calls && 0 === $GLOBALS['wpdb']->status_mapping_update_calls, 'Jet status mapper must not observe, write, or create unknown incoming status messages.' );
+
+$status_admin = new JetLogisticStatusAdminPage( $status_repo );
+$create_result = $status_admin->create_mapping_from_post( array( 'external_status' => 'Передан на доставку', 'universal_status' => DeliveryStatus::IN_TRANSIT ) );
+$created_row = $status_repo->find_by_normalized_status( 'Передан на доставку' );
+$created_id = (int) ( $created_row['id'] ?? 0 );
+jet_assert( ! empty( $create_result['success'] ) && $created_id > 0 && DeliveryStatus::IN_TRANSIT === $status_repo->map( 'Передан на доставку курьеру' ), 'Jet status admin must create a new substring mapping.' );
+$update_status_result = $status_admin->update_mapping_from_post( array( 'mapping_id' => $created_id, 'external_status' => 'Передан на доставку', 'universal_status' => DeliveryStatus::HANDED_TO_COURIER ) );
+jet_assert( ! empty( $update_status_result['success'] ) && $created_id === (int) ( $status_repo->find_by_normalized_status( 'Передан на доставку' )['id'] ?? 0 ) && DeliveryStatus::HANDED_TO_COURIER === $status_repo->map( 'Передан на доставку курьеру' ), 'Jet status admin update must preserve ID and change universal status.' );
+$update_phrase_result = $status_admin->update_mapping_from_post( array( 'mapping_id' => $created_id, 'external_status' => 'Передан курьеру', 'universal_status' => DeliveryStatus::HANDED_TO_COURIER ) );
+jet_assert( ! empty( $update_phrase_result['success'] ) && '' === $status_repo->map( 'Передан на доставку курьеру' ) && DeliveryStatus::HANDED_TO_COURIER === $status_repo->map( 'Передан курьеру сегодня' ), 'Jet status admin update must change the phrase without leaving the old pattern active.' );
+$duplicate_result = $status_admin->update_mapping_from_post( array( 'mapping_id' => $created_id, 'external_status' => 'Груз выдан', 'universal_status' => DeliveryStatus::DELIVERED ) );
+jet_assert( empty( $duplicate_result['success'] ) && str_contains( (string) $duplicate_result['message'], 'уже существует' ) && DeliveryStatus::HANDED_TO_COURIER === $status_repo->map( 'Передан курьеру сегодня' ) && DeliveryStatus::DELIVERED === $status_repo->map( 'Груз выдан : 26 июня 2026 г.' ), 'Jet status admin must reject duplicate normalized phrases without damaging existing mappings.' );
+$delete_result = $status_admin->delete_mapping_from_post( array( 'mapping_id' => $created_id ) );
+jet_assert( ! empty( $delete_result['success'] ) && '' === $status_repo->map( 'Передан курьеру сегодня' ), 'Jet status admin must delete mappings through POST-only action handlers.' );
+$status_repo->delete_mapping( (int) ( $status_repo->find_by_normalized_status( 'Груз выдан' )['id'] ?? 0 ) );
+$status_repo->create_schema();
+jet_assert( array() === $status_repo->find_by_normalized_status( 'Груз выдан' ), 'Jet status create_schema must not restore deleted default mappings.' );
+$status_repo->ensure_default_mappings();
+
+ob_start();
+$status_admin->render_embedded( new DeliveryService( 501, JetLogisticSettings::SERVICE_KEY, JetLogisticSettings::CARRIER_KEY, DeliveryService::TYPE_API, 'Jet Logistic' ), array() );
+$status_admin_html = (string) ob_get_clean();
+jet_assert( str_contains( $status_admin_html, 'Фраза в статусе Jet' ) && str_contains( $status_admin_html, 'Универсальный статус' ) && str_contains( $status_admin_html, 'Действия' ) && str_contains( $status_admin_html, 'Сохранить' ) && str_contains( $status_admin_html, 'Удалить' ) && ! str_contains( $status_admin_html, 'Активно' ) && ! str_contains( $status_admin_html, 'Последнее событие' ) && ! str_contains( $status_admin_html, 'Количество' ) && ! str_contains( $status_admin_html, 'name="active"' ), 'Jet status admin HTML must expose phrase CRUD controls and remove active/last_seen/occurrence_count UI.' );
+
 $status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-07-28 10:00:00', 'message' => 'Неизвестно' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
 $status_service = new JetLogisticStatusService( new JetLogisticApiClient( $status_http, $settings ), new JetLogisticStatusMapper( $status_repo ) );
 $status = $status_service->update( array( 'tracking_number' => 'JET-1', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
 jet_assert( DeliveryStatus::IN_TRANSIT === $status['shipment_patch']['universal_status_code'] && 2 === count( $status['shipment_patch']['status_events'] ), 'Unknown latest Jet status must preserve current universal status and deduplicate compact events.' );
+$delivered_status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-06-26 00:00:00', 'message' => 'Груз выдан : 26 июня 2026 г.' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
+$delivered_status = ( new JetLogisticStatusService( new JetLogisticApiClient( $delivered_status_http, $settings ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-2', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
+jet_assert( DeliveryStatus::DELIVERED === $delivered_status['shipment_patch']['universal_status_code'] && 'Груз выдан : 26 июня 2026 г.' === (string) $delivered_status['shipment_patch']['carrier_status_message'], 'Jet status service must map substring only from latest message while preserving the full carrier status message.' );
 
 $order = new JetFakeOrder();
 $actual_cost_resolver = ( new ReflectionClass( ShipmentActualCostResolver::class ) )->newInstanceWithoutConstructor();

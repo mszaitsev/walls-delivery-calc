@@ -10,8 +10,6 @@ final class JetLogisticStatusMapper {
 	}
 
 	public function map( string $message ): string {
-		$this->repository->observe( $message );
-
 		return $this->repository->map( $message );
 	}
 }
