@@ -13,17 +13,22 @@ final class JetLogisticStatusAdminPage {
 	public function __construct( private JetLogisticStatusMappingRepository $repository ) {
 	}
 
-	public function save_mapping_from_post( array $post ): void {
+	/** @return array<string,mixed> */
+	public function save_mapping_from_post( array $post ): array {
 		$external = sanitize_text_field( wp_unslash( (string) ( $post['external_status'] ?? '' ) ) );
 		$universal = sanitize_key( wp_unslash( (string) ( $post['universal_status'] ?? '' ) ) );
 		$active = ! empty( $post['active'] );
 		if ( '' !== $external && ( '' === $universal || DeliveryStatus::is_valid( $universal ) ) ) {
 			$this->repository->save_mapping( $external, $universal, $active );
+			return array( 'success' => true, 'message' => 'Сопоставление статуса сохранено.' );
 		}
+
+		return array( 'success' => false, 'message' => 'Не удалось сохранить сопоставление статуса Jet Logistic.' );
 	}
 
-	public function render_embedded( DeliveryService $service ): void {
+	public function render_embedded( DeliveryService $service, array $notice = array() ): void {
 		$rows = $this->repository->admin_rows();
+		$this->render_notice( $notice );
 		?>
 		<h3><?php echo esc_html__( 'Сопоставление статусов Jet Logistic', 'walls-delivery-calc' ); ?></h3>
 		<form method="post" style="max-width: 760px;">
@@ -51,5 +56,14 @@ final class JetLogisticStatusAdminPage {
 			</tbody>
 		</table>
 		<?php
+	}
+
+	/** @param array<string,mixed> $notice */
+	private function render_notice( array $notice ): void {
+		if ( array() === $notice ) {
+			return;
+		}
+		$type = in_array( (string) ( $notice['type'] ?? 'info' ), array( 'success', 'warning', 'error' ), true ) ? (string) $notice['type'] : 'info';
+		echo '<div class="notice notice-' . esc_attr( $type ) . ' inline"><p>' . esc_html( (string) ( $notice['message'] ?? '' ) ) . '</p></div>';
 	}
 }

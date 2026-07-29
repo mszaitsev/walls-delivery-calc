@@ -30,4 +30,12 @@ final class JetLogisticCredentials {
 		$token = trim( $token );
 		$this->settings->set( self::ACCESS_TOKEN_KEY, '' === $token ? '' : $this->encryption->encrypt( $token ) );
 	}
+
+	public function has_access_token(): bool {
+		return '' !== trim( $this->settings->get_string( self::ACCESS_TOKEN_KEY, '' ) );
+	}
+
+	public function clear_access_token(): void {
+		$this->settings->set( self::ACCESS_TOKEN_KEY, '' );
+	}
 }

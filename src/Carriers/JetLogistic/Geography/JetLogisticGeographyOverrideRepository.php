@@ -28,15 +28,19 @@ final class JetLogisticGeographyOverrideRepository {
 		) {$this->charset()};" );
 	}
 
-	public function save( string $source_identity, int $location_id, string $country_code ): void {
+	public function save( string $source_identity, int $location_id, string $country_code ): bool {
 		$now = current_time( 'mysql' );
-		$this->wpdb->replace( $this->table(), array( 'source_identity' => $source_identity, 'location_id' => $location_id, 'country_code' => strtoupper( $country_code ), 'created_at' => $now, 'updated_at' => $now ), array( '%s', '%d', '%s', '%s', '%s' ) );
+		return (bool) $this->wpdb->replace( $this->table(), array( 'source_identity' => $source_identity, 'location_id' => $location_id, 'country_code' => strtoupper( $country_code ), 'created_at' => $now, 'updated_at' => $now ), array( '%s', '%d', '%s', '%s', '%s' ) );
 	}
 
 	/** @return array<string,mixed> */
 	public function find( string $source_identity ): array {
 		$row = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT * FROM {$this->table()} WHERE source_identity = %s LIMIT 1", $source_identity ), ARRAY_A );
 		return is_array( $row ) ? $row : array();
+	}
+
+	public function delete( string $source_identity ): bool {
+		return (bool) $this->wpdb->delete( $this->table(), array( 'source_identity' => $source_identity ), array( '%s' ) );
 	}
 
 	private function table(): string {

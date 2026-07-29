@@ -741,7 +741,7 @@ final class DeliveryServicesAdminPage {
 			$this->handle_yandex_region_mapping_v2_action( $action );
 			return;
 		}
-		if ( in_array( $action, array( 'save_jet_settings', 'import_jet_geography_csv', 'save_jet_geography_override', 'save_jet_status_mapping' ), true ) ) {
+		if ( in_array( $action, array( 'save_jet_settings', 'import_jet_geography_remote', 'import_jet_geography_csv', 'save_jet_geography_override', 'save_jet_status_mapping' ), true ) ) {
 			$this->handle_jet_logistic_action( $action );
 			return;
 		}
@@ -1288,21 +1288,28 @@ final class DeliveryServicesAdminPage {
 			exit;
 		}
 
-		if ( 'save_jet_settings' === $action && $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ) {
-			$this->jet_logistic_geography->save_settings_from_post( $_POST );
-			$this->clear_delivery_quote_cache();
+		try {
+			$result = match ( $action ) {
+				'save_jet_settings' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_settings_from_post( $_POST ) : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
+				'import_jet_geography_remote' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_remote_csv() : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
+				'import_jet_geography_csv' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_uploaded_csv( $_FILES ) : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
+				'save_jet_geography_override' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_override_from_post( $_POST ) : array( 'success' => false, 'message' => 'Jet Logistic geography admin component is unavailable.' ),
+				'save_jet_status_mapping' => $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ? $this->jet_logistic_statuses->save_mapping_from_post( $_POST ) : array( 'success' => false, 'message' => 'Jet Logistic status admin component is unavailable.' ),
+				default => array( 'success' => false, 'message' => 'Unknown Jet Logistic admin action.' ),
+			};
+			if ( in_array( $action, array( 'save_jet_settings', 'import_jet_geography_remote', 'import_jet_geography_csv', 'save_jet_geography_override' ), true ) ) {
+				$this->clear_delivery_quote_cache();
+			}
+		} catch ( \Throwable $exception ) {
+			$result = array(
+				'success' => false,
+				'message' => 'import_jet_geography_remote' === $action
+					? 'Не удалось скачать cities.csv Jet Logistic: ' . $exception->getMessage() . ' Можно загрузить файл вручную ниже.'
+					: $exception->getMessage(),
+			);
 		}
-		if ( 'import_jet_geography_csv' === $action && $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ) {
-			$this->jet_logistic_geography->import_uploaded_csv( $_FILES );
-			$this->clear_delivery_quote_cache();
-		}
-		if ( 'save_jet_geography_override' === $action && $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ) {
-			$this->jet_logistic_geography->save_override_from_post( $_POST );
-			$this->clear_delivery_quote_cache();
-		}
-		if ( 'save_jet_status_mapping' === $action && $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ) {
-			$this->jet_logistic_statuses->save_mapping_from_post( $_POST );
-		}
+
+		$this->store_jet_admin_notice( $this->jet_notice_from_result( $result ) );
 
 		$tab = match ( $action ) {
 			'save_jet_status_mapping' => 'jet_statuses',
@@ -1310,6 +1317,48 @@ final class DeliveryServicesAdminPage {
 		};
 		wp_safe_redirect( $this->service_tab_url_by_key( JetLogisticSettings::SERVICE_KEY, $tab ) );
 		exit;
+	}
+
+	/** @param array<string,mixed> $result @return array<string,mixed> */
+	private function jet_notice_from_result( array $result ): array {
+		return array(
+			'type' => ! empty( $result['success'] ) ? 'success' : 'error',
+			'message' => sanitize_text_field( (string) ( $result['message'] ?? ( ! empty( $result['success'] ) ? 'Jet Logistic operation completed.' : 'Jet Logistic operation failed.' ) ) ),
+			'details' => $this->sanitize_jet_notice_details( is_array( $result['stats'] ?? null ) ? $result['stats'] : ( is_array( $result['details'] ?? null ) ? $result['details'] : array() ), (int) ( $result['rows'] ?? 0 ) ),
+		);
+	}
+
+	/** @param array<string,mixed> $details @return array<string,mixed> */
+	private function sanitize_jet_notice_details( array $details, int $rows ): array {
+		$safe = array();
+		if ( $rows > 0 ) {
+			$safe['rows'] = $rows;
+		}
+		foreach ( $details as $key => $value ) {
+			if ( is_scalar( $value ) && ! in_array( (string) $key, array( 'access_token', 'token', 'csv', 'body', 'response' ), true ) ) {
+				$safe[ sanitize_key( (string) $key ) ] = sanitize_text_field( (string) $value );
+			}
+		}
+
+		return $safe;
+	}
+
+	/** @param array<string,mixed> $notice */
+	private function store_jet_admin_notice( array $notice ): void {
+		set_transient( $this->jet_admin_notice_key(), $notice, 120 );
+	}
+
+	/** @return array<string,mixed> */
+	private function consume_jet_admin_notice(): array {
+		$key = $this->jet_admin_notice_key();
+		$notice = get_transient( $key );
+		delete_transient( $key );
+
+		return is_array( $notice ) ? $notice : array();
+	}
+
+	private function jet_admin_notice_key(): string {
+		return 'wdc_jet_admin_notice_' . max( 0, (int) get_current_user_id() );
 	}
 
 	private function handle_russian_post_pickup_file_upload(): void {
@@ -3431,7 +3480,7 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 
-		$this->jet_logistic_geography->render_embedded( $service );
+		$this->jet_logistic_geography->render_embedded( $service, $this->consume_jet_admin_notice() );
 	}
 
 	private function render_jet_statuses_tab( DeliveryService $service ): void {
@@ -3439,7 +3488,7 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 
-		$this->jet_logistic_statuses->render_embedded( $service );
+		$this->jet_logistic_statuses->render_embedded( $service, $this->consume_jet_admin_notice() );
 	}
 
 	private function render_diagnostics_tab( DeliveryService $service ): void {

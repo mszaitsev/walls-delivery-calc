@@ -88,6 +88,28 @@ final class JetLogisticGeographyRepository {
 		return is_array( $row ) ? $row : array();
 	}
 
+	public function apply_manual_override( string $source_identity, int $location_id, string $country_code ): bool {
+		$source_identity = trim( $source_identity );
+		if ( '' === $source_identity || $location_id <= 0 || '' === trim( $country_code ) || array() === $this->find_by_source_identity( $source_identity ) ) {
+			return false;
+		}
+
+		return (bool) $this->wpdb->update(
+			$this->table(),
+			array(
+				'location_id' => $location_id,
+				'country_code' => strtoupper( $country_code ),
+				'match_status' => 'matched',
+				'match_source' => 'manual_override',
+				'active' => 1,
+				'updated_at' => current_time( 'mysql' ),
+			),
+			array( 'source_identity' => $source_identity ),
+			array( '%d', '%s', '%s', '%s', '%d', '%s' ),
+			array( '%s' )
+		);
+	}
+
 	/** @return array<int,array<string,mixed>> */
 	public function active_origin_options(): array {
 		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} WHERE active = 1 AND match_status = 'matched' ORDER BY country_code ASC, source_city ASC", ARRAY_A );
