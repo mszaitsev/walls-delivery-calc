@@ -25,7 +25,7 @@ final class JetLogisticGeographyAdminPage {
 	}
 
 	public function register(): void {
-		add_submenu_page( AdminMenu::SLUG, 'География Джет', 'География Джет', AdminMenu::CAPABILITY, 'wdc-jet-logistic-geography', array( $this, 'render' ) );
+		add_submenu_page( AdminMenu::MENU_SLUG, 'География Джет', 'География Джет', AdminMenu::CAPABILITY, 'wdc-jet-logistic-geography', array( $this, 'render' ) );
 	}
 
 	public function render(): void {

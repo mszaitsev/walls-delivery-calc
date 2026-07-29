@@ -21,6 +21,9 @@ use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMapper;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
 use WallsShop\WDC\Carriers\Runtime\JetLogisticCarrier;
+use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
+use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -48,6 +51,7 @@ function wp_salt( string $scheme = 'auth' ): string { return 'jet-salt-' . $sche
 function sanitize_text_field( mixed $value ): string { return trim( preg_replace( '/[\r\n\t]+/', ' ', (string) $value ) ?? (string) $value ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
+function add_submenu_page( mixed ...$args ): string { $GLOBALS['wdc_submenu_pages'][] = $args; return (string) ( $args[4] ?? '' ); }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -138,7 +142,22 @@ final class JetFakeOrder {
 }
 
 $GLOBALS['wdc_options'] = array();
+$GLOBALS['wdc_submenu_pages'] = array();
 $GLOBALS['wpdb'] = new wpdb();
+
+( ( new ReflectionClass( JetLogisticGeographyAdminPage::class ) )->newInstanceWithoutConstructor() )->register();
+( ( new ReflectionClass( JetLogisticStatusAdminPage::class ) )->newInstanceWithoutConstructor() )->register();
+jet_assert( 2 === count( $GLOBALS['wdc_submenu_pages'] ), 'Jet admin pages must register both submenu pages.' );
+jet_assert(
+	AdminMenu::MENU_SLUG === (string) $GLOBALS['wdc_submenu_pages'][0][0]
+	&& AdminMenu::MENU_SLUG === (string) $GLOBALS['wdc_submenu_pages'][1][0],
+	'Jet admin pages must register under AdminMenu::MENU_SLUG.'
+);
+jet_assert(
+	'wdc-jet-logistic-geography' === (string) $GLOBALS['wdc_submenu_pages'][0][4]
+	&& 'wdc-jet-logistic-statuses' === (string) $GLOBALS['wdc_submenu_pages'][1][4],
+	'Jet admin pages must keep stable submenu slugs.'
+);
 
 $normalizer = new JetLogisticCityNameNormalizer();
 jet_assert( $normalizer->normalize( ' г. АСТАНА  ' ) === $normalizer->normalize( 'Астана' ), 'Jet city normalizer must trim prefixes, case and spaces.' );
