@@ -64,6 +64,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportServi
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyOverrideRepository;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticRegionNameNormalizer;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticCredentials;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteRequestBuilder;
@@ -379,11 +380,12 @@ final class Plugin {
 		$this->container->register( JetLogisticHttpClientInterface::class, fn(): JetLogisticHttpClientInterface => new WpJetLogisticHttpClient() );
 		$this->container->register( JetLogisticApiClient::class, fn(): JetLogisticApiClient => new JetLogisticApiClient( $this->container->get( JetLogisticHttpClientInterface::class ), $this->container->get( JetLogisticSettings::class ) ) );
 		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );
+		$this->container->register( JetLogisticRegionNameNormalizer::class, fn(): JetLogisticRegionNameNormalizer => new JetLogisticRegionNameNormalizer() );
 		$this->container->register( JetLogisticCitiesCsvClient::class, fn(): JetLogisticCitiesCsvClient => new JetLogisticCitiesCsvClient() );
-		$this->container->register( JetLogisticCitiesCsvParser::class, fn(): JetLogisticCitiesCsvParser => new JetLogisticCitiesCsvParser( $this->container->get( JetLogisticCityNameNormalizer::class ) ) );
+		$this->container->register( JetLogisticCitiesCsvParser::class, fn(): JetLogisticCitiesCsvParser => new JetLogisticCitiesCsvParser( $this->container->get( JetLogisticCityNameNormalizer::class ), $this->container->get( JetLogisticRegionNameNormalizer::class ) ) );
 		$this->container->register( JetLogisticGeographyRepository::class, fn(): JetLogisticGeographyRepository => new JetLogisticGeographyRepository() );
 		$this->container->register( JetLogisticGeographyOverrideRepository::class, fn(): JetLogisticGeographyOverrideRepository => new JetLogisticGeographyOverrideRepository() );
-		$this->container->register( JetLogisticGeographyMatcher::class, fn(): JetLogisticGeographyMatcher => new JetLogisticGeographyMatcher( $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ) ) );
+		$this->container->register( JetLogisticGeographyMatcher::class, fn(): JetLogisticGeographyMatcher => new JetLogisticGeographyMatcher( $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticRegionNameNormalizer::class ) ) );
 		$this->container->register( JetLogisticCountrySyncService::class, fn(): JetLogisticCountrySyncService => new JetLogisticCountrySyncService( $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( JetLogisticGeographyImportService::class, fn(): JetLogisticGeographyImportService => new JetLogisticGeographyImportService( $this->container->get( JetLogisticCitiesCsvParser::class ), $this->container->get( JetLogisticGeographyMatcher::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ) ) );
 		$this->container->register( JetLogisticStatusMappingRepository::class, fn(): JetLogisticStatusMappingRepository => new JetLogisticStatusMappingRepository() );

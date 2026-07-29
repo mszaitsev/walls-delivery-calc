@@ -160,6 +160,7 @@ final class JetLogisticGeographyAdminPage {
 			<thead><tr><th>Идентификатор Jet</th><th>Город</th><th>Регион</th><th>Страна</th><th>Статус</th><th>Источник сопоставления</th><th>ID населённого пункта</th><th>Ручное сопоставление</th></tr></thead>
 			<tbody>
 			<?php foreach ( $rows as $row ) : ?>
+				<?php $location_id = (int) ( $row['location_id'] ?? 0 ); ?>
 				<tr>
 					<td><code><?php echo esc_html( (string) ( $row['source_identity'] ?? '' ) ); ?></code></td>
 					<td><?php echo esc_html( (string) ( $row['source_city'] ?? '' ) ); ?></td>
@@ -168,7 +169,7 @@ final class JetLogisticGeographyAdminPage {
 					<td><?php echo esc_html( $this->match_status_label( (string) ( $row['match_status'] ?? '' ) ) ); ?></td>
 					<td><?php echo esc_html( $this->match_source_label( (string) ( $row['match_source'] ?? '' ) ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['location_id'] ?? '' ) ); ?></td>
-					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="1" name="location_id" value="<?php echo esc_attr( (string) ( $row['location_id'] ?? '' ) ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
+					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="1" name="location_id" value="<?php echo esc_attr( $location_id > 0 ? (string) $location_id : '' ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
@@ -217,6 +218,10 @@ final class JetLogisticGeographyAdminPage {
 			'unmatched' => 'Не сопоставлено',
 			'ignored' => 'Пропущено',
 			'invalid' => 'Некорректных строк',
+			'rows_read' => 'Строк прочитано',
+			'rows_unique' => 'Уникальных строк',
+			'duplicates' => 'Дубликатов',
+			'duplicate_conflicts' => 'Конфликтующих дубликатов',
 			'location_id' => 'ID населённого пункта',
 			'source_identity' => 'Идентификатор Jet',
 			'country_code' => 'Страна',

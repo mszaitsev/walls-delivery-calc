@@ -6,7 +6,11 @@ namespace WallsShop\WDC\Carriers\JetLogistic\Geography;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticCitiesCsvParser {
-	public function __construct( private JetLogisticCityNameNormalizer $normalizer ) {
+	public function __construct(
+		private JetLogisticCityNameNormalizer $normalizer,
+		private ?JetLogisticRegionNameNormalizer $region_normalizer = null
+	) {
+		$this->region_normalizer ??= new JetLogisticRegionNameNormalizer();
 	}
 
 	/** @return array<int,array<string,mixed>> */
@@ -29,23 +33,25 @@ final class JetLogisticCitiesCsvParser {
 				continue;
 			}
 			$row = $this->row( $header, $line );
-			$city = trim( (string) ( $row['city'] ?? '' ) );
+			$raw_city = trim( (string) ( $row['city'] ?? '' ) );
+			$city = $raw_city;
 			$region = trim( (string) ( $row['region'] ?? '' ) );
+			$split = $this->split_city_and_region( $city, $region );
+			$city = $split['city'];
+			$region = $split['region'];
 			$country = strtoupper( trim( (string) ( $row['country_code'] ?? $row['country'] ?? '' ) ) );
 			if ( '' === $city ) {
 				$rows[] = array( 'match_status' => 'invalid', 'raw_source' => $row );
 				continue;
 			}
-			if ( '' === $country ) {
-				$country = 'RU';
-			}
 			$rows[] = array(
-				'source_identity' => $this->normalizer->identity( $city, $region, $country ),
+				'source_identity' => $this->source_identity( $city, $region ),
+				'legacy_source_identity' => $this->normalizer->identity( $raw_city, '', 'RU' ),
 				'source_city' => $city,
 				'source_region' => $region,
 				'raw_source' => $row,
 				'normalized_city' => $this->normalizer->normalize( $city ),
-				'normalized_region' => $this->normalizer->normalize( $region ),
+				'normalized_region' => $this->region_normalizer->normalize( $region ),
 				'country_code' => $country,
 				'match_status' => 'parsed',
 			);
@@ -53,6 +59,20 @@ final class JetLogisticCitiesCsvParser {
 		fclose( $handle );
 
 		return $rows;
+	}
+
+	/** @return array{city:string,region:string} */
+	private function split_city_and_region( string $city, string $region ): array {
+		if ( '' === trim( $region ) && 1 === preg_match( '/^\s*(.+?)\s*-\s*\((.+?)\)\s*$/u', $city, $matches ) ) {
+			$city = trim( (string) $matches[1] );
+			$region = trim( (string) $matches[2] );
+		}
+
+		return array( 'city' => trim( $city ), 'region' => trim( $region ) );
+	}
+
+	private function source_identity( string $city, string $region ): string {
+		return hash( 'sha256', $this->region_normalizer->normalize( $region ) . '|' . $this->normalizer->normalize( $city ) );
 	}
 
 	/** @param array<int,string> $line @return array<int,string> */

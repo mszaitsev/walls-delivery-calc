@@ -1321,10 +1321,17 @@ final class DeliveryServicesAdminPage {
 
 	/** @param array<string,mixed> $result @return array<string,mixed> */
 	private function jet_notice_from_result( array $result ): array {
+		$details = is_array( $result['stats'] ?? null ) ? $result['stats'] : ( is_array( $result['details'] ?? null ) ? $result['details'] : array() );
+		foreach ( array( 'rows_read', 'rows_unique', 'duplicates', 'duplicate_conflicts' ) as $counter_key ) {
+			if ( array_key_exists( $counter_key, $result ) ) {
+				$details = array( $counter_key => $result[ $counter_key ] ) + $details;
+			}
+		}
+
 		return array(
 			'type' => ! empty( $result['success'] ) ? 'success' : 'error',
 			'message' => sanitize_text_field( (string) ( $result['message'] ?? ( ! empty( $result['success'] ) ? 'Операция Jet Logistic успешно выполнена.' : 'Не удалось выполнить операцию Jet Logistic.' ) ) ),
-			'details' => $this->sanitize_jet_notice_details( is_array( $result['stats'] ?? null ) ? $result['stats'] : ( is_array( $result['details'] ?? null ) ? $result['details'] : array() ), (int) ( $result['rows'] ?? 0 ) ),
+			'details' => $this->sanitize_jet_notice_details( $details, isset( $result['rows_unique'] ) ? 0 : (int) ( $result['rows'] ?? 0 ) ),
 		);
 	}
 

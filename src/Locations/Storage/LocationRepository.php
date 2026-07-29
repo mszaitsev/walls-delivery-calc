@@ -263,6 +263,79 @@ final class LocationRepository {
 		return $this->deduplicate_locations_by_id( $matches );
 	}
 
+	/**
+	 * @return array<int,Location>
+	 */
+	public function find_active_by_place_and_region_matches( string $place_name, string $region_name ): array {
+		$place_name = trim( $place_name );
+		$region_name = trim( $region_name );
+		if ( '' === $place_name || '' === $region_name ) {
+			return array();
+		}
+
+		$place_key = $this->normalize_foreign_identity_value( $place_name );
+		$region_key = $this->normalize_foreign_identity_value( $region_name );
+		if ( '' === $place_key || '' === $region_key ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$matches = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				if ( $this->active_place_region_row_matches( $row, $place_key, $region_key ) ) {
+					$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
+
+			return $this->deduplicate_locations_by_id( $matches );
+		}
+
+		$where = array( 'l.active = 1' );
+		$args = array();
+		foreach ( $this->foreign_identity_prefilter_tokens( $place_name, $region_name ) as $token ) {
+			if ( '' === $token ) {
+				continue;
+			}
+			$where[] = "REPLACE(LOWER(l.searchable_text), 'ё', 'е') LIKE %s";
+			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
+		}
+
+		$sql = $this->wpdb->prepare(
+			"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+			FROM {$this->table_name()} l
+			LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+			WHERE " . implode( ' AND ', $where ),
+			...$args
+		);
+		if ( ! is_string( $sql ) || '' === trim( $sql ) ) {
+			throw new RuntimeException( 'Active location place and region lookup failed: SQL preparation returned an invalid result' );
+		}
+
+		$this->wpdb->last_error = '';
+		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			$this->throw_sql_error( 'Active location place and region lookup failed' );
+		}
+		if ( ! is_array( $rows ) ) {
+			throw new RuntimeException( 'Active location place and region lookup failed: invalid SQL result' );
+		}
+
+		$matches = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				throw new RuntimeException( 'Active location place and region lookup failed: invalid row structure' );
+			}
+			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key ) ) {
+				$matches[] = $this->row_to_location( $row );
+			}
+		}
+
+		return $this->deduplicate_locations_by_id( $matches );
+	}
+
 	public function find_legacy_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '' ): ?Location {
 		$country_code = $this->normalize_country_code( $country_code );
 		$place_name = trim( $place_name );
@@ -2575,6 +2648,25 @@ final class LocationRepository {
 			&& $row_region === $region_key
 			&& $row_district === $district_key
 			&& $row_place_type === $place_type_key;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function active_place_region_row_matches( array $row, string $place_key, string $region_key ): bool {
+		$row_region = $this->normalize_foreign_identity_value( (string) ( $row['joined_region_name'] ?? $row['region_name'] ?? '' ) );
+		if ( $row_region !== $region_key ) {
+			return false;
+		}
+
+		foreach ( array( 'place_name', 'settlement_name', 'city_name' ) as $column ) {
+			$row_place = $this->normalize_foreign_identity_value( (string) ( $row[ $column ] ?? '' ) );
+			if ( '' !== $row_place && $row_place === $place_key ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private function normalize_guid( string $value ): string {

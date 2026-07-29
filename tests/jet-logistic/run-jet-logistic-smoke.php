@@ -16,6 +16,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCityNameNormalizer;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCountrySyncService;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyOverrideRepository;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticRegionNameNormalizer;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticCredentials;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteRequestBuilder;
@@ -250,11 +251,11 @@ jet_assert( ! str_contains( (string) file_get_contents( $root . '/src/Carriers/J
 foreach ( array( 'download failed', 'is empty', 'response is too large', 'returned HTML', 'upload failed', 'has no rows', 'operation completed', 'operation failed', 'component is unavailable', 'Unknown Jet Logistic admin action' ) as $english_message ) {
 	jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $english_message ), 'Jet admin user-facing messages must be Russian: ' . $english_message );
 }
-foreach ( array( 'География Jet Logistic успешно импортирована.', 'Ручное сопоставление Jet Logistic применено.', 'Настройки Jet Logistic сохранены.', 'Сопоставление статуса Jet Logistic сохранено.', 'Не удалось скачать cities.csv Jet Logistic', 'Строк импортировано', 'Сопоставлено', 'Требует уточнения', 'Не сопоставлено', 'Пропущено', 'Некорректных строк' ) as $russian_message ) {
+foreach ( array( 'География Jet Logistic успешно импортирована.', 'Ручное сопоставление Jet Logistic применено.', 'Настройки Jet Logistic сохранены.', 'Сопоставление статуса Jet Logistic сохранено.', 'Не удалось скачать cities.csv Jet Logistic', 'Строк прочитано', 'Уникальных строк', 'Дубликатов', 'Сопоставлено', 'Требует уточнения', 'Не сопоставлено', 'Пропущено', 'Некорректных строк' ) as $russian_message ) {
 	jet_assert( str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $russian_message ), 'Jet admin must expose Russian message or label: ' . $russian_message );
 }
 
-$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.7' ) );
+$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.8' ) );
 $register_services = new ReflectionMethod( Plugin::class, 'register_services' );
 $register_services->setAccessible( true );
 $register_services->invoke( $plugin );
@@ -309,15 +310,15 @@ $GLOBALS['wdc_options'] = array();
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
 $failed = false;
 try {
-	( new MigrationManager( '0.129.7-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.129.8-test', $migration_dir ) )->run();
 } catch ( RuntimeException ) {
 	$failed = true;
 }
 jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
-( new MigrationManager( '0.129.7-test', $migration_dir ) )->run();
-jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.7-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
-( new MigrationManager( '0.129.7-test', $migration_dir ) )->run();
+( new MigrationManager( '0.129.8-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.8-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.8-test', $migration_dir ) )->run();
 jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
 unlink( $migration_file );
 rmdir( $migration_dir );
@@ -325,10 +326,15 @@ $GLOBALS['wdc_options'] = array();
 $GLOBALS['wpdb']->jet_statuses = array();
 
 $normalizer = new JetLogisticCityNameNormalizer();
+$region_normalizer = new JetLogisticRegionNameNormalizer();
 jet_assert( $normalizer->normalize( ' г. АСТАНА  ' ) === $normalizer->normalize( 'Астана' ), 'Jet city normalizer must trim prefixes, case and spaces.' );
-$parser = new JetLogisticCitiesCsvParser( $normalizer );
+$parser = new JetLogisticCitiesCsvParser( $normalizer, $region_normalizer );
 $parsed = $parser->parse( "city;region;country_code\nАстана;;KZ\nМосква;;RU\n" );
 jet_assert( 2 === count( $parsed ) && 'KZ' === $parsed[0]['country_code'] && 'RU' === $parsed[1]['country_code'], 'Jet CSV parser must parse country and rows without region.' );
+$combined = $parser->parse( "city\nАксу-(Павлодарская область)\n8 Марта п.-(Новосибирская Область)\n" );
+jet_assert( 'Аксу' === (string) $combined[0]['source_city'] && 'Павлодарская область' === (string) $combined[0]['source_region'] && '' === (string) $combined[0]['country_code'], 'Jet CSV parser must split city-region combined values without defaulting country to RU.' );
+jet_assert( '8 Марта п.' === (string) $combined[1]['source_city'] && 'Новосибирская Область' === (string) $combined[1]['source_region'], 'Jet CSV parser must preserve settlement suffixes when splitting city-region values.' );
+jet_assert( $region_normalizer->normalize( 'Павлодарская область' ) === $region_normalizer->normalize( 'Павлодарская' ) && 'хакасия' === $region_normalizer->normalize( 'Хакасия Республика' ) && $region_normalizer->normalize( 'Хакасия Республика' ) === $region_normalizer->normalize( 'Республика Хакасия' ) && 'алматинская' === $region_normalizer->normalize( 'Алма-Ата' ) && 'новосибирская' === $region_normalizer->normalize( 'Новосибирская Область' ) && 'мангистауская' === $region_normalizer->normalize( 'Мангистауская область' ), 'Jet region normalizer must strip administrative words and apply controlled aliases.' );
 
 $settings_repo = new SettingsRepository();
 $credentials = new JetLogisticCredentials( $settings_repo, new EncryptionService() );
@@ -353,7 +359,7 @@ $geo->replace_snapshot(
 );
 $GLOBALS['wpdb']->services[] = array( 'id' => 501, 'service_key' => JetLogisticSettings::SERVICE_KEY, 'carrier_key' => JetLogisticSettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_API, 'title' => 'Jet Logistic', 'enabled' => 1, 'deleted' => 0 );
 $GLOBALS['wpdb']->countries[] = array( 'service_id' => 501, 'country_code' => 'US' );
-$GLOBALS['wpdb']->locations[] = array( 'id' => 77, 'country_code' => 'KZ', 'city_name' => 'Manual Target', 'place_name' => 'Manual Target', 'active' => 1 );
+$GLOBALS['wpdb']->locations[] = array( 'id' => 77, 'country_code' => 'KZ', 'region_name' => 'Manual Region', 'city_name' => 'Manual Target', 'place_name' => 'Manual Target', 'active' => 1 );
 $GLOBALS['wpdb']->locations[] = array( 'id' => 88, 'country_code' => 'KG', 'city_name' => 'Rollback Target', 'place_name' => 'Rollback Target', 'active' => 1 );
 $GLOBALS['wpdb']->locations[] = array( 'id' => 99, 'country_code' => 'RU', 'city_name' => 'Ru Target', 'place_name' => 'Ru Target', 'active' => 1 );
 $country_sync = new JetLogisticCountrySyncService( $geo, new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] ), $settings_repo );
@@ -380,10 +386,11 @@ $manual_row_after_second_save = $geo->active_for_location( 77 );
 jet_assert( ! empty( $second_override['success'] ) && ! empty( $GLOBALS['wpdb']->jet_overrides['manual-target'] ) && 'matched' === (string) ( $manual_row_after_second_save['match_status'] ?? '' ) && 'manual_override' === (string) ( $manual_row_after_second_save['match_source'] ?? '' ), 'Jet repeated manual override save must treat wpdb update result 0 as success and keep persistent override.' );
 $enabled_countries = ( new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] ) )->countries( 501 );
 jet_assert( in_array( 'US', $enabled_countries, true ) && in_array( 'KZ', $enabled_countries, true ) && 1 === count( array_keys( $enabled_countries, 'KZ', true ) ), 'Jet manual override must add the location country without removing existing service countries or creating duplicates.' );
-$matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ), $override_repo );
+$matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ), $override_repo, $region_normalizer );
 $import_service = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $matcher, $geo, $country_sync );
-$override_repo->save( $normalizer->identity( 'Manual Target', '', 'KZ' ), 77, 'KZ' );
-$import_result = $import_service->import_csv( "city;region;country_code\nManual Target;;KZ\n" );
+$manual_target_identity = (string) $parser->parse( "city;region;country_code\nManual Target;Manual Region;KZ\n" )[0]['source_identity'];
+$override_repo->save( $manual_target_identity, 77, 'KZ' );
+$import_result = $import_service->import_csv( "city;region;country_code\nManual Target;Manual Region;KZ\n" );
 $manual_row_after_import = $geo->active_for_location( 77 );
 jet_assert( ! empty( $import_result['success'] ) && 'manual_override' === (string) ( $manual_row_after_import['match_source'] ?? '' ), 'Jet CSV import must reapply persistent manual override after repeated imports.' );
 $override_repo->save( 'rollback-target', 77, 'KZ' );
@@ -397,6 +404,38 @@ jet_assert( ! empty( $ru_override['success'] ) && ! in_array( 'RU', $enabled_cou
 $missing_override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'missing-row', 'location_id' => 77 ) );
 $invalid_override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 999 ) );
 jet_assert( empty( $missing_override['success'] ) && empty( $GLOBALS['wpdb']->jet_overrides['missing-row'] ) && empty( $invalid_override['success'] ), 'Jet manual override must reject missing source identity and invalid location without orphan override.' );
+
+$GLOBALS['wpdb']->locations = array(
+	array( 'id' => 184501, 'country_code' => 'RU', 'region_name' => 'Карачаево-Черкесская', 'place_name' => 'Аксу', 'place_type' => 'с', 'active' => 1 ),
+	array( 'id' => 184502, 'country_code' => 'RU', 'region_name' => 'Татарстан', 'place_name' => 'Аксу', 'place_type' => 'с', 'active' => 1 ),
+	array( 'id' => 184503, 'country_code' => 'KZ', 'region_name' => 'Акмолинская', 'place_name' => 'Аксу', 'place_type' => 'с', 'active' => 1 ),
+	array( 'id' => 184504, 'country_code' => 'KZ', 'region_name' => 'Туркестанская', 'place_name' => 'Аксу', 'place_type' => 'с', 'active' => 1 ),
+	array( 'id' => 184516, 'country_code' => 'KZ', 'region_name' => 'Павлодарская', 'place_name' => 'Аксу', 'place_type' => 'г', 'active' => 1 ),
+	array( 'id' => 184505, 'country_code' => 'KZ', 'region_name' => 'Западно-Казахстанская', 'place_name' => 'Аксу', 'place_type' => 'с', 'active' => 1 ),
+	array( 'id' => 184601, 'country_code' => 'KZ', 'region_name' => 'Алматинская', 'place_name' => 'Аксу', 'place_type' => 'с', 'active' => 1 ),
+	array( 'id' => 184602, 'country_code' => 'KZ', 'region_name' => 'Алматинская', 'place_name' => 'Аксу', 'place_type' => 'аул', 'active' => 1 ),
+	array( 'id' => 163568, 'country_code' => 'KZ', 'region_name' => 'Мангистауская', 'place_name' => 'Актау', 'place_type' => 'г', 'active' => 1 ),
+	array( 'id' => 163569, 'country_code' => 'KZ', 'region_name' => 'Карагандинская', 'place_name' => 'Актау', 'place_type' => 'п', 'active' => 1 ),
+	array( 'id' => 162695, 'country_code' => 'KZ', 'region_name' => 'Алматинская', 'place_name' => 'Алматы', 'place_type' => 'г', 'active' => 1 ),
+	array( 'id' => 190001, 'country_code' => 'RU', 'region_name' => 'Хакасия', 'place_name' => 'Абакан', 'place_type' => 'г', 'active' => 1 ),
+);
+$GLOBALS['wpdb']->jet_overrides = array();
+$cross_matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ), new JetLogisticGeographyOverrideRepository( $GLOBALS['wpdb'] ), $region_normalizer );
+$aksu = $cross_matcher->match( $parser->parse( "city\nАксу-(Павлодарская область)\n" )[0] );
+jet_assert( 'matched' === (string) $aksu['match_status'] && 'exact_name_region_inferred_country' === (string) $aksu['match_source'] && 184516 === (int) $aksu['location_id'] && 'KZ' === (string) $aksu['country_code'], 'Jet matching must infer KZ Аксу only from Павлодарская region and never use city-only fallback.' );
+$missing_region = $cross_matcher->match( array( 'source_identity' => 'missing-region', 'source_city' => 'Аксу', 'source_region' => '', 'country_code' => '' ) );
+jet_assert( 'unmatched' === (string) $missing_region['match_status'] && 'missing_region' === (string) $missing_region['match_source'] && empty( $missing_region['location_id'] ), 'Jet matching must not choose any city when source region is missing.' );
+$ambiguous_aksu = $cross_matcher->match( $parser->parse( "city\nАксу-(Алма-Ата)\n" )[0] );
+jet_assert( 'ambiguous' === (string) $ambiguous_aksu['match_status'] && 'exact_name_region_multiple' === (string) $ambiguous_aksu['match_source'], 'Jet matching must leave multiple candidates in the same region ambiguous.' );
+$aktau = $cross_matcher->match( $parser->parse( "city\nАктау-(Мангистауская область)\n" )[0] );
+jet_assert( 'matched' === (string) $aktau['match_status'] && 163568 === (int) $aktau['location_id'] && 'KZ' === (string) $aktau['country_code'], 'Jet matching must choose Актау in Мангистауская region only.' );
+$almaty = $cross_matcher->match( $parser->parse( "city\nАлматы-(Алма-Ата)\n" )[0] );
+jet_assert( 'matched' === (string) $almaty['match_status'] && 162695 === (int) $almaty['location_id'] && 'KZ' === (string) $almaty['country_code'], 'Jet matching must apply Алма-Ата region alias to Алматинская.' );
+$abakan = $cross_matcher->match( $parser->parse( "city\nАбакан-(Хакасия Республика)\n" )[0] );
+jet_assert( 'ignored' === (string) $abakan['match_status'] && 'country_ru_inferred_by_region' === (string) $abakan['match_source'] && 0 === (int) $abakan['active'] && 'RU' === (string) $abakan['country_code'], 'Jet matching must infer RU by city+region and ignore it only after lookup.' );
+$duplicate_result = ( new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService( $parser, $cross_matcher, $geo, $country_sync ) )->import_csv( "city\nАктау-(Мангистауская область)\nАктау-(Мангистауская область)\n" );
+jet_assert( 2 === (int) $duplicate_result['rows_read'] && 1 === (int) $duplicate_result['rows_unique'] && 1 === (int) $duplicate_result['duplicates'], 'Jet import result must report read rows, unique rows and duplicates after source identity deduplication.' );
+
 $geo->replace_snapshot(
 	array(
 		array( 'source_identity' => 'origin', 'source_city' => 'Almaty', 'source_region' => '', 'normalized_city' => 'almaty', 'normalized_region' => '', 'country_code' => 'KZ', 'location_id' => 1, 'match_status' => 'matched', 'match_source' => 'manual', 'active' => 1 ),
