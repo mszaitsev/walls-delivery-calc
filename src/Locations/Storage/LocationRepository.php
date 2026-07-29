@@ -267,31 +267,35 @@ final class LocationRepository {
 	 * @return array<int,Location>
 	 */
 	public function find_active_by_place_and_region_matches( string $place_name, string $region_name, string $place_type = '' ): array {
+		return $this->resolve_active_by_place_and_region( $place_name, $region_name, $place_type )->matches;
+	}
+
+	public function resolve_active_by_place_and_region( string $place_name, string $region_name, string $place_type = '', string $country_code = '' ): PlaceRegionMatchResult {
 		$place_name = trim( $place_name );
 		$region_name = trim( $region_name );
 		$place_type = trim( $place_type );
+		$country_code = $this->normalize_country_code( $country_code );
 		if ( '' === $place_name || '' === $region_name ) {
-			return array();
+			return new PlaceRegionMatchResult( array(), PlaceRegionMatchResult::NOT_FOUND );
 		}
 
 		$place_key = $this->normalize_foreign_identity_value( $place_name );
 		$region_key = $this->normalize_foreign_identity_value( $region_name );
 		$place_type_key = $this->normalize_foreign_identity_type( $place_type );
 		if ( '' === $place_key || '' === $region_key ) {
-			return array();
+			return new PlaceRegionMatchResult( array(), PlaceRegionMatchResult::NOT_FOUND );
 		}
 
 		if ( $this->has_test_location_rows() ) {
-			$matches = $this->active_place_region_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, $place_type_key );
-			if ( array() === $matches && '' !== $place_type_key ) {
-				$matches = $this->active_place_region_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, '', true );
-			}
-
-			return $this->deduplicate_locations_by_id( $matches );
+			return $this->resolve_place_region_base_matches( $this->active_place_region_base_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, $country_code ), $place_type_key );
 		}
 
 		$where = array( 'l.active = 1' );
 		$args = array();
+		if ( '' !== $country_code ) {
+			$where[] = 'l.country_code = %s';
+			$args[] = $country_code;
+		}
 		foreach ( $this->foreign_identity_prefilter_tokens( $place_name, $region_name ) as $token ) {
 			if ( '' === $token ) {
 				continue;
@@ -320,24 +324,17 @@ final class LocationRepository {
 			throw new RuntimeException( 'Active location place and region lookup failed: invalid SQL result' );
 		}
 
-		$matches = array();
+		$base_matches = array();
 		foreach ( $rows as $row ) {
 			if ( ! is_array( $row ) ) {
 				throw new RuntimeException( 'Active location place and region lookup failed: invalid row structure' );
 			}
-			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key, $place_type_key ) ) {
-				$matches[] = $this->row_to_location( $row );
-			}
-		}
-		if ( array() === $matches && '' !== $place_type_key ) {
-			foreach ( $rows as $row ) {
-				if ( is_array( $row ) && $this->active_place_region_row_matches( $row, $place_key, $region_key, '', true ) ) {
-					$matches[] = $this->row_to_location( $row );
-				}
+			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key, '' ) ) {
+				$base_matches[] = $this->row_to_location( $row );
 			}
 		}
 
-		return $this->deduplicate_locations_by_id( $matches );
+		return $this->resolve_place_region_base_matches( $this->deduplicate_locations_by_id( $base_matches ), $place_type_key );
 	}
 
 	public function find_legacy_foreign_by_place_identity( string $country_code, string $place_name, string $region_name = '' ): ?Location {
@@ -2656,6 +2653,60 @@ final class LocationRepository {
 			&& $row_region === $region_key
 			&& $row_district === $district_key
 			&& $row_place_type === $place_type_key;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,Location>
+	 */
+	private function active_place_region_base_matches_for_rows( array $rows, string $place_key, string $region_key, string $country_code ): array {
+		$matches = array();
+		foreach ( $rows as $row ) {
+			if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+				continue;
+			}
+			if ( '' !== $country_code && $country_code !== $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ) ) {
+				continue;
+			}
+			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key, '' ) ) {
+				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+			}
+		}
+
+		return $this->deduplicate_locations_by_id( $matches );
+	}
+
+	/**
+	 * @param array<int,Location> $base_matches
+	 */
+	private function resolve_place_region_base_matches( array $base_matches, string $place_type_key ): PlaceRegionMatchResult {
+		if ( array() === $base_matches ) {
+			return new PlaceRegionMatchResult( array(), PlaceRegionMatchResult::NOT_FOUND );
+		}
+		if ( '' === $place_type_key ) {
+			return new PlaceRegionMatchResult( $base_matches, PlaceRegionMatchResult::EXACT );
+		}
+
+		$exact_type_matches = array();
+		$empty_type_matches = array();
+		foreach ( $base_matches as $location ) {
+			$location_type = $this->normalize_foreign_identity_type( $location->resolved_place_type() );
+			if ( $location_type === $place_type_key ) {
+				$exact_type_matches[] = $location;
+				continue;
+			}
+			if ( '' === $location_type ) {
+				$empty_type_matches[] = $location;
+			}
+		}
+		if ( array() !== $exact_type_matches ) {
+			return new PlaceRegionMatchResult( $exact_type_matches, PlaceRegionMatchResult::EXACT );
+		}
+		if ( array() !== $empty_type_matches ) {
+			return new PlaceRegionMatchResult( $empty_type_matches, PlaceRegionMatchResult::EMPTY_TYPE_FALLBACK );
+		}
+
+		return new PlaceRegionMatchResult( array(), PlaceRegionMatchResult::TYPE_MISMATCH );
 	}
 
 	/**

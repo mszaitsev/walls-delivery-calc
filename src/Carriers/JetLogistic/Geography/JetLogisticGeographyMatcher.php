@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\JetLogistic\Geography;
 
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\Storage\PlaceRegionMatchResult;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -34,14 +35,16 @@ final class JetLogisticGeographyMatcher {
 
 		$identity = (string) ( $row['source_identity'] ?? '' );
 		$override = $this->overrides->find( $identity );
-		if ( array() === $override ) {
+		if ( array() === $override && true === (bool) ( $row['legacy_override_migration_allowed'] ?? false ) ) {
+			$legacy_identities = array_map( 'strval', (array) ( $row['legacy_override_migration_allowed_identities'] ?? array() ) );
+			if ( array() === $legacy_identities ) {
+				$legacy_identities = array_merge(
+					array( (string) ( $row['legacy_source_identity'] ?? '' ) ),
+					array_map( 'strval', (array) ( $row['legacy_source_identities'] ?? array() ) )
+				);
+			}
 			$legacy_identities = array_filter(
-				array_unique(
-					array_merge(
-						array( (string) ( $row['legacy_source_identity'] ?? '' ) ),
-						array_map( 'strval', (array) ( $row['legacy_source_identities'] ?? array() ) )
-					)
-				),
+				array_unique( $legacy_identities ),
 				static fn( string $legacy_identity ): bool => '' !== $legacy_identity && $legacy_identity !== $identity
 			);
 			foreach ( $legacy_identities as $legacy_identity ) {
@@ -61,9 +64,8 @@ final class JetLogisticGeographyMatcher {
 		}
 
 		$normalized_region = $this->region_normalizer->normalize( $region );
-		$matches = '' !== $country
-			? array_values( array_filter( $this->locations->find_active_by_place_and_region_matches( $city, $normalized_region, $place_type ), static fn( $location ): bool => $country === strtoupper( $location->country_code ) ) )
-			: $this->locations->find_active_by_place_and_region_matches( $city, $normalized_region, $place_type );
+		$result = $this->locations->resolve_active_by_place_and_region( $city, $normalized_region, $place_type, $country );
+		$matches = $result->matches;
 		$count = count( $matches );
 		if ( $count > 1 ) {
 			return array_merge( $row, array( 'match_status' => 'ambiguous', 'match_source' => 'exact_name_region_multiple', 'active' => 0 ) );
@@ -77,6 +79,6 @@ final class JetLogisticGeographyMatcher {
 			return array_merge( $row, array( 'location_id' => $location->id, 'country_code' => $location->country_code, 'match_status' => 'matched', 'match_source' => '' === $country ? 'exact_name_region_inferred_country' : 'exact_name_region', 'active' => 1 ) );
 		}
 
-		return array_merge( $row, array( 'match_status' => 'unmatched', 'match_source' => '' !== $place_type ? 'place_type_mismatch' : 'exact_name_region_not_found', 'active' => 0 ) );
+		return array_merge( $row, array( 'match_status' => 'unmatched', 'match_source' => PlaceRegionMatchResult::TYPE_MISMATCH === $result->resolution ? 'place_type_mismatch' : 'exact_name_region_not_found', 'active' => 0 ) );
 	}
 }

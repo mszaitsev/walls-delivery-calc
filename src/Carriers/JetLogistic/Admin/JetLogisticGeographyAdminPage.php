@@ -222,6 +222,7 @@ final class JetLogisticGeographyAdminPage {
 			'rows_unique' => 'Уникальных строк',
 			'duplicates' => 'Дубликатов',
 			'duplicate_conflicts' => 'Конфликтующих дубликатов',
+			'legacy_identity_conflicts' => 'Конфликтов прежних сопоставлений',
 			'location_id' => 'ID населённого пункта',
 			'source_identity' => 'Идентификатор Jet',
 			'country_code' => 'Страна',

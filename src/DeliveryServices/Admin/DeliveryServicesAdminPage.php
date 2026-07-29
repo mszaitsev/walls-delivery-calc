@@ -1322,7 +1322,7 @@ final class DeliveryServicesAdminPage {
 	/** @param array<string,mixed> $result @return array<string,mixed> */
 	private function jet_notice_from_result( array $result ): array {
 		$details = is_array( $result['stats'] ?? null ) ? $result['stats'] : ( is_array( $result['details'] ?? null ) ? $result['details'] : array() );
-		foreach ( array( 'rows_read', 'rows_unique', 'duplicates', 'duplicate_conflicts' ) as $counter_key ) {
+		foreach ( array( 'rows_read', 'rows_unique', 'duplicates', 'duplicate_conflicts', 'legacy_identity_conflicts' ) as $counter_key ) {
 			if ( array_key_exists( $counter_key, $result ) ) {
 				$details = array( $counter_key => $result[ $counter_key ] ) + $details;
 			}
