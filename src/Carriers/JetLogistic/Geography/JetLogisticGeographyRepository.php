@@ -14,7 +14,7 @@ final class JetLogisticGeographyRepository {
 	}
 
 	public function create_schema(): void {
-		dbDelta( "CREATE TABLE {$this->table()} (
+		\dbDelta( "CREATE TABLE {$this->table()} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 			source_identity varchar(64) NOT NULL,
 			source_city varchar(191) NOT NULL DEFAULT '',

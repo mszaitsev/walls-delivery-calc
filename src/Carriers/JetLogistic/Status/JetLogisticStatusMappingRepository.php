@@ -16,7 +16,7 @@ final class JetLogisticStatusMappingRepository {
 	}
 
 	public function create_schema(): void {
-		dbDelta( "CREATE TABLE {$this->table()} (
+		\dbDelta( "CREATE TABLE {$this->table()} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 			external_status varchar(255) NOT NULL DEFAULT '',
 			normalized_external_status varchar(255) NOT NULL DEFAULT '',

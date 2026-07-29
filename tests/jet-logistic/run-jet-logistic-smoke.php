@@ -31,6 +31,7 @@ use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentAdapter;
@@ -183,6 +184,43 @@ jet_assert(
 	&& 'wdc-jet-logistic-statuses' === (string) $GLOBALS['wdc_submenu_pages'][1][4],
 	'Jet admin pages must keep stable submenu slugs.'
 );
+
+$GLOBALS['wdc_db_delta'] = array();
+$migration_0044 = require dirname( __DIR__, 2 ) . '/database/migrations/0044_create_jet_logistic_geography_tables.php';
+jet_assert( is_callable( $migration_0044 ) && empty( $GLOBALS['wdc_db_delta'] ), 'Jet migration 0044 must return a callable and not execute schema on require.' );
+$migration_0044();
+jet_assert( function_exists( 'dbDelta' ) && 2 === count( $GLOBALS['wdc_db_delta'] ), 'Jet migration 0044 must create geography schemas only after explicit callback execution.' );
+$migration_0045 = require dirname( __DIR__, 2 ) . '/database/migrations/0045_create_jet_logistic_status_mappings.php';
+jet_assert( is_callable( $migration_0045 ) && 2 === count( $GLOBALS['wdc_db_delta'] ), 'Jet migration 0045 must return a callable and not execute schema on require.' );
+$migration_0045();
+jet_assert( 3 === count( $GLOBALS['wdc_db_delta'] ) && count( $GLOBALS['wpdb']->jet_statuses ) >= 2, 'Jet migration 0045 must create status schema and seed default mappings after explicit callback execution.' );
+
+$repository_root = dirname( __DIR__, 2 ) . '/src/Carriers/JetLogistic';
+jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Geography/JetLogisticGeographyRepository.php' ), '\\dbDelta(' ), 'Jet geography repository must call global dbDelta.' );
+jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Geography/JetLogisticGeographyOverrideRepository.php' ), '\\dbDelta(' ), 'Jet geography override repository must call global dbDelta.' );
+jet_assert( str_contains( (string) file_get_contents( $repository_root . '/Status/JetLogisticStatusMappingRepository.php' ), '\\dbDelta(' ), 'Jet status mapping repository must call global dbDelta.' );
+
+$migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-jet-migration-' . str_replace( '.', '', uniqid( '', true ) );
+mkdir( $migration_dir );
+$migration_file = $migration_dir . DIRECTORY_SEPARATOR . '0001_jet_fake_migration.php';
+$GLOBALS['wdc_options'] = array();
+file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
+$failed = false;
+try {
+	( new MigrationManager( '0.129.3-test', $migration_dir ) )->run();
+} catch ( RuntimeException ) {
+	$failed = true;
+}
+jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
+file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
+( new MigrationManager( '0.129.3-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.3-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.3-test', $migration_dir ) )->run();
+jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
+unlink( $migration_file );
+rmdir( $migration_dir );
+$GLOBALS['wdc_options'] = array();
+$GLOBALS['wpdb']->jet_statuses = array();
 
 $normalizer = new JetLogisticCityNameNormalizer();
 jet_assert( $normalizer->normalize( ' г. АСТАНА  ' ) === $normalizer->normalize( 'Астана' ), 'Jet city normalizer must trim prefixes, case and spaces.' );

@@ -14,7 +14,7 @@ final class JetLogisticGeographyOverrideRepository {
 	}
 
 	public function create_schema(): void {
-		dbDelta( "CREATE TABLE {$this->table()} (
+		\dbDelta( "CREATE TABLE {$this->table()} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 			source_identity varchar(64) NOT NULL,
 			location_id bigint(20) unsigned NOT NULL DEFAULT 0,
