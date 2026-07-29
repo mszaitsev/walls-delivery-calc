@@ -290,6 +290,11 @@ jet_assert( str_contains( $delivery_admin_source, 'set_transient( $this->jet_adm
 jet_assert( ! str_contains( $plugin_source, 'JetLogisticGeographyAdminPage::class )->register()' ) && ! str_contains( $plugin_source, 'JetLogisticStatusAdminPage::class )->register()' ), 'Plugin hooks must not register standalone Jet admin pages.' );
 jet_assert( str_contains( $delivery_admin_source, "page=' . self::MENU_SLUG . '&service=' . rawurlencode( \$service->service_key ) . '&tab=' . rawurlencode( \$tab_key )" ) && str_contains( $delivery_admin_source, "http_build_query( array( 'page' => self::MENU_SLUG, 'service' => \$service_key, 'tab' => \$tab )" ), 'Jet tab URLs must use the delivery services service-tab URL helpers.' );
 jet_assert( str_contains( $plugin_source, 'use WallsShop\\WDC\\Carriers\\JetLogistic\\Geography\\JetLogisticCitiesCsvClient;' ), 'Plugin DI must import JetLogisticCitiesCsvClient from the Jet geography namespace.' );
+$render_embedded_start = strpos( $geography_admin_source, 'public function render_embedded' );
+$render_notice_start = strpos( $geography_admin_source, 'private function render_notice', $render_embedded_start );
+$render_embedded_source = false !== $render_embedded_start && false !== $render_notice_start ? substr( $geography_admin_source, $render_embedded_start, $render_notice_start - $render_embedded_start ) : '';
+jet_assert( str_contains( $render_embedded_source, '<th class="wdc-row-number">№</th>' ) && str_contains( $render_embedded_source, 'Сопоставленный населённый пункт' ) && str_contains( $render_embedded_source, '$index + 1' ), 'Jet geography admin table must show row numbers and matched location display names.' );
+jet_assert( str_contains( $geography_admin_source, 'location_display_names_for_rows' ) && str_contains( $geography_admin_source, 'find_map_by_ids( $location_ids )' ) && ! str_contains( $render_embedded_source, 'find_by_id(' ), 'Jet geography admin table must batch-load display names and avoid per-row find_by_id calls.' );
 jet_assert( ! str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php' ), 'return (bool) $this->wpdb->update' ), 'Jet manual override snapshot update must not cast wpdb update result to bool.' );
 foreach ( array( 'download failed', 'is empty', 'response is too large', 'returned HTML', 'upload failed', 'has no rows', 'operation completed', 'operation failed', 'component is unavailable', 'Unknown Jet Logistic admin action' ) as $english_message ) {
 	jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $english_message ), 'Jet admin user-facing messages must be Russian: ' . $english_message );
@@ -298,7 +303,7 @@ foreach ( array( 'География Jet Logistic успешно импорти�
 	jet_assert( str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $russian_message ), 'Jet admin must expose Russian message or label: ' . $russian_message );
 }
 
-$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.13' ) );
+$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.14' ) );
 $register_services = new ReflectionMethod( Plugin::class, 'register_services' );
 $register_services->setAccessible( true );
 $register_services->invoke( $plugin );
@@ -358,15 +363,15 @@ $GLOBALS['wdc_options'] = array();
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
 $failed = false;
 try {
-	( new MigrationManager( '0.129.13-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.129.14-test', $migration_dir ) )->run();
 } catch ( RuntimeException ) {
 	$failed = true;
 }
 jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
-( new MigrationManager( '0.129.13-test', $migration_dir ) )->run();
-jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.13-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
-( new MigrationManager( '0.129.13-test', $migration_dir ) )->run();
+( new MigrationManager( '0.129.14-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.14-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.14-test', $migration_dir ) )->run();
 jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
 unlink( $migration_file );
 rmdir( $migration_dir );
@@ -476,6 +481,21 @@ $GLOBALS['wpdb']->locations = array(
 );
 $GLOBALS['wpdb']->jet_overrides = array();
 $cross_matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ), new JetLogisticGeographyOverrideRepository( $GLOBALS['wpdb'] ), $region_normalizer );
+$location_backup = $GLOBALS['wpdb']->locations;
+$GLOBALS['wpdb']->locations = array(
+	array( 'id' => 121986, 'country_code' => 'RU', 'region_name' => 'Свердловская', 'city_name' => 'Кировград', 'settlement_name' => 'Кировград', 'place_name' => 'Кировград', 'place_type' => 'г', 'city_type' => 'г', 'place_level' => 5, 'display_name' => 'Свердловская область, г Кировград', 'active' => 1 ),
+	array( 'id' => 121949, 'country_code' => 'RU', 'region_name' => 'Свердловская', 'city_name' => 'Кировград', 'settlement_name' => 'Тепловая', 'place_name' => 'Тепловая', 'place_type' => 'п', 'city_type' => 'г', 'place_level' => 6, 'display_name' => 'Свердловская область, г Кировград, поселок Тепловая', 'active' => 1 ),
+	array( 'id' => 122161, 'country_code' => 'RU', 'region_name' => 'Свердловская', 'city_name' => 'Кировград', 'settlement_name' => 'Нейво-Рудянка', 'place_name' => 'Нейво-Рудянка', 'place_type' => 'п', 'city_type' => 'г', 'place_level' => 6, 'display_name' => 'Свердловская область, г Кировград, поселок Нейво-Рудянка', 'active' => 1 ),
+	array( 'id' => 500001, 'country_code' => 'KZ', 'region_name' => 'Тестовая', 'city_name' => 'Город Только City Name', 'settlement_name' => '', 'place_name' => '', 'city_type' => 'г', 'place_level' => 5, 'display_name' => 'Тестовая, г Город Только City Name', 'active' => 1 ),
+);
+$kirovgrad_matcher = new \WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ), new JetLogisticGeographyOverrideRepository( $GLOBALS['wpdb'] ), $region_normalizer );
+$kirovgrad = $kirovgrad_matcher->match( $parser->parse( "city\nКировград-(Свердловская Область)\n" )[0] );
+jet_assert( 'ignored' === (string) $kirovgrad['match_status'] && 'country_ru_inferred_by_region' === (string) $kirovgrad['match_source'] && 121986 === (int) $kirovgrad['location_id'] && 'RU' === (string) $kirovgrad['country_code'] && 0 === (int) $kirovgrad['active'], 'Jet matching must not treat child parent-only city_name values as direct matches for Kirovgrad.' );
+$teplovaya = $kirovgrad_matcher->match( $parser->parse( "city\nТепловая п.-(Свердловская область)\n" )[0] );
+jet_assert( 'ignored' === (string) $teplovaya['match_status'] && 121949 === (int) $teplovaya['location_id'], 'Jet matching must still match child locality by its own direct place_name.' );
+$city_name_only = $kirovgrad_matcher->match( $parser->parse( "city\nГород Только City Name-(Тестовая область)\n" )[0] );
+jet_assert( 'matched' === (string) $city_name_only['match_status'] && 500001 === (int) $city_name_only['location_id'] && 'KZ' === (string) $city_name_only['country_code'], 'Jet matching must keep support for locations whose direct name exists only in city_name.' );
+$GLOBALS['wpdb']->locations = $location_backup;
 $aksu = $cross_matcher->match( $parser->parse( "city\nАксу-(Павлодарская область)\n" )[0] );
 jet_assert( 'matched' === (string) $aksu['match_status'] && 'exact_name_region_inferred_country' === (string) $aksu['match_source'] && 184516 === (int) $aksu['location_id'] && 'KZ' === (string) $aksu['country_code'], 'Jet matching must infer KZ Аксу only from Павлодарская region and never use city-only fallback.' );
 $missing_region = $cross_matcher->match( array( 'source_identity' => 'missing-region', 'source_city' => 'Аксу', 'source_region' => '', 'country_code' => '' ) );

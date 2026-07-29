@@ -177,6 +177,54 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @param array<int,int> $location_ids
+	 * @return array<int,Location>
+	 */
+	public function find_map_by_ids( array $location_ids ): array {
+		$location_ids = array_values( array_unique( array_filter( array_map( 'intval', $location_ids ), static fn( int $id ): bool => $id > 0 ) ) );
+		if ( array() === $location_ids ) {
+			return array();
+		}
+		$locations = array();
+		if ( $this->has_test_location_rows() ) {
+			$id_map = array_flip( $location_ids );
+			foreach ( $this->test_location_rows() as $row ) {
+				$id = (int) ( $row['id'] ?? 0 );
+				if ( isset( $id_map[ $id ] ) ) {
+					$locations[ $id ] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
+			return $locations;
+		}
+
+		foreach ( array_chunk( $location_ids, 500 ) as $chunk ) {
+			$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%d' ) );
+			$sql = $this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.id IN ({$placeholders})",
+				...$chunk
+			);
+			$this->wpdb->last_error = '';
+			$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+			if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+				$this->throw_sql_error( 'Location id batch lookup failed' );
+			}
+			foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+				if ( is_array( $row ) ) {
+					$location = $this->row_to_location( $row );
+					if ( null !== $location->id ) {
+						$locations[ $location->id ] = $location;
+					}
+				}
+			}
+		}
+
+		return $locations;
+	}
+
+	/**
 	 * @param array<int,int> $ids
 	 * @return array<int,Location>
 	 */
@@ -533,7 +581,7 @@ final class LocationRepository {
 			if ( null === $location->id ) {
 				continue;
 			}
-			foreach ( array( $location->place_name, $location->settlement_name, $location->city_name ) as $value ) {
+			foreach ( $this->direct_locality_names_for_row( $row ) as $value ) {
 				$key = $this->normalize_foreign_identity_value( (string) $value );
 				if ( '' !== $key ) {
 					$index[ $key ][ $location->id ] = $location;
@@ -542,6 +590,50 @@ final class LocationRepository {
 		}
 
 		return $index;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<int,string>
+	 */
+	private function direct_locality_names_for_row( array $row ): array {
+		$place_name = trim( (string) ( $row['place_name'] ?? '' ) );
+		$settlement_name = trim( (string) ( $row['settlement_name'] ?? '' ) );
+		$city_name = trim( (string) ( $row['city_name'] ?? '' ) );
+		$names = array();
+		if ( '' !== $place_name ) {
+			$names[] = $place_name;
+		}
+		if ( '' !== $settlement_name ) {
+			$names[] = $settlement_name;
+		}
+		if (
+			'' !== $city_name
+			&& (
+				( '' === $place_name && '' === $settlement_name )
+				|| $this->same_normalized_name( $city_name, $place_name )
+				|| $this->same_normalized_name( $city_name, $settlement_name )
+			)
+		) {
+			$names[] = $city_name;
+		}
+
+		$unique = array();
+		foreach ( $names as $name ) {
+			$key = $this->normalize_foreign_identity_value( $name );
+			if ( '' !== $key ) {
+				$unique[ $key ] = $name;
+			}
+		}
+
+		return array_values( $unique );
+	}
+
+	private function same_normalized_name( string $left, string $right ): bool {
+		$left = $this->normalize_foreign_identity_value( $left );
+		$right = $this->normalize_foreign_identity_value( $right );
+
+		return '' !== $left && $left === $right;
 	}
 
 	/**
@@ -2981,8 +3073,8 @@ final class LocationRepository {
 			}
 		}
 
-		foreach ( array( 'place_name', 'settlement_name', 'city_name' ) as $column ) {
-			$row_place = $this->normalize_foreign_identity_value( (string) ( $row[ $column ] ?? '' ) );
+		foreach ( $this->direct_locality_names_for_row( $row ) as $name ) {
+			$row_place = $this->normalize_foreign_identity_value( $name );
 			if ( '' !== $row_place && $row_place === $place_key ) {
 				return true;
 			}

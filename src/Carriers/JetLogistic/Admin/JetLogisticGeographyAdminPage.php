@@ -112,10 +112,15 @@ final class JetLogisticGeographyAdminPage {
 	public function render_embedded( DeliveryService $service, array $notice = array() ): void {
 		$origins = $this->geography->active_origin_options();
 		$rows = $this->geography->admin_rows( 100 );
+		$location_display_names = $this->location_display_names_for_rows( $rows );
 		$stats = $this->geography->match_status_counts();
 		$has_token = $this->credentials->has_access_token();
 		$this->render_notice( $notice );
 		?>
+		<style>
+			.wdc-row-number { width: 50px; text-align: right; white-space: nowrap; }
+			td.wdc-row-number { font-variant-numeric: tabular-nums; }
+		</style>
 		<h3><?php echo esc_html__( 'Настройки Jet Logistic', 'walls-delivery-calc' ); ?></h3>
 		<form method="post" style="max-width: 760px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -157,11 +162,12 @@ final class JetLogisticGeographyAdminPage {
 
 		<h3><?php echo esc_html__( 'Ручное сопоставление', 'walls-delivery-calc' ); ?></h3>
 		<table class="widefat striped" style="max-width: 1180px;">
-			<thead><tr><th>Идентификатор Jet</th><th>Город</th><th>Регион</th><th>Страна</th><th>Статус</th><th>Источник сопоставления</th><th>ID населённого пункта</th><th>Ручное сопоставление</th></tr></thead>
+			<thead><tr><th class="wdc-row-number">№</th><th>Идентификатор Jet</th><th>Город</th><th>Регион</th><th>Страна</th><th>Статус</th><th>Источник сопоставления</th><th>ID населённого пункта</th><th>Сопоставленный населённый пункт</th><th>Ручное сопоставление</th></tr></thead>
 			<tbody>
-			<?php foreach ( $rows as $row ) : ?>
+			<?php foreach ( $rows as $index => $row ) : ?>
 				<?php $location_id = (int) ( $row['location_id'] ?? 0 ); ?>
 				<tr>
+					<td class="wdc-row-number"><?php echo esc_html( (string) ( $index + 1 ) ); ?></td>
 					<td><code><?php echo esc_html( (string) ( $row['source_identity'] ?? '' ) ); ?></code></td>
 					<td><?php echo esc_html( (string) ( $row['source_city'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['source_region'] ?? '' ) ); ?></td>
@@ -169,6 +175,7 @@ final class JetLogisticGeographyAdminPage {
 					<td><?php echo esc_html( $this->match_status_label( (string) ( $row['match_status'] ?? '' ) ) ); ?></td>
 					<td><?php echo esc_html( $this->match_source_label( (string) ( $row['match_source'] ?? '' ) ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['location_id'] ?? '' ) ); ?></td>
+					<td><?php echo esc_html( $location_id > 0 ? ( $location_display_names[ $location_id ] ?? '—' ) : '—' ); ?></td>
 					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="1" name="location_id" value="<?php echo esc_attr( $location_id > 0 ? (string) $location_id : '' ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
 				</tr>
 			<?php endforeach; ?>
@@ -178,6 +185,42 @@ final class JetLogisticGeographyAdminPage {
 		if ( array() === $rows ) {
 			echo '<p>' . esc_html__( 'География Jet ещё не импортирована.', 'walls-delivery-calc' ) . '</p>';
 		}
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,string>
+	 */
+	private function location_display_names_for_rows( array $rows ): array {
+		$location_ids = array_values(
+			array_unique(
+				array_filter(
+					array_map( static fn( array $row ): int => (int) ( $row['location_id'] ?? 0 ), $rows ),
+					static fn( int $location_id ): bool => $location_id > 0
+				)
+			)
+		);
+		$display_names = array();
+		foreach ( $this->locations->find_map_by_ids( $location_ids ) as $location_id => $location ) {
+			$display_names[ (int) $location_id ] = $this->location_display_name( $location );
+		}
+
+		return $display_names;
+	}
+
+	private function location_display_name( \WallsShop\WDC\Locations\ValueObjects\Location $location ): string {
+		$display = trim( $location->display_name );
+		if ( '' !== $display ) {
+			return $display;
+		}
+		foreach ( array( $location->place_name, $location->settlement_name, $location->city_name ) as $value ) {
+			$value = trim( (string) $value );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return null !== $location->id ? 'ID ' . (string) $location->id : '—';
 	}
 
 	/** @param array<string,mixed> $notice */
