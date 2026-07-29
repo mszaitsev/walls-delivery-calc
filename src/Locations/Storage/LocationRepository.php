@@ -266,28 +266,25 @@ final class LocationRepository {
 	/**
 	 * @return array<int,Location>
 	 */
-	public function find_active_by_place_and_region_matches( string $place_name, string $region_name ): array {
+	public function find_active_by_place_and_region_matches( string $place_name, string $region_name, string $place_type = '' ): array {
 		$place_name = trim( $place_name );
 		$region_name = trim( $region_name );
+		$place_type = trim( $place_type );
 		if ( '' === $place_name || '' === $region_name ) {
 			return array();
 		}
 
 		$place_key = $this->normalize_foreign_identity_value( $place_name );
 		$region_key = $this->normalize_foreign_identity_value( $region_name );
+		$place_type_key = $this->normalize_foreign_identity_type( $place_type );
 		if ( '' === $place_key || '' === $region_key ) {
 			return array();
 		}
 
 		if ( $this->has_test_location_rows() ) {
-			$matches = array();
-			foreach ( $this->test_location_rows() as $row ) {
-				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
-					continue;
-				}
-				if ( $this->active_place_region_row_matches( $row, $place_key, $region_key ) ) {
-					$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
-				}
+			$matches = $this->active_place_region_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, $place_type_key );
+			if ( array() === $matches && '' !== $place_type_key ) {
+				$matches = $this->active_place_region_matches_for_rows( $this->test_location_rows(), $place_key, $region_key, '' );
 			}
 
 			return $this->deduplicate_locations_by_id( $matches );
@@ -328,8 +325,15 @@ final class LocationRepository {
 			if ( ! is_array( $row ) ) {
 				throw new RuntimeException( 'Active location place and region lookup failed: invalid row structure' );
 			}
-			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key ) ) {
+			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key, $place_type_key ) ) {
 				$matches[] = $this->row_to_location( $row );
+			}
+		}
+		if ( array() === $matches && '' !== $place_type_key ) {
+			foreach ( $rows as $row ) {
+				if ( is_array( $row ) && $this->active_place_region_row_matches( $row, $place_key, $region_key, '' ) ) {
+					$matches[] = $this->row_to_location( $row );
+				}
 			}
 		}
 
@@ -2604,8 +2608,12 @@ final class LocationRepository {
 		}
 		return match ( $value ) {
 			'g', 'г', 'город' => 'г',
-			'p', 'п' => 'п',
-			's', 'с' => 'с',
+			'p', 'п', 'пос', 'поселок', 'посёлок' => 'п',
+			's', 'с', 'село' => 'с',
+			'рп', 'рабочий поселок', 'рабочий посёлок' => 'рп',
+			'пгт' => 'пгт',
+			'ст' => 'ст',
+			'аул' => 'аул',
 			default => $value,
 		};
 	}
@@ -2651,12 +2659,33 @@ final class LocationRepository {
 	}
 
 	/**
-	 * @param array<string,mixed> $row
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,Location>
 	 */
-	private function active_place_region_row_matches( array $row, string $place_key, string $region_key ): bool {
+	private function active_place_region_matches_for_rows( array $rows, string $place_key, string $region_key, string $place_type_key ): array {
+		$matches = array();
+		foreach ( $rows as $row ) {
+			if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+				continue;
+			}
+			if ( $this->active_place_region_row_matches( $row, $place_key, $region_key, $place_type_key ) ) {
+				$matches[] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+			}
+		}
+
+		return $matches;
+	}
+
+	private function active_place_region_row_matches( array $row, string $place_key, string $region_key, string $place_type_key ): bool {
 		$row_region = $this->normalize_foreign_identity_value( (string) ( $row['joined_region_name'] ?? $row['region_name'] ?? '' ) );
 		if ( $row_region !== $region_key ) {
 			return false;
+		}
+		if ( '' !== $place_type_key ) {
+			$row_place_type = $this->normalize_foreign_identity_type( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? $row['city_type'] ?? '' ) );
+			if ( $row_place_type !== $place_type_key ) {
+				return false;
+			}
 		}
 
 		foreach ( array( 'place_name', 'settlement_name', 'city_name' ) as $column ) {

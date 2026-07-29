@@ -6,6 +6,32 @@ namespace WallsShop\WDC\Carriers\JetLogistic\Geography;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticCitiesCsvParser {
+	private const PLACE_TYPE_ALIASES = array(
+		'рабочий поселок' => 'рп',
+		'рабочий посёлок' => 'рп',
+		'поселок' => 'п',
+		'посёлок' => 'п',
+		'деревня' => 'д',
+		'город' => 'г',
+		'село' => 'с',
+		'пос.' => 'п',
+		'пгт.' => 'пгт',
+		'рп.' => 'рп',
+		'ст.' => 'ст',
+		'г.' => 'г',
+		'с.' => 'с',
+		'п.' => 'п',
+		'д.' => 'д',
+		'пгт' => 'пгт',
+		'аул' => 'аул',
+		'рп' => 'рп',
+		'ст' => 'ст',
+		'г' => 'г',
+		'с' => 'с',
+		'п' => 'п',
+		'д' => 'д',
+	);
+
 	public function __construct(
 		private JetLogisticCityNameNormalizer $normalizer,
 		private ?JetLogisticRegionNameNormalizer $region_normalizer = null
@@ -39,6 +65,9 @@ final class JetLogisticCitiesCsvParser {
 			$split = $this->split_city_and_region( $city, $region );
 			$city = $split['city'];
 			$region = $split['region'];
+			$place = $this->split_place_type( $city );
+			$city = $place['city'];
+			$place_type = $place['place_type'];
 			$country = strtoupper( trim( (string) ( $row['country_code'] ?? $row['country'] ?? '' ) ) );
 			if ( '' === $city ) {
 				$rows[] = array( 'match_status' => 'invalid', 'raw_source' => $row );
@@ -48,6 +77,7 @@ final class JetLogisticCitiesCsvParser {
 				'source_identity' => $this->source_identity( $city, $region ),
 				'legacy_source_identity' => $this->normalizer->identity( $raw_city, '', 'RU' ),
 				'source_city' => $city,
+				'source_place_type' => $place_type,
 				'source_region' => $region,
 				'raw_source' => $row,
 				'normalized_city' => $this->normalizer->normalize( $city ),
@@ -69,6 +99,23 @@ final class JetLogisticCitiesCsvParser {
 		}
 
 		return array( 'city' => trim( $city ), 'region' => trim( $region ) );
+	}
+
+	/** @return array{city:string,place_type:string} */
+	private function split_place_type( string $city ): array {
+		$city = trim( $city );
+		$aliases = self::PLACE_TYPE_ALIASES;
+		uksort( $aliases, static fn( string $a, string $b ): int => mb_strlen( $b, 'UTF-8' ) <=> mb_strlen( $a, 'UTF-8' ) );
+		foreach ( $aliases as $source_type => $canonical_type ) {
+			if ( 1 === preg_match( '/^(.+?)\s+' . preg_quote( $source_type, '/' ) . '$/iu', $city, $matches ) ) {
+				return array(
+					'city' => trim( (string) $matches[1] ),
+					'place_type' => $canonical_type,
+				);
+			}
+		}
+
+		return array( 'city' => $city, 'place_type' => '' );
 	}
 
 	private function source_identity( string $city, string $region ): string {

@@ -23,6 +23,7 @@ final class JetLogisticGeographyMatcher {
 		}
 		$country = strtoupper( (string) ( $row['country_code'] ?? '' ) );
 		$city = trim( (string) ( $row['source_city'] ?? '' ) );
+		$place_type = trim( (string) ( $row['source_place_type'] ?? '' ) );
 		$region = trim( (string) ( $row['source_region'] ?? '' ) );
 		if ( '' === $city ) {
 			return array_merge( $row, array( 'match_status' => 'invalid', 'match_source' => 'missing_city', 'active' => 0 ) );
@@ -50,8 +51,8 @@ final class JetLogisticGeographyMatcher {
 
 		$normalized_region = $this->region_normalizer->normalize( $region );
 		$matches = '' !== $country
-			? array_values( array_filter( $this->locations->find_active_by_place_and_region_matches( $city, $normalized_region ), static fn( $location ): bool => $country === strtoupper( $location->country_code ) ) )
-			: $this->locations->find_active_by_place_and_region_matches( $city, $normalized_region );
+			? array_values( array_filter( $this->locations->find_active_by_place_and_region_matches( $city, $normalized_region, $place_type ), static fn( $location ): bool => $country === strtoupper( $location->country_code ) ) )
+			: $this->locations->find_active_by_place_and_region_matches( $city, $normalized_region, $place_type );
 		$count = count( $matches );
 		if ( $count > 1 ) {
 			return array_merge( $row, array( 'match_status' => 'ambiguous', 'match_source' => '' !== $country ? 'exact_name_region_multiple' : 'exact_name_region_multiple', 'active' => 0 ) );
