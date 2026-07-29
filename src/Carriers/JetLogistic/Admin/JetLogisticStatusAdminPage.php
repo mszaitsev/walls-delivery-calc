@@ -16,6 +16,10 @@ final class JetLogisticStatusAdminPage {
 	}
 
 	public function register(): void {
+		add_action( 'admin_menu', array( $this, 'add_submenu_page' ), 20 );
+	}
+
+	public function add_submenu_page(): void {
 		add_submenu_page( AdminMenu::MENU_SLUG, 'Статусы Джет', 'Статусы Джет', AdminMenu::CAPABILITY, 'wdc-jet-logistic-statuses', array( $this, 'render' ) );
 	}
 

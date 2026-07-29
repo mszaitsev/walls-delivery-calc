@@ -51,6 +51,7 @@ function wp_salt( string $scheme = 'auth' ): string { return 'jet-salt-' . $sche
 function sanitize_text_field( mixed $value ): string { return trim( preg_replace( '/[\r\n\t]+/', ' ', (string) $value ) ?? (string) $value ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
+function add_action( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool { $GLOBALS['wdc_actions'][] = array( $hook, $callback, $priority, $accepted_args ); return true; }
 function add_submenu_page( mixed ...$args ): string { $GLOBALS['wdc_submenu_pages'][] = $args; return (string) ( $args[4] ?? '' ); }
 
 if ( ! class_exists( 'wpdb' ) ) {
@@ -142,16 +143,40 @@ final class JetFakeOrder {
 }
 
 $GLOBALS['wdc_options'] = array();
+$GLOBALS['wdc_actions'] = array();
 $GLOBALS['wdc_submenu_pages'] = array();
 $GLOBALS['wpdb'] = new wpdb();
 
-( ( new ReflectionClass( JetLogisticGeographyAdminPage::class ) )->newInstanceWithoutConstructor() )->register();
-( ( new ReflectionClass( JetLogisticStatusAdminPage::class ) )->newInstanceWithoutConstructor() )->register();
+$geography_page = ( new ReflectionClass( JetLogisticGeographyAdminPage::class ) )->newInstanceWithoutConstructor();
+$status_page = ( new ReflectionClass( JetLogisticStatusAdminPage::class ) )->newInstanceWithoutConstructor();
+$geography_page->register();
+$status_page->register();
+jet_assert( 2 === count( $GLOBALS['wdc_actions'] ), 'Jet admin pages must register admin_menu callbacks during bootstrap.' );
+jet_assert( empty( $GLOBALS['wdc_submenu_pages'] ), 'Jet admin pages must not register submenu pages during bootstrap.' );
+jet_assert(
+	'admin_menu' === $GLOBALS['wdc_actions'][0][0]
+	&& $GLOBALS['wdc_actions'][0][1] === array( $geography_page, 'add_submenu_page' )
+	&& 20 === $GLOBALS['wdc_actions'][0][2],
+	'Jet geography admin page must defer submenu registration to admin_menu priority 20.'
+);
+jet_assert(
+	'admin_menu' === $GLOBALS['wdc_actions'][1][0]
+	&& $GLOBALS['wdc_actions'][1][1] === array( $status_page, 'add_submenu_page' )
+	&& 20 === $GLOBALS['wdc_actions'][1][2],
+	'Jet status admin page must defer submenu registration to admin_menu priority 20.'
+);
+( $GLOBALS['wdc_actions'][0][1] )();
+( $GLOBALS['wdc_actions'][1][1] )();
 jet_assert( 2 === count( $GLOBALS['wdc_submenu_pages'] ), 'Jet admin pages must register both submenu pages.' );
 jet_assert(
 	AdminMenu::MENU_SLUG === (string) $GLOBALS['wdc_submenu_pages'][0][0]
 	&& AdminMenu::MENU_SLUG === (string) $GLOBALS['wdc_submenu_pages'][1][0],
 	'Jet admin pages must register under AdminMenu::MENU_SLUG.'
+);
+jet_assert(
+	AdminMenu::CAPABILITY === (string) $GLOBALS['wdc_submenu_pages'][0][3]
+	&& AdminMenu::CAPABILITY === (string) $GLOBALS['wdc_submenu_pages'][1][3],
+	'Jet admin pages must use AdminMenu::CAPABILITY.'
 );
 jet_assert(
 	'wdc-jet-logistic-geography' === (string) $GLOBALS['wdc_submenu_pages'][0][4]
