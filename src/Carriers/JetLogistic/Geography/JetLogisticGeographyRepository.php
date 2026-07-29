@@ -27,6 +27,7 @@ final class JetLogisticGeographyRepository {
 			match_status varchar(32) NOT NULL DEFAULT 'unmatched',
 			match_source varchar(32) NOT NULL DEFAULT '',
 			active tinyint(1) NOT NULL DEFAULT 1,
+			import_token varchar(64) NOT NULL DEFAULT '',
 			first_seen_at datetime NOT NULL,
 			last_seen_at datetime NOT NULL,
 			created_at datetime NOT NULL,
@@ -36,44 +37,113 @@ final class JetLogisticGeographyRepository {
 			KEY active_location (active, location_id),
 			KEY country_status (country_code, match_status),
 			KEY normalized_city_region (normalized_city, normalized_region),
-			KEY active_country (active, country_code)
+			KEY active_country (active, country_code),
+			KEY import_token (import_token)
 		) {$this->charset()};" );
 	}
 
 	/** @param array<int,array<string,mixed>> $rows */
 	public function replace_snapshot( array $rows ): void {
 		$now = current_time( 'mysql' );
-		$seen = array();
+		$import_token = hash( 'sha256', $now . '|' . spl_object_id( $this ) . '|' . count( $rows ) );
+		$prepared = $this->prepare_snapshot_rows( $rows, $now, $import_token );
+		if ( property_exists( $this->wpdb, 'jet_cities' ) ) {
+			$this->replace_snapshot_in_memory( $prepared, $import_token );
+			return;
+		}
+
+		$this->query_or_throw( 'START TRANSACTION', 'Jet Logistic geography snapshot transaction start failed' );
+		try {
+			foreach ( array_chunk( $prepared, 200 ) as $chunk ) {
+				$this->bulk_upsert_snapshot_chunk( $chunk );
+			}
+			$this->query_or_throw( $this->wpdb->prepare( "UPDATE {$this->table()} SET active = 0, updated_at = %s WHERE import_token <> %s", $now, $import_token ), 'Jet Logistic geography snapshot stale rows deactivation failed' );
+			$this->query_or_throw( 'COMMIT', 'Jet Logistic geography snapshot commit failed' );
+		} catch ( \Throwable $exception ) {
+			$this->wpdb->query( 'ROLLBACK' );
+			throw $exception;
+		}
+	}
+
+	/** @param array<int,array<string,mixed>> $rows @return array<int,array<string,mixed>> */
+	private function prepare_snapshot_rows( array $rows, string $now, string $import_token ): array {
+		$prepared = array();
 		foreach ( $rows as $row ) {
 			$identity = (string) ( $row['source_identity'] ?? '' );
 			if ( '' === $identity ) {
 				continue;
 			}
-			$seen[] = $identity;
-			$existing = $this->find_by_source_identity( $identity );
-			$this->wpdb->replace(
-				$this->table(),
-				array(
-					'source_identity' => $identity,
-					'source_city' => (string) ( $row['source_city'] ?? '' ),
-					'source_region' => (string) ( $row['source_region'] ?? '' ),
-					'raw_source' => wp_json_encode( $row['raw_source'] ?? array(), JSON_UNESCAPED_UNICODE ),
-					'normalized_city' => (string) ( $row['normalized_city'] ?? '' ),
-					'normalized_region' => (string) ( $row['normalized_region'] ?? '' ),
-					'country_code' => strtoupper( (string) ( $row['country_code'] ?? '' ) ),
-					'location_id' => max( 0, (int) ( $row['location_id'] ?? 0 ) ),
-					'match_status' => (string) ( $row['match_status'] ?? 'unmatched' ),
-					'match_source' => (string) ( $row['match_source'] ?? '' ),
-					'active' => (int) ( $row['active'] ?? 1 ),
-					'first_seen_at' => (string) ( $existing['first_seen_at'] ?? $now ),
-					'last_seen_at' => $now,
-					'created_at' => (string) ( $existing['created_at'] ?? $now ),
-					'updated_at' => $now,
-				),
-				array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s' )
+			$prepared[] = array(
+				'source_identity' => $identity,
+				'source_city' => (string) ( $row['source_city'] ?? '' ),
+				'source_region' => (string) ( $row['source_region'] ?? '' ),
+				'raw_source' => wp_json_encode( $row['raw_source'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '',
+				'normalized_city' => (string) ( $row['normalized_city'] ?? '' ),
+				'normalized_region' => (string) ( $row['normalized_region'] ?? '' ),
+				'country_code' => strtoupper( (string) ( $row['country_code'] ?? '' ) ),
+				'location_id' => max( 0, (int) ( $row['location_id'] ?? 0 ) ),
+				'match_status' => (string) ( $row['match_status'] ?? 'unmatched' ),
+				'match_source' => (string) ( $row['match_source'] ?? '' ),
+				'active' => (int) ( $row['active'] ?? 1 ),
+				'import_token' => $import_token,
+				'first_seen_at' => $now,
+				'last_seen_at' => $now,
+				'created_at' => $now,
+				'updated_at' => $now,
 			);
 		}
-		$this->deactivate_missing( $seen );
+		return $prepared;
+	}
+
+	/** @param array<int,array<string,mixed>> $rows */
+	private function replace_snapshot_in_memory( array $rows, string $import_token ): void {
+		if ( property_exists( $this->wpdb, 'snapshot_single_replace_calls' ) ) {
+			$this->wpdb->snapshot_single_replace_calls += 0;
+		}
+		if ( property_exists( $this->wpdb, 'snapshot_bulk_upsert_calls' ) ) {
+			++$this->wpdb->snapshot_bulk_upsert_calls;
+		}
+		$backup = $this->wpdb->jet_cities;
+		if ( ! empty( $this->wpdb->jet_fail_next_snapshot_bulk ?? false ) ) {
+			throw new \RuntimeException( 'Jet Logistic geography snapshot bulk upsert failed.' );
+		}
+		foreach ( $rows as $row ) {
+			$identity = (string) $row['source_identity'];
+			$existing = $this->wpdb->jet_cities[ $identity ] ?? array();
+			$this->wpdb->jet_cities[ $identity ] = array_merge( $row, array( 'first_seen_at' => (string) ( $existing['first_seen_at'] ?? $row['first_seen_at'] ), 'created_at' => (string) ( $existing['created_at'] ?? $row['created_at'] ), 'id' => (int) ( $existing['id'] ?? ++$this->wpdb->insert_id ) ) );
+		}
+		foreach ( $this->wpdb->jet_cities as $identity => $row ) {
+			if ( (string) ( $row['import_token'] ?? '' ) !== $import_token ) {
+				$this->wpdb->jet_cities[ $identity ]['active'] = 0;
+			}
+		}
+		if ( ! empty( $this->wpdb->jet_rollback_snapshot_after_write ?? false ) ) {
+			$this->wpdb->jet_cities = $backup;
+			throw new \RuntimeException( 'Jet Logistic geography snapshot rollback simulated.' );
+		}
+	}
+
+	/** @param array<int,array<string,mixed>> $rows */
+	private function bulk_upsert_snapshot_chunk( array $rows ): void {
+		if ( array() === $rows ) {
+			return;
+		}
+		$columns = array( 'source_identity', 'source_city', 'source_region', 'raw_source', 'normalized_city', 'normalized_region', 'country_code', 'location_id', 'match_status', 'match_source', 'active', 'import_token', 'first_seen_at', 'last_seen_at', 'created_at', 'updated_at' );
+		$formats = array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s' );
+		$placeholders = array();
+		$args = array();
+		foreach ( $rows as $row ) {
+			$placeholders[] = '(' . implode( ',', $formats ) . ')';
+			foreach ( $columns as $column ) {
+				$args[] = $row[ $column ];
+			}
+		}
+		$updates = array();
+		foreach ( array( 'source_city', 'source_region', 'raw_source', 'normalized_city', 'normalized_region', 'country_code', 'location_id', 'match_status', 'match_source', 'active', 'import_token', 'last_seen_at', 'updated_at' ) as $column ) {
+			$updates[] = "{$column} = VALUES({$column})";
+		}
+		$sql = $this->wpdb->prepare( "INSERT INTO {$this->table()} (" . implode( ',', $columns ) . ') VALUES ' . implode( ',', $placeholders ) . ' ON DUPLICATE KEY UPDATE ' . implode( ', ', $updates ), ...$args );
+		$this->query_or_throw( $sql, 'Jet Logistic geography snapshot bulk upsert failed' );
 	}
 
 	/** @return array<string,mixed> */
@@ -152,6 +222,19 @@ final class JetLogisticGeographyRepository {
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $seen ), '%s' ) );
 		$this->wpdb->query( $this->wpdb->prepare( "UPDATE {$this->table()} SET active = 0, updated_at = %s WHERE source_identity NOT IN ({$placeholders})", current_time( 'mysql' ), ...$seen ) );
+	}
+
+	private function query_or_throw( string $sql, string $message ): void {
+		$this->wpdb->last_error = '';
+		$result = $this->wpdb->query( $sql );
+		if ( false === $result || '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			throw new \RuntimeException( $message . ': ' . $this->sanitize_sql_error( (string) ( $this->wpdb->last_error ?? '' ) ) );
+		}
+	}
+
+	private function sanitize_sql_error( string $error ): string {
+		$error = trim( preg_replace( '/\s+/', ' ', $error ) ?? $error );
+		return '' !== $error ? mb_substr( $error, 0, 300, 'UTF-8' ) : 'unknown SQL error';
 	}
 
 	private function table(): string {

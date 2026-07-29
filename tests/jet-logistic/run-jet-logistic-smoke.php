@@ -91,7 +91,19 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $services = array();
 		public array $countries = array();
 		public array $jet_update_fail_sources = array();
+		public int $location_batch_query_calls = 0;
+		public int $location_single_lookup_calls = 0;
+		public int $override_batch_query_calls = 0;
+		public int $override_single_lookup_calls = 0;
+		public int $snapshot_bulk_upsert_calls = 0;
+		public int $snapshot_single_replace_calls = 0;
+		public bool $jet_import_lock_busy = false;
+		public bool $jet_import_lock_acquired = false;
+		public bool $jet_fail_next_snapshot_bulk = false;
+		public bool $jet_rollback_snapshot_after_write = false;
+		public array $queries = array();
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
+		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
 				$query = preg_replace( '/%[dsf]/', is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query;
@@ -100,6 +112,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 		public function replace( string $table, array $data, array $formats = array() ): bool {
 			if ( str_contains( $table, 'wdc_jet_logistic_cities' ) ) {
+				++$this->snapshot_single_replace_calls;
 				$key = (string) $data['source_identity'];
 				$this->jet_cities[ $key ] = $data;
 				$this->jet_cities[ $key ]['id'] = $this->jet_cities[ $key ]['id'] ?? ++$this->insert_id;
@@ -160,6 +173,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return true;
 		}
 		public function query( string $query ): int|bool {
+			$this->queries[] = $query;
+			if ( 'START TRANSACTION' === trim( $query ) || 'COMMIT' === trim( $query ) || 'ROLLBACK' === trim( $query ) ) {
+				return true;
+			}
 			if ( str_contains( $query, 'UPDATE wp_wdc_jet_logistic_cities SET active = 0' ) ) {
 				foreach ( $this->jet_cities as $key => $row ) {
 					if ( ! str_contains( $query, "'" . $key . "'" ) ) {
@@ -168,6 +185,20 @@ if ( ! class_exists( 'wpdb' ) ) {
 				}
 			}
 			return 1;
+		}
+		public function get_var( string $query ): mixed {
+			if ( str_contains( $query, 'GET_LOCK' ) ) {
+				if ( $this->jet_import_lock_busy ) {
+					return '0';
+				}
+				$this->jet_import_lock_acquired = true;
+				return '1';
+			}
+			if ( str_contains( $query, 'RELEASE_LOCK' ) ) {
+				$this->jet_import_lock_acquired = false;
+				return '1';
+			}
+			return null;
 		}
 		public function get_row( string $query, string $output = ARRAY_A ): ?array {
 			if ( preg_match( "/source_identity = '([^']+)'/", $query, $m ) && str_contains( $query, 'wdc_jet_logistic_cities' ) ) {
@@ -195,7 +226,15 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			return null;
 		}
-		public function get_results( string $query, string $output = ARRAY_A ): array { return array_values( $this->jet_cities ); }
+		public function get_results( string $query, string $output = ARRAY_A ): array {
+			if ( str_contains( $query, 'wdc_jet_logistic_location_overrides' ) ) {
+				if ( preg_match_all( "/'([^']+)'/", $query, $matches ) ) {
+					return array_values( array_intersect_key( $this->jet_overrides, array_flip( $matches[1] ) ) );
+				}
+				return array_values( $this->jet_overrides );
+			}
+			return array_values( $this->jet_cities );
+		}
 		public function get_col( string $query ): array {
 			if ( preg_match( '/service_id = (\d+)/', $query, $m ) && str_contains( $query, 'wdc_delivery_service_countries' ) ) {
 				return array_values( array_map( static fn( array $row ): string => (string) ( $row['country_code'] ?? '' ), array_filter( $this->countries, static fn( array $row ): bool => (int) ( $row['service_id'] ?? 0 ) === (int) $m[1] ) ) );
@@ -256,7 +295,7 @@ foreach ( array( 'География Jet Logistic успешно импорти�
 	jet_assert( str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $russian_message ), 'Jet admin must expose Russian message or label: ' . $russian_message );
 }
 
-$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.11' ) );
+$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.12' ) );
 $register_services = new ReflectionMethod( Plugin::class, 'register_services' );
 $register_services->setAccessible( true );
 $register_services->invoke( $plugin );
@@ -311,15 +350,15 @@ $GLOBALS['wdc_options'] = array();
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
 $failed = false;
 try {
-	( new MigrationManager( '0.129.11-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.129.12-test', $migration_dir ) )->run();
 } catch ( RuntimeException ) {
 	$failed = true;
 }
 jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
-( new MigrationManager( '0.129.11-test', $migration_dir ) )->run();
-jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.11-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
-( new MigrationManager( '0.129.11-test', $migration_dir ) )->run();
+( new MigrationManager( '0.129.12-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.12-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.12-test', $migration_dir ) )->run();
 jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
 unlink( $migration_file );
 rmdir( $migration_dir );
@@ -504,6 +543,37 @@ $safe_legacy_result = $typed_import_service->import_csv( "city\n8 \u{041C}\u{043
 jet_assert( 0 === (int) $safe_legacy_result['legacy_identity_conflicts'], 'Jet safe legacy migration must not report legacy identity conflicts.' );
 jet_assert( empty( $GLOBALS['wpdb']->jet_overrides[ $eight_marta_legacy_identity ] ) && ! empty( $GLOBALS['wpdb']->jet_overrides[ $eight_marta_p_identity ] ), 'Jet safe legacy migration must move override from legacy identity to typed identity.' );
 jet_assert( 'manual_override' === (string) ( $GLOBALS['wpdb']->jet_cities[ $eight_marta_p_identity ]['match_source'] ?? '' ), 'Jet safe legacy migration must apply the migrated override to the typed row.' );
+
+$GLOBALS['wpdb']->locations = array();
+$large_csv = "city\n";
+for ( $i = 0; $i < 600; ++$i ) {
+	$region_index = $i % 10;
+	$city = 'Batch ' . $i;
+	$region = 'Batch Region ' . $region_index;
+	$large_csv .= $city . " \u{043F}.-(" . $region . ")\n";
+	$GLOBALS['wpdb']->locations[] = array( 'id' => 300000 + $i, 'country_code' => 'KZ', 'region_name' => $region, 'place_name' => $city, 'place_type' => "\u{043F}", 'active' => 1 );
+}
+$GLOBALS['wpdb']->jet_cities = array();
+$GLOBALS['wpdb']->jet_overrides = array();
+$GLOBALS['wpdb']->location_batch_query_calls = 0;
+$GLOBALS['wpdb']->location_single_lookup_calls = 0;
+$GLOBALS['wpdb']->override_batch_query_calls = 0;
+$GLOBALS['wpdb']->override_single_lookup_calls = 0;
+$GLOBALS['wpdb']->snapshot_bulk_upsert_calls = 0;
+$GLOBALS['wpdb']->snapshot_single_replace_calls = 0;
+$large_import_result = $typed_import_service->import_csv( $large_csv );
+jet_assert( ! empty( $large_import_result['success'] ) && 600 === (int) $large_import_result['rows_unique'] && 600 === count( array_filter( $GLOBALS['wpdb']->jet_cities, static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 0 ) ) ), 'Jet large geography import must save all active unique rows.' );
+jet_assert( 0 === $GLOBALS['wpdb']->location_single_lookup_calls && 0 === $GLOBALS['wpdb']->override_single_lookup_calls && 0 === $GLOBALS['wpdb']->snapshot_single_replace_calls, 'Jet large geography import must not use per-row location, override, or snapshot lookups.' );
+jet_assert( $GLOBALS['wpdb']->location_batch_query_calls <= 12 && $GLOBALS['wpdb']->override_batch_query_calls <= 4 && $GLOBALS['wpdb']->snapshot_bulk_upsert_calls <= 10, 'Jet large geography import query counts must be bounded by region groups and chunking, not source rows: ' . wp_json_encode( array( 'location_batch' => $GLOBALS['wpdb']->location_batch_query_calls, 'override_batch' => $GLOBALS['wpdb']->override_batch_query_calls, 'snapshot_bulk' => $GLOBALS['wpdb']->snapshot_bulk_upsert_calls ), JSON_UNESCAPED_UNICODE ) );
+$GLOBALS['wpdb']->jet_import_lock_busy = true;
+$locked_import_result = $typed_import_service->import_csv( $large_csv );
+jet_assert( empty( $locked_import_result['success'] ) && 'import_already_running' === (string) ( $locked_import_result['code'] ?? '' ), 'Jet geography import must fail fast when the named import lock is already held.' );
+$GLOBALS['wpdb']->jet_import_lock_busy = false;
+$snapshot_before_failure = $GLOBALS['wpdb']->jet_cities;
+$GLOBALS['wpdb']->jet_rollback_snapshot_after_write = true;
+$failed_snapshot_result = $typed_import_service->import_csv( "city\nRollback New \u{043F}.-(Batch Region 1)\n" );
+jet_assert( empty( $failed_snapshot_result['success'] ) && 'import_failed' === (string) ( $failed_snapshot_result['code'] ?? '' ) && $snapshot_before_failure === $GLOBALS['wpdb']->jet_cities && false === $GLOBALS['wpdb']->jet_import_lock_acquired, 'Jet geography import must roll back snapshot changes and release lock on snapshot failure.' );
+$GLOBALS['wpdb']->jet_rollback_snapshot_after_write = false;
 
 $geo->replace_snapshot(
 	array(

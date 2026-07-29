@@ -35,8 +35,37 @@ final class JetLogisticGeographyOverrideRepository {
 
 	/** @return array<string,mixed> */
 	public function find( string $source_identity ): array {
+		if ( property_exists( $this->wpdb, 'override_single_lookup_calls' ) ) {
+			++$this->wpdb->override_single_lookup_calls;
+		}
 		$row = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT * FROM {$this->table()} WHERE source_identity = %s LIMIT 1", $source_identity ), ARRAY_A );
 		return is_array( $row ) ? $row : array();
+	}
+
+	/**
+	 * @param array<int,string> $identities
+	 * @return array<string,array<string,mixed>>
+	 */
+	public function find_many( array $identities ): array {
+		$identities = array_values( array_unique( array_filter( array_map( static fn( mixed $identity ): string => trim( (string) $identity ), $identities ) ) ) );
+		if ( array() === $identities ) {
+			return array();
+		}
+		$result = array();
+		foreach ( array_chunk( $identities, 500 ) as $chunk ) {
+			if ( property_exists( $this->wpdb, 'override_batch_query_calls' ) ) {
+				++$this->wpdb->override_batch_query_calls;
+			}
+			$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+			$rows = $this->wpdb->get_results( $this->wpdb->prepare( "SELECT * FROM {$this->table()} WHERE source_identity IN ({$placeholders})", ...$chunk ), ARRAY_A );
+			foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+				if ( is_array( $row ) && '' !== (string) ( $row['source_identity'] ?? '' ) ) {
+					$result[ (string) $row['source_identity'] ] = $row;
+				}
+			}
+		}
+
+		return $result;
 	}
 
 	public function delete( string $source_identity ): bool {

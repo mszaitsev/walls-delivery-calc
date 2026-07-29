@@ -8,37 +8,63 @@ use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticGeographyImportService {
+	private const LOCK_NAME = 'wdc_jet_logistic_geography_import';
+	private \wpdb $wpdb;
+
 	public function __construct(
 		private JetLogisticCitiesCsvParser $parser,
 		private JetLogisticGeographyMatcher $matcher,
 		private JetLogisticGeographyRepository $repository,
-		private JetLogisticCountrySyncService $country_sync
+		private JetLogisticCountrySyncService $country_sync,
+		?\wpdb $db = null
 	) {
+		global $wpdb;
+		$this->wpdb = $db ?? $wpdb;
 	}
 
 	/** @return array<string,mixed> */
 	public function import_csv( string $csv ): array {
-		$parsed = $this->parser->parse( $csv );
-		if ( array() === $parsed ) {
-			return array( 'success' => false, 'message' => 'В файле cities.csv не найдено строк для импорта.', 'rows' => 0, 'rows_read' => 0, 'rows_unique' => 0, 'duplicates' => 0, 'legacy_identity_conflicts' => 0 );
+		$started = microtime( true );
+		if ( ! $this->acquire_lock() ) {
+			return array( 'success' => false, 'message' => 'Импорт географии Jet Logistic уже выполняется. Дождитесь его завершения или остановите зависший PHP-процесс.', 'code' => 'import_already_running' );
 		}
-		$deduplicated = $this->deduplicate_rows( $parsed );
-		$legacy_identities = $this->classify_legacy_identities( $deduplicated['rows'] );
-		$matched = array_map( fn( array $row ): array => $this->matcher->match( $this->with_legacy_migration_metadata( $row, $legacy_identities ) ), $deduplicated['rows'] );
-		$this->repository->replace_snapshot( $matched );
-		$this->country_sync->sync_discovered_countries();
+		try {
+			$this->log_stage( 'jet_geography_import_started' );
+			$parsed = $this->parser->parse( $csv );
+			$this->log_stage( 'jet_geography_csv_parsed', array( 'rows' => count( $parsed ), 'elapsed_ms' => $this->elapsed_ms( $started ) ) );
+			if ( array() === $parsed ) {
+				return array( 'success' => false, 'message' => 'В файле cities.csv не найдено строк для импорта.', 'rows' => 0, 'rows_read' => 0, 'rows_unique' => 0, 'duplicates' => 0, 'legacy_identity_conflicts' => 0 );
+			}
+			$deduplicated = $this->deduplicate_rows( $parsed );
+			$this->log_stage( 'jet_geography_rows_deduplicated', array( 'rows_unique' => count( $deduplicated['rows'] ), 'duplicates' => $deduplicated['duplicates'] ) );
+			$legacy_identities = $this->classify_legacy_identities( $deduplicated['rows'] );
+			$rows_with_metadata = array_map( fn( array $row ): array => $this->with_legacy_migration_metadata( $row, $legacy_identities ), $deduplicated['rows'] );
+			$match_result = $this->matcher->match_many( $rows_with_metadata );
+			$matched = $match_result['rows'];
+			$this->log_stage( 'jet_geography_rows_matched', array( 'rows' => count( $matched ), 'legacy_override_migration_failures' => $match_result['legacy_override_migration_failures'] ) );
+			$this->repository->replace_snapshot( $matched );
+			$this->log_stage( 'jet_geography_snapshot_saved', array( 'rows' => count( $matched ) ) );
+			$this->country_sync->sync_discovered_countries();
+			$this->log_stage( 'jet_geography_import_finished', array( 'elapsed_ms' => $this->elapsed_ms( $started ) ) );
 
-		return array(
-			'success' => true,
-			'message' => 'География Jet Logistic успешно импортирована.',
-			'rows' => count( $matched ),
-			'rows_read' => count( $parsed ),
-			'rows_unique' => count( $matched ),
-			'duplicates' => $deduplicated['duplicates'],
-			'duplicate_conflicts' => $deduplicated['duplicate_conflicts'],
-			'legacy_identity_conflicts' => count( $legacy_identities['conflicts'] ),
-			'stats' => $this->stats( $matched ),
-		);
+			return array(
+				'success' => true,
+				'message' => 'География Jet Logistic успешно импортирована.',
+				'rows' => count( $matched ),
+				'rows_read' => count( $parsed ),
+				'rows_unique' => count( $matched ),
+				'duplicates' => $deduplicated['duplicates'],
+				'duplicate_conflicts' => $deduplicated['duplicate_conflicts'],
+				'legacy_identity_conflicts' => count( $legacy_identities['conflicts'] ),
+				'legacy_override_migration_failures' => $match_result['legacy_override_migration_failures'],
+				'stats' => $this->stats( $matched ),
+			);
+		} catch ( \Throwable $exception ) {
+			$this->log_stage( 'jet_geography_import_failed', array( 'message' => $this->safe_error_message( $exception ), 'elapsed_ms' => $this->elapsed_ms( $started ) ) );
+			return array( 'success' => false, 'message' => 'Импорт географии Jet Logistic завершился с ошибкой. Подробности записаны в журнал.', 'code' => 'import_failed' );
+		} finally {
+			$this->release_lock();
+		}
 	}
 
 	/**
@@ -156,5 +182,44 @@ final class JetLogisticGeographyImportService {
 		}
 
 		return $stats;
+	}
+
+	private function acquire_lock(): bool {
+		if ( property_exists( $this->wpdb, 'jet_import_lock_busy' ) && $this->wpdb->jet_import_lock_busy ) {
+			return false;
+		}
+		if ( property_exists( $this->wpdb, 'jet_import_lock_acquired' ) ) {
+			$this->wpdb->jet_import_lock_acquired = true;
+			return true;
+		}
+		if ( ! method_exists( $this->wpdb, 'get_var' ) ) {
+			return true;
+		}
+		$result = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', self::LOCK_NAME ) );
+		return '1' === (string) $result;
+	}
+
+	private function release_lock(): void {
+		if ( property_exists( $this->wpdb, 'jet_import_lock_acquired' ) ) {
+			$this->wpdb->jet_import_lock_acquired = false;
+		}
+		if ( method_exists( $this->wpdb, 'get_var' ) ) {
+			$this->wpdb->get_var( $this->wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', self::LOCK_NAME ) );
+		}
+	}
+
+	private function log_stage( string $stage, array $context = array() ): void {
+		if ( ! defined( 'WP_DEBUG_LOG' ) || ! WP_DEBUG_LOG ) {
+			return;
+		}
+		error_log( '[walls-delivery-calc] ' . $stage . ' ' . wp_json_encode( $context, JSON_UNESCAPED_UNICODE ) );
+	}
+
+	private function elapsed_ms( float $started ): int {
+		return (int) round( ( microtime( true ) - $started ) * 1000 );
+	}
+
+	private function safe_error_message( \Throwable $exception ): string {
+		return mb_substr( preg_replace( '/\s+/', ' ', $exception->getMessage() ) ?? '', 0, 300, 'UTF-8' );
 	}
 }
