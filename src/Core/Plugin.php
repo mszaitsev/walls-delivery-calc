@@ -51,6 +51,27 @@ use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequestBuilder;
+use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
+use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
+use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiClient;
+use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticHttpClientInterface;
+use WallsShop\WDC\Carriers\JetLogistic\Api\WpJetLogisticHttpClient;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvClient;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvParser;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCityNameNormalizer;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCountrySyncService;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyMatcher;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyOverrideRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticRegionNameNormalizer;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticCredentials;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteResponseParser;
+use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMapper;
+use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
@@ -96,6 +117,7 @@ use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
+use WallsShop\WDC\Carriers\Runtime\JetLogisticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Carriers\Runtime\YandexDeliveryCarrier;
@@ -257,6 +279,8 @@ use WallsShop\WDC\Shipments\Dpd\DpdShipmentEnrichmentService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentPersistenceMapper;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentRepository;
 use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
+use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentAdapter;
+use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentDocumentProvider;
@@ -351,6 +375,24 @@ final class Plugin {
 		$this->container->register( CdekTariffSyncService::class, fn(): CdekTariffSyncService => new CdekTariffSyncService( $this->container->get( CdekApiClient::class ), $this->container->get( CdekTariffRepository::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdSettings::class, fn(): DpdSettings => new DpdSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
 		$this->container->register( YandexDeliverySettings::class, fn(): YandexDeliverySettings => new YandexDeliverySettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
+		$this->container->register( JetLogisticSettings::class, fn(): JetLogisticSettings => new JetLogisticSettings( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
+		$this->container->register( JetLogisticCredentials::class, fn(): JetLogisticCredentials => new JetLogisticCredentials( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
+		$this->container->register( JetLogisticHttpClientInterface::class, fn(): JetLogisticHttpClientInterface => new WpJetLogisticHttpClient() );
+		$this->container->register( JetLogisticApiClient::class, fn(): JetLogisticApiClient => new JetLogisticApiClient( $this->container->get( JetLogisticHttpClientInterface::class ), $this->container->get( JetLogisticSettings::class ) ) );
+		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );
+		$this->container->register( JetLogisticRegionNameNormalizer::class, fn(): JetLogisticRegionNameNormalizer => new JetLogisticRegionNameNormalizer() );
+		$this->container->register( JetLogisticCitiesCsvClient::class, fn(): JetLogisticCitiesCsvClient => new JetLogisticCitiesCsvClient() );
+		$this->container->register( JetLogisticCitiesCsvParser::class, fn(): JetLogisticCitiesCsvParser => new JetLogisticCitiesCsvParser( $this->container->get( JetLogisticCityNameNormalizer::class ), $this->container->get( JetLogisticRegionNameNormalizer::class ) ) );
+		$this->container->register( JetLogisticGeographyRepository::class, fn(): JetLogisticGeographyRepository => new JetLogisticGeographyRepository() );
+		$this->container->register( JetLogisticGeographyOverrideRepository::class, fn(): JetLogisticGeographyOverrideRepository => new JetLogisticGeographyOverrideRepository() );
+		$this->container->register( JetLogisticGeographyMatcher::class, fn(): JetLogisticGeographyMatcher => new JetLogisticGeographyMatcher( $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticRegionNameNormalizer::class ) ) );
+		$this->container->register( JetLogisticCountrySyncService::class, fn(): JetLogisticCountrySyncService => new JetLogisticCountrySyncService( $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( JetLogisticGeographyImportService::class, fn(): JetLogisticGeographyImportService => new JetLogisticGeographyImportService( $this->container->get( JetLogisticCitiesCsvParser::class ), $this->container->get( JetLogisticGeographyMatcher::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ) ) );
+		$this->container->register( JetLogisticStatusMappingRepository::class, fn(): JetLogisticStatusMappingRepository => new JetLogisticStatusMappingRepository() );
+		$this->container->register( JetLogisticStatusMapper::class, fn(): JetLogisticStatusMapper => new JetLogisticStatusMapper( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
+		$this->container->register( JetLogisticStatusService::class, fn(): JetLogisticStatusService => new JetLogisticStatusService( $this->container->get( JetLogisticApiClient::class ), $this->container->get( JetLogisticStatusMapper::class ) ) );
+		$this->container->register( JetLogisticQuoteRequestBuilder::class, fn(): JetLogisticQuoteRequestBuilder => new JetLogisticQuoteRequestBuilder( $this->container->get( JetLogisticCredentials::class ) ) );
+		$this->container->register( JetLogisticQuoteResponseParser::class, fn(): JetLogisticQuoteResponseParser => new JetLogisticQuoteResponseParser() );
 		$this->container->register( YandexDeliveryHttpClientInterface::class, fn(): YandexDeliveryHttpClientInterface => new WpYandexDeliveryHttpClient( $this->container->get( YandexDeliverySettings::class )->request_timeout() ) );
 		$this->container->register( YandexDeliveryApiClient::class, fn(): YandexDeliveryApiClient => new YandexDeliveryApiClient( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryHttpClientInterface::class ) ) );
 		$this->container->register( YandexDeliveryShipmentPayloadBuilder::class, fn(): YandexDeliveryShipmentPayloadBuilder => new YandexDeliveryShipmentPayloadBuilder() );
@@ -440,6 +482,8 @@ final class Plugin {
 		$this->container->register( YandexShipmentModalExtension::class, fn(): YandexShipmentModalExtension => new YandexShipmentModalExtension( $this->container->get( YandexLocationMappingV2Repository::class ) ) );
 		$this->container->register( YandexShipmentRegistrationService::class, fn(): YandexShipmentRegistrationService => new YandexShipmentRegistrationService( $this->container->get( CoreYandexDeliveryShipmentRegistrationService::class ), $this->container->get( YandexDeliveryShipmentPayloadBuilder::class ), $this->container->get( YandexDeliveryShipmentClient::class ), $this->container->get( YandexShipmentRepository::class ), $this->container->get( YandexShipmentPersistenceMapper::class ), $this->container->get( YandexShipmentButtonPolicy::class ), $this->container->get( YandexStatusMapping::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
 		$this->container->register( YandexShipmentAdapter::class, fn(): YandexShipmentAdapter => new YandexShipmentAdapter( $this->container->get( YandexShipmentRegistrationService::class ), $this->container->get( YandexShipmentButtonPolicy::class ), $this->container->get( ShipmentActualCostResolver::class ), $this->container->get( YandexStatusMapping::class ), $this->container->get( YandexShipmentLabelPolicy::class ) ) );
+		$this->container->register( JetLogisticShipmentService::class, fn(): JetLogisticShipmentService => new JetLogisticShipmentService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( JetLogisticStatusService::class ) ) );
+		$this->container->register( JetLogisticShipmentAdapter::class, fn(): JetLogisticShipmentAdapter => new JetLogisticShipmentAdapter( $this->container->get( JetLogisticShipmentService::class ), $this->container->get( ShipmentActualCostResolver::class ) ) );
 		$this->container->register( YandexShipmentPersistenceMapper::class, fn(): YandexShipmentPersistenceMapper => new YandexShipmentPersistenceMapper( $this->container->get( YandexShipmentRepository::class ), $this->container->get( YandexStatusMapping::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
 		$this->container->register( ShipmentMetaboxButtonPolicy::class, fn(): ShipmentMetaboxButtonPolicy => new ShipmentMetaboxButtonPolicy() );
 		$this->container->register( CdekStatusMappingService::class, fn(): CdekStatusMappingService => new CdekStatusMappingService( $this->container->get( SettingsRepository::class ) ) );
@@ -461,7 +505,7 @@ final class Plugin {
 		$this->container->register( ShipmentDocumentDownloadService::class, fn(): ShipmentDocumentDownloadService => new ShipmentDocumentDownloadService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentDocumentProviderRegistry::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdShipmentModalExtension::class, fn(): DpdShipmentModalExtension => new DpdShipmentModalExtension( fn(): array => $this->container->get( SettingsRepository::class )->get_array( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, array() ) ) );
 		$this->container->register( ShipmentModalExtensionRegistry::class, fn(): ShipmentModalExtensionRegistry => new ShipmentModalExtensionRegistry( array( $this->container->get( CdekShipmentModalExtension::class ), $this->container->get( DpdShipmentModalExtension::class ), $this->container->get( RussianPostShipmentModalExtension::class ), $this->container->get( YandexShipmentModalExtension::class ) ) ) );
-		$this->container->register( CarrierShipmentAdapterRegistry::class, fn(): CarrierShipmentAdapterRegistry => new CarrierShipmentAdapterRegistry( array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ) ) ) );
+		$this->container->register( CarrierShipmentAdapterRegistry::class, fn(): CarrierShipmentAdapterRegistry => new CarrierShipmentAdapterRegistry( array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ), $this->container->get( JetLogisticShipmentAdapter::class ) ) ) );
 		$this->container->register( ShipmentCreationService::class, fn(): ShipmentCreationService => new ShipmentCreationService( $this->container->get( OrderShipmentRepository::class ), array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ) ), $this->container->get( ShipmentActualCostService::class ), $this->container->get( Logger::class ), $this->container->get( CarrierShipmentAdapterRegistry::class ), array( $this->container->get( RussianPostShipmentPersistenceMapper::class ), $this->container->get( CdekShipmentPersistenceMapper::class ), $this->container->get( DpdShipmentPersistenceMapper::class ), $this->container->get( YandexShipmentPersistenceMapper::class ) ) ) );
 		$this->container->register( ShipmentOrderStatusMappingService::class, fn(): ShipmentOrderStatusMappingService => new ShipmentOrderStatusMappingService( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( ShipmentStatusUpdateService::class, fn(): ShipmentStatusUpdateService => new ShipmentStatusUpdateService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostTrackingApiClient::class ), $this->container->get( RussianPostTrackingStatusMapper::class ), $this->container->get( ShipmentActualCostResolver::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
@@ -479,6 +523,7 @@ final class Plugin {
 		$this->container->register( CdekCarrier::class, fn(): CdekCarrier => new CdekCarrier( $this->container->get( CdekSettings::class ), $this->container->get( CdekApiClient::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ), $this->container->get( CdekDeliveryPointService::class ), $this->container->get( CdekTariffRepository::class ) ) );
 		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( DpdPackagingBuilderFactory::class )->create(), $this->container->get( Logger::class ), $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( YandexDeliveryCarrier::class, fn(): YandexDeliveryCarrier => new YandexDeliveryCarrier( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexLocationMappingV2Repository::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( Logger::class ), $this->container->get( YandexDeliveryPricingRequestBuilder::class ), $this->container->get( YandexDeliveryPricingResponseParser::class ) ) );
+		$this->container->register( JetLogisticCarrier::class, fn(): JetLogisticCarrier => new JetLogisticCarrier( $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticApiClient::class ), $this->container->get( JetLogisticQuoteRequestBuilder::class ), $this->container->get( JetLogisticQuoteResponseParser::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCityNameNormalizer::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -488,12 +533,13 @@ final class Plugin {
 				$registry->register( $this->container->get( CdekCarrier::class ) );
 				$registry->register( $this->container->get( DpdQuoteCarrier::class ) );
 				$registry->register( $this->container->get( YandexDeliveryCarrier::class ) );
+				$registry->register( $this->container->get( JetLogisticCarrier::class ) );
 
 				return $registry;
 			}
 		);
 		$this->container->register( DeliveryServiceRegistry::class, fn(): DeliveryServiceRegistry => new DeliveryServiceRegistry( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( CarrierRegistry::class ) ) );
-		$this->container->register( DeliveryServiceManager::class, fn(): DeliveryServiceManager => new DeliveryServiceManager( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RuleRepository::class ), $this->container->get( RussianPostCountryDirectory::class ) ) );
+		$this->container->register( DeliveryServiceManager::class, fn(): DeliveryServiceManager => new DeliveryServiceManager( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RuleRepository::class ), $this->container->get( RussianPostCountryDirectory::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( QuoteCache::class, fn(): QuoteCache => new QuoteCache() );
 		$this->container->register( DeliveryQuoteCacheManager::class, fn(): DeliveryQuoteCacheManager => new DeliveryQuoteCacheManager( $this->container->get( QuoteCache::class ) ) );
 		$this->container->register( RateSorter::class, fn(): RateSorter => new RateSorter() );
@@ -741,6 +787,8 @@ final class Plugin {
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
+		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticCitiesCsvClient::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
+		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(
@@ -799,6 +847,8 @@ final class Plugin {
 				$this->container->get( DpdQuoteCarrier::class ),
 				$this->container->get( YandexDeliveryCarrier::class ),
 				$this->container->get( SettingsRepository::class ),
+				$this->container->get( JetLogisticGeographyAdminPage::class ),
+				$this->container->get( JetLogisticStatusAdminPage::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );

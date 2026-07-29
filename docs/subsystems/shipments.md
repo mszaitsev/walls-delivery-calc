@@ -1,10 +1,10 @@
 # Shipments
 
-Version: 0.128.23
+Version: 0.129.16
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 
-Carrier-specific shipment implementations currently exist for CDEK, DPD, Russian Post, and Yandex Delivery. Shared behavior is documented in [shipment-framework.md](../architecture/shipment-framework.md). Use that document and [new-carrier-guide.md](../development/new-carrier-guide.md) before changing carrier shipment code.
+Carrier-specific shipment implementations currently exist for CDEK, DPD, Russian Post, Yandex Delivery, and Jet Logistic. Shared behavior is documented in [shipment-framework.md](../architecture/shipment-framework.md). Use that document and [new-carrier-guide.md](../development/new-carrier-guide.md) before changing carrier shipment code.
 
 ## CDEK EAEU Shipments
 
@@ -20,6 +20,7 @@ The CDEK modal extension owns the `cdek_recipient_document` field. It is server-
 - Manual admin shipment creation supports multiple places and item allocation.
 - Carrier documents are exposed through provider-owned document actions and downloaded through the protected document service.
 - Carrier status updates map into universal delivery statuses and may update WooCommerce order status through configured mapping.
+- Jet Logistic status messages are free text. Carrier-owned mappings convert known text into existing universal statuses; unknown messages are observed and saved for admin mapping but do not reset the current universal status. Jet stores only the latest status fields and up to five deduplicated recent events, not the full API log.
 - Order shipment data should be compact but sufficient: carrier key, service key/title, delivery type, places, request/response snapshots when relevant, tracking/external IDs, status, canonical actual shipment cost when available, and timestamps.
 
 ## Actual Shipment Cost

@@ -238,6 +238,7 @@ use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -621,6 +622,10 @@ wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_p
 
 $delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && ! str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render availability fields inside main tab and not expose a separate availability tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, "JetLogisticSettings::SERVICE_KEY === \$service->service_key" ) && str_contains( $delivery_admin_source, "\$tabs['jet_geography']" ) && str_contains( $delivery_admin_source, "\$tabs['jet_statuses']" ), 'Jet Logistic geography/status UI must be exposed only as delivery service tabs.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_remote'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'update_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'delete_jet_status_mapping'" ), 'Jet Logistic admin forms must use shared delivery service action keys.' );
+wdc_ds_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ), "DEFAULT_URL = 'https://jet7777.ru/cabinet/cities.csv'" ), 'Jet Logistic remote geography import must use the fixed official cities.csv URL.' );
+wdc_ds_assert( ! str_contains( $delivery_admin_source, 'wdc-jet-logistic-geography' ) && ! str_contains( $delivery_admin_source, 'wdc-jet-logistic-statuses' ), 'Delivery services admin must not register standalone Jet submenu slugs.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'RussianPostPickupDiagnosticsTab::TAB_KEY' ) && str_contains( $delivery_admin_source, 'Диагностика базы ПВЗ' ) && str_contains( $delivery_admin_source, 'render_russian_post_pickup_diagnostics_tab' ), 'Russian Post domestic admin must expose the pickup diagnostics tab and delegate rendering to the specialized tab component.' );
 $domestic_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_domestic_service( $service ) )' ), 700 );
 $cdek_tabs_source = substr( $delivery_admin_source, (int) strpos( $delivery_admin_source, 'if ( $this->is_cdek_service( $service ) )' ), 450 );

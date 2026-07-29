@@ -200,6 +200,11 @@ final class CheckoutOrchestrator {
 					}
 					continue;
 				}
+				$capabilities = $carrier->get_capabilities();
+				if ( $capabilities->supports_pickup_delivery && $capabilities->supports_courier_delivery ) {
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service );
+					continue;
+				}
 				$entries[] = array( 'carrier' => $carrier, 'service' => $service );
 			}
 		}

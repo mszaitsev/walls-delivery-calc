@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 0.128.23
+Version: 0.129.16
 
 `src/Core/Plugin.php` is the composition root. `src/Core/Container.php` is a small lazy singleton container with `register()`, `get()`, and `has()`.
 
@@ -17,11 +17,13 @@ Version: 0.128.23
 
 For a carrier with shipment support, register:
 
+Jet Logistic registers one quote carrier (`JetLogisticCarrier`) and one shipment adapter (`JetLogisticShipmentAdapter`) in `Plugin.php`. Its API, credentials, geography import, status mapping, and manual shipment service are carrier-owned services. Do not add Jet to `ShipmentDocumentProviderRegistry`, `ShipmentModalExtensionRegistry`, lifecycle continuation wiring, or `ShipmentCreationService` mapper arrays.
+
 - settings and credentials;
 - API client and HTTP/SOAP client;
 - quote runtime carrier in `CarrierRegistry`;
 - shipment adapter in `CarrierShipmentAdapterRegistry`;
-- persistence mapper in `ShipmentCreationService`;
+- persistence mapper in `ShipmentCreationService`, if API shipment creation exists;
 - document provider in `ShipmentDocumentProviderRegistry`, if documents exist;
 - modal extension in `ShipmentModalExtensionRegistry`, if UI fields are needed;
 - lifecycle continuation implementation through the adapter, if the carrier requires continuation steps.

@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.128.23
+Version: 0.129.16
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -20,6 +20,8 @@ The plugin is a WooCommerce delivery platform. Production ownership is split by 
 ## Dependency Direction
 
 Generic layers may depend on domain contracts and registries. Carrier implementations depend on generic contracts. Generic Shipment Framework services must not depend on carrier implementations except in the composition root (`Plugin.php`) where concrete implementations are registered.
+
+Jet Logistic follows the same boundary: `Plugin.php` wires its runtime carrier, geography/status repositories, admin pages, and shipment adapter. Jet is not registered in document providers, modal extensions, lifecycle continuation, or shipment creation persistence mappers because the carrier supports quote, manual attach, status update, local remove, and autosync only.
 
 Allowed carrier references in generic code are limited to:
 

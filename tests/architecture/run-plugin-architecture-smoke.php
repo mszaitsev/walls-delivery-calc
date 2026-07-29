@@ -644,4 +644,31 @@ foreach ( $manifest as $id => $entry ) {
 }
 plugin_architecture_assert( $registered, 'Plugin architecture smoke must be registered in ' . $manifest_path . '.' );
 
+$jet_key = 'jet_' . 'logistic';
+$shipment_creation_source = (string) file_get_contents( plugin_architecture_path( 'src/Shipments/Application/ShipmentCreationService.php' ) );
+plugin_architecture_assert( ! str_contains( $shipment_creation_source, $jet_key ) && ! str_contains( $shipment_creation_source, 'JetLogistic' ), 'Jet Logistic must not add carrier persistence or create-flow branching to ShipmentCreationService.' );
+$generic_shipment_sources = array();
+foreach ( array( 'src/Shipments/Application', 'src/Shipments/Admin', 'src/Shipments/Storage', 'src/Shipments/Documents', 'src/Shipments/Modal' ) as $path ) {
+	foreach ( plugin_architecture_php_files( $path ) as $file ) {
+		$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+		$generic_shipment_sources[ $relative ] = (string) file_get_contents( $file );
+	}
+}
+foreach ( $generic_shipment_sources as $relative => $source ) {
+	plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic Shipment Framework must not branch on Jet Logistic in ' . $relative );
+}
+foreach ( plugin_architecture_js_files( 'assets/admin/shipments' ) as $file ) {
+	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+	$source = (string) file_get_contents( $file );
+	plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic shipment JS must not contain Jet Logistic branches in ' . $relative );
+}
+$plugin_source_for_jet = (string) file_get_contents( plugin_architecture_path( 'src/Core/Plugin.php' ) );
+plugin_architecture_assert( str_contains( $plugin_source_for_jet, 'JetLogisticCarrier::class' ) && str_contains( $plugin_source_for_jet, 'JetLogisticShipmentAdapter::class' ), 'Plugin.php must own Jet Logistic runtime and shipment adapter wiring.' );
+$plugin_lines_for_jet = preg_split( '/\R/', $plugin_source_for_jet ) ?: array();
+foreach ( $plugin_lines_for_jet as $line ) {
+	if ( str_contains( $line, 'ShipmentDocumentProviderRegistry::class' ) || str_contains( $line, 'ShipmentModalExtensionRegistry::class' ) || str_contains( $line, 'ShipmentCreationService::class' ) ) {
+		plugin_architecture_assert( ! str_contains( $line, 'JetLogistic' ), 'Jet Logistic must not register documents, modal extension, or create-flow persistence mapper.' );
+	}
+}
+
 echo "Plugin architecture smoke passed.\n";

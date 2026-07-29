@@ -5,6 +5,7 @@ require_once __DIR__ . '/admin-js-bundle-source.php';
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
@@ -72,12 +73,21 @@ $registry = new CarrierShipmentAdapterRegistry(
 				'tracking_label' => 'Номер DPD',
 			)
 		),
+		new CarrierAdapterRegistrySmokeAdapter(
+			JetLogisticSettings::CARRIER_KEY,
+			array(
+				'carrier_label' => 'Jet Logistic',
+				'status_title' => 'Статус Jet Logistic',
+				'tracking_label' => 'Номер груза Jet Logistic',
+			)
+		),
 	)
 );
 
 carrier_adapter_registry_assert( $registry->has( CdekSettings::CARRIER_KEY ), 'Registry must contain CDEK adapter.' );
 carrier_adapter_registry_assert( $registry->has( RussianPostDomesticSettings::CARRIER_KEY ), 'Registry must contain Russian Post adapter.' );
 carrier_adapter_registry_assert( $registry->has( DpdSettings::CARRIER_KEY ), 'Registry must contain DPD adapter for manual create preparation.' );
+carrier_adapter_registry_assert( $registry->has( JetLogisticSettings::CARRIER_KEY ), 'Registry must contain Jet Logistic adapter for manual attach/status.' );
 carrier_adapter_registry_assert( 'СДЭК' === $registry->get( CdekSettings::CARRIER_KEY )->presentation()['carrier_label'], 'CDEK adapter presentation must contain the CDEK label.' );
 carrier_adapter_registry_assert( 'Почта России' === $registry->get( RussianPostDomesticSettings::CARRIER_KEY )->presentation()['carrier_label'], 'Russian Post adapter presentation must contain the Russian Post label.' );
 carrier_adapter_registry_assert( 'DPD' === $registry->get( DpdSettings::CARRIER_KEY )->presentation()['carrier_label'], 'DPD adapter presentation must contain the DPD label.' );
@@ -94,7 +104,7 @@ $russian_post_adapter_source = (string) file_get_contents( dirname( __DIR__, 2 )
 $shipments_js = wdc_shipment_admin_js_bundle_source();
 
 carrier_adapter_registry_assert( str_contains( $plugin_source, 'CarrierShipmentAdapterRegistry::class' ), 'Plugin must register CarrierShipmentAdapterRegistry.' );
-carrier_adapter_registry_assert( str_contains( $plugin_source, 'new CarrierShipmentAdapterRegistry( array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ) ) )' ), 'Plugin registry wiring must include Russian Post, CDEK, DPD and Yandex adapters.' );
+carrier_adapter_registry_assert( str_contains( $plugin_source, 'new CarrierShipmentAdapterRegistry( array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ), $this->container->get( JetLogisticShipmentAdapter::class ) ) )' ), 'Plugin registry wiring must include Russian Post, CDEK, DPD, Yandex and Jet adapters.' );
 carrier_adapter_registry_assert( str_contains( $plugin_source, 'new ShipmentCreationService( $this->container->get( OrderShipmentRepository::class ), array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ) )' ) && str_contains( $plugin_source, 'array( $this->container->get( RussianPostShipmentPersistenceMapper::class ), $this->container->get( CdekShipmentPersistenceMapper::class ), $this->container->get( DpdShipmentPersistenceMapper::class ), $this->container->get( YandexShipmentPersistenceMapper::class ) )' ) && ! str_contains( $plugin_source, 'new ShipmentCreationService( $this->container->get( OrderShipmentRepository::class ), array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ), $this->container->get( DpdShipmentAdapter::class ), $this->container->get( YandexShipmentAdapter::class ) ), $this->container->get( Logger::class ), $this->container->get( CarrierShipmentAdapterRegistry::class ), null' ), 'ShipmentCreationService live-create wiring must include all adapters, all persistence mappers and no mapper placeholder.' );
 carrier_adapter_registry_assert( str_contains( $autosync_source, '$adapter->update_status' ) && ! str_contains( $autosync_source, 'switch ( $carrier_key )' ), 'Auto-sync must dispatch status updates through adapters, not a carrier switch.' );
 carrier_adapter_registry_assert( str_contains( $autosync_source, '$adapter->tracking_identifier' ), 'Auto-sync tracking identifiers must come from adapters.' );

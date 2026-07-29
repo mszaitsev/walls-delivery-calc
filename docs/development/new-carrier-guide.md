@@ -1,6 +1,8 @@
 # New Carrier Guide
 
-Version: 0.128.23
+Version: 0.129.16
+
+For carriers like Jet Logistic that return multiple delivery options from one quote call, prefer a carrier-agnostic capability path: a carrier whose capabilities include pickup and courier can return multiple `DeliveryRate` objects from one `quote()` call. A pickup `DeliveryRate` may set `requires_pickup_point=false` when the carrier has no selectable pickup-point identifiers.
 
 Use `ExampleCarrier` as a mental model only; do not add it to production. This guide is implementable: follow it in order and add only capabilities the carrier actually supports.
 
