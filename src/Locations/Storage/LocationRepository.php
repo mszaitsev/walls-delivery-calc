@@ -181,7 +181,13 @@ final class LocationRepository {
 	 * @return array<int,Location>
 	 */
 	public function find_map_by_ids( array $location_ids ): array {
+		if ( property_exists( $this->wpdb, 'location_find_map_by_ids_calls' ) ) {
+			++$this->wpdb->location_find_map_by_ids_calls;
+		}
 		$location_ids = array_values( array_unique( array_filter( array_map( 'intval', $location_ids ), static fn( int $id ): bool => $id > 0 ) ) );
+		if ( property_exists( $this->wpdb, 'location_find_map_by_ids_last_ids' ) ) {
+			$this->wpdb->location_find_map_by_ids_last_ids = $location_ids;
+		}
 		if ( array() === $location_ids ) {
 			return array();
 		}

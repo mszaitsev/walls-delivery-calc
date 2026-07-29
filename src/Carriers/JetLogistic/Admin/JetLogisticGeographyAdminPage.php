@@ -16,6 +16,8 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticGeographyAdminPage {
+	private const PER_PAGE_OPTIONS = array( 25, 50, 100, 200 );
+
 	public function __construct(
 		private JetLogisticGeographyImportService $imports,
 		private JetLogisticCitiesCsvClient $cities,
@@ -111,7 +113,13 @@ final class JetLogisticGeographyAdminPage {
 
 	public function render_embedded( DeliveryService $service, array $notice = array() ): void {
 		$origins = $this->geography->active_origin_options();
-		$rows = $this->geography->admin_rows( 100 );
+		$pagination_request = $this->pagination_from_request();
+		$page_data = $this->geography->admin_page( $pagination_request['page'], $pagination_request['per_page'] );
+		$rows = $page_data['items'];
+		$page = (int) $page_data['page'];
+		$per_page = (int) $page_data['per_page'];
+		$total = (int) $page_data['total'];
+		$total_pages = (int) $page_data['total_pages'];
 		$location_display_names = $this->location_display_names_for_rows( $rows );
 		$stats = $this->geography->match_status_counts();
 		$has_token = $this->credentials->has_access_token();
@@ -127,6 +135,7 @@ final class JetLogisticGeographyAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="save_jet_settings">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>">
 			<table class="form-table" role="presentation">
 				<tr><th scope="row">Тайм-аут HTTP, сек.</th><td><input type="number" min="1" max="60" name="<?php echo esc_attr( JetLogisticSettings::REQUEST_TIMEOUT_KEY ); ?>" value="<?php echo esc_attr( (string) $this->settings->request_timeout() ); ?>"></td></tr>
 				<tr><th scope="row">Город отправления</th><td><select name="<?php echo esc_attr( JetLogisticSettings::ORIGIN_SOURCE_IDENTITY_KEY ); ?>"><option value="">Не выбран</option><?php foreach ( $origins as $origin ) : ?><option value="<?php echo esc_attr( (string) ( $origin['source_identity'] ?? '' ) ); ?>" <?php selected( $this->settings->origin_source_identity(), (string) ( $origin['source_identity'] ?? '' ) ); ?>><?php echo esc_html( (string) ( $origin['source_city'] ?? '' ) . ' ' . (string) ( $origin['country_code'] ?? '' ) ); ?></option><?php endforeach; ?></select></td></tr>
@@ -141,6 +150,7 @@ final class JetLogisticGeographyAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="import_jet_geography_remote">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>">
 			<p><button class="button button-primary" type="submit"><?php echo esc_html__( 'Скачать и импортировать cities.csv', 'walls-delivery-calc' ); ?></button></p>
 			<p class="description">Источник: <a href="<?php echo esc_url( JetLogisticCitiesCsvClient::DEFAULT_URL ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( JetLogisticCitiesCsvClient::DEFAULT_URL ); ?></a></p>
 		</form>
@@ -150,6 +160,7 @@ final class JetLogisticGeographyAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="import_jet_geography_csv">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>">
 			<p><input type="file" name="cities_csv" accept=".csv,text/csv"> <?php submit_button( __( 'Загрузить cities.csv с компьютера', 'walls-delivery-calc' ), 'primary', 'submit', false ); ?></p>
 		</form>
 
@@ -161,13 +172,14 @@ final class JetLogisticGeographyAdminPage {
 		</tbody></table>
 
 		<h3><?php echo esc_html__( 'Ручное сопоставление', 'walls-delivery-calc' ); ?></h3>
+		<?php $this->render_pagination( $page, $total_pages, $total, $per_page, $service, 'top' ); ?>
 		<table class="widefat striped" style="max-width: 1180px;">
 			<thead><tr><th class="wdc-row-number">№</th><th>Идентификатор Jet</th><th>Город</th><th>Регион</th><th>Страна</th><th>Статус</th><th>Источник сопоставления</th><th>ID населённого пункта</th><th>Сопоставленный населённый пункт</th><th>Ручное сопоставление</th></tr></thead>
 			<tbody>
 			<?php foreach ( $rows as $index => $row ) : ?>
 				<?php $location_id = (int) ( $row['location_id'] ?? 0 ); ?>
 				<tr>
-					<td class="wdc-row-number"><?php echo esc_html( (string) ( $index + 1 ) ); ?></td>
+					<td class="wdc-row-number"><?php echo esc_html( (string) ( ( ( $page - 1 ) * $per_page ) + $index + 1 ) ); ?></td>
 					<td><code><?php echo esc_html( (string) ( $row['source_identity'] ?? '' ) ); ?></code></td>
 					<td><?php echo esc_html( (string) ( $row['source_city'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['source_region'] ?? '' ) ); ?></td>
@@ -176,15 +188,115 @@ final class JetLogisticGeographyAdminPage {
 					<td><?php echo esc_html( $this->match_source_label( (string) ( $row['match_source'] ?? '' ) ) ); ?></td>
 					<td><?php echo esc_html( (string) ( $row['location_id'] ?? '' ) ); ?></td>
 					<td><?php echo esc_html( $location_id > 0 ? ( $location_display_names[ $location_id ] ?? '—' ) : '—' ); ?></td>
-					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="1" name="location_id" value="<?php echo esc_attr( $location_id > 0 ? (string) $location_id : '' ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
+					<td><form method="post"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_jet_geography_override"><input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"><input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>"><input type="hidden" name="jet_page" value="<?php echo esc_attr( (string) $page ); ?>"><input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>"><input type="hidden" name="source_identity" value="<?php echo esc_attr( (string) ( $row['source_identity'] ?? '' ) ); ?>"><input type="number" min="1" name="location_id" value="<?php echo esc_attr( $location_id > 0 ? (string) $location_id : '' ); ?>"> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Сохранить', 'walls-delivery-calc' ); ?></button></form></td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
 		</table>
+		<?php $this->render_pagination( $page, $total_pages, $total, $per_page, $service, 'bottom' ); ?>
 		<?php
 		if ( array() === $rows ) {
 			echo '<p>' . esc_html__( 'География Jet ещё не импортирована.', 'walls-delivery-calc' ) . '</p>';
 		}
+	}
+
+	/** @return array{page:int,per_page:int} */
+	private function pagination_from_request(): array {
+		$page = max( 1, (int) ( $_GET['jet_page'] ?? 1 ) );
+		$per_page = (int) ( $_GET['jet_per_page'] ?? 100 );
+		if ( ! in_array( $per_page, self::PER_PAGE_OPTIONS, true ) ) {
+			$per_page = 100;
+		}
+
+		return array( 'page' => $page, 'per_page' => $per_page );
+	}
+
+	private function render_pagination( int $page, int $total_pages, int $total, int $per_page, DeliveryService $service, string $position ): void {
+		$from = $total > 0 ? ( ( $page - 1 ) * $per_page ) + 1 : 0;
+		$to = min( $page * $per_page, $total );
+		$select_id = 'jet-per-page-' . sanitize_key( $position );
+		?>
+		<div class="tablenav wdc-jet-geography-pagination">
+			<div class="tablenav-pages">
+				<span class="displaying-num"><?php echo esc_html( 'Всего: ' . $total . ( $total > 0 ? ' · Показаны: ' . $from . '–' . $to . ' · Страница ' . $page . ' из ' . $total_pages : '' ) ); ?></span>
+				<?php if ( $total_pages > 1 ) : ?>
+					<span class="pagination-links">
+						<?php $this->render_page_link( max( 1, $page - 1 ), '‹', 'Предыдущая страница', $page > 1, $per_page, $service ); ?>
+						<?php foreach ( $this->pagination_numbers( $page, $total_pages ) as $number ) : ?>
+							<?php if ( 0 === $number ) : ?>
+								<span class="tablenav-pages-navspan button disabled" aria-hidden="true">…</span>
+							<?php elseif ( $number === $page ) : ?>
+								<span class="page-numbers current button" aria-current="page"><?php echo esc_html( (string) $number ); ?></span>
+							<?php else : ?>
+								<?php $this->render_page_link( $number, (string) $number, 'Страница ' . $number, true, $per_page, $service ); ?>
+							<?php endif; ?>
+						<?php endforeach; ?>
+						<?php $this->render_page_link( min( $total_pages, $page + 1 ), '›', 'Следующая страница', $page < $total_pages, $per_page, $service ); ?>
+					</span>
+				<?php endif; ?>
+			</div>
+			<form method="get" class="alignleft actions">
+				<input type="hidden" name="page" value="wdc-delivery-services">
+				<input type="hidden" name="service" value="<?php echo esc_attr( $service->service_key ); ?>">
+				<input type="hidden" name="tab" value="jet_geography">
+				<input type="hidden" name="jet_page" value="1">
+				<label for="<?php echo esc_attr( $select_id ); ?>"><?php echo esc_html__( 'Показывать по:', 'walls-delivery-calc' ); ?></label>
+				<select id="<?php echo esc_attr( $select_id ); ?>" name="jet_per_page">
+					<?php foreach ( self::PER_PAGE_OPTIONS as $option ) : ?>
+						<option value="<?php echo esc_attr( (string) $option ); ?>" <?php selected( $per_page, $option ); ?>><?php echo esc_html( (string) $option ); ?></option>
+					<?php endforeach; ?>
+				</select>
+				<button class="button" type="submit"><?php echo esc_html__( 'Применить', 'walls-delivery-calc' ); ?></button>
+			</form>
+			<br class="clear">
+		</div>
+		<?php
+	}
+
+	/** @return array<int,int> */
+	private function pagination_numbers( int $page, int $total_pages ): array {
+		$numbers = array_values(
+			array_unique(
+				array_filter(
+					array( 1, $page - 1, $page, $page + 1, $total_pages ),
+					static fn( int $value ): bool => $value >= 1 && $value <= $total_pages
+				)
+			)
+		);
+		sort( $numbers, SORT_NUMERIC );
+		$result = array();
+		$previous = 0;
+		foreach ( $numbers as $number ) {
+			if ( 0 !== $previous && $number > $previous + 1 ) {
+				$result[] = 0;
+			}
+			$result[] = $number;
+			$previous = $number;
+		}
+
+		return $result;
+	}
+
+	private function render_page_link( int $page, string $label, string $aria_label, bool $enabled, int $per_page, DeliveryService $service ): void {
+		if ( ! $enabled ) {
+			echo '<span class="tablenav-pages-navspan button disabled" aria-hidden="true">' . esc_html( $label ) . '</span>';
+			return;
+		}
+		echo '<a class="button" href="' . esc_url( $this->pagination_url( $page, $per_page, $service ) ) . '" aria-label="' . esc_attr( $aria_label ) . '">' . esc_html( $label ) . '</a>';
+	}
+
+	private function pagination_url( int $page, int $per_page, DeliveryService $service ): string {
+		return admin_url(
+			'admin.php?' . http_build_query(
+				array(
+					'page' => 'wdc-delivery-services',
+					'service' => $service->service_key,
+					'tab' => 'jet_geography',
+					'jet_page' => max( 1, $page ),
+					'jet_per_page' => $per_page,
+				)
+			)
+		);
 	}
 
 	/**

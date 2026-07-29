@@ -62,6 +62,7 @@ function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return j
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
 function wp_salt( string $scheme = 'auth' ): string { return 'jet-salt-' . $scheme; }
+function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( preg_replace( '/[\r\n\t]+/', ' ', (string) $value ) ?? (string) $value ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function esc_attr( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
@@ -71,6 +72,8 @@ function esc_html__( string $text, string $domain = 'default' ): string { return
 function __( string $text, string $domain = 'default' ): string { return $text; }
 function selected( mixed $selected, mixed $current, bool $display = true ): string { $result = (string) $selected === (string) $current ? ' selected="selected"' : ''; if ( $display ) { echo $result; } return $result; }
 function submit_button( string $text = 'Save', string $type = 'primary', string $name = 'submit', bool $wrap = true ): void { echo '<button class="button button-' . esc_attr( $type ) . '" name="' . esc_attr( $name ) . '">' . esc_html( $text ) . '</button>'; }
+function wp_nonce_field( string $action ): void { echo '<input type="hidden" name="_wpnonce" value="' . esc_attr( $action ) . '">'; }
+function admin_url( string $path = '' ): string { return 'https://example.test/wp-admin/' . ltrim( $path, '/\\' ); }
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 function add_action( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool { $GLOBALS['wdc_actions'][] = array( $hook, $callback, $priority, $accepted_args ); return true; }
 function add_submenu_page( mixed ...$args ): string { $GLOBALS['wdc_submenu_pages'][] = $args; return (string) ( $args[4] ?? '' ); }
@@ -96,6 +99,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public int $location_single_lookup_calls = 0;
 		public int $location_find_by_id_calls = 0;
 		public int $location_find_many_by_ids_calls = 0;
+		public int $location_find_map_by_ids_calls = 0;
+		public array $location_find_map_by_ids_last_ids = array();
 		public int $override_batch_query_calls = 0;
 		public int $override_single_lookup_calls = 0;
 		public int $snapshot_bulk_upsert_calls = 0;
@@ -284,7 +289,7 @@ jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $de
 jet_assert( str_contains( $delivery_admin_source, "JetLogisticSettings::SERVICE_KEY === \$service->service_key" ) && str_contains( $delivery_admin_source, "\$tabs['jet_geography']" ) && str_contains( $delivery_admin_source, "\$tabs['jet_statuses']" ), 'Jet tabs must be scoped to the Jet Logistic delivery service.' );
 jet_assert( str_contains( $delivery_admin_source, "'jet_geography' => \$this->render_jet_geography_tab( \$service )" ) && str_contains( $delivery_admin_source, "'jet_statuses' => \$this->render_jet_statuses_tab( \$service )" ), 'Jet tabs must delegate to embedded renderers.' );
 jet_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_remote'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'save_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "check_admin_referer( 'wdc_delivery_services' )" ) && str_contains( $delivery_admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Jet POST actions must be handled by the shared delivery services action pipeline.' );
-jet_assert( str_contains( $delivery_admin_source, "service_tab_url_by_key( JetLogisticSettings::SERVICE_KEY, \$tab )" ) && str_contains( $delivery_admin_source, "'save_jet_status_mapping' => 'jet_statuses'" ), 'Jet POST actions must redirect back to their embedded tabs.' );
+jet_assert( str_contains( $delivery_admin_source, 'jet_logistic_redirect_url( $action, $tab )' ) && str_contains( $delivery_admin_source, "'save_jet_status_mapping' => 'jet_statuses'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override' === \$action" ), 'Jet POST actions must redirect back to their embedded tabs and preserve Jet geography pagination state for manual overrides.' );
 jet_assert( str_contains( $geography_admin_source, "JetLogisticCitiesCsvClient::DEFAULT_URL" ) && ! str_contains( $geography_admin_source, "\$_POST['url'" ) && ! str_contains( $geography_admin_source, 'wp_remote_get' ), 'Jet remote geography import must use the fixed client URL and not read arbitrary POST URLs.' );
 jet_assert( str_contains( $delivery_admin_source, 'set_transient( $this->jet_admin_notice_key()' ) && str_contains( $delivery_admin_source, 'get_transient( $key )' ) && str_contains( $delivery_admin_source, 'delete_transient( $key )' ), 'Jet admin actions must use one-shot flash notices.' );
 jet_assert( ! str_contains( $plugin_source, 'JetLogisticGeographyAdminPage::class )->register()' ) && ! str_contains( $plugin_source, 'JetLogisticStatusAdminPage::class )->register()' ), 'Plugin hooks must not register standalone Jet admin pages.' );
@@ -293,8 +298,8 @@ jet_assert( str_contains( $plugin_source, 'use WallsShop\\WDC\\Carriers\\JetLogi
 $render_embedded_start = strpos( $geography_admin_source, 'public function render_embedded' );
 $render_notice_start = strpos( $geography_admin_source, 'private function render_notice', $render_embedded_start );
 $render_embedded_source = false !== $render_embedded_start && false !== $render_notice_start ? substr( $geography_admin_source, $render_embedded_start, $render_notice_start - $render_embedded_start ) : '';
-jet_assert( str_contains( $render_embedded_source, '<th class="wdc-row-number">№</th>' ) && str_contains( $render_embedded_source, 'Сопоставленный населённый пункт' ) && str_contains( $render_embedded_source, '$index + 1' ), 'Jet geography admin table must show row numbers and matched location display names.' );
-jet_assert( str_contains( $geography_admin_source, 'location_display_names_for_rows' ) && str_contains( $geography_admin_source, 'find_map_by_ids( $location_ids )' ) && ! str_contains( $render_embedded_source, 'find_by_id(' ), 'Jet geography admin table must batch-load display names and avoid per-row find_by_id calls.' );
+jet_assert( str_contains( $render_embedded_source, 'admin_page( $pagination_request' ) && str_contains( $render_embedded_source, '<th class="wdc-row-number">№</th>' ) && str_contains( $render_embedded_source, 'Сопоставленный населённый пункт' ) && str_contains( $render_embedded_source, '( ( $page - 1 ) * $per_page ) + $index + 1' ), 'Jet geography admin table must use paginated rows, continuous row numbers and matched location display names.' );
+jet_assert( str_contains( $geography_admin_source, 'render_pagination' ) && str_contains( $geography_admin_source, 'jet_page' ) && str_contains( $geography_admin_source, 'jet_per_page' ) && str_contains( $geography_admin_source, 'location_display_names_for_rows' ) && str_contains( $geography_admin_source, 'find_map_by_ids( $location_ids )' ) && ! str_contains( $render_embedded_source, 'find_by_id(' ), 'Jet geography admin table must render pagination, preserve page state, batch-load display names and avoid per-row find_by_id calls.' );
 jet_assert( ! str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php' ), 'return (bool) $this->wpdb->update' ), 'Jet manual override snapshot update must not cast wpdb update result to bool.' );
 foreach ( array( 'download failed', 'is empty', 'response is too large', 'returned HTML', 'upload failed', 'has no rows', 'operation completed', 'operation failed', 'component is unavailable', 'Unknown Jet Logistic admin action' ) as $english_message ) {
 	jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $english_message ), 'Jet admin user-facing messages must be Russian: ' . $english_message );
@@ -303,7 +308,7 @@ foreach ( array( 'География Jet Logistic успешно импорти�
 	jet_assert( str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $russian_message ), 'Jet admin must expose Russian message or label: ' . $russian_message );
 }
 
-$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.14' ) );
+$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.15' ) );
 $register_services = new ReflectionMethod( Plugin::class, 'register_services' );
 $register_services->setAccessible( true );
 $register_services->invoke( $plugin );
@@ -363,15 +368,15 @@ $GLOBALS['wdc_options'] = array();
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
 $failed = false;
 try {
-	( new MigrationManager( '0.129.14-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.129.15-test', $migration_dir ) )->run();
 } catch ( RuntimeException ) {
 	$failed = true;
 }
 jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
-( new MigrationManager( '0.129.14-test', $migration_dir ) )->run();
-jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.14-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
-( new MigrationManager( '0.129.14-test', $migration_dir ) )->run();
+( new MigrationManager( '0.129.15-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.15-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.15-test', $migration_dir ) )->run();
 jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
 unlink( $migration_file );
 rmdir( $migration_dir );
@@ -460,6 +465,62 @@ jet_assert( ! empty( $ru_override['success'] ) && ! in_array( 'RU', $enabled_cou
 $missing_override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'missing-row', 'location_id' => 77 ) );
 $invalid_override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 999 ) );
 jet_assert( empty( $missing_override['success'] ) && empty( $GLOBALS['wpdb']->jet_overrides['missing-row'] ) && empty( $invalid_override['success'] ), 'Jet manual override must reject missing source identity and invalid location without orphan override.' );
+
+$pagination_cities_backup = $GLOBALS['wpdb']->jet_cities;
+$pagination_locations_backup = $GLOBALS['wpdb']->locations;
+$pagination_get_backup = $_GET;
+$GLOBALS['wpdb']->jet_cities = array();
+$GLOBALS['wpdb']->locations = array();
+for ( $i = 1; $i <= 250; ++$i ) {
+	$identity = sprintf( 'page-%03d', $i );
+	$GLOBALS['wpdb']->jet_cities[ $identity ] = array(
+		'id' => $i,
+		'source_identity' => $identity,
+		'source_city' => sprintf( 'City %03d', $i ),
+		'source_region' => 'Page Region',
+		'normalized_city' => sprintf( 'city %03d', $i ),
+		'normalized_region' => 'page region',
+		'country_code' => 'KZ',
+		'location_id' => $i,
+		'match_status' => 0 === $i % 5 ? 'ambiguous' : 'matched',
+		'match_source' => 'manual_override',
+		'active' => 1,
+	);
+	$GLOBALS['wpdb']->locations[] = array( 'id' => $i, 'country_code' => 'KZ', 'region_name' => 'Page Region', 'place_name' => sprintf( 'City %03d', $i ), 'display_name' => sprintf( 'Display %03d', $i ), 'active' => 1 );
+}
+$admin_page_1 = $geo->admin_page( 1, 100 );
+$admin_page_2 = $geo->admin_page( 2, 100 );
+$admin_page_3 = $geo->admin_page( 3, 100 );
+$admin_page_invalid = $geo->admin_page( 99, 100 );
+jet_assert( 100 === count( $admin_page_1['items'] ) && 250 === (int) $admin_page_1['total'] && 1 === (int) $admin_page_1['page'] && 100 === (int) $admin_page_1['per_page'] && 3 === (int) $admin_page_1['total_pages'], 'Jet geography admin_page page 1 must return the first 100 of 250 rows.' );
+jet_assert( 100 === count( $admin_page_2['items'] ) && 'page-101' === (string) $admin_page_2['items'][0]['source_identity'] && 101 === ( ( (int) $admin_page_2['page'] - 1 ) * (int) $admin_page_2['per_page'] ) + 1, 'Jet geography admin_page page 2 must start at row number 101.' );
+jet_assert( 50 === count( $admin_page_3['items'] ) && 'page-250' === (string) $admin_page_3['items'][49]['source_identity'] && 250 === ( ( (int) $admin_page_3['page'] - 1 ) * (int) $admin_page_3['per_page'] ) + 50, 'Jet geography admin_page page 3 must end at row number 250.' );
+jet_assert( 3 === (int) $admin_page_invalid['page'] && 50 === count( $admin_page_invalid['items'] ), 'Jet geography admin_page must clamp invalid high pages to the last page.' );
+jet_assert( 10 === (int) $geo->admin_page( 1, 25 )['total_pages'] && 5 === (int) $geo->admin_page( 1, 50 )['total_pages'] && 3 === (int) $geo->admin_page( 1, 100 )['total_pages'] && 2 === (int) $geo->admin_page( 1, 200 )['total_pages'] && 100 === (int) $geo->admin_page( 1, 999 )['per_page'], 'Jet geography admin_page must support only 25, 50, 100 and 200 rows per page and normalize invalid sizes to 100.' );
+
+$_GET = array( 'jet_page' => '2', 'jet_per_page' => '100' );
+$GLOBALS['wpdb']->location_find_by_id_calls = 0;
+$GLOBALS['wpdb']->location_find_map_by_ids_calls = 0;
+$GLOBALS['wpdb']->location_find_map_by_ids_last_ids = array();
+ob_start();
+$jet_geo_admin->render_embedded( new DeliveryService( 501, JetLogisticSettings::SERVICE_KEY, JetLogisticSettings::CARRIER_KEY, DeliveryService::TYPE_API, 'Jet Logistic' ), array() );
+$admin_html = (string) ob_get_clean();
+$decoded_admin_html = html_entity_decode( $admin_html, ENT_QUOTES, 'UTF-8' );
+jet_assert( str_contains( $decoded_admin_html, '<td class="wdc-row-number">101</td>' ) && str_contains( $decoded_admin_html, '<td class="wdc-row-number">200</td>' ) && ! str_contains( $decoded_admin_html, '<td class="wdc-row-number">1</td>' ), 'Jet geography admin HTML page 2 must show continuous row numbers 101-200 instead of restarting at 1.' );
+jet_assert( str_contains( $decoded_admin_html, 'Всего: 250' ) && str_contains( $decoded_admin_html, 'Страница 2 из 3' ) && str_contains( $decoded_admin_html, 'Показаны: 101' ) && str_contains( $decoded_admin_html, '200' ), 'Jet geography admin HTML must show total, visible range and current page metadata.' );
+jet_assert( str_contains( $decoded_admin_html, 'jet_page=1' ) && str_contains( $decoded_admin_html, 'jet_page=3' ) && str_contains( $decoded_admin_html, 'jet_per_page=100' ) && str_contains( $decoded_admin_html, 'page=wdc-delivery-services' ) && str_contains( $decoded_admin_html, 'service=jet_logistic' ), 'Jet geography pagination links must preserve service page, Jet service and per-page state.' );
+jet_assert( str_contains( $decoded_admin_html, 'Display 101' ) && 1 === $GLOBALS['wpdb']->location_find_map_by_ids_calls && 0 === $GLOBALS['wpdb']->location_find_by_id_calls && 101 === min( $GLOBALS['wpdb']->location_find_map_by_ids_last_ids ) && 200 === max( $GLOBALS['wpdb']->location_find_map_by_ids_last_ids ), 'Jet geography admin table must batch-load display names only for the current page IDs.' );
+$_POST = array( 'jet_page' => '3', 'jet_per_page' => '50' );
+$redirect_reflection = new ReflectionMethod( DeliveryServicesAdminPage::class, 'jet_logistic_redirect_url' );
+$redirect_reflection->setAccessible( true );
+$delivery_admin_instance = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
+$override_redirect_url = $redirect_reflection->invoke( $delivery_admin_instance, 'save_jet_geography_override', 'jet_geography' );
+$import_redirect_url = $redirect_reflection->invoke( $delivery_admin_instance, 'import_jet_geography_csv', 'jet_geography' );
+jet_assert( str_contains( $override_redirect_url, 'jet_page=3' ) && str_contains( $override_redirect_url, 'jet_per_page=50' ) && str_contains( $import_redirect_url, 'jet_page=1' ) && str_contains( $import_redirect_url, 'jet_per_page=50' ), 'Jet geography redirects must preserve current page for manual overrides and reset imports to page 1 while keeping per-page size.' );
+$_POST = array();
+$_GET = $pagination_get_backup;
+$GLOBALS['wpdb']->jet_cities = $pagination_cities_backup;
+$GLOBALS['wpdb']->locations = $pagination_locations_backup;
 
 $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 184501, 'country_code' => 'RU', 'region_name' => 'Карачаево-Черкесская', 'place_name' => 'Аксу', 'place_type' => 'с', 'active' => 1 ),

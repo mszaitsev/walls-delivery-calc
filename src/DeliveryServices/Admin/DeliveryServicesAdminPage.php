@@ -1315,8 +1315,31 @@ final class DeliveryServicesAdminPage {
 			'save_jet_status_mapping' => 'jet_statuses',
 			default => 'jet_geography',
 		};
-		wp_safe_redirect( $this->service_tab_url_by_key( JetLogisticSettings::SERVICE_KEY, $tab ) );
+		wp_safe_redirect( $this->jet_logistic_redirect_url( $action, $tab ) );
 		exit;
+	}
+
+	private function jet_logistic_redirect_url( string $action, string $tab ): string {
+		$args = array(
+			'page' => self::MENU_SLUG,
+			'service' => JetLogisticSettings::SERVICE_KEY,
+			'tab' => $tab,
+		);
+		if ( 'jet_geography' === $tab ) {
+			$args['jet_page'] = 'save_jet_geography_override' === $action ? $this->jet_positive_post_int( 'jet_page', 1 ) : 1;
+			$args['jet_per_page'] = $this->jet_per_page_from_post();
+		}
+
+		return admin_url( 'admin.php?' . http_build_query( $args ) );
+	}
+
+	private function jet_positive_post_int( string $key, int $default ): int {
+		return max( 1, (int) ( $_POST[ $key ] ?? $default ) );
+	}
+
+	private function jet_per_page_from_post(): int {
+		$per_page = (int) ( $_POST['jet_per_page'] ?? 100 );
+		return in_array( $per_page, array( 25, 50, 100, 200 ), true ) ? $per_page : 100;
 	}
 
 	/** @param array<string,mixed> $result @return array<string,mixed> */

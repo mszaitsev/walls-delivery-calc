@@ -191,8 +191,83 @@ final class JetLogisticGeographyRepository {
 	/** @return array<int,array<string,mixed>> */
 	public function admin_rows( int $limit = 100 ): array {
 		$limit = max( 1, min( 500, $limit ) );
-		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} ORDER BY active DESC, country_code ASC, source_city ASC LIMIT {$limit}", ARRAY_A );
+		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} ORDER BY active DESC, country_code ASC, source_city ASC, source_identity ASC LIMIT {$limit}", ARRAY_A );
 		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array{items:array<int,array<string,mixed>>,total:int,page:int,per_page:int,total_pages:int}
+	 */
+	public function admin_page( int $page = 1, int $per_page = 100, array $filters = array() ): array {
+		unset( $filters );
+		$page = max( 1, $page );
+		$per_page = in_array( $per_page, array( 25, 50, 100, 200 ), true ) ? $per_page : 100;
+
+		if ( property_exists( $this->wpdb, 'jet_cities' ) ) {
+			return $this->admin_page_in_memory( $page, $per_page );
+		}
+
+		$total = (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table()}" );
+		if ( $total <= 0 ) {
+			return array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => $per_page, 'total_pages' => 0 );
+		}
+
+		$total_pages = max( 1, (int) ceil( $total / $per_page ) );
+		$page = min( $page, $total_pages );
+		$offset = ( $page - 1 ) * $per_page;
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->table()} ORDER BY active DESC, country_code ASC, source_city ASC, source_identity ASC LIMIT %d OFFSET %d",
+				$per_page,
+				$offset
+			),
+			ARRAY_A
+		);
+
+		return array(
+			'items' => is_array( $rows ) ? $rows : array(),
+			'total' => $total,
+			'page' => $page,
+			'per_page' => $per_page,
+			'total_pages' => $total_pages,
+		);
+	}
+
+	/** @return array{items:array<int,array<string,mixed>>,total:int,page:int,per_page:int,total_pages:int} */
+	private function admin_page_in_memory( int $page, int $per_page ): array {
+		$items = array_values( $this->wpdb->jet_cities );
+		usort(
+			$items,
+			static function ( array $a, array $b ): int {
+				$active = (int) ( $b['active'] ?? 0 ) <=> (int) ( $a['active'] ?? 0 );
+				if ( 0 !== $active ) {
+					return $active;
+				}
+				foreach ( array( 'country_code', 'source_city', 'source_identity' ) as $key ) {
+					$comparison = strcmp( (string) ( $a[ $key ] ?? '' ), (string) ( $b[ $key ] ?? '' ) );
+					if ( 0 !== $comparison ) {
+						return $comparison;
+					}
+				}
+				return 0;
+			}
+		);
+		$total = count( $items );
+		if ( 0 === $total ) {
+			return array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => $per_page, 'total_pages' => 0 );
+		}
+		$total_pages = max( 1, (int) ceil( $total / $per_page ) );
+		$page = min( $page, $total_pages );
+		$offset = ( $page - 1 ) * $per_page;
+
+		return array(
+			'items' => array_slice( $items, $offset, $per_page ),
+			'total' => $total,
+			'page' => $page,
+			'per_page' => $per_page,
+			'total_pages' => $total_pages,
+		);
 	}
 
 	/** @return array<string,int> */
