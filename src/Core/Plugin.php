@@ -56,6 +56,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiClient;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticHttpClientInterface;
 use WallsShop\WDC\Carriers\JetLogistic\Api\WpJetLogisticHttpClient;
+use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvClient;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvParser;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCityNameNormalizer;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCountrySyncService;

@@ -28,6 +28,7 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
@@ -40,6 +41,8 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Core\Plugin;
+use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentAdapter;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentService;
@@ -52,6 +55,7 @@ function jet_assert( bool $condition, string $message ): void {
 	}
 }
 function current_time( string $type ): string { return '2026-07-28 12:00:00'; }
+function trailingslashit( string $value ): string { return rtrim( $value, '/\\' ) . '/'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
@@ -241,6 +245,7 @@ jet_assert( str_contains( $geography_admin_source, "JetLogisticCitiesCsvClient::
 jet_assert( str_contains( $delivery_admin_source, 'set_transient( $this->jet_admin_notice_key()' ) && str_contains( $delivery_admin_source, 'get_transient( $key )' ) && str_contains( $delivery_admin_source, 'delete_transient( $key )' ), 'Jet admin actions must use one-shot flash notices.' );
 jet_assert( ! str_contains( $plugin_source, 'JetLogisticGeographyAdminPage::class )->register()' ) && ! str_contains( $plugin_source, 'JetLogisticStatusAdminPage::class )->register()' ), 'Plugin hooks must not register standalone Jet admin pages.' );
 jet_assert( str_contains( $delivery_admin_source, "page=' . self::MENU_SLUG . '&service=' . rawurlencode( \$service->service_key ) . '&tab=' . rawurlencode( \$tab_key )" ) && str_contains( $delivery_admin_source, "http_build_query( array( 'page' => self::MENU_SLUG, 'service' => \$service_key, 'tab' => \$tab )" ), 'Jet tab URLs must use the delivery services service-tab URL helpers.' );
+jet_assert( str_contains( $plugin_source, 'use WallsShop\\WDC\\Carriers\\JetLogistic\\Geography\\JetLogisticCitiesCsvClient;' ), 'Plugin DI must import JetLogisticCitiesCsvClient from the Jet geography namespace.' );
 jet_assert( ! str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php' ), 'return (bool) $this->wpdb->update' ), 'Jet manual override snapshot update must not cast wpdb update result to bool.' );
 foreach ( array( 'download failed', 'is empty', 'response is too large', 'returned HTML', 'upload failed', 'has no rows', 'operation completed', 'operation failed', 'component is unavailable', 'Unknown Jet Logistic admin action' ) as $english_message ) {
 	jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $english_message ), 'Jet admin user-facing messages must be Russian: ' . $english_message );
@@ -248,6 +253,15 @@ foreach ( array( 'download failed', 'is empty', 'response is too large', 'return
 foreach ( array( 'География Jet Logistic успешно импортирована.', 'Ручное сопоставление Jet Logistic применено.', 'Настройки Jet Logistic сохранены.', 'Сопоставление статуса Jet Logistic сохранено.', 'Не удалось скачать cities.csv Jet Logistic', 'Строк импортировано', 'Сопоставлено', 'Требует уточнения', 'Не сопоставлено', 'Пропущено', 'Некорректных строк' ) as $russian_message ) {
 	jet_assert( str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $russian_message ), 'Jet admin must expose Russian message or label: ' . $russian_message );
 }
+
+$plugin = new Plugin( new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.129.7' ) );
+$register_services = new ReflectionMethod( Plugin::class, 'register_services' );
+$register_services->setAccessible( true );
+$register_services->invoke( $plugin );
+$container = $plugin->container();
+jet_assert( $container->get( JetLogisticCitiesCsvClient::class ) instanceof JetLogisticCitiesCsvClient, 'Plugin container must resolve JetLogisticCitiesCsvClient without Core namespace fallback.' );
+jet_assert( $container->get( JetLogisticGeographyAdminPage::class ) instanceof JetLogisticGeographyAdminPage, 'Plugin container must resolve Jet geography admin page without missing Jet imports.' );
+jet_assert( $container->get( DeliveryServicesAdminPage::class ) instanceof DeliveryServicesAdminPage, 'Plugin container must resolve delivery services admin page with embedded Jet dependencies.' );
 
 $csv_client = new JetLogisticCitiesCsvClient();
 $GLOBALS['wdc_remote_get_responses'] = array( array( 'status' => 200, 'body' => "city;region;country_code\nAstana;;KZ\n" ) );
@@ -295,15 +309,15 @@ $GLOBALS['wdc_options'] = array();
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { throw new RuntimeException('jet fake failure'); };\n" );
 $failed = false;
 try {
-	( new MigrationManager( '0.129.6-test', $migration_dir ) )->run();
+	( new MigrationManager( '0.129.7-test', $migration_dir ) )->run();
 } catch ( RuntimeException ) {
 	$failed = true;
 }
 jet_assert( $failed && ! in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'Failed migration callback must not be marked as applied.' );
 file_put_contents( $migration_file, "<?php\nreturn static function (): void { update_option('wdc_jet_fake_migration_runs', (int) get_option('wdc_jet_fake_migration_runs', 0) + 1, false); };\n" );
-( new MigrationManager( '0.129.6-test', $migration_dir ) )->run();
-jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.6-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
-( new MigrationManager( '0.129.6-test', $migration_dir ) )->run();
+( new MigrationManager( '0.129.7-test', $migration_dir ) )->run();
+jet_assert( in_array( '0001_jet_fake_migration.php', (array) get_option( 'wdc_applied_migrations', array() ), true ) && '0.129.7-test' === get_option( 'wdc_db_version', '' ), 'Successful migration callback must be marked as applied and update db version.' );
+( new MigrationManager( '0.129.7-test', $migration_dir ) )->run();
 jet_assert( 1 === (int) get_option( 'wdc_jet_fake_migration_runs', 0 ), 'Applied migration must not run again on repeated MigrationManager run.' );
 unlink( $migration_file );
 rmdir( $migration_dir );

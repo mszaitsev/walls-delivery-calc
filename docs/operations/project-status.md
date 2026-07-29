@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.129.6
+Version: 0.129.7
 
 Stable subsystems:
 
