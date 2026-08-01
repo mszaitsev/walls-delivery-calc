@@ -58,6 +58,7 @@ return array(
 	'yandex.source-station' => array( 'path' => 'tests/yandex-delivery/run-yandex-delivery-source-station-smoke.php', 'groups' => array( 'yandex' ) ),
 
 	'jet-logistic.foundation' => array( 'path' => 'tests/jet-logistic/run-jet-logistic-smoke.php', 'groups' => array( 'jet-logistic' ) ),
+	'pek.foundation' => array( 'path' => 'tests/pek/run-pek-foundation-smoke.php', 'groups' => array( 'pek' ) ),
 
 	'status.order-status-mapping' => array( 'path' => 'tests/statuses/run-order-status-mapping-smoke.php', 'groups' => array( 'status-core' ) ),
 	'status.status-autosync' => array( 'path' => 'tests/statuses/run-status-autosync-smoke.php', 'groups' => array( 'status-core' ) ),

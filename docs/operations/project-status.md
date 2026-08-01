@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.129.16
+Version: 0.130.0
 
 Stable subsystems:
 
@@ -16,6 +16,7 @@ Stable subsystems:
 - shipment cost analytics on the overview admin page, comparing the selected order delivery's base API planned cost with canonical actual shipment cost.
 - CDEK EAEU support through the single `cdek` carrier/service with configurable `RU`, `AM`, `BY`, `KZ`, and `KG` availability.
 - Jet Logistic support through one carrier/service with separate geography import, two quote rates from one API calculation, manual tracking attach, status mappings, and shared autosync.
+- PEK foundation and delivery-service settings. The built-in PEK service is disabled by default, starts with only `RU`, stores legal sender data and the default sender warehouse, and keeps `AM`, `BY`, `KG`, and `KZ` planned for later international testing. Runtime checkout quotes, shipment creation, statuses, documents, actual-cost integration, and cancellation are not implemented.
 
 Active known limitations:
 
@@ -43,6 +44,8 @@ Recent fixes:
 - Yandex terminal cancellation tick now treats the active cancellation toast state as lifecycle ownership, so missing terminal purpose metadata cannot leave the last progress toast visible.
 - Yandex cancellation status AJAX now preserves the adapter's `cancelled_and_removed` marker in JSON, so terminal polling resets the shipment UI and finishes the cancellation toast instead of falling back to persistent progress.
 - Shipment cost analytics now appears on `admin.php?page=wdc-platform`. It uses the `wdc_shipment_cost_analytics` materialized read-model table, indexes at most one matching created shipment per eligible order, uses `ShipmentBaseApiCostResolver`, canonical `actual_cost_*` fields, registry-driven carrier filters, integer 3% threshold checks, SQL sorting/pagination/aggregates, and no runtime WooCommerce order scan.
+- PEK foundation now seeds a predefined disabled `pek` API delivery service with only `RU` on first setup and preserves administrator country choices on later boot. PEK settings store login, encrypted API key, legal sender data, client card, HTTP limits, SMS-release contractual limit, and the default sender warehouse snapshot. Manual diagnostics verify credentials, API availability, LTL `type=3`, branch countries, and legal-form directory; manual warehouse search uses `/branches/nearestdepartments/` with `departmentOperation=2` and `type=3`, and selected warehouse IDs are validated server-side before saving. Shipment Framework remains unchanged.
+- Future PEK shipment creation must use sender-paid services, self-delivery to the selected PEK warehouse (`orderType=0`), and mandatory insurance. The canonical PEK declared-value resolver must use WooCommerce product value after product discounts and promo codes, excluding delivery and non-product fees, in the same tax basis shown to the buyer. The first RU physical-recipient flow is designed for SMS release when available; passport data must not be requested or stored when SMS release availability is confirmed. The current contractual SMS-release limit is 500000 RUB, but the shipment flow must apply the strictest applicable limit from contract, route/service availability, counterparty service availability, and any API-returned limit. Legal recipients (`physical | legal`) are a future design target. PEK documents, status mapping, actual-cost integration, and cancellation are not implemented; future preliminary-order cancellation may use `/order/cancellation/` only under the documented operational constraints and must never use `/cargos/cancelandreturncargo/`.
 
 Canonical docs:
 
@@ -55,4 +58,10 @@ Primary test command:
 
 ```bash
 php tests/shipments/run-shipment-regression-profile.php
+```
+
+PEK foundation profile:
+
+```bash
+php tests/shipments/run-shipment-regression-profile.php --group=pek
 ```

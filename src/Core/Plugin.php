@@ -72,6 +72,15 @@ use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteResponseParser;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMapper;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
+use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
+use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
+use WallsShop\WDC\Carriers\Pek\Api\WpPekHttpClient;
+use WallsShop\WDC\Carriers\Pek\PekCredentials;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
@@ -379,6 +388,13 @@ final class Plugin {
 		$this->container->register( JetLogisticCredentials::class, fn(): JetLogisticCredentials => new JetLogisticCredentials( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
 		$this->container->register( JetLogisticHttpClientInterface::class, fn(): JetLogisticHttpClientInterface => new WpJetLogisticHttpClient() );
 		$this->container->register( JetLogisticApiClient::class, fn(): JetLogisticApiClient => new JetLogisticApiClient( $this->container->get( JetLogisticHttpClientInterface::class ), $this->container->get( JetLogisticSettings::class ) ) );
+		$this->container->register( PekSettings::class, fn(): PekSettings => new PekSettings( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( PekCredentials::class, fn(): PekCredentials => new PekCredentials( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
+		$this->container->register( PekHttpClientInterface::class, fn(): PekHttpClientInterface => new WpPekHttpClient() );
+		$this->container->register( PekRequestBudget::class, fn(): PekRequestBudget => new PekRequestBudget( $this->container->get( PekSettings::class ) ) );
+		$this->container->register( PekApiClient::class, fn(): PekApiClient => new PekApiClient( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekHttpClientInterface::class ), $this->container->get( PekRequestBudget::class ) ) );
+		$this->container->register( PekConnectionDiagnosticService::class, fn(): PekConnectionDiagnosticService => new PekConnectionDiagnosticService( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekApiClient::class ) ) );
+		$this->container->register( PekSenderWarehouseService::class, fn(): PekSenderWarehouseService => new PekSenderWarehouseService( $this->container->get( PekApiClient::class ), $this->container->get( PekSettings::class ) ) );
 		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );
 		$this->container->register( JetLogisticRegionNameNormalizer::class, fn(): JetLogisticRegionNameNormalizer => new JetLogisticRegionNameNormalizer() );
 		$this->container->register( JetLogisticCitiesCsvClient::class, fn(): JetLogisticCitiesCsvClient => new JetLogisticCitiesCsvClient() );
@@ -789,6 +805,7 @@ final class Plugin {
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
 		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticCitiesCsvClient::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
+		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(
@@ -849,6 +866,7 @@ final class Plugin {
 				$this->container->get( SettingsRepository::class ),
 				$this->container->get( JetLogisticGeographyAdminPage::class ),
 				$this->container->get( JetLogisticStatusAdminPage::class ),
+				$this->container->get( PekAdminPage::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );

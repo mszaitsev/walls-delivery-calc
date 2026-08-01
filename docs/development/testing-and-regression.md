@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.129.16
+Version: 0.130.0
 
 Jet Logistic critical coverage is registered as the mandatory `jet-logistic` group. It covers API envelope handling, token redaction, CSV/geography basics, one-call two-rate quoting, discounted package goods cost and `D_SDOC`, terminal-city presentation, status mapping with compact events, manual attach, unsupported create, and local remove.
 
@@ -14,6 +14,7 @@ php tests/shipments/run-shipment-regression-profile.php --group=cdek
 php tests/shipments/run-shipment-regression-profile.php --group=dpd
 php tests/shipments/run-shipment-regression-profile.php --group=russian-post
 php tests/shipments/run-shipment-regression-profile.php --group=yandex
+php tests/shipments/run-shipment-regression-profile.php --group=pek
 php tests/shipments/run-shipment-regression-profile.php --group=status-core
 php tests/shipments/run-shipment-regression-profile.php
 ```
@@ -30,6 +31,8 @@ DPD Geography browser-import lifecycle changes should also run `node tests/dpd/r
 
 The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. Shipment and carrier smoke tests that protect framework contracts should appear there.
 
+PEK foundation is registered as mandatory `pek.foundation` in group `pek`. Run it directly with `php tests/pek/run-pek-foundation-smoke.php` or through `php tests/shipments/run-shipment-regression-profile.php --group=pek`. The smoke uses fake HTTP only, verifies no production network calls are made, and asserts PEK is not registered in `CarrierRegistry` or Shipment Framework registries.
+
 The plugin architecture smoke is `framework.plugin-architecture`; it is registered in the framework group and checks architecture boundaries rather than carrier business behavior. It favors dynamic Reflection-based checks where the contract is inspectable. Where runtime proof would require changing production construction, the smoke checks a narrower contract instead: registry duplicate behavior is tested with stubs, providers are discovered without uninitialized method calls, and composition-root ownership is checked for the current `Container::register()` wiring pattern.
 
 Allowed matrix values:
@@ -43,9 +46,9 @@ Allowed matrix values:
 
 ## Coverage Matrix
 
-| Capability | Framework | CDEK | DPD | Russian Post | Yandex |
-| --- | --- | --- | --- | --- | --- |
-| architecture invariants | `contract`: `framework.plugin-architecture` | `N/A` | `N/A` | `N/A` | `N/A` |
+| Capability | Framework | CDEK | DPD | Russian Post | Yandex | PEK |
+| --- | --- | --- | --- | --- | --- | --- |
+| architecture invariants | `contract`: `framework.plugin-architecture` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.foundation` |
 | create | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
 | preview | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-payload` |
 | persistence | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |

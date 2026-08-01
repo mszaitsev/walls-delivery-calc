@@ -6,6 +6,7 @@ namespace WallsShop\WDC\DeliveryServices;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
@@ -113,6 +114,7 @@ final class DeliveryServiceRepository {
 				RussianPostDomesticSettings::SERVICE_KEY,
 				CdekSettings::SERVICE_KEY,
 				DpdSettings::SERVICE_KEY,
+				PekSettings::SERVICE_KEY,
 				JetLogisticSettings::SERVICE_KEY,
 				YandexDeliverySettings::SERVICE_KEY,
 			),
@@ -394,6 +396,52 @@ final class DeliveryServiceRepository {
 		$created = $this->find_by_service_key( JetLogisticSettings::SERVICE_KEY );
 
 		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => JetLogisticSettings::SERVICE_KEY, 'carrier_key' => JetLogisticSettings::CARRIER_KEY, 'title' => JetLogisticSettings::PUBLIC_TITLE, 'enabled' => 0 ) );
+	}
+
+	public function ensure_pek_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( PekSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => PekSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' === trim( $existing->title ) ? PekSettings::PUBLIC_TITLE : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( PekSettings::SERVICE_KEY, (int) $existing->id );
+			}
+			$updated = $this->find_by_service_key( PekSettings::SERVICE_KEY );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => PekSettings::SERVICE_KEY,
+				'carrier_key' => PekSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => PekSettings::PUBLIC_TITLE,
+				'enabled' => 0,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 70,
+				'deleted' => 0,
+			)
+		);
+		$created = $this->find_by_service_key( PekSettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => PekSettings::PUBLIC_TITLE, 'enabled' => 0 ) );
 	}
 	/**
 	 * @param array<int,string> $replaceable_titles
