@@ -62,7 +62,7 @@ $settings_repository = new SettingsRepository();
 $settings = new PekSettings( $settings_repository );
 $credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
-$settings->save_sender_warehouse( array( 'warehouseId' => 'nearest-timezone-wh', 'branchTimezone' => 'UTC+04:00', 'branchName' => 'Самара', 'divisionName' => 'Самара Запад' ) );
+$settings->save_sender_warehouse( array( 'warehouseId' => 'nearest-timezone-wh', 'source' => 'free', 'branchTimezone' => 'UTC+04:00', 'branchName' => 'Самара', 'divisionName' => 'Самара Запад' ) );
 $settings->save_diagnostic_result(
 	array(
 		'success' => false,
@@ -97,6 +97,34 @@ $settings->save_diagnostic_result(
 				'http_status' => 200,
 				'message' => 'RU подтверждена classifier 643.',
 			),
+			'warehouse_api' => array(
+				'endpoint' => '/branches/all/',
+				'method' => 'POST',
+				'status' => 'passed',
+				'success' => true,
+				'skipped' => false,
+				'required' => true,
+				'error_code' => '',
+				'http_status' => 200,
+				'message' => 'Метод списка филиалов ПЭК доступен.',
+			),
+			'warehouse_match' => array(
+				'endpoint' => '/branches/all/',
+				'method' => 'POST',
+				'status' => 'warning',
+				'success' => false,
+				'skipped' => false,
+				'required' => false,
+				'informational' => true,
+				'affects_all_checks' => false,
+				'warehouse_found' => false,
+				'warehouse_id' => 'nearest-timezone-wh',
+				'info_code' => 'pek_diagnostic_warehouse_not_matched',
+				'branches_checked' => 5,
+				'divisions_checked' => 17,
+				'warehouses_checked' => 42,
+				'message' => 'Сохранённый warehouse ID не найден в структуре ответа /branches/all/. Склад был выбран из free.',
+			),
 		),
 	)
 );
@@ -129,8 +157,11 @@ pek_ui_assert( str_contains( $html, 'RU' ) && str_contains( $html, '643' ) && st
 pek_ui_assert( ! str_contains( $html, '>Array<' ) && ! str_contains( $html, 'Array to string conversion' ), 'PEK diagnostic nested arrays must not render as Array or warning text.' );
 pek_ui_assert( str_contains( $html, '2026-08-03 01:13:52' ) && ! str_contains( $html, '[redacted-phone]:13:52' ), 'PEK diagnostic checked_at must render as a full machine datetime.' );
 pek_ui_assert( str_contains( $html, 'GET /typesOfDelivery/all/' ) && str_contains( $html, 'HTTP 403' ) && str_contains( $html, 'pek_http_403' ) && str_contains( $html, 'POST /branches/country/' ), 'PEK diagnostic checks must render method, endpoint, HTTP status and stable error code.' );
+pek_ui_assert( str_contains( $html, 'Сопоставление выбранного склада' ) && str_contains( $html, 'Информация:' ) && str_contains( $html, 'Проверено филиалов: 5, отделений: 17, складов: 42' ) && str_contains( $html, 'pek_diagnostic_warehouse_not_matched' ), 'PEK admin UI must render warehouse_match as informational diagnostics with safe counters.' );
+pek_ui_assert( ! str_contains( $html, 'ПЭК не подтвердил выбранный warehouse ID' ), 'PEK admin UI must not claim PEK explicitly rejected the saved warehouse ID.' );
 pek_ui_assert( ! str_contains( $html, '&quot;products&quot;' ) && ! str_contains( $html, '{&quot;endpoint&quot;' ), 'PEK diagnostic checks must not render as raw nested JSON.' );
 pek_ui_assert( str_contains( $html, 'Saved &lt;safe&gt;' ), 'PEK admin notice must render escaped content.' );
+pek_ui_assert( str_contains( $html, '>free<' ), 'PEK admin UI must render sender warehouse source.' );
 pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
 $search_field_pos = strpos( $html, 'id="pek_warehouse_search_address"' );

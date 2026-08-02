@@ -191,42 +191,103 @@ final class PekSenderWarehouseService {
 
 	/** @param array<string,mixed> $branches @return array<string,mixed> */
 	private function find_warehouse_in_branches_all( array $branches, string $warehouse_id ): array {
-		foreach ( is_array( $branches['branches'] ?? null ) ? $branches['branches'] : $branches as $branch ) {
+		$match = self::find_warehouse_in_branches_response( $branches, $warehouse_id );
+		if ( true !== ( $match['warehouse_found'] ?? false ) ) {
+			return array();
+		}
+		$branches_list = self::branches_from_response( $branches );
+		$branch = $branches_list[ (int) ( $match['branch_index'] ?? -1 ) ] ?? null;
+		$division = is_array( $branch ) ? ( $branch['divisions'][ (int) ( $match['division_index'] ?? -1 ) ] ?? null ) : null;
+		$warehouse = is_array( $division ) ? ( $division['warehouses'][ (int) ( $match['warehouse_index'] ?? -1 ) ] ?? null ) : null;
+		if ( ! is_array( $branch ) || ! is_array( $division ) || ! is_array( $warehouse ) ) {
+			return array();
+		}
+		$warehouse_has_capabilities = array_key_exists( 'kindsOfTransportation', $warehouse );
+
+		return $this->normalize_department(
+			array_merge(
+				$warehouse,
+				array(
+					'warehouseId' => self::normalized_warehouse_id( $warehouse['id'] ?? '' ),
+					'branchId' => (string) ( $branch['id'] ?? '' ),
+					'branchName' => (string) ( $branch['title'] ?? '' ),
+					'divisionName' => (string) ( $warehouse['divisionName'] ?? ( $division['name'] ?? '' ) ),
+					'departmentTypeId' => (int) ( $division['departmentTypeId'] ?? 0 ),
+					'departmentType' => (string) ( $division['departmentType'] ?? '' ),
+					'address' => (string) ( trim( (string) ( $warehouse['addressDivision'] ?? '' ) ) !== '' ? $warehouse['addressDivision'] : ( $warehouse['address'] ?? '' ) ),
+					'coordinates' => is_array( $warehouse['coordinatesobj'] ?? null ) ? $warehouse['coordinatesobj'] : array(),
+					'branchTimezone' => $branch['timezone'] ?? null,
+					'kindsOfTransportation' => $warehouse_has_capabilities ? ( is_array( $warehouse['kindsOfTransportation'] ?? null ) ? $warehouse['kindsOfTransportation'] : array() ) : ( is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array() ),
+				)
+			),
+			'branches_all',
+			0
+		);
+	}
+
+	/** @param array<string,mixed> $response @return array<string,mixed> */
+	public static function find_warehouse_in_branches_response( array $response, string $warehouse_id ): array {
+		$result = array(
+			'warehouse_found' => false,
+			'matched_id' => '',
+			'matched_field' => '',
+			'branches_checked' => 0,
+			'divisions_checked' => 0,
+			'warehouses_checked' => 0,
+			'unexpected_structure' => false,
+		);
+		$warehouse_id = self::normalized_warehouse_id( $warehouse_id );
+		$branches = self::branches_from_response( $response );
+		if ( null === $branches ) {
+			$result['unexpected_structure'] = true;
+			return $result;
+		}
+		foreach ( $branches as $branch_index => $branch ) {
 			if ( ! is_array( $branch ) ) {
 				continue;
 			}
-			foreach ( is_array( $branch['divisions'] ?? null ) ? $branch['divisions'] : array() as $division ) {
+			++$result['branches_checked'];
+			foreach ( is_array( $branch['divisions'] ?? null ) ? $branch['divisions'] : array() as $division_index => $division ) {
 				if ( ! is_array( $division ) ) {
 					continue;
 				}
-				foreach ( is_array( $division['warehouses'] ?? null ) ? $division['warehouses'] : array() as $warehouse ) {
-					if ( is_array( $warehouse ) && $warehouse_id === (string) ( $warehouse['id'] ?? '' ) ) {
-						$warehouse_has_capabilities = array_key_exists( 'kindsOfTransportation', $warehouse );
-						return $this->normalize_department(
-							array_merge(
-								$warehouse,
-								array(
-									'warehouseId' => (string) $warehouse['id'],
-									'branchId' => (string) ( $branch['id'] ?? '' ),
-									'branchName' => (string) ( $branch['title'] ?? '' ),
-									'divisionName' => (string) ( $warehouse['divisionName'] ?? ( $division['name'] ?? '' ) ),
-									'departmentTypeId' => (int) ( $division['departmentTypeId'] ?? 0 ),
-									'departmentType' => (string) ( $division['departmentType'] ?? '' ),
-									'address' => (string) ( trim( (string) ( $warehouse['addressDivision'] ?? '' ) ) !== '' ? $warehouse['addressDivision'] : ( $warehouse['address'] ?? '' ) ),
-									'coordinates' => is_array( $warehouse['coordinatesobj'] ?? null ) ? $warehouse['coordinatesobj'] : array(),
-									'branchTimezone' => $branch['timezone'] ?? null,
-									'kindsOfTransportation' => $warehouse_has_capabilities ? ( is_array( $warehouse['kindsOfTransportation'] ?? null ) ? $warehouse['kindsOfTransportation'] : array() ) : ( is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array() ),
-								)
-							),
-							'branches_all',
-							0
-						);
+				++$result['divisions_checked'];
+				foreach ( is_array( $division['warehouses'] ?? null ) ? $division['warehouses'] : array() as $warehouse_index => $warehouse ) {
+					if ( ! is_array( $warehouse ) ) {
+						continue;
+					}
+					++$result['warehouses_checked'];
+					$id = self::normalized_warehouse_id( $warehouse['id'] ?? '' );
+					if ( '' !== $id && $id === $warehouse_id ) {
+						$result['warehouse_found'] = true;
+						$result['matched_id'] = $id;
+						$result['matched_field'] = 'id';
+						$result['branch_index'] = (int) $branch_index;
+						$result['division_index'] = (int) $division_index;
+						$result['warehouse_index'] = (int) $warehouse_index;
+						return $result;
 					}
 				}
 			}
 		}
 
-		return array();
+		return $result;
+	}
+
+	/** @param array<string,mixed> $response @return ?array<int,mixed> */
+	private static function branches_from_response( array $response ): ?array {
+		if ( is_array( $response['branches'] ?? null ) ) {
+			return $response['branches'];
+		}
+		if ( array_values( $response ) === $response ) {
+			return $response;
+		}
+
+		return null;
+	}
+
+	private static function normalized_warehouse_id( mixed $value ): string {
+		return is_scalar( $value ) ? trim( (string) $value ) : '';
 	}
 
 	/** @param array<string,mixed> $item */
@@ -417,6 +478,7 @@ final class PekSenderWarehouseService {
 			'departmentType' => (string) ( $item['departmentType'] ?? '' ),
 			'address' => (string) ( $item['address'] ?? '' ),
 			'coordinates' => is_array( $item['coordinates'] ?? null ) ? $item['coordinates'] : array(),
+			'source' => (string) ( $item['source'] ?? '' ),
 			'branchTimezone' => $item['branchTimezone'] ?? null,
 			'limits' => array(
 				'maxWeight' => $item['maxWeight'] ?? null,

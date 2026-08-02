@@ -120,23 +120,27 @@ final class PekConnectionDiagnosticService {
 
 		$warehouse = $this->settings->sender_warehouse();
 		$warehouse_id = trim( (string) ( $warehouse['warehouseId'] ?? '' ) );
+		$warehouse_source = trim( (string) ( $warehouse['source'] ?? '' ) );
+		$warehouse_match = null;
 		if ( '' === $warehouse_id ) {
 			$result['checks']['warehouse_api'] = $this->skipped_check( '/branches/all/', 'POST', false, 'Склад самопривоза ещё не выбран.' );
+			$result['checks']['warehouse_match'] = $this->skipped_match_check( 'Склад самопривоза ещё не выбран.' );
 		} else {
 			$result['checks']['warehouse_api'] = $this->run_check(
 				'warehouse_api',
 				'/branches/all/',
 				'POST',
 				true,
-				function () use ( $warehouse_id ): string {
+				function () use ( $warehouse_id, &$warehouse_match ): string {
 					$branches = $this->api->branches_all_for_warehouse( $warehouse_id );
-					if ( ! $this->branches_all_contains_warehouse( $branches, $warehouse_id ) ) {
-						throw new PekApiException( 'ПЭК не подтвердил выбранный warehouse ID.', array( 'endpoint' => '/branches/all/', 'error_code' => 'pek_sender_warehouse_not_found', 'http_status' => 200 ) );
-					}
+					$warehouse_match = PekSenderWarehouseService::find_warehouse_in_branches_response( $branches, $warehouse_id );
 
-					return 'Выбранный склад подтверждён через warehouse API.';
+					return 'Метод списка филиалов ПЭК доступен.';
 				}
 			);
+			$result['checks']['warehouse_match'] = true === ( $result['checks']['warehouse_api']['success'] ?? false )
+				? $this->warehouse_match_check( $warehouse_id, $warehouse_source, is_array( $warehouse_match ) ? $warehouse_match : array() )
+				: $this->skipped_match_check( 'Сопоставление склада пропущено: метод /branches/all/ недоступен.' );
 		}
 
 		$result['connection_ok'] = $this->connection_ok( $result['checks'] );
@@ -160,6 +164,8 @@ final class PekConnectionDiagnosticService {
 				'success' => true,
 				'skipped' => false,
 				'required' => $required,
+				'affects_connection' => true,
+				'affects_all_checks' => true,
 				'error_code' => '',
 				'http_status' => 200,
 				'message' => '' !== $message ? $message : 'Успешно.',
@@ -174,6 +180,8 @@ final class PekConnectionDiagnosticService {
 				'success' => false,
 				'skipped' => false,
 				'required' => $required,
+				'affects_connection' => true,
+				'affects_all_checks' => true,
 				'error_code' => (string) ( $context['error_code'] ?? 'pek_diagnostic_' . $key . '_failed' ),
 				'http_status' => isset( $context['http_status'] ) ? (int) $context['http_status'] : null,
 				'message' => $exception->getMessage(),
@@ -190,37 +198,81 @@ final class PekConnectionDiagnosticService {
 			'success' => false,
 			'skipped' => true,
 			'required' => $required,
+			'affects_connection' => false,
+			'affects_all_checks' => false,
 			'error_code' => '',
 			'http_status' => null,
 			'message' => $message,
 		);
 	}
 
-	/** @param array<string,mixed> $branches */
-	private function branches_all_contains_warehouse( array $branches, string $warehouse_id ): bool {
-		foreach ( is_array( $branches['branches'] ?? null ) ? $branches['branches'] : $branches as $branch ) {
-			if ( ! is_array( $branch ) ) {
-				continue;
-			}
-			foreach ( is_array( $branch['divisions'] ?? null ) ? $branch['divisions'] : array() as $division ) {
-				if ( ! is_array( $division ) ) {
-					continue;
-				}
-				foreach ( is_array( $division['warehouses'] ?? null ) ? $division['warehouses'] : array() as $warehouse ) {
-					if ( is_array( $warehouse ) && $warehouse_id === (string) ( $warehouse['id'] ?? '' ) ) {
-						return true;
-					}
-				}
-			}
+	/** @param array<string,mixed> $match @return array<string,mixed> */
+	private function warehouse_match_check( string $warehouse_id, string $source, array $match ): array {
+		$found = true === ( $match['warehouse_found'] ?? false );
+		$counters = array(
+			'branches_checked' => (int) ( $match['branches_checked'] ?? 0 ),
+			'divisions_checked' => (int) ( $match['divisions_checked'] ?? 0 ),
+			'warehouses_checked' => (int) ( $match['warehouses_checked'] ?? 0 ),
+		);
+		$message = $found
+			? 'Warehouse ID найден в /branches/all/.'
+			: 'Сохранённый warehouse ID не найден в структуре ответа /branches/all/.';
+		if ( '' !== $source ) {
+			$message .= ' Склад был выбран из ' . $source . '.';
 		}
 
-		return false;
+		return array_merge(
+			array(
+				'endpoint' => '/branches/all/',
+				'method' => 'POST',
+				'status' => $found ? 'passed' : 'warning',
+				'success' => $found,
+				'skipped' => false,
+				'required' => false,
+				'informational' => true,
+				'affects_connection' => false,
+				'affects_all_checks' => false,
+				'warehouse_found' => $found,
+				'warehouse_id' => $warehouse_id,
+				'matched_id' => $found ? (string) ( $match['matched_id'] ?? '' ) : '',
+				'matched_field' => $found ? (string) ( $match['matched_field'] ?? '' ) : '',
+				'info_code' => $found ? '' : 'pek_diagnostic_warehouse_not_matched',
+				'http_status' => null,
+				'message' => $message,
+			),
+			$counters
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function skipped_match_check( string $message ): array {
+		return array(
+			'endpoint' => '/branches/all/',
+			'method' => 'POST',
+			'status' => 'skipped',
+			'success' => false,
+			'skipped' => true,
+			'required' => false,
+			'informational' => true,
+			'affects_connection' => false,
+			'affects_all_checks' => false,
+			'warehouse_found' => null,
+			'warehouse_id' => '',
+			'matched_id' => '',
+			'matched_field' => '',
+			'info_code' => '',
+			'http_status' => null,
+			'message' => $message,
+			'branches_checked' => 0,
+			'divisions_checked' => 0,
+			'warehouses_checked' => 0,
+		);
 	}
 
 	/** @param array<string,array<string,mixed>> $checks */
 	private function connection_ok( array $checks ): bool {
 		foreach ( $checks as $check ) {
-			if ( is_array( $check ) && true === ( $check['success'] ?? false ) ) {
+			if ( is_array( $check ) && false !== ( $check['affects_connection'] ?? true ) && true === ( $check['success'] ?? false ) ) {
 				return true;
 			}
 		}
@@ -231,7 +283,7 @@ final class PekConnectionDiagnosticService {
 	/** @param array<string,array<string,mixed>> $checks */
 	private function all_checks_passed( array $checks ): bool {
 		foreach ( $checks as $check ) {
-			if ( ! is_array( $check ) || true === ( $check['skipped'] ?? false ) ) {
+			if ( ! is_array( $check ) || true === ( $check['skipped'] ?? false ) || false === ( $check['affects_all_checks'] ?? true ) ) {
 				continue;
 			}
 			if ( true !== ( $check['success'] ?? false ) ) {
@@ -255,7 +307,7 @@ final class PekConnectionDiagnosticService {
 			return 'Подключение ПЭК работает. Выберите склад самопривоза для полной operational-проверки.';
 		}
 
-		return 'Подключение ПЭК работает. Некоторые справочные методы недоступны; подробности приведены ниже.';
+		return 'Подключение ПЭК частично работает. Некоторые API-проверки завершились ошибкой; подробности приведены ниже.';
 	}
 
 	private function now(): string {

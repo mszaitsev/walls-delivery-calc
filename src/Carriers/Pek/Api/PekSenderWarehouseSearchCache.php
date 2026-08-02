@@ -82,7 +82,7 @@ final class PekSenderWarehouseSearchCache {
 				'longitude' => (string) ( $item['coordinates']['longitude'] ?? '' ),
 			) : array(),
 			'priority' => (int) ( $item['priority'] ?? 0 ),
-			'source' => trim( (string) ( $item['source'] ?? '' ) ),
+			'source' => $this->sanitize_source( $item['source'] ?? '' ),
 			'maxWeight' => $item['maxWeight'] ?? null,
 			'maxVolume' => $item['maxVolume'] ?? null,
 			'maxDimension' => $item['maxDimension'] ?? null,
@@ -101,5 +101,11 @@ final class PekSenderWarehouseSearchCache {
 		}
 
 		return substr( trim( preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', (string) $value ) ?? (string) $value ), 0, 120 );
+	}
+
+	private function sanitize_source( mixed $value ): string {
+		$value = trim( (string) $value );
+
+		return in_array( $value, array( 'free', 'paid', 'branches_all' ), true ) ? $value : '';
 	}
 }

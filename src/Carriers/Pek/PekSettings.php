@@ -214,6 +214,7 @@ final class PekSettings {
 				'latitude' => (string) ( $value['coordinates']['latitude'] ?? '' ),
 				'longitude' => (string) ( $value['coordinates']['longitude'] ?? '' ),
 			),
+			'source' => $this->sanitize_warehouse_source( $value['source'] ?? '' ),
 			'branchTimezone' => $this->snapshot_nullable_string( $value['branchTimezone'] ?? null ),
 			'limits' => array(
 				'maxWeight' => $this->numeric_or_null( $limits['maxWeight'] ?? null ),
@@ -253,6 +254,12 @@ final class PekSettings {
 		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
 
 		return substr( trim( $value ), 0, 120 );
+	}
+
+	private function sanitize_warehouse_source( mixed $value ): string {
+		$value = trim( (string) $value );
+
+		return in_array( $value, array( 'free', 'paid', 'branches_all' ), true ) ? $value : '';
 	}
 
 	private function sanitize_key( string $value ): string {

@@ -288,10 +288,10 @@ $nearest_service = pek_dt_service(
 );
 $nearest_search = $nearest_service->search( 'Самара' );
 $nearest_cached = $nearest_cache->current_for_current_user();
-pek_dt_assert( ( $nearest_search['items'][0]['branchTimezone'] ?? '' ) === 'UTC+04:00' && ( $nearest_cached['items'][0]['branchTimezone'] ?? '' ) === 'UTC+04:00', 'PEK nearestdepartments timeZone must normalize to canonical branchTimezone and survive cache round-trip.' );
+pek_dt_assert( ( $nearest_search['items'][0]['branchTimezone'] ?? '' ) === 'UTC+04:00' && ( $nearest_cached['items'][0]['branchTimezone'] ?? '' ) === 'UTC+04:00' && ( $nearest_cached['items'][0]['source'] ?? '' ) === 'free', 'PEK nearestdepartments timeZone and free source must normalize and survive cache round-trip.' );
 $nearest_result = $nearest_service->validate_and_select( 'nearest-timezone-wh' );
 $nearest_snapshot = $nearest_settings->sender_warehouse();
-pek_dt_assert( $nearest_result['success'] && count( $nearest_http->requests ) === 1 && $nearest_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/nearestdepartments/' && $nearest_snapshot['branchTimezone'] === 'UTC+04:00' && ! array_key_exists( 'timeZone', $nearest_snapshot ), 'PEK search/select path must save cached canonical timezone without branches/all fallback or raw timeZone field.' );
+pek_dt_assert( $nearest_result['success'] && count( $nearest_http->requests ) === 1 && $nearest_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/nearestdepartments/' && $nearest_snapshot['branchTimezone'] === 'UTC+04:00' && $nearest_snapshot['source'] === 'free' && ! array_key_exists( 'timeZone', $nearest_snapshot ), 'PEK search/select path must save cached canonical timezone and source without branches/all fallback or raw timeZone field.' );
 
 $paid_service = pek_dt_service(
 	array(
@@ -307,7 +307,7 @@ $paid_service = pek_dt_service(
 	$paid_cache
 );
 $paid_service->search( 'Самара' );
-pek_dt_assert( ( $paid_cache->current_for_current_user()['items'][0]['branchTimezone'] ?? '' ) === 'UTC+05:30', 'PEK paidDepartments timeZone must use the same normalizer.' );
+pek_dt_assert( ( $paid_cache->current_for_current_user()['items'][0]['branchTimezone'] ?? '' ) === 'UTC+05:30' && ( $paid_cache->current_for_current_user()['items'][0]['source'] ?? '' ) === 'paid', 'PEK paidDepartments timeZone must use the same normalizer and preserve paid source.' );
 
 foreach ( array( '00:00:00' => 'UTC+00:00', '03:00:00' => 'UTC+03:00', '04:30:00' => 'UTC+04:30', '14:00:00' => 'UTC+14:00' ) as $source_timezone => $canonical_timezone ) {
 	$timezone_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( 'valid-tz-' . str_replace( ':', '-', $source_timezone ), $source_timezone ) ), 'paidDepartments' => array() ) ) ), $timezone_http, $timezone_settings, $timezone_cache );
@@ -382,6 +382,7 @@ $snapshot_settings = new PekSettings( $snapshot_repository );
 $snapshot_settings->save_sender_warehouse(
 	array(
 		'warehouseId' => 'sanitize',
+		'source' => 'free',
 		'branchTimezone' => 'UTC+03:00',
 		'availability' => array(
 			'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00',
@@ -391,7 +392,7 @@ $snapshot_settings->save_sender_warehouse(
 	)
 );
 $sanitized = $snapshot_settings->sender_warehouse();
-pek_dt_assert( $sanitized['branchTimezone'] === 'UTC+03:00' && $sanitized['availability']['endOfAvailabilityBeforeClosing'] === '2026-08-02T09:00:00' && null === $sanitized['availability']['endOfCostCalculationAvailability'] && $sanitized['availability']['departmentClosingDate'] === '2026-08-03', 'PEK settings snapshot sanitation must preserve branch timezone, availability strings, and nulls.' );
+pek_dt_assert( $sanitized['branchTimezone'] === 'UTC+03:00' && $sanitized['source'] === 'free' && $sanitized['availability']['endOfAvailabilityBeforeClosing'] === '2026-08-02T09:00:00' && null === $sanitized['availability']['endOfCostCalculationAvailability'] && $sanitized['availability']['departmentClosingDate'] === '2026-08-03', 'PEK settings snapshot sanitation must preserve source, branch timezone, availability strings, and nulls.' );
 
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Pek/Api/PekSenderWarehouseService.php' );
 pek_dt_assert( ! str_contains( $source, "current_time( 'timestamp'" ) && ! str_contains( $source, "current_time('timestamp'" ) && ! str_contains( $source, "current_time( 'U'" ) && ! str_contains( $source, "current_time('U'" ) && ! str_contains( $source, 'strtotime(' ), 'PEK warehouse datetime code must not use current_time timestamp or strtotime.' );

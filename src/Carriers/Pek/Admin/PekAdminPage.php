@@ -180,7 +180,7 @@ final class PekAdminPage {
 			return;
 		}
 		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
-		foreach ( array( 'warehouseId' => 'Warehouse ID', 'branchName' => 'Филиал', 'divisionName' => 'Отделение', 'departmentType' => 'Тип', 'address' => 'Адрес', 'branchTimezone' => 'Часовой пояс филиала', 'checked_at' => 'Проверено' ) as $key => $label ) {
+		foreach ( array( 'warehouseId' => 'Warehouse ID', 'source' => 'Источник выбора', 'branchName' => 'Филиал', 'divisionName' => 'Отделение', 'departmentType' => 'Тип', 'address' => 'Адрес', 'branchTimezone' => 'Часовой пояс филиала', 'checked_at' => 'Проверено' ) as $key => $label ) {
 			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) ( $snapshot[ $key ] ?? '' ) ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
@@ -215,6 +215,7 @@ final class PekAdminPage {
 			'countries' => 'Справочник стран',
 			'legal_forms' => 'Юридические формы',
 			'warehouse_api' => 'Проверка выбранного склада',
+			'warehouse_match' => 'Сопоставление выбранного склада',
 		);
 		echo '<table class="widefat striped" style="max-width:100%;"><tbody>';
 		foreach ( $labels as $key => $label ) {
@@ -225,6 +226,8 @@ final class PekAdminPage {
 			$status = (string) ( $check['status'] ?? ( ( $check['success'] ?? false ) ? 'passed' : 'failed' ) );
 			$status_label = match ( $status ) {
 				'passed' => 'Успешно',
+				'failed' => 'Ошибка',
+				'warning' => true === ( $check['informational'] ?? false ) ? 'Информация' : 'Предупреждение',
 				'skipped' => 'Пропущено',
 				default => 'Предупреждение',
 			};
@@ -233,8 +236,21 @@ final class PekAdminPage {
 			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>';
 			echo '<code>' . esc_html( (string) ( $check['method'] ?? '' ) . ' ' . (string) ( $check['endpoint'] ?? '' ) ) . '</code><br>';
 			echo esc_html( $line );
+			if ( 'warehouse_match' === $key ) {
+				echo '<br>' . esc_html(
+					'Проверено филиалов: ' . (string) (int) ( $check['branches_checked'] ?? 0 )
+					. ', отделений: ' . (string) (int) ( $check['divisions_checked'] ?? 0 )
+					. ', складов: ' . (string) (int) ( $check['warehouses_checked'] ?? 0 )
+				);
+				if ( '' !== (string) ( $check['warehouse_id'] ?? '' ) ) {
+					echo '<br>' . esc_html( 'warehouse ID: ' . (string) $check['warehouse_id'] );
+				}
+			}
 			if ( '' !== (string) ( $check['error_code'] ?? '' ) ) {
 				echo '<br><code>' . esc_html( (string) $check['error_code'] ) . '</code>';
+			}
+			if ( '' !== (string) ( $check['info_code'] ?? '' ) ) {
+				echo '<br><code>' . esc_html( (string) $check['info_code'] ) . '</code>';
 			}
 			echo '</td></tr>';
 		}

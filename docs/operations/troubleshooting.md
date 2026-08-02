@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Version: 0.130.5
+Version: 0.130.6
 
 Start with:
 
