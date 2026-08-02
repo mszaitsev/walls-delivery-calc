@@ -1,6 +1,6 @@
 # Chat Start
 
-Version: 0.129.16
+Version: 0.130.6
 
 Use this at the start of a new ChatGPT planning/review chat.
 

@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.129.16
+Version: 0.130.6
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -22,6 +22,8 @@ The plugin is a WooCommerce delivery platform. Production ownership is split by 
 Generic layers may depend on domain contracts and registries. Carrier implementations depend on generic contracts. Generic Shipment Framework services must not depend on carrier implementations except in the composition root (`Plugin.php`) where concrete implementations are registered.
 
 Jet Logistic follows the same boundary: `Plugin.php` wires its runtime carrier, geography/status repositories, admin pages, and shipment adapter. Jet is not registered in document providers, modal extensions, lifecycle continuation, or shipment creation persistence mappers because the carrier supports quote, manual attach, status update, local remove, and autosync only.
+
+PEK follows the carrier-owned boundary as a foundation-only carrier in version 0.130.6. `Plugin.php` wires `PekSettings`, `PekCredentials`, PEK HTTP/API transport, request budget, user-scoped sender warehouse search cache, user-scoped admin notice store, diagnostics, warehouse lookup/validation, and the PEK delivery-service settings tab. `DeliveryServicesAdminPage` only performs minimal routing for `PekAdminPage::supports_action()` and redirects PEK POST actions back to `service=pek&tab=pek_settings`; PEK credential handling, API parsing, diagnostics, notice storage, and warehouse rules stay carrier-owned. PEK diagnostics remain carrier-owned: each reference/warehouse endpoint is checked independently, `connection_ok` records whether any authenticated endpoint confirms API access, `all_checks_passed` records API-check completeness, and `/branches/all/` API availability is separated from informational saved-warehouse semantic matching. The matcher follows the official `branches[].divisions[].warehouses[].id` path, stores only safe counters and match metadata, and never stores raw warehouse rows. PEK warehouse availability parsing remains inside the carrier foundation: it compares real Unix instants, normalizes `/branches/all/` `timezone` and `/branches/nearestdepartments/` `timeZone` into canonical `branchTimezone` (`UTC+HH:MM`), rejects impossible ISO dates fail-closed, and preserves timezone/availability/source fields in the user-scoped search cache and compact sender warehouse snapshot. PEK is intentionally absent from `CarrierRegistry` and from every Shipment Framework registry until checkout quoting and shipment creation are implemented in later stages.
 
 Allowed carrier references in generic code are limited to:
 

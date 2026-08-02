@@ -24,6 +24,8 @@ use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnostic
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunnerService;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexGeoV2RegionEnrichmentRunner;
@@ -149,6 +151,7 @@ final class DeliveryServicesAdminPage {
 		private ?SettingsRepository $global_settings = null,
 		private ?JetLogisticGeographyAdminPage $jet_logistic_geography = null,
 		private ?JetLogisticStatusAdminPage $jet_logistic_statuses = null,
+		private ?PekAdminPage $pek_admin = null,
 	) {
 	}
 
@@ -745,6 +748,10 @@ final class DeliveryServicesAdminPage {
 			$this->handle_jet_logistic_action( $action );
 			return;
 		}
+		if ( PekAdminPage::supports_action( $action ) ) {
+			$this->handle_pek_action( $action );
+			return;
+		}
 		if ( in_array( $action, array(
 				'save_global_delivery_settings',
 				'save',
@@ -1280,6 +1287,29 @@ final class DeliveryServicesAdminPage {
 		exit;
 	}
 
+	private function handle_pek_action( string $action ): void {
+		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+		$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
+		$service = PekSettings::SERVICE_KEY === $service_key ? $this->services->find_by_service_key( $service_key ) : null;
+		if ( $service instanceof DeliveryService && PekSettings::SERVICE_KEY === $service->service_key && ( $id <= 0 || (int) $service->id === $id ) && $this->pek_admin instanceof PekAdminPage ) {
+			$this->pek_admin->handle_action( $action, $service, $_POST );
+		}
+
+		wp_safe_redirect( $this->pek_settings_redirect_url() );
+		exit;
+	}
+
+	private function pek_settings_redirect_url(): string {
+		return add_query_arg(
+			array(
+				'page' => self::MENU_SLUG,
+				'service' => PekSettings::SERVICE_KEY,
+				'tab' => PekAdminPage::TAB_KEY,
+			),
+			admin_url( 'admin.php' )
+		);
+	}
+
 	private function handle_jet_logistic_action( string $action ): void {
 		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 		$service = $this->services->find_by_service_key( $service_key );
@@ -1626,6 +1656,9 @@ final class DeliveryServicesAdminPage {
 			$tabs['jet_geography'] = 'География';
 			$tabs['jet_statuses'] = 'Статусы';
 		}
+		if ( PekSettings::SERVICE_KEY === $service->service_key ) {
+			$tabs[ PekAdminPage::TAB_KEY ] = 'ПЭК';
+		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
@@ -1657,6 +1690,7 @@ final class DeliveryServicesAdminPage {
 			'russian_post_countries' => $this->render_russian_post_countries_tab( $service ),
 			'jet_geography' => $this->render_jet_geography_tab( $service ),
 			'jet_statuses' => $this->render_jet_statuses_tab( $service ),
+			PekAdminPage::TAB_KEY => $this->render_pek_settings_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
 		?>
@@ -3532,6 +3566,14 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$this->jet_logistic_statuses->render_embedded( $service, $this->consume_jet_admin_notice() );
+	}
+
+	private function render_pek_settings_tab( DeliveryService $service ): void {
+		if ( PekSettings::SERVICE_KEY !== $service->service_key || ! $this->pek_admin instanceof PekAdminPage ) {
+			return;
+		}
+
+		$this->pek_admin->render_embedded( $service );
 	}
 
 	private function render_diagnostics_tab( DeliveryService $service ): void {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\DeliveryServices;
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
@@ -43,6 +44,11 @@ final class DeliveryServiceManager {
 		$jet = $this->services->ensure_jet_logistic_service();
 		if ( null !== $jet->id && $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
 			$this->service_settings->set_setting( (int) $jet->id, DeliveryServiceSettingsRepository::DELIVERY_DAYS_ARE_WORKING_KEY, true, 'bool' );
+		}
+		$pek_exists = $this->services->pek_service_exists();
+		$pek = $this->services->ensure_pek_service();
+		if ( ! $pek_exists && null !== $pek->id ) {
+			$this->countries->replace_countries( (int) $pek->id, PekSettings::INITIAL_COUNTRIES );
 		}
 	}
 

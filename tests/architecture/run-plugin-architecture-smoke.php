@@ -387,6 +387,17 @@ foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 	plugin_architecture_assert( 1 !== preg_match( '/(?:\$this->container|\$container)->register\s*\(/', $source ), 'Container register() composition wiring using the current container syntax must stay in Plugin.php, found in ' . $relative );
 }
 plugin_architecture_assert( str_contains( $plugin_source, 'CarrierShipmentAdapterRegistry::class' ) && str_contains( $plugin_source, 'ShipmentDocumentProviderRegistry::class' ) && str_contains( $plugin_source, 'ShipmentModalExtensionRegistry::class' ), 'Composition root must register shipment registries.' );
+$carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 1000 );
+plugin_architecture_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK foundation must not be registered in CarrierRegistry before checkout quote runtime exists.' );
+plugin_architecture_assert( str_contains( $plugin_source, 'PekSettings::class' ) && str_contains( $plugin_source, 'PekApiClient::class' ) && str_contains( $plugin_source, 'PekSenderWarehouseSearchCache::class' ) && str_contains( $plugin_source, 'PekAdminNoticeStore::class' ) && str_contains( $plugin_source, 'PekAdminPage::class' ), 'Plugin.php must own PEK foundation DI wiring.' );
+foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
+	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+	if ( 'src/Core/Plugin.php' === $relative ) {
+		continue;
+	}
+	$source = (string) file_get_contents( $file );
+	plugin_architecture_assert( ! preg_match( '/register\s*\([^)]*Pek[A-Za-z0-9_\\\\]*::class/', $source ), 'PEK container registrations must stay in Plugin.php, found in ' . $relative );
+}
 
 $removed_checkout_diagnostic_page_needles = array(
 	'Checkout' . 'SimulationPage',
@@ -656,11 +667,13 @@ foreach ( array( 'src/Shipments/Application', 'src/Shipments/Admin', 'src/Shipme
 }
 foreach ( $generic_shipment_sources as $relative => $source ) {
 	plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic Shipment Framework must not branch on Jet Logistic in ' . $relative );
+	plugin_architecture_assert( ! str_contains( $source, "'pek'" ) && ! str_contains( $source, 'Pek' ), 'PEK foundation must not be registered or branched in generic Shipment Framework source ' . $relative );
 }
 foreach ( plugin_architecture_js_files( 'assets/admin/shipments' ) as $file ) {
 	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
 	$source = (string) file_get_contents( $file );
 	plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic shipment JS must not contain Jet Logistic branches in ' . $relative );
+	plugin_architecture_assert( ! str_contains( $source, "'pek'" ) && ! str_contains( $source, 'Pek' ), 'PEK foundation must not add generic shipment JS branches in ' . $relative );
 }
 $plugin_source_for_jet = (string) file_get_contents( plugin_architecture_path( 'src/Core/Plugin.php' ) );
 plugin_architecture_assert( str_contains( $plugin_source_for_jet, 'JetLogisticCarrier::class' ) && str_contains( $plugin_source_for_jet, 'JetLogisticShipmentAdapter::class' ), 'Plugin.php must own Jet Logistic runtime and shipment adapter wiring.' );

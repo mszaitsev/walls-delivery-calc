@@ -239,6 +239,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -384,6 +385,15 @@ $services->update_service( $custom_id, array( 'pickup_customer_comment' => '', '
 $custom = $services->find_by_service_key( 'fixed_test' );
 wdc_ds_assert( $custom instanceof DeliveryService && '' === $custom->pickup_customer_comment && '' === $custom->courier_customer_comment, 'Service customer comments may be empty.' );
 
+$pek = $services->ensure_pek_service();
+wdc_ds_assert( PekSettings::SERVICE_KEY === $pek->service_key && PekSettings::CARRIER_KEY === $pek->carrier_key && ! $pek->enabled, 'PEK predefined service must be disabled by default.' );
+wdc_ds_assert( DeliveryService::AVAILABILITY_SELECTED_COUNTRIES === $pek->availability_mode && true === $pek->include_packaging_weight && DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT === $pek->packaging_weight_mode, 'PEK predefined service must use selected countries and total_weight packaging.' );
+$services->ensure_pek_service();
+$pek_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => PekSettings::SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
+wdc_ds_assert( 1 === count( $pek_rows ), 'Repeated PEK bootstrap must not create duplicate services.' );
+$services->soft_delete_service( (int) $pek->id );
+wdc_ds_assert( $services->find_by_service_key( PekSettings::SERVICE_KEY ) instanceof DeliveryService, 'Predefined PEK service cannot be deleted.' );
+
 $settings->set_setting( $custom_id, 'endpoint', 'https://example.test', 'string' );
 $settings->set_setting( $custom_id, 'limits', array( 'max_weight_g' => 1000 ) );
 wdc_ds_assert( 'https://example.test' === $settings->get_setting( $custom_id, 'endpoint' ), 'Settings repository must read string values.' );
@@ -396,10 +406,25 @@ wdc_ds_assert( array( 'US', 'DE' ) === $countries->countries( $custom_id ), 'Cou
 wdc_ds_assert( in_array( 'US', $countries->countries( $custom_id ), true ) && in_array( 'DE', $countries->countries( $custom_id ), true ), 'Country repository must keep valid countries.' );
 
 $directory = ( new ReflectionClass( WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor();
+$seed_db = new wpdb();
+$seed_services = new DeliveryServiceRepository( $seed_db );
+$seed_countries = new DeliveryServiceCountryRepository( $seed_db );
+$seed_manager = new DeliveryServiceManager( $seed_services, $seed_countries, new RuleRepository( $seed_db ), $directory );
+$seed_manager->ensure_builtin_services();
+$seed_pek = $seed_services->find_by_service_key( PekSettings::SERVICE_KEY );
+wdc_ds_assert( $seed_pek instanceof DeliveryService && array( 'RU' ) === $seed_countries->countries( (int) $seed_pek->id ), 'PEK service must bootstrap only RU availability on fresh setup.' );
 $manager = new DeliveryServiceManager( $services, $countries, new RuleRepository( $GLOBALS['wpdb'] ), $directory );
 $manager->ensure_builtin_services();
 $unified_domestic_service = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 wdc_ds_assert( $unified_domestic_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $unified_domestic_service->id ), true ) && $manager->service_available_for_country( $unified_domestic_service, 'RU' ), 'Unified domestic service must bootstrap RU availability.' );
+$pek_service = $services->find_by_service_key( PekSettings::SERVICE_KEY );
+wdc_ds_assert( $pek_service instanceof DeliveryService && array() === $countries->countries( (int) $pek_service->id ), 'Existing manually created PEK service must not be treated as fresh setup.' );
+$countries->replace_countries( (int) $pek_service->id, array( 'RU', 'KZ' ) );
+$manager->ensure_builtin_services();
+wdc_ds_assert( array( 'RU', 'KZ' ) === $countries->countries( (int) $pek_service->id ), 'PEK bootstrap must not overwrite administrator country choices.' );
+$countries->replace_countries( (int) $pek_service->id, array() );
+$manager->ensure_builtin_services();
+wdc_ds_assert( array() === $countries->countries( (int) $pek_service->id ), 'PEK bootstrap must preserve explicit empty administrator country choice.' );
 wdc_ds_assert( $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'US' ), 'selected_countries availability must allow listed country.' );
 wdc_ds_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'FR' ), 'selected_countries availability must reject unlisted country.' );
 $services->update_service( $custom_id, array( 'availability_mode' => DeliveryService::AVAILABILITY_ALL_COUNTRIES ) );
@@ -621,8 +646,12 @@ wdc_ds_assert( in_array( 'RU', $countries->countries( (int) $migrated_domestic->
 wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_pickup' ) && null === $services->find_by_service_key( 'russian_post_domestic_courier' ), 'Runtime repository must not find legacy Russian Post domestic service keys after migration 0026.' );
 
 $delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
+$carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 800 );
+wdc_ds_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK foundation must not register PEK in CarrierRegistry.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && ! str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render availability fields inside main tab and not expose a separate availability tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, "JetLogisticSettings::SERVICE_KEY === \$service->service_key" ) && str_contains( $delivery_admin_source, "\$tabs['jet_geography']" ) && str_contains( $delivery_admin_source, "\$tabs['jet_statuses']" ), 'Jet Logistic geography/status UI must be exposed only as delivery service tabs.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'PekSettings::SERVICE_KEY === $service->service_key' ) && str_contains( $delivery_admin_source, 'PekAdminPage::TAB_KEY' ) && str_contains( $delivery_admin_source, 'render_pek_settings_tab' ), 'PEK settings UI must be exposed only as a delivery service tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_remote'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'update_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'delete_jet_status_mapping'" ), 'Jet Logistic admin forms must use shared delivery service action keys.' );
 wdc_ds_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ), "DEFAULT_URL = 'https://jet7777.ru/cabinet/cities.csv'" ), 'Jet Logistic remote geography import must use the fixed official cities.csv URL.' );
 wdc_ds_assert( ! str_contains( $delivery_admin_source, 'wdc-jet-logistic-geography' ) && ! str_contains( $delivery_admin_source, 'wdc-jet-logistic-statuses' ), 'Delivery services admin must not register standalone Jet submenu slugs.' );

@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.129.16
+Version: 0.130.6
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 
