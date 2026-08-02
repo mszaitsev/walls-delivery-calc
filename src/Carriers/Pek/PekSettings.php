@@ -48,7 +48,6 @@ final class PekSettings {
 	public const WAREHOUSE_SEARCH_LIMIT_KEY = 'pek_warehouse_search_limit';
 	public const SMS_RELEASE_LIMIT_RUB_KEY = 'pek_sms_release_limit_rub';
 	public const LAST_DIAGNOSTIC_KEY = 'pek_last_diagnostic';
-	public const ADMIN_NOTICE_KEY = 'pek_admin_notice';
 
 	public function __construct( private SettingsRepository $settings ) {
 	}
@@ -76,7 +75,6 @@ final class PekSettings {
 			self::WAREHOUSE_SEARCH_LIMIT_KEY => 5,
 			self::SMS_RELEASE_LIMIT_RUB_KEY => self::DEFAULT_SMS_RELEASE_LIMIT_RUB,
 			self::LAST_DIAGNOSTIC_KEY => array(),
-			self::ADMIN_NOTICE_KEY => array(),
 		);
 	}
 
@@ -176,20 +174,6 @@ final class PekSettings {
 		$this->settings->set( self::LAST_DIAGNOSTIC_KEY, $this->sanitize_report( $result ) );
 	}
 
-	/** @return array<string,mixed> */
-	public function admin_notice(): array {
-		return $this->settings->get_array( self::ADMIN_NOTICE_KEY, array() );
-	}
-
-	/** @param array<string,mixed> $notice */
-	public function save_admin_notice( array $notice ): void {
-		$this->settings->set( self::ADMIN_NOTICE_KEY, $this->sanitize_report( $notice ) );
-	}
-
-	public function clear_admin_notice(): void {
-		$this->settings->set( self::ADMIN_NOTICE_KEY, array() );
-	}
-
 	/** @param array<string,mixed> $input */
 	public function save_from_admin( array $input ): void {
 		$this->settings->set( self::REQUEST_TIMEOUT_KEY, $this->clamp_raw_int( $input[ self::REQUEST_TIMEOUT_KEY ] ?? 15, 1, 60 ) );
@@ -216,6 +200,7 @@ final class PekSettings {
 			return array();
 		}
 		$limits = is_array( $value['limits'] ?? null ) ? $value['limits'] : array();
+		$availability = is_array( $value['availability'] ?? null ) ? $value['availability'] : array();
 
 		return array(
 			'warehouseId' => $this->sanitize_text( (string) $value['warehouseId'] ),
@@ -235,6 +220,11 @@ final class PekSettings {
 				'maxDimension' => $this->numeric_or_null( $limits['maxDimension'] ?? null ),
 				'maxWeightOnePlace' => $this->numeric_or_null( $limits['maxWeightOnePlace'] ?? null ),
 				'maxCount' => $this->numeric_or_null( $limits['maxCount'] ?? null ),
+			),
+			'availability' => array(
+				'endOfAvailabilityBeforeClosing' => $this->sanitize_text( (string) ( $availability['endOfAvailabilityBeforeClosing'] ?? '' ) ),
+				'endOfCostCalculationAvailability' => $this->sanitize_text( (string) ( $availability['endOfCostCalculationAvailability'] ?? '' ) ),
+				'departmentClosingDate' => $this->sanitize_text( (string) ( $availability['departmentClosingDate'] ?? '' ) ),
 			),
 			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
 		);

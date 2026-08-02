@@ -389,7 +389,7 @@ foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 plugin_architecture_assert( str_contains( $plugin_source, 'CarrierShipmentAdapterRegistry::class' ) && str_contains( $plugin_source, 'ShipmentDocumentProviderRegistry::class' ) && str_contains( $plugin_source, 'ShipmentModalExtensionRegistry::class' ), 'Composition root must register shipment registries.' );
 $carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 1000 );
 plugin_architecture_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK foundation must not be registered in CarrierRegistry before checkout quote runtime exists.' );
-plugin_architecture_assert( str_contains( $plugin_source, 'PekSettings::class' ) && str_contains( $plugin_source, 'PekApiClient::class' ) && str_contains( $plugin_source, 'PekSenderWarehouseSearchCache::class' ) && str_contains( $plugin_source, 'PekAdminPage::class' ), 'Plugin.php must own PEK foundation DI wiring.' );
+plugin_architecture_assert( str_contains( $plugin_source, 'PekSettings::class' ) && str_contains( $plugin_source, 'PekApiClient::class' ) && str_contains( $plugin_source, 'PekSenderWarehouseSearchCache::class' ) && str_contains( $plugin_source, 'PekAdminNoticeStore::class' ) && str_contains( $plugin_source, 'PekAdminPage::class' ), 'Plugin.php must own PEK foundation DI wiring.' );
 foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
 	if ( 'src/Core/Plugin.php' === $relative ) {

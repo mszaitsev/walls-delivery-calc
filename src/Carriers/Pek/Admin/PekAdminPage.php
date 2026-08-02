@@ -24,7 +24,8 @@ final class PekAdminPage {
 		private PekSettings $settings,
 		private PekCredentials $credentials,
 		private PekConnectionDiagnosticService $diagnostics,
-		private PekSenderWarehouseService $warehouses
+		private PekSenderWarehouseService $warehouses,
+		private PekAdminNoticeStore $notices
 	) {
 	}
 
@@ -41,6 +42,7 @@ final class PekAdminPage {
 		try {
 			if ( 'save_pek_settings' === $action ) {
 				$this->settings->save_from_admin( $post );
+				$this->warehouses->clear_last_search_for_current_user();
 				if ( ! $this->credentials->save_from_admin( $post ) ) {
 					$notice = array( 'type' => 'warning', 'message' => 'Настройки ПЭК сохранены, но API key не обновлён: задайте APP_ENCRYPTION_KEY.' );
 				}
@@ -58,15 +60,14 @@ final class PekAdminPage {
 			$notice = array( 'type' => 'error', 'message' => 'Не удалось выполнить действие ПЭК: ' . $this->safe_message( $exception->getMessage() ) );
 		}
 
-		$this->settings->save_admin_notice( $notice );
+		$this->notices->save_for_current_user( (string) $notice['type'], (string) $notice['message'] );
 	}
 
 	public function render_embedded( DeliveryService $service ): void {
 		if ( PekSettings::SERVICE_KEY !== $service->service_key ) {
 			return;
 		}
-		$notice = $this->settings->admin_notice();
-		$this->settings->clear_admin_notice();
+		$notice = $this->notices->consume_for_current_user();
 		$warehouse = $this->settings->sender_warehouse();
 		$diagnostic = $this->settings->last_diagnostic();
 		$search = $this->warehouses->last_search_for_current_user();
@@ -128,7 +129,9 @@ final class PekAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="search_pek_sender_warehouse">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<?php $this->text_row( 'pek_warehouse_search_address', 'Адрес поиска склада', (string) ( $search['requested']['address'] ?? '' ) ); ?>
+			<table class="form-table" role="presentation">
+				<?php $this->text_row( 'pek_warehouse_search_address', 'Адрес поиска склада', (string) ( $search['requested']['address'] ?? '' ) ); ?>
+			</table>
 			<?php submit_button( __( 'Найти склады ПЭК', 'walls-delivery-calc' ), 'secondary' ); ?>
 		</form>
 		<?php $this->render_search_results( $service, $search ); ?>
@@ -190,14 +193,47 @@ final class PekAdminPage {
 		}
 		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
 		foreach ( $report as $key => $value ) {
-			if ( is_array( $value ) ) {
-				$value = implode( ', ', array_map( 'strval', $value ) );
-			}
-			if ( is_scalar( $value ) ) {
-				echo '<tr><th scope="row">' . esc_html( (string) $key ) . '</th><td>' . esc_html( (string) $value ) . '</td></tr>';
-			}
+			echo '<tr><th scope="row">' . esc_html( (string) $key ) . '</th><td>' . esc_html( $this->format_report_value( $value, (string) $key ) ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
+	}
+
+	private function format_report_value( mixed $value, string $key = '' ): string {
+		if ( is_bool( $value ) ) {
+			return $value ? 'да' : 'нет';
+		}
+		if ( null === $value || array() === $value ) {
+			return '—';
+		}
+		if ( is_scalar( $value ) ) {
+			return (string) $value;
+		}
+		if ( is_array( $value ) ) {
+			if ( 'classifier_mismatches' === $key ) {
+				$rows = array();
+				foreach ( $value as $item ) {
+					if ( is_array( $item ) ) {
+						$rows[] = trim( (string) ( $item['country'] ?? '' ) ) . ': ожидался ' . trim( (string) ( $item['expected'] ?? '' ) ) . ', API вернул ' . trim( (string) ( $item['actual'] ?? '' ) );
+					}
+				}
+				return array() !== $rows ? implode( '; ', $rows ) : '—';
+			}
+			$scalar = true;
+			foreach ( $value as $item ) {
+				if ( ! is_scalar( $item ) && null !== $item ) {
+					$scalar = false;
+					break;
+				}
+			}
+			if ( $scalar ) {
+				return implode( ', ', array_map( static fn( mixed $item ): string => null === $item ? '' : (string) $item, $value ) );
+			}
+
+			$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) : json_encode( $value, JSON_UNESCAPED_UNICODE );
+			return is_string( $json ) ? $json : '—';
+		}
+
+		return '—';
 	}
 
 	/** @param array<string,mixed> $notice */

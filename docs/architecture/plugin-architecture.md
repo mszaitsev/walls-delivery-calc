@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.130.1
+Version: 0.130.2
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -23,7 +23,7 @@ Generic layers may depend on domain contracts and registries. Carrier implementa
 
 Jet Logistic follows the same boundary: `Plugin.php` wires its runtime carrier, geography/status repositories, admin pages, and shipment adapter. Jet is not registered in document providers, modal extensions, lifecycle continuation, or shipment creation persistence mappers because the carrier supports quote, manual attach, status update, local remove, and autosync only.
 
-PEK follows the carrier-owned boundary as a foundation-only carrier in version 0.130.1. `Plugin.php` wires `PekSettings`, `PekCredentials`, PEK HTTP/API transport, request budget, user-scoped sender warehouse search cache, diagnostics, warehouse lookup/validation, and the PEK delivery-service settings tab. `DeliveryServicesAdminPage` only performs minimal routing for `PekAdminPage::supports_action()` and redirects PEK POST actions back to `service=pek&tab=pek_settings`; PEK credential handling, API parsing, diagnostics, and warehouse rules stay carrier-owned. PEK is intentionally absent from `CarrierRegistry` and from every Shipment Framework registry until checkout quoting and shipment creation are implemented in later stages.
+PEK follows the carrier-owned boundary as a foundation-only carrier in version 0.130.2. `Plugin.php` wires `PekSettings`, `PekCredentials`, PEK HTTP/API transport, request budget, user-scoped sender warehouse search cache, user-scoped admin notice store, diagnostics, warehouse lookup/validation, and the PEK delivery-service settings tab. `DeliveryServicesAdminPage` only performs minimal routing for `PekAdminPage::supports_action()` and redirects PEK POST actions back to `service=pek&tab=pek_settings`; PEK credential handling, API parsing, diagnostics, notice storage, and warehouse rules stay carrier-owned. PEK is intentionally absent from `CarrierRegistry` and from every Shipment Framework registry until checkout quoting and shipment creation are implemented in later stages.
 
 Allowed carrier references in generic code are limited to:
 

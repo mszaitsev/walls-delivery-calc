@@ -9,6 +9,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -40,7 +41,8 @@ function check_admin_referer( string $action ): bool { $GLOBALS['pek_route_nonce
 function wp_safe_redirect( string $url ): bool { throw new PekRedirectException( $url ); }
 function admin_url( string $path = '' ): string { return 'https://example.test/wp-admin/' . ltrim( $path, '/' ); }
 function add_query_arg( array $args, string $url ): string { return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . http_build_query( $args ); }
-function current_time( string $type ): string { return '2026-08-02 12:00:00'; }
+function current_time( string $type ): int|string { return 'timestamp' === $type ? 1785652800 : '2026-08-02 12:00:00'; }
+function wp_timezone(): DateTimeZone { return new DateTimeZone( 'UTC' ); }
 function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false { return json_encode( $value, $flags, $depth ); }
 function wp_unslash( mixed $value ): mixed {
 	if ( is_array( $value ) ) {
@@ -53,7 +55,7 @@ function sanitize_key( string $value ): string { return strtolower( preg_replace
 function sanitize_email( string $value ): string { return trim( $value ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['pek_route_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['pek_route_options'][ $option ] = $value; return true; }
-function get_current_user_id(): int { return 7; }
+function get_current_user_id(): int { return (int) ( $GLOBALS['pek_route_current_user_id'] ?? 7 ); }
 function get_transient( string $key ): mixed { return $GLOBALS['pek_route_transients'][ $key ]['value'] ?? false; }
 function set_transient( string $key, mixed $value, int $expiration = 0 ): bool { $GLOBALS['pek_route_transients'][ $key ] = array( 'value' => $value, 'expiration' => $expiration ); return true; }
 function delete_transient( string $key ): bool { unset( $GLOBALS['pek_route_transients'][ $key ] ); return true; }
@@ -106,7 +108,7 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
-	$pek_admin = new PekAdminPage( $settings, $credentials, new PekConnectionDiagnosticService( $settings, $credentials, $api ), new PekSenderWarehouseService( $api, $settings, $cache ) );
+	$pek_admin = new PekAdminPage( $settings, $credentials, new PekConnectionDiagnosticService( $settings, $credentials, $api ), new PekSenderWarehouseService( $api, $settings, $cache ), new PekAdminNoticeStore() );
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
 	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin ) as $property => $value ) {
 		$ref = new ReflectionProperty( DeliveryServicesAdminPage::class, $property );
@@ -153,8 +155,11 @@ $http = new PekRouteFakeHttp( array(
 $page = pek_route_page( $http, $settings_repository, $cache );
 $settings = new PekSettings( $settings_repository );
 
+$cache->save_for_current_user( array( 'success' => true, 'message' => 'old', 'items' => array( array( 'warehouseId' => 'old-wh' ) ), 'requested' => array( 'departmentOperation' => 2, 'type' => 3 ) ) );
 $redirect = pek_route_run_action( $page, 'save_pek_settings', array( PekSettings::LOGIN_KEY => 'login', PekSettings::REQUEST_TIMEOUT_KEY => '22', PekSettings::SENDER_FULL_NAME_KEY => 'ООО Test' ) );
 pek_route_assert( $settings->request_timeout() === 22 && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'save_pek_settings must reach PekAdminPage and redirect to PEK tab.' );
+pek_route_assert( array() === $cache->current_for_current_user(), 'save_pek_settings must clear current-user PEK warehouse search cache.' );
+pek_route_assert( array() === $settings_repository->get_array( 'pek_admin_notice', array() ), 'PEK admin notices must not be persisted in SettingsRepository.' );
 
 $redirect = pek_route_run_action( $page, 'check_pek_connection' );
 $diagnostic = $settings->last_diagnostic();
@@ -167,6 +172,12 @@ pek_route_assert( ( $cache->current_for_current_user()['items'][0]['warehouseId'
 
 $redirect = pek_route_run_action( $page, 'select_pek_sender_warehouse', array( 'pek_sender_warehouse_id' => 'wh-route' ) );
 pek_route_assert( $settings->sender_warehouse()['warehouseId'] === 'wh-route' && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'select_pek_sender_warehouse must reach PekAdminPage and redirect to PEK tab.' );
+$notice_store = new PekAdminNoticeStore();
+$GLOBALS['pek_route_current_user_id'] = 8;
+pek_route_assert( array() === $notice_store->consume_for_current_user(), 'PEK notice must be scoped away from another admin user.' );
+$GLOBALS['pek_route_current_user_id'] = 7;
+$notice = $notice_store->consume_for_current_user();
+pek_route_assert( array() !== $notice && array() === $notice_store->consume_for_current_user() && $notice_store->ttl_seconds() <= 120, 'PEK notice must be one-shot and TTL must be <= 120 seconds.' );
 
 $before = $settings->request_timeout();
 $_POST = array(

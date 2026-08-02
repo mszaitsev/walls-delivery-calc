@@ -72,6 +72,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteResponseParser;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMapper;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
@@ -397,6 +398,7 @@ final class Plugin {
 		$this->container->register( PekConnectionDiagnosticService::class, fn(): PekConnectionDiagnosticService => new PekConnectionDiagnosticService( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekApiClient::class ) ) );
 		$this->container->register( PekSenderWarehouseSearchCache::class, fn(): PekSenderWarehouseSearchCache => new PekSenderWarehouseSearchCache() );
 		$this->container->register( PekSenderWarehouseService::class, fn(): PekSenderWarehouseService => new PekSenderWarehouseService( $this->container->get( PekApiClient::class ), $this->container->get( PekSettings::class ), $this->container->get( PekSenderWarehouseSearchCache::class ) ) );
+		$this->container->register( PekAdminNoticeStore::class, fn(): PekAdminNoticeStore => new PekAdminNoticeStore() );
 		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );
 		$this->container->register( JetLogisticRegionNameNormalizer::class, fn(): JetLogisticRegionNameNormalizer => new JetLogisticRegionNameNormalizer() );
 		$this->container->register( JetLogisticCitiesCsvClient::class, fn(): JetLogisticCitiesCsvClient => new JetLogisticCitiesCsvClient() );
@@ -807,7 +809,7 @@ final class Plugin {
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
 		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticCitiesCsvClient::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
-		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ) ) );
+		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(

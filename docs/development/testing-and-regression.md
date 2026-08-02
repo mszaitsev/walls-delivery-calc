@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.130.1
+Version: 0.130.2
 
 Jet Logistic critical coverage is registered as the mandatory `jet-logistic` group. It covers API envelope handling, token redaction, CSV/geography basics, one-call two-rate quoting, discounted package goods cost and `D_SDOC`, terminal-city presentation, status mapping with compact events, manual attach, unsupported create, and local remove.
 
@@ -31,7 +31,7 @@ DPD Geography browser-import lifecycle changes should also run `node tests/dpd/r
 
 The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. Shipment and carrier smoke tests that protect framework contracts should appear there.
 
-PEK foundation is registered as mandatory `pek.foundation` in group `pek`; PEK admin routing is registered as mandatory `pek.admin-routing`. Run them directly with `php tests/pek/run-pek-foundation-smoke.php` and `php tests/pek/run-pek-admin-routing-smoke.php`, or through `php tests/shipments/run-shipment-regression-profile.php --group=pek`. The smokes use fake HTTP only, verify no production network calls are made, assert `/typesOfDelivery/all/` is called with GET while branch/legal/warehouse methods use POST, check official `shortName`/`codeByClassifier` country diagnostics, and assert PEK is not registered in `CarrierRegistry` or Shipment Framework registries.
+PEK foundation is registered as mandatory `pek.foundation` in group `pek`; PEK admin routing and admin UI rendering are registered as mandatory `pek.admin-routing` and `pek.admin-ui`. Run them directly with `php tests/pek/run-pek-foundation-smoke.php`, `php tests/pek/run-pek-admin-routing-smoke.php`, and `php tests/pek/run-pek-admin-ui-smoke.php`, or through `php tests/shipments/run-shipment-regression-profile.php --group=pek`. The smokes use fake HTTP only, verify no production network calls are made, assert `/typesOfDelivery/all/` is called with GET while branch/legal/warehouse methods use POST, check official `shortName`/`codeByClassifier` country diagnostics, protect stale warehouse search cache clearing, user-scoped one-shot notices, PEK closing-date validation, mbstring-independent cargo acceptance matching, nested diagnostic rendering, and assert PEK is not registered in `CarrierRegistry` or Shipment Framework registries.
 
 The plugin architecture smoke is `framework.plugin-architecture`; it is registered in the framework group and checks architecture boundaries rather than carrier business behavior. It favors dynamic Reflection-based checks where the contract is inspectable. Where runtime proof would require changing production construction, the smoke checks a narrower contract instead: registry duplicate behavior is tested with stubs, providers are discovered without uninitialized method calls, and composition-root ownership is checked for the current `Container::register()` wiring pattern.
 
@@ -50,6 +50,7 @@ Allowed matrix values:
 | --- | --- | --- | --- | --- | --- | --- |
 | architecture/foundation | `contract`: `framework.plugin-architecture` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.foundation` |
 | admin routing | `N/A` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.admin-routing` |
+| admin UI rendering | `N/A` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.admin-ui` |
 | create | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
 | preview | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-payload` | `N/A` |
 | persistence | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
