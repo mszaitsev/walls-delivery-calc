@@ -32,6 +32,7 @@ function pek_assert( bool $condition, string $message ): void {
 	}
 }
 
+function current_datetime(): DateTimeImmutable { return ( new DateTimeImmutable( '@' . (string) (int) $GLOBALS['pek_now'] ) )->setTimezone( new DateTimeZone( 'UTC' ) ); }
 function current_time( string $type ): int|string { return 'timestamp' === $type ? (int) $GLOBALS['pek_now'] : '2026-08-02 12:00:00'; }
 function wp_timezone(): DateTimeZone { return new DateTimeZone( 'UTC' ); }
 function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false { return json_encode( $value, $flags, $depth ); }
@@ -306,6 +307,7 @@ $branches_all = array(
 		array(
 			'id' => 'br-1',
 			'title' => 'Новосибирск',
+			'timezone' => 'UTC+00:00',
 			'divisions' => array(
 				array(
 					'id' => 'div-1',
@@ -338,7 +340,7 @@ $branches_all = array(
 $warehouse_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
 $selected = $warehouse_service->validate_and_select( 'wh-1' );
 $snapshot = $settings->sender_warehouse();
-pek_assert( $selected['success'] && $snapshot['branchName'] === 'Новосибирск' && $snapshot['departmentTypeId'] === 7 && $snapshot['address'] === 'full address' && $snapshot['coordinates']['latitude'] === '55.1' && $snapshot['limits']['maxWeightOnePlace'] === 50, 'PEK branches/all official nested shape must normalize branch title, division type, address, coordinates and limits.' );
+pek_assert( $selected['success'] && $snapshot['branchName'] === 'Новосибирск' && $snapshot['departmentTypeId'] === 7 && $snapshot['address'] === 'full address' && $snapshot['coordinates']['latitude'] === '55.1' && $snapshot['limits']['maxWeightOnePlace'] === 50 && $snapshot['branchTimezone'] === 'UTC+00:00', 'PEK branches/all official nested shape must normalize branch title, division type, address, coordinates, limits and branch timezone.' );
 pek_assert( ( $snapshot['availability']['endOfAvailabilityBeforeClosing'] ?? '' ) === '2026-08-03T00:00:00' && ( $snapshot['availability']['endOfCostCalculationAvailability'] ?? '' ) === '2026-08-03' && ( $snapshot['availability']['departmentClosingDate'] ?? '' ) === '2026-08-04T00:00:00+00:00', 'PEK sender warehouse snapshot must store compact availability/closing dates.' );
 $previous = $snapshot;
 foreach ( array(
@@ -386,7 +388,7 @@ pek_assert( ! $unknown->validate_and_select( 'unknown' )['success'] && $settings
 $cache = new PekSenderWarehouseSearchCache();
 pek_assert( $cache->ttl_seconds() <= 900, 'PEK warehouse search cache TTL must be <= 15 minutes.' );
 $search_payload = array(
-	'freeDepartments' => array( array( 'warehouseId' => 'cache-wh', 'branchId' => 'cache-br', 'branchName' => 'Cache Branch', 'divisionName' => 'Cache Division', 'departmentTypeId' => 1, 'departmentType' => 'Type', 'address' => 'Cached address' ) ),
+	'freeDepartments' => array( array( 'warehouseId' => 'cache-wh', 'branchId' => 'cache-br', 'branchName' => 'Cache Branch', 'divisionName' => 'Cache Division', 'departmentTypeId' => 1, 'departmentType' => 'Type', 'address' => 'Cached address', 'branchTimezone' => 'UTC+03:00', 'endOfAvailabilityBeforeClosing' => '2026-08-03T00:00:00', 'endOfCostCalculationAvailability' => null, 'departmentClosingDate' => '2026-08-04T00:00:00+03:00' ) ),
 	'paidDepartments' => array(),
 );
 $search_http = new PekFakeHttp( array( pek_json_response( $search_payload ), pek_json_response( $search_payload ), pek_json_response( $search_payload ) ) );
@@ -394,6 +396,7 @@ $search_service = new PekSenderWarehouseService( new PekApiClient( $settings, $c
 $search = $search_service->search( 'Россия, Новосибирск' );
 pek_assert( $search['requested']['departmentOperation'] === 2 && $search['requested']['type'] === 3 && $search_service->validate_and_select( 'cache-wh' )['success'], 'PEK current user can select exact result from own fresh server search cache.' );
 $cache_key_user_1 = $cache->key_for_current_user();
+pek_assert( ( $cache->current_for_current_user()['items'][0]['branchTimezone'] ?? '' ) === 'UTC+03:00' && ( $cache->current_for_current_user()['items'][0]['endOfAvailabilityBeforeClosing'] ?? '' ) === '2026-08-03T00:00:00' && ( $cache->current_for_current_user()['items'][0]['departmentClosingDate'] ?? '' ) === '2026-08-04T00:00:00+03:00', 'PEK warehouse search cache must preserve branch timezone and closing fields.' );
 pek_assert( ! str_contains( json_encode( $GLOBALS['pek_transients'][ $cache_key_user_1 ], JSON_UNESCAPED_UNICODE ) ?: '', 'secret-key' ), 'PEK warehouse search cache must not contain credentials.' );
 $search_service->search( 'Россия, Новосибирск' );
 pek_assert( array() !== $cache->current_for_current_user(), 'PEK successful warehouse search must store a current-user cache.' );
@@ -464,10 +467,11 @@ $warehouse_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Ca
 $shipment_manifest = (string) file_get_contents( dirname( __DIR__ ) . '/shipments/regression/shipment-regression-manifest.php' );
 pek_assert( str_contains( $plugin_source, 'PekSenderWarehouseSearchCache::class' ) && str_contains( $plugin_source, 'PekAdminNoticeStore::class' ) && str_contains( $plugin_source, 'PekApiClient::class' ) && str_contains( $plugin_source, 'PekAdminPage::class' ), 'PEK DI/source wiring must be in Plugin.php.' );
 pek_assert( ! str_contains( $warehouse_source, 'mb_strtolower' ) && ! str_contains( $warehouse_source, 'strtolower( $operation' ), 'PEK operation comparison must not depend on mbstring or strtolower for Cyrillic.' );
+pek_assert( ! str_contains( $plugin_source, 'DateFramework' ) && ! str_contains( $plugin_source, 'WarehouseAvailabilityPolicy' ), 'PEK foundation must not register a generic date framework.' );
 $carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 800 );
 pek_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK must not be registered in CarrierRegistry.' );
 pek_assert( ! str_contains( $plugin_source, 'PekShipmentAdapter' ) && ! str_contains( $plugin_source, 'PekShipmentPersistenceMapper' ) && ! str_contains( $plugin_source, 'PekShipmentModalExtension' ) && ! str_contains( $plugin_source, 'PekShipmentDocumentProvider' ), 'PEK must not be registered in Shipment Framework registries.' );
-pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ) && str_contains( $shipment_manifest, "'pek.admin-routing'" ) && str_contains( $shipment_manifest, "'pek.admin-ui'" ), 'PEK mandatory smokes must be in shipment regression manifest.' );
+pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ) && str_contains( $shipment_manifest, "'pek.admin-routing'" ) && str_contains( $shipment_manifest, "'pek.admin-ui'" ) && str_contains( $shipment_manifest, "'pek.warehouse-datetime'" ), 'PEK mandatory smokes must be in shipment regression manifest.' );
 $redacted = $settings->last_diagnostic();
 pek_assert( ! str_contains( json_encode( $redacted, JSON_UNESCAPED_UNICODE ) ?: '', 'secret-key' ), 'PEK normalized diagnostic must not contain API key.' );
 pek_assert( count( $http->requests ) === 5 && count( $diag_http->requests ) === 3, 'PEK smoke must use fake HTTP only and perform no production network calls.' );

@@ -180,7 +180,7 @@ final class PekAdminPage {
 			return;
 		}
 		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
-		foreach ( array( 'warehouseId' => 'Warehouse ID', 'branchName' => 'Филиал', 'divisionName' => 'Отделение', 'departmentType' => 'Тип', 'address' => 'Адрес', 'checked_at' => 'Проверено' ) as $key => $label ) {
+		foreach ( array( 'warehouseId' => 'Warehouse ID', 'branchName' => 'Филиал', 'divisionName' => 'Отделение', 'departmentType' => 'Тип', 'address' => 'Адрес', 'branchTimezone' => 'Часовой пояс филиала', 'checked_at' => 'Проверено' ) as $key => $label ) {
 			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) ( $snapshot[ $key ] ?? '' ) ) . '</td></tr>';
 		}
 		echo '</tbody></table>';

@@ -88,6 +88,18 @@ final class PekSenderWarehouseSearchCache {
 			'maxDimension' => $item['maxDimension'] ?? null,
 			'maxWeightOnePlace' => $item['maxWeightOnePlace'] ?? null,
 			'maxCount' => $item['maxCount'] ?? null,
+			'branchTimezone' => $this->nullable_string( $item['branchTimezone'] ?? null ),
+			'endOfAvailabilityBeforeClosing' => $this->nullable_string( $item['endOfAvailabilityBeforeClosing'] ?? null ),
+			'endOfCostCalculationAvailability' => $this->nullable_string( $item['endOfCostCalculationAvailability'] ?? null ),
+			'departmentClosingDate' => $this->nullable_string( $item['departmentClosingDate'] ?? null ),
 		);
+	}
+
+	private function nullable_string( mixed $value ): ?string {
+		if ( null === $value ) {
+			return null;
+		}
+
+		return substr( trim( preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', (string) $value ) ?? (string) $value ), 0, 120 );
 	}
 }

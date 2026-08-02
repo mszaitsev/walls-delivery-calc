@@ -214,6 +214,7 @@ final class PekSettings {
 				'latitude' => (string) ( $value['coordinates']['latitude'] ?? '' ),
 				'longitude' => (string) ( $value['coordinates']['longitude'] ?? '' ),
 			),
+			'branchTimezone' => $this->snapshot_nullable_string( $value['branchTimezone'] ?? null ),
 			'limits' => array(
 				'maxWeight' => $this->numeric_or_null( $limits['maxWeight'] ?? null ),
 				'maxVolume' => $this->numeric_or_null( $limits['maxVolume'] ?? null ),
@@ -222,9 +223,9 @@ final class PekSettings {
 				'maxCount' => $this->numeric_or_null( $limits['maxCount'] ?? null ),
 			),
 			'availability' => array(
-				'endOfAvailabilityBeforeClosing' => $this->sanitize_text( (string) ( $availability['endOfAvailabilityBeforeClosing'] ?? '' ) ),
-				'endOfCostCalculationAvailability' => $this->sanitize_text( (string) ( $availability['endOfCostCalculationAvailability'] ?? '' ) ),
-				'departmentClosingDate' => $this->sanitize_text( (string) ( $availability['departmentClosingDate'] ?? '' ) ),
+				'endOfAvailabilityBeforeClosing' => $this->snapshot_nullable_string( $availability['endOfAvailabilityBeforeClosing'] ?? null ),
+				'endOfCostCalculationAvailability' => $this->snapshot_nullable_string( $availability['endOfCostCalculationAvailability'] ?? null ),
+				'departmentClosingDate' => $this->snapshot_nullable_string( $availability['departmentClosingDate'] ?? null ),
 			),
 			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
 		);
@@ -242,6 +243,16 @@ final class PekSettings {
 		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
 
 		return trim( function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : $value );
+	}
+
+	private function snapshot_nullable_string( mixed $value ): ?string {
+		if ( null === $value ) {
+			return null;
+		}
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( (string) $value ) : (string) $value;
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+
+		return substr( trim( $value ), 0, 120 );
 	}
 
 	private function sanitize_key( string $value ): string {

@@ -956,6 +956,7 @@ C:.
     |       run-pek-admin-routing-smoke.php
     |       run-pek-admin-ui-smoke.php
     |       run-pek-foundation-smoke.php
+    |       run-pek-warehouse-datetime-smoke.php
     |
     +---pickup
     |       run-pickup-checkout-smoke.php

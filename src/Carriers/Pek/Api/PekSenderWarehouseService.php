@@ -65,7 +65,7 @@ final class PekSenderWarehouseService {
 		$items = is_array( $search['items'] ?? null ) ? $search['items'] : array();
 		foreach ( $items as $item ) {
 			if ( is_array( $item ) && $warehouse_id === (string) ( $item['warehouseId'] ?? '' ) ) {
-				$availability = $this->availability_status( $item, false );
+				$availability = $this->availability_status( $item );
 				if ( ! $availability['success'] ) {
 					return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => array() );
 				}
@@ -92,7 +92,7 @@ final class PekSenderWarehouseService {
 				$this->settings->save_sender_warehouse( $previous );
 				return array( 'success' => false, 'message' => 'ПЭК не подтвердил выбранный warehouse ID как склад приёма для LTL.', 'snapshot' => $previous );
 			}
-			$availability = $this->availability_status( $item, true );
+			$availability = $this->availability_status( $item );
 			if ( ! $availability['success'] ) {
 				$this->settings->save_sender_warehouse( $previous );
 				return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => $previous );
@@ -145,6 +145,7 @@ final class PekSenderWarehouseService {
 			'maxDimension' => $row['maxDimension'] ?? null,
 			'maxWeightOnePlace' => $row['maxWeightOnePlace'] ?? ( $row['maxWeightPerPlace'] ?? null ),
 			'maxCount' => $row['maxCount'] ?? null,
+			'branchTimezone' => $row['branchTimezone'] ?? ( $row['timezone'] ?? null ),
 			'endOfAvailabilityBeforeClosing' => $row['endOfAvailabilityBeforeClosing'] ?? null,
 			'endOfCostCalculationAvailability' => $row['endOfCostCalculationAvailability'] ?? null,
 			'departmentClosingDate' => $row['departmentClosingDate'] ?? null,
@@ -178,6 +179,7 @@ final class PekSenderWarehouseService {
 									'departmentType' => (string) ( $division['departmentType'] ?? '' ),
 									'address' => (string) ( trim( (string) ( $warehouse['addressDivision'] ?? '' ) ) !== '' ? $warehouse['addressDivision'] : ( $warehouse['address'] ?? '' ) ),
 									'coordinates' => is_array( $warehouse['coordinatesobj'] ?? null ) ? $warehouse['coordinatesobj'] : array(),
+									'branchTimezone' => $branch['timezone'] ?? null,
 									'kindsOfTransportation' => $warehouse_has_capabilities ? ( is_array( $warehouse['kindsOfTransportation'] ?? null ) ? $warehouse['kindsOfTransportation'] : array() ) : ( is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array() ),
 								)
 							),
@@ -220,64 +222,153 @@ final class PekSenderWarehouseService {
 		return 1 === preg_match( '/^при[её]м грузов$/iu', $operation );
 	}
 
-	/** @param array<string,mixed> $item @return array{success:bool,message:string} */
-	private function availability_status( array $item, bool $require_valid_machine_dates ): array {
+	/** @param array<string,mixed> $item @return array{success:bool,code:string,message:string} */
+	private function availability_status( array $item ): array {
 		foreach ( array(
-			'endOfAvailabilityBeforeClosing' => 'Склад ПЭК больше недоступен для подачи заявок.',
-			'endOfCostCalculationAvailability' => 'Склад ПЭК больше недоступен для расчёта.',
-			'departmentClosingDate' => 'Отделение ПЭК закрыто.',
-		) as $field => $message ) {
+			'endOfAvailabilityBeforeClosing' => array(
+				'code' => 'pek_sender_warehouse_order_unavailable',
+				'message' => 'Склад ПЭК больше недоступен для подачи заявок.',
+			),
+			'endOfCostCalculationAvailability' => array(
+				'code' => 'pek_sender_warehouse_cost_unavailable',
+				'message' => 'Склад ПЭК больше недоступен для расчёта.',
+			),
+			'departmentClosingDate' => array(
+				'code' => 'pek_sender_warehouse_closed',
+				'message' => 'Отделение ПЭК закрыто.',
+			),
+		) as $field => $failure ) {
 			if ( ! array_key_exists( $field, $item ) || null === $item[ $field ] || '' === trim( (string) $item[ $field ] ) ) {
 				continue;
 			}
-			$expires_at = $this->parse_availability_datetime( (string) $item[ $field ] );
-			if ( null === $expires_at ) {
-				return array( 'success' => false, 'message' => 'ПЭК вернул некорректную дату доступности склада.' );
+			$parsed = $this->parse_availability_datetime( (string) $item[ $field ], $item['branchTimezone'] ?? null );
+			if ( ! $parsed['success'] ) {
+				return $parsed;
 			}
-			if ( $expires_at < $this->now_timestamp() ) {
-				return array( 'success' => false, 'message' => $message );
+			if ( $this->now_timestamp() >= (int) $parsed['timestamp'] ) {
+				return array( 'success' => false, 'code' => $failure['code'], 'message' => $failure['message'] );
 			}
 		}
 
-		return array( 'success' => true, 'message' => '' );
+		return array( 'success' => true, 'code' => '', 'message' => '' );
 	}
 
-	private function parse_availability_datetime( string $value ): ?int {
+	/** @return array{success:bool,code:string,message:string,timestamp?:int} */
+	private function parse_availability_datetime( string $value, mixed $branch_timezone ): array {
 		$value = trim( $value );
 		if ( '' === $value ) {
+			return array( 'success' => false, 'code' => 'pek_sender_warehouse_invalid_availability_date', 'message' => 'ПЭК вернул некорректную дату доступности склада.' );
+		}
+
+		$explicit_timezone = 1 === preg_match( '/(?:Z|[+\-]\d{2}:\d{2})$/', $value );
+		$timezone = null;
+		if ( ! $explicit_timezone ) {
+			$timezone = $this->branch_timezone( is_string( $branch_timezone ) ? $branch_timezone : '' );
+			if ( null === $timezone ) {
+				return array(
+					'success' => false,
+					'code' => 'pek_sender_warehouse_invalid_branch_timezone',
+					'message' => 'ПЭК не вернул корректный часовой пояс филиала для даты доступности склада.',
+				);
+			}
+		}
+
+		$date = $this->strict_availability_datetime( $value, $timezone );
+		if ( ! $date instanceof \DateTimeImmutable ) {
+			return array( 'success' => false, 'code' => 'pek_sender_warehouse_invalid_availability_date', 'message' => 'ПЭК вернул некорректную дату доступности склада.' );
+		}
+
+		return array( 'success' => true, 'code' => '', 'message' => '', 'timestamp' => $date->getTimestamp() );
+	}
+
+	private function strict_availability_datetime( string $value, ?\DateTimeZone $timezone ): ?\DateTimeImmutable {
+		if ( 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/', $value ) ) {
+			return $this->create_checked_datetime( '!Y-m-d H:i:s', $value . ' 23:59:59', $timezone, $value, 'Y-m-d' );
+		}
+
+		$pattern = '/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+\-]\d{2}:\d{2})?$/';
+		if ( 1 !== preg_match( $pattern, $value, $matches ) ) {
 			return null;
 		}
-		$timezone = $this->timezone();
+
+		$fraction = (string) ( $matches[2] ?? '' );
+		$offset = (string) ( $matches[3] ?? '' );
+		if ( '' !== $offset && ! $this->is_valid_datetime_offset( $offset ) ) {
+			return null;
+		}
+
+		$parse_value = $matches[1];
+		$format = '!Y-m-d\TH:i:s';
+		$roundtrip_format = 'Y-m-d\TH:i:s';
+		if ( '' !== $fraction ) {
+			$parse_value .= '.' . str_pad( $fraction, 6, '0' );
+			$format .= '.u';
+			$roundtrip_format .= '.u';
+		}
+		if ( '' !== $offset ) {
+			$parse_value .= 'Z' === $offset ? '+00:00' : $offset;
+			$format .= 'P';
+			$roundtrip_format .= 'P';
+		}
+
+		$expected = $parse_value;
+
+		return $this->create_checked_datetime( $format, $parse_value, $timezone, $expected, $roundtrip_format );
+	}
+
+	private function create_checked_datetime( string $format, string $value, ?\DateTimeZone $timezone, string $expected, string $roundtrip_format ): ?\DateTimeImmutable {
+		$date = \DateTimeImmutable::createFromFormat( $format, $value, $timezone );
+		$errors = \DateTimeImmutable::getLastErrors();
+		if ( ! $date instanceof \DateTimeImmutable || ( is_array( $errors ) && ( (int) ( $errors['warning_count'] ?? 0 ) > 0 || (int) ( $errors['error_count'] ?? 0 ) > 0 ) ) ) {
+			return null;
+		}
+		if ( $date->format( $roundtrip_format ) !== $expected ) {
+			return null;
+		}
+
+		return $date;
+	}
+
+	private function branch_timezone( string $value ): ?\DateTimeZone {
+		$value = strtoupper( trim( $value ) );
+		if ( 'UTC' === $value || 'Z' === $value ) {
+			return new \DateTimeZone( 'UTC' );
+		}
+		if ( 1 !== preg_match( '/^(?:UTC)?([+\-])(\d{2}):(\d{2})$/', $value, $matches ) ) {
+			return null;
+		}
+		$hours = (int) $matches[2];
+		$minutes = (int) $matches[3];
+		if ( $hours > 14 || $minutes > 59 || ( 14 === $hours && 0 !== $minutes ) ) {
+			return null;
+		}
+
 		try {
-			if ( 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/', $value ) ) {
-				$date = \DateTimeImmutable::createFromFormat( '!Y-m-d H:i:s', $value . ' 23:59:59', $timezone );
-				return $date instanceof \DateTimeImmutable ? $date->getTimestamp() : null;
-			}
-			if ( 1 !== preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:?\d{2})?$/', $value ) ) {
-				return null;
-			}
-			$has_timezone = 1 === preg_match( '/(?:Z|[+\-]\d{2}:?\d{2})$/', $value );
-			$date = $has_timezone ? new \DateTimeImmutable( $value ) : new \DateTimeImmutable( $value, $timezone );
-			return $date->getTimestamp();
+			return new \DateTimeZone( $matches[1] . sprintf( '%02d:%02d', $hours, $minutes ) );
 		} catch ( \Exception ) {
 			return null;
 		}
 	}
 
+	private function is_valid_datetime_offset( string $offset ): bool {
+		if ( 'Z' === $offset ) {
+			return true;
+		}
+		if ( 1 !== preg_match( '/^[+\-](\d{2}):(\d{2})$/', $offset, $matches ) ) {
+			return false;
+		}
+		$hours = (int) $matches[1];
+		$minutes = (int) $matches[2];
+
+		return $hours <= 14 && $minutes <= 59 && ( 14 !== $hours || 0 === $minutes );
+	}
+
 	private function now_timestamp(): int {
-		if ( function_exists( 'current_time' ) ) {
-			return (int) current_time( 'timestamp' );
+		if ( function_exists( 'current_datetime' ) ) {
+			return current_datetime()->getTimestamp();
 		}
 
 		return time();
-	}
-
-	private function timezone(): \DateTimeZone {
-		if ( function_exists( 'wp_timezone' ) ) {
-			return wp_timezone();
-		}
-
-		return new \DateTimeZone( 'UTC' );
 	}
 
 	/** @param array<string,mixed> $item @return array<string,mixed> */
@@ -291,6 +382,7 @@ final class PekSenderWarehouseService {
 			'departmentType' => (string) ( $item['departmentType'] ?? '' ),
 			'address' => (string) ( $item['address'] ?? '' ),
 			'coordinates' => is_array( $item['coordinates'] ?? null ) ? $item['coordinates'] : array(),
+			'branchTimezone' => $item['branchTimezone'] ?? null,
 			'limits' => array(
 				'maxWeight' => $item['maxWeight'] ?? null,
 				'maxVolume' => $item['maxVolume'] ?? null,
@@ -299,9 +391,9 @@ final class PekSenderWarehouseService {
 				'maxCount' => $item['maxCount'] ?? null,
 			),
 			'availability' => array(
-				'endOfAvailabilityBeforeClosing' => (string) ( $item['endOfAvailabilityBeforeClosing'] ?? '' ),
-				'endOfCostCalculationAvailability' => (string) ( $item['endOfCostCalculationAvailability'] ?? '' ),
-				'departmentClosingDate' => (string) ( $item['departmentClosingDate'] ?? '' ),
+				'endOfAvailabilityBeforeClosing' => $item['endOfAvailabilityBeforeClosing'] ?? null,
+				'endOfCostCalculationAvailability' => $item['endOfCostCalculationAvailability'] ?? null,
+				'departmentClosingDate' => $item['departmentClosingDate'] ?? null,
 			),
 			'checked_at' => $this->now(),
 		);

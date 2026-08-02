@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Version: 0.130.2
+Version: 0.130.3
 
 `src/Core/Plugin.php` is the composition root. `src/Core/Container.php` is a small lazy singleton container with `register()`, `get()`, and `has()`.
 
@@ -19,7 +19,7 @@ For a carrier with shipment support, register:
 
 Jet Logistic registers one quote carrier (`JetLogisticCarrier`) and one shipment adapter (`JetLogisticShipmentAdapter`) in `Plugin.php`. Its API, credentials, geography import, status mapping, and manual shipment service are carrier-owned services. Do not add Jet to `ShipmentDocumentProviderRegistry`, `ShipmentModalExtensionRegistry`, lifecycle continuation wiring, or `ShipmentCreationService` mapper arrays.
 
-PEK foundation registers only settings, credentials, HTTP transport, request budget, typed API client, connection diagnostic service, user-scoped sender warehouse search cache, user-scoped admin notice store, sender warehouse service, and the PEK admin tab in `Plugin.php`. The delivery-service admin page receives the PEK admin component only for routing/rendering and must not construct PEK services, parse PEK API payloads, store PEK notices, or handle PEK credentials itself.
+PEK foundation registers only settings, credentials, HTTP transport, request budget, typed API client, connection diagnostic service, user-scoped sender warehouse search cache, user-scoped admin notice store, sender warehouse service, and the PEK admin tab in `Plugin.php`. Warehouse availability date parsing is carrier-owned inside the sender warehouse service; there is no generic date/time framework or Shipment Framework dependency for PEK foundation. The delivery-service admin page receives the PEK admin component only for routing/rendering and must not construct PEK services, parse PEK API payloads, store PEK notices, or handle PEK credentials itself.
 
 - settings and credentials;
 - API client and HTTP/SOAP client;
