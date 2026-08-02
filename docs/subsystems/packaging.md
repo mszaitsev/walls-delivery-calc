@@ -1,6 +1,6 @@
 # Packaging
 
-Version: 0.130.3
+Version: 0.130.4
 
 Packaging code lives in `src/Packaging`. `PackagingBuilder` and `PackagingWeightCalculator` build shipment places from order/package data. Shipment allocation tests protect the bridge into shipment creation.
 

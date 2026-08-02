@@ -62,6 +62,7 @@ $settings_repository = new SettingsRepository();
 $settings = new PekSettings( $settings_repository );
 $credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
+$settings->save_sender_warehouse( array( 'warehouseId' => 'nearest-timezone-wh', 'branchTimezone' => 'UTC+04:00', 'branchName' => 'Самара', 'divisionName' => 'Самара Запад' ) );
 $settings->save_diagnostic_result(
 	array(
 		'success' => false,
@@ -102,6 +103,7 @@ restore_error_handler();
 pek_ui_assert( str_contains( $html, 'RU' ) && str_contains( $html, '643' ) && str_contains( $html, '999' ), 'PEK diagnostic classifier mismatch must render country/expected/actual.' );
 pek_ui_assert( ! str_contains( $html, '>Array<' ) && ! str_contains( $html, 'Array to string conversion' ), 'PEK diagnostic nested arrays must not render as Array or warning text.' );
 pek_ui_assert( str_contains( $html, 'Saved &lt;safe&gt;' ), 'PEK admin notice must render escaped content.' );
+pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
 $search_field_pos = strpos( $html, 'id="pek_warehouse_search_address"' );
 $table_pos = strpos( $html, '<table class="form-table" role="presentation">', $search_form_pos === false ? 0 : $search_form_pos );

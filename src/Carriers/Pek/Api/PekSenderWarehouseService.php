@@ -145,13 +145,48 @@ final class PekSenderWarehouseService {
 			'maxDimension' => $row['maxDimension'] ?? null,
 			'maxWeightOnePlace' => $row['maxWeightOnePlace'] ?? ( $row['maxWeightPerPlace'] ?? null ),
 			'maxCount' => $row['maxCount'] ?? null,
-			'branchTimezone' => $row['branchTimezone'] ?? ( $row['timezone'] ?? null ),
+			'branchTimezone' => $this->normalize_department_timezone( $row ),
 			'endOfAvailabilityBeforeClosing' => $row['endOfAvailabilityBeforeClosing'] ?? null,
 			'endOfCostCalculationAvailability' => $row['endOfCostCalculationAvailability'] ?? null,
 			'departmentClosingDate' => $row['departmentClosingDate'] ?? null,
 			'kindsOfTransportation' => is_array( $row['kindsOfTransportation'] ?? null ) ? $row['kindsOfTransportation'] : array(),
 			'types' => is_array( $row['types'] ?? null ) ? $row['types'] : array(),
 		);
+	}
+
+	/** @param array<string,mixed> $row */
+	private function normalize_department_timezone( array $row ): ?string {
+		foreach ( array( 'branchTimezone', 'timezone' ) as $key ) {
+			if ( ! array_key_exists( $key, $row ) || null === $row[ $key ] || '' === trim( (string) $row[ $key ] ) ) {
+				continue;
+			}
+			$value = strtoupper( trim( (string) $row[ $key ] ) );
+			if ( null !== $this->branch_timezone( $value ) ) {
+				return $value;
+			}
+
+			return null;
+		}
+
+		return $this->normalize_nearest_department_timezone( $row['timeZone'] ?? null );
+	}
+
+	private function normalize_nearest_department_timezone( mixed $value ): ?string {
+		if ( null === $value || '' === trim( (string) $value ) ) {
+			return null;
+		}
+		$value = trim( (string) $value );
+		if ( 1 !== preg_match( '/^(\d{2}):(\d{2}):(\d{2})$/', $value, $matches ) ) {
+			return null;
+		}
+		$hours = (int) $matches[1];
+		$minutes = (int) $matches[2];
+		$seconds = (int) $matches[3];
+		if ( $hours > 14 || $minutes > 59 || 0 !== $seconds || ( 14 === $hours && 0 !== $minutes ) ) {
+			return null;
+		}
+
+		return 'UTC+' . sprintf( '%02d:%02d', $hours, $minutes );
 	}
 
 	/** @param array<string,mixed> $branches @return array<string,mixed> */
