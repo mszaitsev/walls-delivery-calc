@@ -193,7 +193,50 @@ final class PekAdminPage {
 		}
 		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
 		foreach ( $report as $key => $value ) {
+			if ( 'checks' === (string) $key && is_array( $value ) ) {
+				echo '<tr><th scope="row">' . esc_html( (string) $key ) . '</th><td>';
+				$this->render_diagnostic_checks( $value );
+				echo '</td></tr>';
+				continue;
+			}
 			echo '<tr><th scope="row">' . esc_html( (string) $key ) . '</th><td>' . esc_html( $this->format_report_value( $value, (string) $key ) ) . '</td></tr>';
+		}
+		echo '</tbody></table>';
+	}
+
+	/** @param array<string,mixed> $checks */
+	private function render_diagnostic_checks( array $checks ): void {
+		if ( array() === $checks ) {
+			echo esc_html( '—' );
+			return;
+		}
+		$labels = array(
+			'products' => 'Справочник продуктов',
+			'countries' => 'Справочник стран',
+			'legal_forms' => 'Юридические формы',
+			'warehouse_api' => 'Проверка выбранного склада',
+		);
+		echo '<table class="widefat striped" style="max-width:100%;"><tbody>';
+		foreach ( $labels as $key => $label ) {
+			if ( ! is_array( $checks[ $key ] ?? null ) ) {
+				continue;
+			}
+			$check = $checks[ $key ];
+			$status = (string) ( $check['status'] ?? ( ( $check['success'] ?? false ) ? 'passed' : 'failed' ) );
+			$status_label = match ( $status ) {
+				'passed' => 'Успешно',
+				'skipped' => 'Пропущено',
+				default => 'Предупреждение',
+			};
+			$http_status = null !== ( $check['http_status'] ?? null ) && '' !== (string) $check['http_status'] ? ' HTTP ' . (string) $check['http_status'] : '';
+			$line = trim( $status_label . ':' . $http_status . ' ' . (string) ( $check['message'] ?? '' ) );
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>';
+			echo '<code>' . esc_html( (string) ( $check['method'] ?? '' ) . ' ' . (string) ( $check['endpoint'] ?? '' ) ) . '</code><br>';
+			echo esc_html( $line );
+			if ( '' !== (string) ( $check['error_code'] ?? '' ) ) {
+				echo '<br><code>' . esc_html( (string) $check['error_code'] ) . '</code>';
+			}
+			echo '</td></tr>';
 		}
 		echo '</tbody></table>';
 	}

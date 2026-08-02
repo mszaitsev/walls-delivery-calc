@@ -278,6 +278,9 @@ final class PekSettings {
 			return $out;
 		}
 		if ( is_string( $value ) ) {
+			if ( $this->is_machine_datetime( $value ) ) {
+				return $value;
+			}
 			$value = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $value ) ?? $value;
 			$value = preg_replace( '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', '[redacted-email]', $value ) ?? $value;
 			$value = preg_replace( '/(?:\+?\d[\d\s().-]{8,}\d)/', '[redacted-phone]', $value ) ?? $value;
@@ -285,6 +288,11 @@ final class PekSettings {
 		}
 
 		return $value;
+	}
+
+	private function is_machine_datetime( string $value ): bool {
+		return 1 === preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value )
+			|| 1 === preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})?$/', $value );
 	}
 
 	private function numeric_or_null( mixed $value ): int|float|null {

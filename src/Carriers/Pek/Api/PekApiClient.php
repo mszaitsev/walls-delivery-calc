@@ -127,12 +127,12 @@ final class PekApiClient {
 			'headers' => array(
 				'Accept' => 'application/json',
 				'Accept-Encoding' => 'gzip',
+				'Content-Type' => 'application/json;charset=utf-8',
 				'Authorization' => 'Basic ' . base64_encode( $this->credentials->login() . ':' . $this->credentials->api_key() ),
 			),
 		);
 		if ( 'POST' === $method ) {
 			$json = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) : json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) ?: '{}';
-			$args['headers']['Content-Type'] = 'application/json;charset=utf-8';
 			$args['body'] = $json;
 		}
 

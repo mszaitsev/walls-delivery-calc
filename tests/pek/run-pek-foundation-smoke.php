@@ -237,7 +237,7 @@ $api->nearest_departments( 'Новосибирск' );
 $api->branches_all_for_warehouse( 'wh-1' );
 $methods = array_column( $http->requests, 'method' );
 pek_assert( $methods === array( 'GET', 'POST', 'POST', 'POST', 'POST' ), 'PEK typed API methods must use GET for typesOfDelivery and POST for the other foundation methods.' );
-pek_assert( $http->requests[0]['url'] === PekSettings::BASE_URL . '/typesOfDelivery/all/' && ! isset( $http->requests[0]['args']['body'] ), 'PEK GET request must have official URL and no JSON body.' );
+pek_assert( $http->requests[0]['url'] === PekSettings::BASE_URL . '/typesOfDelivery/all/' && ! isset( $http->requests[0]['args']['body'] ) && $http->requests[0]['args']['headers']['Content-Type'] === 'application/json;charset=utf-8', 'PEK GET request must have official URL, JSON Content-Type header and no body.' );
 foreach ( array_slice( $http->requests, 1 ) as $request ) {
 	pek_assert( str_starts_with( $request['url'], 'https://' ) && true === $request['args']['sslverify'], 'PEK requests must use HTTPS and sslverify.' );
 	pek_assert( $request['args']['headers']['Content-Type'] === 'application/json;charset=utf-8' && $request['args']['headers']['Accept'] === 'application/json' && $request['args']['headers']['Accept-Encoding'] === 'gzip', 'PEK POST JSON headers must match protocol.' );
@@ -293,14 +293,15 @@ $diag_http = new PekFakeHttp( array(
 	pek_json_response( array( array( 'name' => 'ООО', 'shortName' => 'ООО' ) ) ),
 ) );
 $diag = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $diag_http, new PekRequestBudget( $settings ) ) ) )->run();
-pek_assert( $diag['success'] && $diag['countries_found'] === array( 'RU', 'KZ' ) && in_array( 'AM', $diag['planned_countries_missing'], true ), 'PEK diagnostic must use official shortName/codeByClassifier and not require all planned countries.' );
+pek_assert( $diag['success'] && $diag['connection_ok'] && $diag['ltl_product_type'] === true && $diag['legal_forms_available'] === true && $diag['countries_found'] === array( 'RU', 'KZ' ) && in_array( 'AM', $diag['planned_countries_missing'], true ), 'PEK diagnostic must use official shortName/codeByClassifier and not require all planned countries.' );
+pek_assert( ( $diag['checks']['products']['method'] ?? '' ) === 'GET' && ( $diag['checks']['countries']['method'] ?? '' ) === 'POST' && ( $diag['checks']['warehouse_api']['status'] ?? '' ) === 'skipped', 'PEK diagnostic checks must expose methods and skip warehouse check without selected warehouse.' );
 $mismatch_http = new PekFakeHttp( array(
 	pek_json_response( array( array( 'type' => 3 ) ) ),
 	pek_json_response( array( array( 'codeByClassifier' => '999', 'name' => 'РОССИЯ', 'shortName' => 'RU' ), array( 'code' => 'KZ' ) ) ),
 	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
 ) );
 $mismatch = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $mismatch_http, new PekRequestBudget( $settings ) ) ) )->run();
-pek_assert( ! $mismatch['success'] && $mismatch['countries_found'] === array() && ( $mismatch['classifier_mismatches'][0]['country'] ?? '' ) === 'RU', 'PEK diagnostic must fail RU classifier mismatch and not rely on invented code field.' );
+pek_assert( $mismatch['connection_ok'] && $mismatch['countries_found'] === array() && ( $mismatch['classifier_mismatches'][0]['country'] ?? '' ) === 'RU', 'PEK diagnostic must report RU classifier mismatch and not rely on invented code field.' );
 
 $branches_all = array(
 	'branches' => array(
@@ -384,6 +385,85 @@ pek_assert( $service->validate_and_select( 'no-date-wh' )['success'], 'PEK absen
 $current_previous = $settings->sender_warehouse();
 $unknown = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
 pek_assert( ! $unknown->validate_and_select( 'unknown' )['success'] && $settings->sender_warehouse() === $current_previous, 'PEK unknown warehouse must be rejected and preserve previous selection.' );
+
+$settings->save_sender_warehouse( $snapshot );
+$diagnostic_previous_warehouse = $settings->sender_warehouse();
+$prod_like_http = new PekFakeHttp( array(
+	array( 'status' => 403, 'body' => '{}' ),
+	pek_json_response( array( array( 'codeByClassifier' => '643', 'name' => 'РОССИЯ', 'shortName' => 'RU' ) ) ),
+	pek_json_response( array( array( 'name' => 'ООО', 'shortName' => 'ООО' ) ) ),
+	pek_json_response( $branches_all ),
+) );
+$prod_like = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $prod_like_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( $prod_like['connection_ok'] === true && $prod_like['success'] === true && $prod_like['all_checks_passed'] === false, 'PEK products 403 plus warehouse success must confirm connection but not all checks.' );
+pek_assert( $prod_like['ltl_product_type'] === null && $prod_like['legal_forms_available'] === true && $prod_like['countries_found'] === array( 'RU' ), 'PEK diagnostic must keep tri-state products and successful countries/legal forms after products 403.' );
+pek_assert( ( $prod_like['checks']['products']['error_code'] ?? '' ) === 'pek_http_403' && ( $prod_like['checks']['products']['http_status'] ?? 0 ) === 403 && ( $prod_like['checks']['warehouse_api']['success'] ?? false ) === true, 'PEK diagnostic checks must preserve endpoint-specific HTTP 403 and continue to warehouse API.' );
+pek_assert( array_column( $prod_like_http->requests, 'method' ) === array( 'GET', 'POST', 'POST', 'POST' ) && $settings->sender_warehouse() === $diagnostic_previous_warehouse, 'PEK diagnostic must execute all independent checks and must not mutate selected warehouse.' );
+pek_assert( $prod_like['message'] === 'Подключение ПЭК работает. Некоторые справочные методы недоступны; подробности приведены ниже.', 'PEK production-like warning summary must be stable.' );
+
+$settings->save_sender_warehouse( array() );
+$no_warehouse_http = new PekFakeHttp( array(
+	array( 'status' => 403, 'body' => '{}' ),
+	pek_json_response( array( array( 'codeByClassifier' => '643', 'name' => 'РОССИЯ', 'shortName' => 'RU' ) ) ),
+	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
+) );
+$no_warehouse = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $no_warehouse_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( $no_warehouse['connection_ok'] && $no_warehouse['success'] && ! $no_warehouse['all_checks_passed'] && ( $no_warehouse['checks']['warehouse_api']['status'] ?? '' ) === 'skipped' && count( $no_warehouse_http->requests ) === 3, 'PEK diagnostic must skip warehouse API without selected warehouse and still confirm working connection from other endpoints.' );
+
+$settings->save_sender_warehouse( $snapshot );
+$no_ltl_http = new PekFakeHttp( array(
+	pek_json_response( array( array( 'type' => 1 ) ) ),
+	pek_json_response( array( array( 'codeByClassifier' => '643', 'name' => 'РОССИЯ', 'shortName' => 'RU' ) ) ),
+	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
+	pek_json_response( $branches_all ),
+) );
+$no_ltl = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $no_ltl_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( $no_ltl['ltl_product_type'] === false && ( $no_ltl['checks']['products']['success'] ?? false ) === true && $no_ltl['connection_ok'], 'PEK products success without type=3 must set ltl_product_type=false without failing connection health.' );
+
+$countries_403_http = new PekFakeHttp( array(
+	pek_json_response( array( array( 'type' => 3 ) ) ),
+	array( 'status' => 403, 'body' => '{}' ),
+	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
+	pek_json_response( $branches_all ),
+) );
+$countries_403 = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $countries_403_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( $countries_403['connection_ok'] && $countries_403['countries_found'] === array() && $countries_403['planned_countries_missing'] === array(), 'PEK country endpoint failure must not declare planned countries missing when dictionary was unavailable.' );
+
+$legal_403_http = new PekFakeHttp( array(
+	pek_json_response( array( array( 'type' => 3 ) ) ),
+	pek_json_response( array( array( 'codeByClassifier' => '643', 'name' => 'РОССИЯ', 'shortName' => 'RU' ) ) ),
+	array( 'status' => 403, 'body' => '{}' ),
+	pek_json_response( $branches_all ),
+) );
+$legal_403 = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $legal_403_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( $legal_403['connection_ok'] && $legal_403['legal_forms_available'] === null, 'PEK legal forms endpoint failure must produce tri-state null and keep warehouse-based connection health.' );
+
+$warehouse_403_http = new PekFakeHttp( array(
+	pek_json_response( array( array( 'type' => 3 ) ) ),
+	pek_json_response( array( array( 'codeByClassifier' => '643', 'name' => 'РОССИЯ', 'shortName' => 'RU' ) ) ),
+	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
+	array( 'status' => 403, 'body' => '{}' ),
+) );
+$warehouse_403 = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $warehouse_403_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( $warehouse_403['connection_ok'] && ! $warehouse_403['all_checks_passed'] && ( $warehouse_403['checks']['warehouse_api']['http_status'] ?? 0 ) === 403, 'PEK warehouse 403 must not hide successful country proof but must fail all_checks_passed.' );
+
+$all_403_http = new PekFakeHttp( array(
+	array( 'status' => 403, 'body' => '{}' ),
+	array( 'status' => 403, 'body' => '{}' ),
+	array( 'status' => 403, 'body' => '{}' ),
+	array( 'status' => 403, 'body' => '{}' ),
+) );
+$all_403 = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $all_403_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( ! $all_403['connection_ok'] && ! $all_403['success'] && ! $all_403['all_checks_passed'], 'PEK diagnostic must fail connection health when all authenticated endpoints fail.' );
+
+$saved_options_for_missing_credentials = $GLOBALS['pek_options'];
+$GLOBALS['pek_options'] = array();
+$missing_credentials_http = new PekFakeHttp( array( pek_json_response( array() ) ) );
+$missing_credentials_settings = new PekSettings( new SettingsRepository() );
+$missing_credentials = new PekCredentials( new SettingsRepository(), new EncryptionService() );
+$missing_result = ( new PekConnectionDiagnosticService( $missing_credentials_settings, $missing_credentials, new PekApiClient( $missing_credentials_settings, $missing_credentials, $missing_credentials_http, new PekRequestBudget( $missing_credentials_settings ) ) ) )->run();
+pek_assert( ! $missing_result['connection_ok'] && ! $missing_result['success'] && count( $missing_credentials_http->requests ) === 0, 'PEK missing credentials diagnostic must not perform API requests.' );
+$GLOBALS['pek_options'] = $saved_options_for_missing_credentials;
 
 $cache = new PekSenderWarehouseSearchCache();
 pek_assert( $cache->ttl_seconds() <= 900, 'PEK warehouse search cache TTL must be <= 15 minutes.' );
@@ -472,8 +552,19 @@ $carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 
 pek_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK must not be registered in CarrierRegistry.' );
 pek_assert( ! str_contains( $plugin_source, 'PekShipmentAdapter' ) && ! str_contains( $plugin_source, 'PekShipmentPersistenceMapper' ) && ! str_contains( $plugin_source, 'PekShipmentModalExtension' ) && ! str_contains( $plugin_source, 'PekShipmentDocumentProvider' ), 'PEK must not be registered in Shipment Framework registries.' );
 pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ) && str_contains( $shipment_manifest, "'pek.admin-routing'" ) && str_contains( $shipment_manifest, "'pek.admin-ui'" ) && str_contains( $shipment_manifest, "'pek.warehouse-datetime'" ), 'PEK mandatory smokes must be in shipment regression manifest.' );
+$settings->save_diagnostic_result(
+	array(
+		'checked_at' => '2026-08-03 01:13:52',
+		'checked_at_iso' => '2026-08-03T01:13:52+07:00',
+		'phone' => '+7 999 123-45-67',
+		'message' => 'Позвонить +7 999 123-45-67',
+	)
+);
+$sanitized_report = $settings->last_diagnostic();
+pek_assert( $sanitized_report['checked_at'] === '2026-08-03 01:13:52' && $sanitized_report['checked_at_iso'] === '2026-08-03T01:13:52+07:00', 'PEK diagnostic sanitation must not redact machine datetime values as phones.' );
+pek_assert( $sanitized_report['phone'] === '[redacted-phone]' && $sanitized_report['message'] === 'Позвонить [redacted-phone]', 'PEK diagnostic sanitation must keep phone redaction for real phone numbers.' );
 $redacted = $settings->last_diagnostic();
 pek_assert( ! str_contains( json_encode( $redacted, JSON_UNESCAPED_UNICODE ) ?: '', 'secret-key' ), 'PEK normalized diagnostic must not contain API key.' );
-pek_assert( count( $http->requests ) === 5 && count( $diag_http->requests ) === 3, 'PEK smoke must use fake HTTP only and perform no production network calls.' );
+pek_assert( count( $http->requests ) === 5 && count( $diag_http->requests ) === 3 && count( $prod_like_http->requests ) === 4, 'PEK smoke must use fake HTTP only and perform no production network calls.' );
 
 echo "PEK foundation smoke OK\n";

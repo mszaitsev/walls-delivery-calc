@@ -66,11 +66,36 @@ $settings->save_sender_warehouse( array( 'warehouseId' => 'nearest-timezone-wh',
 $settings->save_diagnostic_result(
 	array(
 		'success' => false,
+		'checked_at' => '2026-08-03 01:13:52',
 		'classifier_mismatches' => array(
 			array(
 				'country' => 'RU',
 				'expected' => '643',
 				'actual' => '999',
+			),
+		),
+		'checks' => array(
+			'products' => array(
+				'endpoint' => '/typesOfDelivery/all/',
+				'method' => 'GET',
+				'status' => 'failed',
+				'success' => false,
+				'skipped' => false,
+				'required' => false,
+				'error_code' => 'pek_http_403',
+				'http_status' => 403,
+				'message' => 'ПЭК отклонил доступ к методу.',
+			),
+			'countries' => array(
+				'endpoint' => '/branches/country/',
+				'method' => 'POST',
+				'status' => 'passed',
+				'success' => true,
+				'skipped' => false,
+				'required' => false,
+				'error_code' => '',
+				'http_status' => 200,
+				'message' => 'RU подтверждена classifier 643.',
 			),
 		),
 	)
@@ -102,6 +127,9 @@ restore_error_handler();
 
 pek_ui_assert( str_contains( $html, 'RU' ) && str_contains( $html, '643' ) && str_contains( $html, '999' ), 'PEK diagnostic classifier mismatch must render country/expected/actual.' );
 pek_ui_assert( ! str_contains( $html, '>Array<' ) && ! str_contains( $html, 'Array to string conversion' ), 'PEK diagnostic nested arrays must not render as Array or warning text.' );
+pek_ui_assert( str_contains( $html, '2026-08-03 01:13:52' ) && ! str_contains( $html, '[redacted-phone]:13:52' ), 'PEK diagnostic checked_at must render as a full machine datetime.' );
+pek_ui_assert( str_contains( $html, 'GET /typesOfDelivery/all/' ) && str_contains( $html, 'HTTP 403' ) && str_contains( $html, 'pek_http_403' ) && str_contains( $html, 'POST /branches/country/' ), 'PEK diagnostic checks must render method, endpoint, HTTP status and stable error code.' );
+pek_ui_assert( ! str_contains( $html, '&quot;products&quot;' ) && ! str_contains( $html, '{&quot;endpoint&quot;' ), 'PEK diagnostic checks must not render as raw nested JSON.' );
 pek_ui_assert( str_contains( $html, 'Saved &lt;safe&gt;' ), 'PEK admin notice must render escaped content.' );
 pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
