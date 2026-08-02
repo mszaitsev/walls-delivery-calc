@@ -7,8 +7,16 @@ defined( 'ABSPATH' ) || exit;
 
 final class WpPekHttpClient implements PekHttpClientInterface {
 	/** @param array<string,mixed> $args */
-	public function post( string $url, array $args ): array {
-		$response = wp_remote_post( $url, $args );
+	public function request( string $method, string $url, array $args ): array {
+		$method = strtoupper( trim( $method ) );
+		if ( ! in_array( $method, array( 'GET', 'POST' ), true ) ) {
+			return array(
+				'error' => true,
+				'message' => 'Unsupported PEK HTTP method.',
+			);
+		}
+		$args['method'] = $method;
+		$response = wp_remote_request( $url, $args );
 		if ( function_exists( 'is_wp_error' ) && is_wp_error( $response ) ) {
 			return array(
 				'error' => true,

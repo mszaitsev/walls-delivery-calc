@@ -25,6 +25,7 @@ final class PekConnectionDiagnosticService {
 			'ltl_product_type' => false,
 			'countries_found' => array(),
 			'planned_countries_missing' => array(),
+			'classifier_mismatches' => array(),
 			'legal_forms_available' => false,
 			'message' => '',
 		);
@@ -41,15 +42,33 @@ final class PekConnectionDiagnosticService {
 				}
 			}
 			$countries = $this->api->branches_country();
-			$found = array();
+			$found = array_fill_keys( PekSettings::PLANNED_COUNTRIES, false );
+			$mismatches = array();
 			foreach ( $countries as $country ) {
-				$code = strtoupper( (string) ( $country['code'] ?? ( $country['countryCode'] ?? ( $country['CountryNameCode'] ?? '' ) ) ) );
-				if ( '' !== $code && in_array( $code, PekSettings::PLANNED_COUNTRIES, true ) ) {
-					$found[] = $code;
+				$code = strtoupper( trim( (string) ( $country['shortName'] ?? '' ) ) );
+				if ( '' === $code || ! array_key_exists( $code, PekSettings::COUNTRY_CLASSIFIER_CODES ) ) {
+					continue;
 				}
+				$classifier = trim( (string) ( $country['codeByClassifier'] ?? '' ) );
+				$expected = PekSettings::COUNTRY_CLASSIFIER_CODES[ $code ];
+				if ( $classifier === $expected ) {
+					$found[ $code ] = true;
+					continue;
+				}
+				$mismatches[] = array(
+					'country' => $code,
+					'expected' => $expected,
+					'actual' => $classifier,
+				);
 			}
-			$result['countries_found'] = array_values( array_unique( $found ) );
+			$result['countries_found'] = array_values(
+				array_filter(
+					PekSettings::PLANNED_COUNTRIES,
+					static fn( string $code ): bool => true === ( $found[ $code ] ?? false )
+				)
+			);
 			$result['planned_countries_missing'] = array_values( array_diff( PekSettings::PLANNED_COUNTRIES, $result['countries_found'] ) );
+			$result['classifier_mismatches'] = $mismatches;
 			$result['legal_forms_available'] = array() !== $this->api->legal_form_types();
 			$result['success'] = (bool) $result['ltl_product_type'] && (bool) $result['legal_forms_available'] && in_array( 'RU', $result['countries_found'], true );
 			$result['message'] = $result['success'] ? 'Подключение ПЭК проверено. RU доступна, LTL type=3 найден.' : 'Проверка ПЭК завершена с предупреждениями.';

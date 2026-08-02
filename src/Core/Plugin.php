@@ -77,6 +77,7 @@ use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
+use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
 use WallsShop\WDC\Carriers\Pek\Api\WpPekHttpClient;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
@@ -394,7 +395,8 @@ final class Plugin {
 		$this->container->register( PekRequestBudget::class, fn(): PekRequestBudget => new PekRequestBudget( $this->container->get( PekSettings::class ) ) );
 		$this->container->register( PekApiClient::class, fn(): PekApiClient => new PekApiClient( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekHttpClientInterface::class ), $this->container->get( PekRequestBudget::class ) ) );
 		$this->container->register( PekConnectionDiagnosticService::class, fn(): PekConnectionDiagnosticService => new PekConnectionDiagnosticService( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekApiClient::class ) ) );
-		$this->container->register( PekSenderWarehouseService::class, fn(): PekSenderWarehouseService => new PekSenderWarehouseService( $this->container->get( PekApiClient::class ), $this->container->get( PekSettings::class ) ) );
+		$this->container->register( PekSenderWarehouseSearchCache::class, fn(): PekSenderWarehouseSearchCache => new PekSenderWarehouseSearchCache() );
+		$this->container->register( PekSenderWarehouseService::class, fn(): PekSenderWarehouseService => new PekSenderWarehouseService( $this->container->get( PekApiClient::class ), $this->container->get( PekSettings::class ), $this->container->get( PekSenderWarehouseSearchCache::class ) ) );
 		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );
 		$this->container->register( JetLogisticRegionNameNormalizer::class, fn(): JetLogisticRegionNameNormalizer => new JetLogisticRegionNameNormalizer() );
 		$this->container->register( JetLogisticCitiesCsvClient::class, fn(): JetLogisticCitiesCsvClient => new JetLogisticCitiesCsvClient() );

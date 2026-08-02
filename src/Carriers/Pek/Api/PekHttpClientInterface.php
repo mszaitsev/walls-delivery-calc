@@ -7,5 +7,5 @@ defined( 'ABSPATH' ) || exit;
 
 interface PekHttpClientInterface {
 	/** @param array<string,mixed> $args */
-	public function post( string $url, array $args ): array;
+	public function request( string $method, string $url, array $args ): array;
 }

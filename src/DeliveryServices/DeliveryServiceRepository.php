@@ -443,6 +443,11 @@ final class DeliveryServiceRepository {
 
 		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => PekSettings::PUBLIC_TITLE, 'enabled' => 0 ) );
 	}
+
+	public function pek_service_exists(): bool {
+		return $this->find_any_by_service_key( PekSettings::SERVICE_KEY ) instanceof DeliveryService;
+	}
+
 	/**
 	 * @param array<int,string> $replaceable_titles
 	 */

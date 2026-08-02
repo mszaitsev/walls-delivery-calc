@@ -13,6 +13,12 @@ defined( 'ABSPATH' ) || exit;
 
 final class PekAdminPage {
 	public const TAB_KEY = 'pek_settings';
+	public const ACTIONS = array(
+		'save_pek_settings',
+		'check_pek_connection',
+		'search_pek_sender_warehouse',
+		'select_pek_sender_warehouse',
+	);
 
 	public function __construct(
 		private PekSettings $settings,
@@ -20,6 +26,10 @@ final class PekAdminPage {
 		private PekConnectionDiagnosticService $diagnostics,
 		private PekSenderWarehouseService $warehouses
 	) {
+	}
+
+	public static function supports_action( string $action ): bool {
+		return in_array( $action, self::ACTIONS, true );
 	}
 
 	/** @param array<string,mixed> $post */
@@ -59,7 +69,7 @@ final class PekAdminPage {
 		$this->settings->clear_admin_notice();
 		$warehouse = $this->settings->sender_warehouse();
 		$diagnostic = $this->settings->last_diagnostic();
-		$search = $this->settings->last_warehouse_search();
+		$search = $this->warehouses->last_search_for_current_user();
 		?>
 		<?php $this->render_notice( $notice ); ?>
 		<h3><?php echo esc_html__( 'Настройки ПЭК', 'walls-delivery-calc' ); ?></h3>

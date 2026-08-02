@@ -1,6 +1,6 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.130.0
+Version: 0.130.1
 
 Start here when changing the plugin. The documentation is intentionally small: each topic has one canonical owner, and historical stage notes were removed because this plugin has not been deployed to production.
 
@@ -68,4 +68,4 @@ CDEK uses one carrier key and one delivery service key, both `cdek`. The existin
 
 Jet Logistic uses one carrier key, `jet_logistic`, and one delivery service key, `jet_logistic`. Its runtime carrier returns two stable rates from one API calculation: `jet_logistic_pickup` and `jet_logistic_courier`. Jet pickup is a pickup delivery type but does not require a concrete pickup point, because the Jet API returns terminal cities rather than warehouse identifiers.
 
-PEK uses one stable carrier key and one delivery service key, both `pek`. Version 0.130.0 implements the PEK foundation and delivery-service settings only: the built-in service is disabled by default, initially available only for `RU`, and designed for later `AM`, `BY`, `KG`, and `KZ` validation. PEK has no checkout quote runtime, shipment adapter, status integration, documents, or cancellation flow yet.
+PEK uses one stable carrier key and one delivery service key, both `pek`. Version 0.130.1 implements the PEK foundation and delivery-service settings only: the built-in service is disabled by default, initially available only for `RU`, and designed for later `AM`, `BY`, `KG`, and `KZ` validation. PEK admin actions route back to the PEK service tab after POST. `/typesOfDelivery/all/` uses GET; branch/legal/warehouse methods use POST. Country diagnostics use official `shortName` and `codeByClassifier`, and default sender warehouse validation is fail-closed with a short-lived user-scoped search cache. PEK has no checkout quote runtime, shipment adapter, status integration, documents, or cancellation flow yet, and the Shipment Framework remains unchanged.

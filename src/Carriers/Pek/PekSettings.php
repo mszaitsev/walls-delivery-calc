@@ -48,7 +48,6 @@ final class PekSettings {
 	public const WAREHOUSE_SEARCH_LIMIT_KEY = 'pek_warehouse_search_limit';
 	public const SMS_RELEASE_LIMIT_RUB_KEY = 'pek_sms_release_limit_rub';
 	public const LAST_DIAGNOSTIC_KEY = 'pek_last_diagnostic';
-	public const LAST_WAREHOUSE_SEARCH_KEY = 'pek_last_warehouse_search';
 	public const ADMIN_NOTICE_KEY = 'pek_admin_notice';
 
 	public function __construct( private SettingsRepository $settings ) {
@@ -77,7 +76,6 @@ final class PekSettings {
 			self::WAREHOUSE_SEARCH_LIMIT_KEY => 5,
 			self::SMS_RELEASE_LIMIT_RUB_KEY => self::DEFAULT_SMS_RELEASE_LIMIT_RUB,
 			self::LAST_DIAGNOSTIC_KEY => array(),
-			self::LAST_WAREHOUSE_SEARCH_KEY => array(),
 			self::ADMIN_NOTICE_KEY => array(),
 		);
 	}
@@ -176,16 +174,6 @@ final class PekSettings {
 	/** @param array<string,mixed> $result */
 	public function save_diagnostic_result( array $result ): void {
 		$this->settings->set( self::LAST_DIAGNOSTIC_KEY, $this->sanitize_report( $result ) );
-	}
-
-	/** @return array<string,mixed> */
-	public function last_warehouse_search(): array {
-		return $this->settings->get_array( self::LAST_WAREHOUSE_SEARCH_KEY, array() );
-	}
-
-	/** @param array<string,mixed> $result */
-	public function save_warehouse_search_result( array $result ): void {
-		$this->settings->set( self::LAST_WAREHOUSE_SEARCH_KEY, $this->sanitize_report( $result ) );
 	}
 
 	/** @return array<string,mixed> */

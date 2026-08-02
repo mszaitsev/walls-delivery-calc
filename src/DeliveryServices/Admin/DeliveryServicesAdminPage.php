@@ -748,6 +748,10 @@ final class DeliveryServicesAdminPage {
 			$this->handle_jet_logistic_action( $action );
 			return;
 		}
+		if ( PekAdminPage::supports_action( $action ) ) {
+			$this->handle_pek_action( $action );
+			return;
+		}
 		if ( in_array( $action, array(
 				'save_global_delivery_settings',
 				'save',
@@ -846,11 +850,7 @@ final class DeliveryServicesAdminPage {
 					'reset_dpd_pickup_result',
 					'save_yandex_delivery_settings',
 					'save_yandex_delivery_statuses',
-					'check_yandex_delivery_connection',
-					'save_pek_settings',
-					'check_pek_connection',
-					'search_pek_sender_warehouse',
-					'select_pek_sender_warehouse'
+					'check_yandex_delivery_connection'
 				), true ) ) {
 				$data = array();
 			}
@@ -1047,12 +1047,6 @@ final class DeliveryServicesAdminPage {
 			if ( 'check_yandex_delivery_connection' === $action && $this->yandex_delivery_settings instanceof YandexDeliverySettings && $this->yandex_delivery_diagnostics instanceof YandexDeliveryConnectionDiagnosticService ) {
 				$result = $this->yandex_delivery_diagnostics->checkPickupPoint();
 				$this->yandex_delivery_settings->save_connection_result( (bool) $result['success'], (string) $result['message'] );
-			}
-			if ( in_array( $action, array( 'save_pek_settings', 'check_pek_connection', 'search_pek_sender_warehouse', 'select_pek_sender_warehouse' ), true ) && $this->pek_admin instanceof PekAdminPage ) {
-				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
-				if ( $service instanceof DeliveryService && PekSettings::SERVICE_KEY === $service->service_key ) {
-					$this->pek_admin->handle_action( $action, $service, $_POST );
-				}
 			}
 			if ( 'save_dpd_geography_settings' === $action && $this->dpd_settings instanceof DpdSettings ) {
 				$this->dpd_settings->save_geography_settings_from_admin( $_POST );
@@ -1291,6 +1285,29 @@ final class DeliveryServicesAdminPage {
 
 		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG ) );
 		exit;
+	}
+
+	private function handle_pek_action( string $action ): void {
+		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+		$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
+		$service = PekSettings::SERVICE_KEY === $service_key ? $this->services->find_by_service_key( $service_key ) : null;
+		if ( $service instanceof DeliveryService && PekSettings::SERVICE_KEY === $service->service_key && ( $id <= 0 || (int) $service->id === $id ) && $this->pek_admin instanceof PekAdminPage ) {
+			$this->pek_admin->handle_action( $action, $service, $_POST );
+		}
+
+		wp_safe_redirect( $this->pek_settings_redirect_url() );
+		exit;
+	}
+
+	private function pek_settings_redirect_url(): string {
+		return add_query_arg(
+			array(
+				'page' => self::MENU_SLUG,
+				'service' => PekSettings::SERVICE_KEY,
+				'tab' => PekAdminPage::TAB_KEY,
+			),
+			admin_url( 'admin.php' )
+		);
 	}
 
 	private function handle_jet_logistic_action( string $action ): void {

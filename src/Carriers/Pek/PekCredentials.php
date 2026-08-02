@@ -50,7 +50,9 @@ final class PekCredentials {
 			return true;
 		}
 
-		$key = trim( (string) ( $input['pek_api_key'] ?? '' ) );
+		$key = (string) ( $input['pek_api_key'] ?? '' );
+		$key = function_exists( 'wp_unslash' ) ? wp_unslash( $key ) : $key;
+		$key = trim( $key );
 		if ( '' === $key ) {
 			return true;
 		}

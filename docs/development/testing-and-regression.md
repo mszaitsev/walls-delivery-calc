@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.130.0
+Version: 0.130.1
 
 Jet Logistic critical coverage is registered as the mandatory `jet-logistic` group. It covers API envelope handling, token redaction, CSV/geography basics, one-call two-rate quoting, discounted package goods cost and `D_SDOC`, terminal-city presentation, status mapping with compact events, manual attach, unsupported create, and local remove.
 
@@ -31,7 +31,7 @@ DPD Geography browser-import lifecycle changes should also run `node tests/dpd/r
 
 The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. Shipment and carrier smoke tests that protect framework contracts should appear there.
 
-PEK foundation is registered as mandatory `pek.foundation` in group `pek`. Run it directly with `php tests/pek/run-pek-foundation-smoke.php` or through `php tests/shipments/run-shipment-regression-profile.php --group=pek`. The smoke uses fake HTTP only, verifies no production network calls are made, and asserts PEK is not registered in `CarrierRegistry` or Shipment Framework registries.
+PEK foundation is registered as mandatory `pek.foundation` in group `pek`; PEK admin routing is registered as mandatory `pek.admin-routing`. Run them directly with `php tests/pek/run-pek-foundation-smoke.php` and `php tests/pek/run-pek-admin-routing-smoke.php`, or through `php tests/shipments/run-shipment-regression-profile.php --group=pek`. The smokes use fake HTTP only, verify no production network calls are made, assert `/typesOfDelivery/all/` is called with GET while branch/legal/warehouse methods use POST, check official `shortName`/`codeByClassifier` country diagnostics, and assert PEK is not registered in `CarrierRegistry` or Shipment Framework registries.
 
 The plugin architecture smoke is `framework.plugin-architecture`; it is registered in the framework group and checks architecture boundaries rather than carrier business behavior. It favors dynamic Reflection-based checks where the contract is inspectable. Where runtime proof would require changing production construction, the smoke checks a narrower contract instead: registry duplicate behavior is tested with stubs, providers are discovered without uninitialized method calls, and composition-root ownership is checked for the current `Container::register()` wiring pattern.
 
@@ -48,25 +48,26 @@ Allowed matrix values:
 
 | Capability | Framework | CDEK | DPD | Russian Post | Yandex | PEK |
 | --- | --- | --- | --- | --- | --- | --- |
-| architecture invariants | `contract`: `framework.plugin-architecture` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.foundation` |
-| create | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
-| preview | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-payload` |
-| persistence | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
-| status update | `contract`: `framework.status` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.status-mapping` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
-| autosync/polling | `contract`: `framework.lifecycle-contract` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.status-autosync` | `carrier smoke`: `status.status-autosync` | `carrier smoke`: `yandex.shipment-framework` |
-| lifecycle continuation | `contract`: `framework.lifecycle-contract` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.shipment-lifecycle` | `N/A` | `carrier smoke`: `yandex.shipment-framework` |
-| cancel/remove | `contract`: `framework.admin-ajax` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.shipment-buttons` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
-| manual attach | `contract`: `framework.admin-ajax` | `partial`: `cdek.order-creation` | `partial`: `dpd.shipment-buttons` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
-| documents | `contract`: `framework.document-actions` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.documents` | `carrier smoke`: `russian-post.documents` | `carrier smoke`: `yandex.shipment-framework` |
-| tracking presentation | `contract`: `framework.status` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.status-mapping` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
-| actual cost | `contract`: `framework.actual-cost-presentation` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.event-sync` | `carrier smoke`: `russian-post.price` | `carrier smoke`: `yandex.shipment-framework` |
-| modal | `contract`: `framework.modal-extensions` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
-| AJAX wiring | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
-| JS structure | `contract`: `framework.admin-js-structure` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `partial`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` |
-| pickup/courier | `partial`: `core.checkout-location-picker` | `baseline`: `baseline.cdek-pickup-points` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.pickup-import` | `carrier smoke`: `yandex.pickup-selection` |
-| allocation | `contract`: `framework.allocation` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
-| source station/dropoff | `contract`: `framework.admin-ajax` | `N/A` | `partial`: `dpd.create-order` | `N/A` | `carrier smoke`: `yandex.source-station` |
-| error paths | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` |
+| architecture/foundation | `contract`: `framework.plugin-architecture` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.foundation` |
+| admin routing | `N/A` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.admin-routing` |
+| create | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| preview | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-payload` | `N/A` |
+| persistence | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| status update | `contract`: `framework.status` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.status-mapping` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| autosync/polling | `contract`: `framework.lifecycle-contract` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.status-autosync` | `carrier smoke`: `status.status-autosync` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| lifecycle continuation | `contract`: `framework.lifecycle-contract` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.shipment-lifecycle` | `N/A` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| cancel/remove | `contract`: `framework.admin-ajax` | `partial`: `cdek.order-creation` | `carrier smoke`: `dpd.shipment-buttons` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| manual attach | `contract`: `framework.admin-ajax` | `partial`: `cdek.order-creation` | `partial`: `dpd.shipment-buttons` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| documents | `contract`: `framework.document-actions` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.documents` | `carrier smoke`: `russian-post.documents` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| tracking presentation | `contract`: `framework.status` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.status-mapping` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| actual cost | `contract`: `framework.actual-cost-presentation` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.event-sync` | `carrier smoke`: `russian-post.price` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| modal | `contract`: `framework.modal-extensions` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| AJAX wiring | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| JS structure | `contract`: `framework.admin-js-structure` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `partial`: `russian-post.cancel` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| pickup/courier | `partial`: `core.checkout-location-picker` | `baseline`: `baseline.cdek-pickup-points` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.pickup-import` | `carrier smoke`: `yandex.pickup-selection` | `N/A` |
+| allocation | `contract`: `framework.allocation` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
+| source station/dropoff | `contract`: `framework.admin-ajax` | `N/A` | `partial`: `dpd.create-order` | `N/A` | `carrier smoke`: `yandex.source-station` | `N/A` |
+| error paths | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
 
 ## Baseline And Optional
 

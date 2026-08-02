@@ -19,17 +19,17 @@ final class PekApiClient {
 
 	/** @return array<int,array<string,mixed>> */
 	public function types_of_delivery_all(): array {
-		return $this->expect_list( $this->call( '/typesOfDelivery/all/', array() ), 'typesOfDelivery/all' );
+		return $this->expect_list( $this->call( 'GET', '/typesOfDelivery/all/', array() ), 'typesOfDelivery/all' );
 	}
 
 	/** @return array<int,array<string,mixed>> */
 	public function branches_country(): array {
-		return $this->expect_list( $this->call( '/branches/country/', array() ), 'branches/country' );
+		return $this->expect_list( $this->call( 'POST', '/branches/country/', array() ), 'branches/country' );
 	}
 
 	/** @return array<int,array<string,mixed>> */
 	public function legal_form_types(): array {
-		return $this->expect_list( $this->call( '/counterparts/legalformtypes/', array() ), 'counterparts/legalformtypes' );
+		return $this->expect_list( $this->call( 'POST', '/counterparts/legalformtypes/', array() ), 'counterparts/legalformtypes' );
 	}
 
 	/** @return array<string,mixed> */
@@ -47,7 +47,7 @@ final class PekApiClient {
 			'limit' => $this->settings->warehouse_search_limit(),
 		);
 
-		$result = $this->call( '/branches/nearestdepartments/', $payload );
+		$result = $this->call( 'POST', '/branches/nearestdepartments/', $payload );
 		if ( ! is_array( $result ) ) {
 			throw new PekApiException( 'ПЭК вернул неожиданную структуру ближайших складов.', array( 'error_code' => 'pek_unexpected_nearest_departments' ) );
 		}
@@ -62,7 +62,7 @@ final class PekApiClient {
 			throw new PekApiException( 'Не указан ID склада ПЭК.', array( 'error_code' => 'pek_empty_warehouse_id' ) );
 		}
 
-		$result = $this->call( '/branches/all/', array( 'warehouseId' => $warehouse_id ) );
+		$result = $this->call( 'POST', '/branches/all/', array( 'warehouseId' => $warehouse_id ) );
 		if ( ! is_array( $result ) ) {
 			throw new PekApiException( 'ПЭК вернул неожиданную структуру справочника складов.', array( 'error_code' => 'pek_unexpected_branches_all' ) );
 		}
@@ -71,18 +71,17 @@ final class PekApiClient {
 	}
 
 	/** @param array<string,mixed> $payload */
-	public function build_args_for_test( array $payload = array() ): array {
-		return $this->request_args( $payload );
-	}
-
-	/** @param array<string,mixed> $payload */
-	private function call( string $path, array $payload ): mixed {
+	private function call( string $method, string $path, array $payload ): mixed {
+		$method = strtoupper( trim( $method ) );
+		if ( ! in_array( $method, array( 'GET', 'POST' ), true ) ) {
+			throw new PekApiException( 'Неподдерживаемый HTTP метод ПЭК.', array( 'endpoint' => $path, 'error_code' => 'pek_invalid_http_method' ) );
+		}
 		if ( ! $this->credentials->is_complete() ) {
 			throw new PekApiException( 'Не заданы логин или API key ПЭК.', array( 'error_code' => 'pek_credentials_missing' ) );
 		}
 		$this->budget->consume();
 		$url = PekSettings::BASE_URL . $path;
-		$response = $this->http->post( $url, $this->request_args( $payload ) );
+		$response = $this->http->request( $method, $url, $this->request_args( $method, $payload ) );
 		if ( ! empty( $response['error'] ) ) {
 			throw new PekApiException( 'Не удалось выполнить запрос к ПЭК.', array( 'endpoint' => $path, 'error_code' => 'pek_transport_error', 'message' => $this->safe_message( (string) ( $response['message'] ?? '' ) ) ) );
 		}
@@ -121,21 +120,23 @@ final class PekApiClient {
 	}
 
 	/** @param array<string,mixed> $payload */
-	private function request_args( array $payload ): array {
-		$json = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) : json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) ?: '{}';
-
-		return array(
-			'method' => 'POST',
+	private function request_args( string $method, array $payload ): array {
+		$args = array(
 			'timeout' => $this->settings->request_timeout(),
 			'sslverify' => true,
 			'headers' => array(
-				'Content-Type' => 'application/json;charset=utf-8',
 				'Accept' => 'application/json',
 				'Accept-Encoding' => 'gzip',
 				'Authorization' => 'Basic ' . base64_encode( $this->credentials->login() . ':' . $this->credentials->api_key() ),
 			),
-			'body' => $json,
 		);
+		if ( 'POST' === $method ) {
+			$json = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) : json_encode( $payload, JSON_UNESCAPED_UNICODE ) ) ?: '{}';
+			$args['headers']['Content-Type'] = 'application/json;charset=utf-8';
+			$args['body'] = $json;
+		}
+
+		return $args;
 	}
 
 	/** @return array<int,array<string,mixed>> */

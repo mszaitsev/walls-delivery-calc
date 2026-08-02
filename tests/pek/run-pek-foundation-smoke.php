@@ -13,6 +13,7 @@ use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
+use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
@@ -32,14 +33,44 @@ function pek_assert( bool $condition, string $message ): void {
 
 function current_time( string $type ): string { return '2026-08-02 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false { return json_encode( $value, $flags, $depth ); }
-function wp_unslash( mixed $value ): mixed { return $value; }
+function wp_unslash( mixed $value ): mixed {
+	if ( is_array( $value ) ) {
+		return array_map( 'wp_unslash', $value );
+	}
+	return is_string( $value ) ? stripslashes( $value ) : $value;
+}
+function wp_slash( mixed $value ): mixed {
+	if ( is_array( $value ) ) {
+		return array_map( 'wp_slash', $value );
+	}
+	return is_string( $value ) ? addslashes( $value ) : $value;
+}
 function sanitize_text_field( string $value ): string { return trim( preg_replace( '/[\r\n\t]+/', ' ', strip_tags( $value ) ) ?? '' ); }
 function sanitize_key( string $value ): string { return strtolower( preg_replace( '/[^a-z0-9_\-]/i', '', $value ) ?? '' ); }
 function sanitize_email( string $value ): string { return trim( $value ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['pek_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['pek_options'][ $option ] = $value; return true; }
-function get_transient( string $key ): mixed { return $GLOBALS['pek_transients'][ $key ] ?? false; }
-function set_transient( string $key, mixed $value, int $expiration = 0 ): bool { $GLOBALS['pek_transients'][ $key ] = $value; return true; }
+function get_current_user_id(): int { return (int) ( $GLOBALS['pek_current_user_id'] ?? 1 ); }
+function get_transient( string $key ): mixed {
+	$row = $GLOBALS['pek_transients'][ $key ] ?? null;
+	if ( ! is_array( $row ) ) {
+		return false;
+	}
+	if ( (int) ( $row['expires_at'] ?? 0 ) > 0 && (int) $row['expires_at'] <= (int) $GLOBALS['pek_now'] ) {
+		unset( $GLOBALS['pek_transients'][ $key ] );
+		return false;
+	}
+	return $row['value'];
+}
+function set_transient( string $key, mixed $value, int $expiration = 0 ): bool {
+	$GLOBALS['pek_transients'][ $key ] = array(
+		'value' => $value,
+		'expires_at' => $expiration > 0 ? (int) $GLOBALS['pek_now'] + $expiration : 0,
+		'expiration' => $expiration,
+	);
+	return true;
+}
+function delete_transient( string $key ): bool { unset( $GLOBALS['pek_transients'][ $key ] ); return true; }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -87,9 +118,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 			} ) );
 			return true;
 		}
-		public function replace( string $table, array $data, array $format = array() ): bool {
-			return $this->insert( $table, $data, $format );
-		}
+		public function replace( string $table, array $data, array $format = array() ): bool { return $this->insert( $table, $data, $format ); }
 		public function get_row( string $query, mixed $output = null ): ?array {
 			if ( preg_match( '/WHERE id = ([0-9]+)/', $query, $matches ) ) {
 				foreach ( $this->services as $row ) {
@@ -134,14 +163,27 @@ if ( ! class_exists( 'wpdb' ) ) {
 final class PekFakeHttp implements PekHttpClientInterface {
 	public array $requests = array();
 	public function __construct( private array $responses ) {}
-	public function post( string $url, array $args ): array {
-		$this->requests[] = array( 'url' => $url, 'args' => $args );
+	public function request( string $method, string $url, array $args ): array {
+		$this->requests[] = array( 'method' => strtoupper( $method ), 'url' => $url, 'args' => $args );
 		return array_shift( $this->responses ) ?? array( 'status' => 200, 'body' => '[]' );
 	}
 }
 
+function pek_json_response( mixed $body ): array {
+	return array( 'status' => 200, 'body' => json_encode( $body, JSON_UNESCAPED_UNICODE ) ?: 'null' );
+}
+
+function pek_boot_api( SettingsRepository $settings_repository, PekFakeHttp $http ): array {
+	$settings = new PekSettings( $settings_repository );
+	$credentials = new PekCredentials( $settings_repository, new EncryptionService() );
+	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
+	return array( $settings, $credentials, new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) ) );
+}
+
 $GLOBALS['pek_options'] = array();
 $GLOBALS['pek_transients'] = array();
+$GLOBALS['pek_current_user_id'] = 1;
+$GLOBALS['pek_now'] = 100000;
 
 $settings_repository = new SettingsRepository();
 $settings = new PekSettings( $settings_repository );
@@ -163,23 +205,50 @@ pek_assert( $settings->sms_release_limit_rub() === 500000, 'PEK SMS limit defaul
 pek_assert( ! $credentials->encryption_ready(), 'PEK credentials must detect missing APP_ENCRYPTION_KEY.' );
 $preserve = $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
 pek_assert( ! $preserve && ! $credentials->has_api_key(), 'PEK credentials must not save API key when encryption is unavailable.' );
+$settings_repository->set( PekSettings::API_KEY_ENCRYPTED_KEY, 'existing-encrypted-secret' );
+$preserve_existing = $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'replacement' ) );
+pek_assert( ! $preserve_existing && $settings_repository->get_string( PekSettings::API_KEY_ENCRYPTED_KEY, '' ) === 'existing-encrypted-secret', 'PEK failed replacement without encryption must preserve existing encrypted secret.' );
+$credentials->clear_api_key();
 define( 'APP_ENCRYPTION_KEY', 'pek-test-key' );
-$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
-pek_assert( $credentials->login() === 'login' && $credentials->api_key() === 'secret-key' && $credentials->has_api_key(), 'PEK encrypted key must save/read.' );
+$secret = 'a\\b"c\'d+/:=';
+$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => wp_slash( $secret ) ) );
+pek_assert( $credentials->login() === 'login' && $credentials->api_key() === $secret && $credentials->has_api_key(), 'PEK encrypted key must save wp_unslashed secret exactly.' );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login2', 'pek_api_key' => '' ) );
-pek_assert( $credentials->login() === 'login2' && $credentials->api_key() === 'secret-key', 'Empty PEK password field must preserve key.' );
+pek_assert( $credentials->login() === 'login2' && $credentials->api_key() === $secret, 'Empty PEK password field must preserve key.' );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login2', 'pek_clear_api_key' => '1' ) );
 pek_assert( '' === $credentials->api_key() && ! $credentials->has_api_key(), 'PEK API key clear checkbox must clear key.' );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 
-$http = new PekFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( array( 'type' => 3 ) ) ) ) ) );
+$http = new PekFakeHttp( array(
+	pek_json_response( array( array( 'type' => 3 ) ) ),
+	pek_json_response( array( array( 'shortName' => 'RU', 'codeByClassifier' => '643' ) ) ),
+	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
+	pek_json_response( array( 'freeDepartments' => array(), 'paidDepartments' => array() ) ),
+	pek_json_response( array( 'branches' => array() ) ),
+) );
 $api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
-$args = $api->build_args_for_test( array( 'sample' => true ) );
-pek_assert( str_starts_with( PekSettings::BASE_URL, 'https://' ) && $args['method'] === 'POST' && true === $args['sslverify'], 'PEK transport must use HTTPS POST with sslverify.' );
-pek_assert( $args['headers']['Content-Type'] === 'application/json;charset=utf-8' && $args['headers']['Accept'] === 'application/json' && $args['headers']['Accept-Encoding'] === 'gzip', 'PEK JSON headers must match protocol.' );
-pek_assert( $args['headers']['Authorization'] === 'Basic ' . base64_encode( 'login:secret-key' ) && $args['timeout'] === 60, 'PEK Basic Auth and timeout must be built from settings/credentials.' );
 $api->types_of_delivery_all();
-pek_assert( $http->requests[0]['url'] === PekSettings::BASE_URL . '/typesOfDelivery/all/', 'PEK types wrapper must call official endpoint.' );
+$api->branches_country();
+$api->legal_form_types();
+$api->nearest_departments( 'Новосибирск' );
+$api->branches_all_for_warehouse( 'wh-1' );
+$methods = array_column( $http->requests, 'method' );
+pek_assert( $methods === array( 'GET', 'POST', 'POST', 'POST', 'POST' ), 'PEK typed API methods must use GET for typesOfDelivery and POST for the other foundation methods.' );
+pek_assert( $http->requests[0]['url'] === PekSettings::BASE_URL . '/typesOfDelivery/all/' && ! isset( $http->requests[0]['args']['body'] ), 'PEK GET request must have official URL and no JSON body.' );
+foreach ( array_slice( $http->requests, 1 ) as $request ) {
+	pek_assert( str_starts_with( $request['url'], 'https://' ) && true === $request['args']['sslverify'], 'PEK requests must use HTTPS and sslverify.' );
+	pek_assert( $request['args']['headers']['Content-Type'] === 'application/json;charset=utf-8' && $request['args']['headers']['Accept'] === 'application/json' && $request['args']['headers']['Accept-Encoding'] === 'gzip', 'PEK POST JSON headers must match protocol.' );
+}
+pek_assert( $http->requests[0]['args']['headers']['Authorization'] === 'Basic ' . base64_encode( 'login:secret-key' ) && $http->requests[0]['args']['timeout'] === 60, 'PEK Basic Auth and timeout must be built from settings/credentials.' );
+pek_assert( ! ( new ReflectionClass( PekApiClient::class ) )->hasMethod( 'build_args_for_test' ), 'PEK production API client must not expose build_args_for_test().' );
+try {
+	$method = ( new ReflectionClass( PekApiClient::class ) )->getMethod( 'call' );
+	$method->setAccessible( true );
+	$method->invoke( $api, 'PATCH', '/typesOfDelivery/all/', array() );
+	pek_assert( false, 'PEK invalid HTTP method must be rejected before transport.' );
+} catch ( PekApiException $exception ) {
+	pek_assert( ( $exception->context()['error_code'] ?? '' ) === 'pek_invalid_http_method' && count( $http->requests ) === 5, 'PEK invalid method must expose stable error and avoid network.' );
+}
 
 foreach ( array(
 	'logical' => array( 'status' => 200, 'body' => json_encode( array( 'error' => array( 'title' => 'Bad', 'message' => 'No' ) ) ), 'code' => 'pek_logical_error' ),
@@ -201,7 +270,7 @@ foreach ( array(
 
 $settings_repository->set( PekSettings::REQUESTS_PER_MINUTE_KEY, 1 );
 $GLOBALS['pek_transients'] = array();
-$limited_api = new PekApiClient( $settings, $credentials, new PekFakeHttp( array( array( 'status' => 200, 'body' => '[]' ), array( 'status' => 200, 'body' => '[]' ) ) ), new PekRequestBudget( $settings ) );
+$limited_api = new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( array() ), pek_json_response( array() ) ) ), new PekRequestBudget( $settings ) );
 $limited_api->types_of_delivery_all();
 try {
 	$limited_api->types_of_delivery_all();
@@ -213,59 +282,131 @@ $settings_repository->set( PekSettings::REQUESTS_PER_MINUTE_KEY, 90 );
 $GLOBALS['pek_transients'] = array();
 
 $diag_http = new PekFakeHttp( array(
-	array( 'status' => 200, 'body' => json_encode( array( array( 'type' => 3, 'name' => 'ПЭК:LTL Авто' ) ) ) ),
-	array( 'status' => 200, 'body' => json_encode( array( array( 'code' => 'RU' ), array( 'code' => 'KZ' ) ) ) ),
-	array( 'status' => 200, 'body' => json_encode( array( array( 'name' => 'ООО', 'shortName' => 'ООО' ) ) ) ),
+	pek_json_response( array( array( 'type' => 3, 'name' => 'ПЭК:LTL Авто' ) ) ),
+	pek_json_response( array(
+		array( 'codeByClassifier' => '643', 'name' => 'РОССИЯ', 'shortName' => 'RU' ),
+		array( 'codeByClassifier' => '398', 'name' => 'КАЗАХСТАН', 'shortName' => 'KZ' ),
+	) ),
+	pek_json_response( array( array( 'name' => 'ООО', 'shortName' => 'ООО' ) ) ),
 ) );
 $diag = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $diag_http, new PekRequestBudget( $settings ) ) ) )->run();
-pek_assert( $diag['success'] && $diag['ltl_product_type'] && $diag['countries_found'] === array( 'RU', 'KZ' ) && in_array( 'AM', $diag['planned_countries_missing'], true ), 'PEK diagnostic must normalize products/countries/legal forms without requiring all planned countries.' );
+pek_assert( $diag['success'] && $diag['countries_found'] === array( 'RU', 'KZ' ) && in_array( 'AM', $diag['planned_countries_missing'], true ), 'PEK diagnostic must use official shortName/codeByClassifier and not require all planned countries.' );
+$mismatch_http = new PekFakeHttp( array(
+	pek_json_response( array( array( 'type' => 3 ) ) ),
+	pek_json_response( array( array( 'codeByClassifier' => '999', 'name' => 'РОССИЯ', 'shortName' => 'RU' ), array( 'code' => 'KZ' ) ) ),
+	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
+) );
+$mismatch = ( new PekConnectionDiagnosticService( $settings, $credentials, new PekApiClient( $settings, $credentials, $mismatch_http, new PekRequestBudget( $settings ) ) ) )->run();
+pek_assert( ! $mismatch['success'] && $mismatch['countries_found'] === array() && ( $mismatch['classifier_mismatches'][0]['country'] ?? '' ) === 'RU', 'PEK diagnostic must fail RU classifier mismatch and not rely on invented code field.' );
 
-$warehouse_payload = array(
-	'freeDepartments' => array(
-		array( 'warehouseId' => 'wh-1', 'branchId' => 'br-1', 'branchName' => 'Новосибирск', 'divisionName' => 'Склад', 'departmentTypeId' => 0, 'departmentType' => 'Отделение компании', 'address' => 'Адрес', 'maxWeight' => 100, 'maxVolume' => 2, 'maxDimension' => 3, 'maxWeightPerPlace' => 50, 'maxCount' => 10 ),
+$branches_all = array(
+	'branches' => array(
+		array(
+			'id' => 'br-1',
+			'title' => 'Новосибирск',
+			'divisions' => array(
+				array(
+					'id' => 'div-1',
+					'name' => 'Division',
+					'departmentTypeId' => 7,
+					'departmentType' => 'Отделение компании',
+					'warehouses' => array(
+						array(
+							'id' => 'wh-1',
+							'name' => 'Warehouse',
+							'divisionName' => 'Склад Левый',
+							'address' => 'short address',
+							'addressDivision' => 'full address',
+							'coordinatesobj' => array( 'latitude' => '55.1', 'longitude' => '82.9' ),
+							'maxWeight' => 100,
+							'maxVolume' => 2,
+							'maxWeightPerPlace' => 50,
+							'maxDimension' => 3,
+							'kindsOfTransportation' => array( array( 'type' => 3, 'operations' => array( 'Выдача грузов', 'Прием грузов' ) ) ),
+						),
+					),
+				),
+			),
+		),
 	),
+);
+$warehouse_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
+$selected = $warehouse_service->validate_and_select( 'wh-1' );
+$snapshot = $settings->sender_warehouse();
+pek_assert( $selected['success'] && $snapshot['branchName'] === 'Новосибирск' && $snapshot['departmentTypeId'] === 7 && $snapshot['address'] === 'full address' && $snapshot['coordinates']['latitude'] === '55.1' && $snapshot['limits']['maxWeightOnePlace'] === 50, 'PEK branches/all official nested shape must normalize branch title, division type, address, coordinates and limits.' );
+$previous = $snapshot;
+foreach ( array(
+	'issue_only' => array( array( 'type' => 3, 'operations' => array( 'Выдача грузов' ) ) ),
+	'wrong_type' => array( array( 'type' => 1, 'operations' => array( 'Прием грузов' ) ) ),
+	'empty_kinds' => array(),
+) as $name => $kinds ) {
+	$bad = $branches_all;
+	$bad['branches'][0]['divisions'][0]['warehouses'][0]['id'] = 'bad-' . $name;
+	$bad['branches'][0]['divisions'][0]['warehouses'][0]['kindsOfTransportation'] = $kinds;
+	$service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $bad ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
+	$result = $service->validate_and_select( 'bad-' . $name );
+	pek_assert( ! $result['success'] && $settings->sender_warehouse() === $previous, 'PEK branches/all must reject ' . $name . ' and preserve previous selection.' );
+}
+$unknown = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
+pek_assert( ! $unknown->validate_and_select( 'unknown' )['success'] && $settings->sender_warehouse() === $previous, 'PEK unknown warehouse must be rejected and preserve previous selection.' );
+
+$cache = new PekSenderWarehouseSearchCache();
+pek_assert( $cache->ttl_seconds() <= 900, 'PEK warehouse search cache TTL must be <= 15 minutes.' );
+$search_payload = array(
+	'freeDepartments' => array( array( 'warehouseId' => 'cache-wh', 'branchId' => 'cache-br', 'branchName' => 'Cache Branch', 'divisionName' => 'Cache Division', 'departmentTypeId' => 1, 'departmentType' => 'Type', 'address' => 'Cached address' ) ),
 	'paidDepartments' => array(),
 );
-$warehouse_http = new PekFakeHttp( array( array( 'status' => 200, 'body' => json_encode( $warehouse_payload, JSON_UNESCAPED_UNICODE ) ) ) );
-$warehouse_api = new PekApiClient( $settings, $credentials, $warehouse_http, new PekRequestBudget( $settings ) );
-$warehouse_service = new PekSenderWarehouseService( $warehouse_api, $settings );
-$search = $warehouse_service->search( 'Россия, Новосибирск' );
-pek_assert( $search['success'] && $search['requested']['departmentOperation'] === 2 && $search['requested']['type'] === 3 && $search['items'][0]['warehouseId'] === 'wh-1' && $search['items'][0]['maxWeightOnePlace'] === 50, 'PEK sender warehouse search must normalize nearestdepartments with operation=2 and type=3.' );
-$select = $warehouse_service->validate_and_select( 'wh-1' );
-pek_assert( $select['success'] && $settings->sender_warehouse()['warehouseId'] === 'wh-1', 'PEK warehouse selection must use server-side cached result.' );
-$previous = $settings->sender_warehouse();
-$bad_select = $warehouse_service->validate_and_select( 'browser-injected' );
-pek_assert( ! $bad_select['success'] && $settings->sender_warehouse() === $previous, 'PEK untrusted warehouse ID must be rejected and preserve existing warehouse on failure.' );
+$search_http = new PekFakeHttp( array( pek_json_response( $search_payload ) ) );
+$search_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, $search_http, new PekRequestBudget( $settings ) ), $settings, $cache );
+$search = $search_service->search( 'Россия, Новосибирск' );
+pek_assert( $search['requested']['departmentOperation'] === 2 && $search['requested']['type'] === 3 && $search_service->validate_and_select( 'cache-wh' )['success'], 'PEK current user can select exact result from own fresh server search cache.' );
+$cache_key_user_1 = $cache->key_for_current_user();
+pek_assert( ! str_contains( json_encode( $GLOBALS['pek_transients'][ $cache_key_user_1 ], JSON_UNESCAPED_UNICODE ) ?: '', 'secret-key' ), 'PEK warehouse search cache must not contain credentials.' );
+$GLOBALS['pek_current_user_id'] = 2;
+$other_user_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, $cache );
+pek_assert( ! $other_user_service->select_from_cached_search( 'cache-wh' )['success'], 'PEK user B must not use user A search cache.' );
+$GLOBALS['pek_current_user_id'] = 1;
+$GLOBALS['pek_now'] += 901;
+$expired_http = new PekFakeHttp( array( pek_json_response( $branches_all ) ) );
+$expired_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, $expired_http, new PekRequestBudget( $settings ) ), $settings, $cache );
+$expired_service->validate_and_select( 'wh-1' );
+pek_assert( count( $expired_http->requests ) === 1 && $expired_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/all/', 'PEK expired/missing cache must fall back to branches/all validation.' );
+$settings_repository->set( 'pek_last_warehouse_search', $search );
+$GLOBALS['pek_transients'] = array();
+$old_setting_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( array( 'branches' => array() ) ) ) ), new PekRequestBudget( $settings ) ), $settings, $cache );
+pek_assert( ! $old_setting_service->validate_and_select( 'cache-wh' )['success'], 'PEK persistent SettingsRepository search must not authorize old warehouse selection.' );
 
 $GLOBALS['wpdb'] = new wpdb();
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
-$pek_service = $services->ensure_pek_service();
-pek_assert( $pek_service instanceof DeliveryService && ! $pek_service->enabled, 'PEK service seed must be disabled.' );
-pek_assert( $services->is_predefined_service_key( PekSettings::SERVICE_KEY ), 'PEK service must be predefined.' );
 $directory = ( new ReflectionClass( WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor();
 $manager = new DeliveryServiceManager( $services, $countries, new RuleRepository(), $directory );
 $manager->ensure_builtin_services();
 $pek_service = $services->find_by_service_key( PekSettings::SERVICE_KEY );
-pek_assert( $pek_service instanceof DeliveryService && array( 'RU' ) === $countries->countries( (int) $pek_service->id ), 'PEK fresh setup must assign only RU.' );
+pek_assert( $pek_service instanceof DeliveryService && ! $pek_service->enabled && array( 'RU' ) === $countries->countries( (int) $pek_service->id ), 'PEK fresh setup must seed disabled service with only RU.' );
+$manager->ensure_builtin_services();
+pek_assert( array( 'RU' ) === $countries->countries( (int) $pek_service->id ), 'PEK repeated boot must keep existing RU.' );
 $countries->replace_countries( (int) $pek_service->id, array( 'RU', 'KZ' ) );
 $manager->ensure_builtin_services();
-pek_assert( array( 'RU', 'KZ' ) === $countries->countries( (int) $pek_service->id ), 'PEK repeated ensure must not overwrite admin country choices.' );
-$services->soft_delete_service( (int) $pek_service->id );
-pek_assert( $services->find_by_service_key( PekSettings::SERVICE_KEY ) instanceof DeliveryService, 'PEK predefined service cannot be soft-deleted.' );
+pek_assert( array( 'RU', 'KZ' ) === $countries->countries( (int) $pek_service->id ), 'PEK repeated ensure must not overwrite custom RU+KZ.' );
+$countries->replace_countries( (int) $pek_service->id, array() );
+$manager->ensure_builtin_services();
+pek_assert( array() === $countries->countries( (int) $pek_service->id ), 'PEK explicit empty country selection must remain empty after boot.' );
+$GLOBALS['wpdb']->services[ array_key_last( $GLOBALS['wpdb']->services ) ]['deleted'] = 1;
+$manager->ensure_builtin_services();
+$restored = $services->find_by_service_key( PekSettings::SERVICE_KEY );
+pek_assert( $restored instanceof DeliveryService && array() === $countries->countries( (int) $restored->id ), 'PEK restored predefined service must not reseed RU merely because countries are empty.' );
+pek_assert( $services->is_predefined_service_key( PekSettings::SERVICE_KEY ), 'PEK service must be predefined.' );
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-$admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $shipment_manifest = (string) file_get_contents( dirname( __DIR__ ) . '/shipments/regression/shipment-regression-manifest.php' );
-pek_assert( str_contains( $plugin_source, 'PekSettings::class' ) && str_contains( $plugin_source, 'PekApiClient::class' ) && str_contains( $plugin_source, 'PekAdminPage::class' ), 'PEK DI/source wiring must be in Plugin.php.' );
+pek_assert( str_contains( $plugin_source, 'PekSenderWarehouseSearchCache::class' ) && str_contains( $plugin_source, 'PekApiClient::class' ) && str_contains( $plugin_source, 'PekAdminPage::class' ), 'PEK DI/source wiring must be in Plugin.php.' );
 $carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 800 );
 pek_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK must not be registered in CarrierRegistry.' );
 pek_assert( ! str_contains( $plugin_source, 'PekShipmentAdapter' ) && ! str_contains( $plugin_source, 'PekShipmentPersistenceMapper' ) && ! str_contains( $plugin_source, 'PekShipmentModalExtension' ) && ! str_contains( $plugin_source, 'PekShipmentDocumentProvider' ), 'PEK must not be registered in Shipment Framework registries.' );
-pek_assert( str_contains( $admin_source, "'save_pek_settings'" ) && str_contains( $admin_source, 'render_pek_settings_tab' ), 'PEK admin actions must route through delivery service page.' );
 pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ), 'PEK foundation smoke must be in mandatory shipment regression manifest.' );
-
 $redacted = $settings->last_diagnostic();
 pek_assert( ! str_contains( json_encode( $redacted, JSON_UNESCAPED_UNICODE ) ?: '', 'secret-key' ), 'PEK normalized diagnostic must not contain API key.' );
-pek_assert( count( $diag_http->requests ) === 3 && count( $warehouse_http->requests ) === 2 && str_starts_with( (string) $warehouse_http->requests[1]['url'], PekSettings::BASE_URL ), 'PEK smoke must use fake HTTP only and perform no production network calls.' );
+pek_assert( count( $http->requests ) === 5 && count( $diag_http->requests ) === 3, 'PEK smoke must use fake HTTP only and perform no production network calls.' );
 
 echo "PEK foundation smoke OK\n";

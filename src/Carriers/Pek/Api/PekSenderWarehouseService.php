@@ -10,7 +10,8 @@ defined( 'ABSPATH' ) || exit;
 final class PekSenderWarehouseService {
 	public function __construct(
 		private PekApiClient $api,
-		private PekSettings $settings
+		private PekSettings $settings,
+		private PekSenderWarehouseSearchCache $search_cache
 	) {
 	}
 
@@ -38,18 +39,27 @@ final class PekSenderWarehouseService {
 			),
 			'checked_at' => $this->now(),
 		);
-		$this->settings->save_warehouse_search_result( $result );
+		$this->search_cache->save_for_current_user( $result );
 
 		return $result;
+	}
+
+	/** @return array<string,mixed> */
+	public function last_search_for_current_user(): array {
+		return $this->search_cache->current_for_current_user();
 	}
 
 	/** @return array{success:bool,message:string,snapshot:array<string,mixed>} */
 	public function select_from_cached_search( string $warehouse_id ): array {
 		$warehouse_id = trim( $warehouse_id );
-		$search = $this->settings->last_warehouse_search();
+		$search = $this->search_cache->current_for_current_user();
+		$requested = is_array( $search['requested'] ?? null ) ? $search['requested'] : array();
+		if ( 2 !== (int) ( $requested['departmentOperation'] ?? 0 ) || PekSettings::LTL_PRODUCT_TYPE !== (int) ( $requested['type'] ?? 0 ) ) {
+			return array( 'success' => false, 'message' => 'Последний серверный поиск склада ПЭК устарел или выполнен с неподходящими фильтрами.', 'snapshot' => array() );
+		}
 		$items = is_array( $search['items'] ?? null ) ? $search['items'] : array();
 		foreach ( $items as $item ) {
-			if ( is_array( $item ) && $warehouse_id === (string) ( $item['warehouseId'] ?? '' ) && $this->supports_ltl_pickup( $item ) ) {
+			if ( is_array( $item ) && $warehouse_id === (string) ( $item['warehouseId'] ?? '' ) ) {
 				$snapshot = $this->snapshot( $item );
 				$this->settings->save_sender_warehouse( $snapshot );
 				return array( 'success' => true, 'message' => 'Склад самопривоза ПЭК сохранён.', 'snapshot' => $snapshot );
@@ -138,15 +148,20 @@ final class PekSenderWarehouseService {
 				}
 				foreach ( is_array( $division['warehouses'] ?? null ) ? $division['warehouses'] : array() as $warehouse ) {
 					if ( is_array( $warehouse ) && $warehouse_id === (string) ( $warehouse['id'] ?? '' ) ) {
+						$warehouse_has_capabilities = array_key_exists( 'kindsOfTransportation', $warehouse );
 						return $this->normalize_department(
 							array_merge(
 								$warehouse,
 								array(
 									'warehouseId' => (string) $warehouse['id'],
 									'branchId' => (string) ( $branch['id'] ?? '' ),
-									'branchName' => (string) ( $branch['name'] ?? '' ),
-									'divisionName' => (string) ( $division['name'] ?? '' ),
-									'kindsOfTransportation' => is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array(),
+									'branchName' => (string) ( $branch['title'] ?? '' ),
+									'divisionName' => (string) ( $warehouse['divisionName'] ?? ( $division['name'] ?? '' ) ),
+									'departmentTypeId' => (int) ( $division['departmentTypeId'] ?? 0 ),
+									'departmentType' => (string) ( $division['departmentType'] ?? '' ),
+									'address' => (string) ( trim( (string) ( $warehouse['addressDivision'] ?? '' ) ) !== '' ? $warehouse['addressDivision'] : ( $warehouse['address'] ?? '' ) ),
+									'coordinates' => is_array( $warehouse['coordinatesobj'] ?? null ) ? $warehouse['coordinatesobj'] : array(),
+									'kindsOfTransportation' => $warehouse_has_capabilities ? ( is_array( $warehouse['kindsOfTransportation'] ?? null ) ? $warehouse['kindsOfTransportation'] : array() ) : ( is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array() ),
 								)
 							),
 							'branches_all',
@@ -168,16 +183,24 @@ final class PekSenderWarehouseService {
 		$types = array_map( 'intval', is_array( $item['types'] ?? null ) ? $item['types'] : array() );
 		$type_ok = array() === $types || in_array( PekSettings::LTL_PRODUCT_TYPE, $types, true );
 		$kinds = is_array( $item['kindsOfTransportation'] ?? null ) ? $item['kindsOfTransportation'] : array();
-		$operation_ok = array() === $kinds;
 		foreach ( $kinds as $kind ) {
-			if ( is_array( $kind ) && ( 2 === (int) ( $kind['departmentOperation'] ?? 0 ) || 2 === (int) ( $kind['operation'] ?? 0 ) || 2 === (int) ( $kind['id'] ?? 0 ) ) ) {
-				$operation_ok = true;
-			} elseif ( 2 === (int) $kind ) {
-				$operation_ok = true;
+			if ( ! is_array( $kind ) || PekSettings::LTL_PRODUCT_TYPE !== (int) ( $kind['type'] ?? 0 ) ) {
+				continue;
+			}
+			foreach ( is_array( $kind['operations'] ?? null ) ? $kind['operations'] : array() as $operation ) {
+				if ( 'прием грузов' === $this->normalize_operation( (string) $operation ) ) {
+					return $type_ok;
+				}
 			}
 		}
 
-		return $type_ok && $operation_ok;
+		return false;
+	}
+
+	private function normalize_operation( string $operation ): string {
+		$operation = trim( preg_replace( '/\s+/u', ' ', $operation ) ?? $operation );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $operation, 'UTF-8' ) : strtolower( $operation );
 	}
 
 	/** @param array<string,mixed> $item @return array<string,mixed> */
