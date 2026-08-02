@@ -390,6 +390,17 @@ plugin_architecture_assert( str_contains( $plugin_source, 'CarrierShipmentAdapte
 $carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 1000 );
 plugin_architecture_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK foundation must not be registered in CarrierRegistry before checkout quote runtime exists.' );
 plugin_architecture_assert( str_contains( $plugin_source, 'PekSettings::class' ) && str_contains( $plugin_source, 'PekApiClient::class' ) && str_contains( $plugin_source, 'PekSenderWarehouseSearchCache::class' ) && str_contains( $plugin_source, 'PekAdminNoticeStore::class' ) && str_contains( $plugin_source, 'PekAdminPage::class' ), 'Plugin.php must own PEK foundation DI wiring.' );
+plugin_architecture_assert( is_file( plugin_architecture_path( 'src/Pickup/Providers/CarrierPickupPointProviderInterface.php' ) ) && is_file( plugin_architecture_path( 'src/Pickup/Providers/CarrierPickupPointProviderRegistry.php' ) ), 'Carrier pickup provider contract and registry must exist.' );
+plugin_architecture_assert( str_contains( $plugin_source, 'CarrierPickupPointProviderRegistry::class' ) && str_contains( $plugin_source, 'PekPickupPointProvider::class' ), 'Plugin.php must register the pickup provider registry with the PEK provider.' );
+plugin_architecture_assert( ! str_contains( $plugin_source, 'CdekPickupPointProvider' ) && ! str_contains( $plugin_source, 'DpdPickupPointProvider' ) && ! str_contains( $plugin_source, 'YandexDeliveryPickupPointProvider' ) && ! str_contains( $plugin_source, 'RussianPostPickupPointProvider' ), 'Stage 2 must not migrate existing carriers into the new pickup provider registry.' );
+foreach ( array(
+	'src/Pickup/Rest/PickupPointsRestController.php',
+	'src/Pickup/Rest/CheckoutPickupPointRestController.php',
+) as $pickup_rest_path ) {
+	$pickup_rest_source = plugin_architecture_source( $pickup_rest_path );
+	plugin_architecture_assert( ! str_contains( $pickup_rest_source, 'Pek' ) && ! str_contains( $pickup_rest_source, "'pek'" ) && ! str_contains( $pickup_rest_source, 'CarrierPickupPointProviderRegistry' ), 'Public pickup REST must not integrate PEK provider registry in ' . $pickup_rest_path );
+}
+plugin_architecture_assert( is_file( plugin_architecture_path( 'database/migrations/0048_create_pek_location_mappings.php' ) ) && is_file( plugin_architecture_path( 'database/migrations/0049_create_pek_terminals.php' ) ), 'PEK geography/pickup migrations 0048 and 0049 must exist.' );
 foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
 	if ( 'src/Core/Plugin.php' === $relative ) {

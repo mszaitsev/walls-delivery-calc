@@ -1,6 +1,6 @@
 # Project Status
 
-Version: 0.130.6
+Version: 0.131.0
 
 Stable subsystems:
 
@@ -17,6 +17,7 @@ Stable subsystems:
 - CDEK EAEU support through the single `cdek` carrier/service with configurable `RU`, `AM`, `BY`, `KZ`, and `KG` availability.
 - Jet Logistic support through one carrier/service with separate geography import, two quote rates from one API calculation, manual tracking attach, status mappings, and shared autosync.
 - PEK foundation and delivery-service settings. The built-in PEK service is disabled by default, starts with only `RU`, stores legal sender data and the default sender warehouse, preserves canonical branch timezone/availability fields, and keeps `AM`, `BY`, `KG`, and `KZ` planned for later international testing. Runtime checkout quotes, shipment creation, statuses, documents, actual-cost integration, and cancellation are not implemented.
+- PEK geography and destination pickup foundation. A generic pickup-provider registry exists, currently wired only with the PEK provider for closed admin diagnostics. PEK stores location mappings and destination terminal snapshots in carrier-owned tables, resolves canonical locations coordinates-first with address fallback, preserves `wp_wdc_locations` unchanged, and validates destination pickup selections through fresh server-side PEK API lookup instead of trusting cache/repository rows. Public pickup REST, PEK checkout rates, checkout terminal selection, and Shipment Framework integration are still not implemented.
 
 Active known limitations:
 

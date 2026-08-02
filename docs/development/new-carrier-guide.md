@@ -1,6 +1,6 @@
 # New Carrier Guide
 
-Version: 0.130.6
+Version: 0.131.0
 
 For carriers like Jet Logistic that return multiple delivery options from one quote call, prefer a carrier-agnostic capability path: a carrier whose capabilities include pickup and courier can return multiple `DeliveryRate` objects from one `quote()` call. A pickup `DeliveryRate` may set `requires_pickup_point=false` when the carrier has no selectable pickup-point identifiers.
 
@@ -58,6 +58,10 @@ Rule simulation support is required for API-backed carriers. Reuse the productio
 ## 4. Pickup/Courier Support
 
 Optional per carrier. Pickup imports/repositories belong under carrier or pickup namespaces. Shared checkout UI should receive normalized pickup point data. If pickup selection changes price, make checkout recalculate only when the customer-visible price can change.
+
+For new credentialed pickup providers, use `CarrierPickupPointProviderInterface` and `CarrierPickupPointProviderRegistry` only when the carrier has enough trusted cargo/location context to search safely. The provider query uses canonical project units through `PickupCargoConstraints`; carrier-specific services convert those units into API units. `resolve_selection()` must perform fresh server-side validation and must not trust repository/cache rows as selection authority. Public REST integration is a separate checkout-stage decision, not automatic registry wiring.
+
+PEK is the first provider on this contract. Its registry wiring is used only by the PEK admin destination diagnostic in version 0.131.0; PEK checkout rates, public pickup REST, terminal selection in session, and Shipment Framework integration are intentionally not implemented yet.
 
 ## 5. Shipment Adapter
 

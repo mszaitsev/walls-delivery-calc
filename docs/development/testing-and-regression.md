@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.130.6
+Version: 0.131.0
 
 Jet Logistic critical coverage is registered as the mandatory `jet-logistic` group. It covers API envelope handling, token redaction, CSV/geography basics, one-call two-rate quoting, discounted package goods cost and `D_SDOC`, terminal-city presentation, status mapping with compact events, manual attach, unsupported create, and local remove.
 
@@ -33,6 +33,8 @@ The manifest is `tests/shipments/regression/shipment-regression-manifest.php`. S
 
 PEK foundation is registered as mandatory `pek.foundation` in group `pek`; PEK admin routing, admin UI rendering, and warehouse datetime correctness are registered as mandatory `pek.admin-routing`, `pek.admin-ui`, and `pek.warehouse-datetime`. Run them directly with `php tests/pek/run-pek-foundation-smoke.php`, `php tests/pek/run-pek-admin-routing-smoke.php`, `php tests/pek/run-pek-admin-ui-smoke.php`, and `php tests/pek/run-pek-warehouse-datetime-smoke.php`, or through `php tests/shipments/run-shipment-regression-profile.php --group=pek`. The smokes use fake HTTP only, verify no production network calls are made, assert `/typesOfDelivery/all/` is called with GET, PEK JSON headers, and no body while branch/legal/warehouse methods use POST, check independent diagnostics after endpoint 403, validate `connection_ok` versus `all_checks_passed`, verify selected-warehouse operational diagnostics are read-only, separate `/branches/all/` API availability from informational saved-ID matching, cover positive and mismatch warehouse matcher cases with safe counters, check source persistence through search cache/snapshot, check official `shortName`/`codeByClassifier` country diagnostics, protect stale warehouse search cache clearing, user-scoped one-shot notices, PEK closing-date validation, branch timezone handling from `/branches/all/` `timezone` and `/branches/nearestdepartments/` `timeZone`, strict future impossible-date rejection, real Unix timestamp comparison without `current_time('timestamp')`, mbstring-independent cargo acceptance matching, nested diagnostic rendering, machine datetime sanitation before phone redaction, and assert PEK is not registered in `CarrierRegistry` or Shipment Framework registries.
 
+PEK geography and destination pickup foundation are registered as mandatory `pek.geography` and `pek.pickup-provider` in group `pek`, and the generic pickup provider registry contract is registered as mandatory `framework.pickup-provider-registry` in group `framework`. Run them directly with `php tests/pek/run-pek-geography-smoke.php`, `php tests/pek/run-pek-pickup-provider-smoke.php`, and `php tests/pickup/run-carrier-pickup-provider-registry-smoke.php`. These smokes verify coordinate-first and address-fallback PEK location resolution, mapping fingerprints, no canonical location mutation, destination `/branches/nearestdepartments/` with `departmentOperation=3` and `type=3`, project-unit to PEK-unit conversion, free/paid terminal normalization, positive limit enforcement, cache fingerprints, fresh selection validation, no public REST wiring, and fake HTTP only.
+
 The plugin architecture smoke is `framework.plugin-architecture`; it is registered in the framework group and checks architecture boundaries rather than carrier business behavior. It favors dynamic Reflection-based checks where the contract is inspectable. Where runtime proof would require changing production construction, the smoke checks a narrower contract instead: registry duplicate behavior is tested with stubs, providers are discovered without uninitialized method calls, and composition-root ownership is checked for the current `Container::register()` wiring pattern.
 
 Allowed matrix values:
@@ -52,6 +54,8 @@ Allowed matrix values:
 | admin routing | `N/A` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.admin-routing` |
 | admin UI rendering | `N/A` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.admin-ui` |
 | warehouse availability | `N/A` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.warehouse-datetime` |
+| pickup provider registry | `contract`: `framework.pickup-provider-registry` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.pickup-provider` |
+| geography mapping | `N/A` | `N/A` | `N/A` | `N/A` | `N/A` | `carrier smoke`: `pek.geography` |
 | create | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |
 | preview | `contract`: `framework.admin-ajax` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-payload` | `N/A` |
 | persistence | `contract`: `framework.persistence-mappers` | `carrier smoke`: `cdek.order-creation` | `carrier smoke`: `dpd.create-order` | `carrier smoke`: `russian-post.shipments` | `carrier smoke`: `yandex.shipment-framework` | `N/A` |

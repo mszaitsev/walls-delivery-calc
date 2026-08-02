@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\Pek\Api;
 
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalRequest;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 
@@ -65,6 +66,37 @@ final class PekApiClient {
 		$result = $this->call( 'POST', '/branches/all/', array( 'warehouseId' => $warehouse_id ) );
 		if ( ! is_array( $result ) ) {
 			throw new PekApiException( 'ПЭК вернул неожиданную структуру справочника складов.', array( 'error_code' => 'pek_unexpected_branches_all' ) );
+		}
+
+		return $result;
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function find_zone_by_coordinates( float $latitude, float $longitude ): array {
+		$result = $this->call( 'POST', '/branches/findzonebycoordinates/', array( array( 'latitude' => $latitude, 'longitude' => $longitude ) ) );
+
+		return $this->expect_list( $result, 'branches/findzonebycoordinates' );
+	}
+
+	/** @return array<string,mixed>|array<int,mixed> */
+	public function find_zone_by_address( string $address ): array {
+		$address = trim( $address );
+		if ( '' === $address ) {
+			throw new PekApiException( 'Не указан адрес для поиска зоны ПЭК.', array( 'error_code' => 'pek_empty_zone_address' ) );
+		}
+		$result = $this->call( 'POST', '/branches/findzonebyaddress/', array( 'address' => $address ) );
+		if ( ! is_array( $result ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру зоны адреса.', array( 'error_code' => 'pek_unexpected_findzone_address' ) );
+		}
+
+		return $result;
+	}
+
+	/** @return array<string,mixed> */
+	public function destination_nearest_departments( PekDestinationTerminalRequest $request ): array {
+		$result = $this->call( 'POST', '/branches/nearestdepartments/', $request->to_payload() );
+		if ( ! is_array( $result ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру ближайших терминалов.', array( 'error_code' => 'pek_unexpected_destination_nearest_departments' ) );
 		}
 
 		return $result;

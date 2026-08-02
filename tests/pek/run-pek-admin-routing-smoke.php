@@ -10,18 +10,30 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
+use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 
 function pek_route_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -65,6 +77,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $prefix = 'wp_';
 		public int $insert_id = 0;
 		public array $services = array();
+		public array $locations = array();
+		public array $pek_location_mappings = array();
+		public array $pek_terminals = array();
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
 				$query = preg_replace( '/%[sd]/', is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query;
@@ -108,7 +123,19 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
-	$pek_admin = new PekAdminPage( $settings, $credentials, new PekConnectionDiagnosticService( $settings, $credentials, $api ), new PekSenderWarehouseService( $api, $settings, $cache ), new PekAdminNoticeStore() );
+	$location_repository = new LocationRepository( $GLOBALS['wpdb'] );
+	$location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $GLOBALS['wpdb'] ), $api, $settings );
+	$terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $GLOBALS['wpdb'] ), $settings );
+	$pickup_provider = new PekPickupPointProvider( $terminal_service );
+	$pek_admin = new PekAdminPage(
+		$settings,
+		$credentials,
+		new PekConnectionDiagnosticService( $settings, $credentials, $api ),
+		new PekSenderWarehouseService( $api, $settings, $cache ),
+		new PekAdminNoticeStore(),
+		new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings ),
+		new PekDestinationPickupDiagnosticStore()
+	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
 	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin ) as $property => $value ) {
 		$ref = new ReflectionProperty( DeliveryServicesAdminPage::class, $property );

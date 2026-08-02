@@ -9,17 +9,29 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
+use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 
 function pek_ui_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -51,6 +63,15 @@ function submit_button( string $text, string $type = 'primary' ): void { echo '<
 final class PekUiFakeHttp implements PekHttpClientInterface {
 	public function request( string $method, string $url, array $args ): array {
 		return array( 'status' => 200, 'body' => '[]' );
+	}
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public array $locations = array();
+		public array $pek_location_mappings = array();
+		public array $pek_terminals = array();
 	}
 }
 
@@ -140,7 +161,23 @@ $cache->save_for_current_user(
 $notice_store = new PekAdminNoticeStore();
 $notice_store->save_for_current_user( 'success', 'Saved <safe>' );
 $api = new PekApiClient( $settings, $credentials, new PekUiFakeHttp(), new PekRequestBudget( $settings ) );
-$page = new PekAdminPage( $settings, $credentials, new PekConnectionDiagnosticService( $settings, $credentials, $api ), new PekSenderWarehouseService( $api, $settings, $cache ), $notice_store );
+$wpdb = new wpdb();
+$wpdb->locations = array();
+$wpdb->pek_location_mappings = array();
+$wpdb->pek_terminals = array();
+$location_repository = new LocationRepository( $wpdb );
+$location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $api, $settings );
+$terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
+$pickup_provider = new PekPickupPointProvider( $terminal_service );
+$page = new PekAdminPage(
+	$settings,
+	$credentials,
+	new PekConnectionDiagnosticService( $settings, $credentials, $api ),
+	new PekSenderWarehouseService( $api, $settings, $cache ),
+	$notice_store,
+	new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings ),
+	new PekDestinationPickupDiagnosticStore()
+);
 $service = DeliveryService::from_array( array( 'id' => 5, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => 'ПЭК' ) );
 
 set_error_handler(
