@@ -67,10 +67,12 @@ final class PekDestinationPickupDiagnosticService {
 			$mapping = is_array( $terminal_report['mapping'] ?? null ) ? $terminal_report['mapping'] : array();
 			$context = $exception->context();
 			$api_error_message = $this->safe_api_error_message( $exception->getMessage() );
+			$field_errors = $this->safe_field_errors( $terminal_report['field_errors'] ?? $context['field_errors'] ?? array() );
 			$report = array(
 				'success' => false,
 				'error_code' => (string) ( $exception->context()['error_code'] ?? $terminal_report['error_code'] ?? 'pek_destination_api_contract_failed' ),
 				'api_error_message' => $api_error_message,
+				'field_errors' => $field_errors,
 				'failure_stage' => (string) ( $terminal_report['failure_stage'] ?? $context['failure_stage'] ?? 'unknown' ),
 				'endpoint' => (string) ( $terminal_report['endpoint'] ?? $context['endpoint'] ?? '' ),
 				'method' => (string) ( $terminal_report['method'] ?? $context['method'] ?? '' ),
@@ -118,6 +120,7 @@ final class PekDestinationPickupDiagnosticService {
 			'success' => $success,
 			'error_code' => $error_code,
 			'api_error_message' => '',
+			'field_errors' => $this->safe_field_errors( $terminal_report['field_errors'] ?? array() ),
 			'failure_stage' => (string) ( $terminal_report['failure_stage'] ?? '' ),
 			'endpoint' => (string) ( $terminal_report['endpoint'] ?? '' ),
 			'method' => (string) ( $terminal_report['method'] ?? '' ),
@@ -211,6 +214,7 @@ final class PekDestinationPickupDiagnosticService {
 			'success' => false,
 			'error_code' => $error_code,
 			'api_error_message' => '',
+			'field_errors' => array(),
 			'failure_stage' => 'destination_terminal_request',
 			'endpoint' => '',
 			'method' => '',
@@ -265,6 +269,7 @@ final class PekDestinationPickupDiagnosticService {
 				'failure_stage' => (string) ( $report['failure_stage'] ?? '' ),
 				'error_code' => (string) ( $report['error_code'] ?? '' ),
 				'api_error_message' => (string) ( $report['api_error_message'] ?? '' ),
+				'field_errors' => $this->safe_field_errors( $report['field_errors'] ?? array() ),
 				'endpoint' => (string) ( $report['endpoint'] ?? '' ),
 				'method' => (string) ( $report['method'] ?? '' ),
 				'http_status' => $report['http_status'] ?? '',
@@ -293,6 +298,105 @@ final class PekDestinationPickupDiagnosticService {
 		return '' !== trim( $message ) ? trim( $message ) : 'ПЭК вернул ошибку без безопасного описания.';
 	}
 
+	/** @return array<int,array{field:string,messages:array<int,string>}> */
+	private function safe_field_errors( mixed $value ): array {
+		if ( ! is_array( $value ) || ! array_is_list( $value ) ) {
+			return array();
+		}
+		$result = array();
+		$index_by_field = array();
+		$total_messages = 0;
+		foreach ( $value as $item ) {
+			if ( ! is_array( $item ) || array_is_list( $item ) ) {
+				continue;
+			}
+			if ( ! is_string( $item['field'] ?? null ) ) {
+				continue;
+			}
+			$field = $this->safe_field_name( $item['field'] );
+			$messages = $this->safe_field_messages( $item['messages'] ?? null );
+			if ( array() === $messages ) {
+				continue;
+			}
+			if ( ! array_key_exists( $field, $index_by_field ) ) {
+				if ( count( $result ) >= 20 ) {
+					break;
+				}
+				$index_by_field[ $field ] = count( $result );
+				$result[] = array( 'field' => $field, 'messages' => array() );
+			}
+			$index = $index_by_field[ $field ];
+			foreach ( $messages as $message ) {
+				if ( $total_messages >= 50 ) {
+					break 2;
+				}
+				if ( count( $result[ $index ]['messages'] ) >= 5 ) {
+					break;
+				}
+				if ( in_array( $message, $result[ $index ]['messages'], true ) ) {
+					continue;
+				}
+				$result[ $index ]['messages'][] = $message;
+				++$total_messages;
+			}
+		}
+
+		return $result;
+	}
+
+	private function safe_field_name( string $value ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+		$value = trim( $this->redact_api_error_message( $value ) );
+		if ( function_exists( 'mb_substr' ) ) {
+			$value = mb_substr( $value, 0, 100 );
+		} else {
+			$value = substr( $value, 0, 100 );
+		}
+
+		return '' !== trim( $value ) ? trim( $value ) : 'unknown_field';
+	}
+
+	/** @return array<int,string> */
+	private function safe_field_messages( mixed $value ): array {
+		if ( ! is_array( $value ) || ! array_is_list( $value ) ) {
+			return array();
+		}
+		$messages = array();
+		foreach ( $value as $message ) {
+			if ( ! is_string( $message ) ) {
+				continue;
+			}
+			$message = $this->safe_field_error_message( $message );
+			if ( in_array( $message, $messages, true ) ) {
+				continue;
+			}
+			$messages[] = $message;
+			if ( count( $messages ) >= 5 ) {
+				break;
+			}
+		}
+
+		return $messages;
+	}
+
+	private function safe_field_error_message( string $message ): string {
+		$message = trim( $message );
+		$message = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $message ) ?? $message;
+		$message = preg_replace( '/\s+/u', ' ', $message ) ?? $message;
+		$message = trim( $this->redact_api_error_message( $message ) );
+		if ( '' === $message ) {
+			return 'ПЭК вернул ошибку поля без безопасного описания.';
+		}
+		if ( function_exists( 'mb_substr' ) ) {
+			$message = mb_substr( $message, 0, 500 );
+		} else {
+			$message = substr( $message, 0, 500 );
+		}
+
+		return '' !== trim( $message ) ? trim( $message ) : 'ПЭК вернул ошибку поля без безопасного описания.';
+	}
+
 	private function redact_api_error_message( string $message ): string {
 		if ( null !== $this->credentials ) {
 			$api_key = trim( $this->credentials->api_key() );
@@ -307,8 +411,8 @@ final class PekDestinationPickupDiagnosticService {
 			}
 		}
 		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
-		$message = preg_replace( '/([?&](?:api_key|apikey|token|password|authorization|login)=)[^&\s]+/i', '$1[redacted]', $message ) ?? $message;
-		$message = preg_replace( '/\b(api_key|apikey|token|password|authorization|login)\s*[:=]\s*["\']?[^"\'\s,;&]+/i', '$1=[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/([?&])(?:api_key|apikey|token|password|authorization|login)=[^&\s]+/i', '$1[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/\b(?:api_key|apikey|token|password|authorization|login)\s*[:=]\s*["\']?[^"\'\s,;&]+/i', '[redacted]', $message ) ?? $message;
 
 		return $message;
 	}

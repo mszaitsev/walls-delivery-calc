@@ -10,6 +10,10 @@ use WallsShop\WDC\Carriers\Pek\PekSettings;
 defined( 'ABSPATH' ) || exit;
 
 final class PekApiClient {
+	private const MAX_FIELD_ERRORS = 20;
+	private const MAX_FIELD_MESSAGES = 5;
+	private const MAX_TOTAL_FIELD_MESSAGES = 50;
+
 	/** @var array<string,mixed> */
 	private array $last_response_meta = array();
 
@@ -142,7 +146,7 @@ final class PekApiClient {
 		}
 		if ( is_array( $decoded['error'] ?? null ) ) {
 			$error = $decoded['error'];
-			throw new PekApiException( $this->safe_message( $this->logical_error_message( $error ) ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_logical_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ) ) ) );
+			throw new PekApiException( $this->safe_message( $this->logical_error_message( $error ) ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_logical_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ), 'field_errors' => $this->extract_safe_field_errors( $error ) ) ) );
 		}
 		if ( is_array( $decoded ) && true === ( $decoded['hasError'] ?? false ) ) {
 			$error_message = $this->api_error_part( $decoded['errorMessage'] ?? null );
@@ -302,6 +306,128 @@ final class PekApiClient {
 		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
 
 		return trim( $value );
+	}
+
+	/** @param array<string,mixed> $error @return array<int,array{field:string,messages:array<int,string>}> */
+	private function extract_safe_field_errors( array $error ): array {
+		if ( ! array_key_exists( 'fields', $error ) || ! is_array( $error['fields'] ) ) {
+			return array();
+		}
+		$fields = $error['fields'];
+		$result = array();
+		$index_by_field = array();
+		$total_messages = 0;
+		if ( array_is_list( $fields ) ) {
+			foreach ( $fields as $item ) {
+				if ( ! is_array( $item ) || array_is_list( $item ) ) {
+					continue;
+				}
+				$this->append_field_error( $result, $index_by_field, $total_messages, $item['Key'] ?? null, $item['Value'] ?? null );
+				if ( count( $result ) >= self::MAX_FIELD_ERRORS || $total_messages >= self::MAX_TOTAL_FIELD_MESSAGES ) {
+					break;
+				}
+			}
+		} else {
+			foreach ( $fields as $field => $messages ) {
+				$this->append_field_error( $result, $index_by_field, $total_messages, is_string( $field ) ? $field : null, $messages );
+				if ( count( $result ) >= self::MAX_FIELD_ERRORS || $total_messages >= self::MAX_TOTAL_FIELD_MESSAGES ) {
+					break;
+				}
+			}
+		}
+
+		return $result;
+	}
+
+	/** @param array<int,array{field:string,messages:array<int,string>}> $result @param array<string,int> $index_by_field */
+	private function append_field_error( array &$result, array &$index_by_field, int &$total_messages, mixed $field, mixed $messages ): void {
+		if ( ! is_string( $field ) ) {
+			return;
+		}
+		$field = $this->safe_field_name( $field );
+		$messages = $this->safe_field_messages( $messages );
+		if ( array() === $messages ) {
+			return;
+		}
+		if ( ! array_key_exists( $field, $index_by_field ) ) {
+			if ( count( $result ) >= self::MAX_FIELD_ERRORS ) {
+				return;
+			}
+			$index_by_field[ $field ] = count( $result );
+			$result[] = array( 'field' => $field, 'messages' => array() );
+		}
+		$index = $index_by_field[ $field ];
+		foreach ( $messages as $message ) {
+			if ( $total_messages >= self::MAX_TOTAL_FIELD_MESSAGES || count( $result[ $index ]['messages'] ) >= self::MAX_FIELD_MESSAGES ) {
+				break;
+			}
+			if ( in_array( $message, $result[ $index ]['messages'], true ) ) {
+				continue;
+			}
+			$result[ $index ]['messages'][] = $message;
+			++$total_messages;
+		}
+	}
+
+	private function safe_field_name( string $value ): string {
+		$value = $this->safe_error_text( $value, 100, '' );
+
+		return '' !== $value ? $value : 'unknown_field';
+	}
+
+	/** @return array<int,string> */
+	private function safe_field_messages( mixed $value ): array {
+		$values = is_array( $value ) && array_is_list( $value ) ? $value : array( $value );
+		$messages = array();
+		foreach ( $values as $item ) {
+			if ( ! is_string( $item ) ) {
+				continue;
+			}
+			$message = $this->safe_error_text( $item, 500, 'ПЭК вернул ошибку поля без безопасного описания.' );
+			if ( '' === $message ) {
+				continue;
+			}
+			$messages[] = $message;
+			if ( count( $messages ) >= self::MAX_FIELD_MESSAGES ) {
+				break;
+			}
+		}
+
+		return array_values( array_unique( $messages ) );
+	}
+
+	private function safe_error_text( string $value, int $max_length, string $fallback ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+		$value = trim( $this->redact_error_text( $value ) );
+		if ( '' === $value ) {
+			return $fallback;
+		}
+		if ( function_exists( 'mb_substr' ) ) {
+			$value = mb_substr( $value, 0, $max_length );
+		} else {
+			$value = substr( $value, 0, $max_length );
+		}
+
+		return trim( $value );
+	}
+
+	private function redact_error_text( string $message ): string {
+		$api_key = trim( $this->credentials->api_key() );
+		$login = trim( $this->credentials->login() );
+		if ( '' !== $login && '' !== $api_key ) {
+			$message = str_replace( $login . ':' . $api_key, '[redacted]', $message );
+		}
+		foreach ( array( $api_key, $login ) as $secret ) {
+			if ( '' !== $secret ) {
+				$message = str_replace( $secret, '[redacted]', $message );
+			}
+		}
+		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
+		$message = preg_replace( '/([?&])(?:api_key|apikey|token|password|authorization|login)=[^&\s]+/i', '$1[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/\b(?:api_key|apikey|token|password|authorization|login)\s*[:=]\s*["\']?[^"\'\s,;&]+/i', '[redacted]', $message ) ?? $message;
+
+		return $message;
 	}
 
 	/** @return array<string,mixed> */

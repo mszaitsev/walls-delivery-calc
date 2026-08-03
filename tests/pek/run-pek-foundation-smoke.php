@@ -278,6 +278,38 @@ try {
 	pek_assert( 'pek_logical_error' === (string) ( $exception->context()['error_code'] ?? '' ) && 'ПЭК вернул логическую ошибку без описания.' === $exception->getMessage(), 'Malformed PEK logical error description must use safe fallback without Array casts.' );
 }
 
+try {
+	$field_messages = array( 'Значение должно быть больше 0.', 'Значение должно быть больше 0.', "login=login api_key=secret-key Basic " . base64_encode( 'login:secret-key' ) );
+	$field_rows = array(
+		array( 'Key' => 'volume', 'Value' => $field_messages, 'RejectedValue' => 'Москва, секретный адрес' ),
+		array( 'Key' => 'volume', 'Value' => array( 'Второе сообщение.' ) ),
+		array( 'Key' => 'searchRadius', 'Value' => array( 'Максимально допустимое значение — 100.' ) ),
+		array( 'Key' => array( 'bad' ), 'Value' => array( 'skip' ) ),
+		array( 'Key' => '<script>alert(1)</script>', 'Value' => array( '<b>bad</b>' ) ),
+	);
+	for ( $i = 0; $i < 25; $i++ ) {
+		$field_rows[] = array( 'Key' => 'field-' . $i, 'Value' => array( str_repeat( 'x', 700 ) ) );
+	}
+	( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'error' => array( 'title' => 'Ошибка валидации', 'message' => 'Детальные сообщения об ошибках приведены отдельно для каждого поля', 'fields' => $field_rows ) ), JSON_UNESCAPED_UNICODE ) ) ) ), new PekRequestBudget( $settings ) ) )->destination_nearest_departments( new \WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalRequest( '', 55.030204, 82.92043, 1000, 1.2, 1000, 1000, 1, 50, 20 ) );
+	pek_assert( false, 'PEK logical validation error with field details must fail.' );
+} catch ( PekApiException $exception ) {
+	$field_errors = $exception->context()['field_errors'] ?? array();
+	$field_json = json_encode( $field_errors, JSON_UNESCAPED_UNICODE ) ?: '';
+	pek_assert( 'pek_logical_error' === (string) ( $exception->context()['error_code'] ?? '' ) && is_array( $field_errors ) && count( $field_errors ) === 20, 'PEK logical validation error must expose normalized field_errors with field limit.' );
+	pek_assert( 'volume' === (string) ( $field_errors[0]['field'] ?? '' ) && 'Значение должно быть больше 0.' === (string) ( $field_errors[0]['messages'][0] ?? '' ) && str_contains( (string) ( $field_errors[0]['messages'][1] ?? '' ), '[redacted]' ) && 'Второе сообщение.' === (string) ( $field_errors[0]['messages'][2] ?? '' ), 'PEK field errors must preserve order, merge duplicate fields, deduplicate messages and redact credentials.' );
+	pek_assert( 'searchRadius' === (string) ( $field_errors[1]['field'] ?? '' ) && 'Максимально допустимое значение — 100.' === (string) ( $field_errors[1]['messages'][0] ?? '' ), 'PEK field errors must preserve later Key/Value field order.' );
+	pek_assert( str_contains( $field_json, '<script>alert(1)' ) && str_contains( $field_json, '<b>bad' ) && ! str_contains( $field_json, 'unknown_field' ) && ! str_contains( $field_json, 'RejectedValue' ) && ! str_contains( $field_json, 'Москва, секретный адрес' ) && ! str_contains( $field_json, 'secret-key' ) && ! str_contains( $field_json, base64_encode( 'login:secret-key' ) ), 'PEK field error context must keep only safe names/messages without raw values or secrets.' );
+	pek_assert( strlen( (string) ( $field_errors[3]['messages'][0] ?? '' ) ) <= 500, 'PEK field error messages must be length-limited.' );
+}
+
+try {
+	( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'error' => array( 'title' => 'Ошибка', 'message' => 'Описание', 'fields' => array( 'volume' => array( 'Значение должно быть больше 0.' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) ), new PekRequestBudget( $settings ) ) )->types_of_delivery_all();
+	pek_assert( false, 'PEK logical field map must still fail.' );
+} catch ( PekApiException $exception ) {
+	$field_errors = $exception->context()['field_errors'] ?? array();
+	pek_assert( is_array( $field_errors ) && 'volume' === (string) ( $field_errors[0]['field'] ?? '' ) && 'Значение должно быть больше 0.' === (string) ( $field_errors[0]['messages'][0] ?? '' ), 'PEK field error parser must normalize associative error.fields maps.' );
+}
+
 $settings_repository->set( PekSettings::REQUESTS_PER_MINUTE_KEY, 1 );
 $GLOBALS['pek_transients'] = array();
 $limited_api = new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( array() ), pek_json_response( array() ) ) ), new PekRequestBudget( $settings ) );

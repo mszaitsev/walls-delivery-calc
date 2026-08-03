@@ -262,30 +262,66 @@ $ui_http->nearest_response = array(
 	'error' => array(
 		'title' => '<script>alert(1)</script>',
 		'message' => '<b>bad</b> Некорректные параметры: Значение volume должно быть больше 0. diagnostic-user:very-secret-key ' . $long_message,
+		'fields' => array(
+			array(
+				'Key' => 'volume',
+				'Value' => array(
+					'Значение должно быть больше 0.',
+					'login=diagnostic-user api_key=very-secret-key Basic ' . base64_encode( 'diagnostic-user:very-secret-key' ),
+				),
+				'RejectedValue' => 'Москва, секретный адрес',
+			),
+			array(
+				'Key' => 'searchRadius',
+				'Value' => array( 'Максимально допустимое значение — 100.' ),
+				'AttemptedValue' => array( 'secret' => true ),
+			),
+			array(
+				'Key' => 'volume',
+				'Value' => array( 'Значение должно быть больше 0.', 'Второе сообщение.' ),
+			),
+			array(
+				'Key' => '<script>field</script>',
+				'Value' => array( '<b>bad field</b>' ),
+			),
+			array(
+				'Key' => array( 'bad' ),
+				'Value' => array( 'skip' ),
+			),
+			array(
+				'Key' => 'badMessage',
+				'Value' => array( array( 'nested' ) ),
+			),
+		),
 	),
 );
 $logical_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 1.75, 'pek_destination_length_cm' => 100, 'pek_destination_width_cm' => 100, 'pek_destination_height_cm' => 100, 'pek_destination_max_place_weight_kg' => 1.75, 'pek_destination_places_count' => 1 ) );
 pek_ui_assert( false === $logical_report['success'] && 'pek_logical_error' === $logical_report['error_code'] && 'destination_terminal_logical' === $logical_report['failure_stage'] && 'Не удалось использовать ответ ПЭК для выбранного направления.' === $logical_report['message'], 'PEK logical error must keep stable diagnostic message and stable error code.' );
 pek_ui_assert( str_contains( $logical_report['api_error_message'], '<script>alert(1)</script>: <b>bad</b> Некорректные параметры' ) && str_contains( $logical_report['api_error_message'], 'Значение volume должно быть больше 0.' ), 'PEK logical error must expose safe title/message as api_error_message.' );
+pek_ui_assert( is_array( $logical_report['field_errors'] ?? null ) && 'volume' === (string) ( $logical_report['field_errors'][0]['field'] ?? '' ) && array( 'Значение должно быть больше 0.', '[redacted] [redacted] Basic [redacted]', 'Второе сообщение.' ) === ( $logical_report['field_errors'][0]['messages'] ?? array() ) && 'searchRadius' === (string) ( $logical_report['field_errors'][1]['field'] ?? '' ), 'PEK logical field errors must be normalized, ordered, merged and redacted in diagnostic report.' );
+$terminal_last_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 1.76, 'pek_destination_length_cm' => 100, 'pek_destination_width_cm' => 100, 'pek_destination_height_cm' => 100, 'pek_destination_max_place_weight_kg' => 1.76, 'pek_destination_places_count' => 1 ) );
+pek_ui_assert( 'volume' === (string) ( $terminal_last_report['field_errors'][0]['field'] ?? '' ), 'PEK terminal last_report field_errors must reach diagnostic report on repeated logical failure.' );
 $logical_message_length = function_exists( 'mb_strlen' ) ? mb_strlen( $logical_report['api_error_message'] ) : strlen( $logical_report['api_error_message'] );
 pek_ui_assert( $logical_message_length <= 500 && ! preg_match( '/[\r\n\t]/', $logical_report['api_error_message'] ), 'api_error_message must be length-limited and control-free.' );
 $logical_json = wp_json_encode( $logical_report );
 pek_ui_assert( ! str_contains( (string) $logical_json, 'very-secret-key' ) && ! str_contains( (string) $logical_json, 'diagnostic-user' ) && ! str_contains( (string) $logical_json, base64_encode( 'diagnostic-user:very-secret-key' ) ) && ! str_contains( (string) $logical_json, 'api_key=' ) && ! str_contains( (string) $logical_json, 'token=' ), 'api_error_message report must redact PEK credentials and credential query keys.' );
-pek_ui_assert( 1 === count( $GLOBALS['pek_ui_wc_logger']->entries ) && 'pek_logical_error' === $GLOBALS['pek_ui_wc_logger']->entries[0]['context']['error_code'] && str_contains( (string) $GLOBALS['pek_ui_wc_logger']->entries[0]['context']['api_error_message'], 'Значение volume должно быть больше 0.' ), 'PEK logical error must be logged once with safe api_error_message.' );
+pek_ui_assert( 2 === count( $GLOBALS['pek_ui_wc_logger']->entries ) && 'pek_logical_error' === $GLOBALS['pek_ui_wc_logger']->entries[0]['context']['error_code'] && str_contains( (string) $GLOBALS['pek_ui_wc_logger']->entries[0]['context']['api_error_message'], 'Значение volume должно быть больше 0.' ) && 'volume' === (string) ( $GLOBALS['pek_ui_wc_logger']->entries[0]['context']['field_errors'][0]['field'] ?? '' ), 'PEK logical error must be logged with safe api_error_message and field_errors.' );
 $logical_log_json = wp_json_encode( $GLOBALS['pek_ui_wc_logger']->entries[0]['context'] );
-pek_ui_assert( ! str_contains( (string) $logical_log_json, 'very-secret-key' ) && ! str_contains( (string) $logical_log_json, 'diagnostic-user' ) && ! str_contains( (string) $logical_log_json, 'raw_response' ) && ! str_contains( (string) $logical_log_json, 'body' ), 'PEK logical error log context must not contain credentials or raw response data.' );
+pek_ui_assert( ! str_contains( (string) $logical_log_json, 'very-secret-key' ) && ! str_contains( (string) $logical_log_json, 'diagnostic-user' ) && ! str_contains( (string) $logical_log_json, 'raw_response' ) && ! str_contains( (string) $logical_log_json, 'body' ) && ! str_contains( (string) $logical_log_json, 'RejectedValue' ) && ! str_contains( (string) $logical_log_json, 'Москва, секретный адрес' ), 'PEK logical error log context must not contain credentials, raw response data or rejected values.' );
 $destination_report_store->save_for_current_user( $logical_report );
 $stored_logical = $destination_report_store->consume_for_current_user();
 $stored_logical_json = wp_json_encode( $stored_logical );
 pek_ui_assert( str_contains( (string) ( $stored_logical['api_error_message'] ?? '' ), 'Значение volume должно быть больше 0.' ) && ! str_contains( (string) $stored_logical_json, 'very-secret-key' ) && ! str_contains( (string) $stored_logical_json, 'diagnostic-user' ), 'Destination diagnostic store must preserve safe api_error_message without secrets.' );
+pek_ui_assert( 'volume' === (string) ( $stored_logical['field_errors'][0]['field'] ?? '' ) && ! str_contains( (string) $stored_logical_json, 'RejectedValue' ) && ! str_contains( (string) $stored_logical_json, 'AttemptedValue' ), 'Destination diagnostic store must preserve only safe field error fields/messages.' );
 $destination_report_store->save_for_current_user( $logical_report );
 ob_start();
 $page->render_embedded( $service );
 $logical_html = (string) ob_get_clean();
 pek_ui_assert( str_contains( $logical_html, 'Ошибка ПЭК' ) && str_contains( $logical_html, 'pek_logical_error' ) && str_contains( $logical_html, 'Значение volume должно быть больше 0.' ), 'Destination diagnostic UI must render safe PEK API message separately.' );
+pek_ui_assert( str_contains( $logical_html, 'Ошибки полей ПЭК' ) && str_contains( $logical_html, '<th scope="row">volume</th>' ) && str_contains( $logical_html, 'Максимально допустимое значение — 100.' ) && str_contains( $logical_html, '&lt;script&gt;field&lt;/script&gt;' ) && str_contains( $logical_html, '&lt;b&gt;bad field&lt;/b&gt;' ), 'Destination diagnostic UI must render escaped PEK field errors.' );
 pek_ui_assert( str_contains( $logical_html, '&lt;script&gt;alert(1)&lt;/script&gt;' ) && str_contains( $logical_html, '&lt;b&gt;bad&lt;/b&gt;' ) && ! str_contains( $logical_html, '<script>alert(1)</script>' ) && ! str_contains( $logical_html, '<b>bad</b>' ), 'Destination diagnostic UI must escape HTML in api_error_message.' );
 $logical_report_html = strstr( $logical_html, 'Ошибка ПЭК' );
-pek_ui_assert( false !== $logical_report_html && ! str_contains( $logical_report_html, 'very-secret-key' ) && ! str_contains( $logical_report_html, 'diagnostic-user' ) && ! str_contains( $logical_report_html, 'Authorization' ), 'Destination diagnostic report UI must not expose PEK credentials.' );
+pek_ui_assert( false !== $logical_report_html && ! str_contains( $logical_report_html, 'very-secret-key' ) && ! str_contains( $logical_report_html, 'diagnostic-user' ) && ! str_contains( $logical_report_html, 'Authorization' ) && ! str_contains( $logical_report_html, 'Москва, секретный адрес' ) && ! str_contains( $logical_report_html, 'RejectedValue' ), 'Destination diagnostic report UI must not expose PEK credentials or rejected values.' );
 
 $GLOBALS['pek_ui_transients'] = array();
 $ui_http->nearest_response = array( 'error' => array( 'title' => '', 'message' => '' ) );
@@ -329,6 +365,18 @@ $destination_report_store->save_for_current_user(
 		'success' => false,
 		'error_code' => 'safe',
 		'api_error_message' => 'safe api message',
+		'field_errors' => array(
+			array(
+				'field' => 'safe_field',
+				'messages' => array( 'safe message' ),
+				'RejectedValue' => 'must not survive',
+				'AttemptedValue' => array( 'must' => 'not survive' ),
+			),
+			array(
+				'field' => array( 'bad' ),
+				'messages' => array( 'bad' ),
+			),
+		),
 		'message' => 'safe',
 		'raw_error' => array( 'secret' => true ),
 		'error' => array( 'secret' => true ),
@@ -343,6 +391,6 @@ $destination_report_store->save_for_current_user(
 );
 $sanitized_report = $destination_report_store->consume_for_current_user();
 $sanitized_json = wp_json_encode( $sanitized_report );
-pek_ui_assert( str_contains( $sanitized_json, 'safe-point' ) && str_contains( $sanitized_json, 'safe api message' ) && ! str_contains( $sanitized_json, 'Authorization' ) && ! str_contains( $sanitized_json, 'api_key' ) && ! str_contains( $sanitized_json, 'raw_error' ) && ! str_contains( $sanitized_json, 'raw_response' ) && ! str_contains( $sanitized_json, 'credentials' ) && ! str_contains( $sanitized_json, 'secret' ), 'PEK destination diagnostic report store must preserve safe api_error_message and recursively sanitize unsafe keys.' );
+pek_ui_assert( str_contains( $sanitized_json, 'safe-point' ) && str_contains( $sanitized_json, 'safe api message' ) && 'safe_field' === (string) ( $sanitized_report['field_errors'][0]['field'] ?? '' ) && str_contains( $sanitized_json, 'safe message' ) && ! str_contains( $sanitized_json, 'RejectedValue' ) && ! str_contains( $sanitized_json, 'AttemptedValue' ) && ! str_contains( $sanitized_json, 'must not survive' ) && ! str_contains( $sanitized_json, 'Authorization' ) && ! str_contains( $sanitized_json, 'api_key' ) && ! str_contains( $sanitized_json, 'raw_error' ) && ! str_contains( $sanitized_json, 'raw_response' ) && ! str_contains( $sanitized_json, 'credentials' ) && ! str_contains( $sanitized_json, 'secret' ), 'PEK destination diagnostic report store must preserve safe api_error_message/field_errors and recursively sanitize unsafe keys.' );
 
 echo "PEK admin UI smoke OK\n";

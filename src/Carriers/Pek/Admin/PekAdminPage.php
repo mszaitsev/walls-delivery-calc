@@ -247,6 +247,8 @@ final class PekAdminPage {
 		}
 		echo '</tbody></table>';
 
+		$this->render_destination_field_errors( $report['field_errors'] ?? array() );
+
 		$location = is_array( $report['location'] ?? null ) ? $report['location'] : array();
 		$this->render_destination_named_section(
 			'Location',
@@ -341,6 +343,29 @@ final class PekAdminPage {
 				echo esc_html( $value );
 			}
 			echo '</td></tr>';
+		}
+		echo '</tbody></table>';
+	}
+
+	private function render_destination_field_errors( mixed $field_errors ): void {
+		if ( ! is_array( $field_errors ) || array() === $field_errors || ! array_is_list( $field_errors ) ) {
+			return;
+		}
+		echo '<h4>' . esc_html( 'Ошибки полей ПЭК' ) . '</h4>';
+		echo '<table class="widefat striped" style="max-width:1180px;"><tbody>';
+		foreach ( array_slice( $field_errors, 0, 20 ) as $item ) {
+			if ( ! is_array( $item ) || array_is_list( $item ) || ! is_string( $item['field'] ?? null ) || ! is_array( $item['messages'] ?? null ) || ! array_is_list( $item['messages'] ) ) {
+				continue;
+			}
+			$messages = array_values( array_filter( array_slice( $item['messages'], 0, 5 ), 'is_string' ) );
+			if ( array() === $messages ) {
+				continue;
+			}
+			echo '<tr><th scope="row">' . esc_html( (string) $item['field'] ) . '</th><td><ul>';
+			foreach ( $messages as $message ) {
+				echo '<li>' . esc_html( $message ) . '</li>';
+			}
+			echo '</ul></td></tr>';
 		}
 		echo '</tbody></table>';
 	}

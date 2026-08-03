@@ -140,6 +140,7 @@ final class PekTerminalService {
 			'method' => 'POST',
 			'http_status' => '',
 			'response_shape' => array(),
+			'field_errors' => array(),
 		);
 		try {
 			$response = $this->api->destination_nearest_departments( $request );
@@ -155,6 +156,7 @@ final class PekTerminalService {
 					'method' => (string) ( $context['method'] ?? $base_report['method'] ),
 					'http_status' => $context['http_status'] ?? '',
 					'response_shape' => is_array( $context['response_shape'] ?? null ) ? $context['response_shape'] : array(),
+					'field_errors' => is_array( $context['field_errors'] ?? null ) ? $context['field_errors'] : array(),
 					'input_row_count' => (int) ( $context['input_row_count'] ?? 0 ),
 					'valid_structural_row_count' => (int) ( $context['valid_structural_row_count'] ?? 0 ),
 					'rejected_invalid' => (int) ( $context['rejected_invalid'] ?? 0 ),

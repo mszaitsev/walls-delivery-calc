@@ -1,6 +1,6 @@
 # Coding Rules
 
-Version: 0.131.9
+Version: 0.131.10
 
 ## Do Not
 
