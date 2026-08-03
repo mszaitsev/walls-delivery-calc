@@ -229,6 +229,7 @@ final class PekAdminPage {
 			'success' => 'Статус',
 			'message' => 'Сообщение',
 			'error_code' => 'Код ошибки',
+			'api_error_message' => 'Ошибка ПЭК',
 			'failure_stage' => 'Этап',
 			'endpoint' => 'Endpoint',
 			'http_status' => 'HTTP status',

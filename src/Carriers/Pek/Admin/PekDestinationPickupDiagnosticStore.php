@@ -45,7 +45,7 @@ final class PekDestinationPickupDiagnosticStore {
 
 	/** @param array<string,mixed> $report @return array<string,mixed> */
 	private function sanitize( array $report ): array {
-		$top_level = array( 'success', 'error_code', 'failure_stage', 'endpoint', 'method', 'http_status', 'response_shape', 'rejections', 'checked_at', 'location', 'terminals', 'message', 'errors' );
+		$top_level = array( 'success', 'error_code', 'api_error_message', 'failure_stage', 'endpoint', 'method', 'http_status', 'response_shape', 'rejections', 'checked_at', 'location', 'terminals', 'message', 'errors' );
 		$safe = array();
 		foreach ( $top_level as $key ) {
 			if ( array_key_exists( $key, $report ) ) {
@@ -66,7 +66,7 @@ final class PekDestinationPickupDiagnosticStore {
 		$safe = array();
 		foreach ( $value as $key => $nested ) {
 			$normalized = strtolower( (string) $key );
-			if ( in_array( $normalized, array( 'raw_response', 'response', 'credentials', 'authorization', 'headers', 'request_headers', 'request_args', 'body', 'api_key', 'login', 'password', 'token' ), true ) ) {
+			if ( in_array( $normalized, array( 'raw_error', 'error', 'raw_response', 'response', 'credentials', 'authorization', 'headers', 'request', 'request_body', 'request_headers', 'request_args', 'body', 'api_key', 'login', 'password', 'token' ), true ) ) {
 				continue;
 			}
 			$safe[ is_int( $key ) ? $key : (string) $key ] = $this->sanitize_value( $nested );

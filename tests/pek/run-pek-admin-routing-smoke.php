@@ -133,7 +133,7 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 		new PekConnectionDiagnosticService( $settings, $credentials, $api ),
 		new PekSenderWarehouseService( $api, $settings, $cache ),
 		new PekAdminNoticeStore(),
-		new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings ),
+		new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, $credentials ),
 		new PekDestinationPickupDiagnosticStore()
 	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();

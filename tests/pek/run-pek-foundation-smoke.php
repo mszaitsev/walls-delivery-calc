@@ -271,6 +271,13 @@ foreach ( array(
 	}
 }
 
+try {
+	( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'error' => array( 'title' => array( 'bad' ), 'message' => (object) array() ) ) ) ) ) ), new PekRequestBudget( $settings ) ) )->types_of_delivery_all();
+	pek_assert( false, 'PEK logical error with malformed title/message must still fail.' );
+} catch ( PekApiException $exception ) {
+	pek_assert( 'pek_logical_error' === (string) ( $exception->context()['error_code'] ?? '' ) && 'ПЭК вернул логическую ошибку без описания.' === $exception->getMessage(), 'Malformed PEK logical error description must use safe fallback without Array casts.' );
+}
+
 $settings_repository->set( PekSettings::REQUESTS_PER_MINUTE_KEY, 1 );
 $GLOBALS['pek_transients'] = array();
 $limited_api = new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( array() ), pek_json_response( array() ) ) ), new PekRequestBudget( $settings ) );

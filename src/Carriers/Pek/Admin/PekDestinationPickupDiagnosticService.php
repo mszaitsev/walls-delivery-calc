@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Carriers\Pek\Admin;
 
 use RuntimeException;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
+use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -21,6 +22,7 @@ final class PekDestinationPickupDiagnosticService {
 		private LocationRepository $locations,
 		private PekTerminalService $terminals,
 		private PekSettings $settings,
+		private ?PekCredentials $credentials = null,
 		private ?Logger $logger = null
 	) {
 	}
@@ -64,9 +66,11 @@ final class PekDestinationPickupDiagnosticService {
 			$terminal_report = $this->terminals->last_report();
 			$mapping = is_array( $terminal_report['mapping'] ?? null ) ? $terminal_report['mapping'] : array();
 			$context = $exception->context();
+			$api_error_message = $this->safe_api_error_message( $exception->getMessage() );
 			$report = array(
 				'success' => false,
 				'error_code' => (string) ( $exception->context()['error_code'] ?? $terminal_report['error_code'] ?? 'pek_destination_api_contract_failed' ),
+				'api_error_message' => $api_error_message,
 				'failure_stage' => (string) ( $terminal_report['failure_stage'] ?? $context['failure_stage'] ?? 'unknown' ),
 				'endpoint' => (string) ( $terminal_report['endpoint'] ?? $context['endpoint'] ?? '' ),
 				'method' => (string) ( $terminal_report['method'] ?? $context['method'] ?? '' ),
@@ -113,6 +117,7 @@ final class PekDestinationPickupDiagnosticService {
 		$report = array(
 			'success' => $success,
 			'error_code' => $error_code,
+			'api_error_message' => '',
 			'failure_stage' => (string) ( $terminal_report['failure_stage'] ?? '' ),
 			'endpoint' => (string) ( $terminal_report['endpoint'] ?? '' ),
 			'method' => (string) ( $terminal_report['method'] ?? '' ),
@@ -205,6 +210,7 @@ final class PekDestinationPickupDiagnosticService {
 		return array(
 			'success' => false,
 			'error_code' => $error_code,
+			'api_error_message' => '',
 			'failure_stage' => 'destination_terminal_request',
 			'endpoint' => '',
 			'method' => '',
@@ -258,6 +264,7 @@ final class PekDestinationPickupDiagnosticService {
 				'country_code' => (string) ( $location['country'] ?? '' ),
 				'failure_stage' => (string) ( $report['failure_stage'] ?? '' ),
 				'error_code' => (string) ( $report['error_code'] ?? '' ),
+				'api_error_message' => (string) ( $report['api_error_message'] ?? '' ),
 				'endpoint' => (string) ( $report['endpoint'] ?? '' ),
 				'method' => (string) ( $report['method'] ?? '' ),
 				'http_status' => $report['http_status'] ?? '',
@@ -267,5 +274,42 @@ final class PekDestinationPickupDiagnosticService {
 				'rejection_reasons' => is_array( $report['rejections'] ?? null ) ? $report['rejections'] : array(),
 			)
 		);
+	}
+
+	private function safe_api_error_message( string $message ): string {
+		$message = trim( $message );
+		$message = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $message ) ?? $message;
+		$message = preg_replace( '/\s+/u', ' ', $message ) ?? $message;
+		$message = trim( $this->redact_api_error_message( $message ) );
+		if ( '' === $message || ':' === $message ) {
+			return 'ПЭК вернул ошибку без безопасного описания.';
+		}
+		if ( function_exists( 'mb_substr' ) ) {
+			$message = mb_substr( $message, 0, 500 );
+		} else {
+			$message = substr( $message, 0, 500 );
+		}
+
+		return '' !== trim( $message ) ? trim( $message ) : 'ПЭК вернул ошибку без безопасного описания.';
+	}
+
+	private function redact_api_error_message( string $message ): string {
+		if ( null !== $this->credentials ) {
+			$api_key = trim( $this->credentials->api_key() );
+			$login = trim( $this->credentials->login() );
+			if ( '' !== $login && '' !== $api_key ) {
+				$message = str_replace( $login . ':' . $api_key, '[redacted]', $message );
+			}
+			foreach ( array( $api_key, $login ) as $secret ) {
+				if ( '' !== $secret ) {
+					$message = str_replace( $secret, '[redacted]', $message );
+				}
+			}
+		}
+		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
+		$message = preg_replace( '/([?&](?:api_key|apikey|token|password|authorization|login)=)[^&\s]+/i', '$1[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/\b(api_key|apikey|token|password|authorization|login)\s*[:=]\s*["\']?[^"\'\s,;&]+/i', '$1=[redacted]', $message ) ?? $message;
+
+		return $message;
 	}
 }

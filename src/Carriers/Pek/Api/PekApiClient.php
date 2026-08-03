@@ -142,10 +142,11 @@ final class PekApiClient {
 		}
 		if ( is_array( $decoded['error'] ?? null ) ) {
 			$error = $decoded['error'];
-			throw new PekApiException( $this->safe_message( (string) ( $error['title'] ?? 'Ошибка ПЭК' ) . ': ' . (string) ( $error['message'] ?? '' ) ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_logical_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ) ) ) );
+			throw new PekApiException( $this->safe_message( $this->logical_error_message( $error ) ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_logical_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ) ) ) );
 		}
 		if ( is_array( $decoded ) && true === ( $decoded['hasError'] ?? false ) ) {
-			throw new PekApiException( $this->safe_message( (string) ( $decoded['errorMessage'] ?? 'ПЭК вернул логическую ошибку.' ) ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_has_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ) ) ) );
+			$error_message = $this->api_error_part( $decoded['errorMessage'] ?? null );
+			throw new PekApiException( $this->safe_message( '' !== $error_message ? $error_message : 'ПЭК вернул логическую ошибку.' ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_has_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ) ) ) );
 		}
 
 		return $decoded;
@@ -271,6 +272,36 @@ final class PekApiClient {
 		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
 
 		return trim( $message );
+	}
+
+	/** @param array<string,mixed> $error */
+	private function logical_error_message( array $error ): string {
+		$title = $this->api_error_part( $error['title'] ?? null );
+		$message = $this->api_error_part( $error['message'] ?? null );
+		if ( '' !== $title && '' !== $message ) {
+			return $title . ': ' . $message;
+		}
+		if ( '' !== $title ) {
+			return $title;
+		}
+		if ( '' !== $message ) {
+			return $message;
+		}
+
+		return 'ПЭК вернул логическую ошибку без описания.';
+	}
+
+	private function api_error_part( mixed $value ): string {
+		if ( null === $value ) {
+			return '';
+		}
+		if ( ! is_scalar( $value ) ) {
+			return '';
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', (string) $value ) ?? (string) $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+
+		return trim( $value );
 	}
 
 	/** @return array<string,mixed> */

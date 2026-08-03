@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Version: 0.131.8
+Version: 0.131.9
 
 Start with:
 
@@ -30,6 +30,6 @@ SHOW TABLES LIKE 'wp_wdc_pek_terminals';
 SHOW COLUMNS FROM wp_wdc_pek_location_mappings LIKE 'mapping_precision';
 ```
 
-Version 0.131.8 expects the physical mapping precision column to be `mapping_precision`; the domain/API mapping key remains `precision`. Migration `0050` repairs missing PEK foundation tables, and migration `0051` backfills `mapping_precision` from any legacy physical `` `precision` `` column. Failed migrations are not marked applied and `wdc_db_version` is not advanced; after fixing the DB issue, run the normal plugin update/migration lifecycle again. Do not create PEK tables from diagnostics or repository read/write methods.
+Version 0.131.9 expects the physical mapping precision column to be `mapping_precision`; the domain/API mapping key remains `precision`. Migration `0050` repairs missing PEK foundation tables, and migration `0051` backfills `mapping_precision` from any legacy physical `` `precision` `` column. Failed migrations are not marked applied and `wdc_db_version` is not advanced; after fixing the DB issue, run the normal plugin update/migration lifecycle again. Do not create PEK tables from diagnostics or repository read/write methods.
 
-For PEK destination terminal search failures after a successful location mapping, rerun the explicit admin diagnostic and read the structured report before changing contracts. The report separates `location_resolution` from destination terminal stages, shows stable `error_code`, `failure_stage`, endpoint, HTTP status, query fingerprint, preserved mapping fields, safe response shape for `/branches/nearestdepartments/`, and aggregate rejection reason counters. It intentionally does not store or display request bodies, headers, raw terminal rows, API keys, login, or Authorization data. Failed explicit admin diagnostics also emit one project logger event with the same safe context so WooCommerce/debug logs have enough evidence for the next targeted fix.
+For PEK destination terminal search failures after a successful location mapping, rerun the explicit admin diagnostic and read the structured report before changing contracts. The report separates `location_resolution` from destination terminal stages, shows stable `error_code`, `failure_stage`, endpoint, HTTP status, query fingerprint, preserved mapping fields, safe response shape for `/branches/nearestdepartments/`, aggregate rejection reason counters, and the redacted `api_error_message` when PEK returns a logical/API error object. The stable `message` remains project-owned; the PEK detail is shown separately as "Ошибка ПЭК". Reports and logs intentionally do not store or display request bodies, headers, raw error objects, raw terminal rows, API keys, login, tokens, Basic Authorization blobs, or full raw responses. Failed explicit admin diagnostics also emit one project logger event with the same safe context so WooCommerce/debug logs have enough evidence for the next targeted fix.

@@ -101,7 +101,7 @@ define( 'APP_ENCRYPTION_KEY', 'pek-ui-key' );
 $settings_repository = new SettingsRepository();
 $settings = new PekSettings( $settings_repository );
 $credentials = new PekCredentials( $settings_repository, new EncryptionService() );
-$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
+$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'diagnostic-user', 'pek_api_key' => 'very-secret-key' ) );
 $settings->save_sender_warehouse( array( 'warehouseId' => 'nearest-timezone-wh', 'source' => 'free', 'branchTimezone' => 'UTC+04:00', 'branchName' => 'Самара', 'divisionName' => 'Самара Запад' ) );
 $settings->save_diagnostic_result(
 	array(
@@ -189,7 +189,7 @@ $location_repository = new LocationRepository( $wpdb );
 $location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $api, $settings );
 $terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
 $pickup_provider = new PekPickupPointProvider( $terminal_service );
-$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, new Logger() );
+$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, $credentials, new Logger() );
 $destination_report_store = new PekDestinationPickupDiagnosticStore();
 $page = new PekAdminPage(
 	$settings,
@@ -254,6 +254,43 @@ $page->render_embedded( $service );
 $failure_html = (string) ob_get_clean();
 pek_ui_assert( str_contains( $failure_html, 'Код ошибки' ) && str_contains( $failure_html, 'pek_unexpected_destination_nearest_departments' ) && str_contains( $failure_html, 'Этап' ) && str_contains( $failure_html, 'destination_terminal_contract' ) && str_contains( $failure_html, 'POST /branches/nearestdepartments/' ) && str_contains( $failure_html, 'HTTP status' ) && str_contains( $failure_html, 'Resolution method' ) && str_contains( $failure_html, 'Mapping state' ) && str_contains( $failure_html, 'Main warehouse ID' ) && str_contains( $failure_html, 'Response shape' ) && str_contains( $failure_html, 'Free departments type' ) && str_contains( $failure_html, 'Rejections' ), 'Destination diagnostic UI must render named failure fields, mapping, response shape and rejections.' );
 pek_ui_assert( ! str_contains( $failure_html, '10, RU, Новосибирск, 1' ) && ! str_contains( $failure_html, 'raw_response' ) && ! str_contains( $failure_html, 'Authorization' ) && ! str_contains( $failure_html, 'secret' ), 'Destination diagnostic UI must not render positional arrays or unsafe response data.' );
+
+$GLOBALS['pek_ui_transients'] = array();
+$GLOBALS['pek_ui_wc_logger']->entries = array();
+$long_message = str_repeat( ' слишком   длинно ', 80 ) . "\r\n\tapi_key=very-secret-key token=very-secret-key login=diagnostic-user Basic " . base64_encode( 'diagnostic-user:very-secret-key' );
+$ui_http->nearest_response = array(
+	'error' => array(
+		'title' => '<script>alert(1)</script>',
+		'message' => '<b>bad</b> Некорректные параметры: Значение volume должно быть больше 0. diagnostic-user:very-secret-key ' . $long_message,
+	),
+);
+$logical_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 1.75, 'pek_destination_length_cm' => 100, 'pek_destination_width_cm' => 100, 'pek_destination_height_cm' => 100, 'pek_destination_max_place_weight_kg' => 1.75, 'pek_destination_places_count' => 1 ) );
+pek_ui_assert( false === $logical_report['success'] && 'pek_logical_error' === $logical_report['error_code'] && 'destination_terminal_logical' === $logical_report['failure_stage'] && 'Не удалось использовать ответ ПЭК для выбранного направления.' === $logical_report['message'], 'PEK logical error must keep stable diagnostic message and stable error code.' );
+pek_ui_assert( str_contains( $logical_report['api_error_message'], '<script>alert(1)</script>: <b>bad</b> Некорректные параметры' ) && str_contains( $logical_report['api_error_message'], 'Значение volume должно быть больше 0.' ), 'PEK logical error must expose safe title/message as api_error_message.' );
+$logical_message_length = function_exists( 'mb_strlen' ) ? mb_strlen( $logical_report['api_error_message'] ) : strlen( $logical_report['api_error_message'] );
+pek_ui_assert( $logical_message_length <= 500 && ! preg_match( '/[\r\n\t]/', $logical_report['api_error_message'] ), 'api_error_message must be length-limited and control-free.' );
+$logical_json = wp_json_encode( $logical_report );
+pek_ui_assert( ! str_contains( (string) $logical_json, 'very-secret-key' ) && ! str_contains( (string) $logical_json, 'diagnostic-user' ) && ! str_contains( (string) $logical_json, base64_encode( 'diagnostic-user:very-secret-key' ) ) && ! str_contains( (string) $logical_json, 'api_key=' ) && ! str_contains( (string) $logical_json, 'token=' ), 'api_error_message report must redact PEK credentials and credential query keys.' );
+pek_ui_assert( 1 === count( $GLOBALS['pek_ui_wc_logger']->entries ) && 'pek_logical_error' === $GLOBALS['pek_ui_wc_logger']->entries[0]['context']['error_code'] && str_contains( (string) $GLOBALS['pek_ui_wc_logger']->entries[0]['context']['api_error_message'], 'Значение volume должно быть больше 0.' ), 'PEK logical error must be logged once with safe api_error_message.' );
+$logical_log_json = wp_json_encode( $GLOBALS['pek_ui_wc_logger']->entries[0]['context'] );
+pek_ui_assert( ! str_contains( (string) $logical_log_json, 'very-secret-key' ) && ! str_contains( (string) $logical_log_json, 'diagnostic-user' ) && ! str_contains( (string) $logical_log_json, 'raw_response' ) && ! str_contains( (string) $logical_log_json, 'body' ), 'PEK logical error log context must not contain credentials or raw response data.' );
+$destination_report_store->save_for_current_user( $logical_report );
+$stored_logical = $destination_report_store->consume_for_current_user();
+$stored_logical_json = wp_json_encode( $stored_logical );
+pek_ui_assert( str_contains( (string) ( $stored_logical['api_error_message'] ?? '' ), 'Значение volume должно быть больше 0.' ) && ! str_contains( (string) $stored_logical_json, 'very-secret-key' ) && ! str_contains( (string) $stored_logical_json, 'diagnostic-user' ), 'Destination diagnostic store must preserve safe api_error_message without secrets.' );
+$destination_report_store->save_for_current_user( $logical_report );
+ob_start();
+$page->render_embedded( $service );
+$logical_html = (string) ob_get_clean();
+pek_ui_assert( str_contains( $logical_html, 'Ошибка ПЭК' ) && str_contains( $logical_html, 'pek_logical_error' ) && str_contains( $logical_html, 'Значение volume должно быть больше 0.' ), 'Destination diagnostic UI must render safe PEK API message separately.' );
+pek_ui_assert( str_contains( $logical_html, '&lt;script&gt;alert(1)&lt;/script&gt;' ) && str_contains( $logical_html, '&lt;b&gt;bad&lt;/b&gt;' ) && ! str_contains( $logical_html, '<script>alert(1)</script>' ) && ! str_contains( $logical_html, '<b>bad</b>' ), 'Destination diagnostic UI must escape HTML in api_error_message.' );
+$logical_report_html = strstr( $logical_html, 'Ошибка ПЭК' );
+pek_ui_assert( false !== $logical_report_html && ! str_contains( $logical_report_html, 'very-secret-key' ) && ! str_contains( $logical_report_html, 'diagnostic-user' ) && ! str_contains( $logical_report_html, 'Authorization' ), 'Destination diagnostic report UI must not expose PEK credentials.' );
+
+$GLOBALS['pek_ui_transients'] = array();
+$ui_http->nearest_response = array( 'error' => array( 'title' => '', 'message' => '' ) );
+$empty_api_message_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 1.8, 'pek_destination_length_cm' => 100, 'pek_destination_width_cm' => 100, 'pek_destination_height_cm' => 100, 'pek_destination_max_place_weight_kg' => 1.8, 'pek_destination_places_count' => 1 ) );
+pek_ui_assert( 'ПЭК вернул логическую ошибку без описания.' === $empty_api_message_report['api_error_message'], 'Empty PEK logical error must get a generic safe fallback.' );
 $destination_report_store->save_for_current_user(
 	array(
 		'checked_at' => '2026-08-03 10:00:00',
@@ -291,14 +328,21 @@ $destination_report_store->save_for_current_user(
 	array(
 		'success' => false,
 		'error_code' => 'safe',
+		'api_error_message' => 'safe api message',
 		'message' => 'safe',
+		'raw_error' => array( 'secret' => true ),
+		'error' => array( 'secret' => true ),
+		'raw_response' => array( 'secret' => true ),
+		'body' => 'secret',
 		'location' => array( 'location_id' => 10, 'credentials' => 'secret' ),
 		'terminals' => array( 'points' => array( array( 'code' => 'safe-point', 'nested' => array( 'Authorization' => 'Basic secret', 'body' => 'secret' ) ) ) ),
 		'api_key' => 'secret',
+		'login' => 'secret',
+		'token' => 'secret',
 	)
 );
 $sanitized_report = $destination_report_store->consume_for_current_user();
 $sanitized_json = wp_json_encode( $sanitized_report );
-pek_ui_assert( str_contains( $sanitized_json, 'safe-point' ) && ! str_contains( $sanitized_json, 'Authorization' ) && ! str_contains( $sanitized_json, 'api_key' ) && ! str_contains( $sanitized_json, 'credentials' ) && ! str_contains( $sanitized_json, 'secret' ), 'PEK destination diagnostic report store must recursively sanitize unsafe keys.' );
+pek_ui_assert( str_contains( $sanitized_json, 'safe-point' ) && str_contains( $sanitized_json, 'safe api message' ) && ! str_contains( $sanitized_json, 'Authorization' ) && ! str_contains( $sanitized_json, 'api_key' ) && ! str_contains( $sanitized_json, 'raw_error' ) && ! str_contains( $sanitized_json, 'raw_response' ) && ! str_contains( $sanitized_json, 'credentials' ) && ! str_contains( $sanitized_json, 'secret' ), 'PEK destination diagnostic report store must preserve safe api_error_message and recursively sanitize unsafe keys.' );
 
 echo "PEK admin UI smoke OK\n";
