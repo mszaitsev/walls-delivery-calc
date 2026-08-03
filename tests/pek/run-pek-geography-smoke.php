@@ -202,6 +202,13 @@ function pek_geo_clear_mapping( wpdb $wpdb, int $location_id ): void {
 	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== $location_id ) );
 }
 
+function pek_geo_legacy_fingerprint( Location $location ): string {
+	$inputs = ( new PekAddressBuilder() )->fingerprint_inputs( $location );
+	$json = wp_json_encode( $inputs );
+
+	return hash( 'sha256', false !== $json ? $json : serialize( $inputs ) );
+}
+
 foreach ( array(
 	array( 'method' => 'coordinates', 'id' => 10, 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b' ), 'code' => 'pek_unexpected_findzone_coordinates' ),
 	array( 'method' => 'coordinates', 'id' => 10, 'response' => array( array( 'zoneId' => 'z', 'branchUID' => 'b' ), array( 'zoneId' => 'z2', 'branchUID' => 'b2' ) ), 'code' => 'pek_unexpected_findzone_coordinates' ),
@@ -317,8 +324,157 @@ foreach ( array( '643', 'R1', 'RUS', array( 'RU' ) ) as $malformed_country ) {
 	pek_geo_expect_exception( static fn() => $country_resolver->resolve( 11 ), 'pek_invalid_response_country', 'Malformed non-empty response country must throw contract exception.' );
 }
 
+$legacy_location = Location::from_array( $wpdb->locations[1] );
+$legacy_fingerprint = pek_geo_legacy_fingerprint( $legacy_location );
+$current_fingerprint = $resolver->fingerprint( $legacy_location );
+pek_geo_assert( $legacy_fingerprint !== $current_fingerprint, 'PEK mapping contract revision must invalidate legacy fingerprints without using plugin version.' );
+$wpdb->pek_location_mappings = array(
+	array(
+		'id' => 41,
+		'location_id' => 11,
+		'country_code' => 'RU',
+		'address_fingerprint' => $legacy_fingerprint,
+		'resolution_method' => 'address',
+		'mapping_state' => 'resolved',
+		'precision' => 'exact',
+		'zone_id' => 'legacy-zone',
+		'branch_id' => 'legacy-branch',
+		'main_warehouse_id' => 'legacy-main',
+		'normalized_address' => 'Россия, Линево',
+		'latitude' => 55.1,
+		'longitude' => 82.9,
+		'checked_at' => '2026-08-03 10:00:00',
+		'created_at' => '2026-08-03 10:00:00',
+		'updated_at' => '2026-08-03 10:00:00',
+	),
+);
+$legacy_refresh_http = new PekGeoFakeHttp( array(
+	'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'new-zone', 'branchUID' => 'new-branch', 'mainWarehouseId' => 'new-main', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Новосибирская область, Линево' ) ) ),
+) );
+$legacy_refresh_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $legacy_refresh_http, new PekRequestBudget( $settings ) ), $settings );
+$legacy_refreshed = $legacy_refresh_resolver->resolve( 11 );
+pek_geo_assert( false === ( $legacy_refreshed['cache_hit'] ?? true ) && 1 === count( $legacy_refresh_http->requests ) && 'new-main' === $legacy_refreshed['main_warehouse_id'] && null === $legacy_refreshed['latitude'] && null === $legacy_refreshed['longitude'], 'Legacy address mapping with warehousePoint coordinates must be refreshed through current contract.' );
+pek_geo_assert( $current_fingerprint === (string) ( new PekLocationMappingRepository( $wpdb ) )->find_by_location_id( 11 )['address_fingerprint'], 'Successful current resolve must replace legacy fingerprint.' );
+
+$wpdb->pek_location_mappings = array(
+	array(
+		'id' => 42,
+		'location_id' => 11,
+		'country_code' => 'RU',
+		'address_fingerprint' => $current_fingerprint,
+		'resolution_method' => 'address',
+		'mapping_state' => 'resolved',
+		'precision' => 'exact',
+		'zone_id' => 'legacy-zone',
+		'branch_id' => 'legacy-branch',
+		'main_warehouse_id' => '',
+		'normalized_address' => 'Россия, Линево',
+		'latitude' => null,
+		'longitude' => null,
+		'checked_at' => '2026-08-03 10:00:00',
+		'created_at' => '2026-08-03 10:00:00',
+		'updated_at' => '2026-08-03 10:00:00',
+	),
+);
+$missing_main_http = new PekGeoFakeHttp( array(
+	'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'fixed-zone', 'branchUID' => 'fixed-branch', 'mainWarehouseId' => 'fixed-main', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'formatted' => 'Россия, Линево' ) ) ),
+) );
+$missing_main_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $missing_main_http, new PekRequestBudget( $settings ) ), $settings );
+$missing_main_refreshed = $missing_main_resolver->resolve( 11 );
+pek_geo_assert( false === ( $missing_main_refreshed['cache_hit'] ?? true ) && 1 === count( $missing_main_http->requests ) && 'fixed-main' === $missing_main_refreshed['main_warehouse_id'], 'Legacy address mapping without main warehouse must be refreshed and replaced by valid current mapping.' );
+
+$wpdb->pek_location_mappings = array(
+	array(
+		'id' => 43,
+		'location_id' => 11,
+		'country_code' => 'RU',
+		'address_fingerprint' => $current_fingerprint,
+		'resolution_method' => 'address',
+		'mapping_state' => 'resolved',
+		'precision' => 'exact',
+		'zone_id' => 'legacy-zone',
+		'branch_id' => 'legacy-branch',
+		'main_warehouse_id' => '',
+		'normalized_address' => 'Россия, Линево',
+		'latitude' => null,
+		'longitude' => null,
+		'checked_at' => '2026-07-01 00:00:00',
+		'created_at' => '2026-07-01 00:00:00',
+		'updated_at' => '2026-07-01 00:00:00',
+	),
+);
+$legacy_error_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/findzonebyaddress/' => array( '__status' => 503, 'body' => array( 'message' => 'down' ) ) ) );
+$legacy_error_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $legacy_error_http, new PekRequestBudget( $settings ) ), $settings );
+try {
+	$legacy_error_resolver->resolve( 11 );
+	pek_geo_assert( false, 'Legacy mapping without main warehouse must not be used as stale fallback after API failure.' );
+} catch ( PekApiException ) {
+	$preserved_legacy = ( new PekLocationMappingRepository( $wpdb ) )->find_by_location_id( 11 );
+	pek_geo_assert( '' === $preserved_legacy['main_warehouse_id'], 'Invalid persisted mapping must be preserved, not destructively deleted, after API failure.' );
+}
+
+$wpdb->pek_location_mappings = array(
+	array(
+		'id' => 44,
+		'location_id' => 10,
+		'country_code' => 'RU',
+		'address_fingerprint' => $resolver->fingerprint( Location::from_array( $wpdb->locations[0] ) ),
+		'resolution_method' => 'coordinates',
+		'mapping_state' => 'resolved',
+		'precision' => '',
+		'zone_id' => 'legacy-zone',
+		'branch_id' => 'legacy-branch',
+		'main_warehouse_id' => '',
+		'normalized_address' => 'Новосибирск',
+		'latitude' => 55.1,
+		'longitude' => 82.9,
+		'checked_at' => '2026-08-03 10:00:00',
+		'created_at' => '2026-08-03 10:00:00',
+		'updated_at' => '2026-08-03 10:00:00',
+	),
+);
+$coordinate_refresh_http = new PekGeoFakeHttp( array(
+	'POST /api/v1/branches/findzonebycoordinates/' => array( array( 'zoneId' => 'coord-new', 'branchUID' => 'coord-branch' ) ),
+) );
+$coordinate_refresh_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $coordinate_refresh_http, new PekRequestBudget( $settings ) ), $settings );
+$coordinate_refreshed = $coordinate_refresh_resolver->resolve( 10 );
+pek_geo_assert( false === ( $coordinate_refreshed['cache_hit'] ?? true ) && 55.030204 === (float) $coordinate_refreshed['latitude'] && 82.92043 === (float) $coordinate_refreshed['longitude'], 'Coordinate mapping with coordinates different from canonical location must be refreshed.' );
+
+$wpdb->pek_location_mappings = array(
+	array(
+		'id' => 46,
+		'location_id' => 10,
+		'country_code' => 'RU',
+		'address_fingerprint' => $resolver->fingerprint( Location::from_array( $wpdb->locations[0] ) ),
+		'resolution_method' => 'coordinates',
+		'mapping_state' => 'resolved',
+		'precision' => '',
+		'zone_id' => 'partial-zone',
+		'branch_id' => 'partial-branch',
+		'main_warehouse_id' => '',
+		'normalized_address' => 'Новосибирск',
+		'latitude' => 55.030204,
+		'longitude' => null,
+		'checked_at' => '2026-08-03 10:00:00',
+		'created_at' => '2026-08-03 10:00:00',
+		'updated_at' => '2026-08-03 10:00:00',
+	),
+);
+$partial_coordinate_http = new PekGeoFakeHttp( array(
+	'POST /api/v1/branches/findzonebycoordinates/' => array( array( 'zoneId' => 'coord-partial-new', 'branchUID' => 'coord-partial-branch' ) ),
+) );
+$partial_coordinate_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $partial_coordinate_http, new PekRequestBudget( $settings ) ), $settings );
+$partial_coordinate_refreshed = $partial_coordinate_resolver->resolve( 10 );
+pek_geo_assert( false === ( $partial_coordinate_refreshed['cache_hit'] ?? true ) && 1 === count( $partial_coordinate_http->requests ), 'Persisted partial coordinate pair must be treated as cache miss without PHP warnings.' );
+
 $same_fingerprint = $resolver->fingerprint( Location::from_array( $wpdb->locations[1] ) );
-$wpdb->pek_location_mappings = array( array( 'id' => 1, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $same_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'normalized_address' => 'Россия, Линево', 'checked_at' => '2026-07-01 00:00:00', 'created_at' => '2026-07-01 00:00:00', 'updated_at' => '2026-07-01 00:00:00' ) );
+$wpdb->pek_location_mappings = array( array( 'id' => 45, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $same_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'precision' => 'exact', 'zone_id' => 'z', 'branch_id' => 'b', 'main_warehouse_id' => 'main', 'normalized_address' => 'Россия, Линево', 'latitude' => null, 'longitude' => null, 'checked_at' => '2026-08-03 10:00:00', 'created_at' => '2026-08-03 10:00:00', 'updated_at' => '2026-08-03 10:00:00' ) );
+$current_hit_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, new PekGeoFakeHttp( array() ), new PekRequestBudget( $settings ) ), $settings );
+$current_hit = $current_hit_resolver->resolve( 11 );
+pek_geo_assert( true === ( $current_hit['cache_hit'] ?? false ), 'Valid current-contract mapping must still be accepted as a fresh cache hit.' );
+
+$same_fingerprint = $resolver->fingerprint( Location::from_array( $wpdb->locations[1] ) );
+$wpdb->pek_location_mappings = array( array( 'id' => 1, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $same_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'precision' => 'exact', 'zone_id' => 'z', 'branch_id' => 'b', 'main_warehouse_id' => 'main', 'normalized_address' => 'Россия, Линево', 'latitude' => null, 'longitude' => null, 'checked_at' => '2026-07-01 00:00:00', 'created_at' => '2026-07-01 00:00:00', 'updated_at' => '2026-07-01 00:00:00' ) );
 $error_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/findzonebyaddress/' => array( '__status' => 503, 'body' => array( 'message' => 'down' ) ) ) );
 $stale_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $error_http, new PekRequestBudget( $settings ) ), $settings );
 $stale = $stale_resolver->resolve( 11 );

@@ -9,7 +9,7 @@ use WallsShop\WDC\Domain\Pickup\PickupPoint;
 defined( 'ABSPATH' ) || exit;
 
 final class PekDestinationTerminalSearchCache {
-	private const FORMAT_VERSION = 1;
+	private const FORMAT_VERSION = 2;
 
 	public function ttl(): int {
 		return 600;

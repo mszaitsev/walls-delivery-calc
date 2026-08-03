@@ -13,6 +13,8 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class PekLocationResolver {
+	private const MAPPING_CONTRACT_VERSION = 2;
+
 	public function __construct(
 		private LocationRepository $locations,
 		private PekAddressBuilder $addresses,
@@ -34,7 +36,8 @@ final class PekLocationResolver {
 		}
 		$fingerprint = $this->fingerprint( $location );
 		$existing = $this->mappings->find_by_location_id( $location_id );
-		if ( $this->mappings->is_fresh( $existing, $fingerprint, $this->settings->pek_location_mapping_ttl_days() ) ) {
+		$existing_usable = $this->persisted_mapping_is_usable( $existing, $location, $fingerprint );
+		if ( $existing_usable && $this->mappings->is_fresh( $existing, $fingerprint, $this->settings->pek_location_mapping_ttl_days() ) ) {
 			$existing['cache_hit'] = true;
 			return $existing;
 		}
@@ -46,6 +49,8 @@ final class PekLocationResolver {
 			$mapping = $this->normalize_response( $location, $fingerprint, $method, $response );
 		} catch ( PekApiException $exception ) {
 			if (
+				$existing_usable
+				&&
 				hash_equals( $fingerprint, (string) ( $existing['address_fingerprint'] ?? '' ) )
 				&& in_array( (string) ( $existing['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true )
 			) {
@@ -67,7 +72,128 @@ final class PekLocationResolver {
 	}
 
 	public function fingerprint( Location $location ): string {
-		return hash( 'sha256', wp_json_encode( $this->addresses->fingerprint_inputs( $location ) ) ?: serialize( $this->addresses->fingerprint_inputs( $location ) ) );
+		$inputs = $this->addresses->fingerprint_inputs( $location );
+		$inputs['pek_mapping_contract_version'] = self::MAPPING_CONTRACT_VERSION;
+		ksort( $inputs );
+		$json = function_exists( 'wp_json_encode' )
+			? wp_json_encode( $inputs )
+			: json_encode( $inputs, JSON_UNESCAPED_UNICODE );
+
+		return hash( 'sha256', false !== $json ? $json : serialize( $inputs ) );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function persisted_mapping_is_usable( array $mapping, Location $location, string $fingerprint ): bool {
+		if ( array() === $mapping || ! preg_match( '/^[a-f0-9]{64}$/i', (string) ( $mapping['address_fingerprint'] ?? '' ) ) ) {
+			return false;
+		}
+		if ( ! hash_equals( $fingerprint, (string) $mapping['address_fingerprint'] ) ) {
+			return false;
+		}
+		if ( (int) ( $mapping['location_id'] ?? 0 ) !== (int) $location->id ) {
+			return false;
+		}
+		if ( strtoupper( trim( (string) ( $mapping['country_code'] ?? '' ) ) ) !== strtoupper( trim( $location->country_code ) ) ) {
+			return false;
+		}
+		$method = (string) ( $mapping['resolution_method'] ?? '' );
+		$state = (string) ( $mapping['mapping_state'] ?? '' );
+		if ( ! in_array( $method, array( 'coordinates', 'address' ), true ) || ! in_array( $state, array( 'resolved', 'near', 'unsupported' ), true ) ) {
+			return false;
+		}
+		$coords = $this->persisted_coordinates( $mapping );
+		if ( 'invalid' === $coords['state'] ) {
+			return false;
+		}
+		if ( 'address' === $method ) {
+			return $this->persisted_address_mapping_is_usable( $mapping, $state, $coords['state'] );
+		}
+
+		return $this->persisted_coordinate_mapping_is_usable( $mapping, $location, $state, $coords );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function persisted_address_mapping_is_usable( array $mapping, string $state, string $coordinate_state ): bool {
+		if ( 'empty' !== $coordinate_state ) {
+			return false;
+		}
+		if ( 'unsupported' === $state ) {
+			return '' === $this->persisted_text( $mapping, 'precision' ) || 'bad' === $this->persisted_text( $mapping, 'precision' );
+		}
+		if ( ! in_array( $state, array( 'resolved', 'near' ), true ) ) {
+			return false;
+		}
+		if (
+			'' === $this->persisted_text( $mapping, 'zone_id' )
+			|| '' === $this->persisted_text( $mapping, 'branch_id' )
+			|| '' === $this->persisted_text( $mapping, 'main_warehouse_id' )
+			|| '' === $this->persisted_text( $mapping, 'normalized_address' )
+		) {
+			return false;
+		}
+		$precision = $this->persisted_text( $mapping, 'precision' );
+
+		return ( 'resolved' === $state && 'exact' === $precision ) || ( 'near' === $state && 'near' === $precision );
+	}
+
+	/** @param array<string,mixed> $mapping @param array{state:string,latitude:float|null,longitude:float|null} $coords */
+	private function persisted_coordinate_mapping_is_usable( array $mapping, Location $location, string $state, array $coords ): bool {
+		if ( 'full' !== $coords['state'] || ! $this->has_usable_location_coordinates( $location ) ) {
+			return false;
+		}
+		if (
+			$this->normalized_coordinate( (float) $location->latitude ) !== $this->normalized_coordinate( (float) $coords['latitude'] )
+			|| $this->normalized_coordinate( (float) $location->longitude ) !== $this->normalized_coordinate( (float) $coords['longitude'] )
+		) {
+			return false;
+		}
+		if ( 'unsupported' === $state ) {
+			return true;
+		}
+
+		return '' !== $this->persisted_text( $mapping, 'zone_id' ) && '' !== $this->persisted_text( $mapping, 'branch_id' );
+	}
+
+	/** @param array<string,mixed> $mapping @return array{state:string,latitude:float|null,longitude:float|null} */
+	private function persisted_coordinates( array $mapping ): array {
+		$latitude = $mapping['latitude'] ?? null;
+		$longitude = $mapping['longitude'] ?? null;
+		$latitude_empty = null === $latitude || '' === trim( (string) $latitude );
+		$longitude_empty = null === $longitude || '' === trim( (string) $longitude );
+		if ( $latitude_empty && $longitude_empty ) {
+			return array( 'state' => 'empty', 'latitude' => null, 'longitude' => null );
+		}
+		if ( $latitude_empty || $longitude_empty || ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return array( 'state' => 'invalid', 'latitude' => null, 'longitude' => null );
+		}
+		$lat = (float) $latitude;
+		$lng = (float) $longitude;
+		if ( ! is_finite( $lat ) || ! is_finite( $lng ) || $lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 ) {
+			return array( 'state' => 'invalid', 'latitude' => null, 'longitude' => null );
+		}
+
+		return array( 'state' => 'full', 'latitude' => $lat, 'longitude' => $lng );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function persisted_text( array $mapping, string $key ): string {
+		if ( ! array_key_exists( $key, $mapping ) || null === $mapping[ $key ] || is_bool( $mapping[ $key ] ) || ! is_scalar( $mapping[ $key ] ) ) {
+			return '';
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', (string) $mapping[ $key ] ) ?? (string) $mapping[ $key ];
+
+		return trim( $value );
+	}
+
+	private function normalized_coordinate( float $value ): string {
+		$value = round( $value, 7 );
+		if ( -0.0 === $value || 0.0 === $value ) {
+			return '0';
+		}
+		$formatted = sprintf( '%.7F', $value );
+		$formatted = rtrim( rtrim( $formatted, '0' ), '.' );
+
+		return '' === $formatted || '-0' === $formatted ? '0' : $formatted;
 	}
 
 	/** @param array<string,mixed>|array<int,mixed> $response @return array<string,mixed> */
