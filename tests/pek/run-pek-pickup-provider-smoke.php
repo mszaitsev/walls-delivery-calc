@@ -286,7 +286,11 @@ foreach ( array(
 		$bad_api->destination_nearest_departments( new PekDestinationTerminalRequest( 'Россия, Новосибирск', null, null, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) );
 		pek_pickup_assert( false, 'Malformed destination nearestdepartments response must fail closed: ' . $case_name );
 	} catch ( PekApiException $exception ) {
-		pek_pickup_assert( 'pek_unexpected_destination_nearest_departments' === (string) ( $exception->context()['error_code'] ?? '' ), 'Malformed destination response must use stable destination error code.' );
+		$context = $exception->context();
+		$shape_json = wp_json_encode( $context['response_shape'] ?? array() );
+		pek_pickup_assert( 'pek_unexpected_destination_nearest_departments' === (string) ( $context['error_code'] ?? '' ), 'Malformed destination response must use stable destination error code.' );
+		pek_pickup_assert( '/branches/nearestdepartments/' === (string) ( $context['endpoint'] ?? '' ) && 'POST' === (string) ( $context['method'] ?? '' ) && 200 === (int) ( $context['http_status'] ?? 0 ) && 'destination_terminal_contract' === (string) ( $context['failure_stage'] ?? '' ), 'Malformed destination response must expose safe endpoint/method/status/stage diagnostics.' );
+		pek_pickup_assert( is_array( $context['response_shape'] ?? null ) && str_contains( (string) $shape_json, 'root_type' ) && ! str_contains( (string) $shape_json, 'warehouseId' ) && ! str_contains( (string) $shape_json, 'address' ) && ! str_contains( (string) $shape_json, 'Authorization' ) && ! str_contains( (string) $shape_json, 'secret' ), 'Malformed destination response shape must be safe and value-free.' );
 	}
 }
 $sender_bad_http = new PekPickupFakeHttp( array() );
@@ -350,7 +354,9 @@ foreach ( $invalid_rows as $case_name => $row ) {
 		pek_pickup_search_with_response( array( 'freeDepartments' => array( $row ), 'paidDepartments' => array() ), $wpdb, $settings, $credentials );
 		pek_pickup_assert( false, 'All-invalid terminal response must throw: ' . $case_name );
 	} catch ( PekApiException $exception ) {
-		pek_pickup_assert( 'pek_destination_terminal_rows_invalid' === (string) ( $exception->context()['error_code'] ?? '' ), 'All-invalid terminal rows must use stable code: ' . $case_name );
+		$context = $exception->context();
+		pek_pickup_assert( 'pek_destination_terminal_rows_invalid' === (string) ( $context['error_code'] ?? '' ), 'All-invalid terminal rows must use stable code: ' . $case_name );
+		pek_pickup_assert( 'destination_terminal_normalization' === (string) ( $context['failure_stage'] ?? '' ) && 1 === (int) ( $context['input_row_count'] ?? 0 ) && 1 === (int) ( $context['rejected_invalid'] ?? 0 ) && is_array( $context['rejection_reasons'] ?? null ), 'All-invalid terminal rows must expose safe normalization counters: ' . $case_name );
 		pek_pickup_assert( $before_terminals === count( $wpdb->pek_terminals ), 'All-invalid terminal rows must not persist repository rows: ' . $case_name );
 		pek_pickup_assert( array() === array_filter( array_keys( $GLOBALS['wdc_transients'] ), static fn( string $key ): bool => str_starts_with( $key, 'wdc_pek_destination_terminals_' ) ), 'All-invalid terminal rows must not persist terminal cache: ' . $case_name );
 	}
@@ -389,6 +395,33 @@ $mixed_result = pek_pickup_search_with_response(
 );
 $mixed_report = $mixed_result[0]->last_report();
 pek_pickup_assert( 1 === count( $mixed_result[4] ) && 'mixed-ok' === $mixed_result[4][0]->code && 2 === (int) $mixed_report['rejected_invalid'] && 1 === (int) $mixed_report['rejected_limits'] && true === $mixed_report['success'], 'Mixed valid/invalid response must keep exact counters and still succeed when one row is valid.' );
+pek_pickup_assert( 1 === (int) $mixed_report['rejection_reasons']['warehouse_id'] && 1 === (int) $mixed_report['rejection_reasons']['schedule'] && 0 === (int) $mixed_report['rejection_reasons']['limits'], 'Mixed valid/invalid response must classify structural rejection reasons separately from cargo limits.' );
+
+$reason_matrix = pek_pickup_search_with_response(
+	array(
+		'freeDepartments' => array(
+			'not-a-row',
+			pek_pickup_valid_row( array( 'warehouseId' => '' ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-coordinates', 'coordinates' => array( 'latitude' => 91, 'longitude' => 82.9 ) ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-text', 'branchName' => array() ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-integer', 'departmentTypeId' => '1.5' ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-limit', 'maxVolume' => 'bad' ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-work-time', 'divisionTimeOfWork' => array( 'bad' => array() ) ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-schedule-reason', 'scheduleHolidayDays' => array( '2026-02-30T00:00:00' ) ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-timezone', 'timeZone' => array() ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'reason-ok' ) ),
+		),
+		'paidDepartments' => array(),
+	),
+	$wpdb,
+	$settings,
+	$credentials
+);
+$reason_report = $reason_matrix[0]->last_report();
+foreach ( array( 'row_not_object', 'warehouse_id', 'coordinates', 'text_fields', 'integer_fields', 'limits', 'work_time', 'schedule', 'timezone' ) as $reason_key ) {
+	pek_pickup_assert( 1 === (int) $reason_report['rejection_reasons'][ $reason_key ], 'Rejection reason must be counted exactly once: ' . $reason_key );
+}
+pek_pickup_assert( 1 === count( $reason_matrix[4] ) && 'reason-ok' === $reason_matrix[4][0]->code && 9 === (int) $reason_report['rejected_invalid'] && true === $reason_report['success'], 'Rejection reason matrix must still return the one valid row.' );
 
 $success_before_error = $provider->search( $query );
 pek_pickup_assert( array() !== $success_before_error && true === $service->last_report()['success'], 'Sequence setup must start with a successful terminal search.' );
@@ -407,6 +440,10 @@ foreach ( array(
 	} catch ( PekApiException ) {
 		$error_report = $error_service->last_report();
 		pek_pickup_assert( false === $error_report['success'] && 'api' === $error_report['api_source'] && false === $error_report['cache_hit'] && 0 === (int) $error_report['total_returned'], 'Failed search must leave current failed last_report without previous counters: ' . $case_name );
+		pek_pickup_assert( '' !== (string) ( $error_report['failure_stage'] ?? '' ) && '/branches/nearestdepartments/' === (string) ( $error_report['endpoint'] ?? '' ) && 'POST' === (string) ( $error_report['method'] ?? '' ) && is_array( $error_report['response_shape'] ?? null ) && is_array( $error_report['rejection_reasons'] ?? null ), 'Failed search must keep current safe diagnostic context: ' . $case_name );
+		if ( 'all-invalid' === $case_name ) {
+			pek_pickup_assert( 1 === (int) $error_report['rejected_invalid'] && 1 === (int) $error_report['rejection_reasons']['warehouse_id'], 'All-invalid last_report must retain rejection counters.' );
+		}
 	}
 }
 
@@ -425,6 +462,7 @@ foreach ( array(
 	} catch ( PekApiException ) {
 		$zone_report = $zone_service->last_report();
 		pek_pickup_assert( false === $zone_report['success'] && $case['code'] === $zone_report['error_code'] && 'api' === $zone_report['api_source'] && array() === $zone_report['mapping'] && 0 === (int) $zone_report['total_returned'], 'Malformed zone response must set current failed last_report: ' . $case_name );
+		pek_pickup_assert( 'location_resolution' === (string) ( $zone_report['failure_stage'] ?? '' ), 'Malformed zone response must identify location_resolution failure stage: ' . $case_name );
 	}
 }
 

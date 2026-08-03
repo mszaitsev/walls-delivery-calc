@@ -33,21 +33,27 @@ final class PekTerminalService {
 			$this->last_report = array(
 				'success' => false,
 				'error_code' => 'pek_canonical_location_required',
+				'failure_stage' => 'destination_terminal_request',
 				'message' => 'PEK provider requires canonical location ID.',
 			);
 			return array();
 		}
 		$errors = $query->validate();
 		if ( array() !== $errors ) {
-			$this->last_report = array( 'success' => false, 'error_code' => 'pek_invalid_pickup_query', 'errors' => $errors );
+			$this->last_report = array( 'success' => false, 'error_code' => 'pek_invalid_pickup_query', 'failure_stage' => 'destination_terminal_request', 'errors' => $errors );
 			return array();
 		}
 		try {
 			$mapping = $this->locations->resolve( $query->location_id );
 		} catch ( PekApiException $exception ) {
+			$context = $exception->context();
 			$this->last_report = array(
 				'success' => false,
-				'error_code' => (string) ( $exception->context()['error_code'] ?? 'pek_destination_location_api_failed' ),
+				'error_code' => (string) ( $context['error_code'] ?? 'pek_destination_location_api_failed' ),
+				'failure_stage' => 'location_resolution',
+				'endpoint' => (string) ( $context['endpoint'] ?? '' ),
+				'method' => (string) ( $context['method'] ?? '' ),
+				'http_status' => $context['http_status'] ?? '',
 				'api_source' => 'api',
 				'cache_hit' => false,
 				'mapping' => array(),
@@ -56,6 +62,8 @@ final class PekTerminalService {
 				'paid_count' => 0,
 				'rejected_invalid' => 0,
 				'rejected_limits' => 0,
+				'rejection_reasons' => $this->empty_rejection_reasons(),
+				'response_shape' => is_array( $context['response_shape'] ?? null ) ? $context['response_shape'] : array(),
 				'message' => 'PEK destination location API response could not be used.',
 			);
 			throw $exception;
@@ -64,6 +72,7 @@ final class PekTerminalService {
 			$this->last_report = array(
 				'success' => false,
 				'error_code' => 'pek_destination_location_unsupported',
+				'failure_stage' => 'location_resolution',
 				'mapping' => $mapping,
 				'message' => 'PEK location is unsupported.',
 			);
@@ -74,6 +83,7 @@ final class PekTerminalService {
 			$this->last_report = array(
 				'success' => false,
 				'error_code' => 'pek_destination_country_mismatch',
+				'failure_stage' => 'destination_terminal_request',
 				'mapping' => $mapping,
 				'message' => 'PEK destination country does not match canonical mapping.',
 			);
@@ -86,6 +96,7 @@ final class PekTerminalService {
 			$this->last_report = array(
 				'success' => false,
 				'error_code' => 'pek_destination_mapping_incomplete',
+				'failure_stage' => 'destination_terminal_request',
 				'mapping' => $mapping,
 				'message' => 'PEK destination mapping has neither usable destination coordinates nor address.',
 			);
@@ -123,15 +134,32 @@ final class PekTerminalService {
 			'paid_count' => 0,
 			'rejected_invalid' => 0,
 			'rejected_limits' => 0,
+			'rejection_reasons' => $this->empty_rejection_reasons(),
+			'failure_stage' => '',
+			'endpoint' => '/branches/nearestdepartments/',
+			'method' => 'POST',
+			'http_status' => '',
+			'response_shape' => array(),
 		);
 		try {
 			$response = $this->api->destination_nearest_departments( $request );
 			$result = $this->normalize_response( $response, $query, $mapping );
 		} catch ( PekApiException $exception ) {
+			$context = $exception->context();
 			$this->last_report = array_merge(
 				$base_report,
 				array(
-					'error_code' => (string) ( $exception->context()['error_code'] ?? 'pek_destination_terminal_api_failed' ),
+					'error_code' => (string) ( $context['error_code'] ?? 'pek_destination_terminal_api_failed' ),
+					'failure_stage' => (string) ( $context['failure_stage'] ?? 'destination_terminal_contract' ),
+					'endpoint' => (string) ( $context['endpoint'] ?? $base_report['endpoint'] ),
+					'method' => (string) ( $context['method'] ?? $base_report['method'] ),
+					'http_status' => $context['http_status'] ?? '',
+					'response_shape' => is_array( $context['response_shape'] ?? null ) ? $context['response_shape'] : array(),
+					'input_row_count' => (int) ( $context['input_row_count'] ?? 0 ),
+					'valid_structural_row_count' => (int) ( $context['valid_structural_row_count'] ?? 0 ),
+					'rejected_invalid' => (int) ( $context['rejected_invalid'] ?? 0 ),
+					'rejected_limits' => (int) ( $context['rejected_limits'] ?? 0 ),
+					'rejection_reasons' => is_array( $context['rejection_reasons'] ?? null ) ? array_merge( $this->empty_rejection_reasons(), $context['rejection_reasons'] ) : $this->empty_rejection_reasons(),
 					'message' => 'PEK destination terminal API response could not be used.',
 				)
 			);
@@ -149,11 +177,17 @@ final class PekTerminalService {
 			'paid_count' => $result['paid_count'],
 			'rejected_invalid' => $result['rejected_invalid'],
 			'rejected_limits' => $result['rejected_limits'],
+			'rejection_reasons' => $result['rejection_reasons'],
+			'failure_stage' => '',
+			'endpoint' => '/branches/nearestdepartments/',
+			'method' => 'POST',
+			'http_status' => 200,
+			'response_shape' => $result['response_shape'],
 		);
 		try {
 			$this->terminals->upsert_many( $result['terminal_rows'] );
 		} catch ( \RuntimeException $exception ) {
-			$this->last_report = array_merge( $metadata, array( 'success' => false, 'error_code' => 'pek_terminal_persistence_failed', 'message' => 'PEK terminal persistence failed.' ) );
+			$this->last_report = array_merge( $metadata, array( 'success' => false, 'error_code' => 'pek_terminal_persistence_failed', 'failure_stage' => 'destination_terminal_persistence', 'message' => 'PEK terminal persistence failed.' ) );
 			throw $exception;
 		}
 		$this->cache->save( $fingerprint, $metadata, $result['points'], $this->settings->pek_destination_terminal_cache_ttl() );
@@ -179,21 +213,34 @@ final class PekTerminalService {
 		return $this->last_report;
 	}
 
-	/** @param array<string,mixed> $response @param array<string,mixed> $mapping @return array{points:array<int,PickupPoint>,terminal_rows:array<int,array<string,mixed>>,free_count:int,paid_count:int,rejected_invalid:int,rejected_limits:int,input_row_count:int,valid_structural_row_count:int} */
+	/** @param array<string,mixed> $response @param array<string,mixed> $mapping @return array{points:array<int,PickupPoint>,terminal_rows:array<int,array<string,mixed>>,free_count:int,paid_count:int,rejected_invalid:int,rejected_limits:int,input_row_count:int,valid_structural_row_count:int,rejection_reasons:array<string,int>,response_shape:array<string,mixed>} */
 	private function normalize_response( array $response, CarrierPickupPointQuery $query, array $mapping ): array {
 		$points = array();
 		$terminal_rows = array();
-		$report = array( 'free_count' => 0, 'paid_count' => 0, 'rejected_invalid' => 0, 'rejected_limits' => 0, 'input_row_count' => 0, 'valid_structural_row_count' => 0 );
+		$report = array(
+			'free_count' => 0,
+			'paid_count' => 0,
+			'rejected_invalid' => 0,
+			'rejected_limits' => 0,
+			'input_row_count' => 0,
+			'valid_structural_row_count' => 0,
+			'rejection_reasons' => $this->empty_rejection_reasons(),
+			'response_shape' => $this->response_shape( $response ),
+		);
 		foreach ( array( 'freeDepartments' => 'free', 'paidDepartments' => 'paid' ) as $key => $source ) {
 			foreach ( $response[ $key ] as $row ) {
 				++$report['input_row_count'];
-				if ( ! is_array( $row ) ) {
+				$invalid_reason = $this->invalid_row_reason( $row, $query, $mapping );
+				if ( '' !== $invalid_reason ) {
 					++$report['rejected_invalid'];
+					++$report['rejection_reasons'][ $invalid_reason ];
 					continue;
 				}
+				/** @var array<string,mixed> $row */
 				$normalized = $this->normalize_row( $row, $source, $query, $mapping );
 				if ( array() === $normalized ) {
 					++$report['rejected_invalid'];
+					++$report['rejection_reasons']['unknown'];
 					continue;
 				}
 				++$report['valid_structural_row_count'];
@@ -211,12 +258,93 @@ final class PekTerminalService {
 				'ПЭК вернул некорректные строки терминалов назначения.',
 				array(
 					'endpoint' => '/branches/nearestdepartments/',
+					'method' => 'POST',
 					'error_code' => 'pek_destination_terminal_rows_invalid',
+					'http_status' => 200,
+					'failure_stage' => 'destination_terminal_normalization',
+					'response_shape' => $report['response_shape'],
+					'input_row_count' => $report['input_row_count'],
+					'valid_structural_row_count' => $report['valid_structural_row_count'],
+					'rejected_invalid' => $report['rejected_invalid'],
+					'rejected_limits' => $report['rejected_limits'],
+					'rejection_reasons' => $report['rejection_reasons'],
 				)
 			);
 		}
 
 		return array_merge( array( 'points' => $points, 'terminal_rows' => $terminal_rows ), $report );
+	}
+
+	/** @return array<string,int> */
+	private function empty_rejection_reasons(): array {
+		return array(
+			'row_not_object' => 0,
+			'warehouse_id' => 0,
+			'coordinates' => 0,
+			'text_fields' => 0,
+			'integer_fields' => 0,
+			'limits' => 0,
+			'work_time' => 0,
+			'schedule' => 0,
+			'timezone' => 0,
+			'unknown' => 0,
+		);
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function invalid_row_reason( mixed $row, CarrierPickupPointQuery $query, array $mapping ): string {
+		unset( $query );
+		if ( ! is_array( $row ) || array_is_list( $row ) ) {
+			return 'row_not_object';
+		}
+		if ( '' === $this->required_text( $row, 'warehouseId', 64 ) ) {
+			return 'warehouse_id';
+		}
+		$coordinates = is_array( $row['coordinates'] ?? null ) && ! array_is_list( $row['coordinates'] ) ? $row['coordinates'] : array();
+		if ( null === $this->coordinate_component( $coordinates['latitude'] ?? null, -90, 90 ) || null === $this->coordinate_component( $coordinates['longitude'] ?? null, -180, 180 ) ) {
+			return 'coordinates';
+		}
+		foreach ( array( 'branchId', 'branchName', 'divisionName', 'departmentType', 'address' ) as $key ) {
+			if ( "\0" === $this->optional_text( $row, $key, 1000 ) ) {
+				return 'text_fields';
+			}
+		}
+		if ( ( array_key_exists( 'branchTimezone', $row ) && null !== $row['branchTimezone'] && ! is_string( $row['branchTimezone'] ) ) || ( array_key_exists( 'timeZone', $row ) && null !== $row['timeZone'] && ! is_string( $row['timeZone'] ) ) ) {
+			return 'timezone';
+		}
+		if ( null === $this->optional_integer( $row['departmentTypeId'] ?? null ) || null === $this->optional_integer( $row['priority'] ?? null ) ) {
+			return 'integer_fields';
+		}
+		foreach ( array( 'maxWeight', 'maxVolume', 'maxDimension', 'maxWeightOnePlace' ) as $key ) {
+			if ( false === $this->normalize_limit( $row[ $key ] ?? null ) ) {
+				return 'limits';
+			}
+		}
+		if ( false === $this->normalize_limit( $row['maxCount'] ?? null, true ) ) {
+			return 'limits';
+		}
+		if ( null === $this->work_time( $row ) ) {
+			return 'work_time';
+		}
+		if ( null === $this->availability( $row, $mapping ) ) {
+			return 'schedule';
+		}
+
+		return '';
+	}
+
+	/** @param array<string,mixed> $response @return array<string,mixed> */
+	private function response_shape( array $response ): array {
+		return array(
+			'root_type' => 'object',
+			'root_keys' => array_values( array_slice( array_map( 'strval', array_keys( $response ) ), 0, 30 ) ),
+			'free_departments_present' => array_key_exists( 'freeDepartments', $response ),
+			'free_departments_type' => is_array( $response['freeDepartments'] ?? null ) && array_is_list( $response['freeDepartments'] ) ? 'list' : 'missing',
+			'free_departments_count' => is_array( $response['freeDepartments'] ?? null ) && array_is_list( $response['freeDepartments'] ) ? count( $response['freeDepartments'] ) : 0,
+			'paid_departments_present' => array_key_exists( 'paidDepartments', $response ),
+			'paid_departments_type' => is_array( $response['paidDepartments'] ?? null ) && array_is_list( $response['paidDepartments'] ) ? 'list' : 'missing',
+			'paid_departments_count' => is_array( $response['paidDepartments'] ?? null ) && array_is_list( $response['paidDepartments'] ) ? count( $response['paidDepartments'] ) : 0,
+		);
 	}
 
 	/** @param array<string,mixed> $row @param array<string,mixed> $mapping @return array<string,mixed> */

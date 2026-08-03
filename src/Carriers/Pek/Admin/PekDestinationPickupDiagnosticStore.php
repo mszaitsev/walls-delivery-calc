@@ -45,7 +45,7 @@ final class PekDestinationPickupDiagnosticStore {
 
 	/** @param array<string,mixed> $report @return array<string,mixed> */
 	private function sanitize( array $report ): array {
-		$top_level = array( 'success', 'error_code', 'checked_at', 'location', 'terminals', 'message', 'errors' );
+		$top_level = array( 'success', 'error_code', 'failure_stage', 'endpoint', 'method', 'http_status', 'response_shape', 'rejections', 'checked_at', 'location', 'terminals', 'message', 'errors' );
 		$safe = array();
 		foreach ( $top_level as $key ) {
 			if ( array_key_exists( $key, $report ) ) {

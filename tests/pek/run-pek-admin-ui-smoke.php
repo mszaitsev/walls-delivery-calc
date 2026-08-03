@@ -29,6 +29,7 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
@@ -59,9 +60,18 @@ function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $te
 function selected( mixed $selected, mixed $current, bool $display = true ): string { return (string) $selected === (string) $current ? ' selected="selected"' : ''; }
 function wp_nonce_field( string $action ): void { echo '<input type="hidden" name="_wpnonce" value="nonce">'; }
 function submit_button( string $text, string $type = 'primary' ): void { echo '<button class="button button-' . esc_attr( $type ) . '" type="submit">' . esc_html( $text ) . '</button>'; }
+function wc_get_logger(): object { return $GLOBALS['pek_ui_wc_logger']; }
+
+final class PekUiFakeWooLogger {
+	public array $entries = array();
+	public function log( string $level, string $message, array $context = array() ): void {
+		$this->entries[] = compact( 'level', 'message', 'context' );
+	}
+}
 
 final class PekUiFakeHttp implements PekHttpClientInterface {
 	public array $requests = array();
+	public array $nearest_response = array( 'freeDepartments' => array(), 'paidDepartments' => array() );
 	public function request( string $method, string $url, array $args ): array {
 		$this->requests[] = compact( 'method', 'url', 'args' );
 		if ( str_contains( (string) parse_url( $url, PHP_URL_PATH ), 'findzonebycoordinates' ) ) {
@@ -70,7 +80,7 @@ final class PekUiFakeHttp implements PekHttpClientInterface {
 		if ( str_contains( (string) parse_url( $url, PHP_URL_PATH ), 'findzonebyaddress' ) ) {
 			return array( 'status' => 200, 'body' => wp_json_encode( array( 'zoneId' => 'zone-address', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'mainWarehouseId' => 'main-address', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Новосибирск' ) ) ) ) );
 		}
-		return array( 'status' => 200, 'body' => wp_json_encode( array( 'freeDepartments' => array(), 'paidDepartments' => array() ) ) );
+		return array( 'status' => 200, 'body' => wp_json_encode( $this->nearest_response ) );
 	}
 }
 
@@ -85,6 +95,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 $GLOBALS['pek_ui_options'] = array();
 $GLOBALS['pek_ui_transients'] = array();
+$GLOBALS['pek_ui_wc_logger'] = new PekUiFakeWooLogger();
 define( 'APP_ENCRYPTION_KEY', 'pek-ui-key' );
 
 $settings_repository = new SettingsRepository();
@@ -178,7 +189,7 @@ $location_repository = new LocationRepository( $wpdb );
 $location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $api, $settings );
 $terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
 $pickup_provider = new PekPickupPointProvider( $terminal_service );
-$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings );
+$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, new Logger() );
 $destination_report_store = new PekDestinationPickupDiagnosticStore();
 $page = new PekAdminPage(
 	$settings,
@@ -226,6 +237,23 @@ $success_empty_report = $destination_diagnostic_service->run( array( 'pek_destin
 pek_ui_assert( true === $success_empty_report['success'] && 0 === $success_empty_report['terminals']['total_returned'] && str_contains( $success_empty_report['message'], 'Подходящие терминалы не найдены' ), 'Successful empty destination diagnostic must be success=true with explicit empty message.' );
 $destination_payload = json_decode( (string) $ui_http->requests[1]['args']['body'], true );
 pek_ui_assert( 10.0 === (float) $destination_payload['volume'] && 1.25 === (float) $destination_payload['weight'], 'Admin diagnostic must multiply one-place dimensions by places_count and preserve decimal weight.' );
+$GLOBALS['pek_ui_transients'] = array();
+$ui_http->nearest_response = array( 'freeDepartments' => array( 'warehouseId' => 'bad', 'Authorization' => 'secret' ), 'paidDepartments' => null );
+$failure_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 1.5, 'pek_destination_length_cm' => 100, 'pek_destination_width_cm' => 100, 'pek_destination_height_cm' => 100, 'pek_destination_max_place_weight_kg' => 1.5, 'pek_destination_places_count' => 1 ) );
+pek_ui_assert( false === $failure_report['success'] && 'pek_unexpected_destination_nearest_departments' === $failure_report['error_code'] && 'destination_terminal_contract' === $failure_report['failure_stage'] && '/branches/nearestdepartments/' === $failure_report['endpoint'] && 200 === (int) $failure_report['http_status'], 'Malformed destination terminal response must create structured failure diagnostic status.' );
+pek_ui_assert( 'coordinates' === $failure_report['location']['resolution_method'] && 'resolved' === $failure_report['location']['mapping_state'] && 'Branch' === $failure_report['location']['branch'] && 'Zone' === $failure_report['location']['zone'], 'Failure report must preserve successful location mapping context.' );
+pek_ui_assert( is_array( $failure_report['response_shape'] ) && 'object' === $failure_report['response_shape']['root_type'] && 'object' === $failure_report['response_shape']['free_departments_type'] && 'null' === $failure_report['response_shape']['paid_departments_type'], 'Failure report must include safe nearestdepartments response shape.' );
+$failure_json = wp_json_encode( $failure_report );
+pek_ui_assert( ! str_contains( (string) $failure_json, 'Authorization' ) && ! str_contains( (string) $failure_json, 'secret' ) && ! str_contains( (string) $failure_json, 'warehouseId' ), 'Failure report must not store raw response values.' );
+pek_ui_assert( 1 === count( $GLOBALS['pek_ui_wc_logger']->entries ) && 'error' === $GLOBALS['pek_ui_wc_logger']->entries[0]['level'] && 'PEK destination pickup diagnostic failed.' === $GLOBALS['pek_ui_wc_logger']->entries[0]['message'], 'Failed explicit admin diagnostic must write one project logger event.' );
+$log_json = wp_json_encode( $GLOBALS['pek_ui_wc_logger']->entries[0]['context'] );
+pek_ui_assert( str_contains( (string) $log_json, 'pek_unexpected_destination_nearest_departments' ) && ! str_contains( (string) $log_json, 'Authorization' ) && ! str_contains( (string) $log_json, 'secret' ) && ! str_contains( (string) $log_json, 'warehouseId' ), 'Diagnostic log context must be safe and include stable error code.' );
+$destination_report_store->save_for_current_user( $failure_report );
+ob_start();
+$page->render_embedded( $service );
+$failure_html = (string) ob_get_clean();
+pek_ui_assert( str_contains( $failure_html, 'Код ошибки' ) && str_contains( $failure_html, 'pek_unexpected_destination_nearest_departments' ) && str_contains( $failure_html, 'Этап' ) && str_contains( $failure_html, 'destination_terminal_contract' ) && str_contains( $failure_html, 'POST /branches/nearestdepartments/' ) && str_contains( $failure_html, 'HTTP status' ) && str_contains( $failure_html, 'Resolution method' ) && str_contains( $failure_html, 'Mapping state' ) && str_contains( $failure_html, 'Main warehouse ID' ) && str_contains( $failure_html, 'Response shape' ) && str_contains( $failure_html, 'Free departments type' ) && str_contains( $failure_html, 'Rejections' ), 'Destination diagnostic UI must render named failure fields, mapping, response shape and rejections.' );
+pek_ui_assert( ! str_contains( $failure_html, '10, RU, Новосибирск, 1' ) && ! str_contains( $failure_html, 'raw_response' ) && ! str_contains( $failure_html, 'Authorization' ) && ! str_contains( $failure_html, 'secret' ), 'Destination diagnostic UI must not render positional arrays or unsafe response data.' );
 $destination_report_store->save_for_current_user(
 	array(
 		'checked_at' => '2026-08-03 10:00:00',

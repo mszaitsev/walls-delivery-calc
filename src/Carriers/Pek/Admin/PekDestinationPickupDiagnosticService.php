@@ -7,6 +7,7 @@ use RuntimeException;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
@@ -19,7 +20,8 @@ final class PekDestinationPickupDiagnosticService {
 		private CarrierPickupPointProviderRegistry $providers,
 		private LocationRepository $locations,
 		private PekTerminalService $terminals,
-		private PekSettings $settings
+		private PekSettings $settings,
+		private ?Logger $logger = null
 	) {
 	}
 
@@ -60,35 +62,45 @@ final class PekDestinationPickupDiagnosticService {
 			$points = $provider->search( $query );
 		} catch ( PekApiException $exception ) {
 			$terminal_report = $this->terminals->last_report();
-			return array(
+			$mapping = is_array( $terminal_report['mapping'] ?? null ) ? $terminal_report['mapping'] : array();
+			$context = $exception->context();
+			$report = array(
 				'success' => false,
 				'error_code' => (string) ( $exception->context()['error_code'] ?? $terminal_report['error_code'] ?? 'pek_destination_api_contract_failed' ),
+				'failure_stage' => (string) ( $terminal_report['failure_stage'] ?? $context['failure_stage'] ?? 'unknown' ),
+				'endpoint' => (string) ( $terminal_report['endpoint'] ?? $context['endpoint'] ?? '' ),
+				'method' => (string) ( $terminal_report['method'] ?? $context['method'] ?? '' ),
+				'http_status' => $terminal_report['http_status'] ?? $context['http_status'] ?? '',
+				'response_shape' => is_array( $terminal_report['response_shape'] ?? null ) ? $terminal_report['response_shape'] : ( is_array( $context['response_shape'] ?? null ) ? $context['response_shape'] : array() ),
+				'rejections' => is_array( $terminal_report['rejection_reasons'] ?? null ) ? $terminal_report['rejection_reasons'] : array(),
 				'checked_at' => $this->now(),
 				'location' => array(
 					'location_id' => $location_id,
 					'country' => $country,
 					'canonical_address' => $location->resolved_display_name(),
 					'coordinates_available' => $has_coordinates,
-					'resolution_method' => '',
-					'mapping_state' => '',
-					'precision' => '',
-					'branch' => '',
-					'zone' => '',
-					'main_warehouse_id' => '',
-					'mapping_cache_hit' => false,
+					'resolution_method' => (string) ( $mapping['resolution_method'] ?? '' ),
+					'mapping_state' => (string) ( $mapping['mapping_state'] ?? '' ),
+					'precision' => (string) ( $mapping['precision'] ?? '' ),
+					'branch' => (string) ( $mapping['branch_title'] ?? '' ),
+					'zone' => (string) ( $mapping['zone_name'] ?? '' ),
+					'main_warehouse_id' => (string) ( $mapping['main_warehouse_id'] ?? '' ),
+					'mapping_cache_hit' => (bool) ( $mapping['cache_hit'] ?? false ),
 				),
 				'terminals' => array(
-					'total_returned' => 0,
-					'free_count' => 0,
-					'paid_count' => 0,
-					'rejected_invalid' => 0,
-					'rejected_limits' => 0,
+					'total_returned' => (int) ( $terminal_report['total_returned'] ?? 0 ),
+					'free_count' => (int) ( $terminal_report['free_count'] ?? 0 ),
+					'paid_count' => (int) ( $terminal_report['paid_count'] ?? 0 ),
+					'rejected_invalid' => (int) ( $terminal_report['rejected_invalid'] ?? 0 ),
+					'rejected_limits' => (int) ( $terminal_report['rejected_limits'] ?? 0 ),
 					'api_source' => 'api',
-					'query_fingerprint' => '',
+					'query_fingerprint' => (string) ( $terminal_report['query_fingerprint'] ?? '' ),
 					'points' => array(),
 				),
 				'message' => 'Не удалось использовать ответ ПЭК для выбранного направления.',
 			);
+			$this->log_failure( $report );
+			return $report;
 		}
 		$terminal_report = $this->terminals->last_report();
 		$mapping = is_array( $terminal_report['mapping'] ?? null ) ? $terminal_report['mapping'] : array();
@@ -98,9 +110,15 @@ final class PekDestinationPickupDiagnosticService {
 			? ( array() === $points ? 'Диагностика направления ПЭК выполнена. Подходящие терминалы не найдены.' : 'Диагностика направления ПЭК выполнена.' )
 			: $this->message_for_error_code( $error_code );
 
-		return array(
+		$report = array(
 			'success' => $success,
 			'error_code' => $error_code,
+			'failure_stage' => (string) ( $terminal_report['failure_stage'] ?? '' ),
+			'endpoint' => (string) ( $terminal_report['endpoint'] ?? '' ),
+			'method' => (string) ( $terminal_report['method'] ?? '' ),
+			'http_status' => $terminal_report['http_status'] ?? '',
+			'response_shape' => is_array( $terminal_report['response_shape'] ?? null ) ? $terminal_report['response_shape'] : array(),
+			'rejections' => is_array( $terminal_report['rejection_reasons'] ?? null ) ? $terminal_report['rejection_reasons'] : array(),
 			'checked_at' => $this->now(),
 			'location' => array(
 				'location_id' => $location_id,
@@ -127,6 +145,11 @@ final class PekDestinationPickupDiagnosticService {
 			),
 			'message' => $message,
 		);
+		if ( ! $success ) {
+			$this->log_failure( $report );
+		}
+
+		return $report;
 	}
 
 	/** @param array<string,mixed> $input */
@@ -182,6 +205,12 @@ final class PekDestinationPickupDiagnosticService {
 		return array(
 			'success' => false,
 			'error_code' => $error_code,
+			'failure_stage' => 'destination_terminal_request',
+			'endpoint' => '',
+			'method' => '',
+			'http_status' => '',
+			'response_shape' => array(),
+			'rejections' => array(),
 			'checked_at' => $this->now(),
 			'location' => array(),
 			'terminals' => array( 'total_returned' => 0, 'free_count' => 0, 'paid_count' => 0, 'rejected_invalid' => 0, 'rejected_limits' => 0, 'api_source' => '', 'query_fingerprint' => '', 'points' => array() ),
@@ -212,5 +241,31 @@ final class PekDestinationPickupDiagnosticService {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	/** @param array<string,mixed> $report */
+	private function log_failure( array $report ): void {
+		if ( null === $this->logger ) {
+			return;
+		}
+		$location = is_array( $report['location'] ?? null ) ? $report['location'] : array();
+		$terminals = is_array( $report['terminals'] ?? null ) ? $report['terminals'] : array();
+		$this->logger->error(
+			'PEK destination pickup diagnostic failed.',
+			array(
+				'carrier' => 'pek',
+				'location_id' => (int) ( $location['location_id'] ?? 0 ),
+				'country_code' => (string) ( $location['country'] ?? '' ),
+				'failure_stage' => (string) ( $report['failure_stage'] ?? '' ),
+				'error_code' => (string) ( $report['error_code'] ?? '' ),
+				'endpoint' => (string) ( $report['endpoint'] ?? '' ),
+				'method' => (string) ( $report['method'] ?? '' ),
+				'http_status' => $report['http_status'] ?? '',
+				'response_shape' => is_array( $report['response_shape'] ?? null ) ? $report['response_shape'] : array(),
+				'rejected_invalid' => (int) ( $terminals['rejected_invalid'] ?? 0 ),
+				'rejected_limits' => (int) ( $terminals['rejected_limits'] ?? 0 ),
+				'rejection_reasons' => is_array( $report['rejections'] ?? null ) ? $report['rejections'] : array(),
+			)
+		);
 	}
 }

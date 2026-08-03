@@ -224,25 +224,159 @@ final class PekAdminPage {
 			return;
 		}
 		echo '<table class="widefat striped" style="max-width:1180px;"><tbody>';
-		foreach ( array( 'checked_at', 'message' ) as $key ) {
-			echo '<tr><th scope="row">' . esc_html( $key ) . '</th><td>' . esc_html( $this->format_report_value( $report[ $key ] ?? null, $key ) ) . '</td></tr>';
-		}
-		foreach ( array( 'location', 'terminals' ) as $section ) {
-			if ( ! is_array( $report[ $section ] ?? null ) ) {
+		foreach ( array(
+			'checked_at' => 'Проверено',
+			'success' => 'Статус',
+			'message' => 'Сообщение',
+			'error_code' => 'Код ошибки',
+			'failure_stage' => 'Этап',
+			'endpoint' => 'Endpoint',
+			'http_status' => 'HTTP status',
+		) as $key => $label ) {
+			if ( ! array_key_exists( $key, $report ) || '' === (string) $this->destination_report_value( $report[ $key ], $key, $report ) ) {
 				continue;
 			}
-			echo '<tr><th scope="row">' . esc_html( $section ) . '</th><td>';
-			if ( 'terminals' === $section && is_array( $report[ $section ]['points'] ?? null ) ) {
-				$copy = $report[ $section ];
-				unset( $copy['points'] );
-				echo esc_html( $this->format_report_value( $copy, $section ) );
-				$this->render_destination_points( $report[ $section ]['points'] );
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>';
+			if ( 'error_code' === $key ) {
+				echo '<code>' . esc_html( $this->destination_report_value( $report[ $key ], $key, $report ) ) . '</code>';
 			} else {
-				echo esc_html( $this->format_report_value( $report[ $section ], $section ) );
+				echo esc_html( $this->destination_report_value( $report[ $key ], $key, $report ) );
 			}
 			echo '</td></tr>';
 		}
 		echo '</tbody></table>';
+
+		$location = is_array( $report['location'] ?? null ) ? $report['location'] : array();
+		$this->render_destination_named_section(
+			'Location',
+			$location,
+			array(
+				'location_id' => 'Canonical location ID',
+				'country' => 'Страна',
+				'canonical_address' => 'Canonical address',
+				'coordinates_available' => 'Координаты доступны',
+				'resolution_method' => 'Resolution method',
+				'mapping_state' => 'Mapping state',
+				'precision' => 'Precision',
+				'branch' => 'Branch',
+				'zone' => 'Zone',
+				'main_warehouse_id' => 'Main warehouse ID',
+				'mapping_cache_hit' => 'Mapping cache hit',
+			),
+			array( 'main_warehouse_id' )
+		);
+
+		$terminals = is_array( $report['terminals'] ?? null ) ? $report['terminals'] : array();
+		$this->render_destination_named_section(
+			'Terminals',
+			$terminals,
+			array(
+				'total_returned' => 'Total returned',
+				'free_count' => 'Free count',
+				'paid_count' => 'Paid count',
+				'rejected_invalid' => 'Rejected invalid',
+				'rejected_limits' => 'Rejected limits',
+				'api_source' => 'API source',
+				'query_fingerprint' => 'Query fingerprint',
+			),
+			array( 'query_fingerprint' )
+		);
+		if ( is_array( $terminals['points'] ?? null ) ) {
+			$this->render_destination_points( $terminals['points'] );
+		}
+
+		$response_shape = is_array( $report['response_shape'] ?? null ) ? $report['response_shape'] : array();
+		$this->render_destination_named_section(
+			'Response shape',
+			$response_shape,
+			array(
+				'root_type' => 'Root type',
+				'root_keys' => 'Root keys',
+				'root_count' => 'Root count',
+				'free_departments_present' => 'Free departments present',
+				'free_departments_type' => 'Free departments type',
+				'free_departments_count' => 'Free departments count',
+				'paid_departments_present' => 'Paid departments present',
+				'paid_departments_type' => 'Paid departments type',
+				'paid_departments_count' => 'Paid departments count',
+			)
+		);
+
+		$rejections = is_array( $report['rejections'] ?? null ) ? $report['rejections'] : array();
+		$this->render_destination_named_section(
+			'Rejections',
+			$rejections,
+			array(
+				'row_not_object' => 'row_not_object',
+				'warehouse_id' => 'warehouse_id',
+				'coordinates' => 'coordinates',
+				'text_fields' => 'text_fields',
+				'integer_fields' => 'integer_fields',
+				'limits' => 'limits',
+				'work_time' => 'work_time',
+				'schedule' => 'schedule',
+				'timezone' => 'timezone',
+				'unknown' => 'unknown',
+			)
+		);
+	}
+
+	/** @param array<string,mixed> $values @param array<string,string> $labels @param array<int,string> $code_keys */
+	private function render_destination_named_section( string $title, array $values, array $labels, array $code_keys = array() ): void {
+		if ( array() === $values ) {
+			return;
+		}
+		echo '<h4>' . esc_html( $title ) . '</h4>';
+		echo '<table class="widefat striped" style="max-width:1180px;"><tbody>';
+		foreach ( $labels as $key => $label ) {
+			if ( ! array_key_exists( $key, $values ) ) {
+				continue;
+			}
+			$value = $this->destination_report_value( $values[ $key ], $key );
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>';
+			if ( in_array( $key, $code_keys, true ) && '—' !== $value ) {
+				echo '<code>' . esc_html( $value ) . '</code>';
+			} else {
+				echo esc_html( $value );
+			}
+			echo '</td></tr>';
+		}
+		echo '</tbody></table>';
+	}
+
+	/** @param array<string,mixed> $report */
+	private function destination_report_value( mixed $value, string $key = '', array $report = array() ): string {
+		if ( 'success' === $key ) {
+			return true === $value ? 'Успешно' : 'Ошибка';
+		}
+		if ( 'endpoint' === $key ) {
+			$method = trim( (string) ( $report['method'] ?? '' ) );
+			$endpoint = trim( (string) $value );
+			return '' !== $method && '' !== $endpoint ? $method . ' ' . $endpoint : $endpoint;
+		}
+		if ( is_bool( $value ) ) {
+			return $value ? 'да' : 'нет';
+		}
+		if ( null === $value || '' === $value || array() === $value ) {
+			return '—';
+		}
+		if ( is_scalar( $value ) ) {
+			return (string) $value;
+		}
+		if ( is_array( $value ) ) {
+			$scalar = true;
+			foreach ( $value as $item ) {
+				if ( ! is_scalar( $item ) && null !== $item ) {
+					$scalar = false;
+					break;
+				}
+			}
+			if ( $scalar ) {
+				return implode( ', ', array_map( static fn( mixed $item ): string => null === $item || '' === $item ? '—' : (string) $item, $value ) );
+			}
+		}
+
+		return '—';
 	}
 
 	/** @param array<int,mixed> $points */

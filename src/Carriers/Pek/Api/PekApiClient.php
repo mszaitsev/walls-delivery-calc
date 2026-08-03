@@ -10,6 +10,9 @@ use WallsShop\WDC\Carriers\Pek\PekSettings;
 defined( 'ABSPATH' ) || exit;
 
 final class PekApiClient {
+	/** @var array<string,mixed> */
+	private array $last_response_meta = array();
+
 	public function __construct(
 		private PekSettings $settings,
 		private PekCredentials $credentials,
@@ -95,48 +98,54 @@ final class PekApiClient {
 
 	/** @param array<string,mixed> $payload */
 	private function call( string $method, string $path, array $payload ): mixed {
+		$this->last_response_meta = array();
 		$method = strtoupper( trim( $method ) );
 		if ( ! in_array( $method, array( 'GET', 'POST' ), true ) ) {
-			throw new PekApiException( 'Неподдерживаемый HTTP метод ПЭК.', array( 'endpoint' => $path, 'error_code' => 'pek_invalid_http_method' ) );
+			throw new PekApiException( 'Неподдерживаемый HTTP метод ПЭК.', array( 'endpoint' => $path, 'method' => $method, 'error_code' => 'pek_invalid_http_method', 'failure_stage' => $this->failure_stage_for_path( $path, 'request' ) ) );
 		}
 		if ( ! $this->credentials->is_complete() ) {
-			throw new PekApiException( 'Не заданы логин или API key ПЭК.', array( 'error_code' => 'pek_credentials_missing' ) );
+			throw new PekApiException( 'Не заданы логин или API key ПЭК.', array( 'endpoint' => $path, 'method' => $method, 'error_code' => 'pek_credentials_missing', 'failure_stage' => $this->failure_stage_for_path( $path, 'request' ) ) );
 		}
 		$this->budget->consume();
 		$url = PekSettings::BASE_URL . $path;
 		$response = $this->http->request( $method, $url, $this->request_args( $method, $payload ) );
 		if ( ! empty( $response['error'] ) ) {
-			throw new PekApiException( 'Не удалось выполнить запрос к ПЭК.', array( 'endpoint' => $path, 'error_code' => 'pek_transport_error', 'message' => $this->safe_message( (string) ( $response['message'] ?? '' ) ) ) );
+			throw new PekApiException( 'Не удалось выполнить запрос к ПЭК.', array( 'endpoint' => $path, 'method' => $method, 'error_code' => 'pek_transport_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'transport' ), 'message' => $this->safe_message( (string) ( $response['message'] ?? '' ) ) ) );
 		}
 
 		$status = (int) ( $response['status'] ?? 0 );
+		$this->last_response_meta = array(
+			'endpoint' => $path,
+			'method' => $method,
+			'http_status' => $status,
+		);
 		$body = (string) ( $response['body'] ?? '' );
 		if ( 403 === $status ) {
-			throw new PekApiException( 'ПЭК отклонил доступ к методу.', array( 'endpoint' => $path, 'error_code' => 'pek_http_403', 'http_status' => 403 ) );
+			throw new PekApiException( 'ПЭК отклонил доступ к методу.', array_merge( $this->last_response_meta, array( 'error_code' => 'pek_http_403', 'failure_stage' => $this->failure_stage_for_path( $path, 'http' ) ) ) );
 		}
 		if ( 404 === $status ) {
-			throw new PekApiException( 'Метод ПЭК не найден.', array( 'endpoint' => $path, 'error_code' => 'pek_http_404', 'http_status' => 404 ) );
+			throw new PekApiException( 'Метод ПЭК не найден.', array_merge( $this->last_response_meta, array( 'error_code' => 'pek_http_404', 'failure_stage' => $this->failure_stage_for_path( $path, 'http' ) ) ) );
 		}
 		if ( 500 === $status ) {
-			throw new PekApiException( 'ПЭК вернул внутреннюю ошибку.', array( 'endpoint' => $path, 'error_code' => 'pek_http_500', 'http_status' => 500 ) );
+			throw new PekApiException( 'ПЭК вернул внутреннюю ошибку.', array_merge( $this->last_response_meta, array( 'error_code' => 'pek_http_500', 'failure_stage' => $this->failure_stage_for_path( $path, 'http' ) ) ) );
 		}
 		if ( $status < 200 || $status >= 300 ) {
-			throw new PekApiException( 'ПЭК вернул ошибочный HTTP статус.', array( 'endpoint' => $path, 'error_code' => 'pek_http_non_2xx', 'http_status' => $status ) );
+			throw new PekApiException( 'ПЭК вернул ошибочный HTTP статус.', array_merge( $this->last_response_meta, array( 'error_code' => 'pek_http_non_2xx', 'failure_stage' => $this->failure_stage_for_path( $path, 'http' ) ) ) );
 		}
 		if ( '' === trim( $body ) ) {
-			throw new PekApiException( 'ПЭК вернул пустой ответ.', array( 'endpoint' => $path, 'error_code' => 'pek_empty_response' ) );
+			throw new PekApiException( 'ПЭК вернул пустой ответ.', array_merge( $this->last_response_meta, array( 'error_code' => 'pek_empty_response', 'failure_stage' => $this->failure_stage_for_path( $path, 'contract' ) ) ) );
 		}
 
 		$decoded = json_decode( $body, true );
 		if ( JSON_ERROR_NONE !== json_last_error() ) {
-			throw new PekApiException( 'ПЭК вернул некорректный JSON.', array( 'endpoint' => $path, 'error_code' => 'pek_invalid_json' ) );
+			throw new PekApiException( 'ПЭК вернул некорректный JSON.', array_merge( $this->last_response_meta, array( 'error_code' => 'pek_invalid_json', 'failure_stage' => $this->failure_stage_for_path( $path, 'contract' ) ) ) );
 		}
 		if ( is_array( $decoded['error'] ?? null ) ) {
 			$error = $decoded['error'];
-			throw new PekApiException( $this->safe_message( (string) ( $error['title'] ?? 'Ошибка ПЭК' ) . ': ' . (string) ( $error['message'] ?? '' ) ), array( 'endpoint' => $path, 'error_code' => 'pek_logical_error' ) );
+			throw new PekApiException( $this->safe_message( (string) ( $error['title'] ?? 'Ошибка ПЭК' ) . ': ' . (string) ( $error['message'] ?? '' ) ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_logical_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ) ) ) );
 		}
 		if ( is_array( $decoded ) && true === ( $decoded['hasError'] ?? false ) ) {
-			throw new PekApiException( $this->safe_message( (string) ( $decoded['errorMessage'] ?? 'ПЭК вернул логическую ошибку.' ) ), array( 'endpoint' => $path, 'error_code' => 'pek_has_error' ) );
+			throw new PekApiException( $this->safe_message( (string) ( $decoded['errorMessage'] ?? 'ПЭК вернул логическую ошибку.' ) ), array_merge( $this->last_response_meta, array( 'error_code' => 'pek_has_error', 'failure_stage' => $this->failure_stage_for_path( $path, 'logical' ), 'response_shape' => $this->response_shape( $decoded ) ) ) );
 		}
 
 		return $decoded;
@@ -179,6 +188,10 @@ final class PekApiClient {
 				array(
 					'endpoint' => '/branches/findzonebycoordinates/',
 					'error_code' => 'pek_unexpected_findzone_coordinates',
+					'method' => 'POST',
+					'http_status' => (int) ( $this->last_response_meta['http_status'] ?? 200 ),
+					'failure_stage' => 'location_resolution',
+					'response_shape' => $this->response_shape( $value ),
 				)
 			);
 		}
@@ -191,6 +204,10 @@ final class PekApiClient {
 				array(
 					'endpoint' => '/branches/findzonebycoordinates/',
 					'error_code' => 'pek_unexpected_findzone_coordinates',
+					'method' => 'POST',
+					'http_status' => (int) ( $this->last_response_meta['http_status'] ?? 200 ),
+					'failure_stage' => 'location_resolution',
+					'response_shape' => $this->response_shape( $value ),
 				)
 			);
 		}
@@ -206,6 +223,10 @@ final class PekApiClient {
 				array(
 					'endpoint' => '/branches/findzonebyaddress/',
 					'error_code' => 'pek_unexpected_findzone_address',
+					'method' => 'POST',
+					'http_status' => (int) ( $this->last_response_meta['http_status'] ?? 200 ),
+					'failure_stage' => 'location_resolution',
+					'response_shape' => $this->response_shape( $value ),
 				)
 			);
 		}
@@ -231,6 +252,10 @@ final class PekApiClient {
 				array(
 					'endpoint' => '/branches/nearestdepartments/',
 					'error_code' => $error_code,
+					'method' => 'POST',
+					'http_status' => (int) ( $this->last_response_meta['http_status'] ?? 200 ),
+					'failure_stage' => str_contains( $error_code, 'destination' ) ? 'destination_terminal_contract' : 'unknown',
+					'response_shape' => $this->response_shape( $value ),
 				)
 			);
 		}
@@ -246,5 +271,67 @@ final class PekApiClient {
 		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
 
 		return trim( $message );
+	}
+
+	/** @return array<string,mixed> */
+	private function response_shape( mixed $value ): array {
+		if ( ! is_array( $value ) ) {
+			return array( 'root_type' => get_debug_type( $value ) );
+		}
+		if ( array_is_list( $value ) ) {
+			return array( 'root_type' => 'list', 'root_count' => count( $value ) );
+		}
+		$keys = array_slice( array_map( static fn( mixed $key ): string => substr( preg_replace( '/[\x00-\x1F\x7F]+/u', '', (string) $key ) ?? '', 0, 64 ), array_keys( $value ) ), 0, 30 );
+		$shape = array(
+			'root_type' => 'object',
+			'root_keys' => $keys,
+		);
+		foreach ( array( 'freeDepartments' => 'free_departments', 'paidDepartments' => 'paid_departments' ) as $source_key => $prefix ) {
+			$present = array_key_exists( $source_key, $value );
+			$shape[ $prefix . '_present' ] = $present;
+			$shape[ $prefix . '_type' ] = $present ? $this->shape_type( $value[ $source_key ] ) : 'missing';
+			if ( $present && is_array( $value[ $source_key ] ) && array_is_list( $value[ $source_key ] ) ) {
+				$shape[ $prefix . '_count' ] = count( $value[ $source_key ] );
+			}
+		}
+
+		return $shape;
+	}
+
+	private function shape_type( mixed $value ): string {
+		if ( is_array( $value ) ) {
+			return array_is_list( $value ) ? 'list' : 'object';
+		}
+		if ( null === $value ) {
+			return 'null';
+		}
+		if ( is_bool( $value ) ) {
+			return 'boolean';
+		}
+		if ( is_int( $value ) || is_float( $value ) ) {
+			return 'number';
+		}
+		if ( is_string( $value ) ) {
+			return 'string';
+		}
+
+		return 'unknown';
+	}
+
+	private function failure_stage_for_path( string $path, string $kind ): string {
+		if ( str_contains( $path, '/branches/findzoneby' ) ) {
+			return 'location_resolution';
+		}
+		if ( str_contains( $path, '/branches/nearestdepartments/' ) ) {
+			return match ( $kind ) {
+				'request' => 'destination_terminal_request',
+				'transport' => 'destination_terminal_transport',
+				'http' => 'destination_terminal_http',
+				'logical' => 'destination_terminal_logical',
+				default => 'destination_terminal_contract',
+			};
+		}
+
+		return 'unknown';
 	}
 }
