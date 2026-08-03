@@ -43,6 +43,7 @@ final class PekLocationResolver {
 			$response = 'coordinates' === $method
 				? $this->api->find_zone_by_coordinates( (float) $location->latitude, (float) $location->longitude )
 				: $this->api->find_zone_by_address( $this->addresses->build( $location ) );
+			$mapping = $this->normalize_response( $location, $fingerprint, $method, $response );
 		} catch ( PekApiException $exception ) {
 			if (
 				hash_equals( $fingerprint, (string) ( $existing['address_fingerprint'] ?? '' ) )
@@ -59,7 +60,6 @@ final class PekLocationResolver {
 			}
 			throw $exception;
 		}
-		$mapping = $this->normalize_response( $location, $fingerprint, $method, $response );
 		$this->mappings->upsert( $mapping );
 		$mapping['cache_hit'] = false;
 
@@ -72,21 +72,18 @@ final class PekLocationResolver {
 
 	/** @param array<string,mixed>|array<int,mixed> $response @return array<string,mixed> */
 	private function normalize_response( Location $location, string $fingerprint, string $method, array $response ): array {
-		$row = array_is_list( $response ) ? ( is_array( $response[0] ?? null ) ? $response[0] : array() ) : $response;
-		if ( array() === $row ) {
+		if ( array() === $response ) {
 			return $this->unsupported_mapping( $location, 'empty_response', 'PEK returned no zone.', $fingerprint, $method );
 		}
+		if ( array_is_list( $response ) ) {
+			$this->contract_failure( 'coordinates' === $method ? 'pek_unexpected_findzone_coordinates' : 'pek_unexpected_findzone_address', $method );
+		}
+		$row = $response;
 		$geo = is_array( $row['GeoData'] ?? null ) ? $row['GeoData'] : array();
 		$response_country = $this->response_country_code( $geo );
 		$canonical_country = strtoupper( trim( $location->country_code ) );
 		if ( $response_country['present'] && ! $response_country['valid'] ) {
-			return $this->unsupported_mapping(
-				$location,
-				'invalid_response_country',
-				'PEK returned malformed resolved address country.',
-				$fingerprint,
-				$method
-			);
+			$this->contract_failure( 'pek_invalid_response_country', $method );
 		}
 		if ( $response_country['present'] && $response_country['code'] !== $canonical_country ) {
 			return $this->unsupported_mapping(
@@ -101,10 +98,10 @@ final class PekLocationResolver {
 				)
 			);
 		}
-		$zone_id = trim( (string) ( $row['zoneId'] ?? '' ) );
-		$branch_id = trim( (string) ( $row['branchUID'] ?? '' ) );
+		$zone_id = $this->optional_api_string( $row, 'zoneId', $method );
+		$branch_id = $this->optional_api_string( $row, 'branchUID', $method );
 		$has_zone_context = '' !== $zone_id && '' !== $branch_id;
-		$precision_result = $this->precision( $row, $geo );
+		$precision_result = $this->precision( $method, $row, $geo );
 		$precision = $precision_result['value'];
 		$state = 'unsupported';
 		$diagnostic_code = '';
@@ -112,22 +109,22 @@ final class PekLocationResolver {
 			if ( $has_zone_context ) {
 				$state = 'resolved';
 			} else {
-				$diagnostic_code = 'incomplete_zone_context';
+				$this->contract_failure( 'pek_incomplete_findzone_coordinates', $method );
 			}
 		} elseif ( ! $precision_result['scalar'] ) {
-			$diagnostic_code = 'unexpected_precision';
+			$this->contract_failure( 'pek_unexpected_address_precision', $method );
 		} elseif ( '' === $precision ) {
-			$diagnostic_code = 'bad_precision';
+			$this->contract_failure( 'pek_missing_address_precision', $method );
 		} elseif ( 'bad' === $precision ) {
 			$diagnostic_code = 'bad_precision';
 		} elseif ( in_array( $precision, array( 'exact', 'near' ), true ) ) {
 			if ( $has_zone_context ) {
 				$state = 'exact' === $precision ? 'resolved' : 'near';
 			} else {
-				$diagnostic_code = 'incomplete_zone_context';
+				$this->contract_failure( 'pek_incomplete_findzone_address', $method );
 			}
 		} else {
-			$diagnostic_code = 'unexpected_precision';
+			$this->contract_failure( 'pek_unexpected_address_precision', $method );
 		}
 		if ( 'unsupported' === $state && '' === $diagnostic_code ) {
 			$diagnostic_code = 'incomplete_zone_context';
@@ -139,10 +136,10 @@ final class PekLocationResolver {
 			'address_fingerprint' => $fingerprint,
 			'resolution_method' => $method,
 			'zone_id' => $zone_id,
-			'zone_name' => trim( (string) ( $row['zoneName'] ?? '' ) ),
+			'zone_name' => $this->optional_api_string( $row, 'zoneName', $method ),
 			'branch_id' => $branch_id,
-			'branch_title' => trim( (string) ( $row['branchTitle'] ?? '' ) ),
-			'main_warehouse_id' => trim( (string) ( $row['mainWarehouseId'] ?? $row['warehouseId'] ?? '' ) ),
+			'branch_title' => $this->optional_api_string( $row, 'branchTitle', $method ),
+			'main_warehouse_id' => $this->optional_api_string( $row, 'mainWarehouseId', $method ),
 			'normalized_address' => $this->normalized_address( $row, $location ),
 			'latitude' => $has_coordinates ? (float) $location->latitude : null,
 			'longitude' => $has_coordinates ? (float) $location->longitude : null,
@@ -214,13 +211,42 @@ final class PekLocationResolver {
 	}
 
 	/** @param array<string,mixed> $row @param array<string,mixed> $geo @return array{scalar:bool,value:string} */
-	private function precision( array $row, array $geo ): array {
-		$value = $row['precision'] ?? $row['Precision'] ?? $geo['precision'] ?? '';
-		if ( ! is_scalar( $value ) && null !== $value ) {
+	private function precision( string $method, array $row, array $geo ): array {
+		if ( 'coordinates' === $method ) {
+			return array( 'scalar' => true, 'value' => '' );
+		}
+		if ( ! is_array( $row['GeoData'] ?? null ) || ! array_key_exists( 'precision', $geo ) ) {
+			$this->contract_failure( 'pek_missing_address_precision', $method );
+		}
+		$value = $geo['precision'];
+		if ( ! is_string( $value ) ) {
 			return array( 'scalar' => false, 'value' => '' );
 		}
 
 		return array( 'scalar' => true, 'value' => strtolower( trim( (string) $value ) ) );
+	}
+
+	/** @param array<string,mixed> $row */
+	private function optional_api_string( array $row, string $key, string $method ): string {
+		if ( ! array_key_exists( $key, $row ) || null === $row[ $key ] ) {
+			return '';
+		}
+		if ( ! is_string( $row[ $key ] ) ) {
+			$this->contract_failure( 'coordinates' === $method ? 'pek_invalid_findzone_coordinates_contract' : 'pek_invalid_findzone_address_contract', $method );
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $row[ $key ] ) ?? $row[ $key ];
+
+		return trim( $value );
+	}
+
+	private function contract_failure( string $code, string $method ): never {
+		throw new PekApiException(
+			'ПЭК вернул некорректную структуру зоны.',
+			array(
+				'endpoint' => 'coordinates' === $method ? '/branches/findzonebycoordinates/' : '/branches/findzonebyaddress/',
+				'error_code' => $code,
+			)
+		);
 	}
 
 	private function has_usable_location_coordinates( Location $location ): bool {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Pek\Pickup;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
@@ -27,6 +28,7 @@ final class PekTerminalService {
 
 	/** @return array<int,PickupPoint> */
 	public function search( CarrierPickupPointQuery $query, bool $use_cache = true ): array {
+		$this->last_report = array();
 		if ( $query->location_id <= 0 ) {
 			$this->last_report = array(
 				'success' => false,
@@ -92,8 +94,32 @@ final class PekTerminalService {
 				return $cached['points'];
 			}
 		}
-		$response = $this->api->destination_nearest_departments( $request );
-		$result = $this->normalize_response( $response, $query, $mapping );
+		$base_report = array(
+			'success' => false,
+			'error_code' => '',
+			'api_source' => 'api',
+			'cache_hit' => false,
+			'query_fingerprint' => $fingerprint,
+			'mapping' => $mapping,
+			'total_returned' => 0,
+			'free_count' => 0,
+			'paid_count' => 0,
+			'rejected_invalid' => 0,
+			'rejected_limits' => 0,
+		);
+		try {
+			$response = $this->api->destination_nearest_departments( $request );
+			$result = $this->normalize_response( $response, $query, $mapping );
+		} catch ( PekApiException $exception ) {
+			$this->last_report = array_merge(
+				$base_report,
+				array(
+					'error_code' => (string) ( $exception->context()['error_code'] ?? 'pek_destination_terminal_api_failed' ),
+					'message' => 'PEK destination terminal API response could not be used.',
+				)
+			);
+			throw $exception;
+		}
 		$metadata = array(
 			'success' => true,
 			'error_code' => '',
@@ -136,13 +162,14 @@ final class PekTerminalService {
 		return $this->last_report;
 	}
 
-	/** @param array<string,mixed> $response @param array<string,mixed> $mapping @return array{points:array<int,PickupPoint>,terminal_rows:array<int,array<string,mixed>>,free_count:int,paid_count:int,rejected_invalid:int,rejected_limits:int} */
+	/** @param array<string,mixed> $response @param array<string,mixed> $mapping @return array{points:array<int,PickupPoint>,terminal_rows:array<int,array<string,mixed>>,free_count:int,paid_count:int,rejected_invalid:int,rejected_limits:int,input_row_count:int,valid_structural_row_count:int} */
 	private function normalize_response( array $response, CarrierPickupPointQuery $query, array $mapping ): array {
 		$points = array();
 		$terminal_rows = array();
-		$report = array( 'free_count' => 0, 'paid_count' => 0, 'rejected_invalid' => 0, 'rejected_limits' => 0 );
+		$report = array( 'free_count' => 0, 'paid_count' => 0, 'rejected_invalid' => 0, 'rejected_limits' => 0, 'input_row_count' => 0, 'valid_structural_row_count' => 0 );
 		foreach ( array( 'freeDepartments' => 'free', 'paidDepartments' => 'paid' ) as $key => $source ) {
-			foreach ( is_array( $response[ $key ] ?? null ) ? $response[ $key ] : array() as $row ) {
+			foreach ( $response[ $key ] as $row ) {
+				++$report['input_row_count'];
 				if ( ! is_array( $row ) ) {
 					++$report['rejected_invalid'];
 					continue;
@@ -152,6 +179,7 @@ final class PekTerminalService {
 					++$report['rejected_invalid'];
 					continue;
 				}
+				++$report['valid_structural_row_count'];
 				if ( ! $this->passes_limits( $normalized, $query ) ) {
 					++$report['rejected_limits'];
 					continue;
@@ -161,40 +189,77 @@ final class PekTerminalService {
 				$points[] = $this->point_from_row( $normalized, $mapping );
 			}
 		}
+		if ( $report['input_row_count'] > 0 && 0 === $report['valid_structural_row_count'] ) {
+			throw new PekApiException(
+				'ПЭК вернул некорректные строки терминалов назначения.',
+				array(
+					'endpoint' => '/branches/nearestdepartments/',
+					'error_code' => 'pek_destination_terminal_rows_invalid',
+				)
+			);
+		}
 
 		return array_merge( array( 'points' => $points, 'terminal_rows' => $terminal_rows ), $report );
 	}
 
 	/** @param array<string,mixed> $row @param array<string,mixed> $mapping @return array<string,mixed> */
 	private function normalize_row( array $row, string $source, CarrierPickupPointQuery $query, array $mapping ): array {
-		$id = trim( (string) ( $row['warehouseId'] ?? '' ) );
-		$coordinates = is_array( $row['coordinates'] ?? null ) ? $row['coordinates'] : array();
-		$lat = is_numeric( $coordinates['latitude'] ?? null ) ? (float) $coordinates['latitude'] : null;
-		$lng = is_numeric( $coordinates['longitude'] ?? null ) ? (float) $coordinates['longitude'] : null;
-		if ( '' === $id || null === $lat || null === $lng || $lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 ) {
+		$id = $this->required_text( $row, 'warehouseId', 64 );
+		$coordinates = is_array( $row['coordinates'] ?? null ) && ! array_is_list( $row['coordinates'] ) ? $row['coordinates'] : array();
+		$lat = $this->coordinate_component( $coordinates['latitude'] ?? null, -90, 90 );
+		$lng = $this->coordinate_component( $coordinates['longitude'] ?? null, -180, 180 );
+		$department_type_id = $this->optional_integer( $row['departmentTypeId'] ?? null );
+		$priority = $this->optional_integer( $row['priority'] ?? null );
+		$timezone = $this->optional_text( $row, 'branchTimezone', 32 );
+		if ( '' === $timezone ) {
+			$timezone = $this->optional_text( $row, 'timeZone', 32 );
+		}
+		$branch_id = $this->optional_text( $row, 'branchId', 64 );
+		$branch_name = $this->optional_text( $row, 'branchName', 191 );
+		$division_name = $this->optional_text( $row, 'divisionName', 191 );
+		$department_type = $this->optional_text( $row, 'departmentType', 191 );
+		$address = $this->optional_text( $row, 'address', 1000 );
+		$limits = array(
+			'maxWeight' => $this->normalize_limit( $row['maxWeight'] ?? null ),
+			'maxVolume' => $this->normalize_limit( $row['maxVolume'] ?? null ),
+			'maxDimension' => $this->normalize_limit( $row['maxDimension'] ?? null ),
+			'maxWeightOnePlace' => $this->normalize_limit( $row['maxWeightOnePlace'] ?? null ),
+			'maxCount' => $this->normalize_limit( $row['maxCount'] ?? null, true ),
+		);
+		$work_time = $this->work_time( $row );
+		if (
+			'' === $id
+			|| null === $lat
+			|| null === $lng
+			|| null === $department_type_id
+			|| null === $priority
+			|| null === $work_time
+			|| in_array( "\0", array( $branch_id, $branch_name, $division_name, $department_type, $address, $timezone ), true )
+			|| in_array( false, $limits, true )
+		) {
 			return array();
 		}
 
 		return array(
 			'warehouse_id' => $id,
-			'branch_id' => trim( (string) ( $row['branchId'] ?? '' ) ),
-			'branch_name' => trim( (string) ( $row['branchName'] ?? '' ) ),
-			'division_name' => trim( (string) ( $row['divisionName'] ?? '' ) ),
-			'department_type_id' => (int) ( $row['departmentTypeId'] ?? 0 ),
-			'department_type' => trim( (string) ( $row['departmentType'] ?? '' ) ),
+			'branch_id' => $branch_id,
+			'branch_name' => $branch_name,
+			'division_name' => $division_name,
+			'department_type_id' => $department_type_id,
+			'department_type' => $department_type,
 			'source' => $source,
 			'country_code' => strtoupper( trim( (string) ( $mapping['country_code'] ?? '' ) ) ),
-			'address' => trim( (string) ( $row['address'] ?? '' ) ),
+			'address' => $address,
 			'latitude' => $lat,
 			'longitude' => $lng,
-			'timezone' => $this->normalize_timezone( $row['branchTimezone'] ?? $row['timeZone'] ?? '' ),
-			'priority' => (int) ( $row['priority'] ?? 0 ),
-			'maxWeight' => $row['maxWeight'] ?? null,
-			'maxVolume' => $row['maxVolume'] ?? null,
-			'maxDimension' => $row['maxDimension'] ?? null,
-			'maxWeightOnePlace' => $row['maxWeightOnePlace'] ?? null,
-			'maxCount' => $row['maxCount'] ?? null,
-			'work_time' => $this->work_time( $row ),
+			'timezone' => $this->normalize_timezone( $timezone ),
+			'priority' => $priority,
+			'maxWeight' => $limits['maxWeight'],
+			'maxVolume' => $limits['maxVolume'],
+			'maxDimension' => $limits['maxDimension'],
+			'maxWeightOnePlace' => $limits['maxWeightOnePlace'],
+			'maxCount' => $limits['maxCount'],
+			'work_time' => $work_time,
 			'availability' => array(
 				'scheduleShortWorkDays' => is_array( $row['scheduleShortWorkDays'] ?? null ) ? $row['scheduleShortWorkDays'] : array(),
 				'scheduleHolidayDays' => is_array( $row['scheduleHolidayDays'] ?? null ) ? $row['scheduleHolidayDays'] : array(),
@@ -264,19 +329,116 @@ final class PekTerminalService {
 	}
 
 	/** @param array<string,mixed> $row */
-	private function work_time( array $row ): string {
-		$days = is_array( $row['divisionTimeOfWork'] ?? null ) ? $row['divisionTimeOfWork'] : array();
+	private function work_time( array $row ): ?string {
+		if ( ! array_key_exists( 'divisionTimeOfWork', $row ) || null === $row['divisionTimeOfWork'] ) {
+			return '';
+		}
+		if ( ! is_array( $row['divisionTimeOfWork'] ) || ! array_is_list( $row['divisionTimeOfWork'] ) ) {
+			return null;
+		}
+		$days = $row['divisionTimeOfWork'];
 		if ( array() === $days ) {
 			return '';
 		}
 		$parts = array();
 		foreach ( array_slice( $days, 0, 7 ) as $day ) {
-			if ( is_array( $day ) ) {
-				$parts[] = trim( (string) ( $day['dayOfWeek'] ?? '' ) . ': ' . (string) ( $day['workFrom'] ?? '' ) . '-' . (string) ( $day['workTo'] ?? '' ) );
+			if ( ! is_array( $day ) || array_is_list( $day ) ) {
+				return null;
 			}
+			$day_of_week = $this->optional_text( $day, 'dayOfWeek', 16 );
+			$work_from = $this->optional_text( $day, 'workFrom', 16 );
+			$work_to = $this->optional_text( $day, 'workTo', 16 );
+			if ( in_array( "\0", array( $day_of_week, $work_from, $work_to ), true ) ) {
+				return null;
+			}
+			$parts[] = trim( $day_of_week . ': ' . $work_from . '-' . $work_to );
 		}
 
 		return implode( '; ', array_filter( $parts ) );
+	}
+
+	/** @param array<string,mixed> $row */
+	private function required_text( array $row, string $key, int $max_length ): string {
+		if ( ! array_key_exists( $key, $row ) || ! is_string( $row[ $key ] ) ) {
+			return '';
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $row[ $key ] ) ?? $row[ $key ];
+		$value = trim( $value );
+		if ( '' === $value || strlen( $value ) > $max_length ) {
+			return '';
+		}
+
+		return $value;
+	}
+
+	/** @param array<string,mixed> $row */
+	private function optional_text( array $row, string $key, int $max_length ): string {
+		if ( ! array_key_exists( $key, $row ) || null === $row[ $key ] ) {
+			return '';
+		}
+		if ( ! is_string( $row[ $key ] ) ) {
+			return "\0";
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $row[ $key ] ) ?? $row[ $key ];
+
+		return trim( substr( $value, 0, $max_length ) );
+	}
+
+	private function optional_integer( mixed $value ): ?int {
+		if ( null === $value ) {
+			return 0;
+		}
+		if ( is_int( $value ) ) {
+			return $value >= 0 ? $value : null;
+		}
+		if ( is_string( $value ) && preg_match( '/^\d+$/', trim( $value ) ) ) {
+			return (int) trim( $value );
+		}
+
+		return null;
+	}
+
+	private function coordinate_component( mixed $value, float $min, float $max ): ?float {
+		if ( ! is_int( $value ) && ! is_float( $value ) && ! is_string( $value ) ) {
+			return null;
+		}
+		if ( ! is_numeric( $value ) ) {
+			return null;
+		}
+		$number = (float) $value;
+		if ( ! is_finite( $number ) || $number < $min || $number > $max ) {
+			return null;
+		}
+
+		return $number;
+	}
+
+	private function normalize_limit( mixed $value, bool $integer = false ): null|false|int|float {
+		if ( null === $value ) {
+			return null;
+		}
+		if ( $integer ) {
+			if ( is_int( $value ) ) {
+				return $value >= 0 ? $value : false;
+			}
+			if ( is_string( $value ) && preg_match( '/^\d+$/', trim( $value ) ) ) {
+				return (int) trim( $value );
+			}
+
+			return false;
+		}
+		if ( ! is_int( $value ) && ! is_float( $value ) && ! is_string( $value ) ) {
+			return false;
+		}
+		if ( ! is_numeric( $value ) ) {
+			return false;
+		}
+		$number = (float) $value;
+		if ( ! is_finite( $number ) || $number < 0 ) {
+			return false;
+		}
+
+		return $number;
 	}
 
 	/** @param array<string,mixed> $mapping */

@@ -68,11 +68,11 @@ final class PekApiClient {
 		return $result;
 	}
 
-	/** @return array<int,array<string,mixed>> */
+	/** @return array<string,mixed> */
 	public function find_zone_by_coordinates( float $latitude, float $longitude ): array {
 		$result = $this->call( 'POST', '/branches/findzonebycoordinates/', array( array( 'latitude' => $latitude, 'longitude' => $longitude ) ) );
 
-		return $this->expect_list( $result, 'branches/findzonebycoordinates' );
+		return $this->expect_find_zone_by_coordinates_response( $result );
 	}
 
 	/** @return array<string,mixed>|array<int,mixed> */
@@ -82,11 +82,8 @@ final class PekApiClient {
 			throw new PekApiException( 'Не указан адрес для поиска зоны ПЭК.', array( 'error_code' => 'pek_empty_zone_address' ) );
 		}
 		$result = $this->call( 'POST', '/branches/findzonebyaddress/', array( 'address' => $address ) );
-		if ( ! is_array( $result ) ) {
-			throw new PekApiException( 'ПЭК вернул неожиданную структуру зоны адреса.', array( 'error_code' => 'pek_unexpected_findzone_address' ) );
-		}
 
-		return $result;
+		return $this->expect_find_zone_by_address_response( $result );
 	}
 
 	/** @return array<string,mixed> */
@@ -174,6 +171,48 @@ final class PekApiClient {
 		return array_values( array_filter( $value, 'is_array' ) );
 	}
 
+	/** @return array<string,mixed> */
+	private function expect_find_zone_by_coordinates_response( mixed $value ): array {
+		if ( ! is_array( $value ) || ! array_is_list( $value ) ) {
+			throw new PekApiException(
+				'ПЭК вернул неожиданную структуру зоны координат.',
+				array(
+					'endpoint' => '/branches/findzonebycoordinates/',
+					'error_code' => 'pek_unexpected_findzone_coordinates',
+				)
+			);
+		}
+		if ( array() === $value ) {
+			return array();
+		}
+		if ( 1 !== count( $value ) || ! is_array( $value[0] ) || array_is_list( $value[0] ) ) {
+			throw new PekApiException(
+				'ПЭК вернул неожиданную структуру зоны координат.',
+				array(
+					'endpoint' => '/branches/findzonebycoordinates/',
+					'error_code' => 'pek_unexpected_findzone_coordinates',
+				)
+			);
+		}
+
+		return $value[0];
+	}
+
+	/** @return array<string,mixed> */
+	private function expect_find_zone_by_address_response( mixed $value ): array {
+		if ( ! is_array( $value ) || ( array() !== $value && array_is_list( $value ) ) ) {
+			throw new PekApiException(
+				'ПЭК вернул неожиданную структуру зоны адреса.',
+				array(
+					'endpoint' => '/branches/findzonebyaddress/',
+					'error_code' => 'pek_unexpected_findzone_address',
+				)
+			);
+		}
+
+		return $value;
+	}
+
 	/** @return array{freeDepartments:array<int,mixed>,paidDepartments:array<int,mixed>} */
 	private function expect_nearest_departments_response( mixed $value, string $error_code ): array {
 		if (
@@ -184,6 +223,8 @@ final class PekApiClient {
 			|| ! array_key_exists( 'paidDepartments', $value )
 			|| ! is_array( $value['freeDepartments'] )
 			|| ! is_array( $value['paidDepartments'] )
+			|| ! array_is_list( $value['freeDepartments'] )
+			|| ! array_is_list( $value['paidDepartments'] )
 		) {
 			throw new PekApiException(
 				'ПЭК вернул неожиданную структуру ближайших отделений.',
@@ -195,8 +236,8 @@ final class PekApiClient {
 		}
 
 		return array(
-			'freeDepartments' => $value['freeDepartments'],
-			'paidDepartments' => $value['paidDepartments'],
+			'freeDepartments' => array_values( $value['freeDepartments'] ),
+			'paidDepartments' => array_values( $value['paidDepartments'] ),
 		);
 	}
 

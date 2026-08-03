@@ -86,7 +86,16 @@ final class PekDestinationTerminalSearchCache {
 
 	/** @param array<string,mixed> $metadata @return array<string,mixed> */
 	private function sanitize_metadata( array $metadata ): array {
-		unset( $metadata['credentials'], $metadata['Authorization'], $metadata['raw_response'], $metadata['request_args'] );
+		foreach ( array_keys( $metadata ) as $key ) {
+			$normalized = strtolower( (string) $key );
+			if ( in_array( $normalized, array( 'raw_response', 'response', 'credentials', 'authorization', 'headers', 'request_args', 'body' ), true ) ) {
+				unset( $metadata[ $key ] );
+				continue;
+			}
+			if ( is_array( $metadata[ $key ] ) ) {
+				$metadata[ $key ] = $this->sanitize_metadata( $metadata[ $key ] );
+			}
+		}
 
 		return $metadata;
 	}

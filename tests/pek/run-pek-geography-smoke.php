@@ -6,6 +6,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
@@ -158,13 +159,8 @@ foreach ( array( 31, 32, 33, 34 ) as $partial_id ) {
 }
 
 $method_cases = array(
-	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => '' ) ), 'state' => 'unsupported', 'code' => 'bad_precision' ),
-	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'maybe' ) ), 'state' => 'unsupported', 'code' => 'unexpected_precision' ),
-	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => array( 'exact' ) ) ), 'state' => 'unsupported', 'code' => 'unexpected_precision' ),
-	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'GeoData' => array( 'precision' => 'exact' ) ), 'state' => 'unsupported', 'code' => 'incomplete_zone_context' ),
 	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'bad' ) ), 'state' => 'unsupported', 'code' => 'bad_precision' ),
 	array( 'id' => 10, 'method' => 'coordinates', 'response' => array( array( 'zoneId' => 'z', 'branchUID' => 'b' ) ), 'state' => 'resolved', 'code' => '' ),
-	array( 'id' => 10, 'method' => 'coordinates', 'response' => array( array( 'zoneId' => 'z' ) ), 'state' => 'unsupported', 'code' => 'incomplete_zone_context' ),
 );
 foreach ( $method_cases as $case ) {
 	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== (int) $case['id'] ) );
@@ -178,30 +174,78 @@ foreach ( $method_cases as $case ) {
 	}
 }
 
-foreach ( array(
-	array( 'country' => '', 'state' => 'resolved', 'code' => '' ),
-	array( 'country' => '643', 'state' => 'unsupported', 'code' => 'invalid_response_country' ),
-	array( 'country' => 'R1', 'state' => 'unsupported', 'code' => 'invalid_response_country' ),
-	array( 'country' => 'RUS', 'state' => 'unsupported', 'code' => 'invalid_response_country' ),
-) as $case ) {
+foreach ( array( '', null ) as $absent_country ) {
 	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== 11 ) );
-	$country_address = '' === $case['country'] ? array( 'formatted' => 'Россия, Линево' ) : array( 'formatted' => 'Россия, Линево', 'country_code' => $case['country'] );
+	$country_address = array( 'formatted' => 'Россия, Линево' );
+	if ( null !== $absent_country ) {
+		$country_address['country_code'] = $absent_country;
+	}
 	$country_case_http = new PekGeoFakeHttp( array(
 		'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'exact', 'Address' => $country_address ) ),
 	) );
 	$country_case_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $country_case_http, new PekRequestBudget( $settings ) ), $settings );
 	$country_case_mapping = $country_case_resolver->resolve( 11 );
-	pek_geo_assert( $case['state'] === $country_case_mapping['mapping_state'], 'Malformed response country must not be treated as absent.' );
-	if ( '' !== $case['code'] ) {
-		pek_geo_assert( str_contains( (string) $country_case_mapping['safe_diagnostic_json'], (string) $case['code'] ), 'Malformed response country must report invalid_response_country.' );
+	pek_geo_assert( 'resolved' === $country_case_mapping['mapping_state'], 'Absent or empty response country must leave validation unavailable without failing mapping.' );
+}
+
+function pek_geo_expect_exception( callable $callback, string $code, string $message ): void {
+	try {
+		$callback();
+		pek_geo_assert( false, $message );
+	} catch ( PekApiException $exception ) {
+		pek_geo_assert( $code === (string) ( $exception->context()['error_code'] ?? '' ), $message . ' stable code mismatch.' );
 	}
 }
-$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== 11 ) );
-$non_scalar_country_http = new PekGeoFakeHttp( array(
-	'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => array( 'RU' ) ) ) ),
-) );
-$non_scalar_country = ( new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $non_scalar_country_http, new PekRequestBudget( $settings ) ), $settings ) )->resolve( 11 );
-pek_geo_assert( 'unsupported' === $non_scalar_country['mapping_state'] && str_contains( (string) $non_scalar_country['safe_diagnostic_json'], 'invalid_response_country' ), 'Non-scalar response country must fail closed.' );
+
+foreach ( array(
+	array( 'method' => 'coordinates', 'id' => 10, 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b' ), 'code' => 'pek_unexpected_findzone_coordinates' ),
+	array( 'method' => 'coordinates', 'id' => 10, 'response' => array( array( 'zoneId' => 'z', 'branchUID' => 'b' ), array( 'zoneId' => 'z2', 'branchUID' => 'b2' ) ), 'code' => 'pek_unexpected_findzone_coordinates' ),
+	array( 'method' => 'coordinates', 'id' => 10, 'response' => array( 'scalar' ), 'code' => 'pek_unexpected_findzone_coordinates' ),
+	array( 'method' => 'address', 'id' => 11, 'response' => array( array( 'zoneId' => 'z', 'branchUID' => 'b' ) ), 'code' => 'pek_unexpected_findzone_address' ),
+) as $case ) {
+	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== (int) $case['id'] ) );
+	$path = 'coordinates' === $case['method'] ? 'findzonebycoordinates' : 'findzonebyaddress';
+	$root_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/' . $path . '/' => $case['response'] ) );
+	$root_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $root_http, new PekRequestBudget( $settings ) ), $settings );
+	pek_geo_expect_exception( static fn() => $root_resolver->resolve( (int) $case['id'] ), (string) $case['code'], 'Zone root contract failure must throw.' );
+}
+
+foreach ( array(
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'precision' => 'exact' ), 'code' => 'pek_missing_address_precision' ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'Precision' => 'exact' ), 'code' => 'pek_missing_address_precision' ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b' ), 'code' => 'pek_missing_address_precision' ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array() ), 'code' => 'pek_missing_address_precision' ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 1 ) ), 'code' => 'pek_unexpected_address_precision' ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => true ) ), 'code' => 'pek_unexpected_address_precision' ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => array( 'exact' ) ) ), 'code' => 'pek_unexpected_address_precision' ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'maybe' ) ), 'code' => 'pek_unexpected_address_precision' ),
+) as $case ) {
+	$precision_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/findzonebyaddress/' => $case['response'] ) );
+	$precision_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $precision_http, new PekRequestBudget( $settings ) ), $settings );
+	pek_geo_expect_exception( static fn() => $precision_resolver->resolve( 11 ), (string) $case['code'], 'Address precision must be read only from GeoData.precision.' );
+}
+
+foreach ( array(
+	array( 'response' => array( 'zoneId' => array(), 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'exact' ) ) ),
+	array( 'response' => array( 'zoneId' => 123, 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'exact' ) ) ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => (object) array(), 'GeoData' => array( 'precision' => 'exact' ) ) ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => true, 'GeoData' => array( 'precision' => 'exact' ) ) ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'zoneName' => array(), 'GeoData' => array( 'precision' => 'exact' ) ) ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'branchTitle' => array(), 'GeoData' => array( 'precision' => 'exact' ) ) ),
+	array( 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'mainWarehouseId' => array(), 'GeoData' => array( 'precision' => 'exact' ) ) ),
+) as $case ) {
+	$field_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/findzonebyaddress/' => $case['response'] ) );
+	$field_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $field_http, new PekRequestBudget( $settings ) ), $settings );
+	pek_geo_expect_exception( static fn() => $field_resolver->resolve( 11 ), 'pek_invalid_findzone_address_contract', 'Non-string critical/text zone fields must throw contract exception.' );
+}
+
+foreach ( array( '643', 'R1', 'RUS', array( 'RU' ) ) as $malformed_country ) {
+	$country_http = new PekGeoFakeHttp( array(
+		'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => $malformed_country ) ) ),
+	) );
+	$country_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $country_http, new PekRequestBudget( $settings ) ), $settings );
+	pek_geo_expect_exception( static fn() => $country_resolver->resolve( 11 ), 'pek_invalid_response_country', 'Malformed non-empty response country must throw contract exception.' );
+}
 
 $same_fingerprint = $resolver->fingerprint( Location::from_array( $wpdb->locations[1] ) );
 $wpdb->pek_location_mappings = array( array( 'id' => 1, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $same_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'normalized_address' => 'Россия, Линево', 'checked_at' => '2026-07-01 00:00:00', 'created_at' => '2026-07-01 00:00:00', 'updated_at' => '2026-07-01 00:00:00' ) );

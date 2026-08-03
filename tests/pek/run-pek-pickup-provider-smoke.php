@@ -80,8 +80,34 @@ final class PekPickupFakeHttp implements PekHttpClientInterface {
 		if ( str_contains( $path, 'findzonebyaddress' ) ) {
 			return array( 'status' => 200, 'body' => wp_json_encode( array( 'zoneId' => 'zone-address', 'zoneName' => 'Zone address', 'branchUID' => 'branch-address', 'branchTitle' => 'Branch address', 'warehousePoint' => array( 'latitude' => 56.0, 'longitude' => 83.0 ), 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Линево' ) ) ) ) );
 		}
+		if ( isset( $this->nearest_response['__status'] ) ) {
+			return array( 'status' => (int) $this->nearest_response['__status'], 'body' => wp_json_encode( $this->nearest_response['body'] ?? array() ) );
+		}
 		return array( 'status' => 200, 'body' => wp_json_encode( $this->nearest_response ) );
 	}
+}
+
+function pek_pickup_valid_row( array $overrides = array() ): array {
+	return array_merge(
+		array(
+			'warehouseId' => 'valid-' . substr( md5( serialize( $overrides ) ), 0, 8 ),
+			'branchId' => 'branch',
+			'branchName' => 'Новосибирск',
+			'divisionName' => 'Центр',
+			'departmentTypeId' => 0,
+			'departmentType' => 'Отделение компании',
+			'address' => 'Адрес',
+			'coordinates' => array( 'latitude' => 55.1, 'longitude' => 82.9 ),
+			'timeZone' => '07:00:00',
+			'priority' => 1,
+			'maxWeight' => 0,
+			'maxVolume' => 0,
+			'maxDimension' => 0,
+			'maxWeightOnePlace' => 0,
+			'maxCount' => 0,
+		),
+		$overrides
+	);
 }
 
 if ( ! class_exists( 'wpdb' ) ) {
@@ -189,6 +215,8 @@ foreach ( array(
 	'missing-paid' => array( 'freeDepartments' => array() ),
 	'free-null' => array( 'freeDepartments' => null, 'paidDepartments' => array() ),
 	'paid-null' => array( 'freeDepartments' => array(), 'paidDepartments' => null ),
+	'assoc-free' => array( 'freeDepartments' => array( 'warehouseId' => 'bad' ), 'paidDepartments' => array() ),
+	'assoc-paid' => array( 'freeDepartments' => array(), 'paidDepartments' => array( 'warehouseId' => 'bad' ) ),
 	'root-list' => array(),
 ) as $case_name => $response ) {
 	$bad_http = new PekPickupFakeHttp( $response );
@@ -207,6 +235,101 @@ try {
 	pek_pickup_assert( false, 'Malformed sender nearestdepartments response must fail closed.' );
 } catch ( PekApiException $exception ) {
 	pek_pickup_assert( 'pek_unexpected_nearest_departments' === (string) ( $exception->context()['error_code'] ?? '' ), 'Malformed sender response must preserve sender-specific stable error code.' );
+}
+
+function pek_pickup_search_with_response( array $response, wpdb $wpdb, PekSettings $settings, PekCredentials $credentials ): array {
+	$GLOBALS['wdc_transients'] = array();
+	$http = new PekPickupFakeHttp( $response );
+	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
+	$resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $api, $settings );
+	$repo = new PekTerminalRepository( $wpdb );
+	$service = new PekTerminalService( $resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), $repo, $settings );
+	$query = new CarrierPickupPointQuery( 'pek', 10, 'RU', '', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 );
+
+	return array( $service, $http, $repo, $query, $service->search( $query ) );
+}
+
+$invalid_rows = array(
+	'warehouse-array' => pek_pickup_valid_row( array( 'warehouseId' => array() ) ),
+	'warehouse-int' => pek_pickup_valid_row( array( 'warehouseId' => 123 ) ),
+	'warehouse-bool' => pek_pickup_valid_row( array( 'warehouseId' => true ) ),
+	'warehouse-empty' => pek_pickup_valid_row( array( 'warehouseId' => "\n\t" ) ),
+	'warehouse-too-long' => pek_pickup_valid_row( array( 'warehouseId' => str_repeat( 'a', 65 ) ) ),
+	'branch-array' => pek_pickup_valid_row( array( 'branchId' => array() ) ),
+	'branch-name-array' => pek_pickup_valid_row( array( 'branchName' => array() ) ),
+	'division-object' => pek_pickup_valid_row( array( 'divisionName' => (object) array() ) ),
+	'type-array' => pek_pickup_valid_row( array( 'departmentType' => array() ) ),
+	'address-array' => pek_pickup_valid_row( array( 'address' => array() ) ),
+	'timezone-array' => pek_pickup_valid_row( array( 'timeZone' => array() ) ),
+	'missing-latitude' => pek_pickup_valid_row( array( 'coordinates' => array( 'longitude' => 82.9 ) ) ),
+	'missing-longitude' => pek_pickup_valid_row( array( 'coordinates' => array( 'latitude' => 55.1 ) ) ),
+	'array-latitude' => pek_pickup_valid_row( array( 'coordinates' => array( 'latitude' => array(), 'longitude' => 82.9 ) ) ),
+	'out-latitude' => pek_pickup_valid_row( array( 'coordinates' => array( 'latitude' => 91, 'longitude' => 82.9 ) ) ),
+	'out-longitude' => pek_pickup_valid_row( array( 'coordinates' => array( 'latitude' => 55.1, 'longitude' => 181 ) ) ),
+	'negative-maxWeight' => pek_pickup_valid_row( array( 'maxWeight' => -1 ) ),
+	'nonnumeric-maxVolume' => pek_pickup_valid_row( array( 'maxVolume' => 'nope' ) ),
+	'array-maxDimension' => pek_pickup_valid_row( array( 'maxDimension' => array() ) ),
+	'negative-maxWeightOnePlace' => pek_pickup_valid_row( array( 'maxWeightOnePlace' => -1 ) ),
+	'fractional-maxCount' => pek_pickup_valid_row( array( 'maxCount' => '1.5' ) ),
+	'negative-maxCount' => pek_pickup_valid_row( array( 'maxCount' => -1 ) ),
+	'array-schedule' => pek_pickup_valid_row( array( 'divisionTimeOfWork' => array( 'bad' => array() ) ) ),
+);
+foreach ( $invalid_rows as $case_name => $row ) {
+	$before_terminals = count( $wpdb->pek_terminals );
+	try {
+		pek_pickup_search_with_response( array( 'freeDepartments' => array( $row ), 'paidDepartments' => array() ), $wpdb, $settings, $credentials );
+		pek_pickup_assert( false, 'All-invalid terminal response must throw: ' . $case_name );
+	} catch ( PekApiException $exception ) {
+		pek_pickup_assert( 'pek_destination_terminal_rows_invalid' === (string) ( $exception->context()['error_code'] ?? '' ), 'All-invalid terminal rows must use stable code: ' . $case_name );
+		pek_pickup_assert( $before_terminals === count( $wpdb->pek_terminals ), 'All-invalid terminal rows must not persist repository rows: ' . $case_name );
+		pek_pickup_assert( array() === array_filter( array_keys( $GLOBALS['wdc_transients'] ), static fn( string $key ): bool => str_starts_with( $key, 'wdc_pek_destination_terminals_' ) ), 'All-invalid terminal rows must not persist terminal cache: ' . $case_name );
+	}
+}
+
+foreach ( array(
+	'absent-limits' => array_diff_key( pek_pickup_valid_row(), array_flip( array( 'maxWeight', 'maxVolume', 'maxDimension', 'maxWeightOnePlace', 'maxCount' ) ) ),
+	'null-limits' => pek_pickup_valid_row( array( 'maxWeight' => null, 'maxVolume' => null, 'maxDimension' => null, 'maxWeightOnePlace' => null, 'maxCount' => null ) ),
+	'zero-limits' => pek_pickup_valid_row( array( 'warehouseId' => 'zero-limits', 'maxWeight' => 0, 'maxVolume' => 0, 'maxDimension' => 0, 'maxWeightOnePlace' => 0, 'maxCount' => 0 ) ),
+	'positive-string-limits' => pek_pickup_valid_row( array( 'warehouseId' => 'string-limits', 'maxWeight' => '10', 'maxVolume' => '1', 'maxDimension' => '2', 'maxWeightOnePlace' => '10', 'maxCount' => '10' ) ),
+) as $case_name => $row ) {
+	$result = pek_pickup_search_with_response( array( 'freeDepartments' => array( $row ), 'paidDepartments' => array() ), $wpdb, $settings, $credentials );
+	pek_pickup_assert( 1 === count( $result[4] ), 'Absent/null/zero/positive limits must be valid row forms: ' . $case_name );
+}
+
+$mixed_result = pek_pickup_search_with_response(
+	array(
+		'freeDepartments' => array(
+			pek_pickup_valid_row( array( 'warehouseId' => array() ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'limit-rejected', 'maxWeight' => 0.5 ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'mixed-ok' ) ),
+		),
+		'paidDepartments' => array(),
+	),
+	$wpdb,
+	$settings,
+	$credentials
+);
+$mixed_report = $mixed_result[0]->last_report();
+pek_pickup_assert( 1 === count( $mixed_result[4] ) && 'mixed-ok' === $mixed_result[4][0]->code && 1 === (int) $mixed_report['rejected_invalid'] && 1 === (int) $mixed_report['rejected_limits'] && true === $mixed_report['success'], 'Mixed valid/invalid response must keep exact counters and still succeed when one row is valid.' );
+
+$success_before_error = $provider->search( $query );
+pek_pickup_assert( array() !== $success_before_error && true === $service->last_report()['success'], 'Sequence setup must start with a successful terminal search.' );
+foreach ( array(
+	'http' => array( '__status' => 403, 'body' => array() ),
+	'malformed-top' => array( 'freeDepartments' => array( 'warehouseId' => 'bad' ), 'paidDepartments' => array() ),
+	'all-invalid' => array( 'freeDepartments' => array( pek_pickup_valid_row( array( 'warehouseId' => array() ) ) ), 'paidDepartments' => array() ),
+) as $case_name => $response ) {
+	$GLOBALS['wdc_transients'] = array();
+	$error_http = new PekPickupFakeHttp( $response );
+	$error_api = new PekApiClient( $settings, $credentials, $error_http, new PekRequestBudget( $settings ) );
+	$error_service = new PekTerminalService( new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $error_api, $settings ), $error_api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
+	try {
+		$error_service->search( $query );
+		pek_pickup_assert( false, 'API exception sequence must propagate: ' . $case_name );
+	} catch ( PekApiException ) {
+		$error_report = $error_service->last_report();
+		pek_pickup_assert( false === $error_report['success'] && 'api' === $error_report['api_source'] && false === $error_report['cache_hit'] && 0 === (int) $error_report['total_returned'], 'Failed search must leave current failed last_report without previous counters: ' . $case_name );
+	}
 }
 
 $address_http = new PekPickupFakeHttp();
