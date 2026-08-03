@@ -53,8 +53,11 @@ final class PekSchemaIntegrityService {
 			'location_mappings' => $this->table_exists( $tables['location_mappings'] ),
 			'terminals' => $this->table_exists( $tables['terminals'] ),
 		);
-		if ( ! $after['location_mappings'] || ! $after['terminals'] ) {
-			throw new RuntimeException( 'PEK schema integrity recovery failed.' );
+		if ( ! $after['location_mappings'] ) {
+			throw new RuntimeException( 'PEK schema postcondition failed: location mappings table missing.' );
+		}
+		if ( ! $after['terminals'] ) {
+			throw new RuntimeException( 'PEK schema postcondition failed: terminals table missing.' );
 		}
 
 		return array(

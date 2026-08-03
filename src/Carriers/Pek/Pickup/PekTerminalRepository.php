@@ -62,9 +62,12 @@ final class PekTerminalRepository {
 		if ( ! function_exists( 'dbDelta' ) && defined( 'ABSPATH' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		}
-		if ( function_exists( 'dbDelta' ) ) {
-			dbDelta( $this->schema() );
+		if ( ! function_exists( 'dbDelta' ) ) {
+			throw new \RuntimeException( 'PEK terminal schema installation failed: dbDelta unavailable.' );
 		}
+		$this->clear_last_error();
+		dbDelta( $this->schema() );
+		$this->throw_on_sql_error( 'PEK terminal schema installation failed.' );
 	}
 
 	/** @param array<int,array<string,mixed>> $rows @return array{received:int,saved:int,skipped_invalid:int} */

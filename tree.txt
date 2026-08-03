@@ -125,6 +125,7 @@ C:.
 |           0048_create_pek_location_mappings.php
 |           0049_create_pek_terminals.php
 |           0050_repair_pek_foundation_schema.php
+|           0051_migrate_pek_mapping_precision_column.php
 |
 +---docs
 |   |   README.md

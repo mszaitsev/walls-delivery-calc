@@ -338,6 +338,8 @@ final class Plugin {
 
 	private Container $container;
 
+	private string $migration_failure_message = '';
+
 	public function __construct( PluginEnvironment $environment, ?Container $container = null ) {
 		$this->environment = $environment;
 		$this->container   = $container ?? new Container();
@@ -1003,7 +1005,9 @@ final class Plugin {
 	}
 
 	public function boot_modules(): void {
-		$this->container->get( MigrationManager::class )->run();
+		if ( ! $this->run_migrations_safely() ) {
+			return;
+		}
 		$this->container->get( DeliveryServiceManager::class )->ensure_builtin_services();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 		$this->container->get( ActionScheduler::class );
@@ -1014,7 +1018,9 @@ final class Plugin {
 	}
 
 	public function activate(): void {
-		$this->container->get( MigrationManager::class )->run();
+		if ( ! $this->run_migrations_safely() ) {
+			return;
+		}
 		$this->container->get( DeliveryServiceManager::class )->ensure_builtin_services();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 		$this->container->get( DpdPickupPointAutoSync::class )->activate();
@@ -1022,5 +1028,48 @@ final class Plugin {
 
 	public function deactivate(): void {
 		$this->container->get( DpdPickupPointAutoSync::class )->deactivate();
+	}
+
+	private function run_migrations_safely(): bool {
+		try {
+			$this->container->get( MigrationManager::class )->run();
+			$this->migration_failure_message = '';
+			return true;
+		} catch ( \Throwable $exception ) {
+			$this->migration_failure_message = $this->safe_migration_failure_message( $exception );
+			$this->container->get( Logger::class )->error(
+				'Database migration failed.',
+				array(
+					'error' => $this->migration_failure_message,
+					'exception_class' => get_class( $exception ),
+				)
+			);
+			add_action( 'admin_notices', array( $this, 'render_migration_failure_notice' ) );
+			return false;
+		}
+	}
+
+	public function render_migration_failure_notice(): void {
+		if ( '' === $this->migration_failure_message || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		?>
+		<div class="notice notice-error">
+			<p>
+				<strong><?php echo esc_html__( 'Калькулятор доставок: миграция базы данных не завершена.', 'walls-delivery-calc' ); ?></strong>
+				<?php echo esc_html( $this->migration_failure_message ); ?>
+			</p>
+		</div>
+		<?php
+	}
+
+	private function safe_migration_failure_message( \Throwable $exception ): string {
+		$message = trim( $exception->getMessage() );
+		if ( '' === $message ) {
+			return 'Database migration failed.';
+		}
+		$message = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $message ) ?? $message;
+
+		return trim( substr( $message, 0, 240 ) );
 	}
 }

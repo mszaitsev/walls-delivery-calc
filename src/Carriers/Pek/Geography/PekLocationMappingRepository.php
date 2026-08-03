@@ -33,7 +33,7 @@ final class PekLocationMappingRepository {
 			normalized_address text NULL,
 			latitude decimal(10,7) NULL,
 			longitude decimal(10,7) NULL,
-			precision varchar(16) NULL,
+			mapping_precision varchar(16) NULL,
 			mapping_state varchar(32) NOT NULL,
 			safe_diagnostic_json longtext NULL,
 			checked_at datetime NOT NULL,
@@ -56,9 +56,12 @@ final class PekLocationMappingRepository {
 		if ( ! function_exists( 'dbDelta' ) && defined( 'ABSPATH' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		}
-		if ( function_exists( 'dbDelta' ) ) {
-			dbDelta( $this->schema() );
+		if ( ! function_exists( 'dbDelta' ) ) {
+			throw new \RuntimeException( 'PEK location mapping schema installation failed: dbDelta unavailable.' );
 		}
+		$this->clear_last_error();
+		dbDelta( $this->schema() );
+		$this->throw_on_sql_error( 'PEK location mapping schema installation failed.' );
 	}
 
 	/** @return array<string,mixed> */
@@ -80,36 +83,56 @@ final class PekLocationMappingRepository {
 		$row = $this->wpdb->get_row( $this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name() . ' WHERE location_id = %d LIMIT 1', $location_id ), ARRAY_A );
 		$this->throw_on_sql_error( 'PEK location mapping lookup failed.' );
 
-		return is_array( $row ) ? $row : array();
+		return is_array( $row ) ? $this->db_row_to_domain( $row ) : array();
 	}
 
 	/** @param array<string,mixed> $mapping */
 	public function upsert( array $mapping ): void {
-		$row = $this->normalize_row( $mapping );
-		if ( array() === $row ) {
+		$domain_row = $this->normalize_row( $mapping );
+		if ( array() === $domain_row ) {
 			return;
 		}
-		$existing = $this->find_by_location_id( (int) $row['location_id'] );
-		$row['created_at'] = (string) ( $existing['created_at'] ?? $row['created_at'] );
+		$existing = $this->find_by_location_id( (int) $domain_row['location_id'] );
+		$domain_row['created_at'] = (string) ( $existing['created_at'] ?? $domain_row['created_at'] );
 		if ( $this->has_test_rows() ) {
 			$this->throw_if_test_failure( array() === $existing ? 'insert' : 'update' );
-			$rows = array_values( array_filter( $this->wpdb->pek_location_mappings, static fn( array $item ): bool => (int) ( $item['location_id'] ?? 0 ) !== (int) $row['location_id'] ) );
-			$row['id'] = (int) ( $existing['id'] ?? count( $rows ) + 1 );
-			$rows[] = $row;
+			$rows = array_values( array_filter( $this->wpdb->pek_location_mappings, static fn( array $item ): bool => (int) ( $item['location_id'] ?? 0 ) !== (int) $domain_row['location_id'] ) );
+			$domain_row['id'] = (int) ( $existing['id'] ?? count( $rows ) + 1 );
+			$rows[] = $domain_row;
 			$this->wpdb->pek_location_mappings = $rows;
 			return;
 		}
+		$db_row = $this->domain_row_to_db( $domain_row );
 		$this->clear_last_error();
 		if ( array() === $existing ) {
-			$result = $this->wpdb->insert( $this->table_name(), $row );
+			$result = $this->wpdb->insert( $this->table_name(), $db_row );
 		} else {
-			unset( $row['id'], $row['created_at'] );
-			$result = $this->wpdb->update( $this->table_name(), $row, array( 'location_id' => (int) $mapping['location_id'] ) );
+			unset( $db_row['id'], $db_row['created_at'] );
+			$result = $this->wpdb->update( $this->table_name(), $db_row, array( 'location_id' => (int) $mapping['location_id'] ) );
 		}
 		if ( false === $result ) {
 			throw new \RuntimeException( 'PEK location mapping persistence failed.' );
 		}
 		$this->throw_on_sql_error( 'PEK location mapping persistence failed.' );
+	}
+
+	/** @param array<string,mixed> $row @return array<string,mixed> */
+	private function domain_row_to_db( array $row ): array {
+		$db_row = $row;
+		$db_row['mapping_precision'] = (string) ( $row['precision'] ?? '' );
+		unset( $db_row['precision'] );
+
+		return $db_row;
+	}
+
+	/** @param array<string,mixed> $row @return array<string,mixed> */
+	private function db_row_to_domain( array $row ): array {
+		if ( array_key_exists( 'mapping_precision', $row ) ) {
+			$row['precision'] = $row['mapping_precision'];
+		}
+		unset( $row['mapping_precision'] );
+
+		return $row;
 	}
 
 	public function delete_for_location( int $location_id ): void {
