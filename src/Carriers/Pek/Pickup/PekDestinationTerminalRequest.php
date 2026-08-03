@@ -23,6 +23,7 @@ final class PekDestinationTerminalRequest {
 	/** @return array<string,mixed> */
 	public function to_payload(): array {
 		$payload = array(
+			'address' => trim( $this->address ),
 			'weight' => $this->weight_kg > 0 ? $this->weight_kg : null,
 			'volume' => $this->volume_m3 > 0 ? $this->volume_m3 : null,
 			'maxDimension' => $this->max_dimension_m > 0 ? $this->max_dimension_m : null,
@@ -37,8 +38,6 @@ final class PekDestinationTerminalRequest {
 				'latitude' => $this->coordinate_string( $this->latitude ),
 				'longitude' => $this->coordinate_string( $this->longitude ),
 			);
-		} else {
-			$payload['address'] = $this->address;
 		}
 
 		return $payload;

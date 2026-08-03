@@ -94,6 +94,37 @@ final class PekPickupFakeHttp implements PekHttpClientInterface {
 	}
 }
 
+final class PekPickupAddressRequiredFakeHttp implements PekHttpClientInterface {
+	public array $requests = array();
+	public function request( string $method, string $url, array $args ): array {
+		$this->requests[] = compact( 'method', 'url', 'args' );
+		$path = (string) parse_url( $url, PHP_URL_PATH );
+		if ( str_contains( $path, 'findzonebycoordinates' ) ) {
+			return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'zoneId' => 'zone', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch' ) ) ) );
+		}
+		$payload = json_decode( (string) ( $args['body'] ?? '' ), true );
+		if ( ! is_array( $payload ) || '' === trim( (string) ( $payload['address'] ?? '' ) ) ) {
+			return array(
+				'status' => 200,
+				'body' => wp_json_encode(
+					array(
+						'error' => array(
+							'title' => 'Ошибка валидации',
+							'message' => 'Детальные сообщения об ошибках приведены отдельно для каждого поля',
+							'fields' => array(
+								array( 'Key' => 'address', 'Value' => array( 'Пожалуйста, заполните поле' ) ),
+							),
+						),
+					),
+					JSON_UNESCAPED_UNICODE
+				),
+			);
+		}
+
+		return array( 'status' => 200, 'body' => wp_json_encode( array( 'freeDepartments' => array( pek_pickup_valid_row( array( 'warehouseId' => 'address-required-ok' ) ) ), 'paidDepartments' => array() ) ) );
+	}
+}
+
 final class PekPickupZoneFailureFakeHttp implements PekHttpClientInterface {
 	public array $requests = array();
 	private PekPickupFakeHttp $nearest;
@@ -172,9 +203,11 @@ $query = new CarrierPickupPointQuery( 'pek', 10, 'ru', '', null, null, new Picku
 
 $converted = ( new PekCargoConstraintsConverter() )->convert( new PickupCargoConstraints( 1001, 1, 1, 1001, 2 ) );
 pek_pickup_assert( 1.001 === $converted['weight_kg'] && 0.000001 === $converted['volume_m3'] && 0.01 === $converted['max_dimension_m'] && 1.001 === $converted['max_weight_per_place_kg'], 'PEK cargo conversion must be upward-safe.' );
-$payload_probe = ( new PekDestinationTerminalRequest( '', 55.0302040, 82.9204300, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload();
-pek_pickup_assert( is_string( $payload_probe['coordinates']['latitude'] ) && is_string( $payload_probe['coordinates']['longitude'] ) && '55.030204' === $payload_probe['coordinates']['latitude'] && '82.92043' === $payload_probe['coordinates']['longitude'] && ! str_contains( $payload_probe['coordinates']['latitude'], 'E' ), 'PEK destination coordinates must serialize as decimal strings without scientific notation.' );
-$zero_payload_probe = ( new PekDestinationTerminalRequest( '', -0.0, 0.0, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload();
+$payload_probe = ( new PekDestinationTerminalRequest( ' Россия, Москва г, г Москва ', 55.0302040, 82.9204300, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload();
+pek_pickup_assert( 'Россия, Москва г, г Москва' === $payload_probe['address'] && is_string( $payload_probe['coordinates']['latitude'] ) && is_string( $payload_probe['coordinates']['longitude'] ) && '55.030204' === $payload_probe['coordinates']['latitude'] && '82.92043' === $payload_probe['coordinates']['longitude'] && ! str_contains( $payload_probe['coordinates']['latitude'], 'E' ), 'PEK destination coordinate payload must include non-empty address and decimal-string coordinates.' );
+$address_only_probe = ( new PekDestinationTerminalRequest( 'Россия, Новосибирская область, Новосибирск', null, null, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload();
+pek_pickup_assert( 'Россия, Новосибирская область, Новосибирск' === $address_only_probe['address'] && ! isset( $address_only_probe['coordinates'] ), 'PEK destination address-only payload must include address and omit coordinates.' );
+$zero_payload_probe = ( new PekDestinationTerminalRequest( 'Россия, Москва', -0.0, 0.0, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload();
 pek_pickup_assert( '0' === $zero_payload_probe['coordinates']['latitude'] && '0' === $zero_payload_probe['coordinates']['longitude'], 'PEK coordinate serialization must normalize negative zero to zero.' );
 
 $points = $provider->search( $query );
@@ -187,8 +220,17 @@ pek_pickup_assert( array() === $points[0]->raw_reference['availability']['schedu
 pek_pickup_assert( count( $wpdb->pek_terminals ) === 2 && array() !== $repo->find_by_warehouse_id( 'free-ok' ), 'Terminal repository must upsert found terminals.' );
 $nearest_request = $http->requests[1];
 $payload = json_decode( (string) $nearest_request['args']['body'], true );
-pek_pickup_assert( 3 === (int) $payload['departmentOperation'] && 3 === (int) $payload['type'], 'Destination nearestdepartments must use operation=3 and type=3.' );
-pek_pickup_assert( isset( $payload['coordinates'] ) && '55.030204' === $payload['coordinates']['latitude'] && '82.92043' === $payload['coordinates']['longitude'] && is_string( $payload['coordinates']['latitude'] ) && is_string( $payload['coordinates']['longitude'] ) && ! isset( $payload['address'] ), 'Coordinate request must send canonical coordinates as PEK decimal strings and not send conflicting address.' );
+pek_pickup_assert( 2 === count( $http->requests ) && 3 === (int) $payload['departmentOperation'] && 3 === (int) $payload['type'], 'Destination nearestdepartments must use one terminal API call with operation=3 and type=3.' );
+pek_pickup_assert( isset( $payload['address'] ) && '' !== trim( (string) $payload['address'] ) && isset( $payload['coordinates'] ) && '55.030204' === $payload['coordinates']['latitude'] && '82.92043' === $payload['coordinates']['longitude'] && is_string( $payload['coordinates']['latitude'] ) && is_string( $payload['coordinates']['longitude'] ), 'Coordinate request must send non-empty address plus canonical coordinates as PEK decimal strings.' );
+pek_pickup_assert( 1.0 === (float) $payload['weight'] && 0.001 === (float) $payload['volume'] && 0.1 === (float) $payload['maxDimension'] && 1.0 === (float) $payload['maxWeightPerPlace'] && 50 === (int) $payload['searchRadius'] && 50 === (int) $payload['limit'], 'Coordinate request must preserve cargo, radius and limit fields.' );
+$first_report = $service->last_report();
+$cache_probe = new PekDestinationTerminalSearchCache();
+$fingerprint_a = $cache_probe->fingerprint( array( 'endpoint' => '/branches/nearestdepartments/', 'method' => 'POST', 'mapping' => 'same', 'country_code' => 'RU', 'payload' => ( new PekDestinationTerminalRequest( 'Россия, Москва A', 55.030204, 82.92043, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload() ) );
+$fingerprint_a_repeat = $cache_probe->fingerprint( array( 'endpoint' => '/branches/nearestdepartments/', 'method' => 'POST', 'mapping' => 'same', 'country_code' => 'RU', 'payload' => ( new PekDestinationTerminalRequest( 'Россия, Москва A', 55.030204, 82.92043, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload() ) );
+$fingerprint_b = $cache_probe->fingerprint( array( 'endpoint' => '/branches/nearestdepartments/', 'method' => 'POST', 'mapping' => 'same', 'country_code' => 'RU', 'payload' => ( new PekDestinationTerminalRequest( 'Россия, Москва B', 55.030204, 82.92043, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload() ) );
+$fingerprint_address_only = $cache_probe->fingerprint( array( 'endpoint' => '/branches/nearestdepartments/', 'method' => 'POST', 'mapping' => 'same', 'country_code' => 'RU', 'payload' => ( new PekDestinationTerminalRequest( 'Россия, Москва A', null, null, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload() ) );
+$old_style_fingerprint = $cache_probe->fingerprint( array( 'mapping' => $first_report['mapping']['address_fingerprint'] ?? '', 'country_code' => 'RU', 'cargo' => $query->cargo->to_array(), 'operation' => 3, 'type' => PekSettings::LTL_PRODUCT_TYPE, 'radius' => 50, 'limit' => 50 ) );
+pek_pickup_assert( $fingerprint_a === $fingerprint_a_repeat && $fingerprint_a !== $fingerprint_b && $fingerprint_a !== $fingerprint_address_only && $old_style_fingerprint !== (string) ( $first_report['query_fingerprint'] ?? '' ), 'Terminal search fingerprint must reflect full outgoing payload including address and coordinates.' );
 
 $requests_after_first = count( $http->requests );
 $cached = $provider->search( $query );
@@ -472,7 +514,31 @@ $address_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), ne
 $address_service = new PekTerminalService( $address_resolver, $address_api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
 $address_points = $address_service->search( new CarrierPickupPointQuery( 'pek', 11, 'RU', '', 1.0, 2.0, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );
 $address_payload = json_decode( (string) $address_http->requests[1]['args']['body'], true );
-pek_pickup_assert( count( $address_points ) === 2 && isset( $address_payload['address'] ) && ! isset( $address_payload['coordinates'] ), 'Address-only canonical location must send address only and ignore query override/warehousePoint coordinates.' );
+pek_pickup_assert( count( $address_points ) === 2 && isset( $address_payload['address'] ) && '' !== trim( (string) $address_payload['address'] ) && ! isset( $address_payload['coordinates'] ) && 3 === (int) $address_payload['departmentOperation'] && 3 === (int) $address_payload['type'], 'Address-only canonical location must send non-empty address only and ignore query override/warehousePoint coordinates.' );
+
+$GLOBALS['wdc_transients'] = array();
+$production_wpdb = new wpdb();
+$production_wpdb->locations = $wpdb->locations;
+$production_http = new PekPickupAddressRequiredFakeHttp();
+$production_api = new PekApiClient( $settings, $credentials, $production_http, new PekRequestBudget( $settings ) );
+$production_service = new PekTerminalService( new PekLocationResolver( new LocationRepository( $production_wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $production_wpdb ), $production_api, $settings ), $production_api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $production_wpdb ), $settings );
+$production_points = $production_service->search( new CarrierPickupPointQuery( 'pek', 10, 'RU', '', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );
+$production_payload = json_decode( (string) $production_http->requests[1]['args']['body'], true );
+$production_report = $production_service->last_report();
+pek_pickup_assert( 1 === count( $production_points ) && 2 === count( $production_http->requests ) && true === $production_report['success'] && '' === $production_report['error_code'] && array() === ( $production_report['field_errors'] ?? array() ), 'Production address-required validation regression must succeed without logical field errors.' );
+pek_pickup_assert( isset( $production_payload['address'], $production_payload['coordinates'] ) && '' !== trim( (string) $production_payload['address'] ) && '55.030204' === $production_payload['coordinates']['latitude'] && '82.92043' === $production_payload['coordinates']['longitude'], 'Production regression payload must include non-empty address plus coordinates.' );
+
+$GLOBALS['wdc_transients'] = array();
+$blank_wpdb = new wpdb();
+$blank_wpdb->locations = $wpdb->locations;
+$blank_fingerprint = ( new PekLocationResolver( new LocationRepository( $blank_wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $blank_wpdb ), $production_api, $settings ) )->fingerprint( WallsShop\WDC\Locations\ValueObjects\Location::from_array( $blank_wpdb->locations[0] ) );
+$blank_wpdb->pek_location_mappings = array( array( 'id' => 90, 'location_id' => 10, 'country_code' => 'RU', 'address_fingerprint' => $blank_fingerprint, 'resolution_method' => 'coordinates', 'mapping_state' => 'resolved', 'precision' => '', 'zone_id' => 'zone', 'branch_id' => 'branch', 'main_warehouse_id' => '', 'normalized_address' => '   ', 'latitude' => 55.030204, 'longitude' => 82.92043, 'checked_at' => '2026-08-03 10:00:00', 'created_at' => '2026-08-03 10:00:00', 'updated_at' => '2026-08-03 10:00:00' ) );
+$blank_http = new PekPickupAddressRequiredFakeHttp();
+$blank_api = new PekApiClient( $settings, $credentials, $blank_http, new PekRequestBudget( $settings ) );
+$blank_service = new PekTerminalService( new PekLocationResolver( new LocationRepository( $blank_wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $blank_wpdb ), $blank_api, $settings ), $blank_api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $blank_wpdb ), $settings );
+$blank_points = $blank_service->search( new CarrierPickupPointQuery( 'pek', 10, 'RU', '', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );
+$blank_report = $blank_service->last_report();
+pek_pickup_assert( array() === $blank_points && 0 === count( $blank_http->requests ) && 'pek_destination_address_missing' === (string) $blank_report['error_code'] && 'destination_terminal_request' === (string) $blank_report['failure_stage'] && array() === $blank_wpdb->pek_terminals, 'Blank destination address must fail closed before PEK API/cache/repository work.' );
 
 $GLOBALS['wdc_transients'] = array();
 $legacy_fingerprint = pek_pickup_legacy_mapping_fingerprint( $wpdb->locations[1] );

@@ -91,14 +91,14 @@ final class PekTerminalService {
 		}
 		$converted = $this->converter->convert( $query->cargo );
 		$has_destination_coordinates = $this->has_usable_mapping_coordinates( $mapping );
-		$address = $has_destination_coordinates ? '' : trim( (string) ( $mapping['normalized_address'] ?? '' ) );
-		if ( ! $has_destination_coordinates && '' === $address ) {
+		$address = trim( (string) ( $mapping['normalized_address'] ?? '' ) );
+		if ( '' === $address ) {
 			$this->last_report = array(
 				'success' => false,
-				'error_code' => 'pek_destination_mapping_incomplete',
+				'error_code' => 'pek_destination_address_missing',
 				'failure_stage' => 'destination_terminal_request',
 				'mapping' => $mapping,
-				'message' => 'PEK destination mapping has neither usable destination coordinates nor address.',
+				'message' => 'PEK destination mapping has no usable destination address.',
 			);
 			return array();
 		}
@@ -114,7 +114,8 @@ final class PekTerminalService {
 			max( 1, min( 500, $query->radius_km ) ),
 			max( 1, min( 100, $query->limit ) )
 		);
-		$fingerprint = $this->cache->fingerprint( array( 'mapping' => $mapping['address_fingerprint'] ?? '', 'country_code' => $mapping_country, 'cargo' => $query->cargo->to_array(), 'operation' => 3, 'type' => PekSettings::LTL_PRODUCT_TYPE, 'radius' => $request->radius_km, 'limit' => $request->limit ) );
+		$request_payload = $request->to_payload();
+		$fingerprint = $this->cache->fingerprint( array( 'endpoint' => '/branches/nearestdepartments/', 'method' => 'POST', 'mapping' => $mapping['address_fingerprint'] ?? '', 'country_code' => $mapping_country, 'payload' => $request_payload ) );
 		if ( $use_cache ) {
 			$cached = $this->cache->get( $fingerprint );
 			if ( $cached['hit'] ) {
