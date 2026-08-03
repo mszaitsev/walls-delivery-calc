@@ -10,18 +10,30 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
+use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 
 function pek_route_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -65,6 +77,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $prefix = 'wp_';
 		public int $insert_id = 0;
 		public array $services = array();
+		public array $locations = array();
+		public array $pek_location_mappings = array();
+		public array $pek_terminals = array();
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
 				$query = preg_replace( '/%[sd]/', is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query;
@@ -108,7 +123,19 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
-	$pek_admin = new PekAdminPage( $settings, $credentials, new PekConnectionDiagnosticService( $settings, $credentials, $api ), new PekSenderWarehouseService( $api, $settings, $cache ), new PekAdminNoticeStore() );
+	$location_repository = new LocationRepository( $GLOBALS['wpdb'] );
+	$location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $GLOBALS['wpdb'] ), $api, $settings );
+	$terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $GLOBALS['wpdb'] ), $settings );
+	$pickup_provider = new PekPickupPointProvider( $terminal_service );
+	$pek_admin = new PekAdminPage(
+		$settings,
+		$credentials,
+		new PekConnectionDiagnosticService( $settings, $credentials, $api ),
+		new PekSenderWarehouseService( $api, $settings, $cache ),
+		new PekAdminNoticeStore(),
+		new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, $credentials ),
+		new PekDestinationPickupDiagnosticStore()
+	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
 	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin ) as $property => $value ) {
 		$ref = new ReflectionProperty( DeliveryServicesAdminPage::class, $property );
@@ -194,5 +221,41 @@ try {
 }
 
 pek_route_assert( count( $http->requests ) === 4 && str_starts_with( $http->requests[3]['url'], PekSettings::BASE_URL ), 'PEK admin routing smoke must use fake HTTP only and perform no production call.' );
+
+$destination_settings_repository = new SettingsRepository();
+$destination_cache = new PekSenderWarehouseSearchCache();
+$destination_http = new PekRouteFakeHttp( array(
+	pek_route_json( array( 'zoneId' => 'z', 'branchUID' => 'b', 'mainWarehouseId' => 'main', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'formatted' => array() ) ) ) ),
+) );
+$destination_page = pek_route_page( $destination_http, $destination_settings_repository, $destination_cache );
+$GLOBALS['wpdb']->locations = array(
+	array( 'id' => 11, 'country_code' => 'RU', 'city_name' => 'Линево', 'place_name' => 'Линево', 'display_name' => 'Линево', 'active' => 1 ),
+);
+$destination_store = new PekDestinationPickupDiagnosticStore();
+$destination_store->save_for_current_user(
+	array(
+		'success' => true,
+		'message' => 'old success',
+		'terminals' => array( 'points' => array( array( 'code' => 'old-terminal', 'raw_response' => array( 'secret' => true ) ) ) ),
+		'raw_response' => array( 'secret' => true ),
+	)
+);
+$destination_redirect = pek_route_run_action(
+	$destination_page,
+	'diagnose_pek_destination_pickup',
+	array(
+		'pek_destination_location_id' => 11,
+		'pek_destination_weight_kg' => 1,
+		'pek_destination_length_cm' => 10,
+		'pek_destination_width_cm' => 10,
+		'pek_destination_height_cm' => 10,
+		'pek_destination_max_place_weight_kg' => 1,
+		'pek_destination_places_count' => 1,
+	)
+);
+$fresh_report = $destination_store->consume_for_current_user();
+$fresh_json = wp_json_encode( $fresh_report );
+pek_route_assert( str_contains( $destination_redirect, 'service=pek' ) && false === ( $fresh_report['success'] ?? true ) && 'pek_invalid_findzone_formatted_address' === (string) ( $fresh_report['error_code'] ?? '' ), 'Destination diagnostic malformed zone response must save current safe failure report.' );
+pek_route_assert( ! str_contains( $fresh_json, 'old-terminal' ) && ! str_contains( $fresh_json, 'raw_response' ) && ! str_contains( $fresh_json, 'secret' ), 'Destination diagnostic action must clear stale report before run and store only sanitized failure data.' );
 
 echo "PEK admin routing smoke OK\n";

@@ -74,6 +74,8 @@ use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -81,6 +83,15 @@ use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
 use WallsShop\WDC\Carriers\Pek\Api\WpPekHttpClient;
+use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
+use WallsShop\WDC\Carriers\Pek\Installation\PekSchemaIntegrityService;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
@@ -222,6 +233,7 @@ use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\Presentation\PickupPointPresentationResolver;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
@@ -326,6 +338,8 @@ final class Plugin {
 
 	private Container $container;
 
+	private string $migration_failure_message = '';
+
 	public function __construct( PluginEnvironment $environment, ?Container $container = null ) {
 		$this->environment = $environment;
 		$this->container   = $container ?? new Container();
@@ -399,6 +413,18 @@ final class Plugin {
 		$this->container->register( PekSenderWarehouseSearchCache::class, fn(): PekSenderWarehouseSearchCache => new PekSenderWarehouseSearchCache() );
 		$this->container->register( PekSenderWarehouseService::class, fn(): PekSenderWarehouseService => new PekSenderWarehouseService( $this->container->get( PekApiClient::class ), $this->container->get( PekSettings::class ), $this->container->get( PekSenderWarehouseSearchCache::class ) ) );
 		$this->container->register( PekAdminNoticeStore::class, fn(): PekAdminNoticeStore => new PekAdminNoticeStore() );
+		$this->container->register( PekAddressBuilder::class, fn(): PekAddressBuilder => new PekAddressBuilder() );
+		$this->container->register( PekLocationMappingRepository::class, fn(): PekLocationMappingRepository => new PekLocationMappingRepository() );
+		$this->container->register( PekSchemaIntegrityService::class, fn(): PekSchemaIntegrityService => new PekSchemaIntegrityService( null, $this->container->get( PekLocationMappingRepository::class ), $this->container->get( PekTerminalRepository::class ) ) );
+		$this->container->register( PekLocationResolver::class, fn(): PekLocationResolver => new PekLocationResolver( $this->container->get( LocationRepository::class ), $this->container->get( PekAddressBuilder::class ), $this->container->get( PekLocationMappingRepository::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekSettings::class ) ) );
+		$this->container->register( PekDestinationTerminalSearchCache::class, fn(): PekDestinationTerminalSearchCache => new PekDestinationTerminalSearchCache() );
+		$this->container->register( PekTerminalRepository::class, fn(): PekTerminalRepository => new PekTerminalRepository() );
+		$this->container->register( PekCargoConstraintsConverter::class, fn(): PekCargoConstraintsConverter => new PekCargoConstraintsConverter() );
+		$this->container->register( PekTerminalService::class, fn(): PekTerminalService => new PekTerminalService( $this->container->get( PekLocationResolver::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekCargoConstraintsConverter::class ), $this->container->get( PekDestinationTerminalSearchCache::class ), $this->container->get( PekTerminalRepository::class ), $this->container->get( PekSettings::class ) ) );
+		$this->container->register( PekPickupPointProvider::class, fn(): PekPickupPointProvider => new PekPickupPointProvider( $this->container->get( PekTerminalService::class ) ) );
+		$this->container->register( CarrierPickupPointProviderRegistry::class, fn(): CarrierPickupPointProviderRegistry => new CarrierPickupPointProviderRegistry( array( $this->container->get( PekPickupPointProvider::class ) ) ) );
+		$this->container->register( PekDestinationPickupDiagnosticStore::class, fn(): PekDestinationPickupDiagnosticStore => new PekDestinationPickupDiagnosticStore() );
+		$this->container->register( PekDestinationPickupDiagnosticService::class, fn(): PekDestinationPickupDiagnosticService => new PekDestinationPickupDiagnosticService( $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( LocationRepository::class ), $this->container->get( PekTerminalService::class ), $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );
 		$this->container->register( JetLogisticRegionNameNormalizer::class, fn(): JetLogisticRegionNameNormalizer => new JetLogisticRegionNameNormalizer() );
 		$this->container->register( JetLogisticCitiesCsvClient::class, fn(): JetLogisticCitiesCsvClient => new JetLogisticCitiesCsvClient() );
@@ -809,7 +835,7 @@ final class Plugin {
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
 		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticCitiesCsvClient::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
-		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ) ) );
+		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ), $this->container->get( PekDestinationPickupDiagnosticService::class ), $this->container->get( PekDestinationPickupDiagnosticStore::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(
@@ -979,7 +1005,9 @@ final class Plugin {
 	}
 
 	public function boot_modules(): void {
-		$this->container->get( MigrationManager::class )->run();
+		if ( ! $this->run_migrations_safely() ) {
+			return;
+		}
 		$this->container->get( DeliveryServiceManager::class )->ensure_builtin_services();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 		$this->container->get( ActionScheduler::class );
@@ -990,7 +1018,9 @@ final class Plugin {
 	}
 
 	public function activate(): void {
-		$this->container->get( MigrationManager::class )->run();
+		if ( ! $this->run_migrations_safely() ) {
+			return;
+		}
 		$this->container->get( DeliveryServiceManager::class )->ensure_builtin_services();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 		$this->container->get( DpdPickupPointAutoSync::class )->activate();
@@ -998,5 +1028,48 @@ final class Plugin {
 
 	public function deactivate(): void {
 		$this->container->get( DpdPickupPointAutoSync::class )->deactivate();
+	}
+
+	private function run_migrations_safely(): bool {
+		try {
+			$this->container->get( MigrationManager::class )->run();
+			$this->migration_failure_message = '';
+			return true;
+		} catch ( \Throwable $exception ) {
+			$this->migration_failure_message = $this->safe_migration_failure_message( $exception );
+			$this->container->get( Logger::class )->error(
+				'Database migration failed.',
+				array(
+					'error' => $this->migration_failure_message,
+					'exception_class' => get_class( $exception ),
+				)
+			);
+			add_action( 'admin_notices', array( $this, 'render_migration_failure_notice' ) );
+			return false;
+		}
+	}
+
+	public function render_migration_failure_notice(): void {
+		if ( '' === $this->migration_failure_message || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		?>
+		<div class="notice notice-error">
+			<p>
+				<strong><?php echo esc_html__( 'Калькулятор доставок: миграция базы данных не завершена.', 'walls-delivery-calc' ); ?></strong>
+				<?php echo esc_html( $this->migration_failure_message ); ?>
+			</p>
+		</div>
+		<?php
+	}
+
+	private function safe_migration_failure_message( \Throwable $exception ): string {
+		$message = trim( $exception->getMessage() );
+		if ( '' === $message ) {
+			return 'Database migration failed.';
+		}
+		$message = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $message ) ?? $message;
+
+		return trim( substr( $message, 0, 240 ) );
 	}
 }

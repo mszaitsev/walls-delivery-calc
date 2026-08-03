@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Version: 0.130.6
+Version: 0.131.11
 
 Start with:
 
@@ -19,3 +19,17 @@ If a carrier shipment UI issue appears, check in this order:
 5. generic JS payload key `document_actions` and carrier extension hooks.
 
 Never expose carrier credentials or full raw API errors in admin messages.
+
+## PEK Schema Recovery
+
+If PEK diagnostics report `PEK location mapping lookup failed`, first verify the physical tables with the active WordPress prefix:
+
+```sql
+SHOW TABLES LIKE 'wp_wdc_pek_location_mappings';
+SHOW TABLES LIKE 'wp_wdc_pek_terminals';
+SHOW COLUMNS FROM wp_wdc_pek_location_mappings LIKE 'mapping_precision';
+```
+
+Version 0.131.11 expects the physical mapping precision column to be `mapping_precision`; the domain/API mapping key remains `precision`. Migration `0050` repairs missing PEK foundation tables, and migration `0051` backfills `mapping_precision` from any legacy physical `` `precision` `` column. Failed migrations are not marked applied and `wdc_db_version` is not advanced; after fixing the DB issue, run the normal plugin update/migration lifecycle again. Do not create PEK tables from diagnostics or repository read/write methods.
+
+For PEK destination terminal search failures after a successful location mapping, rerun the explicit admin diagnostic and read the structured report before changing contracts. The report separates `location_resolution` from destination terminal stages, shows stable `error_code`, `failure_stage`, endpoint, HTTP status, query fingerprint, preserved mapping fields, safe response shape for `/branches/nearestdepartments/`, aggregate rejection reason counters, and the redacted `api_error_message` when PEK returns a logical/API error object. When PEK returns field-level validation details under `error.fields`, the report shows them separately as `Ошибки полей ПЭК` with only normalized field names and redacted text messages. The `address` validation failure confirmed in 0.131.10 is fixed by sending a non-empty address on every destination terminal request; coordinate requests now contain both address and coordinates, while address-only requests omit coordinates. The stable `message` remains project-owned; the PEK detail is shown separately as "Ошибка ПЭК". Reports and logs intentionally do not store or display request bodies, headers, raw error objects, rejected/attempted field values, raw terminal rows, API keys, login, tokens, Basic Authorization blobs, or full raw responses. Failed explicit admin diagnostics also emit one project logger event with the same safe context so WooCommerce/debug logs have enough evidence for the next targeted fix.

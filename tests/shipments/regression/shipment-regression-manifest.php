@@ -19,6 +19,7 @@ return array(
 	'framework.allocation' => array( 'path' => 'tests/shipments/run-shipment-allocation-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.status' => array( 'path' => 'tests/shipments/run-shipment-status-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.adapter-registry' => array( 'path' => 'tests/shipments/run-carrier-adapter-registry-smoke.php', 'groups' => array( 'framework' ) ),
+	'framework.pickup-provider-registry' => array( 'path' => 'tests/pickup/run-carrier-pickup-provider-registry-smoke.php', 'groups' => array( 'framework' ) ),
 
 	'russian-post.shipments' => array( 'path' => 'tests/shipments/run-russian-post-shipments-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.price' => array( 'path' => 'tests/shipments/run-russian-post-shipment-price-smoke.php', 'groups' => array( 'russian-post' ) ),
@@ -62,6 +63,9 @@ return array(
 	'pek.admin-routing' => array( 'path' => 'tests/pek/run-pek-admin-routing-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.admin-ui' => array( 'path' => 'tests/pek/run-pek-admin-ui-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.warehouse-datetime' => array( 'path' => 'tests/pek/run-pek-warehouse-datetime-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.schema-integrity' => array( 'path' => 'tests/pek/run-pek-schema-integrity-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.geography' => array( 'path' => 'tests/pek/run-pek-geography-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.pickup-provider' => array( 'path' => 'tests/pek/run-pek-pickup-provider-smoke.php', 'groups' => array( 'pek' ) ),
 
 	'status.order-status-mapping' => array( 'path' => 'tests/statuses/run-order-status-mapping-smoke.php', 'groups' => array( 'status-core' ) ),
 	'status.status-autosync' => array( 'path' => 'tests/statuses/run-status-autosync-smoke.php', 'groups' => array( 'status-core' ) ),

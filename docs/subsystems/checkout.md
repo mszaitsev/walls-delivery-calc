@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.130.6
+Version: 0.131.11
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -35,6 +35,8 @@ Checkout location search builds its preliminary pool in two tiers: direct own-na
 When a local DB location is selected, the picker option remains contextual, for example `г Минск - Минский р-н, Минская область`, but the WooCommerce city field receives only the own typed place, for example `г Минск`. Region, district, city, and place canonical values are submitted through `wdc_platform_location_*` hidden fields and the checkout runtime stores `city_context.city_name` and `settlement_name` without hierarchy text, so CDEK receives `Минск` rather than `Минский р-н, г Минск`. Hidden selected-location country must match the posted checkout country; mismatches are ignored server-side.
 
 Changing the actual destination country after initial checkout load clears the active destination scope's city, state, postcode, selected local-location hidden fields, selected notice, picker search state, pickup selection, and cached quote state through the existing checkout recalculation flow. A first load with an existing country and repeated same-country events do not clear fields.
+
+PEK destination pickup foundation is not checkout runtime yet. Version 0.131.11 provides a generic pickup-provider registry and PEK admin-only terminal diagnostics, but the public pickup REST controllers do not receive that registry, PEK checkout rates are not calculated, and no PEK terminal selection is stored in checkout session. This is deliberate: PEK terminal search is credentialed, rate-limited, requires canonical `location_id`, and depends on trusted cargo constraints that will be supplied by the future PEK quote/rate stage. The admin diagnostic uses one-place dimensions multiplied by `places_count`, accepts address fallback when canonical coordinates are partial/invalid, always sends a non-empty address to PEK `/branches/nearestdepartments/`, adds decimal-string coordinates when available, clears stale destination reports before explicit reruns, reports terminal branch, division, and work time without treating PEK organizational `branchName` as checkout city, displays PEK logical/API detail only as a separate redacted `api_error_message`, and renders redacted field-level `field_errors` from `error.fields` without raw rejected values. Malformed PEK zone/terminal contracts, malformed terminal IDs/text/coordinates/limits/schedules, and all-invalid terminal collections fail closed and are not cached as checkout-ready empty results. PEK mapping fingerprints use a carrier contract revision rather than plugin version, persisted mappings are structurally validated before reuse, and terminal cache format `2` invalidates older unsafe transients before any future checkout integration can consume them. Checkout cargo/context integration remains a later stage.
 
 ## Canonical Requirements
 

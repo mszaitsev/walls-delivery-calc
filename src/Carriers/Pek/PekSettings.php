@@ -46,6 +46,10 @@ final class PekSettings {
 	public const DEFAULT_CARGO_DESCRIPTION_KEY = 'pek_default_cargo_description';
 	public const WAREHOUSE_SEARCH_RADIUS_KEY = 'pek_warehouse_search_radius';
 	public const WAREHOUSE_SEARCH_LIMIT_KEY = 'pek_warehouse_search_limit';
+	public const DESTINATION_TERMINAL_SEARCH_RADIUS_KEY = 'pek_destination_terminal_search_radius';
+	public const DESTINATION_TERMINAL_SEARCH_LIMIT_KEY = 'pek_destination_terminal_search_limit';
+	public const DESTINATION_TERMINAL_CACHE_TTL_KEY = 'pek_destination_terminal_cache_ttl';
+	public const LOCATION_MAPPING_TTL_DAYS_KEY = 'pek_location_mapping_ttl_days';
 	public const SMS_RELEASE_LIMIT_RUB_KEY = 'pek_sms_release_limit_rub';
 	public const LAST_DIAGNOSTIC_KEY = 'pek_last_diagnostic';
 
@@ -73,6 +77,10 @@ final class PekSettings {
 			self::DEFAULT_CARGO_DESCRIPTION_KEY => self::DEFAULT_CARGO_DESCRIPTION,
 			self::WAREHOUSE_SEARCH_RADIUS_KEY => 50,
 			self::WAREHOUSE_SEARCH_LIMIT_KEY => 5,
+			self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY => 50,
+			self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY => 50,
+			self::DESTINATION_TERMINAL_CACHE_TTL_KEY => 600,
+			self::LOCATION_MAPPING_TTL_DAYS_KEY => 30,
 			self::SMS_RELEASE_LIMIT_RUB_KEY => self::DEFAULT_SMS_RELEASE_LIMIT_RUB,
 			self::LAST_DIAGNOSTIC_KEY => array(),
 		);
@@ -150,6 +158,22 @@ final class PekSettings {
 		return $this->clamp_int( self::WAREHOUSE_SEARCH_LIMIT_KEY, 5, 1, 50 );
 	}
 
+	public function pek_destination_terminal_search_radius(): int {
+		return $this->clamp_int( self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY, 50, 1, 500 );
+	}
+
+	public function pek_destination_terminal_search_limit(): int {
+		return $this->clamp_int( self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY, 50, 1, 100 );
+	}
+
+	public function pek_destination_terminal_cache_ttl(): int {
+		return $this->clamp_int( self::DESTINATION_TERMINAL_CACHE_TTL_KEY, 600, 60, 3600 );
+	}
+
+	public function pek_location_mapping_ttl_days(): int {
+		return $this->clamp_int( self::LOCATION_MAPPING_TTL_DAYS_KEY, 30, 1, 365 );
+	}
+
 	public function sms_release_limit_rub(): int {
 		return $this->clamp_int( self::SMS_RELEASE_LIMIT_RUB_KEY, self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 );
 	}
@@ -191,6 +215,10 @@ final class PekSettings {
 		$this->settings->set( self::SENDER_EMAIL_KEY, function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : trim( $email ) );
 		$this->settings->set( self::WAREHOUSE_SEARCH_RADIUS_KEY, $this->clamp_raw_int( $input[ self::WAREHOUSE_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 ) );
 		$this->settings->set( self::WAREHOUSE_SEARCH_LIMIT_KEY, $this->clamp_raw_int( $input[ self::WAREHOUSE_SEARCH_LIMIT_KEY ] ?? 5, 1, 50 ) );
+		$this->settings->set( self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 ) );
+		$this->settings->set( self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY ] ?? 50, 1, 100 ) );
+		$this->settings->set( self::DESTINATION_TERMINAL_CACHE_TTL_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_CACHE_TTL_KEY ] ?? 600, 60, 3600 ) );
+		$this->settings->set( self::LOCATION_MAPPING_TTL_DAYS_KEY, $this->clamp_raw_int( $input[ self::LOCATION_MAPPING_TTL_DAYS_KEY ] ?? 30, 1, 365 ) );
 		$this->settings->set( self::SMS_RELEASE_LIMIT_RUB_KEY, $this->clamp_raw_int( $input[ self::SMS_RELEASE_LIMIT_RUB_KEY ] ?? self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 ) );
 	}
 
