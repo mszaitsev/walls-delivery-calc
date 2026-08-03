@@ -1,6 +1,6 @@
 # Checkout
 
-Version: 0.131.1
+Version: 0.131.2
 
 Checkout code lives in `src/Checkout` and frontend assets in `assets/frontend`. It maps WooCommerce packages into `QuoteRequest`, runs carriers through `CheckoutOrchestrator`, applies rules, sorts rates, persists selected pickup/courier metadata, and validates checkout input.
 
@@ -36,7 +36,7 @@ When a local DB location is selected, the picker option remains contextual, for 
 
 Changing the actual destination country after initial checkout load clears the active destination scope's city, state, postcode, selected local-location hidden fields, selected notice, picker search state, pickup selection, and cached quote state through the existing checkout recalculation flow. A first load with an existing country and repeated same-country events do not clear fields.
 
-PEK destination pickup foundation is not checkout runtime yet. Version 0.131.1 provides a generic pickup-provider registry and PEK admin-only terminal diagnostics, but the public pickup REST controllers do not receive that registry, PEK checkout rates are not calculated, and no PEK terminal selection is stored in checkout session. This is deliberate: PEK terminal search is credentialed, rate-limited, requires canonical `location_id`, and depends on trusted cargo constraints that will be supplied by the future PEK quote/rate stage. The admin diagnostic uses one-place dimensions multiplied by `places_count`; checkout cargo/context integration remains a later stage.
+PEK destination pickup foundation is not checkout runtime yet. Version 0.131.2 provides a generic pickup-provider registry and PEK admin-only terminal diagnostics, but the public pickup REST controllers do not receive that registry, PEK checkout rates are not calculated, and no PEK terminal selection is stored in checkout session. This is deliberate: PEK terminal search is credentialed, rate-limited, requires canonical `location_id`, and depends on trusted cargo constraints that will be supplied by the future PEK quote/rate stage. The admin diagnostic uses one-place dimensions multiplied by `places_count`, accepts address fallback when canonical coordinates are partial/invalid, and reports terminal branch, division, and work time without treating PEK organizational `branchName` as checkout city. Checkout cargo/context integration remains a later stage.
 
 ## Canonical Requirements
 

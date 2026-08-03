@@ -61,9 +61,19 @@ final class PekTerminalService {
 			return array();
 		}
 		$converted = $this->converter->convert( $query->cargo );
-		$has_destination_coordinates = is_numeric( $mapping['latitude'] ?? null ) && is_numeric( $mapping['longitude'] ?? null );
+		$has_destination_coordinates = $this->has_usable_mapping_coordinates( $mapping );
+		$address = $has_destination_coordinates ? '' : trim( (string) ( $mapping['normalized_address'] ?? '' ) );
+		if ( ! $has_destination_coordinates && '' === $address ) {
+			$this->last_report = array(
+				'success' => false,
+				'error_code' => 'pek_destination_mapping_incomplete',
+				'mapping' => $mapping,
+				'message' => 'PEK destination mapping has neither usable destination coordinates nor address.',
+			);
+			return array();
+		}
 		$request = new PekDestinationTerminalRequest(
-			$has_destination_coordinates ? '' : (string) ( $mapping['normalized_address'] ?? '' ),
+			$address,
 			$has_destination_coordinates ? (float) $mapping['latitude'] : null,
 			$has_destination_coordinates ? (float) $mapping['longitude'] : null,
 			$converted['weight_kg'],
@@ -219,7 +229,7 @@ final class PekTerminalService {
 			PekSettings::CARRIER_KEY,
 			(string) $row['warehouse_id'],
 			(string) $row['address'],
-			(string) $row['branch_name'],
+			'',
 			'',
 			'',
 			(float) $row['latitude'],
@@ -267,6 +277,17 @@ final class PekTerminalService {
 		}
 
 		return implode( '; ', array_filter( $parts ) );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function has_usable_mapping_coordinates( array $mapping ): bool {
+		if ( ! is_numeric( $mapping['latitude'] ?? null ) || ! is_numeric( $mapping['longitude'] ?? null ) ) {
+			return false;
+		}
+		$latitude = (float) $mapping['latitude'];
+		$longitude = (float) $mapping['longitude'];
+
+		return $latitude >= -90 && $latitude <= 90 && $longitude >= -180 && $longitude <= 180;
 	}
 
 	private function normalize_timezone( mixed $value ): string {

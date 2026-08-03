@@ -38,13 +38,14 @@ final class PekDestinationPickupDiagnosticService {
 		} catch ( RuntimeException $exception ) {
 			return $this->failure_report( 'pek_invalid_pickup_query', $exception->getMessage(), 'Некорректные параметры диагностического груза.' );
 		}
+		$has_coordinates = $this->has_usable_location_coordinates( $location->latitude, $location->longitude );
 		$query = new CarrierPickupPointQuery(
 			PekSettings::CARRIER_KEY,
 			$location_id,
 			$country,
 			'',
-			$location->latitude,
-			$location->longitude,
+			$has_coordinates ? $location->latitude : null,
+			$has_coordinates ? $location->longitude : null,
 			$cargo,
 			CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
 			$this->settings->pek_destination_terminal_search_radius(),
@@ -71,7 +72,7 @@ final class PekDestinationPickupDiagnosticService {
 				'location_id' => $location_id,
 				'country' => $country,
 				'canonical_address' => $location->resolved_display_name(),
-				'coordinates_available' => $location->has_coordinates(),
+				'coordinates_available' => $has_coordinates,
 				'resolution_method' => (string) ( $mapping['resolution_method'] ?? '' ),
 				'mapping_state' => (string) ( $mapping['mapping_state'] ?? '' ),
 				'precision' => (string) ( $mapping['precision'] ?? '' ),
@@ -160,8 +161,19 @@ final class PekDestinationPickupDiagnosticService {
 			'pek_destination_location_unsupported' => 'ПЭК не подтвердил обслуживание выбранного населённого пункта.',
 			'pek_invalid_pickup_query', 'pek_canonical_location_required' => 'Некорректные параметры диагностического груза.',
 			'pek_destination_country_mismatch' => 'Страна запроса не совпадает с canonical location.',
+			'pek_destination_mapping_incomplete' => 'ПЭК не вернул достаточные данные направления для поиска терминалов.',
 			default => 'Не удалось выполнить диагностику направления ПЭК.',
 		};
+	}
+
+	private function has_usable_location_coordinates( mixed $latitude, mixed $longitude ): bool {
+		if ( ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return false;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+
+		return $latitude >= -90 && $latitude <= 90 && $longitude >= -180 && $longitude <= 180;
 	}
 
 	private function now(): string {

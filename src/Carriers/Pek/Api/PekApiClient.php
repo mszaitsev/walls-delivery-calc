@@ -49,11 +49,8 @@ final class PekApiClient {
 		);
 
 		$result = $this->call( 'POST', '/branches/nearestdepartments/', $payload );
-		if ( ! is_array( $result ) ) {
-			throw new PekApiException( 'ПЭК вернул неожиданную структуру ближайших складов.', array( 'error_code' => 'pek_unexpected_nearest_departments' ) );
-		}
 
-		return $result;
+		return $this->expect_nearest_departments_response( $result, 'pek_unexpected_nearest_departments' );
 	}
 
 	/** @return array<string,mixed> */
@@ -95,11 +92,8 @@ final class PekApiClient {
 	/** @return array<string,mixed> */
 	public function destination_nearest_departments( PekDestinationTerminalRequest $request ): array {
 		$result = $this->call( 'POST', '/branches/nearestdepartments/', $request->to_payload() );
-		if ( ! is_array( $result ) ) {
-			throw new PekApiException( 'ПЭК вернул неожиданную структуру ближайших терминалов.', array( 'error_code' => 'pek_unexpected_destination_nearest_departments' ) );
-		}
 
-		return $result;
+		return $this->expect_nearest_departments_response( $result, 'pek_unexpected_destination_nearest_departments' );
 	}
 
 	/** @param array<string,mixed> $payload */
@@ -178,6 +172,32 @@ final class PekApiClient {
 		}
 
 		return array_values( array_filter( $value, 'is_array' ) );
+	}
+
+	/** @return array{freeDepartments:array<int,mixed>,paidDepartments:array<int,mixed>} */
+	private function expect_nearest_departments_response( mixed $value, string $error_code ): array {
+		if (
+			! is_array( $value )
+			|| array() === $value
+			|| array_values( $value ) === $value
+			|| ! array_key_exists( 'freeDepartments', $value )
+			|| ! array_key_exists( 'paidDepartments', $value )
+			|| ! is_array( $value['freeDepartments'] )
+			|| ! is_array( $value['paidDepartments'] )
+		) {
+			throw new PekApiException(
+				'ПЭК вернул неожиданную структуру ближайших отделений.',
+				array(
+					'endpoint' => '/branches/nearestdepartments/',
+					'error_code' => $error_code,
+				)
+			);
+		}
+
+		return array(
+			'freeDepartments' => $value['freeDepartments'],
+			'paidDepartments' => $value['paidDepartments'],
+		);
 	}
 
 	private function safe_message( string $message ): string {

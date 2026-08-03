@@ -249,14 +249,14 @@ final class PekAdminPage {
 		if ( array() === $points ) {
 			return;
 		}
-		echo '<table class="widefat striped"><thead><tr><th>Warehouse ID</th><th>Источник</th><th>Тип</th><th>Адрес</th><th>Координаты</th><th>Ограничения</th></tr></thead><tbody>';
+		echo '<table class="widefat striped"><thead><tr><th>Warehouse ID</th><th>Источник</th><th>Тип</th><th>Филиал</th><th>Отделение</th><th>Адрес</th><th>Координаты</th><th>Время работы</th><th>Ограничения</th></tr></thead><tbody>';
 		foreach ( array_slice( $points, 0, 20 ) as $point ) {
 			if ( ! is_array( $point ) ) {
 				continue;
 			}
 			$ref = is_array( $point['raw_reference'] ?? null ) ? $point['raw_reference'] : array();
 			$limits = is_array( $ref['limits'] ?? null ) ? $ref['limits'] : array();
-			echo '<tr><td><code>' . esc_html( (string) ( $point['code'] ?? '' ) ) . '</code></td><td>' . esc_html( (string) ( $ref['source'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $point['type'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $point['address'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $point['latitude'] ?? '' ) . ', ' . (string) ( $point['longitude'] ?? '' ) ) . '</td><td>' . esc_html( $this->format_report_value( $limits, 'limits' ) ) . '</td></tr>';
+			echo '<tr><td><code>' . esc_html( (string) ( $point['code'] ?? '' ) ) . '</code></td><td>' . esc_html( (string) ( $ref['source'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $point['type'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $ref['branch_name'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $ref['division_name'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $point['address'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $point['latitude'] ?? '' ) . ', ' . (string) ( $point['longitude'] ?? '' ) ) . '</td><td>' . esc_html( (string) ( $point['work_time'] ?? '' ) ) . '</td><td>' . esc_html( $this->format_report_value( $limits, 'limits' ) ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
 	}

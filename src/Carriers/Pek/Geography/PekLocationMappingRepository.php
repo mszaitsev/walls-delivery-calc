@@ -131,14 +131,26 @@ final class PekLocationMappingRepository {
 		if ( array() === $mapping || $fingerprint !== (string) ( $mapping['address_fingerprint'] ?? '' ) ) {
 			return false;
 		}
-		$checked = strtotime( (string) ( $mapping['checked_at'] ?? '' ) );
-		if ( false === $checked ) {
+		$checked_at = trim( (string) ( $mapping['checked_at'] ?? '' ) );
+		$timezone = function_exists( 'wp_timezone' ) ? wp_timezone() : new \DateTimeZone( 'UTC' );
+		$checked = \DateTimeImmutable::createFromFormat( '!Y-m-d H:i:s', $checked_at, $timezone );
+		$errors = \DateTimeImmutable::getLastErrors();
+		if (
+			false === $checked
+			|| ( is_array( $errors ) && ( (int) ( $errors['warning_count'] ?? 0 ) > 0 || (int) ( $errors['error_count'] ?? 0 ) > 0 ) )
+			|| $checked->format( 'Y-m-d H:i:s' ) !== $checked_at
+		) {
 			return false;
 		}
 
 		$day = defined( 'DAY_IN_SECONDS' ) ? (int) DAY_IN_SECONDS : 86400;
+		$now = function_exists( 'current_datetime' ) ? current_datetime()->getTimestamp() : time();
+		$checked_timestamp = $checked->getTimestamp();
+		if ( $checked_timestamp > $now ) {
+			return false;
+		}
 
-		return time() - $checked <= max( 1, $ttl_days ) * $day;
+		return $now - $checked_timestamp <= max( 1, $ttl_days ) * $day;
 	}
 
 	/** @return array<string,int> */

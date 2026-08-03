@@ -405,6 +405,10 @@ foreach ( array(
 plugin_architecture_assert( is_file( plugin_architecture_path( 'database/migrations/0048_create_pek_location_mappings.php' ) ) && is_file( plugin_architecture_path( 'database/migrations/0049_create_pek_terminals.php' ) ), 'PEK geography/pickup migrations 0048 and 0049 must exist.' );
 $pek_mapping_repository_source = plugin_architecture_source( 'src/Carriers/Pek/Geography/PekLocationMappingRepository.php' );
 $pek_terminal_repository_source = plugin_architecture_source( 'src/Carriers/Pek/Pickup/PekTerminalRepository.php' );
+$pek_location_resolver_source = plugin_architecture_source( 'src/Carriers/Pek/Geography/PekLocationResolver.php' );
+$pek_api_client_source = plugin_architecture_source( 'src/Carriers/Pek/Api/PekApiClient.php' );
+$pek_terminal_cache_source = plugin_architecture_source( 'src/Carriers/Pek/Pickup/PekDestinationTerminalSearchCache.php' );
+$pek_terminal_service_source = plugin_architecture_source( 'src/Carriers/Pek/Pickup/PekTerminalService.php' );
 $pek_mapping_migration_source = plugin_architecture_source( 'database/migrations/0048_create_pek_location_mappings.php' );
 $pek_terminal_migration_source = plugin_architecture_source( 'database/migrations/0049_create_pek_terminals.php' );
 plugin_architecture_assert( str_contains( $pek_mapping_repository_source, 'function install_schema' ) && str_contains( $pek_terminal_repository_source, 'function install_schema' ), 'PEK repositories must expose explicit install_schema methods for migrations.' );
@@ -417,6 +421,11 @@ foreach ( array(
 	plugin_architecture_assert( ! str_contains( $repository_source, '$this->install_schema' ) && ! str_contains( $repository_source, '->install_schema' ), $repository_name . ' runtime methods must not call install_schema.' );
 	plugin_architecture_assert( 1 === substr_count( $repository_source, 'function install_schema' ) && 1 === substr_count( $repository_source, 'dbDelta( $this->schema() )' ), $repository_name . ' must keep dbDelta only inside the explicit install_schema method.' );
 }
+plugin_architecture_assert( ! str_contains( $pek_mapping_repository_source, 'strtotime(' ) && ! str_contains( $pek_mapping_repository_source, "current_time( 'timestamp'" ) && ! str_contains( $pek_mapping_repository_source, "current_time('timestamp'" ), 'PEK location mapping freshness must not use strtotime or WordPress offset timestamps.' );
+plugin_architecture_assert( str_contains( $pek_location_resolver_source, 'invalid_response_country' ) && str_contains( $pek_location_resolver_source, 'unexpected_precision' ) && str_contains( $pek_location_resolver_source, 'incomplete_zone_context' ), 'PEK location resolver must keep strict method-specific zone and response country diagnostics.' );
+plugin_architecture_assert( str_contains( $pek_api_client_source, 'pek_unexpected_destination_nearest_departments' ) && str_contains( $pek_api_client_source, 'freeDepartments' ) && str_contains( $pek_api_client_source, 'paidDepartments' ), 'PEK API client must validate documented nearestdepartments collections at the typed boundary.' );
+plugin_architecture_assert( str_contains( $pek_terminal_cache_source, 'FORMAT_VERSION' ) && str_contains( $pek_terminal_cache_source, 'delete_transient' ) && str_contains( $pek_terminal_cache_source, 'PickupPoint::from_array' ) && str_contains( $pek_terminal_cache_source, 'PekSettings::CARRIER_KEY' ), 'PEK destination terminal cache must be versioned and validate cached PEK PickupPoint payloads.' );
+plugin_architecture_assert( str_contains( $pek_terminal_service_source, 'pek_destination_mapping_incomplete' ) && str_contains( $pek_terminal_service_source, 'has_usable_mapping_coordinates' ), 'PEK terminal service must fail closed on incomplete mapping coordinates/address.' );
 foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
 	if ( 'src/Core/Plugin.php' === $relative ) {

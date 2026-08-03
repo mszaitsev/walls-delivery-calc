@@ -67,7 +67,10 @@ final class PekUiFakeHttp implements PekHttpClientInterface {
 		if ( str_contains( (string) parse_url( $url, PHP_URL_PATH ), 'findzonebycoordinates' ) ) {
 			return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'zoneId' => 'zone', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'warehousePoint' => array( 'latitude' => 1, 'longitude' => 2 ) ) ) ) );
 		}
-		return array( 'status' => 200, 'body' => '[]' );
+		if ( str_contains( (string) parse_url( $url, PHP_URL_PATH ), 'findzonebyaddress' ) ) {
+			return array( 'status' => 200, 'body' => wp_json_encode( array( 'zoneId' => 'zone-address', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Новосибирск' ) ) ) ) );
+		}
+		return array( 'status' => 200, 'body' => wp_json_encode( array( 'freeDepartments' => array(), 'paidDepartments' => array() ) ) );
 	}
 }
 
@@ -176,6 +179,7 @@ $location_resolver = new PekLocationResolver( $location_repository, new PekAddre
 $terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
 $pickup_provider = new PekPickupPointProvider( $terminal_service );
 $destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings );
+$destination_report_store = new PekDestinationPickupDiagnosticStore();
 $page = new PekAdminPage(
 	$settings,
 	$credentials,
@@ -183,7 +187,7 @@ $page = new PekAdminPage(
 	new PekSenderWarehouseService( $api, $settings, $cache ),
 	$notice_store,
 	$destination_diagnostic_service,
-	new PekDestinationPickupDiagnosticStore()
+	$destination_report_store
 );
 $service = DeliveryService::from_array( array( 'id' => 5, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => 'ПЭК' ) );
 
@@ -222,5 +226,38 @@ $success_empty_report = $destination_diagnostic_service->run( array( 'pek_destin
 pek_ui_assert( true === $success_empty_report['success'] && 0 === $success_empty_report['terminals']['total_returned'] && str_contains( $success_empty_report['message'], 'Подходящие терминалы не найдены' ), 'Successful empty destination diagnostic must be success=true with explicit empty message.' );
 $destination_payload = json_decode( (string) $ui_http->requests[1]['args']['body'], true );
 pek_ui_assert( 10.0 === (float) $destination_payload['volume'] && 1.25 === (float) $destination_payload['weight'], 'Admin diagnostic must multiply one-place dimensions by places_count and preserve decimal weight.' );
+$destination_report_store->save_for_current_user(
+	array(
+		'checked_at' => '2026-08-03 10:00:00',
+		'message' => 'Диагностика направления ПЭК выполнена.',
+		'location' => array(),
+		'terminals' => array(
+			'total_returned' => 1,
+			'points' => array(
+				array(
+					'carrier_key' => 'pek',
+					'code' => 'terminal-ui',
+					'address' => 'Адрес терминала',
+					'city' => '',
+					'latitude' => 55.1,
+					'longitude' => 82.9,
+					'type' => 'terminal',
+					'work_time' => 'Пн: 09:00-18:00',
+					'raw_reference' => array(
+						'source' => 'free',
+						'branch_name' => 'Новосибирск',
+						'division_name' => 'Центр',
+						'limits' => array( 'maxWeight' => 10 ),
+					),
+				),
+			),
+		),
+	)
+);
+ob_start();
+$page->render_embedded( $service );
+$destination_html = (string) ob_get_clean();
+pek_ui_assert( str_contains( $destination_html, '<th>Филиал</th>' ) && str_contains( $destination_html, '<th>Отделение</th>' ) && str_contains( $destination_html, '<th>Время работы</th>' ), 'PEK destination diagnostics table must show branch, division and work time columns.' );
+pek_ui_assert( str_contains( $destination_html, 'Новосибирск' ) && str_contains( $destination_html, 'Центр' ) && str_contains( $destination_html, 'Пн: 09:00-18:00' ), 'PEK destination diagnostics table must render branch, division and work time values.' );
 
 echo "PEK admin UI smoke OK\n";

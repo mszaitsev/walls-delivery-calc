@@ -6,6 +6,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
@@ -14,6 +15,7 @@ use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalRequest;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
@@ -28,6 +30,12 @@ use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 if ( ! function_exists( 'current_time' ) ) {
 	function current_time( string $type ): string { unset( $type ); return '2026-08-03 10:00:00'; }
 }
+if ( ! function_exists( 'wp_timezone' ) ) {
+	function wp_timezone(): DateTimeZone { return new DateTimeZone( 'UTC' ); }
+}
+if ( ! function_exists( 'current_datetime' ) ) {
+	function current_datetime(): DateTimeImmutable { return new DateTimeImmutable( '2026-08-03 10:00:00', wp_timezone() ); }
+}
 if ( ! function_exists( 'wp_json_encode' ) ) {
 	function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 }
@@ -39,6 +47,7 @@ $GLOBALS['wdc_transients'] = array();
 if ( ! function_exists( 'set_transient' ) ) {
 	function set_transient( string $key, mixed $value, int $ttl ): bool { $GLOBALS['wdc_transients'][ $key ] = array( 'value' => $value, 'ttl' => $ttl ); return true; }
 	function get_transient( string $key ): mixed { return $GLOBALS['wdc_transients'][ $key ]['value'] ?? false; }
+	function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_transients'][ $key ] ); return true; }
 }
 
 function pek_pickup_assert( bool $condition, string $message ): void {
@@ -50,8 +59,8 @@ function pek_pickup_assert( bool $condition, string $message ): void {
 final class PekPickupFakeHttp implements PekHttpClientInterface {
 	public array $requests = array();
 	public array $nearest_response;
-	public function __construct( array $nearest_response = array() ) {
-		$this->nearest_response = array() === $nearest_response ? array(
+	public function __construct( ?array $nearest_response = null ) {
+		$this->nearest_response = null === $nearest_response ? array(
 			'freeDepartments' => array(
 				array( 'warehouseId' => 'free-ok', 'branchId' => 'b1', 'branchName' => 'Новосибирск', 'divisionName' => 'Центр', 'departmentTypeId' => 0, 'departmentType' => 'Отделение компании', 'address' => 'Адрес 1', 'coordinates' => array( 'latitude' => 55.1, 'longitude' => 82.9 ), 'timeZone' => '07:00:00', 'priority' => 10, 'maxWeight' => 0.0, 'maxVolume' => 0.0, 'maxDimension' => 0.0, 'maxWeightOnePlace' => 0.0, 'maxCount' => 0 ),
 				array( 'warehouseId' => 'too-small', 'branchName' => 'Новосибирск', 'address' => 'Адрес 2', 'coordinates' => array( 'latitude' => 55.2, 'longitude' => 82.8 ), 'maxWeight' => 0.5, 'maxVolume' => 0, 'maxDimension' => 0, 'maxWeightOnePlace' => 0, 'maxCount' => 0 ),
@@ -119,6 +128,7 @@ pek_pickup_assert( count( $points ) === 2, 'PEK provider must return free and pa
 pek_pickup_assert( $points[0]->type === 'terminal' && $points[0]->raw_reference['source'] === 'free', 'freeDepartments must become terminal source free.' );
 pek_pickup_assert( $points[1]->type === 'pvz' && $points[1]->raw_reference['source'] === 'paid', 'paidDepartments must become pvz source paid.' );
 pek_pickup_assert( $points[0]->raw_reference['timezone'] === 'UTC+07:00', 'PEK destination timeZone must normalize to canonical timezone.' );
+pek_pickup_assert( '' === $points[0]->city && 'Новосибирск' === $points[0]->raw_reference['branch_name'], 'PEK organizational branchName must not be exposed as PickupPoint city.' );
 pek_pickup_assert( count( $wpdb->pek_terminals ) === 2 && array() !== $repo->find_by_warehouse_id( 'free-ok' ), 'Terminal repository must upsert found terminals.' );
 $nearest_request = $http->requests[1];
 $payload = json_decode( (string) $nearest_request['args']['body'], true );
@@ -128,6 +138,31 @@ pek_pickup_assert( isset( $payload['coordinates'] ) && 55.030204 === (float) $pa
 $requests_after_first = count( $http->requests );
 $cached = $provider->search( $query );
 pek_pickup_assert( count( $cached ) === 2 && count( $http->requests ) === $requests_after_first, 'Terminal search cache hit must avoid API.' );
+
+$cache = new PekDestinationTerminalSearchCache();
+$cache_fingerprint = $cache->fingerprint( array( 'case' => 'valid' ) );
+$cache->save( $cache_fingerprint, array( 'query_fingerprint' => $cache_fingerprint ), array( $points[0] ), 600 );
+pek_pickup_assert( true === $cache->get( $cache_fingerprint )['hit'] && 1 === count( $cache->get( $cache_fingerprint )['points'] ), 'Versioned terminal cache must accept valid non-empty PEK points.' );
+$empty_fingerprint = $cache->fingerprint( array( 'case' => 'empty' ) );
+$cache->save( $empty_fingerprint, array( 'query_fingerprint' => $empty_fingerprint ), array(), 600 );
+pek_pickup_assert( true === $cache->get( $empty_fingerprint )['hit'] && array() === $cache->get( $empty_fingerprint )['points'], 'Versioned terminal cache must accept valid empty successful results.' );
+foreach ( array(
+	array( 'case' => 'wrong-version', 'value' => array( 'format_version' => 2, 'fingerprint' => '', 'metadata' => array(), 'points' => array() ) ),
+	array( 'case' => 'missing-version', 'value' => array( 'fingerprint' => '', 'metadata' => array(), 'points' => array() ) ),
+	array( 'case' => 'missing-points', 'value' => array( 'format_version' => 1, 'fingerprint' => '', 'metadata' => array() ) ),
+	array( 'case' => 'scalar-points', 'value' => array( 'format_version' => 1, 'fingerprint' => '', 'metadata' => array(), 'points' => 'bad' ) ),
+	array( 'case' => 'malformed-point', 'value' => array( 'format_version' => 1, 'fingerprint' => '', 'metadata' => array(), 'points' => array( array( 'carrier_key' => 'pek', 'code' => '', 'type' => 'terminal' ) ) ) ),
+	array( 'case' => 'foreign-carrier', 'value' => array( 'format_version' => 1, 'fingerprint' => '', 'metadata' => array(), 'points' => array( array_merge( $points[0]->to_array(), array( 'carrier_key' => 'cdek' ) ) ) ) ),
+) as $cache_case ) {
+	$bad_fingerprint = $cache->fingerprint( array( 'case' => $cache_case['case'] ) );
+	$cache_case['value']['fingerprint'] = 'wrong-fingerprint' === $cache_case['case'] ? 'other' : $bad_fingerprint;
+	$GLOBALS['wdc_transients'][ 'wdc_pek_destination_terminals_' . $bad_fingerprint ] = array( 'value' => $cache_case['value'], 'ttl' => 600 );
+	pek_pickup_assert( false === $cache->get( $bad_fingerprint )['hit'] && ! isset( $GLOBALS['wdc_transients'][ 'wdc_pek_destination_terminals_' . $bad_fingerprint ] ), 'Malformed terminal cache must be deleted and treated as miss: ' . $cache_case['case'] );
+}
+$wrong_fingerprint = $cache->fingerprint( array( 'case' => 'wrong-fingerprint' ) );
+$GLOBALS['wdc_transients'][ 'wdc_pek_destination_terminals_' . $wrong_fingerprint ] = array( 'value' => array( 'format_version' => 1, 'fingerprint' => 'different', 'metadata' => array(), 'points' => array() ), 'ttl' => 600 );
+pek_pickup_assert( false === $cache->get( $wrong_fingerprint )['hit'] && ! isset( $GLOBALS['wdc_transients'][ 'wdc_pek_destination_terminals_' . $wrong_fingerprint ] ), 'Wrong cache fingerprint must be deleted and treated as miss.' );
+
 $selected = $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, 'paid-ok' ) );
 pek_pickup_assert( null !== $selected && $selected->code === 'paid-ok' && count( $http->requests ) > $requests_after_first, 'resolve_selection must perform fresh API validation.' );
 pek_pickup_assert( ! property_exists( new CarrierPickupPointSelectionQuery( $query, 'paid-ok' ), 'fresh_validation_required' ), 'Selection query must not expose unused fresh_validation_required flag.' );
@@ -149,6 +184,31 @@ pek_pickup_assert( array() === $fallback_only && count( $http->requests ) === $r
 $fallback_selection = $provider->resolve_selection( new CarrierPickupPointSelectionQuery( new CarrierPickupPointQuery( 'pek', 0, 'RU', 'Россия, Новосибирск', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ), 'free-ok' ) );
 pek_pickup_assert( null === $fallback_selection && count( $http->requests ) === $requests_before_fallback_only, 'PEK resolve_selection must reject fallback-only query without API call.' );
 
+foreach ( array(
+	'missing-free' => array( 'paidDepartments' => array() ),
+	'missing-paid' => array( 'freeDepartments' => array() ),
+	'free-null' => array( 'freeDepartments' => null, 'paidDepartments' => array() ),
+	'paid-null' => array( 'freeDepartments' => array(), 'paidDepartments' => null ),
+	'root-list' => array(),
+) as $case_name => $response ) {
+	$bad_http = new PekPickupFakeHttp( $response );
+	$bad_api = new PekApiClient( $settings, $credentials, $bad_http, new PekRequestBudget( $settings ) );
+	try {
+		$bad_api->destination_nearest_departments( new PekDestinationTerminalRequest( 'Россия, Новосибирск', null, null, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) );
+		pek_pickup_assert( false, 'Malformed destination nearestdepartments response must fail closed: ' . $case_name );
+	} catch ( PekApiException $exception ) {
+		pek_pickup_assert( 'pek_unexpected_destination_nearest_departments' === (string) ( $exception->context()['error_code'] ?? '' ), 'Malformed destination response must use stable destination error code.' );
+	}
+}
+$sender_bad_http = new PekPickupFakeHttp( array() );
+$sender_bad_api = new PekApiClient( $settings, $credentials, $sender_bad_http, new PekRequestBudget( $settings ) );
+try {
+	$sender_bad_api->nearest_departments( 'Россия, Новосибирск' );
+	pek_pickup_assert( false, 'Malformed sender nearestdepartments response must fail closed.' );
+} catch ( PekApiException $exception ) {
+	pek_pickup_assert( 'pek_unexpected_nearest_departments' === (string) ( $exception->context()['error_code'] ?? '' ), 'Malformed sender response must preserve sender-specific stable error code.' );
+}
+
 $address_http = new PekPickupFakeHttp();
 $address_api = new PekApiClient( $settings, $credentials, $address_http, new PekRequestBudget( $settings ) );
 $address_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $address_api, $settings );
@@ -156,6 +216,24 @@ $address_service = new PekTerminalService( $address_resolver, $address_api, new 
 $address_points = $address_service->search( new CarrierPickupPointQuery( 'pek', 11, 'RU', '', 1.0, 2.0, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );
 $address_payload = json_decode( (string) $address_http->requests[1]['args']['body'], true );
 pek_pickup_assert( count( $address_points ) === 2 && isset( $address_payload['address'] ) && ! isset( $address_payload['coordinates'] ), 'Address-only canonical location must send address only and ignore query override/warehousePoint coordinates.' );
+
+$GLOBALS['wdc_transients'] = array();
+$legacy_fingerprint = $address_resolver->fingerprint( WallsShop\WDC\Locations\ValueObjects\Location::from_array( $wpdb->locations[1] ) );
+$wpdb->pek_location_mappings = array( array( 'id' => 77, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $legacy_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'normalized_address' => 'Россия, Линево', 'latitude' => 999, 'longitude' => 82, 'checked_at' => '2026-08-03 10:00:00', 'created_at' => '2026-08-03 10:00:00', 'updated_at' => '2026-08-03 10:00:00' ) );
+$legacy_http = new PekPickupFakeHttp();
+$legacy_api = new PekApiClient( $settings, $credentials, $legacy_http, new PekRequestBudget( $settings ) );
+$legacy_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $legacy_api, $settings );
+$legacy_service = new PekTerminalService( $legacy_resolver, $legacy_api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
+$legacy_points = $legacy_service->search( new CarrierPickupPointQuery( 'pek', 11, 'RU', '', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );
+$legacy_payload = json_decode( (string) $legacy_http->requests[0]['args']['body'], true );
+pek_pickup_assert( count( $legacy_points ) === 2 && isset( $legacy_payload['address'] ) && ! isset( $legacy_payload['coordinates'] ), 'Legacy mapping with invalid coordinates must fall back to address-only terminal request.' );
+$GLOBALS['wdc_transients'] = array();
+$wpdb->pek_location_mappings = array( array( 'id' => 78, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $legacy_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'normalized_address' => '', 'latitude' => 999, 'longitude' => 82, 'checked_at' => '2026-08-03 10:00:00', 'created_at' => '2026-08-03 10:00:00', 'updated_at' => '2026-08-03 10:00:00' ) );
+$incomplete_http = new PekPickupFakeHttp();
+$incomplete_api = new PekApiClient( $settings, $credentials, $incomplete_http, new PekRequestBudget( $settings ) );
+$incomplete_service = new PekTerminalService( new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $incomplete_api, $settings ), $incomplete_api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
+$incomplete_points = $incomplete_service->search( new CarrierPickupPointQuery( 'pek', 11, 'RU', '', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );
+pek_pickup_assert( array() === $incomplete_points && 0 === count( $incomplete_http->requests ) && 'pek_destination_mapping_incomplete' === (string) $incomplete_service->last_report()['error_code'], 'Mapping without usable coordinates or address must fail closed before terminal API.' );
 
 $mismatch_requests_before = count( $address_http->requests );
 $mismatch_points = $address_service->search( new CarrierPickupPointQuery( 'pek', 11, 'KZ', '', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );

@@ -3,11 +3,14 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\Pek\Pickup;
 
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PekDestinationTerminalSearchCache {
+	private const FORMAT_VERSION = 1;
+
 	public function ttl(): int {
 		return 600;
 	}
@@ -20,6 +23,8 @@ final class PekDestinationTerminalSearchCache {
 		set_transient(
 			$this->key( $fingerprint ),
 			array(
+				'format_version' => self::FORMAT_VERSION,
+				'fingerprint' => $fingerprint,
 				'metadata' => $this->sanitize_metadata( $metadata ),
 				'points' => array_map( static fn( PickupPoint $point ): array => $point->to_array(), $points ),
 			),
@@ -36,14 +41,31 @@ final class PekDestinationTerminalSearchCache {
 		if ( ! is_array( $value ) ) {
 			return array( 'hit' => false, 'metadata' => array(), 'points' => array() );
 		}
+		if (
+			self::FORMAT_VERSION !== (int) ( $value['format_version'] ?? 0 )
+			|| $fingerprint !== (string) ( $value['fingerprint'] ?? '' )
+			|| ! is_array( $value['metadata'] ?? null )
+			|| ! array_key_exists( 'points', $value )
+			|| ! is_array( $value['points'] )
+		) {
+			$this->delete( $fingerprint );
+			return array( 'hit' => false, 'metadata' => array(), 'points' => array() );
+		}
 		$points = array();
-		foreach ( is_array( $value['points'] ?? null ) ? $value['points'] : array() as $point ) {
-			if ( is_array( $point ) ) {
-				$points[] = PickupPoint::from_array( $point );
+		foreach ( $value['points'] as $point ) {
+			if ( ! is_array( $point ) ) {
+				$this->delete( $fingerprint );
+				return array( 'hit' => false, 'metadata' => array(), 'points' => array() );
 			}
+			$pickup_point = PickupPoint::from_array( $point );
+			if ( PekSettings::CARRIER_KEY !== $pickup_point->carrier_key || array() !== $pickup_point->validate() ) {
+				$this->delete( $fingerprint );
+				return array( 'hit' => false, 'metadata' => array(), 'points' => array() );
+			}
+			$points[] = $pickup_point;
 		}
 
-		return array( 'hit' => true, 'metadata' => is_array( $value['metadata'] ?? null ) ? $value['metadata'] : array(), 'points' => $points );
+		return array( 'hit' => true, 'metadata' => $value['metadata'], 'points' => $points );
 	}
 
 	public function fingerprint( array $parts ): string {
@@ -54,6 +76,12 @@ final class PekDestinationTerminalSearchCache {
 
 	private function key( string $fingerprint ): string {
 		return 'wdc_pek_destination_terminals_' . preg_replace( '/[^a-f0-9]/i', '', $fingerprint );
+	}
+
+	private function delete( string $fingerprint ): void {
+		if ( function_exists( 'delete_transient' ) ) {
+			delete_transient( $this->key( $fingerprint ) );
+		}
 	}
 
 	/** @param array<string,mixed> $metadata @return array<string,mixed> */

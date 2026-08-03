@@ -21,6 +21,12 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 if ( ! function_exists( 'current_time' ) ) {
 	function current_time( string $type ): string { unset( $type ); return '2026-08-03 10:00:00'; }
 }
+if ( ! function_exists( 'wp_timezone' ) ) {
+	function wp_timezone(): DateTimeZone { return new DateTimeZone( '+07:00' ); }
+}
+if ( ! function_exists( 'current_datetime' ) ) {
+	function current_datetime(): DateTimeImmutable { return new DateTimeImmutable( '2026-08-03 10:00:00', wp_timezone() ); }
+}
 if ( ! function_exists( 'wp_json_encode' ) ) {
 	function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 }
@@ -79,6 +85,11 @@ $wpdb->locations = array(
 	array( 'id' => 21, 'country_code' => 'KZ', 'region_name' => 'Алматинская область', 'city_name' => 'Алматы', 'city_type' => 'г', 'place_name' => 'Алматы', 'place_type' => 'г', 'display_name' => 'Алматы', 'active' => 1 ),
 	array( 'id' => 22, 'country_code' => 'AM', 'city_name' => 'Ереван', 'city_type' => 'г', 'place_name' => 'Ереван', 'place_type' => 'г', 'display_name' => 'Ереван', 'active' => 1 ),
 	array( 'id' => 23, 'country_code' => 'KG', 'city_name' => 'Бишкек', 'city_type' => 'г', 'place_name' => 'Бишкек', 'place_type' => 'г', 'display_name' => 'Бишкек', 'active' => 1 ),
+	array( 'id' => 24, 'country_code' => 'KZ', 'city_name' => 'Шымкент', 'city_type' => 'г', 'place_name' => 'Шымкент', 'place_type' => 'г', 'display_name' => 'Шымкент', 'active' => 1 ),
+	array( 'id' => 31, 'country_code' => 'RU', 'city_name' => 'Partial Lat', 'display_name' => 'Partial Lat', 'latitude' => 55.0, 'active' => 1 ),
+	array( 'id' => 32, 'country_code' => 'RU', 'city_name' => 'Partial Lng', 'display_name' => 'Partial Lng', 'longitude' => 82.0, 'active' => 1 ),
+	array( 'id' => 33, 'country_code' => 'RU', 'city_name' => 'Bad Lat', 'display_name' => 'Bad Lat', 'latitude' => 91.0, 'longitude' => 82.0, 'active' => 1 ),
+	array( 'id' => 34, 'country_code' => 'RU', 'city_name' => 'Bad Lng', 'display_name' => 'Bad Lng', 'latitude' => 55.0, 'longitude' => 181.0, 'active' => 1 ),
 	array( 'id' => 99, 'country_code' => 'US', 'city_name' => 'Boston', 'place_name' => 'Boston', 'display_name' => 'Boston', 'active' => 1 ),
 );
 
@@ -135,6 +146,63 @@ $mismatch_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), n
 $mismatch = $mismatch_resolver->resolve( 20 );
 pek_geo_assert( 'unsupported' === $mismatch['mapping_state'] && str_contains( (string) $mismatch['safe_diagnostic_json'], 'country_mismatch' ), 'Mismatching documented response country must create unsupported mapping.' );
 
+foreach ( array( 31, 32, 33, 34 ) as $partial_id ) {
+	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== $partial_id ) );
+	$partial_http = new PekGeoFakeHttp( array(
+		'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'zone-partial', 'zoneName' => 'Partial', 'branchUID' => 'branch-partial', 'branchTitle' => 'Partial', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'formatted' => 'Россия, Partial', 'country_code' => 'RU' ) ) ),
+	) );
+	$partial_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $partial_http, new PekRequestBudget( $settings ) ), $settings );
+	$partial_mapping = $partial_resolver->resolve( $partial_id );
+	pek_geo_assert( 'address' === $partial_mapping['resolution_method'] && null === $partial_mapping['latitude'] && null === $partial_mapping['longitude'], 'Partial or invalid canonical coordinates must fall back to address mapping without storing coordinates.' );
+	pek_geo_assert( str_contains( $partial_http->requests[0]['url'], '/branches/findzonebyaddress/' ), 'Partial or invalid canonical coordinates must not call coordinate zone endpoint.' );
+}
+
+$method_cases = array(
+	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => '' ) ), 'state' => 'unsupported', 'code' => 'bad_precision' ),
+	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'maybe' ) ), 'state' => 'unsupported', 'code' => 'unexpected_precision' ),
+	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => array( 'exact' ) ) ), 'state' => 'unsupported', 'code' => 'unexpected_precision' ),
+	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'GeoData' => array( 'precision' => 'exact' ) ), 'state' => 'unsupported', 'code' => 'incomplete_zone_context' ),
+	array( 'id' => 11, 'method' => 'address', 'response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'bad' ) ), 'state' => 'unsupported', 'code' => 'bad_precision' ),
+	array( 'id' => 10, 'method' => 'coordinates', 'response' => array( array( 'zoneId' => 'z', 'branchUID' => 'b' ) ), 'state' => 'resolved', 'code' => '' ),
+	array( 'id' => 10, 'method' => 'coordinates', 'response' => array( array( 'zoneId' => 'z' ) ), 'state' => 'unsupported', 'code' => 'incomplete_zone_context' ),
+);
+foreach ( $method_cases as $case ) {
+	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== (int) $case['id'] ) );
+	$path = 'coordinates' === $case['method'] ? 'findzonebycoordinates' : 'findzonebyaddress';
+	$case_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/' . $path . '/' => $case['response'] ) );
+	$case_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $case_http, new PekRequestBudget( $settings ) ), $settings );
+	$case_mapping = $case_resolver->resolve( (int) $case['id'] );
+	pek_geo_assert( $case['state'] === $case_mapping['mapping_state'], 'Method-specific zone response policy must produce expected mapping_state.' );
+	if ( '' !== $case['code'] ) {
+		pek_geo_assert( str_contains( (string) $case_mapping['safe_diagnostic_json'], (string) $case['code'] ), 'Method-specific zone response policy must report stable diagnostic code.' );
+	}
+}
+
+foreach ( array(
+	array( 'country' => '', 'state' => 'resolved', 'code' => '' ),
+	array( 'country' => '643', 'state' => 'unsupported', 'code' => 'invalid_response_country' ),
+	array( 'country' => 'R1', 'state' => 'unsupported', 'code' => 'invalid_response_country' ),
+	array( 'country' => 'RUS', 'state' => 'unsupported', 'code' => 'invalid_response_country' ),
+) as $case ) {
+	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== 11 ) );
+	$country_address = '' === $case['country'] ? array( 'formatted' => 'Россия, Линево' ) : array( 'formatted' => 'Россия, Линево', 'country_code' => $case['country'] );
+	$country_case_http = new PekGeoFakeHttp( array(
+		'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'exact', 'Address' => $country_address ) ),
+	) );
+	$country_case_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $country_case_http, new PekRequestBudget( $settings ) ), $settings );
+	$country_case_mapping = $country_case_resolver->resolve( 11 );
+	pek_geo_assert( $case['state'] === $country_case_mapping['mapping_state'], 'Malformed response country must not be treated as absent.' );
+	if ( '' !== $case['code'] ) {
+		pek_geo_assert( str_contains( (string) $country_case_mapping['safe_diagnostic_json'], (string) $case['code'] ), 'Malformed response country must report invalid_response_country.' );
+	}
+}
+$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== 11 ) );
+$non_scalar_country_http = new PekGeoFakeHttp( array(
+	'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => array( 'RU' ) ) ) ),
+) );
+$non_scalar_country = ( new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $non_scalar_country_http, new PekRequestBudget( $settings ) ), $settings ) )->resolve( 11 );
+pek_geo_assert( 'unsupported' === $non_scalar_country['mapping_state'] && str_contains( (string) $non_scalar_country['safe_diagnostic_json'], 'invalid_response_country' ), 'Non-scalar response country must fail closed.' );
+
 $same_fingerprint = $resolver->fingerprint( Location::from_array( $wpdb->locations[1] ) );
 $wpdb->pek_location_mappings = array( array( 'id' => 1, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $same_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'normalized_address' => 'Россия, Линево', 'checked_at' => '2026-07-01 00:00:00', 'created_at' => '2026-07-01 00:00:00', 'updated_at' => '2026-07-01 00:00:00' ) );
 $error_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/findzonebyaddress/' => array( '__status' => 503, 'body' => array( 'message' => 'down' ) ) ) );
@@ -174,6 +242,16 @@ try {
 }
 $repo->upsert( array( 'location_id' => 30, 'country_code' => 'RU', 'address_fingerprint' => str_repeat( 'b', 64 ), 'mapping_state' => 'near' ) );
 pek_geo_assert( '2026-01-01 00:00:00' === $repo->find_by_location_id( 30 )['created_at'], 'PEK mapping update must preserve created_at.' );
+$default_timezone = date_default_timezone_get();
+date_default_timezone_set( 'UTC' );
+$fresh_fingerprint = str_repeat( 'c', 64 );
+pek_geo_assert( $repo->is_fresh( array( 'address_fingerprint' => $fresh_fingerprint, 'checked_at' => '2026-08-03 09:30:00' ), $fresh_fingerprint, 1 ), 'Freshness must compare checked_at in WordPress timezone, not PHP default timezone.' );
+pek_geo_assert( $repo->is_fresh( array( 'address_fingerprint' => $fresh_fingerprint, 'checked_at' => '2026-08-02 10:00:00' ), $fresh_fingerprint, 1 ), 'Exact TTL boundary must remain fresh.' );
+pek_geo_assert( ! $repo->is_fresh( array( 'address_fingerprint' => $fresh_fingerprint, 'checked_at' => '2026-08-02 09:59:59' ), $fresh_fingerprint, 1 ), 'Mapping older than TTL boundary must be stale.' );
+pek_geo_assert( ! $repo->is_fresh( array( 'address_fingerprint' => $fresh_fingerprint, 'checked_at' => 'bad-date' ), $fresh_fingerprint, 1 ), 'Invalid checked_at must not be fresh.' );
+pek_geo_assert( ! $repo->is_fresh( array( 'address_fingerprint' => $fresh_fingerprint, 'checked_at' => '2026-02-30 10:00:00' ), $fresh_fingerprint, 365 ), 'Impossible checked_at must not be fresh.' );
+pek_geo_assert( ! $repo->is_fresh( array( 'address_fingerprint' => $fresh_fingerprint, 'checked_at' => '2026-08-03 10:00:01' ), $fresh_fingerprint, 1 ), 'Future checked_at must not be fresh.' );
+date_default_timezone_set( $default_timezone );
 $wpdb->pek_location_mapping_read_fails = true;
 try {
 	$repo->find_by_location_id( 30 );
