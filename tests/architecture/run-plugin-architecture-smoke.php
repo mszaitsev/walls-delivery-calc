@@ -402,9 +402,10 @@ foreach ( array(
 	$pickup_rest_source = plugin_architecture_source( $pickup_rest_path );
 	plugin_architecture_assert( ! str_contains( $pickup_rest_source, 'Pek' ) && ! str_contains( $pickup_rest_source, "'pek'" ) && ! str_contains( $pickup_rest_source, 'CarrierPickupPointProviderRegistry' ), 'Public pickup REST must not integrate PEK provider registry in ' . $pickup_rest_path );
 }
-plugin_architecture_assert( is_file( plugin_architecture_path( 'database/migrations/0048_create_pek_location_mappings.php' ) ) && is_file( plugin_architecture_path( 'database/migrations/0049_create_pek_terminals.php' ) ), 'PEK geography/pickup migrations 0048 and 0049 must exist.' );
+plugin_architecture_assert( is_file( plugin_architecture_path( 'database/migrations/0048_create_pek_location_mappings.php' ) ) && is_file( plugin_architecture_path( 'database/migrations/0049_create_pek_terminals.php' ) ) && is_file( plugin_architecture_path( 'database/migrations/0050_repair_pek_foundation_schema.php' ) ), 'PEK geography/pickup migrations 0048, 0049, and schema integrity recovery migration 0050 must exist.' );
 $pek_mapping_repository_source = plugin_architecture_source( 'src/Carriers/Pek/Geography/PekLocationMappingRepository.php' );
 $pek_terminal_repository_source = plugin_architecture_source( 'src/Carriers/Pek/Pickup/PekTerminalRepository.php' );
+$pek_schema_integrity_source = plugin_architecture_source( 'src/Carriers/Pek/Installation/PekSchemaIntegrityService.php' );
 $pek_location_resolver_source = plugin_architecture_source( 'src/Carriers/Pek/Geography/PekLocationResolver.php' );
 $pek_api_client_source = plugin_architecture_source( 'src/Carriers/Pek/Api/PekApiClient.php' );
 $pek_destination_request_source = plugin_architecture_source( 'src/Carriers/Pek/Pickup/PekDestinationTerminalRequest.php' );
@@ -414,8 +415,21 @@ $pek_destination_store_source = plugin_architecture_source( 'src/Carriers/Pek/Ad
 $pek_admin_page_source = plugin_architecture_source( 'src/Carriers/Pek/Admin/PekAdminPage.php' );
 $pek_mapping_migration_source = plugin_architecture_source( 'database/migrations/0048_create_pek_location_mappings.php' );
 $pek_terminal_migration_source = plugin_architecture_source( 'database/migrations/0049_create_pek_terminals.php' );
+$pek_schema_repair_migration_source = plugin_architecture_source( 'database/migrations/0050_repair_pek_foundation_schema.php' );
 plugin_architecture_assert( str_contains( $pek_mapping_repository_source, 'function install_schema' ) && str_contains( $pek_terminal_repository_source, 'function install_schema' ), 'PEK repositories must expose explicit install_schema methods for migrations.' );
 plugin_architecture_assert( str_contains( $pek_mapping_migration_source, '->install_schema()' ) && str_contains( $pek_terminal_migration_source, '->install_schema()' ), 'PEK schemas must be installed by migrations 0048/0049.' );
+plugin_architecture_assert( str_contains( $plugin_source, 'PekSchemaIntegrityService::class' ), 'Plugin.php must own PEK schema integrity service registration.' );
+plugin_architecture_assert( str_contains( $pek_schema_repair_migration_source, 'PekSchemaIntegrityService' ) && str_contains( $pek_schema_repair_migration_source, '->repair()' ) && ! str_contains( $pek_schema_repair_migration_source, 'CREATE TABLE' ), 'Migration 0050 must delegate idempotent PEK schema repair and must not duplicate SQL definitions.' );
+plugin_architecture_assert( str_contains( $pek_schema_integrity_source, 'SHOW TABLES LIKE %s' ) && str_contains( $pek_schema_integrity_source, 'esc_like' ) && str_contains( $pek_schema_integrity_source, '->install_schema()' ) && str_contains( $pek_schema_integrity_source, 'PEK schema integrity recovery failed.' ), 'PEK schema integrity service must check table existence safely, install only missing schemas, and verify postconditions.' );
+foreach ( array(
+	'0048 migration' => $pek_mapping_migration_source,
+	'0049 migration' => $pek_terminal_migration_source,
+	'0050 migration' => $pek_schema_repair_migration_source,
+	'PEK schema integrity service' => $pek_schema_integrity_source,
+) as $pek_schema_owner => $source ) {
+	plugin_architecture_assert( ! preg_match( '/\b(?:DROP|TRUNCATE|DELETE)\s+/i', $source ), $pek_schema_owner . ' must not perform destructive PEK schema recovery.' );
+	plugin_architecture_assert( ! str_contains( $source, 'PekApiClient' ) && ! str_contains( $source, 'PekHttpClientInterface' ) && ! str_contains( $source, '/branches/' ), $pek_schema_owner . ' must not call PEK API during migration/schema recovery.' );
+}
 foreach ( array(
 	'PekLocationMappingRepository' => $pek_mapping_repository_source,
 	'PekTerminalRepository' => $pek_terminal_repository_source,
@@ -440,7 +454,7 @@ plugin_architecture_assert( str_contains( $pek_terminal_service_source, 'pek_des
 $forbidden_pek_warehouse_cast = '(string) ( $row[' . "'warehouseId'" . ']';
 plugin_architecture_assert( ! str_contains( $pek_terminal_service_source, $forbidden_pek_warehouse_cast ) && str_contains( $pek_terminal_service_source, 'required_text( $row, \'warehouseId\'' ) && str_contains( $pek_terminal_service_source, 'normalize_limit' ) && str_contains( $pek_terminal_service_source, 'pek_destination_terminal_rows_invalid' ) && str_contains( $pek_terminal_service_source, '$this->last_report = array();' ), 'PEK terminal service must strictly validate terminal IDs/limits, reject all-invalid responses, and reset last_report.' );
 plugin_architecture_assert( str_contains( $pek_destination_store_source, 'function clear_for_current_user' ) && str_contains( $pek_destination_store_source, 'sanitize_value' ) && str_contains( $pek_admin_page_source, 'clear_for_current_user();' ) && strpos( $pek_admin_page_source, 'clear_for_current_user();' ) < strpos( $pek_admin_page_source, 'destination_diagnostics->run' ), 'PEK destination diagnostic report must be cleared before a new explicit diagnostic run and sanitized recursively.' );
-plugin_architecture_assert( ! is_file( plugin_architecture_path( 'database/migrations/0050_create_pek_geography_hardening.php' ) ) && ! is_file( plugin_architecture_path( 'src/Carriers/Pek/Pickup/PekTerminalRowNormalizer.php' ) ), 'PEK 0.131.5 hardening must not add migrations or new production normalizer classes.' );
+plugin_architecture_assert( ! is_file( plugin_architecture_path( 'database/migrations/0050_create_pek_geography_hardening.php' ) ) && ! is_file( plugin_architecture_path( 'src/Carriers/Pek/Pickup/PekTerminalRowNormalizer.php' ) ), 'PEK hardening must not add unrelated migrations or new production normalizer classes.' );
 foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
 	if ( 'src/Core/Plugin.php' === $relative ) {

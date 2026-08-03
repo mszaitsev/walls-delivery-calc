@@ -124,6 +124,7 @@ C:.
 |           0047_simplify_jet_logistic_status_mappings.php
 |           0048_create_pek_location_mappings.php
 |           0049_create_pek_terminals.php
+|           0050_repair_pek_foundation_schema.php
 |
 +---docs
 |   |   README.md
@@ -325,6 +326,9 @@ C:.
 |   |   |   |       PekAddressBuilder.php
 |   |   |   |       PekLocationMappingRepository.php
 |   |   |   |       PekLocationResolver.php
+|   |   |   |
+|   |   |   +---Installation
+|   |   |   |       PekSchemaIntegrityService.php
 |   |   |   |
 |   |   |   \---Pickup
 |   |   |           PekCargoConstraintsConverter.php
@@ -982,6 +986,7 @@ C:.
     |       run-pek-foundation-smoke.php
     |       run-pek-geography-smoke.php
     |       run-pek-pickup-provider-smoke.php
+    |       run-pek-schema-integrity-smoke.php
     |       run-pek-warehouse-datetime-smoke.php
     |
     +---pickup

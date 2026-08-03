@@ -86,6 +86,7 @@ use WallsShop\WDC\Carriers\Pek\Api\WpPekHttpClient;
 use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
+use WallsShop\WDC\Carriers\Pek\Installation\PekSchemaIntegrityService;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
@@ -412,6 +413,7 @@ final class Plugin {
 		$this->container->register( PekAdminNoticeStore::class, fn(): PekAdminNoticeStore => new PekAdminNoticeStore() );
 		$this->container->register( PekAddressBuilder::class, fn(): PekAddressBuilder => new PekAddressBuilder() );
 		$this->container->register( PekLocationMappingRepository::class, fn(): PekLocationMappingRepository => new PekLocationMappingRepository() );
+		$this->container->register( PekSchemaIntegrityService::class, fn(): PekSchemaIntegrityService => new PekSchemaIntegrityService( null, $this->container->get( PekLocationMappingRepository::class ), $this->container->get( PekTerminalRepository::class ) ) );
 		$this->container->register( PekLocationResolver::class, fn(): PekLocationResolver => new PekLocationResolver( $this->container->get( LocationRepository::class ), $this->container->get( PekAddressBuilder::class ), $this->container->get( PekLocationMappingRepository::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekSettings::class ) ) );
 		$this->container->register( PekDestinationTerminalSearchCache::class, fn(): PekDestinationTerminalSearchCache => new PekDestinationTerminalSearchCache() );
 		$this->container->register( PekTerminalRepository::class, fn(): PekTerminalRepository => new PekTerminalRepository() );

@@ -63,6 +63,7 @@ return array(
 	'pek.admin-routing' => array( 'path' => 'tests/pek/run-pek-admin-routing-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.admin-ui' => array( 'path' => 'tests/pek/run-pek-admin-ui-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.warehouse-datetime' => array( 'path' => 'tests/pek/run-pek-warehouse-datetime-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.schema-integrity' => array( 'path' => 'tests/pek/run-pek-schema-integrity-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.geography' => array( 'path' => 'tests/pek/run-pek-geography-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.pickup-provider' => array( 'path' => 'tests/pek/run-pek-pickup-provider-smoke.php', 'groups' => array( 'pek' ) ),
 
