@@ -6,5 +6,5 @@ use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
 defined( 'ABSPATH' ) || exit;
 
 return static function (): void {
-	( new PekLocationMappingRepository() )->create_schema_if_needed();
+	( new PekLocationMappingRepository() )->install_schema();
 };

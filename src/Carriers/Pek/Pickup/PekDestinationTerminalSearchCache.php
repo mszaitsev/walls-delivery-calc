@@ -27,14 +27,14 @@ final class PekDestinationTerminalSearchCache {
 		);
 	}
 
-	/** @return array{metadata:array<string,mixed>,points:array<int,PickupPoint>} */
+	/** @return array{hit:bool,metadata:array<string,mixed>,points:array<int,PickupPoint>} */
 	public function get( string $fingerprint ): array {
 		if ( ! function_exists( 'get_transient' ) ) {
-			return array( 'metadata' => array(), 'points' => array() );
+			return array( 'hit' => false, 'metadata' => array(), 'points' => array() );
 		}
 		$value = get_transient( $this->key( $fingerprint ) );
 		if ( ! is_array( $value ) ) {
-			return array( 'metadata' => array(), 'points' => array() );
+			return array( 'hit' => false, 'metadata' => array(), 'points' => array() );
 		}
 		$points = array();
 		foreach ( is_array( $value['points'] ?? null ) ? $value['points'] : array() as $point ) {
@@ -43,7 +43,7 @@ final class PekDestinationTerminalSearchCache {
 			}
 		}
 
-		return array( 'metadata' => is_array( $value['metadata'] ?? null ) ? $value['metadata'] : array(), 'points' => $points );
+		return array( 'hit' => true, 'metadata' => is_array( $value['metadata'] ?? null ) ? $value['metadata'] : array(), 'points' => $points );
 	}
 
 	public function fingerprint( array $parts ): string {

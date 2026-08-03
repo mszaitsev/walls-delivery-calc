@@ -49,7 +49,7 @@ final class PekLocationMappingRepository {
 		) {$charset};";
 	}
 
-	public function create_schema_if_needed(): void {
+	public function install_schema(): void {
 		if ( $this->has_test_rows() ) {
 			return;
 		}
@@ -68,6 +68,7 @@ final class PekLocationMappingRepository {
 			return array();
 		}
 		if ( $this->has_test_rows() ) {
+			$this->throw_if_test_failure( 'read' );
 			foreach ( $this->wpdb->pek_location_mappings as $row ) {
 				if ( (int) ( $row['location_id'] ?? 0 ) === $location_id ) {
 					return $row;
@@ -75,8 +76,9 @@ final class PekLocationMappingRepository {
 			}
 			return array();
 		}
-		$this->create_schema_if_needed();
+		$this->clear_last_error();
 		$row = $this->wpdb->get_row( $this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name() . ' WHERE location_id = %d LIMIT 1', $location_id ), ARRAY_A );
+		$this->throw_on_sql_error( 'PEK location mapping lookup failed.' );
 
 		return is_array( $row ) ? $row : array();
 	}
@@ -90,28 +92,38 @@ final class PekLocationMappingRepository {
 		$existing = $this->find_by_location_id( (int) $row['location_id'] );
 		$row['created_at'] = (string) ( $existing['created_at'] ?? $row['created_at'] );
 		if ( $this->has_test_rows() ) {
+			$this->throw_if_test_failure( array() === $existing ? 'insert' : 'update' );
 			$rows = array_values( array_filter( $this->wpdb->pek_location_mappings, static fn( array $item ): bool => (int) ( $item['location_id'] ?? 0 ) !== (int) $row['location_id'] ) );
 			$row['id'] = (int) ( $existing['id'] ?? count( $rows ) + 1 );
 			$rows[] = $row;
 			$this->wpdb->pek_location_mappings = $rows;
 			return;
 		}
-		$this->create_schema_if_needed();
+		$this->clear_last_error();
 		if ( array() === $existing ) {
-			$this->wpdb->insert( $this->table_name(), $row );
+			$result = $this->wpdb->insert( $this->table_name(), $row );
 		} else {
 			unset( $row['id'], $row['created_at'] );
-			$this->wpdb->update( $this->table_name(), $row, array( 'location_id' => (int) $mapping['location_id'] ) );
+			$result = $this->wpdb->update( $this->table_name(), $row, array( 'location_id' => (int) $mapping['location_id'] ) );
 		}
+		if ( false === $result ) {
+			throw new \RuntimeException( 'PEK location mapping persistence failed.' );
+		}
+		$this->throw_on_sql_error( 'PEK location mapping persistence failed.' );
 	}
 
 	public function delete_for_location( int $location_id ): void {
 		if ( $this->has_test_rows() ) {
+			$this->throw_if_test_failure( 'delete' );
 			$this->wpdb->pek_location_mappings = array_values( array_filter( $this->wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== $location_id ) );
 			return;
 		}
-		$this->create_schema_if_needed();
-		$this->wpdb->delete( $this->table_name(), array( 'location_id' => $location_id ), array( '%d' ) );
+		$this->clear_last_error();
+		$result = $this->wpdb->delete( $this->table_name(), array( 'location_id' => $location_id ), array( '%d' ) );
+		if ( false === $result ) {
+			throw new \RuntimeException( 'PEK location mapping delete failed.' );
+		}
+		$this->throw_on_sql_error( 'PEK location mapping delete failed.' );
 	}
 
 	/** @param array<string,mixed> $mapping */
@@ -133,9 +145,12 @@ final class PekLocationMappingRepository {
 	public function statistics(): array {
 		$rows = $this->has_test_rows() ? $this->wpdb->pek_location_mappings : array();
 		if ( ! $this->has_test_rows() ) {
-			$this->create_schema_if_needed();
-			return array( 'total' => (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() ) );
+			$this->clear_last_error();
+			$total = $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() );
+			$this->throw_on_sql_error( 'PEK location mapping statistics failed.' );
+			return array( 'total' => (int) $total );
 		}
+		$this->throw_if_test_failure( 'statistics' );
 		$stats = array( 'total' => count( $rows ), 'resolved' => 0, 'near' => 0, 'unsupported' => 0 );
 		foreach ( $rows as $row ) {
 			$state = (string) ( $row['mapping_state'] ?? '' );
@@ -196,5 +211,24 @@ final class PekLocationMappingRepository {
 
 	private function table_name(): string {
 		return $this->wpdb->prefix . 'wdc_pek_location_mappings';
+	}
+
+	private function clear_last_error(): void {
+		if ( property_exists( $this->wpdb, 'last_error' ) ) {
+			$this->wpdb->last_error = '';
+		}
+	}
+
+	private function throw_on_sql_error( string $message ): void {
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			throw new \RuntimeException( $message );
+		}
+	}
+
+	private function throw_if_test_failure( string $operation ): void {
+		$flag = 'pek_location_mapping_' . $operation . '_fails';
+		if ( ! empty( $this->wpdb->{$flag} ) ) {
+			throw new \RuntimeException( 'PEK location mapping storage failed.' );
+		}
 	}
 }

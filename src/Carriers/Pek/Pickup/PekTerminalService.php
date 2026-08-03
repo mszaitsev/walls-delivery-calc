@@ -27,21 +27,45 @@ final class PekTerminalService {
 
 	/** @return array<int,PickupPoint> */
 	public function search( CarrierPickupPointQuery $query, bool $use_cache = true ): array {
+		if ( $query->location_id <= 0 ) {
+			$this->last_report = array(
+				'success' => false,
+				'error_code' => 'pek_canonical_location_required',
+				'message' => 'PEK provider requires canonical location ID.',
+			);
+			return array();
+		}
 		$errors = $query->validate();
 		if ( array() !== $errors ) {
-			$this->last_report = array( 'success' => false, 'errors' => $errors );
+			$this->last_report = array( 'success' => false, 'error_code' => 'pek_invalid_pickup_query', 'errors' => $errors );
 			return array();
 		}
 		$mapping = $this->locations->resolve( $query->location_id );
 		if ( 'unsupported' === (string) ( $mapping['mapping_state'] ?? '' ) ) {
-			$this->last_report = array( 'success' => false, 'mapping' => $mapping, 'message' => 'PEK location is unsupported.' );
+			$this->last_report = array(
+				'success' => false,
+				'error_code' => 'pek_destination_location_unsupported',
+				'mapping' => $mapping,
+				'message' => 'PEK location is unsupported.',
+			);
+			return array();
+		}
+		$mapping_country = strtoupper( trim( (string) ( $mapping['country_code'] ?? '' ) ) );
+		if ( $query->normalized_country_code() !== $mapping_country ) {
+			$this->last_report = array(
+				'success' => false,
+				'error_code' => 'pek_destination_country_mismatch',
+				'mapping' => $mapping,
+				'message' => 'PEK destination country does not match canonical mapping.',
+			);
 			return array();
 		}
 		$converted = $this->converter->convert( $query->cargo );
+		$has_destination_coordinates = is_numeric( $mapping['latitude'] ?? null ) && is_numeric( $mapping['longitude'] ?? null );
 		$request = new PekDestinationTerminalRequest(
-			(string) ( $mapping['normalized_address'] ?? $query->fallback_address ),
-			null !== $query->latitude ? $query->latitude : ( is_numeric( $mapping['latitude'] ?? null ) ? (float) $mapping['latitude'] : null ),
-			null !== $query->longitude ? $query->longitude : ( is_numeric( $mapping['longitude'] ?? null ) ? (float) $mapping['longitude'] : null ),
+			$has_destination_coordinates ? '' : (string) ( $mapping['normalized_address'] ?? '' ),
+			$has_destination_coordinates ? (float) $mapping['latitude'] : null,
+			$has_destination_coordinates ? (float) $mapping['longitude'] : null,
 			$converted['weight_kg'],
 			$converted['volume_m3'],
 			$converted['max_dimension_m'],
@@ -50,18 +74,19 @@ final class PekTerminalService {
 			max( 1, min( 500, $query->radius_km ) ),
 			max( 1, min( 100, $query->limit ) )
 		);
-		$fingerprint = $this->cache->fingerprint( array( 'mapping' => $mapping['address_fingerprint'] ?? '', 'country_code' => $query->normalized_country_code(), 'cargo' => $query->cargo->to_array(), 'operation' => 3, 'type' => PekSettings::LTL_PRODUCT_TYPE, 'radius' => $request->radius_km, 'limit' => $request->limit ) );
+		$fingerprint = $this->cache->fingerprint( array( 'mapping' => $mapping['address_fingerprint'] ?? '', 'country_code' => $mapping_country, 'cargo' => $query->cargo->to_array(), 'operation' => 3, 'type' => PekSettings::LTL_PRODUCT_TYPE, 'radius' => $request->radius_km, 'limit' => $request->limit ) );
 		if ( $use_cache ) {
 			$cached = $this->cache->get( $fingerprint );
-			if ( array() !== $cached['points'] ) {
-				$this->last_report = array_merge( $cached['metadata'], array( 'api_source' => 'cache', 'cache_hit' => true, 'mapping' => $mapping ) );
+			if ( $cached['hit'] ) {
+				$this->last_report = array_merge( $cached['metadata'], array( 'success' => true, 'error_code' => '', 'api_source' => 'cache', 'cache_hit' => true, 'mapping' => $mapping, 'total_returned' => count( $cached['points'] ) ) );
 				return $cached['points'];
 			}
 		}
 		$response = $this->api->destination_nearest_departments( $request );
 		$result = $this->normalize_response( $response, $query, $mapping );
-		$this->terminals->upsert_many( $result['terminal_rows'] );
 		$metadata = array(
+			'success' => true,
+			'error_code' => '',
 			'api_source' => 'api',
 			'cache_hit' => false,
 			'query_fingerprint' => $fingerprint,
@@ -72,6 +97,12 @@ final class PekTerminalService {
 			'rejected_invalid' => $result['rejected_invalid'],
 			'rejected_limits' => $result['rejected_limits'],
 		);
+		try {
+			$this->terminals->upsert_many( $result['terminal_rows'] );
+		} catch ( \RuntimeException $exception ) {
+			$this->last_report = array_merge( $metadata, array( 'success' => false, 'error_code' => 'pek_terminal_persistence_failed', 'message' => 'PEK terminal persistence failed.' ) );
+			throw $exception;
+		}
 		$this->cache->save( $fingerprint, $metadata, $result['points'], $this->settings->pek_destination_terminal_cache_ttl() );
 		$this->last_report = $metadata;
 
@@ -142,7 +173,7 @@ final class PekTerminalService {
 			'department_type_id' => (int) ( $row['departmentTypeId'] ?? 0 ),
 			'department_type' => trim( (string) ( $row['departmentType'] ?? '' ) ),
 			'source' => $source,
-			'country_code' => $query->normalized_country_code(),
+			'country_code' => strtoupper( trim( (string) ( $mapping['country_code'] ?? '' ) ) ),
 			'address' => trim( (string) ( $row['address'] ?? '' ) ),
 			'latitude' => $lat,
 			'longitude' => $lng,

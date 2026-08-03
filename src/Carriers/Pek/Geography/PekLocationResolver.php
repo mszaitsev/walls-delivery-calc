@@ -44,8 +44,18 @@ final class PekLocationResolver {
 				? $this->api->find_zone_by_coordinates( (float) $location->latitude, (float) $location->longitude )
 				: $this->api->find_zone_by_address( $this->addresses->build( $location ) );
 		} catch ( PekApiException $exception ) {
-			if ( in_array( (string) ( $existing['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true ) ) {
-				return array_merge( $existing, array( 'cache_hit' => false, 'warning' => 'PEK API error; previous mapping preserved.' ) );
+			if (
+				hash_equals( $fingerprint, (string) ( $existing['address_fingerprint'] ?? '' ) )
+				&& in_array( (string) ( $existing['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true )
+			) {
+				return array_merge(
+					$existing,
+					array(
+						'cache_hit' => false,
+						'stale_fallback' => true,
+						'warning' => 'PEK API error; previous mapping for the same canonical location inputs preserved.',
+					)
+				);
 			}
 			throw $exception;
 		}
@@ -67,6 +77,21 @@ final class PekLocationResolver {
 			return $this->unsupported_mapping( $location, 'empty_response', 'PEK returned no zone.', $fingerprint, $method );
 		}
 		$geo = is_array( $row['GeoData'] ?? null ) ? $row['GeoData'] : array();
+		$response_country = $this->response_country_code( $geo );
+		$canonical_country = strtoupper( trim( $location->country_code ) );
+		if ( '' !== $response_country && $response_country !== $canonical_country ) {
+			return $this->unsupported_mapping(
+				$location,
+				'country_mismatch',
+				'PEK resolved address country does not match canonical location country.',
+				$fingerprint,
+				$method,
+				array(
+					'expected_country' => $canonical_country,
+					'actual_country' => $response_country,
+				)
+			);
+		}
 		$precision = strtolower( trim( (string) ( $row['precision'] ?? $row['Precision'] ?? $geo['precision'] ?? '' ) ) );
 		$state = match ( $precision ) {
 			'exact' => 'resolved',
@@ -74,11 +99,9 @@ final class PekLocationResolver {
 			'bad' => 'unsupported',
 			default => ( '' !== trim( (string) ( $row['zoneId'] ?? '' ) ) && '' !== trim( (string) ( $row['branchUID'] ?? '' ) ) ? 'resolved' : 'unsupported' ),
 		};
-		$point = is_array( $row['warehousePoint'] ?? null ) ? $row['warehousePoint'] : array();
-
 		return array(
 			'location_id' => (int) $location->id,
-			'country_code' => strtoupper( trim( $location->country_code ) ),
+			'country_code' => $canonical_country,
 			'address_fingerprint' => $fingerprint,
 			'resolution_method' => $method,
 			'zone_id' => trim( (string) ( $row['zoneId'] ?? '' ) ),
@@ -87,8 +110,8 @@ final class PekLocationResolver {
 			'branch_title' => trim( (string) ( $row['branchTitle'] ?? '' ) ),
 			'main_warehouse_id' => trim( (string) ( $row['mainWarehouseId'] ?? $row['warehouseId'] ?? '' ) ),
 			'normalized_address' => $this->normalized_address( $row, $location ),
-			'latitude' => is_numeric( $point['latitude'] ?? null ) ? (float) $point['latitude'] : $location->latitude,
-			'longitude' => is_numeric( $point['longitude'] ?? null ) ? (float) $point['longitude'] : $location->longitude,
+			'latitude' => $location->has_coordinates() ? (float) $location->latitude : null,
+			'longitude' => $location->has_coordinates() ? (float) $location->longitude : null,
 			'precision' => $precision,
 			'mapping_state' => $state,
 			'safe_diagnostic_json' => $this->json( array( 'precision' => $precision, 'state' => $state ) ),
@@ -113,7 +136,7 @@ final class PekLocationResolver {
 	}
 
 	/** @return array<string,mixed> */
-	private function unsupported_mapping( Location $location, string $code, string $message, string $fingerprint = '', string $method = 'address' ): array {
+	private function unsupported_mapping( Location $location, string $code, string $message, string $fingerprint = '', string $method = 'address', array $extra_diagnostic = array() ): array {
 		return array(
 			'location_id' => (int) $location->id,
 			'country_code' => strtoupper( trim( $location->country_code ) ),
@@ -125,16 +148,24 @@ final class PekLocationResolver {
 			'branch_title' => '',
 			'main_warehouse_id' => '',
 			'normalized_address' => $this->addresses->build( $location ),
-			'latitude' => $location->latitude,
-			'longitude' => $location->longitude,
+			'latitude' => $location->has_coordinates() ? (float) $location->latitude : null,
+			'longitude' => $location->has_coordinates() ? (float) $location->longitude : null,
 			'precision' => 'bad',
 			'mapping_state' => 'unsupported',
-			'safe_diagnostic_json' => $this->json( array( 'code' => $code, 'message' => $message ) ),
+			'safe_diagnostic_json' => $this->json( array_merge( array( 'code' => $code, 'message' => $message ), $extra_diagnostic ) ),
 			'checked_at' => $this->now(),
 			'created_at' => $this->now(),
 			'updated_at' => $this->now(),
 			'cache_hit' => false,
 		);
+	}
+
+	/** @param array<string,mixed> $geo */
+	private function response_country_code( array $geo ): string {
+		$address = is_array( $geo['Address'] ?? null ) ? $geo['Address'] : array();
+		$country = strtoupper( trim( (string) ( $address['country_code'] ?? '' ) ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
 	}
 
 	private function json( array $value ): string {

@@ -156,11 +156,11 @@ final class PekAdminPage {
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<table class="form-table" role="presentation">
 				<?php $this->number_row( 'pek_destination_location_id', 'Canonical location ID', 0, 1, 999999999 ); ?>
-				<?php $this->number_row( 'pek_destination_weight_kg', 'Вес, кг', 1, 1, 100000 ); ?>
-				<?php $this->number_row( 'pek_destination_length_cm', 'Длина, см', 10, 1, 2000 ); ?>
-				<?php $this->number_row( 'pek_destination_width_cm', 'Ширина, см', 10, 1, 2000 ); ?>
-				<?php $this->number_row( 'pek_destination_height_cm', 'Высота, см', 10, 1, 2000 ); ?>
-				<?php $this->number_row( 'pek_destination_max_place_weight_kg', 'Максимальный вес места, кг', 1, 1, 100000 ); ?>
+				<?php $this->decimal_row( 'pek_destination_weight_kg', 'Общий вес груза, кг', 1, 0.001, 100000, 0.001 ); ?>
+				<?php $this->decimal_row( 'pek_destination_length_cm', 'Длина одного места, см', 10, 0.1, 2000, 0.1 ); ?>
+				<?php $this->decimal_row( 'pek_destination_width_cm', 'Ширина одного места, см', 10, 0.1, 2000, 0.1 ); ?>
+				<?php $this->decimal_row( 'pek_destination_height_cm', 'Высота одного места, см', 10, 0.1, 2000, 0.1 ); ?>
+				<?php $this->decimal_row( 'pek_destination_max_place_weight_kg', 'Максимальный вес одного места, кг', 1, 0.001, 100000, 0.001 ); ?>
 				<?php $this->number_row( 'pek_destination_places_count', 'Количество мест', 1, 1, 1000 ); ?>
 			</table>
 			<?php submit_button( __( 'Проверить направление и терминалы ПЭК', 'walls-delivery-calc' ), 'secondary' ); ?>
@@ -385,6 +385,10 @@ final class PekAdminPage {
 
 	private function number_row( string $name, string $label, int $value, int $min, int $max ): void {
 		echo '<tr><th scope="row"><label for="' . esc_attr( $name ) . '">' . esc_html( $label ) . '</label></th><td><input class="small-text" type="number" min="' . esc_attr( (string) $min ) . '" max="' . esc_attr( (string) $max ) . '" id="' . esc_attr( $name ) . '" name="' . esc_attr( $name ) . '" value="' . esc_attr( (string) $value ) . '"></td></tr>';
+	}
+
+	private function decimal_row( string $name, string $label, float $value, float $min, float $max, float $step ): void {
+		echo '<tr><th scope="row"><label for="' . esc_attr( $name ) . '">' . esc_html( $label ) . '</label></th><td><input class="small-text" type="number" step="' . esc_attr( (string) $step ) . '" min="' . esc_attr( (string) $min ) . '" max="' . esc_attr( (string) $max ) . '" id="' . esc_attr( $name ) . '" name="' . esc_attr( $name ) . '" value="' . esc_attr( (string) $value ) . '"></td></tr>';
 	}
 
 	/** @param array<string,string> $options */

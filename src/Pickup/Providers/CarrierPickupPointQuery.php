@@ -45,6 +45,15 @@ final class CarrierPickupPointQuery {
 		if ( $this->location_id <= 0 && '' === trim( $this->fallback_address ) && ( null === $this->latitude || null === $this->longitude ) ) {
 			$errors[] = 'location_id or fallback address/coordinates are required';
 		}
+		if ( ( null === $this->latitude ) !== ( null === $this->longitude ) ) {
+			$errors[] = 'coordinates must contain both latitude and longitude';
+		}
+		if ( null !== $this->latitude && ( $this->latitude < -90 || $this->latitude > 90 ) ) {
+			$errors[] = 'latitude must be between -90 and 90';
+		}
+		if ( null !== $this->longitude && ( $this->longitude < -180 || $this->longitude > 180 ) ) {
+			$errors[] = 'longitude must be between -180 and 180';
+		}
 		if ( $this->radius_km < 1 ) {
 			$errors[] = 'radius_km must be greater than 0';
 		}

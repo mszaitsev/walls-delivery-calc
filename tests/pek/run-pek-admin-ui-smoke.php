@@ -61,7 +61,12 @@ function wp_nonce_field( string $action ): void { echo '<input type="hidden" nam
 function submit_button( string $text, string $type = 'primary' ): void { echo '<button class="button button-' . esc_attr( $type ) . '" type="submit">' . esc_html( $text ) . '</button>'; }
 
 final class PekUiFakeHttp implements PekHttpClientInterface {
+	public array $requests = array();
 	public function request( string $method, string $url, array $args ): array {
+		$this->requests[] = compact( 'method', 'url', 'args' );
+		if ( str_contains( (string) parse_url( $url, PHP_URL_PATH ), 'findzonebycoordinates' ) ) {
+			return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'zoneId' => 'zone', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'warehousePoint' => array( 'latitude' => 1, 'longitude' => 2 ) ) ) ) );
+		}
 		return array( 'status' => 200, 'body' => '[]' );
 	}
 }
@@ -160,22 +165,24 @@ $cache->save_for_current_user(
 );
 $notice_store = new PekAdminNoticeStore();
 $notice_store->save_for_current_user( 'success', 'Saved <safe>' );
-$api = new PekApiClient( $settings, $credentials, new PekUiFakeHttp(), new PekRequestBudget( $settings ) );
+$ui_http = new PekUiFakeHttp();
+$api = new PekApiClient( $settings, $credentials, $ui_http, new PekRequestBudget( $settings ) );
 $wpdb = new wpdb();
-$wpdb->locations = array();
+$wpdb->locations = array( array( 'id' => 10, 'country_code' => 'RU', 'display_name' => 'Новосибирск', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'latitude' => 55.030204, 'longitude' => 82.92043, 'active' => 1 ) );
 $wpdb->pek_location_mappings = array();
 $wpdb->pek_terminals = array();
 $location_repository = new LocationRepository( $wpdb );
 $location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $api, $settings );
 $terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
 $pickup_provider = new PekPickupPointProvider( $terminal_service );
+$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings );
 $page = new PekAdminPage(
 	$settings,
 	$credentials,
 	new PekConnectionDiagnosticService( $settings, $credentials, $api ),
 	new PekSenderWarehouseService( $api, $settings, $cache ),
 	$notice_store,
-	new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings ),
+	$destination_diagnostic_service,
 	new PekDestinationPickupDiagnosticStore()
 );
 $service = DeliveryService::from_array( array( 'id' => 5, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => 'ПЭК' ) );
@@ -198,6 +205,7 @@ pek_ui_assert( str_contains( $html, 'Сопоставление выбранно
 pek_ui_assert( ! str_contains( $html, 'ПЭК не подтвердил выбранный warehouse ID' ), 'PEK admin UI must not claim PEK explicitly rejected the saved warehouse ID.' );
 pek_ui_assert( ! str_contains( $html, '&quot;products&quot;' ) && ! str_contains( $html, '{&quot;endpoint&quot;' ), 'PEK diagnostic checks must not render as raw nested JSON.' );
 pek_ui_assert( str_contains( $html, 'Saved &lt;safe&gt;' ), 'PEK admin notice must render escaped content.' );
+pek_ui_assert( 0 === count( $ui_http->requests ), 'Normal PEK admin page render must not call PEK API.' );
 pek_ui_assert( str_contains( $html, '>free<' ), 'PEK admin UI must render sender warehouse source.' );
 pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
@@ -205,5 +213,14 @@ $search_field_pos = strpos( $html, 'id="pek_warehouse_search_address"' );
 $table_pos = strpos( $html, '<table class="form-table" role="presentation">', $search_form_pos === false ? 0 : $search_form_pos );
 pek_ui_assert( false !== $search_form_pos && false !== $table_pos && false !== $search_field_pos && $table_pos < $search_field_pos, 'PEK warehouse search field must be inside a form-table.' );
 pek_ui_assert( array() === $notice_store->consume_for_current_user(), 'PEK admin notice must be consumed by render.' );
+
+$invalid_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 'abc', 'pek_destination_length_cm' => 10, 'pek_destination_width_cm' => 10, 'pek_destination_height_cm' => 10, 'pek_destination_max_place_weight_kg' => 1, 'pek_destination_places_count' => 1 ) );
+pek_ui_assert( false === $invalid_report['success'] && 'pek_invalid_pickup_query' === $invalid_report['error_code'] && 0 === count( $ui_http->requests ), 'Invalid admin cargo input must return success=false without API.' );
+$out_of_range_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 1, 'pek_destination_length_cm' => 5000, 'pek_destination_width_cm' => 10, 'pek_destination_height_cm' => 10, 'pek_destination_max_place_weight_kg' => 1, 'pek_destination_places_count' => 1 ) );
+pek_ui_assert( false === $out_of_range_report['success'] && 0 === count( $ui_http->requests ), 'Out-of-range admin cargo input must not be silently clamped.' );
+$success_empty_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 1.25, 'pek_destination_length_cm' => 100, 'pek_destination_width_cm' => 100, 'pek_destination_height_cm' => 100, 'pek_destination_max_place_weight_kg' => 1.25, 'pek_destination_places_count' => 10 ) );
+pek_ui_assert( true === $success_empty_report['success'] && 0 === $success_empty_report['terminals']['total_returned'] && str_contains( $success_empty_report['message'], 'Подходящие терминалы не найдены' ), 'Successful empty destination diagnostic must be success=true with explicit empty message.' );
+$destination_payload = json_decode( (string) $ui_http->requests[1]['args']['body'], true );
+pek_ui_assert( 10.0 === (float) $destination_payload['volume'] && 1.25 === (float) $destination_payload['weight'], 'Admin diagnostic must multiply one-place dimensions by places_count and preserve decimal weight.' );
 
 echo "PEK admin UI smoke OK\n";

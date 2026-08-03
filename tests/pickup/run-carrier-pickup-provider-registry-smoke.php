@@ -10,6 +10,7 @@ use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderInterface;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 
 function pickup_registry_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -42,6 +43,12 @@ try {
 	pickup_registry_assert( false, 'Duplicate pickup provider key must be rejected.' );
 } catch ( InvalidArgumentException ) {
 }
+
+$coordinate_pair_errors = ( new CarrierPickupPointQuery( 'pek', 0, 'RU', '', 55.0, null, new PickupCargoConstraints(), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) )->validate();
+pickup_registry_assert( in_array( 'coordinates must contain both latitude and longitude', $coordinate_pair_errors, true ), 'Carrier pickup query must reject incomplete coordinate pair.' );
+pickup_registry_assert( array() !== ( new CarrierPickupPointQuery( 'pek', 0, 'RU', '', 91.0, 82.0, new PickupCargoConstraints(), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) )->validate(), 'Carrier pickup query must reject invalid latitude.' );
+pickup_registry_assert( array() !== ( new CarrierPickupPointQuery( 'pek', 0, 'RU', '', 55.0, 181.0, new PickupCargoConstraints(), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) )->validate(), 'Carrier pickup query must reject invalid longitude.' );
+pickup_registry_assert( ! property_exists( new CarrierPickupPointSelectionQuery( new CarrierPickupPointQuery( 'pek', 1, 'RU', '', null, null, new PickupCargoConstraints(), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ), 'p1' ), 'fresh_validation_required' ), 'Selection query must not expose unused fresh_validation_required flag.' );
 
 $plugin = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 pickup_registry_assert( str_contains( $plugin, 'CarrierPickupPointProviderRegistry::class' ) && str_contains( $plugin, 'PekPickupPointProvider::class' ), 'Plugin.php must wire PEK pickup provider registry.' );

@@ -55,7 +55,7 @@ final class PekTerminalRepository {
 		) {$charset};";
 	}
 
-	public function create_schema_if_needed(): void {
+	public function install_schema(): void {
 		if ( $this->has_test_rows() ) {
 			return;
 		}
@@ -77,17 +77,27 @@ final class PekTerminalRepository {
 				continue;
 			}
 			if ( $this->has_test_rows() ) {
+				$this->throw_if_test_failure( $this->find_by_warehouse_id( (string) $normalized['warehouse_id'] ) === array() ? 'insert' : 'update' );
 				$items = array_values( array_filter( $this->wpdb->pek_terminals, static fn( array $item ): bool => (string) ( $item['warehouse_id'] ?? '' ) !== (string) $normalized['warehouse_id'] ) );
+				$existing = $this->find_by_warehouse_id( (string) $normalized['warehouse_id'] );
+				if ( array() !== $existing ) {
+					$normalized['created_at'] = (string) ( $existing['created_at'] ?? $normalized['created_at'] );
+				}
 				$items[] = $normalized;
 				$this->wpdb->pek_terminals = $items;
 			} else {
-				$this->create_schema_if_needed();
 				$existing = $this->find_by_warehouse_id( (string) $normalized['warehouse_id'] );
+				$this->clear_last_error();
 				if ( array() === $existing ) {
-					$this->wpdb->insert( $this->table_name(), $normalized );
+					$result = $this->wpdb->insert( $this->table_name(), $normalized );
 				} else {
-					$this->wpdb->update( $this->table_name(), $normalized, array( 'warehouse_id' => $normalized['warehouse_id'] ) );
+					unset( $normalized['created_at'] );
+					$result = $this->wpdb->update( $this->table_name(), $normalized, array( 'warehouse_id' => $normalized['warehouse_id'] ) );
 				}
+				if ( false === $result ) {
+					throw new \RuntimeException( 'PEK terminal persistence failed.' );
+				}
+				$this->throw_on_sql_error( 'PEK terminal persistence failed.' );
 			}
 			++$report['saved'];
 		}
@@ -102,6 +112,7 @@ final class PekTerminalRepository {
 			return array();
 		}
 		if ( $this->has_test_rows() ) {
+			$this->throw_if_test_failure( 'read' );
 			foreach ( $this->wpdb->pek_terminals as $row ) {
 				if ( $warehouse_id === (string) ( $row['warehouse_id'] ?? '' ) ) {
 					return $row;
@@ -109,8 +120,9 @@ final class PekTerminalRepository {
 			}
 			return array();
 		}
-		$this->create_schema_if_needed();
+		$this->clear_last_error();
 		$row = $this->wpdb->get_row( $this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name() . ' WHERE warehouse_id = %s LIMIT 1', $warehouse_id ), ARRAY_A );
+		$this->throw_on_sql_error( 'PEK terminal lookup failed.' );
 
 		return is_array( $row ) ? $row : array();
 	}
@@ -131,11 +143,14 @@ final class PekTerminalRepository {
 	/** @return array<string,int> */
 	public function statistics(): array {
 		if ( $this->has_test_rows() ) {
+			$this->throw_if_test_failure( 'statistics' );
 			return array( 'total' => count( $this->wpdb->pek_terminals ) );
 		}
-		$this->create_schema_if_needed();
+		$this->clear_last_error();
+		$total = $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() );
+		$this->throw_on_sql_error( 'PEK terminal statistics failed.' );
 
-		return array( 'total' => (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() ) );
+		return array( 'total' => (int) $total );
 	}
 
 	/** @param array<string,mixed> $row @return array<string,mixed> */
@@ -191,5 +206,24 @@ final class PekTerminalRepository {
 
 	private function table_name(): string {
 		return $this->wpdb->prefix . 'wdc_pek_terminals';
+	}
+
+	private function clear_last_error(): void {
+		if ( property_exists( $this->wpdb, 'last_error' ) ) {
+			$this->wpdb->last_error = '';
+		}
+	}
+
+	private function throw_on_sql_error( string $message ): void {
+		if ( '' !== trim( (string) ( $this->wpdb->last_error ?? '' ) ) ) {
+			throw new \RuntimeException( $message );
+		}
+	}
+
+	private function throw_if_test_failure( string $operation ): void {
+		$flag = 'pek_terminal_' . $operation . '_fails';
+		if ( ! empty( $this->wpdb->{$flag} ) ) {
+			throw new \RuntimeException( 'PEK terminal storage failed.' );
+		}
 	}
 }

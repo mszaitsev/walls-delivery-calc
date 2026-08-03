@@ -47,6 +47,9 @@ final class PekGeoFakeHttp implements PekHttpClientInterface {
 		$this->requests[] = compact( 'method', 'url', 'args' );
 		$key = $method . ' ' . parse_url( $url, PHP_URL_PATH );
 		$body = $this->responses[ $key ] ?? array();
+		if ( is_array( $body ) && isset( $body['__status'] ) ) {
+			return array( 'status' => (int) $body['__status'], 'body' => wp_json_encode( $body['body'] ?? array() ) );
+		}
 		return array( 'status' => 200, 'body' => wp_json_encode( $body ) );
 	}
 }
@@ -56,6 +59,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $prefix = 'wp_';
 		public array $locations = array();
 		public array $pek_location_mappings = array();
+		public string $last_error = '';
+		public bool $pek_location_mapping_insert_fails = false;
+		public bool $pek_location_mapping_update_fails = false;
+		public bool $pek_location_mapping_read_fails = false;
+		public bool $pek_location_mapping_delete_fails = false;
+		public bool $pek_location_mapping_statistics_fails = false;
 	}
 }
 
@@ -68,6 +77,8 @@ $wpdb->locations = array(
 	array( 'id' => 11, 'country_code' => 'RU', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'district_name' => 'Искитимский', 'district_type' => 'р-н', 'place_name' => 'Линево', 'place_type' => 'рп', 'display_name' => 'Линево', 'active' => 1, 'fias_id' => 'fias2', 'gar_object_id' => 2, 'region_code' => '54' ),
 	array( 'id' => 20, 'country_code' => 'BY', 'region_name' => 'Минская область', 'city_name' => 'Минск', 'city_type' => 'г', 'place_name' => 'Минск', 'place_type' => 'г', 'display_name' => 'Минск', 'active' => 1 ),
 	array( 'id' => 21, 'country_code' => 'KZ', 'region_name' => 'Алматинская область', 'city_name' => 'Алматы', 'city_type' => 'г', 'place_name' => 'Алматы', 'place_type' => 'г', 'display_name' => 'Алматы', 'active' => 1 ),
+	array( 'id' => 22, 'country_code' => 'AM', 'city_name' => 'Ереван', 'city_type' => 'г', 'place_name' => 'Ереван', 'place_type' => 'г', 'display_name' => 'Ереван', 'active' => 1 ),
+	array( 'id' => 23, 'country_code' => 'KG', 'city_name' => 'Бишкек', 'city_type' => 'г', 'place_name' => 'Бишкек', 'place_type' => 'г', 'display_name' => 'Бишкек', 'active' => 1 ),
 	array( 'id' => 99, 'country_code' => 'US', 'city_name' => 'Boston', 'place_name' => 'Boston', 'display_name' => 'Boston', 'active' => 1 ),
 );
 
@@ -84,18 +95,22 @@ $resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAdd
 
 $address_builder = new PekAddressBuilder();
 pek_geo_assert( str_contains( $address_builder->build( Location::from_array( $wpdb->locations[0] ) ), 'Россия' ), 'Address builder must include country.' );
+pek_geo_assert( str_contains( $address_builder->build( Location::from_array( $wpdb->locations[4] ) ), 'Армения' ), 'Address builder must support AM without FIAS/GAR.' );
 pek_geo_assert( str_contains( $address_builder->build( Location::from_array( $wpdb->locations[2] ) ), 'Беларусь' ), 'Address builder must support BY without FIAS/GAR.' );
+pek_geo_assert( str_contains( $address_builder->build( Location::from_array( $wpdb->locations[5] ) ), 'Кыргызстан' ), 'Address builder must support KG without FIAS/GAR.' );
 pek_geo_assert( str_contains( $address_builder->build( Location::from_array( $wpdb->locations[3] ) ), 'Казахстан' ), 'Address builder must support KZ foreign locations.' );
 
 $before = $wpdb->locations;
 $coord = $resolver->resolve( 10 );
 pek_geo_assert( 'coordinates' === $coord['resolution_method'] && 'resolved' === $coord['mapping_state'] && 'branch-coord' === $coord['branch_id'], 'Coordinate endpoint must resolve active location.' );
+pek_geo_assert( 55.030204 === (float) $coord['latitude'] && 82.92043 === (float) $coord['longitude'], 'Mapping coordinates must equal canonical destination coordinates, not warehousePoint.' );
 pek_geo_assert( str_contains( $http->requests[0]['url'], '/branches/findzonebycoordinates/' ), 'Coordinates must use coordinate endpoint.' );
 $again = $resolver->resolve( 10 );
 pek_geo_assert( true === ( $again['cache_hit'] ?? false ) && count( $http->requests ) === 1, 'Fresh mapping cache hit must avoid API.' );
 
 $address = $resolver->resolve( 11 );
 pek_geo_assert( 'address' === $address['resolution_method'] && 'near' === $address['mapping_state'] && 'main-wh' === $address['main_warehouse_id'], 'Address endpoint must normalize near mapping and main warehouse.' );
+pek_geo_assert( null === $address['latitude'] && null === $address['longitude'], 'Address-only mapping must not store warehousePoint as destination coordinates.' );
 pek_geo_assert( str_contains( $http->requests[1]['url'], '/branches/findzonebyaddress/' ), 'Missing coordinates must use address endpoint.' );
 pek_geo_assert( $before === $wpdb->locations, 'PEK resolver must not mutate canonical wdc_locations rows.' );
 
@@ -106,9 +121,79 @@ $changed = $wpdb->locations[1];
 $changed['place_name'] = 'Линево-2';
 pek_geo_assert( $fingerprint_before !== $resolver->fingerprint( Location::from_array( $changed ) ), 'Canonical location changes must invalidate fingerprint.' );
 
+$country_http = new PekGeoFakeHttp( array(
+	'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'zone-by', 'branchUID' => 'branch-by', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'BY', 'formatted' => 'Беларусь, Минск' ) ) ),
+) );
+$country_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $country_http, new PekRequestBudget( $settings ) ), $settings );
+$by = $country_resolver->resolve( 20 );
+pek_geo_assert( 'resolved' === $by['mapping_state'], 'Matching documented GeoData.Address.country_code must allow mapping.' );
+$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== 20 ) );
+$mismatch_http = new PekGeoFakeHttp( array(
+	'POST /api/v1/branches/findzonebyaddress/' => array( 'zoneId' => 'zone-bad', 'branchUID' => 'branch-bad', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Минск' ) ) ),
+) );
+$mismatch_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $mismatch_http, new PekRequestBudget( $settings ) ), $settings );
+$mismatch = $mismatch_resolver->resolve( 20 );
+pek_geo_assert( 'unsupported' === $mismatch['mapping_state'] && str_contains( (string) $mismatch['safe_diagnostic_json'], 'country_mismatch' ), 'Mismatching documented response country must create unsupported mapping.' );
+
+$same_fingerprint = $resolver->fingerprint( Location::from_array( $wpdb->locations[1] ) );
+$wpdb->pek_location_mappings = array( array( 'id' => 1, 'location_id' => 11, 'country_code' => 'RU', 'address_fingerprint' => $same_fingerprint, 'resolution_method' => 'address', 'mapping_state' => 'resolved', 'normalized_address' => 'Россия, Линево', 'checked_at' => '2026-07-01 00:00:00', 'created_at' => '2026-07-01 00:00:00', 'updated_at' => '2026-07-01 00:00:00' ) );
+$error_http = new PekGeoFakeHttp( array( 'POST /api/v1/branches/findzonebyaddress/' => array( '__status' => 503, 'body' => array( 'message' => 'down' ) ) ) );
+$stale_resolver = new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), new PekApiClient( $settings, $credentials, $error_http, new PekRequestBudget( $settings ) ), $settings );
+$stale = $stale_resolver->resolve( 11 );
+pek_geo_assert( true === ( $stale['stale_fallback'] ?? false ) && false === ( $stale['cache_hit'] ?? true ), 'Same-fingerprint stale resolved mapping may be returned on transport failure.' );
+$wpdb->locations[1]['place_name'] = 'Линево-2';
+try {
+	$stale_resolver->resolve( 11 );
+	pek_geo_assert( false, 'Different fingerprint must not return old mapping after PEK API failure.' );
+} catch ( Throwable ) {
+	$preserved = ( new PekLocationMappingRepository( $wpdb ) )->find_by_location_id( 11 );
+	pek_geo_assert( 'Россия, Линево' === $preserved['normalized_address'], 'Old mapping row must be preserved after different-fingerprint API failure.' );
+}
+
 $schema = ( new PekLocationMappingRepository( $wpdb ) )->schema();
 foreach ( array( 'wdc_pek_location_mappings', 'address_fingerprint', 'main_warehouse_id', 'mapping_state', 'checked_at' ) as $needle ) {
 	pek_geo_assert( str_contains( $schema, $needle ), 'PEK mapping schema must contain ' . $needle );
+}
+$source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Pek/Geography/PekLocationMappingRepository.php' );
+pek_geo_assert( ! str_contains( $source, 'create_schema_if_needed' ), 'PEK mapping repository must not expose runtime create_schema_if_needed.' );
+$repo = new PekLocationMappingRepository( $wpdb );
+$wpdb->pek_location_mapping_insert_fails = true;
+try {
+	$repo->upsert( array( 'location_id' => 30, 'country_code' => 'RU', 'address_fingerprint' => str_repeat( 'a', 64 ), 'mapping_state' => 'resolved' ) );
+	pek_geo_assert( false, 'PEK mapping insert failure must fail closed.' );
+} catch ( RuntimeException ) {
+	$wpdb->pek_location_mapping_insert_fails = false;
+}
+$repo->upsert( array( 'location_id' => 30, 'country_code' => 'RU', 'address_fingerprint' => str_repeat( 'a', 64 ), 'mapping_state' => 'resolved', 'created_at' => '2026-01-01 00:00:00' ) );
+$wpdb->pek_location_mapping_update_fails = true;
+try {
+	$repo->upsert( array( 'location_id' => 30, 'country_code' => 'RU', 'address_fingerprint' => str_repeat( 'b', 64 ), 'mapping_state' => 'near' ) );
+	pek_geo_assert( false, 'PEK mapping update failure must fail closed.' );
+} catch ( RuntimeException ) {
+	$wpdb->pek_location_mapping_update_fails = false;
+}
+$repo->upsert( array( 'location_id' => 30, 'country_code' => 'RU', 'address_fingerprint' => str_repeat( 'b', 64 ), 'mapping_state' => 'near' ) );
+pek_geo_assert( '2026-01-01 00:00:00' === $repo->find_by_location_id( 30 )['created_at'], 'PEK mapping update must preserve created_at.' );
+$wpdb->pek_location_mapping_read_fails = true;
+try {
+	$repo->find_by_location_id( 30 );
+	pek_geo_assert( false, 'PEK mapping read SQL error must fail closed.' );
+} catch ( RuntimeException ) {
+	$wpdb->pek_location_mapping_read_fails = false;
+}
+$wpdb->pek_location_mapping_delete_fails = true;
+try {
+	$repo->delete_for_location( 30 );
+	pek_geo_assert( false, 'PEK mapping delete SQL error must fail closed.' );
+} catch ( RuntimeException ) {
+	$wpdb->pek_location_mapping_delete_fails = false;
+}
+$wpdb->pek_location_mapping_statistics_fails = true;
+try {
+	$repo->statistics();
+	pek_geo_assert( false, 'PEK mapping statistics SQL error must fail closed.' );
+} catch ( RuntimeException ) {
+	$wpdb->pek_location_mapping_statistics_fails = false;
 }
 
 echo "PEK geography smoke OK\n";

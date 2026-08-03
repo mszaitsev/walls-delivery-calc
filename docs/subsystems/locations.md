@@ -1,14 +1,14 @@
 # Locations And Pickup
 
-Version: 0.131.0
+Version: 0.131.1
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 
 Generic location services own normalized lookup. Carrier pickup services own carrier import formats and carrier pickup identifiers. Checkout and admin code should consume normalized search results instead of parsing carrier payloads directly.
 
-PEK geography uses `wp_wdc_locations` only as the canonical source. It does not create, edit, deactivate, or backfill canonical locations, does not invent FIAS/GAR identities for `AM`, `BY`, `KG`, or `KZ`, and does not write PEK branch/zone identifiers into `wdc_locations`. PEK-specific resolution is stored in `wdc_pek_location_mappings` with a fingerprint of canonical location inputs, PEK zone/branch/main warehouse fields, mapping state, precision, and safe diagnostics. Locations with trusted coordinates use `/branches/findzonebycoordinates/`; locations without coordinates use a PEK carrier-owned address builder and `/branches/findzonebyaddress/`. PEK-returned coordinates stay in the PEK mapping table only.
+PEK geography uses `wp_wdc_locations` only as the canonical source. It does not create, edit, deactivate, or backfill canonical locations, does not invent FIAS/GAR identities for `AM`, `BY`, `KG`, or `KZ`, and does not write PEK branch/zone identifiers into `wdc_locations`. PEK-specific resolution is stored in `wdc_pek_location_mappings` with a fingerprint of canonical location inputs, PEK zone/branch/main warehouse fields, mapping state, precision, and safe diagnostics. Mapping `latitude`/`longitude` mean destination coordinates from the canonical location only; if the canonical location has no coordinate pair, both mapping coordinates stay `null`. PEK `warehousePoint` describes the main warehouse of the resolved branch and is never used as destination coordinates. Locations with trusted coordinates use `/branches/findzonebycoordinates/`; locations without coordinates use a PEK carrier-owned address builder and `/branches/findzonebyaddress/`. Stale resolved/near mappings may be used during a PEK transport failure only when the current fingerprint still matches the stored mapping; a fingerprint mismatch blocks fallback and preserves the old row without returning it for the changed location.
 
-PEK destination terminal snapshots are stored separately in `wdc_pek_terminals`. A scoped terminal search is cargo- and location-dependent, so absence from one search result does not deactivate a terminal globally. Repository and transient cache data are optimization and diagnostics aids; they are not authority for a future checkout selection without fresh server validation.
+PEK destination terminal snapshots are stored separately in `wdc_pek_terminals`. A scoped terminal search is cargo- and location-dependent, so absence from one search result does not deactivate a terminal globally. Terminal searches use canonical mapping coordinates when present and mapping address otherwise; query coordinates and fallback address do not override the PEK canonical-location flow. Repository and transient cache data are optimization and diagnostics aids; they are not authority for a future checkout selection without fresh server validation. Successful empty terminal results are cached as hits, while invalid, unsupported, country-mismatched, transport, API, and persistence failures are not cached.
 
 ## CDEK And DPD Geography
 

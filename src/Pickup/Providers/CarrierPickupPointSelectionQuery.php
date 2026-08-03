@@ -8,8 +8,7 @@ defined( 'ABSPATH' ) || exit;
 final class CarrierPickupPointSelectionQuery {
 	public function __construct(
 		public readonly CarrierPickupPointQuery $query,
-		public readonly string $point_code,
-		public readonly bool $fresh_validation_required = true
+		public readonly string $point_code
 	) {
 	}
 

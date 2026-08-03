@@ -393,6 +393,8 @@ plugin_architecture_assert( str_contains( $plugin_source, 'PekSettings::class' )
 plugin_architecture_assert( is_file( plugin_architecture_path( 'src/Pickup/Providers/CarrierPickupPointProviderInterface.php' ) ) && is_file( plugin_architecture_path( 'src/Pickup/Providers/CarrierPickupPointProviderRegistry.php' ) ), 'Carrier pickup provider contract and registry must exist.' );
 plugin_architecture_assert( str_contains( $plugin_source, 'CarrierPickupPointProviderRegistry::class' ) && str_contains( $plugin_source, 'PekPickupPointProvider::class' ), 'Plugin.php must register the pickup provider registry with the PEK provider.' );
 plugin_architecture_assert( ! str_contains( $plugin_source, 'CdekPickupPointProvider' ) && ! str_contains( $plugin_source, 'DpdPickupPointProvider' ) && ! str_contains( $plugin_source, 'YandexDeliveryPickupPointProvider' ) && ! str_contains( $plugin_source, 'RussianPostPickupPointProvider' ), 'Stage 2 must not migrate existing carriers into the new pickup provider registry.' );
+$selection_query_source = plugin_architecture_source( 'src/Pickup/Providers/CarrierPickupPointSelectionQuery.php' );
+plugin_architecture_assert( ! str_contains( $selection_query_source, 'fresh_validation_required' ), 'CarrierPickupPointSelectionQuery must not expose unused fresh_validation_required flag; resolve_selection is always fresh.' );
 foreach ( array(
 	'src/Pickup/Rest/PickupPointsRestController.php',
 	'src/Pickup/Rest/CheckoutPickupPointRestController.php',
@@ -401,6 +403,20 @@ foreach ( array(
 	plugin_architecture_assert( ! str_contains( $pickup_rest_source, 'Pek' ) && ! str_contains( $pickup_rest_source, "'pek'" ) && ! str_contains( $pickup_rest_source, 'CarrierPickupPointProviderRegistry' ), 'Public pickup REST must not integrate PEK provider registry in ' . $pickup_rest_path );
 }
 plugin_architecture_assert( is_file( plugin_architecture_path( 'database/migrations/0048_create_pek_location_mappings.php' ) ) && is_file( plugin_architecture_path( 'database/migrations/0049_create_pek_terminals.php' ) ), 'PEK geography/pickup migrations 0048 and 0049 must exist.' );
+$pek_mapping_repository_source = plugin_architecture_source( 'src/Carriers/Pek/Geography/PekLocationMappingRepository.php' );
+$pek_terminal_repository_source = plugin_architecture_source( 'src/Carriers/Pek/Pickup/PekTerminalRepository.php' );
+$pek_mapping_migration_source = plugin_architecture_source( 'database/migrations/0048_create_pek_location_mappings.php' );
+$pek_terminal_migration_source = plugin_architecture_source( 'database/migrations/0049_create_pek_terminals.php' );
+plugin_architecture_assert( str_contains( $pek_mapping_repository_source, 'function install_schema' ) && str_contains( $pek_terminal_repository_source, 'function install_schema' ), 'PEK repositories must expose explicit install_schema methods for migrations.' );
+plugin_architecture_assert( str_contains( $pek_mapping_migration_source, '->install_schema()' ) && str_contains( $pek_terminal_migration_source, '->install_schema()' ), 'PEK schemas must be installed by migrations 0048/0049.' );
+foreach ( array(
+	'PekLocationMappingRepository' => $pek_mapping_repository_source,
+	'PekTerminalRepository' => $pek_terminal_repository_source,
+) as $repository_name => $repository_source ) {
+	plugin_architecture_assert( ! str_contains( $repository_source, 'create_schema_if_needed' ), $repository_name . ' must not keep runtime create_schema_if_needed ownership.' );
+	plugin_architecture_assert( ! str_contains( $repository_source, '$this->install_schema' ) && ! str_contains( $repository_source, '->install_schema' ), $repository_name . ' runtime methods must not call install_schema.' );
+	plugin_architecture_assert( 1 === substr_count( $repository_source, 'function install_schema' ) && 1 === substr_count( $repository_source, 'dbDelta( $this->schema() )' ), $repository_name . ' must keep dbDelta only inside the explicit install_schema method.' );
+}
 foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
 	if ( 'src/Core/Plugin.php' === $relative ) {
