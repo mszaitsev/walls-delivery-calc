@@ -68,7 +68,7 @@ final class PekUiFakeHttp implements PekHttpClientInterface {
 			return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'zoneId' => 'zone', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'warehousePoint' => array( 'latitude' => 1, 'longitude' => 2 ) ) ) ) );
 		}
 		if ( str_contains( (string) parse_url( $url, PHP_URL_PATH ), 'findzonebyaddress' ) ) {
-			return array( 'status' => 200, 'body' => wp_json_encode( array( 'zoneId' => 'zone-address', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Новосибирск' ) ) ) ) );
+			return array( 'status' => 200, 'body' => wp_json_encode( array( 'zoneId' => 'zone-address', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'mainWarehouseId' => 'main-address', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Новосибирск' ) ) ) ) );
 		}
 		return array( 'status' => 200, 'body' => wp_json_encode( array( 'freeDepartments' => array(), 'paidDepartments' => array() ) ) );
 	}
@@ -259,5 +259,18 @@ $page->render_embedded( $service );
 $destination_html = (string) ob_get_clean();
 pek_ui_assert( str_contains( $destination_html, '<th>Филиал</th>' ) && str_contains( $destination_html, '<th>Отделение</th>' ) && str_contains( $destination_html, '<th>Время работы</th>' ), 'PEK destination diagnostics table must show branch, division and work time columns.' );
 pek_ui_assert( str_contains( $destination_html, 'Новосибирск' ) && str_contains( $destination_html, 'Центр' ) && str_contains( $destination_html, 'Пн: 09:00-18:00' ), 'PEK destination diagnostics table must render branch, division and work time values.' );
+$destination_report_store->save_for_current_user(
+	array(
+		'success' => false,
+		'error_code' => 'safe',
+		'message' => 'safe',
+		'location' => array( 'location_id' => 10, 'credentials' => 'secret' ),
+		'terminals' => array( 'points' => array( array( 'code' => 'safe-point', 'nested' => array( 'Authorization' => 'Basic secret', 'body' => 'secret' ) ) ) ),
+		'api_key' => 'secret',
+	)
+);
+$sanitized_report = $destination_report_store->consume_for_current_user();
+$sanitized_json = wp_json_encode( $sanitized_report );
+pek_ui_assert( str_contains( $sanitized_json, 'safe-point' ) && ! str_contains( $sanitized_json, 'Authorization' ) && ! str_contains( $sanitized_json, 'api_key' ) && ! str_contains( $sanitized_json, 'credentials' ) && ! str_contains( $sanitized_json, 'secret' ), 'PEK destination diagnostic report store must recursively sanitize unsafe keys.' );
 
 echo "PEK admin UI smoke OK\n";

@@ -42,7 +42,24 @@ final class PekTerminalService {
 			$this->last_report = array( 'success' => false, 'error_code' => 'pek_invalid_pickup_query', 'errors' => $errors );
 			return array();
 		}
-		$mapping = $this->locations->resolve( $query->location_id );
+		try {
+			$mapping = $this->locations->resolve( $query->location_id );
+		} catch ( PekApiException $exception ) {
+			$this->last_report = array(
+				'success' => false,
+				'error_code' => (string) ( $exception->context()['error_code'] ?? 'pek_destination_location_api_failed' ),
+				'api_source' => 'api',
+				'cache_hit' => false,
+				'mapping' => array(),
+				'total_returned' => 0,
+				'free_count' => 0,
+				'paid_count' => 0,
+				'rejected_invalid' => 0,
+				'rejected_limits' => 0,
+				'message' => 'PEK destination location API response could not be used.',
+			);
+			throw $exception;
+		}
 		if ( 'unsupported' === (string) ( $mapping['mapping_state'] ?? '' ) ) {
 			$this->last_report = array(
 				'success' => false,
@@ -227,6 +244,7 @@ final class PekTerminalService {
 			'maxCount' => $this->normalize_limit( $row['maxCount'] ?? null, true ),
 		);
 		$work_time = $this->work_time( $row );
+		$availability = $this->availability( $row, $mapping );
 		if (
 			'' === $id
 			|| null === $lat
@@ -234,6 +252,7 @@ final class PekTerminalService {
 			|| null === $department_type_id
 			|| null === $priority
 			|| null === $work_time
+			|| null === $availability
 			|| in_array( "\0", array( $branch_id, $branch_name, $division_name, $department_type, $address, $timezone ), true )
 			|| in_array( false, $limits, true )
 		) {
@@ -260,12 +279,7 @@ final class PekTerminalService {
 			'maxWeightOnePlace' => $limits['maxWeightOnePlace'],
 			'maxCount' => $limits['maxCount'],
 			'work_time' => $work_time,
-			'availability' => array(
-				'scheduleShortWorkDays' => is_array( $row['scheduleShortWorkDays'] ?? null ) ? $row['scheduleShortWorkDays'] : array(),
-				'scheduleHolidayDays' => is_array( $row['scheduleHolidayDays'] ?? null ) ? $row['scheduleHolidayDays'] : array(),
-				'mapping_state' => (string) ( $mapping['mapping_state'] ?? '' ),
-				'precision' => (string) ( $mapping['precision'] ?? '' ),
-			),
+			'availability' => $availability,
 		);
 	}
 
@@ -340,8 +354,11 @@ final class PekTerminalService {
 		if ( array() === $days ) {
 			return '';
 		}
+		if ( count( $days ) > 14 ) {
+			return null;
+		}
 		$parts = array();
-		foreach ( array_slice( $days, 0, 7 ) as $day ) {
+		foreach ( $days as $day ) {
 			if ( ! is_array( $day ) || array_is_list( $day ) ) {
 				return null;
 			}
@@ -351,10 +368,127 @@ final class PekTerminalService {
 			if ( in_array( "\0", array( $day_of_week, $work_from, $work_to ), true ) ) {
 				return null;
 			}
-			$parts[] = trim( $day_of_week . ': ' . $work_from . '-' . $work_to );
+			if ( '' === $day_of_week && '' === $work_from && '' === $work_to ) {
+				continue;
+			}
+			$range = '' !== $work_from || '' !== $work_to ? trim( $work_from . '-' . $work_to, '-' ) : '';
+			$parts[] = trim( '' !== $day_of_week && '' !== $range ? $day_of_week . ': ' . $range : $day_of_week . $range );
 		}
 
 		return implode( '; ', array_filter( $parts ) );
+	}
+
+	/** @param array<string,mixed> $row @param array<string,mixed> $mapping @return array<string,mixed>|null */
+	private function availability( array $row, array $mapping ): ?array {
+		$short_work_days = $this->schedule_short_work_days( $row['scheduleShortWorkDays'] ?? null );
+		$holiday_days = $this->schedule_holiday_days( $row['scheduleHolidayDays'] ?? null );
+		if ( null === $short_work_days || null === $holiday_days ) {
+			return null;
+		}
+
+		return array(
+			'scheduleShortWorkDays' => $short_work_days,
+			'scheduleHolidayDays' => $holiday_days,
+			'mapping_state' => in_array( (string) ( $mapping['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true ) ? (string) $mapping['mapping_state'] : '',
+			'precision' => in_array( (string) ( $mapping['precision'] ?? '' ), array( 'exact', 'near', '' ), true ) ? (string) ( $mapping['precision'] ?? '' ) : '',
+		);
+	}
+
+	/** @return array<int,array<string,mixed>>|null */
+	private function schedule_short_work_days( mixed $value ): ?array {
+		if ( null === $value ) {
+			return array();
+		}
+		if ( ! is_array( $value ) || ! array_is_list( $value ) || count( $value ) > 100 ) {
+			return null;
+		}
+		$days = array();
+		foreach ( $value as $item ) {
+			if ( ! is_array( $item ) || array_is_list( $item ) ) {
+				return null;
+			}
+			$date = $this->machine_datetime( $item['date'] ?? null );
+			if ( '' === $date ) {
+				return null;
+			}
+			$work_time = array();
+			if ( array_key_exists( 'workTime', $item ) && null !== $item['workTime'] ) {
+				if ( ! is_array( $item['workTime'] ) || array_is_list( $item['workTime'] ) ) {
+					return null;
+				}
+				$from = $this->clock_time( $item['workTime']['periodTimeFrom'] ?? null );
+				$to = $this->clock_time( $item['workTime']['periodTimeTo'] ?? null );
+				if ( '' === $from || '' === $to ) {
+					return null;
+				}
+				$work_time = array( 'periodTimeFrom' => $from, 'periodTimeTo' => $to );
+			}
+			$break_time = '';
+			if ( array_key_exists( 'breakTime', $item ) && null !== $item['breakTime'] ) {
+				if ( ! is_string( $item['breakTime'] ) ) {
+					return null;
+				}
+				$break_time = $this->safe_string( $item['breakTime'], 64 );
+			}
+			$days[] = array_filter(
+				array(
+					'date' => $date,
+					'workTime' => $work_time,
+					'breakTime' => $break_time,
+				),
+				static fn( mixed $field ): bool => array() !== $field && '' !== $field
+			);
+		}
+
+		return $days;
+	}
+
+	/** @return array<int,string>|null */
+	private function schedule_holiday_days( mixed $value ): ?array {
+		if ( null === $value ) {
+			return array();
+		}
+		if ( ! is_array( $value ) || ! array_is_list( $value ) || count( $value ) > 100 ) {
+			return null;
+		}
+		$days = array();
+		foreach ( $value as $item ) {
+			$date = $this->machine_datetime( $item );
+			if ( '' === $date ) {
+				return null;
+			}
+			$days[] = $date;
+		}
+
+		return $days;
+	}
+
+	private function machine_datetime( mixed $value ): string {
+		if ( ! is_string( $value ) || ! preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/', $value ) ) {
+			return '';
+		}
+		$date = \DateTimeImmutable::createFromFormat( '!Y-m-d\TH:i:s', $value, new \DateTimeZone( 'UTC' ) );
+		$errors = \DateTimeImmutable::getLastErrors();
+		if ( false === $date || ( is_array( $errors ) && ( $errors['warning_count'] > 0 || $errors['error_count'] > 0 ) ) || $date->format( 'Y-m-d\TH:i:s' ) !== $value ) {
+			return '';
+		}
+
+		return $value;
+	}
+
+	private function clock_time( mixed $value ): string {
+		if ( ! is_string( $value ) || ! preg_match( '/^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/', $value ) ) {
+			return '';
+		}
+
+		return $value;
+	}
+
+	private function safe_string( string $value, int $max_length ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+
+		return trim( substr( $value, 0, $max_length ) );
 	}
 
 	/** @param array<string,mixed> $row */

@@ -59,6 +59,7 @@ final class PekAdminPage {
 				$result = $this->warehouses->validate_and_select( $this->string_from_post( $post, 'pek_sender_warehouse_id' ) );
 				$notice = array( 'type' => $result['success'] ? 'success' : 'error', 'message' => (string) $result['message'] );
 			} elseif ( 'diagnose_pek_destination_pickup' === $action ) {
+				$this->destination_reports->clear_for_current_user();
 				$result = $this->destination_diagnostics->run( $post );
 				$this->destination_reports->save_for_current_user( $result );
 				$notice = array( 'type' => $result['success'] ? 'success' : 'warning', 'message' => (string) ( $result['message'] ?? 'Диагностика направления ПЭК выполнена.' ) );

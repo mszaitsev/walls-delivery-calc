@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Pek\Admin;
 
 use RuntimeException;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
@@ -55,7 +56,40 @@ final class PekDestinationPickupDiagnosticService {
 		if ( null === $provider ) {
 			throw new RuntimeException( 'PEK pickup provider is not registered.' );
 		}
-		$points = $provider->search( $query );
+		try {
+			$points = $provider->search( $query );
+		} catch ( PekApiException $exception ) {
+			$terminal_report = $this->terminals->last_report();
+			return array(
+				'success' => false,
+				'error_code' => (string) ( $exception->context()['error_code'] ?? $terminal_report['error_code'] ?? 'pek_destination_api_contract_failed' ),
+				'checked_at' => $this->now(),
+				'location' => array(
+					'location_id' => $location_id,
+					'country' => $country,
+					'canonical_address' => $location->resolved_display_name(),
+					'coordinates_available' => $has_coordinates,
+					'resolution_method' => '',
+					'mapping_state' => '',
+					'precision' => '',
+					'branch' => '',
+					'zone' => '',
+					'main_warehouse_id' => '',
+					'mapping_cache_hit' => false,
+				),
+				'terminals' => array(
+					'total_returned' => 0,
+					'free_count' => 0,
+					'paid_count' => 0,
+					'rejected_invalid' => 0,
+					'rejected_limits' => 0,
+					'api_source' => 'api',
+					'query_fingerprint' => '',
+					'points' => array(),
+				),
+				'message' => 'Не удалось использовать ответ ПЭК для выбранного направления.',
+			);
+		}
 		$terminal_report = $this->terminals->last_report();
 		$mapping = is_array( $terminal_report['mapping'] ?? null ) ? $terminal_report['mapping'] : array();
 		$success = true === ( $terminal_report['success'] ?? false );

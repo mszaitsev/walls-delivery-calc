@@ -33,11 +33,25 @@ final class PekDestinationTerminalRequest {
 			'limit' => $this->limit,
 		);
 		if ( null !== $this->latitude && null !== $this->longitude ) {
-			$payload['coordinates'] = array( 'latitude' => $this->latitude, 'longitude' => $this->longitude );
+			$payload['coordinates'] = array(
+				'latitude' => $this->coordinate_string( $this->latitude ),
+				'longitude' => $this->coordinate_string( $this->longitude ),
+			);
 		} else {
 			$payload['address'] = $this->address;
 		}
 
 		return $payload;
+	}
+
+	private function coordinate_string( float $value ): string {
+		$value = round( $value, 7 );
+		if ( 0.0 === $value || -0.0 === $value ) {
+			return '0';
+		}
+		$formatted = sprintf( '%.7F', $value );
+		$formatted = rtrim( rtrim( $formatted, '0' ), '.' );
+
+		return '-0' === $formatted ? '0' : $formatted;
 	}
 }

@@ -31,6 +31,12 @@ final class PekDestinationPickupDiagnosticStore {
 		return is_array( $value ) ? $value : array();
 	}
 
+	public function clear_for_current_user(): void {
+		if ( function_exists( 'delete_transient' ) ) {
+			delete_transient( $this->key() );
+		}
+	}
+
 	private function key(): string {
 		$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
 
@@ -39,8 +45,33 @@ final class PekDestinationPickupDiagnosticStore {
 
 	/** @param array<string,mixed> $report @return array<string,mixed> */
 	private function sanitize( array $report ): array {
-		unset( $report['raw_response'], $report['credentials'], $report['Authorization'], $report['request_headers'] );
+		$top_level = array( 'success', 'error_code', 'checked_at', 'location', 'terminals', 'message', 'errors' );
+		$safe = array();
+		foreach ( $top_level as $key ) {
+			if ( array_key_exists( $key, $report ) ) {
+				$safe[ $key ] = $this->sanitize_value( $report[ $key ] );
+			}
+		}
 
-		return $report;
+		return $safe;
+	}
+
+	private function sanitize_value( mixed $value ): mixed {
+		if ( null === $value || is_bool( $value ) || is_int( $value ) || is_float( $value ) || is_string( $value ) ) {
+			return $value;
+		}
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+		$safe = array();
+		foreach ( $value as $key => $nested ) {
+			$normalized = strtolower( (string) $key );
+			if ( in_array( $normalized, array( 'raw_response', 'response', 'credentials', 'authorization', 'headers', 'request_headers', 'request_args', 'body', 'api_key', 'login', 'password', 'token' ), true ) ) {
+				continue;
+			}
+			$safe[ is_int( $key ) ? $key : (string) $key ] = $this->sanitize_value( $nested );
+		}
+
+		return $safe;
 	}
 }

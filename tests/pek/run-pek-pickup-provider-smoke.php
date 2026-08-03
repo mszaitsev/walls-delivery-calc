@@ -78,12 +78,29 @@ final class PekPickupFakeHttp implements PekHttpClientInterface {
 			return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'zoneId' => 'zone', 'zoneName' => 'Zone', 'branchUID' => 'branch', 'branchTitle' => 'Branch', 'warehousePoint' => array( 'latitude' => 55.0, 'longitude' => 82.0 ) ) ) ) );
 		}
 		if ( str_contains( $path, 'findzonebyaddress' ) ) {
-			return array( 'status' => 200, 'body' => wp_json_encode( array( 'zoneId' => 'zone-address', 'zoneName' => 'Zone address', 'branchUID' => 'branch-address', 'branchTitle' => 'Branch address', 'warehousePoint' => array( 'latitude' => 56.0, 'longitude' => 83.0 ), 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Линево' ) ) ) ) );
+			return array( 'status' => 200, 'body' => wp_json_encode( array( 'zoneId' => 'zone-address', 'zoneName' => 'Zone address', 'branchUID' => 'branch-address', 'branchTitle' => 'Branch address', 'mainWarehouseId' => 'main-address', 'warehousePoint' => array( 'latitude' => 56.0, 'longitude' => 83.0 ), 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'country_code' => 'RU', 'formatted' => 'Россия, Линево' ) ) ) ) );
 		}
 		if ( isset( $this->nearest_response['__status'] ) ) {
 			return array( 'status' => (int) $this->nearest_response['__status'], 'body' => wp_json_encode( $this->nearest_response['body'] ?? array() ) );
 		}
 		return array( 'status' => 200, 'body' => wp_json_encode( $this->nearest_response ) );
+	}
+}
+
+final class PekPickupZoneFailureFakeHttp implements PekHttpClientInterface {
+	public array $requests = array();
+	private PekPickupFakeHttp $nearest;
+	public function __construct( private array $zone_response ) {
+		$this->nearest = new PekPickupFakeHttp();
+	}
+	public function request( string $method, string $url, array $args ): array {
+		$this->requests[] = compact( 'method', 'url', 'args' );
+		$path = (string) parse_url( $url, PHP_URL_PATH );
+		if ( str_contains( $path, 'findzonebyaddress' ) || str_contains( $path, 'findzonebycoordinates' ) ) {
+			return array( 'status' => 200, 'body' => wp_json_encode( $this->zone_response ) );
+		}
+
+		return array( 'status' => 200, 'body' => wp_json_encode( $this->nearest->nearest_response ) );
 	}
 }
 
@@ -148,6 +165,10 @@ $query = new CarrierPickupPointQuery( 'pek', 10, 'ru', '', null, null, new Picku
 
 $converted = ( new PekCargoConstraintsConverter() )->convert( new PickupCargoConstraints( 1001, 1, 1, 1001, 2 ) );
 pek_pickup_assert( 1.001 === $converted['weight_kg'] && 0.000001 === $converted['volume_m3'] && 0.01 === $converted['max_dimension_m'] && 1.001 === $converted['max_weight_per_place_kg'], 'PEK cargo conversion must be upward-safe.' );
+$payload_probe = ( new PekDestinationTerminalRequest( '', 55.0302040, 82.9204300, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload();
+pek_pickup_assert( is_string( $payload_probe['coordinates']['latitude'] ) && is_string( $payload_probe['coordinates']['longitude'] ) && '55.030204' === $payload_probe['coordinates']['latitude'] && '82.92043' === $payload_probe['coordinates']['longitude'] && ! str_contains( $payload_probe['coordinates']['latitude'], 'E' ), 'PEK destination coordinates must serialize as decimal strings without scientific notation.' );
+$zero_payload_probe = ( new PekDestinationTerminalRequest( '', -0.0, 0.0, 1.0, 0.001, 0.1, 1.0, 1, 50, 50 ) )->to_payload();
+pek_pickup_assert( '0' === $zero_payload_probe['coordinates']['latitude'] && '0' === $zero_payload_probe['coordinates']['longitude'], 'PEK coordinate serialization must normalize negative zero to zero.' );
 
 $points = $provider->search( $query );
 pek_pickup_assert( count( $points ) === 2, 'PEK provider must return free and paid points after filtering invalid/limit rows.' );
@@ -155,11 +176,12 @@ pek_pickup_assert( $points[0]->type === 'terminal' && $points[0]->raw_reference[
 pek_pickup_assert( $points[1]->type === 'pvz' && $points[1]->raw_reference['source'] === 'paid', 'paidDepartments must become pvz source paid.' );
 pek_pickup_assert( $points[0]->raw_reference['timezone'] === 'UTC+07:00', 'PEK destination timeZone must normalize to canonical timezone.' );
 pek_pickup_assert( '' === $points[0]->city && 'Новосибирск' === $points[0]->raw_reference['branch_name'], 'PEK organizational branchName must not be exposed as PickupPoint city.' );
+pek_pickup_assert( array() === $points[0]->raw_reference['availability']['scheduleShortWorkDays'] && array() === $points[0]->raw_reference['availability']['scheduleHolidayDays'], 'Absent PEK schedule arrays must normalize to empty compact availability arrays.' );
 pek_pickup_assert( count( $wpdb->pek_terminals ) === 2 && array() !== $repo->find_by_warehouse_id( 'free-ok' ), 'Terminal repository must upsert found terminals.' );
 $nearest_request = $http->requests[1];
 $payload = json_decode( (string) $nearest_request['args']['body'], true );
 pek_pickup_assert( 3 === (int) $payload['departmentOperation'] && 3 === (int) $payload['type'], 'Destination nearestdepartments must use operation=3 and type=3.' );
-pek_pickup_assert( isset( $payload['coordinates'] ) && 55.030204 === (float) $payload['coordinates']['latitude'] && 82.92043 === (float) $payload['coordinates']['longitude'] && ! isset( $payload['address'] ), 'Coordinate request must use canonical coordinates only and not send conflicting address.' );
+pek_pickup_assert( isset( $payload['coordinates'] ) && '55.030204' === $payload['coordinates']['latitude'] && '82.92043' === $payload['coordinates']['longitude'] && is_string( $payload['coordinates']['latitude'] ) && is_string( $payload['coordinates']['longitude'] ) && ! isset( $payload['address'] ), 'Coordinate request must send canonical coordinates as PEK decimal strings and not send conflicting address.' );
 
 $requests_after_first = count( $http->requests );
 $cached = $provider->search( $query );
@@ -169,6 +191,12 @@ $cache = new PekDestinationTerminalSearchCache();
 $cache_fingerprint = $cache->fingerprint( array( 'case' => 'valid' ) );
 $cache->save( $cache_fingerprint, array( 'query_fingerprint' => $cache_fingerprint ), array( $points[0] ), 600 );
 pek_pickup_assert( true === $cache->get( $cache_fingerprint )['hit'] && 1 === count( $cache->get( $cache_fingerprint )['points'] ), 'Versioned terminal cache must accept valid non-empty PEK points.' );
+$unsafe_point = new WallsShop\WDC\Domain\Pickup\PickupPoint( 'pek', 'unsafe', 'Address', '', '', '', 55.1, 82.9, 'terminal', '', '', null, true, array( 'warehouse_id' => 'unsafe', 'raw_response' => array( 'secret' => true ), 'nested' => array( 'Authorization' => 'Basic secret' ), 'availability' => array( 'scheduleHolidayDays' => array(), 'body' => 'secret' ) ) );
+$unsafe_fingerprint = $cache->fingerprint( array( 'case' => 'unsafe' ) );
+$cache->save( $unsafe_fingerprint, array( 'query_fingerprint' => $unsafe_fingerprint ), array( $unsafe_point ), 600 );
+$stored_unsafe = $GLOBALS['wdc_transients'][ 'wdc_pek_destination_terminals_' . $unsafe_fingerprint ]['value']['points'][0];
+$stored_unsafe_json = wp_json_encode( $stored_unsafe );
+pek_pickup_assert( ! str_contains( $stored_unsafe_json, 'raw_response' ) && ! str_contains( $stored_unsafe_json, 'Authorization' ) && ! str_contains( $stored_unsafe_json, 'body' ) && ! array_key_exists( 'nested', $stored_unsafe['raw_reference'] ), 'Terminal cache must project PickupPoint raw_reference through a safe allowlist.' );
 $empty_fingerprint = $cache->fingerprint( array( 'case' => 'empty' ) );
 $cache->save( $empty_fingerprint, array( 'query_fingerprint' => $empty_fingerprint ), array(), 600 );
 pek_pickup_assert( true === $cache->get( $empty_fingerprint )['hit'] && array() === $cache->get( $empty_fingerprint )['points'], 'Versioned terminal cache must accept valid empty successful results.' );
@@ -273,6 +301,15 @@ $invalid_rows = array(
 	'fractional-maxCount' => pek_pickup_valid_row( array( 'maxCount' => '1.5' ) ),
 	'negative-maxCount' => pek_pickup_valid_row( array( 'maxCount' => -1 ) ),
 	'array-schedule' => pek_pickup_valid_row( array( 'divisionTimeOfWork' => array( 'bad' => array() ) ) ),
+	'oversized-work-time' => pek_pickup_valid_row( array( 'divisionTimeOfWork' => array_fill( 0, 15, array( 'dayOfWeek' => '1', 'workFrom' => '09:00', 'workTo' => '18:00' ) ) ) ),
+	'assoc-short-days' => pek_pickup_valid_row( array( 'scheduleShortWorkDays' => array( 'date' => '2026-01-01T00:00:00' ) ) ),
+	'list-short-day-item' => pek_pickup_valid_row( array( 'scheduleShortWorkDays' => array( array( '2026-01-01T00:00:00' ) ) ) ),
+	'invalid-short-day-field' => pek_pickup_valid_row( array( 'scheduleShortWorkDays' => array( array( 'date' => array() ) ) ) ),
+	'oversized-short-days' => pek_pickup_valid_row( array( 'scheduleShortWorkDays' => array_fill( 0, 101, array( 'date' => '2026-01-01T00:00:00' ) ) ) ),
+	'assoc-holiday-days' => pek_pickup_valid_row( array( 'scheduleHolidayDays' => array( 'date' => '2026-01-01T00:00:00' ) ) ),
+	'nonstr-holiday-day' => pek_pickup_valid_row( array( 'scheduleHolidayDays' => array( 123 ) ) ),
+	'invalid-holiday-date' => pek_pickup_valid_row( array( 'scheduleHolidayDays' => array( '2026-02-30T00:00:00' ) ) ),
+	'oversized-holiday-days' => pek_pickup_valid_row( array( 'scheduleHolidayDays' => array_fill( 0, 101, '2026-01-01T00:00:00' ) ) ),
 );
 foreach ( $invalid_rows as $case_name => $row ) {
 	$before_terminals = count( $wpdb->pek_terminals );
@@ -291,15 +328,23 @@ foreach ( array(
 	'null-limits' => pek_pickup_valid_row( array( 'maxWeight' => null, 'maxVolume' => null, 'maxDimension' => null, 'maxWeightOnePlace' => null, 'maxCount' => null ) ),
 	'zero-limits' => pek_pickup_valid_row( array( 'warehouseId' => 'zero-limits', 'maxWeight' => 0, 'maxVolume' => 0, 'maxDimension' => 0, 'maxWeightOnePlace' => 0, 'maxCount' => 0 ) ),
 	'positive-string-limits' => pek_pickup_valid_row( array( 'warehouseId' => 'string-limits', 'maxWeight' => '10', 'maxVolume' => '1', 'maxDimension' => '2', 'maxWeightOnePlace' => '10', 'maxCount' => '10' ) ),
+	'null-schedules' => pek_pickup_valid_row( array( 'warehouseId' => 'null-schedules', 'scheduleShortWorkDays' => null, 'scheduleHolidayDays' => null, 'divisionTimeOfWork' => null ) ),
+	'empty-schedules' => pek_pickup_valid_row( array( 'warehouseId' => 'empty-schedules', 'scheduleShortWorkDays' => array(), 'scheduleHolidayDays' => array(), 'divisionTimeOfWork' => array() ) ),
+	'compact-schedules' => pek_pickup_valid_row( array( 'warehouseId' => 'compact-schedules', 'scheduleShortWorkDays' => array( array( 'date' => '2026-01-02T00:00:00', 'workTime' => array( 'periodTimeFrom' => '09:00:00', 'periodTimeTo' => '17:00:00' ), 'breakTime' => null, 'ignored' => 'drop' ) ), 'scheduleHolidayDays' => array( '2026-01-03T00:00:00' ), 'divisionTimeOfWork' => array( array( 'dayOfWeek' => '1', 'workFrom' => '09:00', 'workTo' => '18:00' ) ) ) ),
 ) as $case_name => $row ) {
 	$result = pek_pickup_search_with_response( array( 'freeDepartments' => array( $row ), 'paidDepartments' => array() ), $wpdb, $settings, $credentials );
 	pek_pickup_assert( 1 === count( $result[4] ), 'Absent/null/zero/positive limits must be valid row forms: ' . $case_name );
+	if ( 'compact-schedules' === $case_name ) {
+		$availability = $result[4][0]->raw_reference['availability'];
+		pek_pickup_assert( array( 'date' => '2026-01-02T00:00:00', 'workTime' => array( 'periodTimeFrom' => '09:00:00', 'periodTimeTo' => '17:00:00' ) ) === $availability['scheduleShortWorkDays'][0] && array( '2026-01-03T00:00:00' ) === $availability['scheduleHolidayDays'] && ! array_key_exists( 'ignored', $availability['scheduleShortWorkDays'][0] ), 'Valid schedule data must normalize to compact allowlisted availability.' );
+	}
 }
 
 $mixed_result = pek_pickup_search_with_response(
 	array(
 		'freeDepartments' => array(
 			pek_pickup_valid_row( array( 'warehouseId' => array() ) ),
+			pek_pickup_valid_row( array( 'warehouseId' => 'bad-schedule', 'scheduleHolidayDays' => array( '2026-02-30T00:00:00' ) ) ),
 			pek_pickup_valid_row( array( 'warehouseId' => 'limit-rejected', 'maxWeight' => 0.5 ) ),
 			pek_pickup_valid_row( array( 'warehouseId' => 'mixed-ok' ) ),
 		),
@@ -310,7 +355,7 @@ $mixed_result = pek_pickup_search_with_response(
 	$credentials
 );
 $mixed_report = $mixed_result[0]->last_report();
-pek_pickup_assert( 1 === count( $mixed_result[4] ) && 'mixed-ok' === $mixed_result[4][0]->code && 1 === (int) $mixed_report['rejected_invalid'] && 1 === (int) $mixed_report['rejected_limits'] && true === $mixed_report['success'], 'Mixed valid/invalid response must keep exact counters and still succeed when one row is valid.' );
+pek_pickup_assert( 1 === count( $mixed_result[4] ) && 'mixed-ok' === $mixed_result[4][0]->code && 2 === (int) $mixed_report['rejected_invalid'] && 1 === (int) $mixed_report['rejected_limits'] && true === $mixed_report['success'], 'Mixed valid/invalid response must keep exact counters and still succeed when one row is valid.' );
 
 $success_before_error = $provider->search( $query );
 pek_pickup_assert( array() !== $success_before_error && true === $service->last_report()['success'], 'Sequence setup must start with a successful terminal search.' );
@@ -329,6 +374,24 @@ foreach ( array(
 	} catch ( PekApiException ) {
 		$error_report = $error_service->last_report();
 		pek_pickup_assert( false === $error_report['success'] && 'api' === $error_report['api_source'] && false === $error_report['cache_hit'] && 0 === (int) $error_report['total_returned'], 'Failed search must leave current failed last_report without previous counters: ' . $case_name );
+	}
+}
+
+foreach ( array(
+	'address-zone' => array( 'location_id' => 11, 'zone_response' => array( 'zoneId' => 'z', 'branchUID' => 'b', 'mainWarehouseId' => 'main', 'GeoData' => array( 'precision' => 'exact', 'Address' => array( 'formatted' => array() ) ) ), 'code' => 'pek_invalid_findzone_formatted_address' ),
+	'coordinate-zone' => array( 'location_id' => 10, 'zone_response' => array( array( 'zoneId' => 'z', 'branchUID' => 'b', 'GeoData' => array( 'bad' ) ) ), 'code' => 'pek_invalid_findzone_coordinates_geodata' ),
+) as $case_name => $case ) {
+	$GLOBALS['wdc_transients'] = array();
+	$wpdb->pek_location_mappings = array_values( array_filter( $wpdb->pek_location_mappings, static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) !== (int) $case['location_id'] ) );
+	$zone_http = new PekPickupZoneFailureFakeHttp( $case['zone_response'] );
+	$zone_api = new PekApiClient( $settings, $credentials, $zone_http, new PekRequestBudget( $settings ) );
+	$zone_service = new PekTerminalService( new PekLocationResolver( new LocationRepository( $wpdb ), new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $zone_api, $settings ), $zone_api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
+	try {
+		$zone_service->search( new CarrierPickupPointQuery( 'pek', (int) $case['location_id'], 'RU', '', null, null, new PickupCargoConstraints( 1000, 1000, 10, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ) );
+		pek_pickup_assert( false, 'Malformed zone response must propagate as operation failure: ' . $case_name );
+	} catch ( PekApiException ) {
+		$zone_report = $zone_service->last_report();
+		pek_pickup_assert( false === $zone_report['success'] && $case['code'] === $zone_report['error_code'] && 'api' === $zone_report['api_source'] && array() === $zone_report['mapping'] && 0 === (int) $zone_report['total_returned'], 'Malformed zone response must set current failed last_report: ' . $case_name );
 	}
 }
 

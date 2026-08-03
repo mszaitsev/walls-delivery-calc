@@ -79,8 +79,9 @@ final class PekLocationResolver {
 			$this->contract_failure( 'coordinates' === $method ? 'pek_unexpected_findzone_coordinates' : 'pek_unexpected_findzone_address', $method );
 		}
 		$row = $response;
-		$geo = is_array( $row['GeoData'] ?? null ) ? $row['GeoData'] : array();
-		$response_country = $this->response_country_code( $geo );
+		$geo = $this->geodata( $row, $method );
+		$address = $this->address_object( $geo, $method );
+		$response_country = $this->response_country_code( $address );
 		$canonical_country = strtoupper( trim( $location->country_code ) );
 		if ( $response_country['present'] && ! $response_country['valid'] ) {
 			$this->contract_failure( 'pek_invalid_response_country', $method );
@@ -100,6 +101,7 @@ final class PekLocationResolver {
 		}
 		$zone_id = $this->optional_api_string( $row, 'zoneId', $method );
 		$branch_id = $this->optional_api_string( $row, 'branchUID', $method );
+		$main_warehouse_id = $this->optional_api_string( $row, 'mainWarehouseId', $method );
 		$has_zone_context = '' !== $zone_id && '' !== $branch_id;
 		$precision_result = $this->precision( $method, $row, $geo );
 		$precision = $precision_result['value'];
@@ -118,7 +120,7 @@ final class PekLocationResolver {
 		} elseif ( 'bad' === $precision ) {
 			$diagnostic_code = 'bad_precision';
 		} elseif ( in_array( $precision, array( 'exact', 'near' ), true ) ) {
-			if ( $has_zone_context ) {
+			if ( $has_zone_context && '' !== $main_warehouse_id ) {
 				$state = 'exact' === $precision ? 'resolved' : 'near';
 			} else {
 				$this->contract_failure( 'pek_incomplete_findzone_address', $method );
@@ -139,8 +141,8 @@ final class PekLocationResolver {
 			'zone_name' => $this->optional_api_string( $row, 'zoneName', $method ),
 			'branch_id' => $branch_id,
 			'branch_title' => $this->optional_api_string( $row, 'branchTitle', $method ),
-			'main_warehouse_id' => $this->optional_api_string( $row, 'mainWarehouseId', $method ),
-			'normalized_address' => $this->normalized_address( $row, $location ),
+			'main_warehouse_id' => $main_warehouse_id,
+			'normalized_address' => $this->normalized_address( $address, $location, $method ),
 			'latitude' => $has_coordinates ? (float) $location->latitude : null,
 			'longitude' => $has_coordinates ? (float) $location->longitude : null,
 			'precision' => $precision,
@@ -152,15 +154,11 @@ final class PekLocationResolver {
 		);
 	}
 
-	/** @param array<string,mixed> $row */
-	private function normalized_address( array $row, Location $location ): string {
-		$geo = is_array( $row['GeoData'] ?? null ) ? $row['GeoData'] : array();
-		$address = is_array( $geo['Address'] ?? null ) ? $geo['Address'] : array();
-		if ( '' !== trim( (string) ( $address['formatted'] ?? '' ) ) ) {
-			return trim( (string) $address['formatted'] );
-		}
-		if ( is_array( $row['address'] ?? null ) ) {
-			return implode( ', ', array_map( 'strval', $row['address'] ) );
+	/** @param array<string,mixed> $address */
+	private function normalized_address( array $address, Location $location, string $method ): string {
+		$formatted = $this->formatted_address( $address, $method );
+		if ( '' !== $formatted ) {
+			return $formatted;
 		}
 
 		return $this->addresses->build( $location );
@@ -191,9 +189,8 @@ final class PekLocationResolver {
 		);
 	}
 
-	/** @param array<string,mixed> $geo @return array{present:bool,valid:bool,code:string} */
-	private function response_country_code( array $geo ): array {
-		$address = is_array( $geo['Address'] ?? null ) ? $geo['Address'] : array();
+	/** @param array<string,mixed> $address @return array{present:bool,valid:bool,code:string} */
+	private function response_country_code( array $address ): array {
 		if ( ! array_key_exists( 'country_code', $address ) ) {
 			return array( 'present' => false, 'valid' => false, 'code' => '' );
 		}
@@ -208,6 +205,47 @@ final class PekLocationResolver {
 		return preg_match( '/^[A-Z]{2}$/', $country )
 			? array( 'present' => true, 'valid' => true, 'code' => $country )
 			: array( 'present' => true, 'valid' => false, 'code' => '' );
+	}
+
+	/** @param array<string,mixed> $row @return array<string,mixed> */
+	private function geodata( array $row, string $method ): array {
+		if ( ! array_key_exists( 'GeoData', $row ) || null === $row['GeoData'] ) {
+			if ( 'address' === $method ) {
+				$this->contract_failure( 'pek_invalid_findzone_address_geodata', $method );
+			}
+			return array();
+		}
+		if ( ! is_array( $row['GeoData'] ) || ( array() !== $row['GeoData'] && array_is_list( $row['GeoData'] ) ) ) {
+			$this->contract_failure( 'coordinates' === $method ? 'pek_invalid_findzone_coordinates_geodata' : 'pek_invalid_findzone_address_geodata', $method );
+		}
+
+		return $row['GeoData'];
+	}
+
+	/** @param array<string,mixed> $geo @return array<string,mixed> */
+	private function address_object( array $geo, string $method ): array {
+		if ( ! array_key_exists( 'Address', $geo ) || null === $geo['Address'] ) {
+			return array();
+		}
+		if ( ! is_array( $geo['Address'] ) || ( array() !== $geo['Address'] && array_is_list( $geo['Address'] ) ) ) {
+			$this->contract_failure( 'pek_invalid_findzone_address_object', $method );
+		}
+
+		return $geo['Address'];
+	}
+
+	/** @param array<string,mixed> $address */
+	private function formatted_address( array $address, string $method ): string {
+		if ( ! array_key_exists( 'formatted', $address ) || null === $address['formatted'] ) {
+			return '';
+		}
+		if ( ! is_string( $address['formatted'] ) ) {
+			$this->contract_failure( 'pek_invalid_findzone_formatted_address', $method );
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $address['formatted'] ) ?? $address['formatted'];
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+
+		return trim( substr( $value, 0, 1000 ) );
 	}
 
 	/** @param array<string,mixed> $row @param array<string,mixed> $geo @return array{scalar:bool,value:string} */

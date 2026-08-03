@@ -26,7 +26,7 @@ final class PekDestinationTerminalSearchCache {
 				'format_version' => self::FORMAT_VERSION,
 				'fingerprint' => $fingerprint,
 				'metadata' => $this->sanitize_metadata( $metadata ),
-				'points' => array_map( static fn( PickupPoint $point ): array => $point->to_array(), $points ),
+				'points' => array_map( fn( PickupPoint $point ): array => $this->safe_point_array( $point ), $points ),
 			),
 			max( 60, min( 3600, $ttl ) )
 		);
@@ -98,5 +98,71 @@ final class PekDestinationTerminalSearchCache {
 		}
 
 		return $metadata;
+	}
+
+	/** @return array<string,mixed> */
+	private function safe_point_array( PickupPoint $point ): array {
+		return array(
+			'carrier_key' => $point->carrier_key,
+			'code' => $point->code,
+			'address' => $point->address,
+			'city' => $point->city,
+			'region' => $point->region,
+			'postcode' => $point->postcode,
+			'latitude' => $point->latitude,
+			'longitude' => $point->longitude,
+			'type' => $point->type,
+			'work_time' => $point->work_time,
+			'comment' => $point->comment,
+			'extra_cost' => $point->extra_cost?->to_array(),
+			'active' => $point->active,
+			'raw_reference' => $this->safe_raw_reference( $point->raw_reference ),
+		);
+	}
+
+	/** @param array<string,mixed> $raw_reference @return array<string,mixed> */
+	private function safe_raw_reference( array $raw_reference ): array {
+		$allowed = array(
+			'warehouse_id',
+			'branch_id',
+			'branch_name',
+			'division_name',
+			'department_type_id',
+			'department_type',
+			'source',
+			'priority',
+			'limits',
+			'timezone',
+			'availability',
+			'mapping_state',
+			'mapping_precision',
+		);
+		$safe = array();
+		foreach ( $allowed as $key ) {
+			if ( array_key_exists( $key, $raw_reference ) ) {
+				$safe[ $key ] = $this->sanitize_compact_value( $raw_reference[ $key ] );
+			}
+		}
+
+		return $safe;
+	}
+
+	private function sanitize_compact_value( mixed $value ): mixed {
+		if ( null === $value || is_bool( $value ) || is_int( $value ) || is_float( $value ) || is_string( $value ) ) {
+			return $value;
+		}
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+		$safe = array();
+		foreach ( $value as $key => $nested ) {
+			$normalized = strtolower( (string) $key );
+			if ( in_array( $normalized, array( 'raw_response', 'response', 'credentials', 'authorization', 'headers', 'request_args', 'body', 'api_key', 'login', 'password', 'token' ), true ) ) {
+				continue;
+			}
+			$safe[ is_int( $key ) ? $key : (string) $key ] = $this->sanitize_compact_value( $nested );
+		}
+
+		return $safe;
 	}
 }
