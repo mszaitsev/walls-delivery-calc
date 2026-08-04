@@ -410,8 +410,11 @@ final class CheckoutPickupPointRestController {
 		$family = $this->session_manager->shipping_method_family( $method_id );
 		try {
 			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );
+		} catch ( \RuntimeException $exception ) {
+			$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
+			return $this->error( $code, 'Pickup rate context is invalid.', 400 );
 		} catch ( \Throwable ) {
-			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
+			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is invalid.', 400 );
 		}
 		$provider = $this->provider_registry?->get( $carrier );
 		if ( null === $provider ) {
@@ -429,6 +432,9 @@ final class CheckoutPickupPointRestController {
 			return $this->error( 'not_found', 'Pickup point not found.', 404 );
 		}
 		$fingerprint = $this->provider_query_resolver->destination_fingerprint( $method_id );
+		if ( '' === trim( $fingerprint ) ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
+		}
 		$selection = $this->selection_from_provider_point( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code );
 		$this->save_selection( $selection, $carrier, $method_id, $selection_intent );
 

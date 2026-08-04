@@ -182,13 +182,116 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderInterface;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
+use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
+
+final class WdcPickupRestPekProvider implements CarrierPickupPointProviderInterface {
+	public array $queries = array();
+	public array $selection_queries = array();
+	/** @param array<int,PickupPoint> $points */
+	public function __construct( private array $points ) {}
+	public function carrier_key(): string { return PekSettings::CARRIER_KEY; }
+	public function search( CarrierPickupPointQuery $query ): array {
+		$this->queries[] = $query;
+		return $this->points;
+	}
+	public function resolve_selection( CarrierPickupPointSelectionQuery $query ): ?PickupPoint {
+		$this->selection_queries[] = $query;
+		foreach ( $this->points as $point ) {
+			if ( $point->code === $query->point_code ) {
+				return $point;
+			}
+		}
+
+		return null;
+	}
+}
+
+function wdc_pickup_rest_pek_snapshot( string $fingerprint = 'pek-destination-fp' ): array {
+	return array(
+		'carrier_key' => PekSettings::CARRIER_KEY,
+		'purpose' => CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
+		'location_id' => 153912,
+		'country_code' => 'RU',
+		'latitude' => 55.755864,
+		'longitude' => 37.617698,
+		'cargo' => array(
+			'weight_g' => 1000,
+			'volume_cm3' => 1000,
+			'max_dimension_cm' => 10,
+			'max_place_weight_g' => 1000,
+			'places_count' => 1,
+		),
+		'radius_km' => 50,
+		'limit' => 50,
+		'destination_fingerprint' => $fingerprint,
+	);
+}
+
+function wdc_pickup_rest_store_pek_rate( CheckoutSessionManager $session, array $snapshot ): array {
+	$rate = new DeliveryRate(
+		PekSettings::PICKUP_RATE_ID,
+		PekSettings::CARRIER_KEY,
+		'ПЭК',
+		PekSettings::SERVICE_KEY,
+		'ПЭК',
+		PekSettings::PICKUP_TARIFF_KEY,
+		PekSettings::PICKUP_TARIFF_NAME,
+		DeliveryType::PICKUP,
+		'ПЭК до терминала',
+		Money::from_kopecks( 109000 ),
+		null,
+		null,
+		DateRange::single( 4, DateRange::UNIT_CALENDAR_DAYS ),
+		'',
+		'',
+		array(),
+		false,
+		'',
+		true,
+		false,
+		array(
+			'pickup_family' => PekSettings::PICKUP_FAMILY,
+			'pickup_provider_query' => $snapshot,
+			'requires_rate_refresh_on_pickup_selection' => true,
+		),
+		Money::from_kopecks( 109000 )
+	);
+	$mapped = ( new WooCommerceRateMapper() )->map( $rate );
+	$stored_rate = array_merge(
+		$mapped['meta_data'],
+		array(
+			'rate_id' => $rate->rate_id,
+			'label' => $mapped['label'],
+			'cost' => $mapped['cost'],
+			'planned_delivery_comment' => $rate->planned_delivery_comment,
+			'delivery_days' => $rate->delivery_days->to_array(),
+			'fallback_used' => false,
+			'service_title' => $rate->service_name,
+		)
+	);
+	$session->save_rates( array( PekSettings::PICKUP_RATE_ID => $stored_rate ) );
+
+	return $stored_rate;
+}
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wdc_pickup_rest_http_requests'] = array();
@@ -437,5 +540,65 @@ $session->save_pickup_selection_for_family( 'cdek:pickup', array( 'carrier_key' 
 $session->save_pickup_selection_for_family( 'russian_post_domestic:pickup', array( 'carrier_key' => 'russian_post_domestic', 'service_key' => 'russian_post_domestic', 'point_code' => '630001-a', 'point_address' => 'Ленина, 1' ) );
 pickup_rest_assert( 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['russian_post_domestic:pickup']['point_code'] ?? '' ), 'Raw WC session key must keep CDEK and Russian Post canonical pickup buckets.' );
 pickup_rest_assert( str_contains( $session_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutSessionManager.php' ), 'function set_raw_session_array' ) && str_contains( $session_source, 'save_data' ) && str_contains( $session_source, 'wdc_platform_pickup_selections' ), 'Checkout session manager must use a raw array writer for canonical pickup selections.' );
+
+WC()->session = new WC_Session_Handler();
+$pek_session = new CheckoutSessionManager();
+$pek_snapshot = wdc_pickup_rest_pek_snapshot();
+$stored_pek_rate = wdc_pickup_rest_store_pek_rate( $pek_session, $pek_snapshot );
+pickup_rest_assert( isset( $stored_pek_rate['rate_meta']['pickup_provider_query'] ) && ! isset( $stored_pek_rate['meta'] ), 'PEK REST fixture must use production WooCommerce rate_meta shape.' );
+$pek_provider = new WdcPickupRestPekProvider(
+	array(
+		new PickupPoint( PekSettings::CARRIER_KEY, 'main-wh', 'Россия, Москва, терминал main-wh', '', 'Москва', '', 55.75, 37.61, 'terminal', 'Пн-Пт 09:00-18:00', '', null, true, array( 'source' => 'free' ) ),
+	)
+);
+$pek_registry = new CarrierPickupPointProviderRegistry( array( $pek_provider ) );
+$pek_query_resolver = new CheckoutPickupPointProviderQueryResolver( $pek_session );
+$pek_points_controller = new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, $pek_registry, $pek_query_resolver, new PekCheckoutPickupPointFormatter() );
+$pek_points = $pek_points_controller->points(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => PekSettings::CARRIER_KEY,
+			'shipping_method_id' => PekSettings::PICKUP_RATE_ID,
+			'pickup_family' => PekSettings::PICKUP_FAMILY,
+			'location_id' => '999999',
+			'weight_g' => '999999',
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( is_array( $pek_points ) && 1 === count( $pek_points ) && 'main-wh' === (string) ( $pek_points[0]['point_code'] ?? '' ) && 'pek-destination-fp' === (string) ( $pek_points[0]['destination_fingerprint'] ?? '' ), 'PEK /points must use trusted production rate_meta context and return provider points.' );
+pickup_rest_assert( 153912 === $pek_provider->queries[0]->location_id && 1000 === $pek_provider->queries[0]->cargo->weight_g, 'PEK /points must ignore browser location/cargo authority and use stored rate snapshot.' );
+$pek_search = $pek_points_controller->search( new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'pickup_family' => PekSettings::PICKUP_FAMILY, 'q' => 'main-wh' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_rest_assert( is_array( $pek_search ) && 1 === count( $pek_search ), 'PEK /points/search must resolve provider context from production rate_meta.' );
+$pek_wrong_family = $pek_points_controller->points( new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'pickup_family' => 'forged:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_rest_assert( $pek_wrong_family instanceof WP_Error && 'provider_rate_context_mismatch' === $pek_wrong_family->get_error_code(), 'PEK /points must reject browser-forged pickup family.' );
+
+$pek_checkout_controller = new CheckoutPickupPointRestController( $repo, $pek_session, null, null, null, null, null, $pek_registry, $pek_query_resolver );
+$pek_save = $pek_checkout_controller->save(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => PekSettings::CARRIER_KEY,
+			'shipping_method_id' => PekSettings::PICKUP_RATE_ID,
+			'point_code' => 'main-wh',
+			'point' => array(
+				'point_address' => 'forged browser address',
+				'lat' => 1,
+				'lng' => 2,
+			),
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( 1 === count( $pek_provider->selection_queries ) && 'main-wh' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_code'] ?? '' ), 'PEK save must reach fresh resolve_selection and store the selected warehouse in pek:pickup.' );
+pickup_rest_assert( 'pek-destination-fp' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['destination_fingerprint'] ?? '' ), 'PEK save must persist non-empty destination fingerprint from trusted rate context.' );
+pickup_rest_assert( 'Россия, Москва, терминал main-wh' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_address'] ?? '' ), 'PEK save must ignore forged browser point presentation and use provider projection.' );
+
+WC()->session = new WC_Session_Handler();
+$empty_fp_session = new CheckoutSessionManager();
+wdc_pickup_rest_store_pek_rate( $empty_fp_session, wdc_pickup_rest_pek_snapshot( '' ) );
+$empty_fp_save = ( new CheckoutPickupPointRestController( $repo, $empty_fp_session, null, null, null, null, null, $pek_registry, new CheckoutPickupPointProviderQueryResolver( $empty_fp_session ) ) )->save(
+	new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'point_code' => 'main-wh' ), array( 'X-WP-Nonce' => 'nonce' ) )
+);
+pickup_rest_assert( $empty_fp_save instanceof WP_Error && 'provider_rate_context_missing' === $empty_fp_save->get_error_code(), 'PEK save must reject empty destination fingerprint in trusted rate context.' );
 
 echo "Pickup REST smoke test passed.\n";

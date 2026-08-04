@@ -1,6 +1,6 @@
 # Codex Prompt Template
 
-Version: 0.133.0
+Version: 0.133.1
 
 Use this as a template, not as a concrete task.
 

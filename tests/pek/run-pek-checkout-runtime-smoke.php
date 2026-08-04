@@ -25,10 +25,14 @@ use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\Carriers\Runtime\PekCarrier;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -39,6 +43,7 @@ use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderInterface;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
+use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
 
 function pek_checkout_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -49,7 +54,7 @@ function pek_checkout_assert( bool $condition, string $message ): void {
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['pek_checkout_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['pek_checkout_options'][ $option ] = $value; return true; }
 function current_time( string $type ): string { return 'mysql' === $type ? '2026-08-04 12:00:00' : '2026-08-04'; }
-function current_datetime(): DateTimeImmutable { return new DateTimeImmutable( '2026-08-04 12:07:00', new DateTimeZone( 'UTC' ) ); }
+function current_datetime(): DateTimeImmutable { return new DateTimeImmutable( $GLOBALS['pek_checkout_current_datetime'] ?? '2026-08-04 12:07:00', new DateTimeZone( 'UTC' ) ); }
 function wp_timezone(): DateTimeZone { return new DateTimeZone( 'UTC' ); }
 function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false { return json_encode( $value, $flags, $depth ); }
 function get_transient( string $key ): mixed { return $GLOBALS['pek_checkout_transients'][ $key ]['value'] ?? false; }
@@ -62,6 +67,25 @@ final class PekCheckoutFakeWooLogger {
 	public function log( string $level, string $message, array $context = array() ): void {
 		$this->entries[] = compact( 'level', 'message', 'context' );
 	}
+}
+
+final class PekCheckoutFakeSession {
+	public array $data = array();
+	public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+	public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+	public function save_data(): void {}
+}
+
+final class PekCheckoutFakeWoo {
+	public PekCheckoutFakeSession $session;
+	public function __construct() {
+		$this->session = new PekCheckoutFakeSession();
+	}
+}
+
+function WC(): PekCheckoutFakeWoo {
+	$GLOBALS['pek_checkout_wc'] ??= new PekCheckoutFakeWoo();
+	return $GLOBALS['pek_checkout_wc'];
 }
 
 final class PekCheckoutFakeHttp implements PekHttpClientInterface {
@@ -111,6 +135,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public bool $pek_location_mapping_delete_fails = false;
 		public bool $pek_location_mapping_statistics_fails = false;
 	}
+}
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {}
 }
 
 function pek_checkout_location_rows(): array {
@@ -237,6 +264,31 @@ function pek_checkout_calc_payloads( PekCheckoutFakeHttp $http ): array {
 	) );
 }
 
+function pek_checkout_stored_rate_from_mapper( DeliveryRate $rate ): array {
+	$mapped = ( new WooCommerceRateMapper() )->map( $rate );
+
+	return array_merge(
+		$mapped['meta_data'],
+		array(
+			'rate_id' => $rate->rate_id,
+			'label' => $mapped['label'],
+			'cost' => $mapped['cost'],
+			'planned_delivery_comment' => $rate->planned_delivery_comment,
+			'delivery_days' => $rate->delivery_days->to_array(),
+			'fallback_used' => false,
+			'service_title' => $rate->service_name,
+		)
+	);
+}
+
+function pek_checkout_resolver_with_rate( array $stored_rate ): CheckoutPickupPointProviderQueryResolver {
+	$GLOBALS['pek_checkout_wc'] = new PekCheckoutFakeWoo();
+	$session = new CheckoutSessionManager();
+	$session->save_rates( array( PekSettings::PICKUP_RATE_ID => $stored_rate ) );
+
+	return new CheckoutPickupPointProviderQueryResolver( $session );
+}
+
 list( $carrier, $http, $provider ) = pek_checkout_boot(
 	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1000.00 ), pek_checkout_calc_response( 2000.00 ) ),
 	array( pek_checkout_point( 'main-wh' ), pek_checkout_point( 'paid-wh', 'paid' ) )
@@ -258,10 +310,55 @@ pek_checkout_assert( $pickup->requires_pickup_point && ! $pickup->requires_couri
 pek_checkout_assert( 109000 === $pickup->price->get_kopecks() && 209000 === $courier->price->get_kopecks(), 'PEK DeliveryRate price must use final adjusted quote price.' );
 pek_checkout_assert( 100000 === (int) $pickup->meta['pek_carrier_price_kopecks'] && 7000 === (int) $pickup->meta['pek_bag_surcharge_kopecks'] && 2000 === (int) $pickup->meta['pek_sealing_surcharge_kopecks'], 'PEK rate meta must preserve carrier price and store surcharges separately.' );
 pek_checkout_assert( PekSettings::PICKUP_FAMILY === (string) $pickup->meta['pickup_family'] && is_array( $pickup->meta['pickup_provider_query'] ?? null ), 'PEK pickup rate must carry trusted provider query snapshot.' );
+$stored_pickup_rate = pek_checkout_stored_rate_from_mapper( $pickup );
+pek_checkout_assert( is_array( $stored_pickup_rate['rate_meta'] ?? null ) && ! isset( $stored_pickup_rate['meta'] ), 'Realistic WooCommerce stored PEK rate must expose nested rate_meta, not fake-only meta.' );
+$query_resolver = pek_checkout_resolver_with_rate( $stored_pickup_rate );
+$trusted_query = $query_resolver->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+pek_checkout_assert( PekSettings::CARRIER_KEY === $trusted_query->carrier_key && 153912 === $trusted_query->location_id && 'RU' === $trusted_query->country_code && 1000 === $trusted_query->cargo->weight_g && 1 === $trusted_query->cargo->places_count, 'Production WooCommerce stored PEK rate must resolve trusted provider query from rate_meta.' );
+pek_checkout_assert( '' !== $query_resolver->destination_fingerprint( PekSettings::PICKUP_RATE_ID ), 'Production PEK stored pickup rate must expose non-empty destination fingerprint.' );
+foreach ( array(
+	'missing_rate_meta' => array_diff_key( $stored_pickup_rate, array( 'rate_meta' => true ) ),
+	'empty_fingerprint' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'destination_fingerprint' => '' ) ) ) ),
+	'forged_courier' => array_replace( pek_checkout_stored_rate_from_mapper( $courier ), array( 'rate_id' => PekSettings::PICKUP_RATE_ID, 'rate_meta' => array( 'pickup_provider_query' => $pickup->meta['pickup_provider_query'] ) ) ),
+	'string_requires_pickup' => array_replace( $stored_pickup_rate, array( 'requires_pickup_point' => 'true' ) ),
+) as $case => $stored_rate ) {
+	try {
+		pek_checkout_resolver_with_rate( $stored_rate )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+		pek_checkout_assert( false, 'PEK trusted resolver must reject invalid stored rate case: ' . $case );
+	} catch ( RuntimeException $exception ) {
+		pek_checkout_assert( in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ), 'PEK trusted resolver invalid case must use stable context errors: ' . $case );
+	}
+}
+foreach ( array(
+	'wrong_family' => array( 'pickup_family' => 'forged:pickup' ),
+	'wrong_service' => array( 'service_key' => 'forged' ),
+	'wrong_carrier' => array( 'carrier_key' => 'forged' ),
+) as $case => $override ) {
+	try {
+		pek_checkout_resolver_with_rate( array_replace( $stored_pickup_rate, $override ) )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+		pek_checkout_assert( false, 'PEK trusted resolver must reject mismatched stored rate envelope: ' . $case );
+	} catch ( RuntimeException $exception ) {
+		pek_checkout_assert( 'provider_rate_context_mismatch' === $exception->getMessage(), 'PEK trusted resolver mismatch case must use provider_rate_context_mismatch: ' . $case );
+	}
+}
 $payloads = pek_checkout_calc_payloads( $http );
 pek_checkout_assert( 'main-wh' === (string) ( $payloads[0]['receiverWarehouseId'] ?? '' ), 'Preliminary pickup quote must use mapped suitable receiver warehouse.' );
 pek_checkout_assert( false === $payloads[0]['cargos'][0]['isHP'] && 0 === $payloads[0]['cargos'][0]['sealingPositionsCount'], 'PEK checkout payload must not request bag/protective packaging/plombing through API.' );
 pek_checkout_assert( true === $payloads[1]['isDelivery'] && isset( $payloads[1]['delivery']['coordinates'] ), 'Location-level courier quote may use canonical city coordinates.' );
+$base_context_planned = (string) ( $carrier->quote_cache_context( pek_checkout_request() )['pek_planned_datetime_bucket'] ?? '' );
+pek_checkout_assert( '' !== $base_context_planned, 'PEK quote cache context must include plannedDateTime.' );
+pek_checkout_assert( $base_context_planned === (string) ( $payloads[0]['plannedDateTime'] ?? '' ) && $base_context_planned === (string) ( $payloads[1]['plannedDateTime'] ?? '' ), 'PEK plannedDateTime must be identical between quote cache context and calculator payloads in one calculation lifecycle.' );
+
+$memo_repository = new SettingsRepository();
+$memo_settings = new PekSettings( $memo_repository );
+$memo_repository->set( PekSettings::SENDER_WAREHOUSE_KEY, array( 'warehouseId' => 'sender-wh', 'source' => 'free', 'branchTimezone' => 'UTC' ) );
+$GLOBALS['pek_checkout_current_datetime'] = '2026-08-04 12:14:59';
+$memo_resolver = new PekQuotePlannedDateTimeResolver( $memo_settings );
+pek_checkout_assert( '2026-08-04T13:15:00' === $memo_resolver->resolve(), 'PEK plannedDateTime first resolve must round 12:14:59 +1h to 13:15.' );
+$GLOBALS['pek_checkout_current_datetime'] = '2026-08-04 12:15:01';
+pek_checkout_assert( '2026-08-04T13:15:00' === $memo_resolver->resolve(), 'PEK plannedDateTime must memoize within the same resolver instance.' );
+pek_checkout_assert( '2026-08-04T13:30:00' === ( new PekQuotePlannedDateTimeResolver( $memo_settings ) )->resolve(), 'A new PEK plannedDateTime resolver instance must compute a fresh request-scoped value.' );
+$GLOBALS['pek_checkout_current_datetime'] = '2026-08-04 12:07:00';
 
 $selection = array(
 	'carrier_key' => 'pek',

@@ -10,10 +10,15 @@ use WallsShop\WDC\Carriers\Pek\PekSettings;
 defined( 'ABSPATH' ) || exit;
 
 final class PekQuotePlannedDateTimeResolver {
+	private ?string $resolved = null;
+
 	public function __construct( private PekSettings $settings ) {
 	}
 
 	public function resolve(): string {
+		if ( null !== $this->resolved ) {
+			return $this->resolved;
+		}
 		$timezone = $this->timezone();
 		$now = function_exists( 'current_datetime' ) ? current_datetime()->setTimezone( $timezone ) : new DateTimeImmutable( 'now', $timezone );
 		$planned = $now->modify( '+1 hour' );
@@ -23,7 +28,9 @@ final class PekQuotePlannedDateTimeResolver {
 			$planned = $planned->modify( '+' . ( 15 - $remainder ) . ' minutes' );
 		}
 
-		return $planned->setTime( (int) $planned->format( 'H' ), (int) $planned->format( 'i' ), 0 )->format( 'Y-m-d\TH:i:s' );
+		$this->resolved = $planned->setTime( (int) $planned->format( 'H' ), (int) $planned->format( 'i' ), 0 )->format( 'Y-m-d\TH:i:s' );
+
+		return $this->resolved;
 	}
 
 	public function timezone_source(): string {
