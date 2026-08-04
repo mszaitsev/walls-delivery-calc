@@ -17,6 +17,7 @@ final class PekQuoteService {
 		private PekApiClient $api,
 		private PekQuoteRequestBuilder $request_builder,
 		private PekQuoteResponseParser $parser,
+		private PekQuoteMessageSanitizer $message_sanitizer,
 		private ?Logger $logger = null
 	) {
 	}
@@ -58,26 +59,13 @@ final class PekQuoteService {
 				(string) ( $context['endpoint'] ?? '/calculator/calculateprice/' ),
 				(string) ( $context['method'] ?? 'POST' ),
 				$context['http_status'] ?? '',
-				$this->safe_api_error_message( $exception->getMessage() ),
+				$this->message_sanitizer->sanitize( $exception->getMessage() ),
 				$this->safe_field_errors( $context['field_errors'] ?? array() )
 			);
 			$this->log_failure( $result, $request );
 
 			return $result;
 		}
-	}
-
-	private function safe_api_error_message( string $message ): string {
-		$message = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $message ) ?? $message;
-		$message = preg_replace( '/\s+/u', ' ', $message ) ?? $message;
-		$message = trim( $message );
-		if ( function_exists( 'mb_substr' ) ) {
-			$message = mb_substr( $message, 0, 500 );
-		} else {
-			$message = substr( $message, 0, 500 );
-		}
-
-		return '' !== trim( $message ) ? trim( $message ) : 'ПЭК вернул ошибку без безопасного описания.';
 	}
 
 	/** @return array<int,array{field:string,messages:array<int,string>}> */
@@ -90,7 +78,13 @@ final class PekQuoteService {
 			if ( ! is_array( $item ) || array_is_list( $item ) || ! is_string( $item['field'] ?? null ) || ! is_array( $item['messages'] ?? null ) || ! array_is_list( $item['messages'] ) ) {
 				continue;
 			}
-			$messages = array_values( array_filter( array_slice( $item['messages'], 0, 5 ), 'is_string' ) );
+			$messages = array();
+			foreach ( array_slice( $item['messages'], 0, 5 ) as $message ) {
+				if ( is_string( $message ) ) {
+					$messages[] = $this->message_sanitizer->sanitize_field_message( $message );
+				}
+			}
+			$messages = array_values( array_unique( $messages ) );
 			if ( array() !== $messages ) {
 				$result[] = array( 'field' => (string) $item['field'], 'messages' => $messages );
 			}
@@ -116,8 +110,23 @@ final class PekQuoteService {
 				'method' => $result->method,
 				'http_status' => $result->http_status,
 				'response_shape' => $result->safe_response_meta['response_shape'] ?? array(),
-				'field_errors' => $result->field_errors,
+				'field_error_fields' => $this->field_error_fields( $result->field_errors ),
+				'field_error_count' => count( $result->field_errors ),
 			)
 		);
+	}
+
+	/** @param array<int,array{field:string,messages:array<int,string>}> $field_errors @return array<int,string> */
+	private function field_error_fields( array $field_errors ): array {
+		$fields = array();
+		foreach ( array_slice( $field_errors, 0, 20 ) as $error ) {
+			$field = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $error['field'] ) ?? $error['field'];
+			$field = trim( preg_replace( '/\s+/u', ' ', $field ) ?? $field );
+			if ( '' !== $field ) {
+				$fields[] = function_exists( 'mb_substr' ) ? mb_substr( $field, 0, 100 ) : substr( $field, 0, 100 );
+			}
+		}
+
+		return array_values( array_unique( $fields ) );
 	}
 }

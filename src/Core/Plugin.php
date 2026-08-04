@@ -97,6 +97,7 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
@@ -434,7 +435,8 @@ final class Plugin {
 		$this->container->register( PekQuoteCargoBuilder::class, fn(): PekQuoteCargoBuilder => new PekQuoteCargoBuilder() );
 		$this->container->register( PekQuoteRequestBuilder::class, fn(): PekQuoteRequestBuilder => new PekQuoteRequestBuilder( $this->container->get( PekSettings::class ), $this->container->get( PekQuoteCargoBuilder::class ) ) );
 		$this->container->register( PekQuoteResponseParser::class, fn(): PekQuoteResponseParser => new PekQuoteResponseParser() );
-		$this->container->register( PekQuoteService::class, fn(): PekQuoteService => new PekQuoteService( $this->container->get( PekCredentials::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekQuoteRequestBuilder::class ), $this->container->get( PekQuoteResponseParser::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( PekQuoteMessageSanitizer::class, fn(): PekQuoteMessageSanitizer => new PekQuoteMessageSanitizer( $this->container->get( PekCredentials::class ), $this->container->get( PekSettings::class ) ) );
+		$this->container->register( PekQuoteService::class, fn(): PekQuoteService => new PekQuoteService( $this->container->get( PekCredentials::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekQuoteRequestBuilder::class ), $this->container->get( PekQuoteResponseParser::class ), $this->container->get( PekQuoteMessageSanitizer::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( PekQuoteDiagnosticStore::class, fn(): PekQuoteDiagnosticStore => new PekQuoteDiagnosticStore() );
 		$this->container->register( PekQuoteDiagnosticService::class, fn(): PekQuoteDiagnosticService => new PekQuoteDiagnosticService( $this->container->get( LocationRepository::class ), $this->container->get( PekLocationResolver::class ), $this->container->get( PekAddressBuilder::class ), $this->container->get( PekSettings::class ), $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( PekQuoteService::class ) ) );
 		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );

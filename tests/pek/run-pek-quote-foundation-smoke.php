@@ -13,14 +13,17 @@ use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
@@ -40,6 +43,15 @@ function wp_unslash( mixed $value ): mixed { return $value; }
 function get_transient( string $key ): mixed { return $GLOBALS['pek_quote_transients'][ $key ]['value'] ?? false; }
 function set_transient( string $key, mixed $value, int $ttl = 0 ): bool { $GLOBALS['pek_quote_transients'][ $key ] = array( 'value' => $value, 'ttl' => $ttl ); return true; }
 function delete_transient( string $key ): bool { unset( $GLOBALS['pek_quote_transients'][ $key ] ); return true; }
+function get_current_user_id(): int { return 17; }
+function wc_get_logger(): object { return $GLOBALS['pek_quote_wc_logger']; }
+
+final class PekQuoteFakeWooLogger {
+	public array $entries = array();
+	public function log( string $level, string $message, array $context = array() ): void {
+		$this->entries[] = compact( 'level', 'message', 'context' );
+	}
+}
 
 final class PekQuoteFakeHttp implements PekHttpClientInterface {
 	public array $requests = array();
@@ -69,22 +81,23 @@ function pek_quote_success_response(): array {
 	);
 }
 
-function pek_quote_boot( array $responses ): array {
+function pek_quote_boot( array $responses, array $sensitive = array(), bool $with_logger = false ): array {
 	$GLOBALS['pek_quote_options'] = array();
 	$GLOBALS['pek_quote_transients'] = array();
+	$GLOBALS['pek_quote_wc_logger'] = new PekQuoteFakeWooLogger();
 	$repository = new SettingsRepository();
 	$settings = new PekSettings( $repository );
 	$credentials = new PekCredentials( $repository, new EncryptionService() );
 	if ( ! defined( 'APP_ENCRYPTION_KEY' ) ) {
 		define( 'APP_ENCRYPTION_KEY', 'pek-quote-test-key' );
 	}
-	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
-	$settings->save_from_admin( array( PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::CLIENT_CARD_KEY => 'client-card' ) );
+	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => (string) ( $sensitive['login'] ?? 'login' ), 'pek_api_key' => (string) ( $sensitive['api_key'] ?? 'secret' ) ) );
+	$settings->save_from_admin( array( PekSettings::SENDER_INN_KEY => (string) ( $sensitive['inn'] ?? '5400000000' ), PekSettings::SENDER_KPP_KEY => (string) ( $sensitive['kpp'] ?? '540001001' ), PekSettings::CLIENT_CARD_KEY => (string) ( $sensitive['client_card'] ?? 'client-card' ) ) );
 	$repository->set( PekSettings::SENDER_WAREHOUSE_KEY, array( 'warehouseId' => 'sender-wh', 'source' => 'free', 'branchTimezone' => 'UTC' ) );
 	$http = new PekQuoteFakeHttp( $responses );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
 	$builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
-	$service = new PekQuoteService( $credentials, $api, $builder, new PekQuoteResponseParser() );
+	$service = new PekQuoteService( $credentials, $api, $builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), $with_logger ? new Logger() : null );
 
 	return array( $settings, $http, $builder, $service );
 }
@@ -214,6 +227,52 @@ foreach ( array( 0, 1, 'true', 'false', array(), (object) array() ) as $bad_insu
 		pek_quote_assert( 'pek_quote_services_invalid' === (string) ( $exception->context()['error_code'] ?? '' ), 'Non-bool insuranceTerm must fail services contract.' );
 	}
 }
+
+foreach ( array( 'serviceType' => true, 'serviceType_int' => 1, 'senderCity' => 123, 'info' => false, 'info_array' => array() ) as $case => $bad_text ) {
+	$key = str_starts_with( (string) $case, 'serviceType' ) ? 'serviceType' : ( str_starts_with( (string) $case, 'senderCity' ) ? 'senderCity' : 'info' );
+	try {
+		$parser->parse( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => 1, 'estDeliveryTime' => 1, 'services' => array( array( $key => $bad_text ) ) ) ) ), PekQuoteOptions::MODE_PICKUP, array(), $meta );
+		pek_quote_assert( false, 'Parser must reject non-string service text fields.' );
+	} catch ( PekApiException $exception ) {
+		pek_quote_assert( 'pek_quote_services_invalid' === (string) ( $exception->context()['error_code'] ?? '' ), 'Non-string service text fields must fail service contract.' );
+	}
+}
+$empty_service = $parser->parse( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => 1, 'estDeliveryTime' => 1, 'services' => array( array( 'serviceType' => '', 'senderCity' => null, 'info' => 'Условие', 'insuranceTerm' => false ) ) ) ) ), PekQuoteOptions::MODE_PICKUP, array(), $meta );
+pek_quote_assert( ! array_key_exists( 'serviceType', $empty_service->services[0] ) && ! array_key_exists( 'senderCity', $empty_service->services[0] ) && 'Условие' === $empty_service->services[0]['info'] && false === $empty_service->services[0]['insuranceTerm'], 'Empty service text is omitted while valid info and Boolean insuranceTerm are preserved.' );
+
+$sensitive = array( 'login' => 'diagnostic-user', 'api_key' => 'very-secret-key', 'client_card' => 'CLIENT-SECRET-777', 'inn' => '1234567890', 'kpp' => '123456789' );
+$basic = base64_encode( 'diagnostic-user:very-secret-key' );
+$secret_message = 'login=diagnostic-user api_key=very-secret-key diagnostic-user:very-secret-key Basic ' . $basic . ' counterpartClientCard=CLIENT-SECRET-777 inn=1234567890 kpp=123456789 token=very-secret-key Authorization: Basic abc ?token=very-secret-key &login=diagnostic-user Карта CLIENT-SECRET-777 ИНН 1234567890 Пользователь diagnostic-user';
+list( $settings_secret, $http_secret, $builder_secret, $service_secret ) = pek_quote_boot( array( pek_quote_response( array( 'hasError' => true, 'errorMessage' => $secret_message ) ) ), $sensitive, true );
+$secret_result = $service_secret->calculate( pek_quote_request(), $pickup );
+$secret_json = wp_json_encode( $secret_result->to_array() );
+foreach ( array( 'diagnostic-user', 'very-secret-key', 'CLIENT-SECRET-777', '1234567890', '123456789', $basic, 'diagnostic-user:very-secret-key' ) as $secret ) {
+	pek_quote_assert( ! str_contains( (string) $secret_json, $secret ) && ! str_contains( $secret_result->api_error_message, $secret ), 'Root calculator error sanitization must remove actual sensitive value ' . $secret );
+}
+pek_quote_assert( 'ПЭК вернул ошибку без безопасного описания.' !== $secret_result->api_error_message && str_contains( $secret_result->api_error_message, '[redacted]' ), 'Root calculator error sanitization must keep a readable redacted message.' );
+$store = new PekQuoteDiagnosticStore();
+$store->save_for_current_user( $secret_result->to_array() );
+$stored_secret = $store->consume_for_current_user();
+$stored_secret_json = wp_json_encode( $stored_secret );
+foreach ( array( 'diagnostic-user', 'very-secret-key', 'CLIENT-SECRET-777', '1234567890', '123456789', $basic ) as $secret ) {
+	pek_quote_assert( ! str_contains( (string) $stored_secret_json, $secret ), 'Quote diagnostic transient must not contain sensitive value ' . $secret );
+}
+$log_json = wp_json_encode( $GLOBALS['pek_quote_wc_logger']->entries );
+pek_quote_assert( 1 === count( $GLOBALS['pek_quote_wc_logger']->entries ) && str_contains( (string) $log_json, 'field_error_count' ) && ! str_contains( (string) $log_json, 'api_error_message' ) && ! str_contains( (string) $log_json, 'field_errors' ) && ! str_contains( (string) $log_json, 'very-secret-key' ) && ! str_contains( (string) $log_json, 'CLIENT-SECRET-777' ), 'Quote failure logger must omit API messages, field messages and sensitive values.' );
+
+list( $settings_transfer, $http_transfer, $builder_transfer, $service_transfer ) = pek_quote_boot( array( pek_quote_response( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => true, 'errorMessage' => 'client card CLIENT-SECRET-777, inn 1234567890', 'costTotal' => 0, 'estDeliveryTime' => 0 ) ) ) ) ), $sensitive );
+$transfer_secret = $service_transfer->calculate( pek_quote_request(), $pickup );
+pek_quote_assert( ! str_contains( $transfer_secret->api_error_message, 'CLIENT-SECRET-777' ) && ! str_contains( $transfer_secret->api_error_message, '1234567890' ) && str_contains( $transfer_secret->api_error_message, '[redacted]' ), 'Transfer calculator error sanitization must remove counterpart identifiers.' );
+
+list( $settings_field, $http_field, $builder_field, $service_field ) = pek_quote_boot( array( pek_quote_response( array( 'error' => array( 'title' => 'Ошибка', 'message' => 'Описание', 'fields' => array( array( 'Key' => 'counterpart.inn', 'Value' => array( 'Недопустимое значение 1234567890', 'client_card=CLIENT-SECRET-777', 'client_card=CLIENT-SECRET-777' ) ) ) ) ) ) ), $sensitive, true );
+$field_secret = $service_field->calculate( pek_quote_request(), $pickup );
+$field_json = wp_json_encode( $field_secret->to_array() );
+pek_quote_assert( 'counterpart.inn' === (string) ( $field_secret->field_errors[0]['field'] ?? '' ) && 2 === count( $field_secret->field_errors[0]['messages'] ?? array() ) && ! str_contains( (string) $field_json, '1234567890' ) && ! str_contains( (string) $field_json, 'CLIENT-SECRET-777' ), 'Quote field error messages must be sanitized and deduplicated after redaction.' );
+pek_quote_assert( ! str_contains( (string) wp_json_encode( $GLOBALS['pek_quote_wc_logger']->entries ), 'Недопустимое значение' ) && ! str_contains( (string) wp_json_encode( $GLOBALS['pek_quote_wc_logger']->entries ), 'CLIENT-SECRET-777' ), 'Quote logger must not contain field error messages.' );
+
+list( $settings_empty, $http_empty, $builder_empty, $service_empty ) = pek_quote_boot( array( pek_quote_response( array( 'hasError' => true, 'errorMessage' => 'very-secret-key CLIENT-SECRET-777 1234567890 123456789 diagnostic-user' ) ) ), $sensitive );
+$empty_secret = $service_empty->calculate( pek_quote_request(), $pickup );
+pek_quote_assert( 'ПЭК вернул ошибку без безопасного описания.' === $empty_secret->api_error_message, 'Message reduced to secrets only must use generic fallback.' );
 
 list( $settings4, $http4, $builder4, $service4 ) = pek_quote_boot( array( pek_quote_response( array( 'error' => array( 'title' => 'Ошибка валидации', 'message' => 'Детали отдельно', 'fields' => array( array( 'Key' => 'volume', 'Value' => array( 'Значение должно быть больше 0.' ) ) ) ) ) ) ) );
 $logical = $service4->calculate( pek_quote_request(), $pickup );

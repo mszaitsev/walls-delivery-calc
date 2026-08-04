@@ -123,10 +123,13 @@ final class PekQuoteResponseParser {
 			$row = array();
 			foreach ( array( 'serviceType', 'senderCity', 'info' ) as $key ) {
 				if ( array_key_exists( $key, $item ) && null !== $item[ $key ] ) {
-					if ( ! is_scalar( $item[ $key ] ) ) {
+					if ( ! is_string( $item[ $key ] ) ) {
 						throw new PekApiException( 'ПЭК вернул некорректный список услуг расчёта.', array_merge( $meta, array( 'error_code' => 'pek_quote_services_invalid', 'failure_stage' => 'quote_calculator_contract' ) ) );
 					}
-					$row[ $key ] = $this->safe_text( $item[ $key ] );
+					$text = $this->safe_text( $item[ $key ] );
+					if ( '' !== $text ) {
+						$row[ $key ] = $text;
+					}
 				}
 			}
 			if ( array_key_exists( 'insuranceTerm', $item ) && null !== $item['insuranceTerm'] ) {

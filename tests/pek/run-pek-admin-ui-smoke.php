@@ -30,6 +30,7 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
@@ -199,7 +200,7 @@ $pickup_registry = new CarrierPickupPointProviderRegistry( array( $pickup_provid
 $destination_diagnostic_service = new PekDestinationPickupDiagnosticService( $pickup_registry, $location_repository, $terminal_service, $settings, $credentials, new Logger() );
 $destination_report_store = new PekDestinationPickupDiagnosticStore();
 $quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
-$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new Logger() );
+$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new Logger() );
 $quote_diagnostic_service = new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service );
 $quote_report_store = new PekQuoteDiagnosticStore();
 $page = new PekAdminPage(
@@ -412,6 +413,8 @@ $quote_report_store->save_for_current_user(
 		'checked_at' => '2026-08-04 12:00:00',
 		'success' => true,
 		'message' => 'Расчёт ПЭК успешно выполнен.',
+		'api_error_message' => '[redacted] безопасное описание',
+		'field_errors' => array( array( 'field' => 'counterpart.inn', 'messages' => array( '[redacted] значение' ) ) ),
 		'endpoint' => '/calculator/calculateprice/',
 		'method' => 'POST',
 		'http_status' => 200,
@@ -422,17 +425,19 @@ $quote_report_store->save_for_current_user(
 			'sender_branch' => 'Новосибирск',
 			'receiver_branch' => 'Москва',
 			'services' => array(
-				array( 'serviceType' => 'Страхование', 'cost' => 50, 'info' => 'Страхование:', 'insuranceTerm' => false, 'services' => array( array( 'serviceType' => 'Страхование', 'insuranceTerm' => true, 'services' => null ) ) ),
+				array( 'serviceType' => 'Страхование', 'cost' => 50, 'info' => 'Страхование:', 'insuranceTerm' => false, 'raw_response' => 'secret', 'counterpartClientCard' => 'secret', 'services' => array( array( 'serviceType' => 'Страхование', 'insuranceTerm' => true, 'AttemptedValue' => 'secret', 'services' => null ) ) ),
 			),
 		),
 	)
 );
 $stored_quote = $quote_report_store->consume_for_current_user();
+$stored_quote_json = wp_json_encode( $stored_quote );
 pek_ui_assert( false === $stored_quote['result']['services'][0]['insuranceTerm'] && true === $stored_quote['result']['services'][0]['services'][0]['insuranceTerm'], 'PEK quote diagnostic store must preserve Boolean insuranceTerm values including false.' );
+pek_ui_assert( ! str_contains( (string) $stored_quote_json, 'raw_response' ) && ! str_contains( (string) $stored_quote_json, 'counterpartClientCard' ) && ! str_contains( (string) $stored_quote_json, 'AttemptedValue' ) && ! str_contains( (string) $stored_quote_json, 'secret' ), 'PEK quote diagnostic store must keep service breakdown allowlisted and free from unsafe nested keys.' );
 $quote_report_store->save_for_current_user( $stored_quote );
 ob_start();
 $page->render_embedded( $service );
 $quote_html = (string) ob_get_clean();
-pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ), 'PEK quote diagnostic UI must render endpoint/status and Boolean insuranceTerm as да/нет.' );
+pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, sanitized API message and Boolean insuranceTerm as да/нет without unsafe service keys.' );
 
 echo "PEK admin UI smoke OK\n";
