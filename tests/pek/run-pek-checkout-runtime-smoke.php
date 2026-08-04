@@ -348,6 +348,7 @@ pek_checkout_assert( DeliveryType::PICKUP === $pickup->delivery_type && Delivery
 pek_checkout_assert( $pickup->requires_pickup_point && ! $pickup->requires_courier_address && ! $courier->requires_pickup_point && $courier->requires_courier_address, 'PEK pickup/courier requirement flags must be canonical.' );
 pek_checkout_assert( 109000 === $pickup->price->get_kopecks() && 209000 === $courier->price->get_kopecks(), 'PEK DeliveryRate price must use final adjusted quote price.' );
 pek_checkout_assert( 100000 === (int) $pickup->meta['pek_carrier_price_kopecks'] && 7000 === (int) $pickup->meta['pek_bag_surcharge_kopecks'] && 2000 === (int) $pickup->meta['pek_sealing_surcharge_kopecks'], 'PEK rate meta must preserve carrier price and store surcharges separately.' );
+pek_checkout_assert( 1090.0 === (float) $pickup->meta['api_base_price_rub'] && 1000.0 === (float) $pickup->meta['pek_carrier_base_price_rub'], 'PEK generic API base meta must use final adjusted base while PEK carrier base preserves pure costTotal.' );
 pek_checkout_assert( PekSettings::PICKUP_FAMILY === (string) $pickup->meta['pickup_family'] && is_array( $pickup->meta['pickup_provider_query'] ?? null ), 'PEK pickup rate must carry trusted provider query snapshot.' );
 pek_checkout_assert( (string) $pickup->meta['pickup_provider_query']['destination_fingerprint'] === (string) $pickup->meta['pickup_provider_query']['provider_destination_fingerprint'], 'PEK provider query snapshot must expose provider_destination_fingerprint alongside legacy destination_fingerprint.' );
 $formatter_smoke = new PekCheckoutPickupPointFormatter();
@@ -364,6 +365,16 @@ $query_resolver = pek_checkout_resolver_with_rate( $stored_pickup_rate );
 $trusted_query = $query_resolver->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
 pek_checkout_assert( PekSettings::CARRIER_KEY === $trusted_query->carrier_key && 153912 === $trusted_query->location_id && 'RU' === $trusted_query->country_code && 1000 === $trusted_query->cargo->weight_g && 1 === $trusted_query->cargo->places_count, 'Production WooCommerce stored PEK rate must resolve trusted provider query from rate_meta.' );
 pek_checkout_assert( '' !== $query_resolver->destination_fingerprint( PekSettings::PICKUP_RATE_ID ), 'Production PEK stored pickup rate must expose non-empty destination fingerprint.' );
+
+list( $base_price_carrier ) = pek_checkout_boot(
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 927.92 ), pek_checkout_calc_response( 2000.00 ) ),
+	array( pek_checkout_point( 'main-wh' ) )
+);
+$base_price_quote = $base_price_carrier->quote( pek_checkout_request() );
+$base_price_rate = $base_price_quote->rates[0];
+pek_checkout_assert( 101792 === $base_price_rate->price->get_kopecks() && null !== $base_price_rate->original_cost && 101792 === $base_price_rate->original_cost->get_kopecks(), 'PEK checkout price and original_cost must include store light-cargo surcharges.' );
+pek_checkout_assert( 1017.92 === (float) $base_price_rate->meta['api_base_price_rub'] && 927.92 === (float) $base_price_rate->meta['pek_carrier_base_price_rub'] && 92792 === (int) $base_price_rate->meta['pek_carrier_price_kopecks'], 'PEK rate meta must store adjusted API base separately from carrier costTotal.' );
+
 $GLOBALS['pek_checkout_wc'] = new PekCheckoutFakeWoo();
 $checkout_lifecycle_session = new CheckoutSessionManager();
 $checkout_lifecycle_session->save_rates( array( PekSettings::PICKUP_RATE_ID => $stored_pickup_rate ) );

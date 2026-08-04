@@ -1,6 +1,6 @@
 # Rules
 
-Version: 0.133.4
+Version: 0.133.5
 
 Rules live under `src/Rules`. The rule engine evaluates delivery conditions and operations used by checkout and delivery services.
 
@@ -9,6 +9,8 @@ Repositories store rule data. Application logic belongs in services such as `Rul
 Rules may change price, delivery days/date, availability, labels/comments, or delivery-service behavior. Rule evaluation should leave an audit trail sufficient for admin review and order snapshots.
 
 Delivery-day rules run after checkout normalizes raw carrier lead time into calendar days. The canonical order is carrier raw lead time -> shop processing calendar -> carrier working-day conversion -> delivery date rules -> planned date. Because the global `shop_processing_working_days` setting now applies automatically, older manual processing-day additions in rules should be removed manually by an administrator to avoid double-increasing delivery time.
+
+PEK light-cargo bag/plombing surcharges are store-owned base-price adjustments, not Rule Engine rules. For PEK, `api_base_price_rub` already includes the configured non-zero bag and/or plombing surcharge before rules run, while the pure carrier `costTotal` is stored separately as `pek_carrier_base_price_rub`/`pek_carrier_price_kopecks`. Formula visualization may add `Добавлен мешок и пломбировка`, `Добавлен мешок`, or `Добавлена пломбировка` before rule operations, including when no regular rule applies. These comments are not added to `applied_rules`, and `price_delta_rub` is calculated from the adjusted base so PEK store surcharges are not counted as rule effects.
 
 ## Service Rule Simulation
 

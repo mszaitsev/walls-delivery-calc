@@ -826,6 +826,12 @@ plugin_architecture_assert( str_contains( $pek_context_source, 'provider_destina
 $pek_carrier_source_for_cache = plugin_architecture_source( 'src/Carriers/Runtime/PekCarrier.php' );
 $quote_cache_source_for_pickup = plugin_architecture_source( 'src/Checkout/Cache/QuoteCache.php' );
 plugin_architecture_assert( str_contains( $pek_carrier_source_for_cache, 'pek_selection_provider_destination_fingerprint' ) && str_contains( $quote_cache_source_for_pickup, 'provider_destination_fingerprint' ), 'PEK and generic quote cache context must include selected point provider fingerprint.' );
+plugin_architecture_assert( str_contains( $pek_carrier_source_for_cache, "'api_base_price_rub' => \$result->price_kopecks / 100" ) && str_contains( $pek_carrier_source_for_cache, "'pek_carrier_base_price_rub' => \$result->carrier_price_kopecks / 100" ) && str_contains( $pek_carrier_source_for_cache, "'pek_carrier_price_kopecks' => \$result->carrier_price_kopecks" ), 'PEK carrier must expose adjusted API base and preserve carrier-only cost separately.' );
+$calculation_builder_source = plugin_architecture_source( 'src/Orders/Application/DeliveryCalculationDataBuilder.php' );
+plugin_architecture_assert( str_contains( $calculation_builder_source, 'base_price_adjustment_lines' ) && str_contains( $calculation_builder_source, 'Добавлен мешок и пломбировка' ) && str_contains( $calculation_builder_source, 'Добавлен мешок' ) && str_contains( $calculation_builder_source, 'Добавлена пломбировка' ), 'Delivery calculation builder must render PEK base adjustment formula notes for both/bag-only/sealing-only cases.' );
+plugin_architecture_assert( str_contains( $calculation_builder_source, 'array() !== $audit || $round || $minimum || array() !== $base_adjustments' ) && str_contains( $calculation_builder_source, 'insert_base_price_adjustment_lines' ), 'Delivery calculation builder must render surcharge notes even without regular rules.' );
+plugin_architecture_assert( str_contains( $calculation_builder_source, "'applied_rules' => \$audit" ) && ! str_contains( $calculation_builder_source, "'applied_rules' => \$base_adjustments" ), 'PEK surcharge note must not be inserted into applied_rules.' );
+plugin_architecture_assert( str_contains( $calculation_builder_source, "'price_delta_rub' => \$final - \$api_base" ) && ! str_contains( $calculation_builder_source, 'pek_light_cargo_surcharge_kopecks +=' ), 'Rule delta must be calculated from adjusted base and builder must not add PEK surcharges again.' );
 $pickup_map_js_source = plugin_architecture_source( 'assets/frontend/pickup-map/wdc-pickup-map.js' );
 plugin_architecture_assert( str_contains( $pickup_map_js_source, 'typeLabel !== title' ) && str_contains( $pickup_map_js_source, "carrier === 'pek'" ), 'Generic pickup map must hide duplicate title/type rows and avoid displaying PEK technical UUID codes.' );
 
@@ -838,7 +844,7 @@ plugin_architecture_assert( ! str_contains( $checkout_orchestrator_source, 'PekC
 $migration_files = glob( plugin_architecture_path( 'src/Infrastructure/Migrations/*.php' ) ) ?: array();
 foreach ( $migration_files as $migration_file ) {
 	$name = basename( $migration_file );
-	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.4 must not add a new PEK migration: ' . $name );
+	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.5 must not add a new PEK migration: ' . $name );
 }
 
 echo "Plugin architecture smoke passed.\n";

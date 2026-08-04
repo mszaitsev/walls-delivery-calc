@@ -108,6 +108,11 @@ final class DeliveryCalculationDataBuilder {
 			'http_code' => $api['http_code'] ?? $rate_meta['http_code'] ?? $api_result['http_code'] ?? null,
 			'carrier_country_id' => (string) ( $country['carrier_country_id'] ?? '' ),
 			'country_name' => (string) ( $country['country_name'] ?? '' ),
+			'pek_carrier_base_price_rub' => $this->nullable_float( $rate_meta['pek_carrier_base_price_rub'] ?? null ),
+			'pek_carrier_price_kopecks' => $this->nullable_int( $rate_meta['pek_carrier_price_kopecks'] ?? null ),
+			'pek_bag_surcharge_kopecks' => $this->nullable_int( $rate_meta['pek_bag_surcharge_kopecks'] ?? null ),
+			'pek_sealing_surcharge_kopecks' => $this->nullable_int( $rate_meta['pek_sealing_surcharge_kopecks'] ?? null ),
+			'pek_light_cargo_surcharge_kopecks' => $this->nullable_int( $rate_meta['pek_light_cargo_surcharge_kopecks'] ?? null ),
 		);
 		if ( DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate_meta['carrier_key'] ?? '' ) ) {
 			foreach ( array( 'dpd_service_code', 'dpd_sender_city_id', 'dpd_receiver_city_id', 'dpd_pickup_terminal_code', 'dpd_delivery_terminal_code', 'dpd_delivery_terminal_source', 'dpd_tariff_method' ) as $key ) {
@@ -143,7 +148,8 @@ final class DeliveryCalculationDataBuilder {
 		$round = ! empty( $rules['round_up_applied'] ) || ! empty( $rate['round_up_applied'] ) || ! empty( $rate_meta['round_up_applied'] ) || ! empty( $result['round_up_applied'] );
 		$minimum = ! empty( $rules['minimum_price_applied'] ) || ! empty( $rate['minimum_price_applied'] ) || ! empty( $rate_meta['minimum_price_applied'] ) || ! empty( $result['minimum_price_applied'] );
 		$formula = is_array( $rules['formula_visualization'] ?? null ) ? $rules['formula_visualization'] : ( is_array( $rate_meta['formula_visualization'] ?? null ) ? $rate_meta['formula_visualization'] : array() );
-		if ( array() === $formula && ( array() !== $audit || $round || $minimum ) ) {
+		$base_adjustments = $this->base_price_adjustment_lines( $rate_meta );
+		if ( array() === $formula && ( array() !== $audit || $round || $minimum || array() !== $base_adjustments ) ) {
 			$formula = $this->rule_formula_formatter->lines(
 				$this->nullable_float( $api['api_base_price_rub'] ?? null ) ?? $api_base,
 				$audit,
@@ -154,6 +160,7 @@ final class DeliveryCalculationDataBuilder {
 				)
 			);
 		}
+		$formula = $this->insert_base_price_adjustment_lines( $formula, $base_adjustments );
 		$formula = $this->append_unique_lines( $formula, $this->lead_time_audit_lines( $rate, $rate_meta ) );
 
 		return array(
@@ -218,6 +225,48 @@ final class DeliveryCalculationDataBuilder {
 		}
 
 		return $output;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<int,string>
+	 */
+	private function base_price_adjustment_lines( array $rate_meta ): array {
+		$bag = max( 0, $this->nullable_int( $rate_meta['pek_bag_surcharge_kopecks'] ?? null ) ?? 0 );
+		$sealing = max( 0, $this->nullable_int( $rate_meta['pek_sealing_surcharge_kopecks'] ?? null ) ?? 0 );
+		if ( $bag > 0 && $sealing > 0 ) {
+			return array( 'Добавлен мешок и пломбировка' );
+		}
+		if ( $bag > 0 ) {
+			return array( 'Добавлен мешок' );
+		}
+		if ( $sealing > 0 ) {
+			return array( 'Добавлена пломбировка' );
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array<int,mixed> $formula
+	 * @param array<int,string> $adjustments
+	 * @return array<int,string>
+	 */
+	private function insert_base_price_adjustment_lines( array $formula, array $adjustments ): array {
+		$formula = array_values(
+			array_filter(
+				array_map( static fn( mixed $line ): string => (string) $line, $formula ),
+				static fn( string $line ): bool => '' !== trim( $line )
+			)
+		);
+		foreach ( $adjustments as $line ) {
+			if ( in_array( $line, $formula, true ) ) {
+				continue;
+			}
+			array_splice( $formula, min( 1, count( $formula ) ), 0, array( $line ) );
+		}
+
+		return $formula;
 	}
 
 	/**
