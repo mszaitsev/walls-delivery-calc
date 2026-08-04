@@ -27,7 +27,7 @@ final class CheckoutPickupPointProviderQueryResolver {
 			true !== $requires_pickup
 			|| 'pickup' !== $rate_delivery_type
 			|| $rate_carrier !== $carrier_key
-			|| ( '' !== $rate_service && $rate_service !== $carrier_key )
+			|| $rate_service !== $carrier_key
 			|| $rate_family !== $pickup_family
 		) {
 			throw new RuntimeException( 'provider_rate_context_mismatch' );
@@ -94,10 +94,7 @@ final class CheckoutPickupPointProviderQueryResolver {
 		) {
 			return false;
 		}
-		if ( ( array_key_exists( 'latitude', $snapshot ) && ! is_numeric( $snapshot['latitude'] ) ) || ( array_key_exists( 'longitude', $snapshot ) && ! is_numeric( $snapshot['longitude'] ) ) ) {
-			return false;
-		}
-		if ( ( null === ( $snapshot['latitude'] ?? null ) ) !== ( null === ( $snapshot['longitude'] ?? null ) ) ) {
+		if ( ! $this->valid_coordinates( $snapshot ) ) {
 			return false;
 		}
 		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
@@ -108,6 +105,30 @@ final class CheckoutPickupPointProviderQueryResolver {
 		}
 
 		return 1 === (int) ( $cargo['places_count'] ?? 0 );
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function valid_coordinates( array $snapshot ): bool {
+		$latitude = $snapshot['latitude'] ?? null;
+		$longitude = $snapshot['longitude'] ?? null;
+		if ( null === $latitude && null === $longitude ) {
+			return true;
+		}
+		if ( null === $latitude || null === $longitude ) {
+			return false;
+		}
+		if ( ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return false;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+
+		return is_finite( $latitude )
+			&& is_finite( $longitude )
+			&& $latitude >= -90
+			&& $latitude <= 90
+			&& $longitude >= -180
+			&& $longitude <= 180;
 	}
 
 	/** @return array<string,mixed> */

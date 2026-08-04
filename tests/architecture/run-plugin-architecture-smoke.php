@@ -794,11 +794,16 @@ $checkout_provider_resolver_source = plugin_architecture_source( 'src/Pickup/Pro
 plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, "\$rate['rate_meta']" ) && str_contains( $checkout_provider_resolver_source, "\$rate['meta']" ), 'Checkout pickup provider resolver must read production rate_meta before legacy meta.' );
 plugin_architecture_assert( strpos( $checkout_provider_resolver_source, "\$rate['carrier_key']" ) < strpos( $checkout_provider_resolver_source, "\$meta['carrier_key']" ) && strpos( $checkout_provider_resolver_source, "\$rate['pickup_family']" ) < strpos( $checkout_provider_resolver_source, "\$meta['pickup_family']" ), 'Checkout pickup provider resolver must prefer production top-level rate envelope for carrier and family.' );
 plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, "true !== \$requires_pickup" ) && str_contains( $checkout_provider_resolver_source, "'pickup' !== \$rate_delivery_type" ), 'Checkout pickup provider resolver must reject non-pickup/courier rate envelopes.' );
+plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, "\$rate_service !== \$carrier_key" ), 'Checkout pickup provider resolver must require service key to match carrier key.' );
 plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, "\$meta['pickup_provider_query']" ) && ! str_contains( $checkout_provider_resolver_source, "array_param" ) && ! str_contains( $checkout_provider_resolver_source, "get_param" ), 'Checkout pickup provider resolver must use stored rate metadata and not browser request payload.' );
 plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, "destination_fingerprint" ) && str_contains( $checkout_provider_resolver_source, "'' === trim" ), 'Checkout pickup provider resolver must reject empty destination fingerprints.' );
+plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, 'private function valid_coordinates' ) && str_contains( $checkout_provider_resolver_source, 'null === $latitude && null === $longitude' ), 'Checkout pickup provider resolver must accept address-only null/null coordinates.' );
+plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, 'null === $latitude || null === $longitude' ) && str_contains( $checkout_provider_resolver_source, '! is_numeric( $latitude )' ), 'Checkout pickup provider resolver must reject partial and non-numeric coordinates.' );
+plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, 'is_finite( $latitude )' ) && str_contains( $checkout_provider_resolver_source, '$latitude >= -90' ) && str_contains( $checkout_provider_resolver_source, '$longitude <= 180' ), 'Checkout pickup provider resolver must bound numeric coordinates and reject non-finite values.' );
 
 $checkout_pickup_rest_source = plugin_architecture_source( 'src/Pickup/Rest/CheckoutPickupPointRestController.php' );
 plugin_architecture_assert( str_contains( $checkout_pickup_rest_source, "destination_fingerprint( \$method_id )" ) && str_contains( $checkout_pickup_rest_source, "provider_rate_context_missing" ), 'Checkout pickup save must enforce trusted destination fingerprint from stored rate context.' );
+plugin_architecture_assert( ! str_contains( $checkout_pickup_rest_source, "param( \$request, 'address'" ) && ! str_contains( $checkout_pickup_rest_source, "param( \$request, 'latitude'" ), 'Checkout pickup save must not promote browser address/coordinates into trusted provider context.' );
 
 $pek_planned_resolver_source = plugin_architecture_source( 'src/Carriers/Pek/Quote/PekQuotePlannedDateTimeResolver.php' );
 plugin_architecture_assert( str_contains( $pek_planned_resolver_source, 'private ?string $resolved = null' ) && str_contains( $pek_planned_resolver_source, 'null !== $this->resolved' ) && str_contains( $pek_planned_resolver_source, '$this->resolved =' ), 'PEK plannedDateTime resolver must memoize per service instance.' );
@@ -809,7 +814,7 @@ plugin_architecture_assert( ! str_contains( $checkout_orchestrator_source, 'PekC
 $migration_files = glob( plugin_architecture_path( 'src/Infrastructure/Migrations/*.php' ) ) ?: array();
 foreach ( $migration_files as $migration_file ) {
 	$name = basename( $migration_file );
-	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.1 must not add a new PEK migration: ' . $name );
+	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.2 must not add a new PEK migration: ' . $name );
 }
 
 echo "Plugin architecture smoke passed.\n";

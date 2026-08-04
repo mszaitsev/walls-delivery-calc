@@ -225,14 +225,15 @@ final class WdcPickupRestPekProvider implements CarrierPickupPointProviderInterf
 	}
 }
 
-function wdc_pickup_rest_pek_snapshot( string $fingerprint = 'pek-destination-fp' ): array {
+function wdc_pickup_rest_pek_snapshot( string $fingerprint = 'pek-destination-fp', mixed $latitude = 55.755864, mixed $longitude = 37.617698 ): array {
 	return array(
 		'carrier_key' => PekSettings::CARRIER_KEY,
 		'purpose' => CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
 		'location_id' => 153912,
 		'country_code' => 'RU',
-		'latitude' => 55.755864,
-		'longitude' => 37.617698,
+		'fallback_address_fingerprint' => hash( 'sha256', 'Россия, Москва' ),
+		'latitude' => $latitude,
+		'longitude' => $longitude,
 		'cargo' => array(
 			'weight_g' => 1000,
 			'volume_cm3' => 1000,
@@ -592,6 +593,50 @@ $pek_save = $pek_checkout_controller->save(
 pickup_rest_assert( 1 === count( $pek_provider->selection_queries ) && 'main-wh' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_code'] ?? '' ), 'PEK save must reach fresh resolve_selection and store the selected warehouse in pek:pickup.' );
 pickup_rest_assert( 'pek-destination-fp' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['destination_fingerprint'] ?? '' ), 'PEK save must persist non-empty destination fingerprint from trusted rate context.' );
 pickup_rest_assert( 'Россия, Москва, терминал main-wh' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_address'] ?? '' ), 'PEK save must ignore forged browser point presentation and use provider projection.' );
+
+WC()->session = new WC_Session_Handler();
+$pek_address_only_session = new CheckoutSessionManager();
+wdc_pickup_rest_store_pek_rate( $pek_address_only_session, wdc_pickup_rest_pek_snapshot( 'pek-address-only-fp', null, null ) );
+$pek_address_only_provider = new WdcPickupRestPekProvider(
+	array(
+		new PickupPoint( PekSettings::CARRIER_KEY, 'address-only-wh', 'Россия, Москва, address-only terminal', '', 'Москва', '', null, null, 'terminal', 'Пн-Пт 09:00-18:00', '', null, true, array( 'source' => 'free' ) ),
+	)
+);
+$pek_address_only_registry = new CarrierPickupPointProviderRegistry( array( $pek_address_only_provider ) );
+$pek_address_only_resolver = new CheckoutPickupPointProviderQueryResolver( $pek_address_only_session );
+$pek_address_only_points = ( new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, $pek_address_only_registry, $pek_address_only_resolver, new PekCheckoutPickupPointFormatter() ) )->points(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => PekSettings::CARRIER_KEY,
+			'shipping_method_id' => PekSettings::PICKUP_RATE_ID,
+			'pickup_family' => PekSettings::PICKUP_FAMILY,
+			'latitude' => '1',
+			'longitude' => '2',
+			'address' => 'forged browser address',
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( is_array( $pek_address_only_points ) && 1 === count( $pek_address_only_points ) && 'address-only-wh' === (string) ( $pek_address_only_points[0]['point_code'] ?? '' ), 'PEK /points must load terminals for address-only trusted snapshots.' );
+pickup_rest_assert( 1 === count( $pek_address_only_provider->queries ) && 153912 === $pek_address_only_provider->queries[0]->location_id && null === $pek_address_only_provider->queries[0]->latitude && null === $pek_address_only_provider->queries[0]->longitude, 'PEK /points must ignore browser coordinates/address and pass null coordinates from trusted address-only snapshot.' );
+$pek_address_only_save = ( new CheckoutPickupPointRestController( $repo, $pek_address_only_session, null, null, null, null, null, $pek_address_only_registry, $pek_address_only_resolver ) )->save(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => PekSettings::CARRIER_KEY,
+			'shipping_method_id' => PekSettings::PICKUP_RATE_ID,
+			'point_code' => 'address-only-wh',
+			'point' => array(
+				'point_address' => 'forged browser address',
+				'lat' => 1,
+				'lng' => 2,
+			),
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( 1 === count( $pek_address_only_provider->selection_queries ) && 'address-only-wh' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_code'] ?? '' ), 'PEK address-only save must fresh-validate selected warehouse.' );
+pickup_rest_assert( 'pek-address-only-fp' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['destination_fingerprint'] ?? '' ), 'PEK address-only save must persist trusted destination fingerprint.' );
+pickup_rest_assert( 'Россия, Москва, address-only terminal' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_address'] ?? '' ), 'PEK address-only save must ignore forged browser presentation.' );
 
 WC()->session = new WC_Session_Handler();
 $empty_fp_session = new CheckoutSessionManager();

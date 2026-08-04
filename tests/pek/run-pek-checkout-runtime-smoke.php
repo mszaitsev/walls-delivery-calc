@@ -141,6 +141,10 @@ if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 }
 
 function pek_checkout_location_rows(): array {
+	if ( isset( $GLOBALS['pek_checkout_location_rows'] ) && is_array( $GLOBALS['pek_checkout_location_rows'] ) ) {
+		return $GLOBALS['pek_checkout_location_rows'];
+	}
+
 	return array(
 		array(
 			'id' => 153912,
@@ -171,6 +175,23 @@ function pek_checkout_zone_response(): array {
 			'branchTitle' => 'Москва Восток',
 			'mainWarehouseId' => 'main-wh',
 			'warehousePoint' => array( 'latitude' => 55.7, 'longitude' => 37.7 ),
+		),
+	);
+}
+
+function pek_checkout_address_zone_response(): array {
+	return array(
+		'zoneId' => 'moscow-zone',
+		'zoneName' => 'Москва Садовое кольцо',
+		'branchUID' => 'moscow-east',
+		'branchTitle' => 'Москва Восток',
+		'mainWarehouseId' => 'main-wh',
+		'GeoData' => array(
+			'precision' => 'exact',
+			'Address' => array(
+				'formatted' => 'Россия, Москва',
+				'country_code' => 'RU',
+			),
 		),
 	);
 }
@@ -316,11 +337,36 @@ $query_resolver = pek_checkout_resolver_with_rate( $stored_pickup_rate );
 $trusted_query = $query_resolver->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
 pek_checkout_assert( PekSettings::CARRIER_KEY === $trusted_query->carrier_key && 153912 === $trusted_query->location_id && 'RU' === $trusted_query->country_code && 1000 === $trusted_query->cargo->weight_g && 1 === $trusted_query->cargo->places_count, 'Production WooCommerce stored PEK rate must resolve trusted provider query from rate_meta.' );
 pek_checkout_assert( '' !== $query_resolver->destination_fingerprint( PekSettings::PICKUP_RATE_ID ), 'Production PEK stored pickup rate must expose non-empty destination fingerprint.' );
+$base_snapshot = $pickup->meta['pickup_provider_query'];
+foreach ( array(
+	'numeric_pair' => array( 'latitude' => 55.7558, 'longitude' => 37.6173, 'expected_latitude' => 55.7558, 'expected_longitude' => 37.6173 ),
+	'numeric_strings' => array( 'latitude' => '55.7558', 'longitude' => '37.6173', 'expected_latitude' => 55.7558, 'expected_longitude' => 37.6173 ),
+	'zero_pair' => array( 'latitude' => '0', 'longitude' => 0, 'expected_latitude' => 0.0, 'expected_longitude' => 0.0 ),
+	'null_pair' => array( 'latitude' => null, 'longitude' => null, 'expected_latitude' => null, 'expected_longitude' => null ),
+) as $case => $coordinates ) {
+	$snapshot = array_merge( $base_snapshot, array( 'latitude' => $coordinates['latitude'], 'longitude' => $coordinates['longitude'] ) );
+	$stored_rate = array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => $snapshot ) ) );
+	$query = pek_checkout_resolver_with_rate( $stored_rate )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+	pek_checkout_assert( $coordinates['expected_latitude'] === $query->latitude && $coordinates['expected_longitude'] === $query->longitude && array() === $query->validate(), 'PEK trusted resolver must accept valid coordinate state: ' . $case );
+}
+$missing_coordinate_snapshot = array_diff_key( $base_snapshot, array( 'latitude' => true, 'longitude' => true ) );
+$missing_coordinate_rate = $stored_pickup_rate;
+$missing_coordinate_rate['rate_meta']['pickup_provider_query'] = $missing_coordinate_snapshot;
+$missing_coordinate_query = pek_checkout_resolver_with_rate( $missing_coordinate_rate )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+pek_checkout_assert( null === $missing_coordinate_query->latitude && null === $missing_coordinate_query->longitude && array() === $missing_coordinate_query->validate(), 'PEK trusted resolver must accept legacy snapshots with both coordinate keys absent.' );
 foreach ( array(
 	'missing_rate_meta' => array_diff_key( $stored_pickup_rate, array( 'rate_meta' => true ) ),
 	'empty_fingerprint' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'destination_fingerprint' => '' ) ) ) ),
 	'forged_courier' => array_replace( pek_checkout_stored_rate_from_mapper( $courier ), array( 'rate_id' => PekSettings::PICKUP_RATE_ID, 'rate_meta' => array( 'pickup_provider_query' => $pickup->meta['pickup_provider_query'] ) ) ),
 	'string_requires_pickup' => array_replace( $stored_pickup_rate, array( 'requires_pickup_point' => 'true' ) ),
+	'partial_latitude' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => 55.7, 'longitude' => null ) ) ) ),
+	'partial_longitude' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => null, 'longitude' => 37.6 ) ) ) ),
+	'empty_coordinate_strings' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => '', 'longitude' => '' ) ) ) ),
+	'array_coordinate' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => array(), 'longitude' => 37.6 ) ) ) ),
+	'latitude_out_of_range' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => 91, 'longitude' => 37.6 ) ) ) ),
+	'longitude_out_of_range' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => 55.7, 'longitude' => 181 ) ) ) ),
+	'infinite_coordinate' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => INF, 'longitude' => 37.6 ) ) ) ),
+	'nan_coordinate' => array_replace_recursive( $stored_pickup_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array( 'latitude' => NAN, 'longitude' => 37.6 ) ) ) ),
 ) as $case => $stored_rate ) {
 	try {
 		pek_checkout_resolver_with_rate( $stored_rate )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
@@ -332,6 +378,7 @@ foreach ( array(
 foreach ( array(
 	'wrong_family' => array( 'pickup_family' => 'forged:pickup' ),
 	'wrong_service' => array( 'service_key' => 'forged' ),
+	'missing_service' => array( 'service_key' => '' ),
 	'wrong_carrier' => array( 'carrier_key' => 'forged' ),
 ) as $case => $override ) {
 	try {
@@ -359,6 +406,39 @@ $GLOBALS['pek_checkout_current_datetime'] = '2026-08-04 12:15:01';
 pek_checkout_assert( '2026-08-04T13:15:00' === $memo_resolver->resolve(), 'PEK plannedDateTime must memoize within the same resolver instance.' );
 pek_checkout_assert( '2026-08-04T13:30:00' === ( new PekQuotePlannedDateTimeResolver( $memo_settings ) )->resolve(), 'A new PEK plannedDateTime resolver instance must compute a fresh request-scoped value.' );
 $GLOBALS['pek_checkout_current_datetime'] = '2026-08-04 12:07:00';
+
+$GLOBALS['pek_checkout_location_rows'] = array(
+	array(
+		'id' => 153912,
+		'country_code' => 'RU',
+		'region_name' => 'Москва',
+		'region_type' => 'г',
+		'city_name' => 'Москва',
+		'city_type' => 'г',
+		'place_name' => 'Москва',
+		'place_type' => 'г',
+		'display_name' => 'Москва',
+		'latitude' => null,
+		'longitude' => null,
+		'active' => 1,
+		'fias_id' => 'moscow-fias',
+		'gar_object_id' => 153912,
+		'region_code' => '77',
+	),
+);
+list( $address_only_carrier, $address_only_http, $address_only_provider ) = pek_checkout_boot(
+	array( pek_checkout_address_zone_response(), pek_checkout_calc_response( 1000.00 ), pek_checkout_calc_response( 2000.00 ) ),
+	array( pek_checkout_point( 'main-wh' ) )
+);
+$address_only_quote = $address_only_carrier->quote( pek_checkout_request() );
+unset( $GLOBALS['pek_checkout_location_rows'] );
+pek_checkout_assert( $address_only_quote->success && count( $address_only_quote->rates ) >= 1, 'PEK address-only canonical mapping must still produce checkout rates.' );
+$address_only_pickup = $address_only_quote->rates[0];
+pek_checkout_assert( array_key_exists( 'latitude', $address_only_pickup->meta['pickup_provider_query'] ) && array_key_exists( 'longitude', $address_only_pickup->meta['pickup_provider_query'] ) && null === $address_only_pickup->meta['pickup_provider_query']['latitude'] && null === $address_only_pickup->meta['pickup_provider_query']['longitude'], 'PEK address-only mapping must store null/null coordinates in trusted provider snapshot.' );
+$address_only_stored = pek_checkout_stored_rate_from_mapper( $address_only_pickup );
+$address_only_query = pek_checkout_resolver_with_rate( $address_only_stored )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+pek_checkout_assert( 153912 === $address_only_query->location_id && null === $address_only_query->latitude && null === $address_only_query->longitude && array() === $address_only_query->validate(), 'Production stored PEK address-only rate must resolve trusted provider query with null coordinates.' );
+pek_checkout_assert( 1 === count( $address_only_provider->queries ) && null === $address_only_provider->queries[0]->latitude && null === $address_only_provider->queries[0]->longitude, 'PEK terminal provider must remain usable for address-only checkout mappings.' );
 
 $selection = array(
 	'carrier_key' => 'pek',
