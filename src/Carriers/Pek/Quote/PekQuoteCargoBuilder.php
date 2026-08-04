@@ -25,22 +25,23 @@ final class PekQuoteCargoBuilder {
 			throw new PekApiException( 'Не указан положительный вес груза ПЭК.', array( 'error_code' => 'pek_quote_weight_missing', 'failure_stage' => 'quote_calculator_contract' ) );
 		}
 
-		$requires_light_cargo_services = $product_weight_g > 0 && $product_weight_g < self::LIGHT_CARGO_PRODUCT_WEIGHT_THRESHOLD_G;
+		$requires_light_cargo_sealing = $product_weight_g > 0 && $product_weight_g < self::LIGHT_CARGO_PRODUCT_WEIGHT_THRESHOLD_G;
+		$requires_protective_transport_packaging = false;
 		$this->last_diagnostics = array(
 			'product_weight_g' => $product_weight_g,
 			'total_weight_g' => $total_weight_g,
 			'light_cargo_threshold_g' => self::LIGHT_CARGO_PRODUCT_WEIGHT_THRESHOLD_G,
-			'light_cargo_services_required' => $requires_light_cargo_services,
-			'isHP' => $requires_light_cargo_services,
-			'sealingPositionsCount' => $requires_light_cargo_services ? 1 : 0,
+			'light_cargo_sealing_required' => $requires_light_cargo_sealing,
+			'protective_transport_packaging_requested' => $requires_protective_transport_packaging,
+			'sealing_positions_count' => $requires_light_cargo_sealing ? 1 : 0,
 			'product_weight_known' => $product_weight_g > 0,
 		);
 		$weight = $this->grams_to_kg_hundredths( $total_weight_g );
 		$cargo = array(
 			'weight' => $weight,
 			'maxPlaceWeight' => $weight,
-			'isHP' => $requires_light_cargo_services,
-			'sealingPositionsCount' => $requires_light_cargo_services ? 1 : 0,
+			'isHP' => $requires_protective_transport_packaging,
+			'sealingPositionsCount' => $requires_light_cargo_sealing ? 1 : 0,
 		);
 
 		if ( $this->has_full_dimensions( $package ) ) {

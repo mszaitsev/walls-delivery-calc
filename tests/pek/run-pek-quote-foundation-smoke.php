@@ -207,18 +207,18 @@ pek_quote_assert( 'sender-wh' === $payload['senderWarehouseId'] && 'receiver-wh'
 pek_quote_assert( ! array_key_exists( 'pickup', $payload ) && ! array_key_exists( 'delivery', $payload ) && ! array_key_exists( 'transportingTypes', $payload ) && ! array_key_exists( 'senderCityId', $payload ) && ! array_key_exists( 'receiverCityId', $payload ) && ! array_key_exists( 'overSize', $payload ), 'PEK quote payload must avoid pickup/delivery blocks and deprecated calculator fields in pickup mode.' );
 pek_quote_assert( true === $payload['isInsurance'] && 1000.5 === $payload['isInsurancePrice'], 'PEK quote payload must use Package declared_value as mandatory insurance price with kopecks preserved.' );
 pek_quote_assert( '5400000000' === $payload['counterpart']['inn'] && '540001001' === $payload['counterpart']['kpp'] && 'client-card' === $payload['counterpart']['counterpartClientCard'] && array( 1, 3 ) === $payload['counterpart']['whoMakesCalculation'], 'PEK quote payload must include counterpart and client card contract fields.' );
-pek_quote_assert( 1.01 === $payload['cargos'][0]['weight'] && 1.01 === $payload['cargos'][0]['maxPlaceWeight'] && 0.1 === $payload['cargos'][0]['length'] && true === $payload['cargos'][0]['isHP'] && 1 === $payload['cargos'][0]['sealingPositionsCount'], 'PEK cargo builder must use one aggregate place with upward weight/dimension rounding and light-cargo services below 3000g product weight.' );
-pek_quote_assert( true === ( $result->safe_request['cargo_policy']['light_cargo_services_required'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['product_weight_g'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['total_weight_g'] ?? null ), 'PEK quote safe request must expose light-cargo policy diagnostics.' );
+pek_quote_assert( 1.01 === $payload['cargos'][0]['weight'] && 1.01 === $payload['cargos'][0]['maxPlaceWeight'] && 0.1 === $payload['cargos'][0]['length'] && false === $payload['cargos'][0]['isHP'] && 1 === $payload['cargos'][0]['sealingPositionsCount'], 'PEK cargo builder must use one aggregate place with upward weight/dimension rounding and light-cargo sealing below 3000g product weight.' );
+pek_quote_assert( true === ( $result->safe_request['cargo_policy']['light_cargo_sealing_required'] ?? null ) && false === ( $result->safe_request['cargo_policy']['protective_transport_packaging_requested'] ?? null ) && 1 === ( $result->safe_request['cargo_policy']['sealing_positions_count'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['product_weight_g'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['total_weight_g'] ?? null ), 'PEK quote safe request must expose separated sealing/protective packaging policy diagnostics.' );
 
 foreach ( array(
-	1 => array( true, 1 ),
-	2999 => array( true, 1 ),
+	1 => array( false, 1 ),
+	2999 => array( false, 1 ),
 	3000 => array( false, 0 ),
 	3001 => array( false, 0 ),
 ) as $case_weight_g => $expected_policy ) {
 	list( $settings_case, $http_case, $builder_case, $service_case ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
 	$case_payload = $builder_case->build( pek_quote_request( (int) $case_weight_g ), $pickup );
-	pek_quote_assert( $expected_policy[0] === $case_payload['cargos'][0]['isHP'] && $expected_policy[1] === $case_payload['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo threshold must be strict for product weight ' . (string) $case_weight_g . 'g.' );
+	pek_quote_assert( $expected_policy[0] === $case_payload['cargos'][0]['isHP'] && $expected_policy[1] === $case_payload['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo threshold must be strict for product weight ' . (string) $case_weight_g . 'g and must not request protective transport packaging.' );
 }
 
 list( $settings_unknown_weight, $http_unknown_weight, $builder_unknown_weight, $service_unknown_weight ) = pek_quote_boot( array() );
@@ -227,13 +227,13 @@ pek_quote_assert( false === $unknown_weight_payload['cargos'][0]['isHP'] && 0 ==
 
 list( $settings_packaging_a, $http_packaging_a, $builder_packaging_a, $service_packaging_a ) = pek_quote_boot( array() );
 $packaging_a = $builder_packaging_a->build( pek_quote_custom_package_request( 2999, 1000, 3999 ), $pickup );
-pek_quote_assert( 4.0 === $packaging_a['cargos'][0]['weight'] && true === $packaging_a['cargos'][0]['isHP'] && 1 === $packaging_a['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo threshold must ignore packaging weight while calculator weight includes it.' );
+pek_quote_assert( 4.0 === $packaging_a['cargos'][0]['weight'] && false === $packaging_a['cargos'][0]['isHP'] && 1 === $packaging_a['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo sealing threshold must ignore packaging weight while calculator weight includes it and protective transport packaging remains disabled.' );
 list( $settings_packaging_b, $http_packaging_b, $builder_packaging_b, $service_packaging_b ) = pek_quote_boot( array() );
 $packaging_b = $builder_packaging_b->build( pek_quote_custom_package_request( 3000, 1000, 4000 ), $pickup );
 pek_quote_assert( 4.0 === $packaging_b['cargos'][0]['weight'] && false === $packaging_b['cargos'][0]['isHP'] && 0 === $packaging_b['cargos'][0]['sealingPositionsCount'], 'Product weight at 3000g must not trigger light-cargo services even when packaging increases total weight.' );
 list( $settings_items, $http_items, $builder_items, $service_items ) = pek_quote_boot( array() );
 $items_payload = $builder_items->build( pek_quote_custom_package_request( 2500, 0, 2500, 10 ), $pickup );
-pek_quote_assert( 1 === count( $items_payload['cargos'] ) && true === $items_payload['cargos'][0]['isHP'] && 1 === $items_payload['cargos'][0]['sealingPositionsCount'], 'PEK quote must keep one aggregate cargo place and one sealing position regardless of product item quantity.' );
+pek_quote_assert( 1 === count( $items_payload['cargos'] ) && false === $items_payload['cargos'][0]['isHP'] && 1 === $items_payload['cargos'][0]['sealingPositionsCount'], 'PEK quote must keep one aggregate cargo place and one sealing position regardless of product item quantity without requesting protective transport packaging.' );
 
 list( $settings_light_services, $http_light_services, $builder_light_services, $service_light_services ) = pek_quote_boot( array( pek_quote_response( pek_quote_light_cargo_services_response() ) ) );
 $light_services_result = $service_light_services->calculate( pek_quote_request( 1000 ), $pickup );

@@ -427,9 +427,9 @@ $quote_report_store->save_for_current_user(
 				'product_weight_g' => 1000,
 				'total_weight_g' => 1000,
 				'light_cargo_threshold_g' => 3000,
-				'light_cargo_services_required' => true,
-				'isHP' => true,
-				'sealingPositionsCount' => 1,
+				'light_cargo_sealing_required' => true,
+				'protective_transport_packaging_requested' => false,
+				'sealing_positions_count' => 1,
 				'product_weight_known' => true,
 			),
 		),
@@ -453,6 +453,6 @@ $quote_report_store->save_for_current_user( $stored_quote );
 ob_start();
 $page->render_embedded( $service );
 $quote_html = (string) ob_get_clean();
-pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && str_contains( $quote_html, 'Cargo policy' ) && str_contains( $quote_html, 'Вес товаров без упаковки, г' ) && str_contains( $quote_html, 'Защитная упаковка запрошена' ) && str_contains( $quote_html, 'Количество пломб' ) && str_contains( $quote_html, '&lt;script&gt;unknown_field&lt;/script&gt;' ) && str_contains( $quote_html, '&lt;b&gt;safe field message&lt;/b&gt;' ) && ! str_contains( $quote_html, '<script>unknown_field</script>' ) && ! str_contains( $quote_html, '<b>safe field message</b>' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, cargo policy, sanitized API message, escaped field errors and Boolean insuranceTerm as да/нет without unsafe service keys.' );
+pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && str_contains( $quote_html, 'Cargo policy' ) && str_contains( $quote_html, 'Вес товаров без упаковки, г' ) && str_contains( $quote_html, 'Пломбировка запрошена' ) && str_contains( $quote_html, 'Защитная транспортировочная упаковка запрошена' ) && str_contains( $quote_html, 'Количество пломб' ) && str_contains( $quote_html, '&lt;script&gt;unknown_field&lt;/script&gt;' ) && str_contains( $quote_html, '&lt;b&gt;safe field message&lt;/b&gt;' ) && ! str_contains( $quote_html, '<script>unknown_field</script>' ) && ! str_contains( $quote_html, '<b>safe field message</b>' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, separated cargo policy, sanitized API message, escaped field errors and Boolean insuranceTerm as да/нет without unsafe service keys.' );
 
 echo "PEK admin UI smoke OK\n";
