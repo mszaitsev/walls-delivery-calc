@@ -10,20 +10,37 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 defined( 'ABSPATH' ) || exit;
 
 final class PekQuoteCargoBuilder {
+	private const LIGHT_CARGO_PRODUCT_WEIGHT_THRESHOLD_G = 3000;
+
+	/** @var array<string,mixed> */
+	private array $last_diagnostics = array();
+
 	/** @return array<int,array<string,mixed>> */
 	public function build( QuoteRequest $request ): array {
+		$this->last_diagnostics = array();
 		$package = $request->package;
-		$weight_g = $package->total_weight_g > 0 ? $package->total_weight_g : $package->get_total_weight_g();
-		if ( $weight_g <= 0 ) {
+		$product_weight_g = max( 0, $package->weight_g );
+		$total_weight_g = $package->total_weight_g > 0 ? $package->total_weight_g : $package->get_total_weight_g();
+		if ( $total_weight_g <= 0 ) {
 			throw new PekApiException( 'Не указан положительный вес груза ПЭК.', array( 'error_code' => 'pek_quote_weight_missing', 'failure_stage' => 'quote_calculator_contract' ) );
 		}
 
-		$weight = $this->grams_to_kg_hundredths( $weight_g );
+		$requires_light_cargo_services = $product_weight_g > 0 && $product_weight_g < self::LIGHT_CARGO_PRODUCT_WEIGHT_THRESHOLD_G;
+		$this->last_diagnostics = array(
+			'product_weight_g' => $product_weight_g,
+			'total_weight_g' => $total_weight_g,
+			'light_cargo_threshold_g' => self::LIGHT_CARGO_PRODUCT_WEIGHT_THRESHOLD_G,
+			'light_cargo_services_required' => $requires_light_cargo_services,
+			'isHP' => $requires_light_cargo_services,
+			'sealingPositionsCount' => $requires_light_cargo_services ? 1 : 0,
+			'product_weight_known' => $product_weight_g > 0,
+		);
+		$weight = $this->grams_to_kg_hundredths( $total_weight_g );
 		$cargo = array(
 			'weight' => $weight,
 			'maxPlaceWeight' => $weight,
-			'isHP' => false,
-			'sealingPositionsCount' => 0,
+			'isHP' => $requires_light_cargo_services,
+			'sealingPositionsCount' => $requires_light_cargo_services ? 1 : 0,
 		);
 
 		if ( $this->has_full_dimensions( $package ) ) {
@@ -46,6 +63,11 @@ final class PekQuoteCargoBuilder {
 		$cargo['maxSize'] = $this->centimeters_to_meters_hundredths( $max_dimension_cm );
 
 		return array( $cargo );
+	}
+
+	/** @return array<string,mixed> */
+	public function last_diagnostics(): array {
+		return $this->last_diagnostics;
 	}
 
 	private function has_full_dimensions( Package $package ): bool {

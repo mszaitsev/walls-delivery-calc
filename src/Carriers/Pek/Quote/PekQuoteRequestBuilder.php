@@ -80,6 +80,7 @@ final class PekQuoteRequestBuilder {
 			'insurance_value' => (float) ( $payload['isInsurancePrice'] ?? 0 ),
 			'cargo_count' => is_array( $payload['cargos'] ?? null ) ? count( $payload['cargos'] ) : 0,
 			'cargos' => $this->safe_cargos( $payload['cargos'] ?? array() ),
+			'cargo_policy' => $this->cargo_builder->last_diagnostics(),
 			'counterpart_present' => array() !== $counterpart,
 			'client_card_present' => '' !== trim( (string) ( $counterpart['counterpartClientCard'] ?? '' ) ),
 			'whoMakesCalculation' => is_array( $counterpart['whoMakesCalculation'] ?? null ) ? array_values( $counterpart['whoMakesCalculation'] ) : array(),

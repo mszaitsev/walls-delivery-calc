@@ -22,6 +22,7 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
@@ -87,6 +88,46 @@ function pek_quote_success_response(): array {
 	);
 }
 
+function pek_quote_light_cargo_services_response(): array {
+	return array(
+		'hasError' => false,
+		'currencyCode' => '643',
+		'branchSenderUID' => 'sender-branch',
+		'branchSender' => 'Новосибирск',
+		'branchReceiverUID' => 'receiver-branch',
+		'branchReceiver' => 'Москва',
+		'transfers' => array(
+			array(
+				'type' => 3,
+				'hasError' => false,
+				'costTotal' => 1017.92,
+				'estDeliveryTime' => 6,
+				'services' => array(
+					array( 'serviceType' => 'Перевозка', 'senderCity' => 'Новосибирск', 'cost' => 820, 'info' => 'Автоперевозка', 'services' => null ),
+					array( 'serviceType' => 'Упаковка', 'senderCity' => 'Новосибирск', 'cost' => 70, 'info' => 'Мешок малый (70×90)', 'services' => null ),
+					array( 'serviceType' => 'Дополнительные услуги', 'senderCity' => 'Новосибирск', 'cost' => 20, 'info' => 'Пломбировка', 'services' => null ),
+				),
+			),
+		),
+	);
+}
+
+/** @param array<int,array<string,mixed>> $services */
+function pek_quote_services_contain_text( array $services, string $needle ): bool {
+	foreach ( $services as $service ) {
+		foreach ( array( 'serviceType', 'senderCity', 'info' ) as $key ) {
+			if ( is_string( $service[ $key ] ?? null ) && str_contains( $service[ $key ], $needle ) ) {
+				return true;
+			}
+		}
+		if ( is_array( $service['services'] ?? null ) && pek_quote_services_contain_text( $service['services'], $needle ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 function pek_quote_boot( array $responses, array $sensitive = array(), bool $with_logger = false ): array {
 	$GLOBALS['pek_quote_options'] = array();
 	$GLOBALS['pek_quote_transients'] = array();
@@ -121,6 +162,24 @@ function pek_quote_request( int $weight_g = 1001, int $length = 10, int $width =
 	);
 }
 
+function pek_quote_custom_package_request( int $product_weight_g, int $packaging_weight_g, int $total_weight_g, int $quantity = 0 ): QuoteRequest {
+	$money = Money::from_rubles( 1000 );
+	$items = array();
+	if ( $quantity > 0 && $product_weight_g > 0 ) {
+		$items[] = new PackageItem( 'sku', 'Товар', $quantity, Money::from_rubles( 100 ), Money::from_rubles( 100 * $quantity ), (int) floor( $product_weight_g / $quantity ), 10, 10, 10 );
+	}
+
+	return new QuoteRequest(
+		'RU',
+		new Address( country_code: 'RU', city: 'Москва', raw_address: 'Россия, Москва' ),
+		new Package( $items, $money, $money, $product_weight_g, $packaging_weight_g, $total_weight_g, 10, 10, 10, 1000, 'cart' ),
+		'',
+		$money,
+		'2026-08-04',
+		array( 'selected_location_id' => 153912 )
+	);
+}
+
 function pek_quote_volume_request(): QuoteRequest {
 	$money = Money::from_rubles( 1000 );
 	return new QuoteRequest(
@@ -148,7 +207,37 @@ pek_quote_assert( 'sender-wh' === $payload['senderWarehouseId'] && 'receiver-wh'
 pek_quote_assert( ! array_key_exists( 'pickup', $payload ) && ! array_key_exists( 'delivery', $payload ) && ! array_key_exists( 'transportingTypes', $payload ) && ! array_key_exists( 'senderCityId', $payload ) && ! array_key_exists( 'receiverCityId', $payload ) && ! array_key_exists( 'overSize', $payload ), 'PEK quote payload must avoid pickup/delivery blocks and deprecated calculator fields in pickup mode.' );
 pek_quote_assert( true === $payload['isInsurance'] && 1000.5 === $payload['isInsurancePrice'], 'PEK quote payload must use Package declared_value as mandatory insurance price with kopecks preserved.' );
 pek_quote_assert( '5400000000' === $payload['counterpart']['inn'] && '540001001' === $payload['counterpart']['kpp'] && 'client-card' === $payload['counterpart']['counterpartClientCard'] && array( 1, 3 ) === $payload['counterpart']['whoMakesCalculation'], 'PEK quote payload must include counterpart and client card contract fields.' );
-pek_quote_assert( 1.01 === $payload['cargos'][0]['weight'] && 1.01 === $payload['cargos'][0]['maxPlaceWeight'] && 0.1 === $payload['cargos'][0]['length'] && false === $payload['cargos'][0]['isHP'], 'PEK cargo builder must use one aggregate place with upward weight/dimension rounding.' );
+pek_quote_assert( 1.01 === $payload['cargos'][0]['weight'] && 1.01 === $payload['cargos'][0]['maxPlaceWeight'] && 0.1 === $payload['cargos'][0]['length'] && true === $payload['cargos'][0]['isHP'] && 1 === $payload['cargos'][0]['sealingPositionsCount'], 'PEK cargo builder must use one aggregate place with upward weight/dimension rounding and light-cargo services below 3000g product weight.' );
+pek_quote_assert( true === ( $result->safe_request['cargo_policy']['light_cargo_services_required'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['product_weight_g'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['total_weight_g'] ?? null ), 'PEK quote safe request must expose light-cargo policy diagnostics.' );
+
+foreach ( array(
+	1 => array( true, 1 ),
+	2999 => array( true, 1 ),
+	3000 => array( false, 0 ),
+	3001 => array( false, 0 ),
+) as $case_weight_g => $expected_policy ) {
+	list( $settings_case, $http_case, $builder_case, $service_case ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
+	$case_payload = $builder_case->build( pek_quote_request( (int) $case_weight_g ), $pickup );
+	pek_quote_assert( $expected_policy[0] === $case_payload['cargos'][0]['isHP'] && $expected_policy[1] === $case_payload['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo threshold must be strict for product weight ' . (string) $case_weight_g . 'g.' );
+}
+
+list( $settings_unknown_weight, $http_unknown_weight, $builder_unknown_weight, $service_unknown_weight ) = pek_quote_boot( array() );
+$unknown_weight_payload = $builder_unknown_weight->build( pek_quote_custom_package_request( 0, 1000, 1000 ), $pickup );
+pek_quote_assert( false === $unknown_weight_payload['cargos'][0]['isHP'] && 0 === $unknown_weight_payload['cargos'][0]['sealingPositionsCount'] && 1.0 === $unknown_weight_payload['cargos'][0]['weight'], 'Unknown product weight must not trigger light-cargo services while calculator transport weight still uses total weight.' );
+
+list( $settings_packaging_a, $http_packaging_a, $builder_packaging_a, $service_packaging_a ) = pek_quote_boot( array() );
+$packaging_a = $builder_packaging_a->build( pek_quote_custom_package_request( 2999, 1000, 3999 ), $pickup );
+pek_quote_assert( 4.0 === $packaging_a['cargos'][0]['weight'] && true === $packaging_a['cargos'][0]['isHP'] && 1 === $packaging_a['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo threshold must ignore packaging weight while calculator weight includes it.' );
+list( $settings_packaging_b, $http_packaging_b, $builder_packaging_b, $service_packaging_b ) = pek_quote_boot( array() );
+$packaging_b = $builder_packaging_b->build( pek_quote_custom_package_request( 3000, 1000, 4000 ), $pickup );
+pek_quote_assert( 4.0 === $packaging_b['cargos'][0]['weight'] && false === $packaging_b['cargos'][0]['isHP'] && 0 === $packaging_b['cargos'][0]['sealingPositionsCount'], 'Product weight at 3000g must not trigger light-cargo services even when packaging increases total weight.' );
+list( $settings_items, $http_items, $builder_items, $service_items ) = pek_quote_boot( array() );
+$items_payload = $builder_items->build( pek_quote_custom_package_request( 2500, 0, 2500, 10 ), $pickup );
+pek_quote_assert( 1 === count( $items_payload['cargos'] ) && true === $items_payload['cargos'][0]['isHP'] && 1 === $items_payload['cargos'][0]['sealingPositionsCount'], 'PEK quote must keep one aggregate cargo place and one sealing position regardless of product item quantity.' );
+
+list( $settings_light_services, $http_light_services, $builder_light_services, $service_light_services ) = pek_quote_boot( array( pek_quote_response( pek_quote_light_cargo_services_response() ) ) );
+$light_services_result = $service_light_services->calculate( pek_quote_request( 1000 ), $pickup );
+pek_quote_assert( 101792 === $light_services_result->price_kopecks && pek_quote_services_contain_text( $light_services_result->services, 'Мешок малый' ) && pek_quote_services_contain_text( $light_services_result->services, 'Пломбировка' ), 'PEK quote result must use transfer costTotal as authoritative total and expose returned bag/sealing services in safe breakdown.' );
 
 list( $settings2, $http2, $builder2, $service2 ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
 $courier = new PekQuoteOptions( PekQuoteOptions::MODE_COURIER, '2026-08-04T13:15:00', '', 'Россия, Москва, улица Большая Лубянка, 2', 55.754058, 37.62049 );

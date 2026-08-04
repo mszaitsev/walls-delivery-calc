@@ -1,6 +1,6 @@
 # Shipment Framework
 
-Version: 0.132.2
+Version: 0.132.3
 
 The Shipment Framework lets carriers share admin creation, persistence, lifecycle, documents, modal UI, status presentation, polling, and regression coverage. It is not one linear pipeline; each runtime flow has its own owner.
 

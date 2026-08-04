@@ -236,6 +236,7 @@ pek_ui_assert( ! str_contains( $html, '&quot;products&quot;' ) && ! str_contains
 pek_ui_assert( str_contains( $html, 'Saved &lt;safe&gt;' ), 'PEK admin notice must render escaped content.' );
 pek_ui_assert( 0 === count( $ui_http->requests ), 'Normal PEK admin page render must not call PEK API.' );
 pek_ui_assert( str_contains( $html, 'Диагностика расчёта стоимости ПЭК' ) && str_contains( $html, 'name="wdc_delivery_services_action" value="diagnose_pek_quote"' ) && str_contains( $html, 'pek_quote_planned_datetime' ), 'PEK admin UI must expose explicit quote diagnostic form without normal-render API calls.' );
+pek_ui_assert( str_contains( $html, 'Вес товаров без упаковки, кг' ), 'PEK quote diagnostic form must label manual weight as product weight before packaging.' );
 pek_ui_assert( str_contains( $html, '>free<' ), 'PEK admin UI must render sender warehouse source.' );
 pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
@@ -421,6 +422,17 @@ $quote_report_store->save_for_current_user(
 		'endpoint' => '/calculator/calculateprice/',
 		'method' => 'POST',
 		'http_status' => 200,
+		'safe_request' => array(
+			'cargo_policy' => array(
+				'product_weight_g' => 1000,
+				'total_weight_g' => 1000,
+				'light_cargo_threshold_g' => 3000,
+				'light_cargo_services_required' => true,
+				'isHP' => true,
+				'sealingPositionsCount' => 1,
+				'product_weight_known' => true,
+			),
+		),
 		'result' => array(
 			'cost_total_rub' => 1234.56,
 			'cost_total_kopecks' => 123456,
@@ -441,6 +453,6 @@ $quote_report_store->save_for_current_user( $stored_quote );
 ob_start();
 $page->render_embedded( $service );
 $quote_html = (string) ob_get_clean();
-pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && str_contains( $quote_html, '&lt;script&gt;unknown_field&lt;/script&gt;' ) && str_contains( $quote_html, '&lt;b&gt;safe field message&lt;/b&gt;' ) && ! str_contains( $quote_html, '<script>unknown_field</script>' ) && ! str_contains( $quote_html, '<b>safe field message</b>' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, sanitized API message, escaped field errors and Boolean insuranceTerm as да/нет without unsafe service keys.' );
+pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && str_contains( $quote_html, 'Cargo policy' ) && str_contains( $quote_html, 'Вес товаров без упаковки, г' ) && str_contains( $quote_html, 'Защитная упаковка запрошена' ) && str_contains( $quote_html, 'Количество пломб' ) && str_contains( $quote_html, '&lt;script&gt;unknown_field&lt;/script&gt;' ) && str_contains( $quote_html, '&lt;b&gt;safe field message&lt;/b&gt;' ) && ! str_contains( $quote_html, '<script>unknown_field</script>' ) && ! str_contains( $quote_html, '<b>safe field message</b>' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, cargo policy, sanitized API message, escaped field errors and Boolean insuranceTerm as да/нет without unsafe service keys.' );
 
 echo "PEK admin UI smoke OK\n";
