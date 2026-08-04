@@ -26,6 +26,25 @@ final class PekQuoteMessageSanitizer {
 		return $this->sanitize_with_fallback( $message, self::FIELD_FALLBACK );
 	}
 
+	public function sanitize_field_name( string $field ): string {
+		$field = $this->redact_exact_values( $field );
+		$field = $this->redact_key_value_fragments( $field );
+		$field = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $field ) ?? $field;
+		$field = preg_replace( '/\s+/u', ' ', $field ) ?? $field;
+		$field = trim( $field );
+		if ( '' === $field || $this->contains_only_redactions( $field ) ) {
+			return 'unknown_field';
+		}
+		if ( function_exists( 'mb_substr' ) ) {
+			$field = mb_substr( $field, 0, 100 );
+		} else {
+			$field = substr( $field, 0, 100 );
+		}
+		$field = trim( $field );
+
+		return '' !== $field && ! $this->contains_only_redactions( $field ) ? $field : 'unknown_field';
+	}
+
 	private function sanitize_with_fallback( string $message, string $fallback ): string {
 		$message = $this->redact_exact_values( $message );
 		$message = $this->redact_key_value_fragments( $message );
@@ -47,7 +66,7 @@ final class PekQuoteMessageSanitizer {
 
 	private function contains_only_redactions( string $message ): bool {
 		$without_redactions = preg_replace( '/(?:Basic\s+)?\[redacted\]/i', '', $message ) ?? $message;
-		$without_redactions = preg_replace( '/[\s,.;:()\[\]\-_=]+/', '', $without_redactions ) ?? $without_redactions;
+		$without_redactions = preg_replace( '/[\s,.;:()\[\]\-_=\/?&]+/', '', $without_redactions ) ?? $without_redactions;
 
 		return '' === trim( $without_redactions );
 	}

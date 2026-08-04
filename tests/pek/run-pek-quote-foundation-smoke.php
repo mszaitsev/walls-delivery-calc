@@ -33,6 +33,12 @@ function pek_quote_assert( bool $condition, string $message ): void {
 	}
 }
 
+function pek_quote_assert_no_secrets( string $value, array $secrets, string $message ): void {
+	foreach ( $secrets as $secret ) {
+		pek_quote_assert( '' === (string) $secret || ! str_contains( $value, (string) $secret ), $message . ': ' . (string) $secret );
+	}
+}
+
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['pek_quote_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['pek_quote_options'][ $option ] = $value; return true; }
 function current_datetime(): DateTimeImmutable { return new DateTimeImmutable( '2026-08-04 12:00:00', new DateTimeZone( 'UTC' ) ); }
@@ -269,6 +275,62 @@ $field_secret = $service_field->calculate( pek_quote_request(), $pickup );
 $field_json = wp_json_encode( $field_secret->to_array() );
 pek_quote_assert( 'counterpart.inn' === (string) ( $field_secret->field_errors[0]['field'] ?? '' ) && 2 === count( $field_secret->field_errors[0]['messages'] ?? array() ) && ! str_contains( (string) $field_json, '1234567890' ) && ! str_contains( (string) $field_json, 'CLIENT-SECRET-777' ), 'Quote field error messages must be sanitized and deduplicated after redaction.' );
 pek_quote_assert( ! str_contains( (string) wp_json_encode( $GLOBALS['pek_quote_wc_logger']->entries ), 'Недопустимое значение' ) && ! str_contains( (string) wp_json_encode( $GLOBALS['pek_quote_wc_logger']->entries ), 'CLIENT-SECRET-777' ), 'Quote logger must not contain field error messages.' );
+
+$field_secret_values = array( 'diagnostic-user', 'very-secret-key', 'CLIENT-SECRET-777', '1234567890', '123456789', $basic, 'diagnostic-user:very-secret-key' );
+list( $settings_field_name, $http_field_name, $builder_field_name, $service_field_name ) = pek_quote_boot( array( pek_quote_response( array( 'error' => array( 'title' => 'Ошибка', 'message' => 'Описание', 'fields' => array(
+	array( 'Key' => 'CLIENT-SECRET-777 diagnostic-user very-secret-key 1234567890 123456789', 'Value' => array( 'Ошибка проверки поля.' ) ),
+	array( 'Key' => 'counterpart.inn', 'Value' => array( 'Canonical INN path.' ) ),
+	array( 'Key' => 'counterpart.kpp', 'Value' => array( 'Canonical KPP path.' ) ),
+	array( 'Key' => 'counterpart.counterpartClientCard', 'Value' => array( 'Canonical client card path.' ) ),
+	array( 'Key' => 'cargos[0].weight', 'Value' => array( 'Canonical cargo path.' ) ),
+	array( 'Key' => 'delivery.address', 'Value' => array( 'Canonical delivery path.' ) ),
+	array( 'Key' => 'counterpart.inn=1234567890', 'Value' => array( 'Assignment value redacted.' ) ),
+	array( 'Key' => 'counterpart.kpp: 123456789', 'Value' => array( 'Assignment value redacted.' ) ),
+	array( 'Key' => 'counterpartClientCard=CLIENT-SECRET-777', 'Value' => array( 'Assignment value redacted.' ) ),
+	array( 'Key' => 'login=diagnostic-user', 'Value' => array( 'Assignment value redacted.' ) ),
+	array( 'Key' => 'api_key=very-secret-key', 'Value' => array( 'Assignment value redacted.' ) ),
+	array( 'Key' => '?token=very-secret-key', 'Value' => array( 'Query token redacted.' ) ),
+	array( 'Key' => '&login=diagnostic-user', 'Value' => array( 'Query login redacted.' ) ),
+	array( 'Key' => 'Authorization: Basic abcdef', 'Value' => array( 'Authorization redacted.' ) ),
+) ) ) ) ), $sensitive, true );
+$field_name_result = $service_field_name->calculate( pek_quote_request(), $pickup );
+$field_name_json = (string) wp_json_encode( $field_name_result->to_array() );
+pek_quote_assert_no_secrets( $field_name_json, $field_secret_values, 'Quote result field names must remove configured sensitive values' );
+$fields = array_column( $field_name_result->field_errors, 'field' );
+foreach ( array( 'counterpart.inn', 'counterpart.kpp', 'counterpart.counterpartClientCard', 'cargos[0].weight', 'delivery.address' ) as $canonical_field ) {
+	pek_quote_assert( in_array( $canonical_field, $fields, true ), 'Canonical PEK field path must survive field-name sanitization: ' . $canonical_field );
+}
+pek_quote_assert( 'unknown_field' === (string) ( $field_name_result->field_errors[0]['field'] ?? '' ), 'Field names made only of configured secrets must collapse to unknown_field.' );
+foreach ( $field_name_result->field_errors as $item ) {
+	pek_quote_assert( is_string( $item['field'] ) && '' !== $item['field'] && ( function_exists( 'mb_strlen' ) ? mb_strlen( $item['field'] ) : strlen( $item['field'] ) ) <= 100, 'Sanitized quote field names must be non-empty and limited to 100 characters.' );
+}
+$store_field = new PekQuoteDiagnosticStore();
+$store_field->save_for_current_user( array_merge( $field_name_result->to_array(), array( 'field_errors' => array_merge( $field_name_result->field_errors, array( array( 'field' => 'counterpart.inn', 'messages' => array( 'Ошибка' ), 'raw_field' => '1234567890', 'original_field' => 'CLIENT-SECRET-777', 'rejectedValue' => 'very-secret-key', 'metadata' => array( 'authorization' => 'Basic secret' ) ) ) ) ) ) );
+$stored_field = $store_field->consume_for_current_user();
+$stored_field_json = (string) wp_json_encode( $stored_field );
+pek_quote_assert_no_secrets( $stored_field_json, $field_secret_values, 'Quote diagnostic store must not persist sensitive field-name values' );
+foreach ( array( 'raw_field', 'original_field', 'rejectedValue', 'metadata' ) as $unsafe_key ) {
+	pek_quote_assert( ! str_contains( $stored_field_json, $unsafe_key ), 'Quote diagnostic store must discard unsafe field-error key ' . $unsafe_key );
+}
+$field_name_log_json = (string) wp_json_encode( $GLOBALS['pek_quote_wc_logger']->entries );
+pek_quote_assert_no_secrets( $field_name_log_json, $field_secret_values, 'Quote logger field_error_fields must not contain sensitive values' );
+pek_quote_assert( str_contains( $field_name_log_json, 'field_error_fields' ) && ! str_contains( $field_name_log_json, 'Ошибка проверки поля.' ), 'Quote logger must contain only sanitized field names, not field messages.' );
+
+list( $settings_field_only, $http_field_only, $builder_field_only, $service_field_only ) = pek_quote_boot( array( pek_quote_response( array( 'error' => array( 'title' => 'Ошибка', 'message' => 'Описание', 'fields' => array(
+	array( 'Key' => 'CLIENT-SECRET-777', 'Value' => array( 'Ошибка A', 'Ошибка A' ) ),
+	array( 'Key' => '1234567890', 'Value' => array( 'Ошибка B' ) ),
+	array( 'Key' => 'diagnostic-user:very-secret-key', 'Value' => array( 'Ошибка C' ) ),
+	array( 'Key' => 'Basic ' . $basic, 'Value' => array( 'Ошибка D' ) ),
+) ) ) ) ), $sensitive );
+$secret_only_fields = $service_field_only->calculate( pek_quote_request(), $pickup );
+pek_quote_assert( 1 === count( $secret_only_fields->field_errors ) && 'unknown_field' === $secret_only_fields->field_errors[0]['field'], 'Duplicate secret-only field names must merge into one unknown_field item.' );
+pek_quote_assert( array( 'Ошибка A', 'Ошибка B', 'Ошибка C', 'Ошибка D' ) === $secret_only_fields->field_errors[0]['messages'], 'Merged unknown_field item must preserve first message order and deduplicate messages.' );
+
+list( $settings_mixed_field, $http_mixed_field, $builder_mixed_field, $service_mixed_field ) = pek_quote_boot( array( pek_quote_response( array( 'error' => array( 'title' => 'Ошибка', 'message' => 'Описание', 'fields' => array( array( 'Key' => "counterpart.inn\r\n\t rejected value 1234567890 <script>" . str_repeat( 'ж', 220 ) . ' CLIENT-SECRET-777', 'Value' => array( 'Ошибка' ) ) ) ) ) ) ), $sensitive );
+$mixed_field = $service_mixed_field->calculate( pek_quote_request(), $pickup );
+$mixed_name = (string) ( $mixed_field->field_errors[0]['field'] ?? '' );
+pek_quote_assert( ! str_contains( $mixed_name, '1234567890' ) && ! str_contains( $mixed_name, 'CLIENT-SECRET-777' ) && ! str_contains( $mixed_name, "\r" ) && ! str_contains( $mixed_name, "\n" ) && ! str_contains( $mixed_name, "\t" ), 'Mixed safe field names must redact secrets before truncation and remove controls.' );
+pek_quote_assert( ( function_exists( 'mb_strlen' ) ? mb_strlen( $mixed_name ) : strlen( $mixed_name ) ) <= 100, 'Mixed safe field names must be truncated to 100 Unicode characters.' );
 
 list( $settings_empty, $http_empty, $builder_empty, $service_empty ) = pek_quote_boot( array( pek_quote_response( array( 'hasError' => true, 'errorMessage' => 'very-secret-key CLIENT-SECRET-777 1234567890 123456789 diagnostic-user' ) ) ), $sensitive );
 $empty_secret = $service_empty->calculate( pek_quote_request(), $pickup );

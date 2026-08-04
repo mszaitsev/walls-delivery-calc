@@ -414,7 +414,10 @@ $quote_report_store->save_for_current_user(
 		'success' => true,
 		'message' => 'Расчёт ПЭК успешно выполнен.',
 		'api_error_message' => '[redacted] безопасное описание',
-		'field_errors' => array( array( 'field' => 'counterpart.inn', 'messages' => array( '[redacted] значение' ) ) ),
+		'field_errors' => array(
+			array( 'field' => 'counterpart.inn', 'messages' => array( '[redacted] значение' ) ),
+			array( 'field' => '<script>unknown_field</script>', 'messages' => array( '<b>safe field message</b>' ), 'raw_field' => '1234567890', 'original_field' => 'CLIENT-SECRET-777', 'rejectedValue' => 'very-secret-key', 'metadata' => array( 'authorization' => 'Basic secret' ) ),
+		),
 		'endpoint' => '/calculator/calculateprice/',
 		'method' => 'POST',
 		'http_status' => 200,
@@ -433,11 +436,11 @@ $quote_report_store->save_for_current_user(
 $stored_quote = $quote_report_store->consume_for_current_user();
 $stored_quote_json = wp_json_encode( $stored_quote );
 pek_ui_assert( false === $stored_quote['result']['services'][0]['insuranceTerm'] && true === $stored_quote['result']['services'][0]['services'][0]['insuranceTerm'], 'PEK quote diagnostic store must preserve Boolean insuranceTerm values including false.' );
-pek_ui_assert( ! str_contains( (string) $stored_quote_json, 'raw_response' ) && ! str_contains( (string) $stored_quote_json, 'counterpartClientCard' ) && ! str_contains( (string) $stored_quote_json, 'AttemptedValue' ) && ! str_contains( (string) $stored_quote_json, 'secret' ), 'PEK quote diagnostic store must keep service breakdown allowlisted and free from unsafe nested keys.' );
+pek_ui_assert( ! str_contains( (string) $stored_quote_json, 'raw_response' ) && ! str_contains( (string) $stored_quote_json, 'counterpartClientCard' ) && ! str_contains( (string) $stored_quote_json, 'AttemptedValue' ) && ! str_contains( (string) $stored_quote_json, 'raw_field' ) && ! str_contains( (string) $stored_quote_json, 'original_field' ) && ! str_contains( (string) $stored_quote_json, 'rejectedValue' ) && ! str_contains( (string) $stored_quote_json, 'metadata' ) && ! str_contains( (string) $stored_quote_json, 'very-secret-key' ) && ! str_contains( (string) $stored_quote_json, 'CLIENT-SECRET-777' ), 'PEK quote diagnostic store must keep field errors/service breakdown allowlisted and free from unsafe nested keys.' );
 $quote_report_store->save_for_current_user( $stored_quote );
 ob_start();
 $page->render_embedded( $service );
 $quote_html = (string) ob_get_clean();
-pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, sanitized API message and Boolean insuranceTerm as да/нет without unsafe service keys.' );
+pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && str_contains( $quote_html, '&lt;script&gt;unknown_field&lt;/script&gt;' ) && str_contains( $quote_html, '&lt;b&gt;safe field message&lt;/b&gt;' ) && ! str_contains( $quote_html, '<script>unknown_field</script>' ) && ! str_contains( $quote_html, '<b>safe field message</b>' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, sanitized API message, escaped field errors and Boolean insuranceTerm as да/нет without unsafe service keys.' );
 
 echo "PEK admin UI smoke OK\n";

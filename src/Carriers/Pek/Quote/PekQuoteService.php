@@ -74,10 +74,12 @@ final class PekQuoteService {
 			return array();
 		}
 		$result = array();
-		foreach ( array_slice( $value, 0, 20 ) as $item ) {
+		$index_by_field = array();
+		foreach ( $value as $item ) {
 			if ( ! is_array( $item ) || array_is_list( $item ) || ! is_string( $item['field'] ?? null ) || ! is_array( $item['messages'] ?? null ) || ! array_is_list( $item['messages'] ) ) {
 				continue;
 			}
+			$field = $this->message_sanitizer->sanitize_field_name( $item['field'] );
 			$messages = array();
 			foreach ( array_slice( $item['messages'], 0, 5 ) as $message ) {
 				if ( is_string( $message ) ) {
@@ -86,7 +88,20 @@ final class PekQuoteService {
 			}
 			$messages = array_values( array_unique( $messages ) );
 			if ( array() !== $messages ) {
-				$result[] = array( 'field' => (string) $item['field'], 'messages' => $messages );
+				if ( ! array_key_exists( $field, $index_by_field ) ) {
+					if ( count( $result ) >= 20 ) {
+						continue;
+					}
+					$index_by_field[ $field ] = count( $result );
+					$result[] = array( 'field' => $field, 'messages' => array() );
+				}
+				$index = $index_by_field[ $field ];
+				foreach ( $messages as $message ) {
+					if ( count( $result[ $index ]['messages'] ) >= 5 || in_array( $message, $result[ $index ]['messages'], true ) ) {
+						continue;
+					}
+					$result[ $index ]['messages'][] = $message;
+				}
 			}
 		}
 
