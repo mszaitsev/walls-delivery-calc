@@ -10,6 +10,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
@@ -196,7 +197,7 @@ $session->save_rates( array(
 $session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'country_code' => 'RU' ) );
 yandex_pickup_selection_assert( 'yandex_delivery:pickup' === $session->shipping_method_family( 'yandex_pickup' ), 'CheckoutSessionManager must map yandex_pickup to yandex_delivery:pickup.' );
 
-$checkout_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $session, null, null, null, $repository, $formatter );
+$checkout_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $session, null, null, null, $repository, $formatter, null, null, new WooCommerceSessionBootstrapper() );
 $save_response = $checkout_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => YandexDeliverySettings::CARRIER_KEY, 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'DST-A' ) ) );
 yandex_pickup_selection_assert( 'DST-A' === (string) ( $save_response['pickup_point']['platform_station_id'] ?? '' ), 'Checkout save endpoint must persist selected Yandex platform_station_id.' );
 yandex_pickup_selection_assert( 'yandex_delivery:pickup' === (string) ( $save_response['active_pickup_family'] ?? '' ), 'Checkout save endpoint must store Yandex selection in yandex_delivery:pickup bucket.' );
@@ -277,7 +278,7 @@ $technical_missing_session = new CheckoutSessionManager();
 $technical_missing_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
 $missing_timestamp_selection = $selection_for_day( '5post', '', 'DST-B' );
 $technical_missing_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $missing_timestamp_selection );
-$technical_missing_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $technical_missing_session, null, null, null, $repository, $formatter );
+$technical_missing_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $technical_missing_session, null, null, null, $repository, $formatter, null, null, new WooCommerceSessionBootstrapper() );
 $technical_missing_response = $technical_missing_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => 'yandex_delivery', 'shipping_method_id' => 'yandex_pickup', 'point_code' => 'DST-B', 'selection_intent' => 'technical' ) ) );
 yandex_pickup_selection_assert( ! array_key_exists( 'selected_at', $technical_missing_response['pickup_point'] ?? array() ), 'Technical save without an existing/incoming timestamp must not create selected_at.' );
 yandex_pickup_selection_assert( true === $technical_missing_session->expire_stale_yandex_5post_selection() && array() === $technical_missing_session->pickup_selection_for_family( 'yandex_delivery:pickup' ), '5Post technical save without selected_at must remain eligible for normal expiration.' );
@@ -285,7 +286,7 @@ yandex_pickup_selection_assert( true === $technical_missing_session->expire_stal
 $client_extension_session = new CheckoutSessionManager();
 $client_extension_session->save_city_context( array( 'location_id' => 10, 'city_name' => 'Москва', 'country_code' => 'RU' ) );
 $client_extension_session->save_pickup_selection_for_family( 'yandex_delivery:pickup', $selection_for_day( '5post', '2026-07-10T20:00:00+00:00', 'DST-B' ) );
-$client_extension_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $client_extension_session, null, null, null, $repository, $formatter );
+$client_extension_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $client_extension_session, null, null, null, $repository, $formatter, null, null, new WooCommerceSessionBootstrapper() );
 $client_extension_response = $client_extension_rest->save( new YandexPickupSelectionRequest( array( 'carrier' => 'yandex_delivery', 'shipping_method_id' => 'yandex_pickup', 'point_code' => 'DST-B', 'selection_intent' => 'technical', 'point' => array( 'point_code' => 'DST-B', 'selected_at' => '2026-07-11T12:00:00+00:00' ) ) ) );
 yandex_pickup_selection_assert( '2026-07-10T20:00:00+00:00' === (string) ( $client_extension_response['pickup_point']['selected_at'] ?? '' ), 'Incoming technical payload must not override the existing family selected_at.' );
 yandex_pickup_selection_assert( true === $client_extension_session->expire_stale_yandex_5post_selection(), 'A client extension attempt must not prevent yesterday 5Post from expiring.' );

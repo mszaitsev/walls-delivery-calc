@@ -28,6 +28,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -1490,7 +1491,7 @@ foreach (
 	$e2e_session->save_rates( array( 'cdek:pickup:136' => $e2e_rate ) );
 	$e2e_session->save_city_context( array( 'country_code' => $e2e_country, 'city_name' => $e2e_case['city'], 'region_name' => $e2e_case['region'], 'postcode' => $e2e_case['postcode'], 'city_code' => $e2e_case['city_code'] ) );
 	WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup:136' ) );
-	$e2e_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( new wpdb() ), $e2e_session, null, $e2e_points );
+	$e2e_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( new wpdb() ), $e2e_session, null, $e2e_points, null, null, null, null, null, new WooCommerceSessionBootstrapper() );
 	$save_result = $e2e_controller->save(
 		array(
 			'carrier' => 'cdek',

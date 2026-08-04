@@ -801,9 +801,20 @@ plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, 'p
 plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, 'null === $latitude || null === $longitude' ) && str_contains( $checkout_provider_resolver_source, '! is_numeric( $latitude )' ), 'Checkout pickup provider resolver must reject partial and non-numeric coordinates.' );
 plugin_architecture_assert( str_contains( $checkout_provider_resolver_source, 'is_finite( $latitude )' ) && str_contains( $checkout_provider_resolver_source, '$latitude >= -90' ) && str_contains( $checkout_provider_resolver_source, '$longitude <= 180' ), 'Checkout pickup provider resolver must bound numeric coordinates and reject non-finite values.' );
 
+$wc_session_bootstrapper_source = plugin_architecture_source( 'src/Checkout/WooCommerce/WooCommerceSessionBootstrapper.php' );
+plugin_architecture_assert( str_contains( $wc_session_bootstrapper_source, 'final class WooCommerceSessionBootstrapper' ) && str_contains( $wc_session_bootstrapper_source, 'public function ensure(): bool' ), 'Shared WooCommerce session bootstrapper must exist for REST checkout session reads.' );
+plugin_architecture_assert( str_contains( $wc_session_bootstrapper_source, 'WC_Session_Handler' ) && str_contains( $wc_session_bootstrapper_source, 'set_customer_session_cookie' ) && str_contains( $wc_session_bootstrapper_source, 'WC_Customer' ), 'WooCommerce session bootstrapper must initialize session handler, cookie, and customer without controller-local duplication.' );
+plugin_architecture_assert( ! str_contains( $wc_session_bootstrapper_source, 'session_start' ) && ! str_contains( $wc_session_bootstrapper_source, '$_SESSION' ), 'WooCommerce session bootstrapper must not use native PHP sessions.' );
+$pickup_points_rest_source = plugin_architecture_source( 'src/Pickup/Rest/PickupPointsRestController.php' );
+plugin_architecture_assert( str_contains( $pickup_points_rest_source, 'WooCommerceSessionBootstrapper' ) && strpos( $pickup_points_rest_source, '$this->session_bootstrapper->ensure()' ) < strpos( $pickup_points_rest_source, '$this->provider_query_resolver->resolve' ), 'Pickup points REST must bootstrap WooCommerce session before trusted registry resolver.' );
+plugin_architecture_assert( str_contains( $pickup_points_rest_source, 'provider_session_unavailable' ) && str_contains( $pickup_points_rest_source, 'Checkout session is unavailable.' ) && str_contains( $pickup_points_rest_source, ', 503' ), 'Pickup points REST must distinguish WooCommerce session bootstrap failure with provider_session_unavailable 503.' );
+plugin_architecture_assert( ! str_contains( $pickup_points_rest_source, 'pickup_provider_query' ) || ! str_contains( $pickup_points_rest_source, "param( \$request, 'pickup_provider_query'" ), 'Pickup points REST must not accept pickup_provider_query from browser request.' );
+$pickup_api_js_source = plugin_architecture_source( 'assets/frontend/pickup-map/wdc-pickup-api.js' );
+plugin_architecture_assert( ! str_contains( $pickup_api_js_source, 'pickup_provider_query' ) && ! str_contains( $pickup_api_js_source, 'weight_g' ) && ! str_contains( $pickup_api_js_source, 'volume_cm3' ), 'Browser pickup API must not send trusted provider snapshots or cargo authority.' );
 $checkout_pickup_rest_source = plugin_architecture_source( 'src/Pickup/Rest/CheckoutPickupPointRestController.php' );
 plugin_architecture_assert( str_contains( $checkout_pickup_rest_source, "destination_fingerprint( \$method_id )" ) && str_contains( $checkout_pickup_rest_source, "provider_rate_context_missing" ), 'Checkout pickup save must enforce trusted destination fingerprint from stored rate context.' );
 plugin_architecture_assert( ! str_contains( $checkout_pickup_rest_source, "param( \$request, 'address'" ) && ! str_contains( $checkout_pickup_rest_source, "param( \$request, 'latitude'" ), 'Checkout pickup save must not promote browser address/coordinates into trusted provider context.' );
+plugin_architecture_assert( str_contains( $checkout_pickup_rest_source, 'WooCommerceSessionBootstrapper' ) && str_contains( $checkout_pickup_rest_source, '$this->session_bootstrapper->ensure()' ) && ! str_contains( $checkout_pickup_rest_source, 'function ensure_woocommerce_session' ) && ! str_contains( $checkout_pickup_rest_source, 'new \WC_Session_Handler' ), 'Checkout pickup REST must use shared bootstrapper and not duplicate controller-local WC session creation.' );
 
 $pek_planned_resolver_source = plugin_architecture_source( 'src/Carriers/Pek/Quote/PekQuotePlannedDateTimeResolver.php' );
 plugin_architecture_assert( str_contains( $pek_planned_resolver_source, 'private ?string $resolved = null' ) && str_contains( $pek_planned_resolver_source, 'null !== $this->resolved' ) && str_contains( $pek_planned_resolver_source, '$this->resolved =' ), 'PEK plannedDateTime resolver must memoize per service instance.' );
@@ -814,7 +825,7 @@ plugin_architecture_assert( ! str_contains( $checkout_orchestrator_source, 'PekC
 $migration_files = glob( plugin_architecture_path( 'src/Infrastructure/Migrations/*.php' ) ) ?: array();
 foreach ( $migration_files as $migration_file ) {
 	$name = basename( $migration_file );
-	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.2 must not add a new PEK migration: ' . $name );
+	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.3 must not add a new PEK migration: ' . $name );
 }
 
 echo "Plugin architecture smoke passed.\n";

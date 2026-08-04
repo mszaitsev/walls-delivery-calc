@@ -15,15 +15,24 @@ if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 if ( ! class_exists( 'WC_Session_Handler' ) ) {
 	class WC_Session_Handler {
 		/** @var array<string,mixed> */
+		public static array $persisted_data = array();
+		public static bool $throw_on_init = false;
+		/** @var array<string,mixed> */
 		public array $data = array();
 		public bool $initialized = false;
 		public bool $cookie_set = false;
 		public bool $saved = false;
-		public function init(): void { $this->initialized = true; }
+		public function init(): void {
+			if ( self::$throw_on_init ) {
+				throw new RuntimeException( 'session init failed' );
+			}
+			$this->initialized = true;
+			$this->data = self::$persisted_data;
+		}
 		public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
-		public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+		public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; self::$persisted_data[ $key ] = $value; }
 		public function set_customer_session_cookie( bool $set ): void { $this->cookie_set = $set; }
-		public function save_data(): void { $this->saved = true; }
+		public function save_data(): void { $this->saved = true; self::$persisted_data = $this->data; }
 	}
 }
 
@@ -183,6 +192,7 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
@@ -494,7 +504,8 @@ $pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/
 $cdek_service_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Cdek/CdekDeliveryPointService.php' ) ?: '';
 $checkout_rest_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
 pickup_rest_assert( str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'description'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'storage_notice'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'cdek_code'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'pickup_family'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'point_title'" ), 'CDEK pickup REST summary must expose description, storage_notice, cdek_code and normalized presentation fields.' );
-$checkout_controller = new CheckoutPickupPointRestController( $repo, new CheckoutSessionManager() );
+$session_bootstrapper = new WooCommerceSessionBootstrapper();
+$checkout_controller = new CheckoutPickupPointRestController( $repo, new CheckoutSessionManager(), null, null, null, null, null, null, null, $session_bootstrapper );
 WC()->session = null;
 $rp_save = $checkout_controller->save(
 	new WdcPickupRestRequest(
@@ -533,7 +544,7 @@ $cdek_save = $checkout_controller->save(
 pickup_rest_assert( WC()->session instanceof WC_Session_Handler && 'KEM7' === (string) ( $cdek_save['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'REST save without pre-existing WC session must write CDEK canonical bucket.' );
 $cdek_state = $checkout_controller->state( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_rest_assert( 'KEM7' === (string) ( $cdek_state['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $cdek_state['pickup_point']['point_code'] ?? '' ), 'REST state after save must read the initialized CDEK canonical bucket.' );
-pickup_rest_assert( isset( $cdek_state['pickupSelections']['cdek:pickup'], $cdek_state['pickup_selections']['cdek:pickup'] ) && array_keys( $cdek_state['pickupSelections'] ) === array( 'cdek:pickup' ), 'REST state must expose pickup selections as camelCase and snake_case dictionaries.' );
+pickup_rest_assert( isset( $cdek_state['pickupSelections']['cdek:pickup'], $cdek_state['pickup_selections']['cdek:pickup'] ) && 'KEM7' === (string) ( $cdek_state['pickupSelections']['cdek:pickup']['point_code'] ?? '' ), 'REST state must expose pickup selections as camelCase and snake_case dictionaries.' );
 $cdek_reset = $checkout_controller->delete( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_rest_assert( ! isset( $cdek_reset['pickup_selections']['cdek:pickup'] ) && WC()->session instanceof WC_Session_Handler, 'REST family reset must keep the initialized session and remove only the requested bucket.' );
 $session = new CheckoutSessionManager();
@@ -547,6 +558,7 @@ $pek_session = new CheckoutSessionManager();
 $pek_snapshot = wdc_pickup_rest_pek_snapshot();
 $stored_pek_rate = wdc_pickup_rest_store_pek_rate( $pek_session, $pek_snapshot );
 pickup_rest_assert( isset( $stored_pek_rate['rate_meta']['pickup_provider_query'] ) && ! isset( $stored_pek_rate['meta'] ), 'PEK REST fixture must use production WooCommerce rate_meta shape.' );
+WC()->session = null;
 $pek_provider = new WdcPickupRestPekProvider(
 	array(
 		new PickupPoint( PekSettings::CARRIER_KEY, 'main-wh', 'Россия, Москва, терминал main-wh', '', 'Москва', '', 55.75, 37.61, 'terminal', 'Пн-Пт 09:00-18:00', '', null, true, array( 'source' => 'free' ) ),
@@ -554,7 +566,7 @@ $pek_provider = new WdcPickupRestPekProvider(
 );
 $pek_registry = new CarrierPickupPointProviderRegistry( array( $pek_provider ) );
 $pek_query_resolver = new CheckoutPickupPointProviderQueryResolver( $pek_session );
-$pek_points_controller = new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, $pek_registry, $pek_query_resolver, new PekCheckoutPickupPointFormatter() );
+$pek_points_controller = new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, $pek_registry, $pek_query_resolver, new PekCheckoutPickupPointFormatter(), $session_bootstrapper );
 $pek_points = $pek_points_controller->points(
 	new WdcPickupRestRequest(
 		array(
@@ -568,13 +580,14 @@ $pek_points = $pek_points_controller->points(
 	)
 );
 pickup_rest_assert( is_array( $pek_points ) && 1 === count( $pek_points ) && 'main-wh' === (string) ( $pek_points[0]['point_code'] ?? '' ) && 'pek-destination-fp' === (string) ( $pek_points[0]['destination_fingerprint'] ?? '' ), 'PEK /points must use trusted production rate_meta context and return provider points.' );
+pickup_rest_assert( WC()->session instanceof WC_Session_Handler && WC()->session->initialized && WC()->session->cookie_set && isset( WC()->session->data['wdc_platform_rates'][ PekSettings::PICKUP_RATE_ID ] ), 'PEK /points must bootstrap the existing WooCommerce customer session and restore stored rates.' );
 pickup_rest_assert( 153912 === $pek_provider->queries[0]->location_id && 1000 === $pek_provider->queries[0]->cargo->weight_g, 'PEK /points must ignore browser location/cargo authority and use stored rate snapshot.' );
 $pek_search = $pek_points_controller->search( new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'pickup_family' => PekSettings::PICKUP_FAMILY, 'q' => 'main-wh' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_rest_assert( is_array( $pek_search ) && 1 === count( $pek_search ), 'PEK /points/search must resolve provider context from production rate_meta.' );
 $pek_wrong_family = $pek_points_controller->points( new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'pickup_family' => 'forged:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_rest_assert( $pek_wrong_family instanceof WP_Error && 'provider_rate_context_mismatch' === $pek_wrong_family->get_error_code(), 'PEK /points must reject browser-forged pickup family.' );
 
-$pek_checkout_controller = new CheckoutPickupPointRestController( $repo, $pek_session, null, null, null, null, null, $pek_registry, $pek_query_resolver );
+$pek_checkout_controller = new CheckoutPickupPointRestController( $repo, $pek_session, null, null, null, null, null, $pek_registry, $pek_query_resolver, $session_bootstrapper );
 $pek_save = $pek_checkout_controller->save(
 	new WdcPickupRestRequest(
 		array(
@@ -597,6 +610,7 @@ pickup_rest_assert( 'Россия, Москва, терминал main-wh' === (
 WC()->session = new WC_Session_Handler();
 $pek_address_only_session = new CheckoutSessionManager();
 wdc_pickup_rest_store_pek_rate( $pek_address_only_session, wdc_pickup_rest_pek_snapshot( 'pek-address-only-fp', null, null ) );
+WC()->session = null;
 $pek_address_only_provider = new WdcPickupRestPekProvider(
 	array(
 		new PickupPoint( PekSettings::CARRIER_KEY, 'address-only-wh', 'Россия, Москва, address-only terminal', '', 'Москва', '', null, null, 'terminal', 'Пн-Пт 09:00-18:00', '', null, true, array( 'source' => 'free' ) ),
@@ -604,7 +618,7 @@ $pek_address_only_provider = new WdcPickupRestPekProvider(
 );
 $pek_address_only_registry = new CarrierPickupPointProviderRegistry( array( $pek_address_only_provider ) );
 $pek_address_only_resolver = new CheckoutPickupPointProviderQueryResolver( $pek_address_only_session );
-$pek_address_only_points = ( new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, $pek_address_only_registry, $pek_address_only_resolver, new PekCheckoutPickupPointFormatter() ) )->points(
+$pek_address_only_points = ( new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, $pek_address_only_registry, $pek_address_only_resolver, new PekCheckoutPickupPointFormatter(), $session_bootstrapper ) )->points(
 	new WdcPickupRestRequest(
 		array(
 			'carrier' => PekSettings::CARRIER_KEY,
@@ -619,7 +633,7 @@ $pek_address_only_points = ( new PickupPointsRestController( $repo, $type_settin
 );
 pickup_rest_assert( is_array( $pek_address_only_points ) && 1 === count( $pek_address_only_points ) && 'address-only-wh' === (string) ( $pek_address_only_points[0]['point_code'] ?? '' ), 'PEK /points must load terminals for address-only trusted snapshots.' );
 pickup_rest_assert( 1 === count( $pek_address_only_provider->queries ) && 153912 === $pek_address_only_provider->queries[0]->location_id && null === $pek_address_only_provider->queries[0]->latitude && null === $pek_address_only_provider->queries[0]->longitude, 'PEK /points must ignore browser coordinates/address and pass null coordinates from trusted address-only snapshot.' );
-$pek_address_only_save = ( new CheckoutPickupPointRestController( $repo, $pek_address_only_session, null, null, null, null, null, $pek_address_only_registry, $pek_address_only_resolver ) )->save(
+$pek_address_only_save = ( new CheckoutPickupPointRestController( $repo, $pek_address_only_session, null, null, null, null, null, $pek_address_only_registry, $pek_address_only_resolver, $session_bootstrapper ) )->save(
 	new WdcPickupRestRequest(
 		array(
 			'carrier' => PekSettings::CARRIER_KEY,
@@ -641,9 +655,24 @@ pickup_rest_assert( 'Россия, Москва, address-only terminal' === (str
 WC()->session = new WC_Session_Handler();
 $empty_fp_session = new CheckoutSessionManager();
 wdc_pickup_rest_store_pek_rate( $empty_fp_session, wdc_pickup_rest_pek_snapshot( '' ) );
-$empty_fp_save = ( new CheckoutPickupPointRestController( $repo, $empty_fp_session, null, null, null, null, null, $pek_registry, new CheckoutPickupPointProviderQueryResolver( $empty_fp_session ) ) )->save(
+$empty_fp_save = ( new CheckoutPickupPointRestController( $repo, $empty_fp_session, null, null, null, null, null, $pek_registry, new CheckoutPickupPointProviderQueryResolver( $empty_fp_session ), $session_bootstrapper ) )->save(
 	new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'point_code' => 'main-wh' ), array( 'X-WP-Nonce' => 'nonce' ) )
 );
 pickup_rest_assert( $empty_fp_save instanceof WP_Error && 'provider_rate_context_missing' === $empty_fp_save->get_error_code(), 'PEK save must reject empty destination fingerprint in trusted rate context.' );
+
+WC_Session_Handler::$throw_on_init = true;
+WC()->session = null;
+$bootstrap_failure = $pek_points_controller->points(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => PekSettings::CARRIER_KEY,
+			'shipping_method_id' => PekSettings::PICKUP_RATE_ID,
+			'pickup_family' => PekSettings::PICKUP_FAMILY,
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+WC_Session_Handler::$throw_on_init = false;
+pickup_rest_assert( $bootstrap_failure instanceof WP_Error && 'provider_session_unavailable' === $bootstrap_failure->get_error_code() && 503 === (int) ( $bootstrap_failure->get_error_data()['status'] ?? 0 ), 'PEK /points must return provider_session_unavailable 503 when WooCommerce session bootstrap fails.' );
 
 echo "Pickup REST smoke test passed.\n";

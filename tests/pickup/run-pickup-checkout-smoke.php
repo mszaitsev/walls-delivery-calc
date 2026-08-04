@@ -10,6 +10,7 @@ use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -225,7 +226,8 @@ $session->save_pickup_selection_for_family(
 );
 pickup_checkout_assert( 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $session->pickup_selections()[ RussianPostDomesticSettings::CARRIER_KEY . ':pickup' ]['point_code'] ?? '' ), 'Sequential family saves must keep CDEK and Russian Post buckets together.' );
 $session->clear_pickup_selection( 'canonical_write_smoke_reset' );
-$state_controller = new CheckoutPickupPointRestController( $repo, $session, new PickupPointLocationResolver( $location_repo ) );
+$existing_wc_session = WC()->session;
+$state_controller = new CheckoutPickupPointRestController( $repo, $session, new PickupPointLocationResolver( $location_repo ), null, null, null, null, null, null, new WooCommerceSessionBootstrapper() );
 $state_controller->register();
 pickup_checkout_assert( 3 === count( $GLOBALS['wdc_pickup_checkout_routes'] ?? array() ), 'checkout REST routes must register.' );
 $state_route = array_values( array_filter( $GLOBALS['wdc_pickup_checkout_routes'], static fn( array $route ): bool => '/checkout/state' === $route['route'] ) )[0] ?? array();
@@ -241,6 +243,7 @@ $courier_group_id = RussianPostDomesticSettings::checkout_group_id( \WallsShop\W
 
 $saved = $state_controller->save( new WdcPickupCheckoutRequest( array( 'point_id' => 10, 'shipping_method_id' => $pickup_group_id ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_checkout_assert( '630001-a' === $saved['pickup_point']['point_code'], 'checkout state save must return selected point.' );
+pickup_checkout_assert( $existing_wc_session === WC()->session, 'Shared WooCommerce session bootstrapper must not replace an existing checkout session instance.' );
 pickup_checkout_assert( RussianPostDomesticSettings::CARRIER_KEY === (string) ( $saved['pickup_point']['carrier_key'] ?? '' ) && $pickup_group_id === (string) ( $saved['pickup_point']['pickup_family'] ?? '' ), 'Russian Post checkout save must return normalized carrier_key and pickup_family.' );
 pickup_checkout_assert( 'Отделение Почты России' === (string) ( $saved['pickup_point']['point_title'] ?? '' ) && 'Пункт выдачи' === (string) ( $saved['pickup_point']['point_type_label'] ?? '' ) && 'pickup' === (string) ( $saved['pickup_point']['marker_type'] ?? '' ), 'Russian Post checkout save must return full pickup presentation payload.' );
 pickup_checkout_assert( is_array( $saved['pickup_point']['snapshot'] ?? null ) && RussianPostDomesticSettings::CARRIER_KEY === (string) ( $saved['pickup_point']['snapshot']['carrier_key'] ?? '' ), 'Russian Post checkout save response must include normalized snapshot.' );

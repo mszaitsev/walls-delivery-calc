@@ -27,6 +27,7 @@ use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\Carriers\Runtime\PekCarrier;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
@@ -62,6 +63,22 @@ function set_transient( string $key, mixed $value, int $ttl = 0 ): bool { $GLOBA
 function delete_transient( string $key ): bool { unset( $GLOBALS['pek_checkout_transients'][ $key ] ); return true; }
 function wc_get_logger(): object { return $GLOBALS['pek_checkout_wc_logger']; }
 
+if ( ! class_exists( 'WC_Session_Handler' ) ) {
+	class WC_Session_Handler {
+		/** @var array<string,mixed> */
+		public static array $persisted_data = array();
+		/** @var array<string,mixed> */
+		public array $data = array();
+		public bool $initialized = false;
+		public bool $cookie_set = false;
+		public function init(): void { $this->initialized = true; $this->data = self::$persisted_data; }
+		public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; self::$persisted_data[ $key ] = $value; }
+		public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+		public function save_data(): void { self::$persisted_data = $this->data; }
+		public function set_customer_session_cookie( bool $set ): void { $this->cookie_set = $set; }
+	}
+}
+
 final class PekCheckoutFakeWooLogger {
 	public array $entries = array();
 	public function log( string $level, string $message, array $context = array() ): void {
@@ -77,7 +94,7 @@ final class PekCheckoutFakeSession {
 }
 
 final class PekCheckoutFakeWoo {
-	public PekCheckoutFakeSession $session;
+	public mixed $session;
 	public function __construct() {
 		$this->session = new PekCheckoutFakeSession();
 	}
@@ -337,6 +354,16 @@ $query_resolver = pek_checkout_resolver_with_rate( $stored_pickup_rate );
 $trusted_query = $query_resolver->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
 pek_checkout_assert( PekSettings::CARRIER_KEY === $trusted_query->carrier_key && 153912 === $trusted_query->location_id && 'RU' === $trusted_query->country_code && 1000 === $trusted_query->cargo->weight_g && 1 === $trusted_query->cargo->places_count, 'Production WooCommerce stored PEK rate must resolve trusted provider query from rate_meta.' );
 pek_checkout_assert( '' !== $query_resolver->destination_fingerprint( PekSettings::PICKUP_RATE_ID ), 'Production PEK stored pickup rate must expose non-empty destination fingerprint.' );
+$GLOBALS['pek_checkout_wc'] = new PekCheckoutFakeWoo();
+$checkout_lifecycle_session = new CheckoutSessionManager();
+$checkout_lifecycle_session->save_rates( array( PekSettings::PICKUP_RATE_ID => $stored_pickup_rate ) );
+WC_Session_Handler::$persisted_data = WC()->session->data;
+WC()->session = null;
+$bootstrapper = new WooCommerceSessionBootstrapper();
+pek_checkout_assert( $bootstrapper->ensure() && WC()->session instanceof WC_Session_Handler && WC()->session->initialized && WC()->session->cookie_set, 'PEK separate REST lifecycle must bootstrap the same WooCommerce customer session.' );
+$rest_lifecycle_resolver = new CheckoutPickupPointProviderQueryResolver( new CheckoutSessionManager() );
+$rest_lifecycle_query = $rest_lifecycle_resolver->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+pek_checkout_assert( 153912 === $rest_lifecycle_query->location_id && 1000 === $rest_lifecycle_query->cargo->weight_g && '' !== $rest_lifecycle_resolver->destination_fingerprint( PekSettings::PICKUP_RATE_ID ), 'PEK separate REST lifecycle must restore stored rates before trusted provider query resolution.' );
 $base_snapshot = $pickup->meta['pickup_provider_query'];
 foreach ( array(
 	'numeric_pair' => array( 'latitude' => 55.7558, 'longitude' => 37.6173, 'expected_latitude' => 55.7558, 'expected_longitude' => 37.6173 ),

@@ -13,6 +13,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repo
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
@@ -37,7 +38,8 @@ final class PickupPointsRestController {
 		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null,
 		private ?CarrierPickupPointProviderRegistry $provider_registry = null,
 		private ?CheckoutPickupPointProviderQueryResolver $provider_query_resolver = null,
-		private ?PekCheckoutPickupPointFormatter $pek_formatter = null
+		private ?PekCheckoutPickupPointFormatter $pek_formatter = null,
+		private ?WooCommerceSessionBootstrapper $session_bootstrapper = null
 	) {
 		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 		$this->pek_formatter ??= new PekCheckoutPickupPointFormatter();
@@ -351,6 +353,7 @@ final class PickupPointsRestController {
 	private function is_registry_backed_carrier( string $carrier ): bool {
 		return $this->provider_registry instanceof CarrierPickupPointProviderRegistry
 			&& $this->provider_query_resolver instanceof CheckoutPickupPointProviderQueryResolver
+			&& $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper
 			&& $this->provider_registry->has( $carrier );
 	}
 
@@ -359,6 +362,9 @@ final class PickupPointsRestController {
 		$family = $this->param( $request, 'pickup_family' );
 		if ( '' === $method_id || '' === $family ) {
 			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
+		}
+		if ( ! $this->session_bootstrapper->ensure() ) {
+			return $this->error( 'provider_session_unavailable', 'Checkout session is unavailable.', 503 );
 		}
 		try {
 			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );

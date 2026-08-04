@@ -13,6 +13,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPoi
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
@@ -35,7 +36,8 @@ final class CheckoutPickupPointRestController {
 		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
 		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null,
 		private ?CarrierPickupPointProviderRegistry $provider_registry = null,
-		private ?CheckoutPickupPointProviderQueryResolver $provider_query_resolver = null
+		private ?CheckoutPickupPointProviderQueryResolver $provider_query_resolver = null,
+		private ?WooCommerceSessionBootstrapper $session_bootstrapper = null
 	) {
 		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 	}
@@ -95,7 +97,9 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function save( mixed $request ): mixed {
-		$this->ensure_woocommerce_session();
+		if ( ! $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper || ! $this->session_bootstrapper->ensure() ) {
+			return $this->error( 'provider_session_unavailable', 'Checkout session is unavailable.', 503 );
+		}
 		$point_id_raw = $this->param( $request, 'point_id' );
 		$point_id = (int) $point_id_raw;
 		$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
@@ -179,7 +183,9 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function delete( mixed $request = null ): mixed {
-		$this->ensure_woocommerce_session();
+		if ( $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper ) {
+			$this->session_bootstrapper->ensure();
+		}
 		$family = $this->param( $request, 'pickup_family' );
 		if ( '' === $family ) {
 			$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
@@ -205,7 +211,9 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function state( mixed $request = null ): mixed {
-		$this->ensure_woocommerce_session();
+		if ( $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper ) {
+			$this->session_bootstrapper->ensure();
+		}
 		$family = $this->param( $request, 'pickup_family' );
 		$active_family = '' !== $family ? $family : $this->active_pickup_family();
 		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
@@ -223,39 +231,6 @@ final class CheckoutPickupPointRestController {
 				'city_context' => $this->city_context(),
 			)
 		);
-	}
-
-	private function ensure_woocommerce_session(): void {
-		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) ) {
-			return;
-		}
-
-		$woocommerce = WC();
-		if ( ! isset( $woocommerce->session ) || ! is_object( $woocommerce->session ) ) {
-			if ( class_exists( '\WC_Session_Handler' ) ) {
-				$session = new \WC_Session_Handler();
-				if ( method_exists( $session, 'init' ) ) {
-					$session->init();
-				}
-				$woocommerce->session = $session;
-			}
-		}
-
-		if ( isset( $woocommerce->session ) && is_object( $woocommerce->session ) && method_exists( $woocommerce->session, 'set_customer_session_cookie' ) ) {
-			$woocommerce->session->set_customer_session_cookie( true );
-		}
-
-		if ( ( ! isset( $woocommerce->customer ) || ! is_object( $woocommerce->customer ) ) && class_exists( '\WC_Customer' ) ) {
-			$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
-			try {
-				$woocommerce->customer = new \WC_Customer( $user_id, true );
-			} catch ( \Throwable ) {
-				try {
-					$woocommerce->customer = new \WC_Customer( 0, true );
-				} catch ( \Throwable ) {
-				}
-			}
-		}
 	}
 
 	public function resolve_location( mixed $request ): mixed {
@@ -403,6 +378,7 @@ final class CheckoutPickupPointRestController {
 	private function is_registry_backed_carrier( string $carrier ): bool {
 		return $this->provider_registry instanceof CarrierPickupPointProviderRegistry
 			&& $this->provider_query_resolver instanceof CheckoutPickupPointProviderQueryResolver
+			&& $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper
 			&& $this->provider_registry->has( $carrier );
 	}
 

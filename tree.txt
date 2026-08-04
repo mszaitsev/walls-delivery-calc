@@ -512,6 +512,7 @@ C:.
 |   |           ShippingMethodRegistrar.php
 |   |           WooCommercePackageMapper.php
 |   |           WooCommerceRateMapper.php
+|   |           WooCommerceSessionBootstrapper.php
 |   |
 |   +---Core
 |   |       Autoloader.php
