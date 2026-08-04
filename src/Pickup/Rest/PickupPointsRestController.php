@@ -11,9 +11,14 @@ use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappin
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
 
 defined( 'ABSPATH' ) || exit;
@@ -29,9 +34,13 @@ final class PickupPointsRestController {
 		private ?DpdPickupPointService $dpd_points = null,
 		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
 		private ?YandexLocationMappingV2Repository $yandex_location_mapping = null,
-		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null
+		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null,
+		private ?CarrierPickupPointProviderRegistry $provider_registry = null,
+		private ?CheckoutPickupPointProviderQueryResolver $provider_query_resolver = null,
+		private ?PekCheckoutPickupPointFormatter $pek_formatter = null
 	) {
 		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
+		$this->pek_formatter ??= new PekCheckoutPickupPointFormatter();
 	}
 
 	public function register(): void {
@@ -102,6 +111,13 @@ final class PickupPointsRestController {
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
 			return $this->response( $this->yandex_points( $request ) );
+		}
+		if ( $this->is_registry_backed_carrier( $carrier ) ) {
+			$nonce = $this->check_nonce( $request );
+			if ( true !== $nonce ) {
+				return $nonce;
+			}
+			return $this->registry_points_response( $request, $carrier, '' );
 		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
@@ -192,6 +208,13 @@ final class PickupPointsRestController {
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
 			return $this->response( $this->filter_generic_points( $this->yandex_points( $request ), $query ) );
+		}
+		if ( $this->is_registry_backed_carrier( $carrier ) ) {
+			$nonce = $this->check_nonce( $request );
+			if ( true !== $nonce ) {
+				return $nonce;
+			}
+			return $this->registry_points_response( $request, $carrier, $query );
 		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
@@ -323,6 +346,47 @@ final class PickupPointsRestController {
 				)
 			)
 		);
+	}
+
+	private function is_registry_backed_carrier( string $carrier ): bool {
+		return $this->provider_registry instanceof CarrierPickupPointProviderRegistry
+			&& $this->provider_query_resolver instanceof CheckoutPickupPointProviderQueryResolver
+			&& $this->provider_registry->has( $carrier );
+	}
+
+	private function registry_points_response( mixed $request, string $carrier, string $query_text ): mixed {
+		$method_id = $this->param( $request, 'shipping_method_id' );
+		$family = $this->param( $request, 'pickup_family' );
+		if ( '' === $method_id || '' === $family ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
+		}
+		try {
+			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );
+		} catch ( \RuntimeException $exception ) {
+			$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
+			return $this->error( $code, 'Pickup rate context is invalid.', 400 );
+		}
+		$provider = $this->provider_registry?->get( $carrier );
+		if ( null === $provider ) {
+			return $this->error( 'pickup_provider_unavailable', 'Pickup provider is unavailable.', 503 );
+		}
+		try {
+			$points = $provider->search( $query );
+		} catch ( \Throwable ) {
+			return $this->error( 'pickup_provider_search_failed', 'Pickup provider search failed.', 502 );
+		}
+		$fingerprint = $this->provider_query_resolver->destination_fingerprint( $method_id );
+		$formatted = array();
+		foreach ( $points as $point ) {
+			if ( ! $point instanceof PickupPoint ) {
+				continue;
+			}
+			if ( PekSettings::CARRIER_KEY === $carrier ) {
+				$formatted[] = $this->pek_formatter->format( $point, $fingerprint, $query->location_id, $query->country_code );
+			}
+		}
+
+		return $this->response( $this->filter_generic_points( $formatted, $query_text ) );
 	}
 
 	/**

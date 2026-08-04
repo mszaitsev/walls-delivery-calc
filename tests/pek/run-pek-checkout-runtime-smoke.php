@@ -1,0 +1,313 @@
+<?php
+declare(strict_types=1);
+
+defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+
+require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
+( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+
+use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
+use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
+use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
+use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
+use WallsShop\WDC\Carriers\Pek\PekCredentials;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuotePlannedDateTimeResolver;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
+use WallsShop\WDC\Carriers\Runtime\PekCarrier;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderInterface;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
+
+function pek_checkout_assert( bool $condition, string $message ): void {
+	if ( ! $condition ) {
+		throw new RuntimeException( $message );
+	}
+}
+
+function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['pek_checkout_options'][ $option ] ?? $default; }
+function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['pek_checkout_options'][ $option ] = $value; return true; }
+function current_time( string $type ): string { return 'mysql' === $type ? '2026-08-04 12:00:00' : '2026-08-04'; }
+function current_datetime(): DateTimeImmutable { return new DateTimeImmutable( '2026-08-04 12:07:00', new DateTimeZone( 'UTC' ) ); }
+function wp_timezone(): DateTimeZone { return new DateTimeZone( 'UTC' ); }
+function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false { return json_encode( $value, $flags, $depth ); }
+function get_transient( string $key ): mixed { return $GLOBALS['pek_checkout_transients'][ $key ]['value'] ?? false; }
+function set_transient( string $key, mixed $value, int $ttl = 0 ): bool { $GLOBALS['pek_checkout_transients'][ $key ] = array( 'value' => $value, 'ttl' => $ttl ); return true; }
+function delete_transient( string $key ): bool { unset( $GLOBALS['pek_checkout_transients'][ $key ] ); return true; }
+function wc_get_logger(): object { return $GLOBALS['pek_checkout_wc_logger']; }
+
+final class PekCheckoutFakeWooLogger {
+	public array $entries = array();
+	public function log( string $level, string $message, array $context = array() ): void {
+		$this->entries[] = compact( 'level', 'message', 'context' );
+	}
+}
+
+final class PekCheckoutFakeHttp implements PekHttpClientInterface {
+	public array $requests = array();
+	public function __construct( private array $responses ) {}
+	public function request( string $method, string $url, array $args ): array {
+		$body = json_decode( (string) ( $args['body'] ?? '{}' ), true );
+		$this->requests[] = array( 'method' => strtoupper( $method ), 'url' => $url, 'body' => is_array( $body ) ? $body : array(), 'args' => $args );
+		$response = array_shift( $this->responses ) ?? array();
+		if ( is_array( $response ) && array_key_exists( 'status', $response ) && array_key_exists( 'body', $response ) ) {
+			return array( 'status' => (int) $response['status'], 'body' => wp_json_encode( $response['body'], JSON_UNESCAPED_UNICODE ) ?: '{}' );
+		}
+
+		return array( 'status' => 200, 'body' => wp_json_encode( $response, JSON_UNESCAPED_UNICODE ) ?: '{}' );
+	}
+}
+
+final class PekCheckoutFakeProvider implements CarrierPickupPointProviderInterface {
+	public array $queries = array();
+	/** @param array<int,PickupPoint> $points */
+	public function __construct( private array $points ) {}
+	public function carrier_key(): string { return PekSettings::CARRIER_KEY; }
+	public function search( CarrierPickupPointQuery $query ): array {
+		$this->queries[] = $query;
+		return $this->points;
+	}
+	public function resolve_selection( CarrierPickupPointSelectionQuery $query ): ?PickupPoint {
+		foreach ( $this->points as $point ) {
+			if ( $point->code === $query->point_code ) {
+				return $point;
+			}
+		}
+
+		return null;
+	}
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public array $locations = array();
+		public array $pek_location_mappings = array();
+		public string $last_error = '';
+		public bool $pek_location_mapping_insert_fails = false;
+		public bool $pek_location_mapping_update_fails = false;
+		public bool $pek_location_mapping_read_fails = false;
+		public bool $pek_location_mapping_delete_fails = false;
+		public bool $pek_location_mapping_statistics_fails = false;
+	}
+}
+
+function pek_checkout_location_rows(): array {
+	return array(
+		array(
+			'id' => 153912,
+			'country_code' => 'RU',
+			'region_name' => 'Москва',
+			'region_type' => 'г',
+			'city_name' => 'Москва',
+			'city_type' => 'г',
+			'place_name' => 'Москва',
+			'place_type' => 'г',
+			'display_name' => 'Москва',
+			'latitude' => 55.755864,
+			'longitude' => 37.617698,
+			'active' => 1,
+			'fias_id' => 'moscow-fias',
+			'gar_object_id' => 153912,
+			'region_code' => '77',
+		),
+	);
+}
+
+function pek_checkout_zone_response(): array {
+	return array(
+		array(
+			'zoneId' => 'moscow-zone',
+			'zoneName' => 'Москва Садовое кольцо',
+			'branchUID' => 'moscow-east',
+			'branchTitle' => 'Москва Восток',
+			'mainWarehouseId' => 'main-wh',
+			'warehousePoint' => array( 'latitude' => 55.7, 'longitude' => 37.7 ),
+		),
+	);
+}
+
+function pek_checkout_calc_response( float $cost, int $days = 4 ): array {
+	return array(
+		'hasError' => false,
+		'currencyCode' => '643',
+		'branchSenderUID' => 'sender-branch',
+		'branchSender' => 'Новосибирск',
+		'branchReceiverUID' => 'receiver-branch',
+		'branchReceiver' => 'Москва',
+		'transfers' => array(
+			array(
+				'type' => 3,
+				'hasError' => false,
+				'costTotal' => $cost,
+				'estDeliveryTime' => $days,
+				'services' => array(
+					array( 'serviceType' => 'Перевозка', 'senderCity' => 'Новосибирск', 'cost' => $cost, 'info' => 'Автоперевозка', 'services' => null ),
+				),
+			),
+		),
+	);
+}
+
+function pek_checkout_point( string $code, string $source = 'free' ): PickupPoint {
+	return new PickupPoint(
+		PekSettings::CARRIER_KEY,
+		$code,
+		'Россия, Москва, терминал ' . $code,
+		'',
+		'Москва',
+		'',
+		55.75,
+		37.61,
+		'terminal',
+		'Пн-Пт 09:00-18:00',
+		'',
+		null,
+		true,
+		array( 'source' => $source, 'point_type_label' => 'Терминал' )
+	);
+}
+
+function pek_checkout_boot( array $responses, array $points ): array {
+	$GLOBALS['pek_checkout_options'] = array();
+	$GLOBALS['pek_checkout_transients'] = array();
+	$GLOBALS['pek_checkout_wc_logger'] = new PekCheckoutFakeWooLogger();
+	defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'pek-checkout-test-key' );
+	$wpdb = new wpdb();
+	$wpdb->locations = pek_checkout_location_rows();
+	$repository = new SettingsRepository();
+	$settings = new PekSettings( $repository );
+	$credentials = new PekCredentials( $repository, new EncryptionService() );
+	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'checkout-login', 'pek_api_key' => 'checkout-secret' ) );
+	$settings->save_from_admin( array( PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::CLIENT_CARD_KEY => 'card-secret' ) );
+	$repository->set( PekSettings::SENDER_WAREHOUSE_KEY, array( 'warehouseId' => 'sender-wh', 'source' => 'free', 'branchTimezone' => 'UTC' ) );
+	$http = new PekCheckoutFakeHttp( $responses );
+	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
+	$address_builder = new PekAddressBuilder();
+	$resolver = new PekLocationResolver( new LocationRepository( $wpdb ), $address_builder, new PekLocationMappingRepository( $wpdb ), $api, $settings );
+	$provider = new PekCheckoutFakeProvider( $points );
+	$providers = new CarrierPickupPointProviderRegistry( array( $provider ) );
+	$planned = new PekQuotePlannedDateTimeResolver( $settings );
+	$formatter = new PekCheckoutPickupPointFormatter();
+	$context = new PekCheckoutQuoteContextResolver( $settings, new LocationRepository( $wpdb ), $resolver, $address_builder, $providers, $planned, $formatter );
+	$quote_service = new PekQuoteService( $credentials, $api, new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() ), new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
+	$carrier = new PekCarrier( $settings, $credentials, $context, $quote_service, $planned, new Logger() );
+
+	return array( $carrier, $http, $provider );
+}
+
+function pek_checkout_request( array $context = array(), ?Address $address = null, int $weight_g = 1000, int $packaging_weight_g = 0 ): QuoteRequest {
+	$declared = Money::from_kopecks( 100000 );
+	return new QuoteRequest(
+		'RU',
+		$address ?? new Address( country_code: 'RU', city: 'Москва', raw_address: '', normalized: true ),
+		new Package( array(), $declared, $declared, $weight_g, $packaging_weight_g, $weight_g + $packaging_weight_g, 10, 10, 10, 1000, 'cart' ),
+		'',
+		$declared,
+		'2026-08-04',
+		array_merge( array( 'selected_location_id' => 153912 ), $context )
+	);
+}
+
+function pek_checkout_calc_payloads( PekCheckoutFakeHttp $http ): array {
+	return array_values( array_filter(
+		array_map( static fn( array $request ): array => $request['body'], $http->requests ),
+		static fn( array $body ): bool => isset( $body['cargos'] )
+	) );
+}
+
+list( $carrier, $http, $provider ) = pek_checkout_boot(
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1000.00 ), pek_checkout_calc_response( 2000.00 ) ),
+	array( pek_checkout_point( 'main-wh' ), pek_checkout_point( 'paid-wh', 'paid' ) )
+);
+
+$identity = $carrier->get_identity();
+pek_checkout_assert( 'pek' === $identity->key && 'ПЭК' === $identity->name && $identity->enabled, 'PekCarrier identity must be enabled when credentials are complete.' );
+$capabilities = $carrier->get_capabilities();
+pek_checkout_assert( $capabilities->supports_quotes && $capabilities->supports_pickup_delivery && $capabilities->supports_courier_delivery && ! $capabilities->supports_status_sync && ! $capabilities->supports_international, 'PekCarrier capabilities must match checkout runtime scope.' );
+pek_checkout_assert( $carrier->supports_country( 'RU' ) && ! $carrier->supports_country( 'KZ' ), 'PekCarrier checkout runtime must be RU-only.' );
+
+$quote = $carrier->quote( pek_checkout_request() );
+pek_checkout_assert( $quote->success && 2 === count( $quote->rates ), 'One PEK quote call must return pickup and courier rates when both modes succeed.' );
+$pickup = $quote->rates[0];
+$courier = $quote->rates[1];
+pek_checkout_assert( PekSettings::PICKUP_RATE_ID === $pickup->rate_id && PekSettings::COURIER_RATE_ID === $courier->rate_id, 'PEK rates must use stable rate IDs.' );
+pek_checkout_assert( DeliveryType::PICKUP === $pickup->delivery_type && DeliveryType::COURIER === $courier->delivery_type, 'PEK rates must expose canonical delivery types.' );
+pek_checkout_assert( $pickup->requires_pickup_point && ! $pickup->requires_courier_address && ! $courier->requires_pickup_point && $courier->requires_courier_address, 'PEK pickup/courier requirement flags must be canonical.' );
+pek_checkout_assert( 109000 === $pickup->price->get_kopecks() && 209000 === $courier->price->get_kopecks(), 'PEK DeliveryRate price must use final adjusted quote price.' );
+pek_checkout_assert( 100000 === (int) $pickup->meta['pek_carrier_price_kopecks'] && 7000 === (int) $pickup->meta['pek_bag_surcharge_kopecks'] && 2000 === (int) $pickup->meta['pek_sealing_surcharge_kopecks'], 'PEK rate meta must preserve carrier price and store surcharges separately.' );
+pek_checkout_assert( PekSettings::PICKUP_FAMILY === (string) $pickup->meta['pickup_family'] && is_array( $pickup->meta['pickup_provider_query'] ?? null ), 'PEK pickup rate must carry trusted provider query snapshot.' );
+$payloads = pek_checkout_calc_payloads( $http );
+pek_checkout_assert( 'main-wh' === (string) ( $payloads[0]['receiverWarehouseId'] ?? '' ), 'Preliminary pickup quote must use mapped suitable receiver warehouse.' );
+pek_checkout_assert( false === $payloads[0]['cargos'][0]['isHP'] && 0 === $payloads[0]['cargos'][0]['sealingPositionsCount'], 'PEK checkout payload must not request bag/protective packaging/plombing through API.' );
+pek_checkout_assert( true === $payloads[1]['isDelivery'] && isset( $payloads[1]['delivery']['coordinates'] ), 'Location-level courier quote may use canonical city coordinates.' );
+
+$selection = array(
+	'carrier_key' => 'pek',
+	'service_key' => 'pek',
+	'pickup_family' => PekSettings::PICKUP_FAMILY,
+	'point_code' => 'paid-wh',
+	'destination_fingerprint' => (string) $pickup->meta['pickup_provider_query']['destination_fingerprint'],
+);
+list( $selected_carrier, $selected_http ) = pek_checkout_boot(
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1100.00 ), pek_checkout_calc_response( 2000.00 ) ),
+	array( pek_checkout_point( 'main-wh' ), pek_checkout_point( 'paid-wh', 'paid' ) )
+);
+$selected_quote = $selected_carrier->quote( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $selection ) ) ) );
+$selected_payloads = pek_checkout_calc_payloads( $selected_http );
+pek_checkout_assert( 'paid-wh' === (string) ( $selected_payloads[0]['receiverWarehouseId'] ?? '' ), 'Selected PEK terminal must become receiverWarehouseId for pickup calculator quote.' );
+pek_checkout_assert( $selected_quote->quote_id !== $quote->quote_id, 'Selected terminal must change PEK quote ID/cache identity.' );
+
+list( $courier_only, $courier_only_http ) = pek_checkout_boot(
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 2000.00 ) ),
+	array()
+);
+$courier_only_quote = $courier_only->quote( pek_checkout_request() );
+pek_checkout_assert( $courier_only_quote->success && 1 === count( $courier_only_quote->rates ) && PekSettings::COURIER_RATE_ID === $courier_only_quote->rates[0]->rate_id, 'Pickup point absence must not suppress courier PEK rate.' );
+
+list( $full_address_carrier, $full_address_http ) = pek_checkout_boot(
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1000.00 ), pek_checkout_calc_response( 2000.00 ) ),
+	array( pek_checkout_point( 'main-wh' ) )
+);
+$full_address = new Address( country_code: 'RU', city: 'Москва', street: 'улица Большая Лубянка', house: '2', raw_address: 'Россия, Москва, улица Большая Лубянка, 2', normalized: true );
+$full_address_quote = $full_address_carrier->quote( pek_checkout_request( array(), $full_address ) );
+$full_payloads = pek_checkout_calc_payloads( $full_address_http );
+pek_checkout_assert( 'full_address' === (string) $full_address_quote->rates[1]->meta['pek_courier_quote_scope'] && ! isset( $full_payloads[1]['delivery']['coordinates'] ), 'Full-address PEK courier quote must omit city-center coordinates.' );
+
+$base_context = $carrier->quote_cache_context( pek_checkout_request() );
+$selected_context = $carrier->quote_cache_context( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $selection ) ) ) );
+$full_context = $carrier->quote_cache_context( pek_checkout_request( array(), $full_address ) );
+pek_checkout_assert( $base_context !== $selected_context && $base_context !== $full_context, 'PEK quote cache context must distinguish selected terminal and full courier address.' );
+$context_json = wp_json_encode( $selected_context, JSON_UNESCAPED_UNICODE ) ?: '';
+pek_checkout_assert( ! str_contains( $context_json, 'checkout-secret' ) && ! str_contains( $context_json, 'card-secret' ) && ! str_contains( $context_json, '5400000000' ), 'PEK quote cache context must not include raw credentials or contract identifiers.' );
+
+$checkout_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Runtime/CheckoutOrchestrator.php' ) ?: '';
+pek_checkout_assert( ! str_contains( $checkout_source, 'PekCarrier' ) && ! str_contains( $checkout_source, "'pek'" ), 'CheckoutOrchestrator must not add a PEK-specific branch.' );
+$pickup_rest_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
+pek_checkout_assert( strpos( $pickup_rest_source, 'save_registry_backed_selection( $request' ) < strpos( $pickup_rest_source, "'cdek' === \$carrier" ), 'Registry-backed PEK selection save must run before legacy carrier/browser-payload fallback.' );
+$pek_carrier_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Runtime/PekCarrier.php' ) ?: '';
+pek_checkout_assert( ! str_contains( $pek_carrier_source, 'transportingTypes' ) && ! str_contains( $pek_carrier_source, 'senderCityId' ) && ! str_contains( $pek_carrier_source, 'receiverCityId' ) && ! str_contains( $pek_carrier_source, 'overSize' ), 'PEK checkout runtime must not introduce deprecated calculator fields.' );
+pek_checkout_assert( ! is_dir( dirname( __DIR__, 2 ) . '/src/Shipments/Pek' ), 'Checkout runtime stage must not add PEK Shipment Framework files.' );
+
+echo "PEK checkout runtime smoke passed.\n";

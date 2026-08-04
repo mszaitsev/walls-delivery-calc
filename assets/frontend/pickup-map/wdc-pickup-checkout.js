@@ -886,6 +886,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		context.carrier = carrier;
 		context.carrier_key = carrier;
 		context.pickup_family = family;
+		context.shipping_method_id = normalizeShippingMethod(method || activeMethod || currentShippingMethod());
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
 		}
@@ -1906,7 +1907,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function rememberPreferredShippingMethod(method, point) {
 		method = normalizeShippingMethod(method);
-		if (pickupFamily(point) !== 'yandex_delivery:pickup' || shippingMethodFamily(method) !== 'yandex_delivery:pickup') {
+		if (!requiresRateRefreshAfterPickupSave(point) || pickupFamily(point) !== shippingMethodFamily(method)) {
 			return;
 		}
 		preferredShippingMethod = method;
@@ -1950,6 +1951,13 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function requiresRateRefreshAfterPickupSave(point) {
+		var snapshot = pointSnapshot(point);
+		if (point && Object.prototype.hasOwnProperty.call(point, 'requires_rate_refresh')) {
+			return point.requires_rate_refresh === true || point.requires_rate_refresh === '1' || point.requires_rate_refresh === 'true';
+		}
+		if (snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'requires_rate_refresh')) {
+			return snapshot.requires_rate_refresh === true || snapshot.requires_rate_refresh === '1' || snapshot.requires_rate_refresh === 'true';
+		}
 		var family = pickupFamily(point);
 		return family === 'dpd:pickup' || family === 'yandex_delivery:pickup';
 	}

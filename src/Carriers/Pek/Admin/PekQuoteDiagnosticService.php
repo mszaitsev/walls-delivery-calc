@@ -3,14 +3,12 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\Pek\Admin;
 
-use DateInterval;
-use DateTimeImmutable;
-use DateTimeZone;
 use RuntimeException;
 use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuotePlannedDateTimeResolver;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -33,7 +31,8 @@ final class PekQuoteDiagnosticService {
 		private PekAddressBuilder $addresses,
 		private PekSettings $settings,
 		private CarrierPickupPointProviderRegistry $providers,
-		private PekQuoteService $quotes
+		private PekQuoteService $quotes,
+		private PekQuotePlannedDateTimeResolver $planned_datetime
 	) {
 	}
 
@@ -76,17 +75,10 @@ final class PekQuoteDiagnosticService {
 
 	/** @return array{planned:string,timezone_source:string} */
 	public function default_planned_datetime(): array {
-		$timezone = $this->sender_timezone();
-		$now = function_exists( 'current_datetime' ) ? current_datetime()->setTimezone( $timezone ) : new DateTimeImmutable( 'now', $timezone );
-		$planned = $now->add( new DateInterval( 'PT1H' ) );
-		$minute = (int) $planned->format( 'i' );
-		$add = ( 15 - ( $minute % 15 ) ) % 15;
-		if ( $add > 0 ) {
-			$planned = $planned->modify( '+' . $add . ' minutes' );
-		}
-		$planned = $planned->setTime( (int) $planned->format( 'H' ), (int) $planned->format( 'i' ), 0 );
-
-		return array( 'planned' => $planned->format( 'Y-m-d\TH:i:s' ), 'timezone_source' => $timezone->getName() );
+		return array(
+			'planned' => $this->planned_datetime->resolve(),
+			'timezone_source' => $this->planned_datetime->timezone_source(),
+		);
 	}
 
 	/** @param array<string,mixed> $mapping @param array<string,mixed> $post */
@@ -249,19 +241,6 @@ final class PekQuoteDiagnosticService {
 			'field_errors' => array(),
 			'api_error_message' => '',
 		);
-	}
-
-	private function sender_timezone(): DateTimeZone {
-		$sender = $this->settings->sender_warehouse();
-		$value = trim( (string) ( $sender['branchTimezone'] ?? '' ) );
-		if ( '' !== $value ) {
-			try {
-				return new DateTimeZone( $value );
-			} catch ( \Throwable ) {
-			}
-		}
-
-		return function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'UTC' );
 	}
 
 	private function safe_message( string $message ): string {

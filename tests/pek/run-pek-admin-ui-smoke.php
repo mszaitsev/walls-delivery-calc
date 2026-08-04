@@ -32,6 +32,7 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuotePlannedDateTimeResolver;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
@@ -202,7 +203,7 @@ $destination_diagnostic_service = new PekDestinationPickupDiagnosticService( $pi
 $destination_report_store = new PekDestinationPickupDiagnosticStore();
 $quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
 $quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
-$quote_diagnostic_service = new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service );
+$quote_diagnostic_service = new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service, new PekQuotePlannedDateTimeResolver( $settings ) );
 $quote_report_store = new PekQuoteDiagnosticStore();
 $page = new PekAdminPage(
 	$settings,

@@ -645,9 +645,9 @@ pek_assert( str_contains( $plugin_source, 'PekSenderWarehouseSearchCache::class'
 pek_assert( ! str_contains( $warehouse_source, 'mb_strtolower' ) && ! str_contains( $warehouse_source, 'strtolower( $operation' ), 'PEK operation comparison must not depend on mbstring or strtolower for Cyrillic.' );
 pek_assert( ! str_contains( $plugin_source, 'DateFramework' ) && ! str_contains( $plugin_source, 'WarehouseAvailabilityPolicy' ), 'PEK foundation must not register a generic date framework.' );
 $carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 800 );
-pek_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK must not be registered in CarrierRegistry.' );
+pek_assert( str_contains( $carrier_registry_block, 'PekCarrier::class' ), 'PEK checkout runtime must register PekCarrier in CarrierRegistry.' );
 pek_assert( ! str_contains( $plugin_source, 'PekShipmentAdapter' ) && ! str_contains( $plugin_source, 'PekShipmentPersistenceMapper' ) && ! str_contains( $plugin_source, 'PekShipmentModalExtension' ) && ! str_contains( $plugin_source, 'PekShipmentDocumentProvider' ), 'PEK must not be registered in Shipment Framework registries.' );
-pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ) && str_contains( $shipment_manifest, "'pek.admin-routing'" ) && str_contains( $shipment_manifest, "'pek.admin-ui'" ) && str_contains( $shipment_manifest, "'pek.warehouse-datetime'" ) && str_contains( $shipment_manifest, "'pek.quote-foundation'" ), 'PEK mandatory smokes must be in shipment regression manifest.' );
+pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ) && str_contains( $shipment_manifest, "'pek.admin-routing'" ) && str_contains( $shipment_manifest, "'pek.admin-ui'" ) && str_contains( $shipment_manifest, "'pek.warehouse-datetime'" ) && str_contains( $shipment_manifest, "'pek.quote-foundation'" ) && str_contains( $shipment_manifest, "'pek.checkout-runtime'" ), 'PEK mandatory smokes must be in shipment regression manifest.' );
 $settings->save_diagnostic_result(
 	array(
 		'checked_at' => '2026-08-03 01:13:52',
