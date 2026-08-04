@@ -25,6 +25,7 @@ use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\Carriers\Runtime\PekCarrier;
+use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
@@ -235,7 +236,7 @@ function pek_checkout_calc_response( float $cost, int $days = 4 ): array {
 	);
 }
 
-function pek_checkout_point( string $code, string $source = 'free' ): PickupPoint {
+function pek_checkout_point( string $code, string $source = 'free', string $division_name = '' ): PickupPoint {
 	return new PickupPoint(
 		PekSettings::CARRIER_KEY,
 		$code,
@@ -250,7 +251,7 @@ function pek_checkout_point( string $code, string $source = 'free' ): PickupPoin
 		'',
 		null,
 		true,
-		array( 'source' => $source, 'point_type_label' => 'Терминал' )
+		array( 'source' => $source, 'point_type_label' => 'Терминал', 'division_name' => $division_name )
 	);
 }
 
@@ -348,6 +349,15 @@ pek_checkout_assert( $pickup->requires_pickup_point && ! $pickup->requires_couri
 pek_checkout_assert( 109000 === $pickup->price->get_kopecks() && 209000 === $courier->price->get_kopecks(), 'PEK DeliveryRate price must use final adjusted quote price.' );
 pek_checkout_assert( 100000 === (int) $pickup->meta['pek_carrier_price_kopecks'] && 7000 === (int) $pickup->meta['pek_bag_surcharge_kopecks'] && 2000 === (int) $pickup->meta['pek_sealing_surcharge_kopecks'], 'PEK rate meta must preserve carrier price and store surcharges separately.' );
 pek_checkout_assert( PekSettings::PICKUP_FAMILY === (string) $pickup->meta['pickup_family'] && is_array( $pickup->meta['pickup_provider_query'] ?? null ), 'PEK pickup rate must carry trusted provider query snapshot.' );
+pek_checkout_assert( (string) $pickup->meta['pickup_provider_query']['destination_fingerprint'] === (string) $pickup->meta['pickup_provider_query']['provider_destination_fingerprint'], 'PEK provider query snapshot must expose provider_destination_fingerprint alongside legacy destination_fingerprint.' );
+$formatter_smoke = new PekCheckoutPickupPointFormatter();
+$uuid = '8c4eeef5-1f90-11f1-b8ab-00155d24b451';
+$free_formatted = $formatter_smoke->format( pek_checkout_point( 'free-wh', 'free', $uuid ), 'provider-fp', 153912, 'RU' );
+$paid_formatted = $formatter_smoke->format( pek_checkout_point( 'paid-wh', 'paid', $uuid ), 'provider-fp', 153912, 'RU' );
+pek_checkout_assert( 'Собственный пункт выдачи ПЭК' === (string) $free_formatted['point_title'] && 'Собственный пункт выдачи ПЭК' === (string) $free_formatted['point_type_label'] && '' === (string) $free_formatted['presentation_comment'], 'PEK free terminal presentation must use own pickup title without surcharge warning.' );
+pek_checkout_assert( 'Партнерский пункт выдачи ПЭК' === (string) $paid_formatted['point_title'] && 'Партнерский пункт выдачи ПЭК' === (string) $paid_formatted['point_type_label'] && 'Возможна небольшая доплата за доставку в этот пункт' === (string) $paid_formatted['presentation_comment'], 'PEK paid terminal presentation must use partner title and warning.' );
+pek_checkout_assert( '' === (string) $paid_formatted['point_name'] && '' === (string) $paid_formatted['snapshot']['point_name'] && ! str_contains( wp_json_encode( $paid_formatted, JSON_UNESCAPED_UNICODE ) ?: '', $uuid ), 'PEK formatter must not expose internal UUID as public point name.' );
+pek_checkout_assert( 'paid-wh' === (string) $paid_formatted['point_code'] && 'provider-fp' === (string) $paid_formatted['provider_destination_fingerprint'], 'PEK formatter must keep technical warehouse code and provider fingerprint.' );
 $stored_pickup_rate = pek_checkout_stored_rate_from_mapper( $pickup );
 pek_checkout_assert( is_array( $stored_pickup_rate['rate_meta'] ?? null ) && ! isset( $stored_pickup_rate['meta'] ), 'Realistic WooCommerce stored PEK rate must expose nested rate_meta, not fake-only meta.' );
 $query_resolver = pek_checkout_resolver_with_rate( $stored_pickup_rate );
@@ -467,20 +477,29 @@ $address_only_query = pek_checkout_resolver_with_rate( $address_only_stored )->r
 pek_checkout_assert( 153912 === $address_only_query->location_id && null === $address_only_query->latitude && null === $address_only_query->longitude && array() === $address_only_query->validate(), 'Production stored PEK address-only rate must resolve trusted provider query with null coordinates.' );
 pek_checkout_assert( 1 === count( $address_only_provider->queries ) && null === $address_only_provider->queries[0]->latitude && null === $address_only_provider->queries[0]->longitude, 'PEK terminal provider must remain usable for address-only checkout mappings.' );
 
+$provider_fingerprint = (string) $pickup->meta['pickup_provider_query']['provider_destination_fingerprint'];
 $selection = array(
 	'carrier_key' => 'pek',
 	'service_key' => 'pek',
 	'pickup_family' => PekSettings::PICKUP_FAMILY,
 	'point_code' => 'paid-wh',
-	'destination_fingerprint' => (string) $pickup->meta['pickup_provider_query']['destination_fingerprint'],
+	'destination_fingerprint' => $provider_fingerprint,
+	'provider_destination_fingerprint' => $provider_fingerprint,
 );
+$GLOBALS['pek_checkout_wc'] = new PekCheckoutFakeWoo();
+$normalized_session = new CheckoutSessionManager();
+$normalized_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 153912 ) );
+$normalized_session->save_pickup_selection_for_family( PekSettings::PICKUP_FAMILY, $selection );
+$normalized_selection = $normalized_session->pickup_selection_for_family( PekSettings::PICKUP_FAMILY );
+pek_checkout_assert( $provider_fingerprint === (string) ( $normalized_selection['provider_destination_fingerprint'] ?? '' ) && 'country=RU|location_id=153912' === (string) ( $normalized_selection['destination_fingerprint'] ?? '' ), 'CheckoutSessionManager must preserve provider fingerprint separately from generic location fingerprint.' );
 list( $selected_carrier, $selected_http ) = pek_checkout_boot(
-	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1100.00 ), pek_checkout_calc_response( 2000.00 ) ),
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1267.92 ), pek_checkout_calc_response( 2000.00 ) ),
 	array( pek_checkout_point( 'main-wh' ), pek_checkout_point( 'paid-wh', 'paid' ) )
 );
-$selected_quote = $selected_carrier->quote( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $selection ) ) ) );
+$selected_quote = $selected_carrier->quote( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $normalized_selection ) ) ) );
 $selected_payloads = pek_checkout_calc_payloads( $selected_http );
 pek_checkout_assert( 'paid-wh' === (string) ( $selected_payloads[0]['receiverWarehouseId'] ?? '' ), 'Selected PEK terminal must become receiverWarehouseId for pickup calculator quote.' );
+pek_checkout_assert( 135792 === $selected_quote->rates[0]->price->get_kopecks() && 'selection' === (string) $selected_quote->rates[0]->meta['pek_receiver_warehouse_source'], 'Selected PEK partner terminal must recalculate pickup price using the selected warehouse.' );
 pek_checkout_assert( $selected_quote->quote_id !== $quote->quote_id, 'Selected terminal must change PEK quote ID/cache identity.' );
 
 list( $courier_only, $courier_only_http ) = pek_checkout_boot(
@@ -500,9 +519,19 @@ $full_payloads = pek_checkout_calc_payloads( $full_address_http );
 pek_checkout_assert( 'full_address' === (string) $full_address_quote->rates[1]->meta['pek_courier_quote_scope'] && ! isset( $full_payloads[1]['delivery']['coordinates'] ), 'Full-address PEK courier quote must omit city-center coordinates.' );
 
 $base_context = $carrier->quote_cache_context( pek_checkout_request() );
-$selected_context = $carrier->quote_cache_context( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $selection ) ) ) );
+$selected_context = $carrier->quote_cache_context( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $normalized_selection ) ) ) );
 $full_context = $carrier->quote_cache_context( pek_checkout_request( array(), $full_address ) );
-pek_checkout_assert( $base_context !== $selected_context && $base_context !== $full_context, 'PEK quote cache context must distinguish selected terminal and full courier address.' );
+pek_checkout_assert( $base_context !== $selected_context && $base_context !== $full_context && $provider_fingerprint === (string) ( $selected_context['pek_selection_provider_destination_fingerprint'] ?? '' ), 'PEK quote cache context must distinguish selected terminal/fingerprint and full courier address.' );
+$quote_cache = new QuoteCache();
+$preliminary_key = $quote_cache->cache_key( pek_checkout_request(), PekSettings::CARRIER_KEY, 'pickup', PekSettings::SERVICE_KEY, $base_context );
+$selected_key = $quote_cache->cache_key( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $normalized_selection ) ) ), PekSettings::CARRIER_KEY, 'pickup', PekSettings::SERVICE_KEY, $selected_context );
+$same_selected_key = $quote_cache->cache_key( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $normalized_selection ) ) ), PekSettings::CARRIER_KEY, 'pickup', PekSettings::SERVICE_KEY, $selected_context );
+$other_destination_selection = $normalized_selection;
+$other_destination_selection['provider_destination_fingerprint'] = str_repeat( 'a', 64 );
+$other_destination_selection['snapshot']['provider_destination_fingerprint'] = str_repeat( 'a', 64 );
+$other_context = $carrier->quote_cache_context( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $other_destination_selection ) ) ) );
+$other_selected_key = $quote_cache->cache_key( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $other_destination_selection ) ) ), PekSettings::CARRIER_KEY, 'pickup', PekSettings::SERVICE_KEY, $other_context );
+pek_checkout_assert( $preliminary_key !== $selected_key && $selected_key === $same_selected_key && $selected_key !== $other_selected_key, 'PEK quote cache key must miss after terminal/fingerprint changes and stay stable for the same selected point.' );
 $context_json = wp_json_encode( $selected_context, JSON_UNESCAPED_UNICODE ) ?: '';
 pek_checkout_assert( ! str_contains( $context_json, 'checkout-secret' ) && ! str_contains( $context_json, 'card-secret' ) && ! str_contains( $context_json, '5400000000' ), 'PEK quote cache context must not include raw credentials or contract identifiers.' );
 

@@ -107,6 +107,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		$selection = is_array( $request->customer_context['pickup_selections'][ PekSettings::PICKUP_FAMILY ] ?? null )
 			? $request->customer_context['pickup_selections'][ PekSettings::PICKUP_FAMILY ]
 			: array();
+		$selection_snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 		$sender = $this->settings->sender_warehouse();
 		$address = $request->destination;
 		$full_address = trim( implode( '|', array( $address->street, $address->house, $address->apartment, $address->raw_address ) ) );
@@ -118,7 +119,8 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 
 		return array(
 			'pek_selected_terminal_code' => (string) ( $selection['point_code'] ?? '' ),
-			'pek_selection_destination_fingerprint' => (string) ( $selection['destination_fingerprint'] ?? '' ),
+			'pek_selection_provider_destination_fingerprint' => (string) ( $selection['provider_destination_fingerprint'] ?? $selection_snapshot['provider_destination_fingerprint'] ?? '' ),
+			'pek_selection_destination_fingerprint' => (string) ( $selection['destination_fingerprint'] ?? $selection_snapshot['destination_fingerprint'] ?? '' ),
 			'pek_courier_address_scope' => '' !== $full_address ? 'full_address' : 'location',
 			'pek_full_courier_address_fingerprint' => '' !== $full_address ? hash( 'sha256', $full_address ) : '',
 			'pek_planned_datetime_bucket' => $this->planned_datetime->resolve(),

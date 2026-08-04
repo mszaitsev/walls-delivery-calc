@@ -815,6 +815,19 @@ $checkout_pickup_rest_source = plugin_architecture_source( 'src/Pickup/Rest/Chec
 plugin_architecture_assert( str_contains( $checkout_pickup_rest_source, "destination_fingerprint( \$method_id )" ) && str_contains( $checkout_pickup_rest_source, "provider_rate_context_missing" ), 'Checkout pickup save must enforce trusted destination fingerprint from stored rate context.' );
 plugin_architecture_assert( ! str_contains( $checkout_pickup_rest_source, "param( \$request, 'address'" ) && ! str_contains( $checkout_pickup_rest_source, "param( \$request, 'latitude'" ), 'Checkout pickup save must not promote browser address/coordinates into trusted provider context.' );
 plugin_architecture_assert( str_contains( $checkout_pickup_rest_source, 'WooCommerceSessionBootstrapper' ) && str_contains( $checkout_pickup_rest_source, '$this->session_bootstrapper->ensure()' ) && ! str_contains( $checkout_pickup_rest_source, 'function ensure_woocommerce_session' ) && ! str_contains( $checkout_pickup_rest_source, 'new \WC_Session_Handler' ), 'Checkout pickup REST must use shared bootstrapper and not duplicate controller-local WC session creation.' );
+$pek_formatter_source = plugin_architecture_source( 'src/Carriers/Pek/Pickup/PekCheckoutPickupPointFormatter.php' );
+plugin_architecture_assert( str_contains( $pek_formatter_source, 'Собственный пункт выдачи ПЭК' ) && str_contains( $pek_formatter_source, 'Партнерский пункт выдачи ПЭК' ) && str_contains( $pek_formatter_source, 'Возможна небольшая доплата за доставку в этот пункт' ), 'PEK pickup formatter must expose free/paid customer titles and paid warning.' );
+plugin_architecture_assert( str_contains( $pek_formatter_source, 'public_point_name' ) && str_contains( $pek_formatter_source, 'looks_like_internal_identifier' ) && str_contains( $pek_formatter_source, '/^[0-9a-f]{8}-' ), 'PEK pickup formatter must filter internal UUIDs from public point names.' );
+plugin_architecture_assert( str_contains( $pek_formatter_source, "'provider_destination_fingerprint' =>" ) && str_contains( $checkout_pickup_rest_source, "'provider_destination_fingerprint' =>" ), 'PEK provider formatter and save projection must carry provider_destination_fingerprint.' );
+$checkout_session_source = plugin_architecture_source( 'src/Checkout/WooCommerce/CheckoutSessionManager.php' );
+plugin_architecture_assert( str_contains( $checkout_session_source, 'safe_provider_destination_fingerprint' ) && str_contains( $checkout_session_source, "\$selection['provider_destination_fingerprint']" ) && str_contains( $checkout_session_source, "\$snapshot['provider_destination_fingerprint']" ), 'Checkout session normalization must preserve provider fingerprint separately from generic destination fingerprint.' );
+$pek_context_source = plugin_architecture_source( 'src/Carriers/Pek/Checkout/PekCheckoutQuoteContextResolver.php' );
+plugin_architecture_assert( str_contains( $pek_context_source, 'provider_destination_fingerprint' ) && str_contains( $pek_context_source, 'looks_like_provider_fingerprint' ) && str_contains( $pek_context_source, 'hash_equals( $destination_fingerprint, $stored_fingerprint )' ), 'PEK checkout resolver must validate selected terminals by provider fingerprint, with SHA-only legacy fallback.' );
+$pek_carrier_source_for_cache = plugin_architecture_source( 'src/Carriers/Runtime/PekCarrier.php' );
+$quote_cache_source_for_pickup = plugin_architecture_source( 'src/Checkout/Cache/QuoteCache.php' );
+plugin_architecture_assert( str_contains( $pek_carrier_source_for_cache, 'pek_selection_provider_destination_fingerprint' ) && str_contains( $quote_cache_source_for_pickup, 'provider_destination_fingerprint' ), 'PEK and generic quote cache context must include selected point provider fingerprint.' );
+$pickup_map_js_source = plugin_architecture_source( 'assets/frontend/pickup-map/wdc-pickup-map.js' );
+plugin_architecture_assert( str_contains( $pickup_map_js_source, 'typeLabel !== title' ) && str_contains( $pickup_map_js_source, "carrier === 'pek'" ), 'Generic pickup map must hide duplicate title/type rows and avoid displaying PEK technical UUID codes.' );
 
 $pek_planned_resolver_source = plugin_architecture_source( 'src/Carriers/Pek/Quote/PekQuotePlannedDateTimeResolver.php' );
 plugin_architecture_assert( str_contains( $pek_planned_resolver_source, 'private ?string $resolved = null' ) && str_contains( $pek_planned_resolver_source, 'null !== $this->resolved' ) && str_contains( $pek_planned_resolver_source, '$this->resolved =' ), 'PEK plannedDateTime resolver must memoize per service instance.' );
@@ -825,7 +838,7 @@ plugin_architecture_assert( ! str_contains( $checkout_orchestrator_source, 'PekC
 $migration_files = glob( plugin_architecture_path( 'src/Infrastructure/Migrations/*.php' ) ) ?: array();
 foreach ( $migration_files as $migration_file ) {
 	$name = basename( $migration_file );
-	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.3 must not add a new PEK migration: ' . $name );
+	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.4 must not add a new PEK migration: ' . $name );
 }
 
 echo "Plugin architecture smoke passed.\n";

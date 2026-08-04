@@ -93,11 +93,15 @@ final class PekCheckoutQuoteContextResolver {
 		$service = (string) ( $selection['service_key'] ?? $snapshot['service_key'] ?? '' );
 		$family = (string) ( $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
 		$code = trim( (string) ( $selection['point_code'] ?? $selection['point_id'] ?? $snapshot['point_code'] ?? '' ) );
-		$stored_fingerprint = (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' );
+		$stored_fingerprint = (string) ( $selection['provider_destination_fingerprint'] ?? $snapshot['provider_destination_fingerprint'] ?? '' );
+		if ( '' === $stored_fingerprint ) {
+			$legacy = (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' );
+			$stored_fingerprint = $this->looks_like_provider_fingerprint( $legacy ) ? $legacy : '';
+		}
 		if ( PekSettings::CARRIER_KEY !== $carrier || PekSettings::SERVICE_KEY !== $service || PekSettings::PICKUP_FAMILY !== $family || '' === $code ) {
 			return null;
 		}
-		if ( '' !== $stored_fingerprint && ! hash_equals( $destination_fingerprint, $stored_fingerprint ) ) {
+		if ( '' === $stored_fingerprint || ! hash_equals( $destination_fingerprint, $stored_fingerprint ) ) {
 			return null;
 		}
 		$selection['point_code'] = $code;
@@ -119,6 +123,7 @@ final class PekCheckoutQuoteContextResolver {
 			'radius_km' => $query->radius_km,
 			'limit' => $query->limit,
 			'destination_fingerprint' => $destination_fingerprint,
+			'provider_destination_fingerprint' => $destination_fingerprint,
 		);
 	}
 
@@ -149,6 +154,10 @@ final class PekCheckoutQuoteContextResolver {
 	/** @param array<string,mixed> $snapshot */
 	public function destination_fingerprint_from_snapshot( array $snapshot ): string {
 		return (string) ( $snapshot['destination_fingerprint'] ?? '' );
+	}
+
+	private function looks_like_provider_fingerprint( string $value ): bool {
+		return 64 === strlen( $value ) && ctype_xdigit( $value );
 	}
 
 	/** @return array<string,mixed> */

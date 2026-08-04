@@ -254,6 +254,7 @@ function wdc_pickup_rest_pek_snapshot( string $fingerprint = 'pek-destination-fp
 		'radius_km' => 50,
 		'limit' => 50,
 		'destination_fingerprint' => $fingerprint,
+		'provider_destination_fingerprint' => $fingerprint,
 	);
 }
 
@@ -555,13 +556,15 @@ pickup_rest_assert( str_contains( $session_source = (string) file_get_contents( 
 
 WC()->session = new WC_Session_Handler();
 $pek_session = new CheckoutSessionManager();
+$pek_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 153912 ) );
 $pek_snapshot = wdc_pickup_rest_pek_snapshot();
 $stored_pek_rate = wdc_pickup_rest_store_pek_rate( $pek_session, $pek_snapshot );
 pickup_rest_assert( isset( $stored_pek_rate['rate_meta']['pickup_provider_query'] ) && ! isset( $stored_pek_rate['meta'] ), 'PEK REST fixture must use production WooCommerce rate_meta shape.' );
 WC()->session = null;
 $pek_provider = new WdcPickupRestPekProvider(
 	array(
-		new PickupPoint( PekSettings::CARRIER_KEY, 'main-wh', 'Россия, Москва, терминал main-wh', '', 'Москва', '', 55.75, 37.61, 'terminal', 'Пн-Пт 09:00-18:00', '', null, true, array( 'source' => 'free' ) ),
+		new PickupPoint( PekSettings::CARRIER_KEY, 'main-wh', 'Россия, Москва, терминал main-wh', '', 'Москва', '', 55.75, 37.61, 'terminal', 'Пн-Пт 09:00-18:00', '', null, true, array( 'source' => 'free', 'division_name' => '8c4eeef5-1f90-11f1-b8ab-00155d24b451' ) ),
+		new PickupPoint( PekSettings::CARRIER_KEY, 'paid-wh', 'Россия, Москва, партнерский пункт paid-wh', '', 'Москва', '', 55.76, 37.62, 'pvz', 'Пн-Пт 10:00-19:00', '', null, true, array( 'source' => 'paid', 'division_name' => '8c4eeef5-1f90-11f1-b8ab-00155d24b451' ) ),
 	)
 );
 $pek_registry = new CarrierPickupPointProviderRegistry( array( $pek_provider ) );
@@ -579,7 +582,10 @@ $pek_points = $pek_points_controller->points(
 		array( 'X-WP-Nonce' => 'nonce' )
 	)
 );
-pickup_rest_assert( is_array( $pek_points ) && 1 === count( $pek_points ) && 'main-wh' === (string) ( $pek_points[0]['point_code'] ?? '' ) && 'pek-destination-fp' === (string) ( $pek_points[0]['destination_fingerprint'] ?? '' ), 'PEK /points must use trusted production rate_meta context and return provider points.' );
+pickup_rest_assert( is_array( $pek_points ) && 2 === count( $pek_points ) && 'main-wh' === (string) ( $pek_points[0]['point_code'] ?? '' ) && 'pek-destination-fp' === (string) ( $pek_points[0]['provider_destination_fingerprint'] ?? '' ), 'PEK /points must use trusted production rate_meta context and return provider points.' );
+pickup_rest_assert( 'Собственный пункт выдачи ПЭК' === (string) ( $pek_points[0]['point_title'] ?? '' ) && 'Собственный пункт выдачи ПЭК' === (string) ( $pek_points[0]['point_type_label'] ?? '' ) && '' === (string) ( $pek_points[0]['presentation_comment'] ?? '' ), 'Free PEK point must use public own-terminal presentation without a surcharge warning.' );
+pickup_rest_assert( 'Партнерский пункт выдачи ПЭК' === (string) ( $pek_points[1]['point_title'] ?? '' ) && 'Партнерский пункт выдачи ПЭК' === (string) ( $pek_points[1]['point_type_label'] ?? '' ) && 'Возможна небольшая доплата за доставку в этот пункт' === (string) ( $pek_points[1]['presentation_comment'] ?? '' ), 'Paid PEK point must use partner presentation with a warning.' );
+pickup_rest_assert( ! str_contains( wp_json_encode( $pek_points, JSON_UNESCAPED_UNICODE ) ?: '', '8c4eeef5-1f90-11f1-b8ab-00155d24b451' ) && '' === (string) ( $pek_points[0]['point_name'] ?? '' ) && '' === (string) ( $pek_points[1]['point_name'] ?? '' ), 'PEK formatter must not expose internal UUID as public point name.' );
 pickup_rest_assert( WC()->session instanceof WC_Session_Handler && WC()->session->initialized && WC()->session->cookie_set && isset( WC()->session->data['wdc_platform_rates'][ PekSettings::PICKUP_RATE_ID ] ), 'PEK /points must bootstrap the existing WooCommerce customer session and restore stored rates.' );
 pickup_rest_assert( 153912 === $pek_provider->queries[0]->location_id && 1000 === $pek_provider->queries[0]->cargo->weight_g, 'PEK /points must ignore browser location/cargo authority and use stored rate snapshot.' );
 $pek_search = $pek_points_controller->search( new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'pickup_family' => PekSettings::PICKUP_FAMILY, 'q' => 'main-wh' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
@@ -594,6 +600,7 @@ $pek_save = $pek_checkout_controller->save(
 			'carrier' => PekSettings::CARRIER_KEY,
 			'shipping_method_id' => PekSettings::PICKUP_RATE_ID,
 			'point_code' => 'main-wh',
+			'provider_destination_fingerprint' => 'forged-browser-fingerprint',
 			'point' => array(
 				'point_address' => 'forged browser address',
 				'lat' => 1,
@@ -604,11 +611,12 @@ $pek_save = $pek_checkout_controller->save(
 	)
 );
 pickup_rest_assert( 1 === count( $pek_provider->selection_queries ) && 'main-wh' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_code'] ?? '' ), 'PEK save must reach fresh resolve_selection and store the selected warehouse in pek:pickup.' );
-pickup_rest_assert( 'pek-destination-fp' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['destination_fingerprint'] ?? '' ), 'PEK save must persist non-empty destination fingerprint from trusted rate context.' );
+pickup_rest_assert( 'pek-destination-fp' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['provider_destination_fingerprint'] ?? '' ) && 'country=RU|location_id=153912' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['destination_fingerprint'] ?? '' ), 'PEK save must preserve trusted provider fingerprint separately from generic checkout location fingerprint.' );
 pickup_rest_assert( 'Россия, Москва, терминал main-wh' === (string) ( $pek_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_address'] ?? '' ), 'PEK save must ignore forged browser point presentation and use provider projection.' );
 
 WC()->session = new WC_Session_Handler();
 $pek_address_only_session = new CheckoutSessionManager();
+$pek_address_only_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 153912 ) );
 wdc_pickup_rest_store_pek_rate( $pek_address_only_session, wdc_pickup_rest_pek_snapshot( 'pek-address-only-fp', null, null ) );
 WC()->session = null;
 $pek_address_only_provider = new WdcPickupRestPekProvider(
@@ -639,6 +647,7 @@ $pek_address_only_save = ( new CheckoutPickupPointRestController( $repo, $pek_ad
 			'carrier' => PekSettings::CARRIER_KEY,
 			'shipping_method_id' => PekSettings::PICKUP_RATE_ID,
 			'point_code' => 'address-only-wh',
+			'provider_destination_fingerprint' => 'forged-browser-fingerprint',
 			'point' => array(
 				'point_address' => 'forged browser address',
 				'lat' => 1,
@@ -649,7 +658,7 @@ $pek_address_only_save = ( new CheckoutPickupPointRestController( $repo, $pek_ad
 	)
 );
 pickup_rest_assert( 1 === count( $pek_address_only_provider->selection_queries ) && 'address-only-wh' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_code'] ?? '' ), 'PEK address-only save must fresh-validate selected warehouse.' );
-pickup_rest_assert( 'pek-address-only-fp' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['destination_fingerprint'] ?? '' ), 'PEK address-only save must persist trusted destination fingerprint.' );
+pickup_rest_assert( 'pek-address-only-fp' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['provider_destination_fingerprint'] ?? '' ) && 'country=RU|location_id=153912' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['destination_fingerprint'] ?? '' ), 'PEK address-only save must preserve provider fingerprint separately from generic location fingerprint.' );
 pickup_rest_assert( 'Россия, Москва, address-only terminal' === (string) ( $pek_address_only_save['pickup_selections'][ PekSettings::PICKUP_FAMILY ]['point_address'] ?? '' ), 'PEK address-only save must ignore forged browser presentation.' );
 
 WC()->session = new WC_Session_Handler();

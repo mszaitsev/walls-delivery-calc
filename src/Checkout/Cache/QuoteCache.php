@@ -108,6 +108,7 @@ final class QuoteCache {
 				'service_key' => (string) ( $selection['service_key'] ?? $snapshot['service_key'] ?? '' ),
 				'pickup_family' => (string) ( $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? $family ),
 				'point_code' => (string) ( $selection['point_code'] ?? $selection['point_id'] ?? $snapshot['point_code'] ?? '' ),
+				'provider_destination_fingerprint' => (string) ( $selection['provider_destination_fingerprint'] ?? $snapshot['provider_destination_fingerprint'] ?? '' ),
 				'destination_fingerprint' => (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' ),
 			);
 		}
