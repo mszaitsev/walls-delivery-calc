@@ -45,12 +45,14 @@ final class PekQuoteDiagnosticStore {
 
 	/** @param array<string,mixed> $report @return array<string,mixed> */
 	private function sanitize_report( array $report ): array {
-		$allow = array( 'checked_at', 'success', 'message', 'error_code', 'error_message', 'api_error_message', 'field_errors', 'failure_stage', 'endpoint', 'method', 'http_status', 'mode_location', 'safe_request', 'result', 'response_shape' );
+		$allow = array( 'checked_at', 'success', 'message', 'error_code', 'error_message', 'api_error_message', 'field_errors', 'failure_stage', 'endpoint', 'method', 'http_status', 'mode_location', 'safe_request', 'pricing_adjustment', 'result', 'response_shape' );
 		$safe = array();
 		foreach ( $allow as $key ) {
 			if ( array_key_exists( $key, $report ) ) {
 				if ( 'field_errors' === $key ) {
 					$safe[ $key ] = $this->field_errors( $report[ $key ] );
+				} elseif ( 'pricing_adjustment' === $key ) {
+					$safe[ $key ] = $this->pricing_adjustment( $report[ $key ] );
 				} elseif ( 'result' === $key ) {
 					$safe[ $key ] = $this->result( $report[ $key ] );
 				} elseif ( 'api_error_message' === $key ) {
@@ -94,13 +96,58 @@ final class PekQuoteDiagnosticStore {
 			return array();
 		}
 		$result = array();
-		foreach ( array( 'cost_total_rub', 'cost_total_kopecks', 'delivery_days', 'sender_branch', 'receiver_branch' ) as $key ) {
+		foreach ( array( 'carrier_cost_total_rub', 'carrier_price_kopecks', 'bag_surcharge_kopecks', 'sealing_surcharge_kopecks', 'light_cargo_surcharge_kopecks', 'final_price_rub', 'price_kopecks', 'delivery_days', 'sender_branch', 'receiver_branch' ) as $key ) {
 			if ( array_key_exists( $key, $value ) ) {
 				$result[ $key ] = $this->sanitize_value( $value[ $key ] );
 			}
 		}
+		if ( array_key_exists( 'surcharges', $value ) ) {
+			$result['surcharges'] = $this->surcharges( $value['surcharges'] );
+		}
 		if ( array_key_exists( 'services', $value ) ) {
 			$result['services'] = $this->services( $value['services'] );
+		}
+
+		return $result;
+	}
+
+	private function pricing_adjustment( mixed $value ): array {
+		if ( ! is_array( $value ) || array_is_list( $value ) ) {
+			return array();
+		}
+		$result = array();
+		foreach ( array( 'product_weight_g', 'light_cargo_weight_limit_g', 'light_cargo_eligible', 'bag_surcharge_kopecks', 'sealing_surcharge_kopecks', 'total_surcharge_kopecks', 'surcharge_applied', 'surcharge_reason' ) as $key ) {
+			if ( array_key_exists( $key, $value ) ) {
+				$result[ $key ] = $this->sanitize_value( $value[ $key ] );
+			}
+		}
+
+		return $result;
+	}
+
+	/** @return array<int,array{code:string,title:string,price_kopecks:int}> */
+	private function surcharges( mixed $value ): array {
+		if ( ! is_array( $value ) || ! array_is_list( $value ) ) {
+			return array();
+		}
+		$result = array();
+		foreach ( array_slice( $value, 0, 2 ) as $item ) {
+			if ( ! is_array( $item ) || array_is_list( $item ) ) {
+				continue;
+			}
+			$code = is_string( $item['code'] ?? null ) ? $item['code'] : '';
+			if ( ! in_array( $code, array( 'light_cargo_bag', 'light_cargo_sealing' ), true ) ) {
+				continue;
+			}
+			$price = is_numeric( $item['price_kopecks'] ?? null ) ? (int) $item['price_kopecks'] : 0;
+			if ( $price <= 0 ) {
+				continue;
+			}
+			$result[] = array(
+				'code' => $code,
+				'title' => $this->safe_text( $item['title'] ?? '', 120 ),
+				'price_kopecks' => $price,
+			);
 		}
 
 		return $result;

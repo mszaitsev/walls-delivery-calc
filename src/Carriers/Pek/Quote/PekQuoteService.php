@@ -18,6 +18,7 @@ final class PekQuoteService {
 		private PekQuoteRequestBuilder $request_builder,
 		private PekQuoteResponseParser $parser,
 		private PekQuoteMessageSanitizer $message_sanitizer,
+		private PekLightCargoSurchargePolicy $light_cargo_surcharges,
 		private ?Logger $logger = null
 	) {
 	}
@@ -34,7 +35,7 @@ final class PekQuoteService {
 			$response = $this->api->calculate_price( $payload );
 			$result = $this->parser->parse( $response, $options->mode, $safe_request, $this->api->last_response_meta() );
 
-			return $result;
+			return $result->with_light_cargo_surcharge( $this->light_cargo_surcharges->evaluate( $request->package ) );
 		} catch ( PekApiException $exception ) {
 			$context = $exception->context();
 			$result = new PekQuoteResult(

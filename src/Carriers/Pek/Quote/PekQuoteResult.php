@@ -28,14 +28,55 @@ final class PekQuoteResult {
 		public readonly string $method = '',
 		public readonly int|string $http_status = '',
 		public readonly string $api_error_message = '',
-		public readonly array $field_errors = array()
+		public readonly array $field_errors = array(),
+		public readonly int $carrier_price_kopecks = 0,
+		public readonly int $bag_surcharge_kopecks = 0,
+		public readonly int $sealing_surcharge_kopecks = 0,
+		public readonly int $light_cargo_surcharge_kopecks = 0,
+		public readonly array $surcharges = array(),
+		public readonly array $pricing_adjustment = array()
 	) {
 		if ( ! in_array( $mode, array( PekQuoteOptions::MODE_PICKUP, PekQuoteOptions::MODE_COURIER ), true ) ) {
 			throw new \InvalidArgumentException( 'PEK quote result mode is invalid.' );
 		}
-		if ( $price_kopecks < 0 || $delivery_days < 0 || '643' !== $currency_code ) {
+		if ( $price_kopecks < 0 || $carrier_price_kopecks < 0 || $bag_surcharge_kopecks < 0 || $sealing_surcharge_kopecks < 0 || $light_cargo_surcharge_kopecks < 0 || $delivery_days < 0 || '643' !== $currency_code ) {
 			throw new \InvalidArgumentException( 'PEK quote result values are invalid.' );
 		}
+	}
+
+	public function with_light_cargo_surcharge( PekLightCargoSurchargeResult $surcharge ): self {
+		$carrier_price_kopecks = $this->carrier_price_kopecks > 0 || 0 === $this->price_kopecks ? $this->carrier_price_kopecks : $this->price_kopecks;
+		$final_price_kopecks = $carrier_price_kopecks + $surcharge->total_surcharge_kopecks;
+
+		return new self(
+			$this->success,
+			$this->mode,
+			$final_price_kopecks,
+			$this->currency_code,
+			$this->delivery_days,
+			$this->sender_branch_id,
+			$this->sender_branch_title,
+			$this->receiver_branch_id,
+			$this->receiver_branch_title,
+			$this->product_type,
+			$this->services,
+			$this->safe_request,
+			$this->safe_response_meta,
+			$this->error_code,
+			$this->error_message,
+			$this->failure_stage,
+			$this->endpoint,
+			$this->method,
+			$this->http_status,
+			$this->api_error_message,
+			$this->field_errors,
+			$carrier_price_kopecks,
+			$surcharge->bag_price_kopecks,
+			$surcharge->sealing_price_kopecks,
+			$surcharge->total_surcharge_kopecks,
+			$surcharge->surcharges,
+			$surcharge->to_pricing_adjustment()
+		);
 	}
 
 	/** @return array<string,mixed> */
@@ -44,6 +85,10 @@ final class PekQuoteResult {
 			'success' => $this->success,
 			'mode' => $this->mode,
 			'price_kopecks' => $this->price_kopecks,
+			'carrier_price_kopecks' => $this->carrier_price_kopecks,
+			'bag_surcharge_kopecks' => $this->bag_surcharge_kopecks,
+			'sealing_surcharge_kopecks' => $this->sealing_surcharge_kopecks,
+			'light_cargo_surcharge_kopecks' => $this->light_cargo_surcharge_kopecks,
 			'currency_code' => $this->currency_code,
 			'delivery_days' => $this->delivery_days,
 			'sender_branch_id' => $this->sender_branch_id,
@@ -52,6 +97,8 @@ final class PekQuoteResult {
 			'receiver_branch_title' => $this->receiver_branch_title,
 			'product_type' => $this->product_type,
 			'services' => $this->services,
+			'surcharges' => $this->surcharges,
+			'pricing_adjustment' => $this->pricing_adjustment,
 			'safe_request' => $this->safe_request,
 			'safe_response_meta' => $this->safe_response_meta,
 			'error_code' => $this->error_code,

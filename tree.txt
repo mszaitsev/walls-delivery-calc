@@ -342,6 +342,8 @@ C:.
 |   |   |           PekTerminalService.php
 |   |   |
 |   |   |   \---Quote
+|   |   |           PekLightCargoSurchargePolicy.php
+|   |   |           PekLightCargoSurchargeResult.php
 |   |   |           PekQuoteCargoBuilder.php
 |   |   |           PekQuoteMessageSanitizer.php
 |   |   |           PekQuoteOptions.php

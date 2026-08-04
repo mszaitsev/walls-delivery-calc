@@ -30,6 +30,7 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
+use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
@@ -136,7 +137,7 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$pickup_provider = new PekPickupPointProvider( $terminal_service );
 	$pickup_registry = new CarrierPickupPointProviderRegistry( array( $pickup_provider ) );
 	$quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
-	$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ) );
+	$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ) );
 	$pek_admin = new PekAdminPage(
 		$settings,
 		$credentials,

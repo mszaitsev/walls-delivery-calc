@@ -51,6 +51,9 @@ final class PekSettings {
 	public const DESTINATION_TERMINAL_CACHE_TTL_KEY = 'pek_destination_terminal_cache_ttl';
 	public const LOCATION_MAPPING_TTL_DAYS_KEY = 'pek_location_mapping_ttl_days';
 	public const SMS_RELEASE_LIMIT_RUB_KEY = 'pek_sms_release_limit_rub';
+	public const LIGHT_CARGO_BAG_PRICE_RUB_KEY = 'pek_light_cargo_bag_price_rub';
+	public const LIGHT_CARGO_SEALING_PRICE_RUB_KEY = 'pek_light_cargo_sealing_price_rub';
+	public const LIGHT_CARGO_WEIGHT_LIMIT_G_KEY = 'pek_light_cargo_weight_limit_g';
 	public const LAST_DIAGNOSTIC_KEY = 'pek_last_diagnostic';
 
 	public function __construct( private SettingsRepository $settings ) {
@@ -82,6 +85,9 @@ final class PekSettings {
 			self::DESTINATION_TERMINAL_CACHE_TTL_KEY => 600,
 			self::LOCATION_MAPPING_TTL_DAYS_KEY => 30,
 			self::SMS_RELEASE_LIMIT_RUB_KEY => self::DEFAULT_SMS_RELEASE_LIMIT_RUB,
+			self::LIGHT_CARGO_BAG_PRICE_RUB_KEY => '70',
+			self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY => '20',
+			self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY => 3000,
 			self::LAST_DIAGNOSTIC_KEY => array(),
 		);
 	}
@@ -178,6 +184,26 @@ final class PekSettings {
 		return $this->clamp_int( self::SMS_RELEASE_LIMIT_RUB_KEY, self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 );
 	}
 
+	public function light_cargo_bag_price_rub(): string {
+		return $this->rub_string( self::LIGHT_CARGO_BAG_PRICE_RUB_KEY, '70' );
+	}
+
+	public function light_cargo_sealing_price_rub(): string {
+		return $this->rub_string( self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, '20' );
+	}
+
+	public function light_cargo_bag_price_kopecks(): int {
+		return $this->rub_string_to_kopecks( $this->light_cargo_bag_price_rub() );
+	}
+
+	public function light_cargo_sealing_price_kopecks(): int {
+		return $this->rub_string_to_kopecks( $this->light_cargo_sealing_price_rub() );
+	}
+
+	public function light_cargo_weight_limit_g(): int {
+		return $this->clamp_int( self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, 3000, 1, 1000000 );
+	}
+
 	/** @return array<string,mixed> */
 	public function sender_warehouse(): array {
 		return $this->sanitize_snapshot( $this->settings->get_array( self::SENDER_WAREHOUSE_KEY, array() ) );
@@ -220,6 +246,9 @@ final class PekSettings {
 		$this->settings->set( self::DESTINATION_TERMINAL_CACHE_TTL_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_CACHE_TTL_KEY ] ?? 600, 60, 3600 ) );
 		$this->settings->set( self::LOCATION_MAPPING_TTL_DAYS_KEY, $this->clamp_raw_int( $input[ self::LOCATION_MAPPING_TTL_DAYS_KEY ] ?? 30, 1, 365 ) );
 		$this->settings->set( self::SMS_RELEASE_LIMIT_RUB_KEY, $this->clamp_raw_int( $input[ self::SMS_RELEASE_LIMIT_RUB_KEY ] ?? self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 ) );
+		$this->settings->set( self::LIGHT_CARGO_BAG_PRICE_RUB_KEY, $this->sanitize_rub_setting( $input[ self::LIGHT_CARGO_BAG_PRICE_RUB_KEY ] ?? $this->light_cargo_bag_price_rub(), '70' ) );
+		$this->settings->set( self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, $this->sanitize_rub_setting( $input[ self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ] ?? $this->light_cargo_sealing_price_rub(), '20' ) );
+		$this->settings->set( self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, $this->clamp_raw_int( $input[ self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ] ?? $this->light_cargo_weight_limit_g(), 1, 1000000 ) );
 	}
 
 	/** @param array<string,mixed> $value */
@@ -292,6 +321,39 @@ final class PekSettings {
 
 	private function sanitize_key( string $value ): string {
 		return function_exists( 'sanitize_key' ) ? sanitize_key( $value ) : strtolower( preg_replace( '/[^a-z0-9_\-]/i', '', $value ) ?? '' );
+	}
+
+	private function rub_string( string $key, string $default ): string {
+		return $this->sanitize_rub_setting( $this->settings->get_string( $key, $default ), $default );
+	}
+
+	private function sanitize_rub_setting( mixed $value, string $default ): string {
+		if ( is_array( $value ) || is_object( $value ) ) {
+			return $default;
+		}
+		$value = trim( str_replace( ',', '.', (string) $value ) );
+		if ( 1 !== preg_match( '/^\d+(?:\.\d{1,2})?$/', $value ) ) {
+			return $default;
+		}
+		$kopecks = $this->rub_string_to_kopecks( $value );
+		if ( $kopecks < 0 || $kopecks > 10000000 ) {
+			return $default;
+		}
+		$rubles = intdiv( $kopecks, 100 );
+		$cents = $kopecks % 100;
+
+		return 0 === $cents ? (string) $rubles : (string) $rubles . '.' . str_pad( (string) $cents, 2, '0', STR_PAD_LEFT );
+	}
+
+	private function rub_string_to_kopecks( string $value ): int {
+		$value = trim( str_replace( ',', '.', $value ) );
+		if ( 1 !== preg_match( '/^(\d+)(?:\.(\d{1,2}))?$/', $value, $matches ) ) {
+			return 0;
+		}
+		$rubles = (int) $matches[1];
+		$kopecks = isset( $matches[2] ) ? (int) str_pad( $matches[2], 2, '0', STR_PAD_RIGHT ) : 0;
+
+		return $rubles * 100 + $kopecks;
 	}
 
 	/** @param array<string,mixed> $result */

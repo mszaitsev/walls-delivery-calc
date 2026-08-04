@@ -12,6 +12,7 @@ use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
@@ -144,7 +145,7 @@ function pek_quote_boot( array $responses, array $sensitive = array(), bool $wit
 	$http = new PekQuoteFakeHttp( $responses );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
 	$builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
-	$service = new PekQuoteService( $credentials, $api, $builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), $with_logger ? new Logger() : null );
+	$service = new PekQuoteService( $credentials, $api, $builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), $with_logger ? new Logger() : null );
 
 	return array( $settings, $http, $builder, $service );
 }
@@ -197,7 +198,7 @@ list( $settings, $http, $builder, $service ) = pek_quote_boot( array( pek_quote_
 $request = pek_quote_request();
 $pickup = new PekQuoteOptions( PekQuoteOptions::MODE_PICKUP, '2026-08-04T13:15:00', 'receiver-wh' );
 $result = $service->calculate( $request, $pickup );
-pek_quote_assert( $result->success && 123456 === $result->price_kopecks && 3 === $result->delivery_days, 'PEK quote service must parse successful type=3 calculator response.' );
+pek_quote_assert( $result->success && 123456 === $result->carrier_price_kopecks && 132456 === $result->price_kopecks && 7000 === $result->bag_surcharge_kopecks && 2000 === $result->sealing_surcharge_kopecks && 9000 === $result->light_cargo_surcharge_kopecks && 3 === $result->delivery_days, 'PEK quote service must keep carrier costTotal separate and add default store light-cargo surcharges to final price.' );
 pek_quote_assert( '/calculator/calculateprice/' === $result->endpoint && 'POST' === $result->method && 200 === $result->http_status, 'Successful PEK quote result must preserve calculator endpoint, method and HTTP status.' );
 pek_quote_assert( false === $result->services[1]['insuranceTerm'] && true === $result->services[1]['services'][0]['insuranceTerm'], 'PEK quote services must preserve insuranceTerm as Boolean including nested services.' );
 pek_quote_assert( 1 === count( $http->requests ) && 'POST' === $http->requests[0]['method'] && str_ends_with( $http->requests[0]['url'], '/calculator/calculateprice/' ), 'PEK quote must call POST /calculator/calculateprice/ exactly once.' );
@@ -207,37 +208,68 @@ pek_quote_assert( 'sender-wh' === $payload['senderWarehouseId'] && 'receiver-wh'
 pek_quote_assert( ! array_key_exists( 'pickup', $payload ) && ! array_key_exists( 'delivery', $payload ) && ! array_key_exists( 'transportingTypes', $payload ) && ! array_key_exists( 'senderCityId', $payload ) && ! array_key_exists( 'receiverCityId', $payload ) && ! array_key_exists( 'overSize', $payload ), 'PEK quote payload must avoid pickup/delivery blocks and deprecated calculator fields in pickup mode.' );
 pek_quote_assert( true === $payload['isInsurance'] && 1000.5 === $payload['isInsurancePrice'], 'PEK quote payload must use Package declared_value as mandatory insurance price with kopecks preserved.' );
 pek_quote_assert( '5400000000' === $payload['counterpart']['inn'] && '540001001' === $payload['counterpart']['kpp'] && 'client-card' === $payload['counterpart']['counterpartClientCard'] && array( 1, 3 ) === $payload['counterpart']['whoMakesCalculation'], 'PEK quote payload must include counterpart and client card contract fields.' );
-pek_quote_assert( 1.01 === $payload['cargos'][0]['weight'] && 1.01 === $payload['cargos'][0]['maxPlaceWeight'] && 0.1 === $payload['cargos'][0]['length'] && false === $payload['cargos'][0]['isHP'] && 1 === $payload['cargos'][0]['sealingPositionsCount'], 'PEK cargo builder must use one aggregate place with upward weight/dimension rounding and light-cargo sealing below 3000g product weight.' );
-pek_quote_assert( true === ( $result->safe_request['cargo_policy']['light_cargo_sealing_required'] ?? null ) && false === ( $result->safe_request['cargo_policy']['protective_transport_packaging_requested'] ?? null ) && 1 === ( $result->safe_request['cargo_policy']['sealing_positions_count'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['product_weight_g'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['total_weight_g'] ?? null ), 'PEK quote safe request must expose separated sealing/protective packaging policy diagnostics.' );
+pek_quote_assert( 1.01 === $payload['cargos'][0]['weight'] && 1.01 === $payload['cargos'][0]['maxPlaceWeight'] && 0.1 === $payload['cargos'][0]['length'] && false === $payload['cargos'][0]['isHP'] && 0 === $payload['cargos'][0]['sealingPositionsCount'], 'PEK cargo builder must use one aggregate place with upward rounding and never request bag/sealing services through PEK API.' );
+pek_quote_assert( false === ( $result->safe_request['cargo_policy']['isHP'] ?? null ) && 0 === ( $result->safe_request['cargo_policy']['sealingPositionsCount'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['product_weight_g'] ?? null ) && 1001 === ( $result->safe_request['cargo_policy']['total_weight_g'] ?? null ), 'PEK quote safe request must expose actual outgoing cargo policy without store surcharge metadata.' );
+pek_quote_assert( true === ( $result->pricing_adjustment['light_cargo_eligible'] ?? null ) && true === ( $result->pricing_adjustment['surcharge_applied'] ?? null ) && 'applied' === ( $result->pricing_adjustment['surcharge_reason'] ?? '' ) && 2 === count( $result->surcharges ), 'PEK quote result must expose separate store surcharge diagnostics and rows.' );
+pek_quote_assert( 7000 === $settings->light_cargo_bag_price_kopecks() && 2000 === $settings->light_cargo_sealing_price_kopecks() && 3000 === $settings->light_cargo_weight_limit_g(), 'PEK light-cargo surcharge settings must provide existing-install defaults without migration.' );
+$settings->save_from_admin( array( PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::CLIENT_CARD_KEY => 'client-card', PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY => '85.50', PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY => '25,25', PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY => 2500 ) );
+pek_quote_assert( 8550 === $settings->light_cargo_bag_price_kopecks() && 2525 === $settings->light_cargo_sealing_price_kopecks() && 2500 === $settings->light_cargo_weight_limit_g(), 'PEK light-cargo surcharge settings must save decimal RUB values and custom weight limit.' );
 
 foreach ( array(
-	1 => array( false, 1 ),
-	2999 => array( false, 1 ),
+	1 => array( false, 0 ),
+	2999 => array( false, 0 ),
 	3000 => array( false, 0 ),
 	3001 => array( false, 0 ),
 ) as $case_weight_g => $expected_policy ) {
 	list( $settings_case, $http_case, $builder_case, $service_case ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
 	$case_payload = $builder_case->build( pek_quote_request( (int) $case_weight_g ), $pickup );
-	pek_quote_assert( $expected_policy[0] === $case_payload['cargos'][0]['isHP'] && $expected_policy[1] === $case_payload['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo threshold must be strict for product weight ' . (string) $case_weight_g . 'g and must not request protective transport packaging.' );
+	pek_quote_assert( $expected_policy[0] === $case_payload['cargos'][0]['isHP'] && $expected_policy[1] === $case_payload['cargos'][0]['sealingPositionsCount'], 'PEK API payload must always keep isHP=false and sealingPositionsCount=0 for product weight ' . (string) $case_weight_g . 'g.' );
 }
 
 list( $settings_unknown_weight, $http_unknown_weight, $builder_unknown_weight, $service_unknown_weight ) = pek_quote_boot( array() );
 $unknown_weight_payload = $builder_unknown_weight->build( pek_quote_custom_package_request( 0, 1000, 1000 ), $pickup );
 pek_quote_assert( false === $unknown_weight_payload['cargos'][0]['isHP'] && 0 === $unknown_weight_payload['cargos'][0]['sealingPositionsCount'] && 1.0 === $unknown_weight_payload['cargos'][0]['weight'], 'Unknown product weight must not trigger light-cargo services while calculator transport weight still uses total weight.' );
+list( $settings_unknown_service, $http_unknown_service, $builder_unknown_service, $service_unknown_service ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
+$unknown_service_result = $service_unknown_service->calculate( pek_quote_custom_package_request( 0, 1000, 1000 ), $pickup );
+pek_quote_assert( 123456 === $unknown_service_result->price_kopecks && false === $unknown_service_result->pricing_adjustment['surcharge_applied'] && 'weight_not_known' === $unknown_service_result->pricing_adjustment['surcharge_reason'], 'Unknown product weight must not trigger store light-cargo surcharges.' );
 
 list( $settings_packaging_a, $http_packaging_a, $builder_packaging_a, $service_packaging_a ) = pek_quote_boot( array() );
 $packaging_a = $builder_packaging_a->build( pek_quote_custom_package_request( 2999, 1000, 3999 ), $pickup );
-pek_quote_assert( 4.0 === $packaging_a['cargos'][0]['weight'] && false === $packaging_a['cargos'][0]['isHP'] && 1 === $packaging_a['cargos'][0]['sealingPositionsCount'], 'PEK light-cargo sealing threshold must ignore packaging weight while calculator weight includes it and protective transport packaging remains disabled.' );
+pek_quote_assert( 4.0 === $packaging_a['cargos'][0]['weight'] && false === $packaging_a['cargos'][0]['isHP'] && 0 === $packaging_a['cargos'][0]['sealingPositionsCount'], 'PEK API payload must ignore store light-cargo surcharges while calculator weight includes packaging weight.' );
 list( $settings_packaging_b, $http_packaging_b, $builder_packaging_b, $service_packaging_b ) = pek_quote_boot( array() );
 $packaging_b = $builder_packaging_b->build( pek_quote_custom_package_request( 3000, 1000, 4000 ), $pickup );
 pek_quote_assert( 4.0 === $packaging_b['cargos'][0]['weight'] && false === $packaging_b['cargos'][0]['isHP'] && 0 === $packaging_b['cargos'][0]['sealingPositionsCount'], 'Product weight at 3000g must not trigger light-cargo services even when packaging increases total weight.' );
 list( $settings_items, $http_items, $builder_items, $service_items ) = pek_quote_boot( array() );
 $items_payload = $builder_items->build( pek_quote_custom_package_request( 2500, 0, 2500, 10 ), $pickup );
-pek_quote_assert( 1 === count( $items_payload['cargos'] ) && false === $items_payload['cargos'][0]['isHP'] && 1 === $items_payload['cargos'][0]['sealingPositionsCount'], 'PEK quote must keep one aggregate cargo place and one sealing position regardless of product item quantity without requesting protective transport packaging.' );
+pek_quote_assert( 1 === count( $items_payload['cargos'] ) && false === $items_payload['cargos'][0]['isHP'] && 0 === $items_payload['cargos'][0]['sealingPositionsCount'], 'PEK quote must keep one aggregate cargo place and must not turn product item quantity into PEK sealing positions.' );
+
+foreach ( array(
+	2999 => array( 109000, true, 'applied' ),
+	3000 => array( 100000, false, 'weight_at_or_above_limit' ),
+) as $weight_for_surcharge => $expected_surcharge ) {
+	list( $settings_surcharge, $http_surcharge, $builder_surcharge, $service_surcharge ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
+	$surcharge_result = $service_surcharge->calculate( pek_quote_request( (int) $weight_for_surcharge, declared_kopecks: 100000 ), $pickup );
+	pek_quote_assert( 123456 === $surcharge_result->carrier_price_kopecks && $expected_surcharge[1] === $surcharge_result->pricing_adjustment['surcharge_applied'] && $expected_surcharge[2] === $surcharge_result->pricing_adjustment['surcharge_reason'], 'PEK surcharge threshold must be strict for product weight ' . (string) $weight_for_surcharge . 'g.' );
+}
+
+list( $settings_custom_limit, $http_custom_limit, $builder_custom_limit, $service_custom_limit ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ), pek_quote_response( pek_quote_success_response() ) ) );
+$settings_custom_limit->save_from_admin( array( PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::CLIENT_CARD_KEY => 'client-card', PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY => '80', PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY => '25', PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY => 2500 ) );
+$custom_limit_applied = $service_custom_limit->calculate( pek_quote_request( 2499 ), $pickup );
+$custom_limit_blocked = $service_custom_limit->calculate( pek_quote_request( 2500 ), $pickup );
+pek_quote_assert( 133956 === $custom_limit_applied->price_kopecks && 123456 === $custom_limit_blocked->price_kopecks && 'applied' === $custom_limit_applied->pricing_adjustment['surcharge_reason'] && 'weight_at_or_above_limit' === $custom_limit_blocked->pricing_adjustment['surcharge_reason'], 'Custom PEK light-cargo limit and prices must affect only store surcharge final price.' );
+
+list( $settings_zero, $http_zero, $builder_zero, $service_zero ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
+$settings_zero->save_from_admin( array( PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::CLIENT_CARD_KEY => 'client-card', PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY => '0', PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY => '0', PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY => 3000 ) );
+$zero_surcharge = $service_zero->calculate( pek_quote_request( 1000 ), $pickup );
+pek_quote_assert( 123456 === $zero_surcharge->price_kopecks && array() === $zero_surcharge->surcharges && 'zero_surcharge' === $zero_surcharge->pricing_adjustment['surcharge_reason'], 'Zero PEK light-cargo surcharge settings must not create rows or change final price.' );
+
+list( $settings_packaging_policy, $http_packaging_policy, $builder_packaging_policy, $service_packaging_policy ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
+$packaging_policy = $service_packaging_policy->calculate( pek_quote_custom_package_request( 2999, 5000, 7999 ), $pickup );
+pek_quote_assert( 8.0 === (float) json_decode( (string) $http_packaging_policy->requests[0]['args']['body'], true )['cargos'][0]['weight'] && true === $packaging_policy->pricing_adjustment['surcharge_applied'], 'PEK surcharge eligibility must use product weight while calculator transport weight uses total weight including packaging.' );
 
 list( $settings_light_services, $http_light_services, $builder_light_services, $service_light_services ) = pek_quote_boot( array( pek_quote_response( pek_quote_light_cargo_services_response() ) ) );
 $light_services_result = $service_light_services->calculate( pek_quote_request( 1000 ), $pickup );
-pek_quote_assert( 101792 === $light_services_result->price_kopecks && pek_quote_services_contain_text( $light_services_result->services, 'Мешок малый' ) && pek_quote_services_contain_text( $light_services_result->services, 'Пломбировка' ), 'PEK quote result must use transfer costTotal as authoritative total and expose returned bag/sealing services in safe breakdown.' );
+pek_quote_assert( 101792 === $light_services_result->carrier_price_kopecks && 110792 === $light_services_result->price_kopecks && pek_quote_services_contain_text( $light_services_result->services, 'Мешок малый' ) && pek_quote_services_contain_text( $light_services_result->services, 'Пломбировка' ), 'PEK quote result must use transfer costTotal as authoritative carrier total, expose returned services separately, and add store surcharges only to final price.' );
 
 list( $settings2, $http2, $builder2, $service2 ) = pek_quote_boot( array( pek_quote_response( pek_quote_success_response() ) ) );
 $courier = new PekQuoteOptions( PekQuoteOptions::MODE_COURIER, '2026-08-04T13:15:00', '', 'Россия, Москва, улица Большая Лубянка, 2', 55.754058, 37.62049 );

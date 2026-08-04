@@ -83,7 +83,10 @@ final class PekQuoteResponseParser {
 			'',
 			$meta['endpoint'],
 			$meta['method'],
-			$meta['http_status']
+			$meta['http_status'],
+			'',
+			array(),
+			$cost_kopecks
 		);
 	}
 
