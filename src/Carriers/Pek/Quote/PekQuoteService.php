@@ -31,7 +31,7 @@ final class PekQuoteService {
 			$payload = $this->request_builder->build( $request, $options );
 			$safe_request = $this->request_builder->safe_request( $payload );
 			$response = $this->api->calculate_price( $payload );
-			$result = $this->parser->parse( $response, $options->mode, $safe_request );
+			$result = $this->parser->parse( $response, $options->mode, $safe_request, $this->api->last_response_meta() );
 
 			return $result;
 		} catch ( PekApiException $exception ) {

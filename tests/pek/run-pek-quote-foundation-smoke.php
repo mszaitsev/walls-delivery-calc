@@ -63,7 +63,7 @@ function pek_quote_success_response(): array {
 		'branchReceiverUID' => 'receiver-branch',
 		'branchReceiver' => 'Москва',
 		'transfers' => array(
-			array( 'type' => 3, 'hasError' => false, 'costTotal' => 1234.56, 'estDeliveryTime' => 3, 'services' => array( array( 'serviceType' => 'Перевозка', 'cost' => 1000 ), array( 'serviceType' => 'Страхование', 'cost' => 234.56, 'services' => array() ) ) ),
+			array( 'type' => 3, 'hasError' => false, 'costTotal' => 1234.56, 'estDeliveryTime' => 3, 'services' => array( array( 'serviceType' => 'Перевозка', 'cost' => 1000 ), array( 'serviceType' => 'Страхование', 'cost' => 234.56, 'insuranceTerm' => false, 'services' => array( array( 'serviceType' => 'Страхование', 'cost' => 0, 'insuranceTerm' => true, 'services' => null ) ) ) ) ),
 		),
 		'commonTerms' => 'safe',
 	);
@@ -120,6 +120,8 @@ $request = pek_quote_request();
 $pickup = new PekQuoteOptions( PekQuoteOptions::MODE_PICKUP, '2026-08-04T13:15:00', 'receiver-wh' );
 $result = $service->calculate( $request, $pickup );
 pek_quote_assert( $result->success && 123456 === $result->price_kopecks && 3 === $result->delivery_days, 'PEK quote service must parse successful type=3 calculator response.' );
+pek_quote_assert( '/calculator/calculateprice/' === $result->endpoint && 'POST' === $result->method && 200 === $result->http_status, 'Successful PEK quote result must preserve calculator endpoint, method and HTTP status.' );
+pek_quote_assert( false === $result->services[1]['insuranceTerm'] && true === $result->services[1]['services'][0]['insuranceTerm'], 'PEK quote services must preserve insuranceTerm as Boolean including nested services.' );
 pek_quote_assert( 1 === count( $http->requests ) && 'POST' === $http->requests[0]['method'] && str_ends_with( $http->requests[0]['url'], '/calculator/calculateprice/' ), 'PEK quote must call POST /calculator/calculateprice/ exactly once.' );
 $payload = json_decode( (string) $http->requests[0]['args']['body'], true );
 pek_quote_assert( is_array( $payload ) && '643' === $payload['currencyCode'] && array( 3 ) === $payload['types'], 'PEK quote payload must use currencyCode=643 and types=[3].' );
@@ -142,19 +144,74 @@ $bad_country = new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: '�
 $country_result = $service3->calculate( $bad_country, $pickup );
 pek_quote_assert( ! $country_result->success && 'pek_quote_country_not_supported' === $country_result->error_code && array() === $http3->requests, 'Non-RU PEK quote must fail closed before API call.' );
 
+list( $settings_root, $http_root, $builder_root, $service_root ) = pek_quote_boot( array( pek_quote_response( array( 'hasError' => true, 'errorMessage' => 'Ошибка расчёта' ) ) ) );
+$root_error = $service_root->calculate( pek_quote_request(), $pickup );
+pek_quote_assert( ! $root_error->success && 'pek_quote_root_error' === $root_error->error_code && 'quote_calculator_logical' === $root_error->failure_stage && 200 === $root_error->http_status && '/calculator/calculateprice/' === $root_error->endpoint && ! str_contains( $root_error->error_code, 'pek_has_error' ), 'Calculator root hasError must be owned by quote parser and preserve HTTP metadata.' );
+
+list( $settings_generic, $credentials_generic, $api_generic ) = ( function (): array {
+	$GLOBALS['pek_quote_options'] = array();
+	$repository = new SettingsRepository();
+	$settings = new PekSettings( $repository );
+	$credentials = new PekCredentials( $repository, new EncryptionService() );
+	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
+	$api = new PekApiClient( $settings, $credentials, new PekQuoteFakeHttp( array( pek_quote_response( array( 'hasError' => true, 'errorMessage' => 'generic failure' ) ) ) ), new PekRequestBudget( $settings ) );
+
+	return array( $settings, $credentials, $api );
+} )();
+try {
+	$api_generic->branches_all_for_warehouse( 'warehouse' );
+	pek_quote_assert( false, 'Non-calculator hasError must keep generic PekApiClient handling.' );
+} catch ( PekApiException $exception ) {
+	pek_quote_assert( 'pek_has_error' === (string) ( $exception->context()['error_code'] ?? '' ), 'Non-calculator hasError must keep generic pek_has_error.' );
+}
+
 $parser = new PekQuoteResponseParser();
+$meta = array( 'endpoint' => '/calculator/calculateprice/', 'method' => 'POST', 'http_status' => 200 );
 foreach ( array(
 	'pek_quote_ltl_transfer_missing' => array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 1, 'hasError' => false ) ) ),
 	'pek_quote_ltl_transfer_duplicate' => array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => 1, 'estDeliveryTime' => 1 ), array( 'type' => 3, 'hasError' => false, 'costTotal' => 2, 'estDeliveryTime' => 2 ) ) ),
 	'pek_quote_currency_mismatch' => array( 'hasError' => false, 'currencyCode' => '840', 'transfers' => array() ),
 	'pek_quote_cost_invalid' => array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => -1, 'estDeliveryTime' => 1 ) ) ),
 	'pek_quote_delivery_time_invalid' => array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => 1, 'estDeliveryTime' => 1.5 ) ) ),
+	'pek_quote_ltl_transfer_error' => array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'costTotal' => 1, 'estDeliveryTime' => 1 ) ) ),
+	'pek_quote_services_invalid' => array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => 1, 'estDeliveryTime' => 1, 'services' => array( array( 'insuranceTerm' => 'false' ) ) ) ) ),
 ) as $code => $response ) {
 	try {
-		$parser->parse( $response, PekQuoteOptions::MODE_PICKUP, array() );
+		$parser->parse( $response, PekQuoteOptions::MODE_PICKUP, array(), $meta );
 		pek_quote_assert( false, 'Parser must reject calculator response with ' . $code );
 	} catch ( PekApiException $exception ) {
 		pek_quote_assert( $code === (string) ( $exception->context()['error_code'] ?? '' ), 'Parser must expose stable code ' . $code );
+		pek_quote_assert( '/calculator/calculateprice/' === (string) ( $exception->context()['endpoint'] ?? '' ) && 'POST' === (string) ( $exception->context()['method'] ?? '' ) && 200 === (int) ( $exception->context()['http_status'] ?? 0 ), 'Parser failures must preserve calculator response metadata for ' . $code );
+	}
+}
+
+foreach ( array( 0, 1, 'false', null ) as $bad_has_error ) {
+	try {
+		$parser->parse( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => $bad_has_error, 'costTotal' => 1, 'estDeliveryTime' => 1 ) ) ), PekQuoteOptions::MODE_PICKUP, array(), $meta );
+		pek_quote_assert( false, 'Parser must reject non-bool transfer hasError.' );
+	} catch ( PekApiException $exception ) {
+		pek_quote_assert( 'pek_quote_ltl_transfer_error' === (string) ( $exception->context()['error_code'] ?? '' ), 'Non-bool transfer hasError must fail with stable LTL transfer code.' );
+	}
+}
+try {
+	$parser->parse( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => true, 'errorMessage' => 'bad transfer', 'costTotal' => 0, 'estDeliveryTime' => 0 ) ) ), PekQuoteOptions::MODE_PICKUP, array(), $meta );
+	pek_quote_assert( false, 'Parser must fail logical transfer hasError=true.' );
+} catch ( PekApiException $exception ) {
+	pek_quote_assert( 'pek_quote_ltl_transfer_error' === (string) ( $exception->context()['error_code'] ?? '' ) && 'quote_calculator_logical' === (string) ( $exception->context()['failure_stage'] ?? '' ), 'Transfer hasError=true must remain a logical LTL failure.' );
+}
+
+$cost_cases = array( '0' => 0, '0.01' => 1, '1.005' => 100, '1234.56' => 123456 );
+foreach ( $cost_cases as $cost => $kopecks ) {
+	$parsed = $parser->parse( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => $cost, 'estDeliveryTime' => 0, 'services' => array() ) ) ), PekQuoteOptions::MODE_PICKUP, array(), $meta );
+	pek_quote_assert( $kopecks === $parsed->price_kopecks, 'PEK quote cost conversion must keep documented PHP rounding behavior for ' . $cost );
+}
+
+foreach ( array( 0, 1, 'true', 'false', array(), (object) array() ) as $bad_insurance_term ) {
+	try {
+		$parser->parse( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array( array( 'type' => 3, 'hasError' => false, 'costTotal' => 1, 'estDeliveryTime' => 1, 'services' => array( array( 'insuranceTerm' => $bad_insurance_term ) ) ) ) ), PekQuoteOptions::MODE_PICKUP, array(), $meta );
+		pek_quote_assert( false, 'Parser must reject non-bool insuranceTerm.' );
+	} catch ( PekApiException $exception ) {
+		pek_quote_assert( 'pek_quote_services_invalid' === (string) ( $exception->context()['error_code'] ?? '' ), 'Non-bool insuranceTerm must fail services contract.' );
 	}
 }
 

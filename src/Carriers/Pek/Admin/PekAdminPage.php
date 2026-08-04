@@ -424,8 +424,43 @@ final class PekAdminPage {
 		$this->render_destination_field_errors( $report['field_errors'] ?? array() );
 		$this->render_destination_named_section( 'Mode/location', is_array( $report['mode_location'] ?? null ) ? $report['mode_location'] : array(), array( 'mode' => 'Mode', 'location_id' => 'Canonical location ID', 'country' => 'Страна', 'resolution_method' => 'Resolution method', 'mapping_state' => 'Mapping state', 'branch' => 'Branch', 'zone' => 'Zone', 'receiver_warehouse_source' => 'Receiver warehouse source' ) );
 		$this->render_destination_named_section( 'Safe request', is_array( $report['safe_request'] ?? null ) ? $report['safe_request'] : array(), array( 'currencyCode' => 'Currency', 'types' => 'Types', 'senderWarehouseId' => 'Sender warehouse ID', 'receiverWarehouseId' => 'Receiver warehouse ID', 'isPickUp' => 'isPickUp', 'isDelivery' => 'isDelivery', 'delivery_address_present' => 'Delivery address present', 'coordinates_present' => 'Coordinates present', 'plannedDateTime' => 'plannedDateTime', 'insurance_enabled' => 'Insurance enabled', 'insurance_value' => 'Insurance value', 'cargo_count' => 'Cargo count', 'counterpart_present' => 'Counterpart present', 'client_card_present' => 'Client card present', 'whoMakesCalculation' => 'whoMakesCalculation' ), array( 'senderWarehouseId', 'receiverWarehouseId' ) );
-		$this->render_destination_named_section( 'Result', is_array( $report['result'] ?? null ) ? $report['result'] : array(), array( 'cost_total_rub' => 'Cost total RUB', 'cost_total_kopecks' => 'Cost total kopecks', 'delivery_days' => 'Delivery days', 'sender_branch' => 'Sender branch', 'receiver_branch' => 'Receiver branch', 'services' => 'Service breakdown' ) );
+		$result = is_array( $report['result'] ?? null ) ? $report['result'] : array();
+		$this->render_destination_named_section( 'Result', $result, array( 'cost_total_rub' => 'Cost total RUB', 'cost_total_kopecks' => 'Cost total kopecks', 'delivery_days' => 'Delivery days', 'sender_branch' => 'Sender branch', 'receiver_branch' => 'Receiver branch' ) );
+		$this->render_quote_services( is_array( $result['services'] ?? null ) ? $result['services'] : array() );
 		$this->render_destination_named_section( 'Response shape', is_array( $report['response_shape'] ?? null ) ? $report['response_shape'] : array(), array( 'root_type' => 'Root type', 'root_keys' => 'Root keys' ) );
+	}
+
+	/** @param array<int,mixed> $services */
+	private function render_quote_services( array $services, int $depth = 0 ): void {
+		if ( array() === $services || $depth > 3 ) {
+			return;
+		}
+		echo 0 === $depth ? '<h4>' . esc_html( 'Service breakdown' ) . '</h4>' : '';
+		echo '<table class="widefat striped" style="max-width:1180px;"><tbody>';
+		foreach ( array_slice( $services, 0, 100 ) as $service ) {
+			if ( ! is_array( $service ) || array_is_list( $service ) ) {
+				continue;
+			}
+			$parts = array();
+			foreach ( array(
+				'serviceType' => 'Type',
+				'senderCity' => 'Sender city',
+				'cost' => 'Cost',
+				'info' => 'Info',
+				'insuranceTerm' => 'insuranceTerm',
+			) as $key => $label ) {
+				if ( array_key_exists( $key, $service ) ) {
+					$parts[] = $label . ': ' . $this->destination_report_value( $service[ $key ], $key );
+				}
+			}
+			echo '<tr><td>' . esc_html( str_repeat( '  ', $depth ) . implode( '; ', $parts ) ) . '</td></tr>';
+			if ( is_array( $service['services'] ?? null ) ) {
+				echo '<tr><td>';
+				$this->render_quote_services( $service['services'], $depth + 1 );
+				echo '</td></tr>';
+			}
+		}
+		echo '</tbody></table>';
 	}
 
 	/** @param array<string,mixed> $report */

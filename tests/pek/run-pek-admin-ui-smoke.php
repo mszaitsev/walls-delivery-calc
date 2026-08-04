@@ -407,4 +407,32 @@ $sanitized_report = $destination_report_store->consume_for_current_user();
 $sanitized_json = wp_json_encode( $sanitized_report );
 pek_ui_assert( str_contains( $sanitized_json, 'safe-point' ) && str_contains( $sanitized_json, 'safe api message' ) && 'safe_field' === (string) ( $sanitized_report['field_errors'][0]['field'] ?? '' ) && str_contains( $sanitized_json, 'safe message' ) && ! str_contains( $sanitized_json, 'RejectedValue' ) && ! str_contains( $sanitized_json, 'AttemptedValue' ) && ! str_contains( $sanitized_json, 'must not survive' ) && ! str_contains( $sanitized_json, 'Authorization' ) && ! str_contains( $sanitized_json, 'api_key' ) && ! str_contains( $sanitized_json, 'raw_error' ) && ! str_contains( $sanitized_json, 'raw_response' ) && ! str_contains( $sanitized_json, 'credentials' ) && ! str_contains( $sanitized_json, 'secret' ), 'PEK destination diagnostic report store must preserve safe api_error_message/field_errors and recursively sanitize unsafe keys.' );
 
+$quote_report_store->save_for_current_user(
+	array(
+		'checked_at' => '2026-08-04 12:00:00',
+		'success' => true,
+		'message' => 'Расчёт ПЭК успешно выполнен.',
+		'endpoint' => '/calculator/calculateprice/',
+		'method' => 'POST',
+		'http_status' => 200,
+		'result' => array(
+			'cost_total_rub' => 1234.56,
+			'cost_total_kopecks' => 123456,
+			'delivery_days' => 3,
+			'sender_branch' => 'Новосибирск',
+			'receiver_branch' => 'Москва',
+			'services' => array(
+				array( 'serviceType' => 'Страхование', 'cost' => 50, 'info' => 'Страхование:', 'insuranceTerm' => false, 'services' => array( array( 'serviceType' => 'Страхование', 'insuranceTerm' => true, 'services' => null ) ) ),
+			),
+		),
+	)
+);
+$stored_quote = $quote_report_store->consume_for_current_user();
+pek_ui_assert( false === $stored_quote['result']['services'][0]['insuranceTerm'] && true === $stored_quote['result']['services'][0]['services'][0]['insuranceTerm'], 'PEK quote diagnostic store must preserve Boolean insuranceTerm values including false.' );
+$quote_report_store->save_for_current_user( $stored_quote );
+ob_start();
+$page->render_embedded( $service );
+$quote_html = (string) ob_get_clean();
+pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Service breakdown' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ), 'PEK quote diagnostic UI must render endpoint/status and Boolean insuranceTerm as да/нет.' );
+
 echo "PEK admin UI smoke OK\n";
