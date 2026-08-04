@@ -11,6 +11,8 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -27,6 +29,10 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -189,8 +195,13 @@ $location_repository = new LocationRepository( $wpdb );
 $location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $api, $settings );
 $terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
 $pickup_provider = new PekPickupPointProvider( $terminal_service );
-$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, $credentials, new Logger() );
+$pickup_registry = new CarrierPickupPointProviderRegistry( array( $pickup_provider ) );
+$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( $pickup_registry, $location_repository, $terminal_service, $settings, $credentials, new Logger() );
 $destination_report_store = new PekDestinationPickupDiagnosticStore();
+$quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
+$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new Logger() );
+$quote_diagnostic_service = new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service );
+$quote_report_store = new PekQuoteDiagnosticStore();
 $page = new PekAdminPage(
 	$settings,
 	$credentials,
@@ -198,7 +209,9 @@ $page = new PekAdminPage(
 	new PekSenderWarehouseService( $api, $settings, $cache ),
 	$notice_store,
 	$destination_diagnostic_service,
-	$destination_report_store
+	$destination_report_store,
+	$quote_diagnostic_service,
+	$quote_report_store
 );
 $service = DeliveryService::from_array( array( 'id' => 5, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => 'ПЭК' ) );
 
@@ -221,6 +234,7 @@ pek_ui_assert( ! str_contains( $html, 'ПЭК не подтвердил выбр
 pek_ui_assert( ! str_contains( $html, '&quot;products&quot;' ) && ! str_contains( $html, '{&quot;endpoint&quot;' ), 'PEK diagnostic checks must not render as raw nested JSON.' );
 pek_ui_assert( str_contains( $html, 'Saved &lt;safe&gt;' ), 'PEK admin notice must render escaped content.' );
 pek_ui_assert( 0 === count( $ui_http->requests ), 'Normal PEK admin page render must not call PEK API.' );
+pek_ui_assert( str_contains( $html, 'Диагностика расчёта стоимости ПЭК' ) && str_contains( $html, 'name="wdc_delivery_services_action" value="diagnose_pek_quote"' ) && str_contains( $html, 'pek_quote_planned_datetime' ), 'PEK admin UI must expose explicit quote diagnostic form without normal-render API calls.' );
 pek_ui_assert( str_contains( $html, '>free<' ), 'PEK admin UI must render sender warehouse source.' );
 pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );

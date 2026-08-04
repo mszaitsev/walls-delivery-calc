@@ -100,6 +100,26 @@ final class PekApiClient {
 		return $this->expect_nearest_departments_response( $result, 'pek_unexpected_destination_nearest_departments' );
 	}
 
+	/** @param array<string,mixed> $payload @return array<string,mixed> */
+	public function calculate_price( array $payload ): array {
+		$result = $this->call( 'POST', '/calculator/calculateprice/', $payload );
+		if ( ! is_array( $result ) || array() === $result || array_is_list( $result ) ) {
+			throw new PekApiException(
+				'ПЭК вернул неожиданную структуру расчёта стоимости.',
+				array(
+					'endpoint' => '/calculator/calculateprice/',
+					'error_code' => 'pek_unexpected_calculate_price_response',
+					'method' => 'POST',
+					'http_status' => (int) ( $this->last_response_meta['http_status'] ?? 200 ),
+					'failure_stage' => 'quote_calculator_contract',
+					'response_shape' => $this->response_shape( $result ),
+				)
+			);
+		}
+
+		return $result;
+	}
+
 	/** @param array<string,mixed> $payload */
 	private function call( string $method, string $path, array $payload ): mixed {
 		$this->last_response_meta = array();
@@ -486,6 +506,14 @@ final class PekApiClient {
 				'http' => 'destination_terminal_http',
 				'logical' => 'destination_terminal_logical',
 				default => 'destination_terminal_contract',
+			};
+		}
+		if ( str_contains( $path, '/calculator/calculateprice/' ) ) {
+			return match ( $kind ) {
+				'transport' => 'quote_calculator_transport',
+				'http' => 'quote_calculator_http',
+				'logical' => 'quote_calculator_logical',
+				default => 'quote_calculator_contract',
 			};
 		}
 

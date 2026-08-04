@@ -12,6 +12,8 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -28,6 +30,10 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
@@ -127,14 +133,19 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $GLOBALS['wpdb'] ), $api, $settings );
 	$terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $GLOBALS['wpdb'] ), $settings );
 	$pickup_provider = new PekPickupPointProvider( $terminal_service );
+	$pickup_registry = new CarrierPickupPointProviderRegistry( array( $pickup_provider ) );
+	$quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
+	$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser() );
 	$pek_admin = new PekAdminPage(
 		$settings,
 		$credentials,
 		new PekConnectionDiagnosticService( $settings, $credentials, $api ),
 		new PekSenderWarehouseService( $api, $settings, $cache ),
 		new PekAdminNoticeStore(),
-		new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, $credentials ),
-		new PekDestinationPickupDiagnosticStore()
+		new PekDestinationPickupDiagnosticService( $pickup_registry, $location_repository, $terminal_service, $settings, $credentials ),
+		new PekDestinationPickupDiagnosticStore(),
+		new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service ),
+		new PekQuoteDiagnosticStore()
 	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
 	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin ) as $property => $value ) {

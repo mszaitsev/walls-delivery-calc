@@ -76,6 +76,8 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -94,6 +96,10 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
@@ -425,6 +431,12 @@ final class Plugin {
 		$this->container->register( CarrierPickupPointProviderRegistry::class, fn(): CarrierPickupPointProviderRegistry => new CarrierPickupPointProviderRegistry( array( $this->container->get( PekPickupPointProvider::class ) ) ) );
 		$this->container->register( PekDestinationPickupDiagnosticStore::class, fn(): PekDestinationPickupDiagnosticStore => new PekDestinationPickupDiagnosticStore() );
 		$this->container->register( PekDestinationPickupDiagnosticService::class, fn(): PekDestinationPickupDiagnosticService => new PekDestinationPickupDiagnosticService( $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( LocationRepository::class ), $this->container->get( PekTerminalService::class ), $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( PekQuoteCargoBuilder::class, fn(): PekQuoteCargoBuilder => new PekQuoteCargoBuilder() );
+		$this->container->register( PekQuoteRequestBuilder::class, fn(): PekQuoteRequestBuilder => new PekQuoteRequestBuilder( $this->container->get( PekSettings::class ), $this->container->get( PekQuoteCargoBuilder::class ) ) );
+		$this->container->register( PekQuoteResponseParser::class, fn(): PekQuoteResponseParser => new PekQuoteResponseParser() );
+		$this->container->register( PekQuoteService::class, fn(): PekQuoteService => new PekQuoteService( $this->container->get( PekCredentials::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekQuoteRequestBuilder::class ), $this->container->get( PekQuoteResponseParser::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( PekQuoteDiagnosticStore::class, fn(): PekQuoteDiagnosticStore => new PekQuoteDiagnosticStore() );
+		$this->container->register( PekQuoteDiagnosticService::class, fn(): PekQuoteDiagnosticService => new PekQuoteDiagnosticService( $this->container->get( LocationRepository::class ), $this->container->get( PekLocationResolver::class ), $this->container->get( PekAddressBuilder::class ), $this->container->get( PekSettings::class ), $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( PekQuoteService::class ) ) );
 		$this->container->register( JetLogisticCityNameNormalizer::class, fn(): JetLogisticCityNameNormalizer => new JetLogisticCityNameNormalizer() );
 		$this->container->register( JetLogisticRegionNameNormalizer::class, fn(): JetLogisticRegionNameNormalizer => new JetLogisticRegionNameNormalizer() );
 		$this->container->register( JetLogisticCitiesCsvClient::class, fn(): JetLogisticCitiesCsvClient => new JetLogisticCitiesCsvClient() );
@@ -835,7 +847,7 @@ final class Plugin {
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
 		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticCitiesCsvClient::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
-		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ), $this->container->get( PekDestinationPickupDiagnosticService::class ), $this->container->get( PekDestinationPickupDiagnosticStore::class ) ) );
+		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ), $this->container->get( PekDestinationPickupDiagnosticService::class ), $this->container->get( PekDestinationPickupDiagnosticStore::class ), $this->container->get( PekQuoteDiagnosticService::class ), $this->container->get( PekQuoteDiagnosticStore::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(

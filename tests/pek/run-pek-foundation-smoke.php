@@ -228,6 +228,7 @@ $http = new PekFakeHttp( array(
 	pek_json_response( array( array( 'name' => 'ООО' ) ) ),
 	pek_json_response( array( 'freeDepartments' => array(), 'paidDepartments' => array() ) ),
 	pek_json_response( array( 'branches' => array() ) ),
+	pek_json_response( array( 'hasError' => false, 'currencyCode' => '643', 'transfers' => array() ) ),
 ) );
 $api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
 $api->types_of_delivery_all();
@@ -235,9 +236,11 @@ $api->branches_country();
 $api->legal_form_types();
 $api->nearest_departments( 'Новосибирск' );
 $api->branches_all_for_warehouse( 'wh-1' );
+$api->calculate_price( array( 'currencyCode' => '643', 'types' => array( 3 ) ) );
 $methods = array_column( $http->requests, 'method' );
-pek_assert( $methods === array( 'GET', 'POST', 'POST', 'POST', 'POST' ), 'PEK typed API methods must use GET for typesOfDelivery and POST for the other foundation methods.' );
+pek_assert( $methods === array( 'GET', 'POST', 'POST', 'POST', 'POST', 'POST' ), 'PEK typed API methods must use GET for typesOfDelivery and POST for the other foundation methods including calculator.' );
 pek_assert( $http->requests[0]['url'] === PekSettings::BASE_URL . '/typesOfDelivery/all/' && ! isset( $http->requests[0]['args']['body'] ) && $http->requests[0]['args']['headers']['Content-Type'] === 'application/json;charset=utf-8', 'PEK GET request must have official URL, JSON Content-Type header and no body.' );
+pek_assert( $http->requests[5]['url'] === PekSettings::BASE_URL . '/calculator/calculateprice/' && 'POST' === $http->requests[5]['method'], 'PEK calculate_price must use typed POST /calculator/calculateprice/.' );
 foreach ( array_slice( $http->requests, 1 ) as $request ) {
 	pek_assert( str_starts_with( $request['url'], 'https://' ) && true === $request['args']['sslverify'], 'PEK requests must use HTTPS and sslverify.' );
 	pek_assert( $request['args']['headers']['Content-Type'] === 'application/json;charset=utf-8' && $request['args']['headers']['Accept'] === 'application/json' && $request['args']['headers']['Accept-Encoding'] === 'gzip', 'PEK POST JSON headers must match protocol.' );
@@ -250,7 +253,7 @@ try {
 	$method->invoke( $api, 'PATCH', '/typesOfDelivery/all/', array() );
 	pek_assert( false, 'PEK invalid HTTP method must be rejected before transport.' );
 } catch ( PekApiException $exception ) {
-	pek_assert( ( $exception->context()['error_code'] ?? '' ) === 'pek_invalid_http_method' && count( $http->requests ) === 5, 'PEK invalid method must expose stable error and avoid network.' );
+	pek_assert( ( $exception->context()['error_code'] ?? '' ) === 'pek_invalid_http_method' && count( $http->requests ) === 6, 'PEK invalid method must expose stable error and avoid network.' );
 }
 
 foreach ( array(
@@ -644,7 +647,7 @@ pek_assert( ! str_contains( $plugin_source, 'DateFramework' ) && ! str_contains(
 $carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 800 );
 pek_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK must not be registered in CarrierRegistry.' );
 pek_assert( ! str_contains( $plugin_source, 'PekShipmentAdapter' ) && ! str_contains( $plugin_source, 'PekShipmentPersistenceMapper' ) && ! str_contains( $plugin_source, 'PekShipmentModalExtension' ) && ! str_contains( $plugin_source, 'PekShipmentDocumentProvider' ), 'PEK must not be registered in Shipment Framework registries.' );
-pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ) && str_contains( $shipment_manifest, "'pek.admin-routing'" ) && str_contains( $shipment_manifest, "'pek.admin-ui'" ) && str_contains( $shipment_manifest, "'pek.warehouse-datetime'" ), 'PEK mandatory smokes must be in shipment regression manifest.' );
+pek_assert( str_contains( $shipment_manifest, "'pek.foundation'" ) && str_contains( $shipment_manifest, "'pek.admin-routing'" ) && str_contains( $shipment_manifest, "'pek.admin-ui'" ) && str_contains( $shipment_manifest, "'pek.warehouse-datetime'" ) && str_contains( $shipment_manifest, "'pek.quote-foundation'" ), 'PEK mandatory smokes must be in shipment regression manifest.' );
 $settings->save_diagnostic_result(
 	array(
 		'checked_at' => '2026-08-03 01:13:52',
@@ -658,6 +661,6 @@ pek_assert( $sanitized_report['checked_at'] === '2026-08-03 01:13:52' && $saniti
 pek_assert( $sanitized_report['phone'] === '[redacted-phone]' && $sanitized_report['message'] === 'Позвонить [redacted-phone]', 'PEK diagnostic sanitation must keep phone redaction for real phone numbers.' );
 $redacted = $settings->last_diagnostic();
 pek_assert( ! str_contains( json_encode( $redacted, JSON_UNESCAPED_UNICODE ) ?: '', 'secret-key' ), 'PEK normalized diagnostic must not contain API key.' );
-pek_assert( count( $http->requests ) === 5 && count( $diag_http->requests ) === 3 && count( $prod_like_http->requests ) === 4, 'PEK smoke must use fake HTTP only and perform no production network calls.' );
+pek_assert( count( $http->requests ) === 6 && count( $diag_http->requests ) === 3 && count( $prod_like_http->requests ) === 4, 'PEK smoke must use fake HTTP only and perform no production network calls.' );
 
 echo "PEK foundation smoke OK\n";
