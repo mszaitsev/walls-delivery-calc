@@ -1,0 +1,114 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Carriers\Pek\Quote;
+
+defined( 'ABSPATH' ) || exit;
+
+final class PekQuoteResult {
+	/** @param array<int,array<string,mixed>> $services @param array<string,mixed> $safe_request @param array<string,mixed> $safe_response_meta @param array<int,array{field:string,messages:array<int,string>}> $field_errors */
+	public function __construct(
+		public readonly bool $success,
+		public readonly string $mode,
+		public readonly int $price_kopecks = 0,
+		public readonly string $currency_code = '643',
+		public readonly int $delivery_days = 0,
+		public readonly string $sender_branch_id = '',
+		public readonly string $sender_branch_title = '',
+		public readonly string $receiver_branch_id = '',
+		public readonly string $receiver_branch_title = '',
+		public readonly int $product_type = 3,
+		public readonly array $services = array(),
+		public readonly array $safe_request = array(),
+		public readonly array $safe_response_meta = array(),
+		public readonly string $error_code = '',
+		public readonly string $error_message = '',
+		public readonly string $failure_stage = '',
+		public readonly string $endpoint = '',
+		public readonly string $method = '',
+		public readonly int|string $http_status = '',
+		public readonly string $api_error_message = '',
+		public readonly array $field_errors = array(),
+		public readonly int $carrier_price_kopecks = 0,
+		public readonly int $bag_surcharge_kopecks = 0,
+		public readonly int $sealing_surcharge_kopecks = 0,
+		public readonly int $light_cargo_surcharge_kopecks = 0,
+		public readonly array $surcharges = array(),
+		public readonly array $pricing_adjustment = array()
+	) {
+		if ( ! in_array( $mode, array( PekQuoteOptions::MODE_PICKUP, PekQuoteOptions::MODE_COURIER ), true ) ) {
+			throw new \InvalidArgumentException( 'PEK quote result mode is invalid.' );
+		}
+		if ( $price_kopecks < 0 || $carrier_price_kopecks < 0 || $bag_surcharge_kopecks < 0 || $sealing_surcharge_kopecks < 0 || $light_cargo_surcharge_kopecks < 0 || $delivery_days < 0 || '643' !== $currency_code ) {
+			throw new \InvalidArgumentException( 'PEK quote result values are invalid.' );
+		}
+	}
+
+	public function with_light_cargo_surcharge( PekLightCargoSurchargeResult $surcharge ): self {
+		$carrier_price_kopecks = $this->carrier_price_kopecks > 0 || 0 === $this->price_kopecks ? $this->carrier_price_kopecks : $this->price_kopecks;
+		$final_price_kopecks = $carrier_price_kopecks + $surcharge->total_surcharge_kopecks;
+
+		return new self(
+			$this->success,
+			$this->mode,
+			$final_price_kopecks,
+			$this->currency_code,
+			$this->delivery_days,
+			$this->sender_branch_id,
+			$this->sender_branch_title,
+			$this->receiver_branch_id,
+			$this->receiver_branch_title,
+			$this->product_type,
+			$this->services,
+			$this->safe_request,
+			$this->safe_response_meta,
+			$this->error_code,
+			$this->error_message,
+			$this->failure_stage,
+			$this->endpoint,
+			$this->method,
+			$this->http_status,
+			$this->api_error_message,
+			$this->field_errors,
+			$carrier_price_kopecks,
+			$surcharge->bag_price_kopecks,
+			$surcharge->sealing_price_kopecks,
+			$surcharge->total_surcharge_kopecks,
+			$surcharge->surcharges,
+			$surcharge->to_pricing_adjustment()
+		);
+	}
+
+	/** @return array<string,mixed> */
+	public function to_array(): array {
+		return array(
+			'success' => $this->success,
+			'mode' => $this->mode,
+			'price_kopecks' => $this->price_kopecks,
+			'carrier_price_kopecks' => $this->carrier_price_kopecks,
+			'bag_surcharge_kopecks' => $this->bag_surcharge_kopecks,
+			'sealing_surcharge_kopecks' => $this->sealing_surcharge_kopecks,
+			'light_cargo_surcharge_kopecks' => $this->light_cargo_surcharge_kopecks,
+			'currency_code' => $this->currency_code,
+			'delivery_days' => $this->delivery_days,
+			'sender_branch_id' => $this->sender_branch_id,
+			'sender_branch_title' => $this->sender_branch_title,
+			'receiver_branch_id' => $this->receiver_branch_id,
+			'receiver_branch_title' => $this->receiver_branch_title,
+			'product_type' => $this->product_type,
+			'services' => $this->services,
+			'surcharges' => $this->surcharges,
+			'pricing_adjustment' => $this->pricing_adjustment,
+			'safe_request' => $this->safe_request,
+			'safe_response_meta' => $this->safe_response_meta,
+			'error_code' => $this->error_code,
+			'error_message' => $this->error_message,
+			'failure_stage' => $this->failure_stage,
+			'endpoint' => $this->endpoint,
+			'method' => $this->method,
+			'http_status' => $this->http_status,
+			'api_error_message' => $this->api_error_message,
+			'field_errors' => $this->field_errors,
+		);
+	}
+}

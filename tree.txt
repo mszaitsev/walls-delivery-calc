@@ -312,6 +312,8 @@ C:.
 |   |   |   |       PekAdminPage.php
 |   |   |   |       PekDestinationPickupDiagnosticService.php
 |   |   |   |       PekDestinationPickupDiagnosticStore.php
+|   |   |   |       PekQuoteDiagnosticService.php
+|   |   |   |       PekQuoteDiagnosticStore.php
 |   |   |   |
 |   |   |   +---Api
 |   |   |   |       PekApiClient.php
@@ -331,13 +333,24 @@ C:.
 |   |   |   +---Installation
 |   |   |   |       PekSchemaIntegrityService.php
 |   |   |   |
-|   |   |   \---Pickup
+|   |   |   +---Pickup
 |   |   |           PekCargoConstraintsConverter.php
 |   |   |           PekDestinationTerminalRequest.php
 |   |   |           PekDestinationTerminalSearchCache.php
 |   |   |           PekPickupPointProvider.php
 |   |   |           PekTerminalRepository.php
 |   |   |           PekTerminalService.php
+|   |   |
+|   |   |   \---Quote
+|   |   |           PekLightCargoSurchargePolicy.php
+|   |   |           PekLightCargoSurchargeResult.php
+|   |   |           PekQuoteCargoBuilder.php
+|   |   |           PekQuoteMessageSanitizer.php
+|   |   |           PekQuoteOptions.php
+|   |   |           PekQuoteRequestBuilder.php
+|   |   |           PekQuoteResponseParser.php
+|   |   |           PekQuoteResult.php
+|   |   |           PekQuoteService.php
 |   |   |
 |   |   +---Registry
 |   |   |       CarrierRegistry.php
@@ -987,6 +1000,7 @@ C:.
     |       run-pek-foundation-smoke.php
     |       run-pek-geography-smoke.php
     |       run-pek-pickup-provider-smoke.php
+    |       run-pek-quote-foundation-smoke.php
     |       run-pek-schema-integrity-smoke.php
     |       run-pek-warehouse-datetime-smoke.php
     |

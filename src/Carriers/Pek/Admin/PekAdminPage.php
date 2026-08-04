@@ -19,6 +19,7 @@ final class PekAdminPage {
 		'search_pek_sender_warehouse',
 		'select_pek_sender_warehouse',
 		'diagnose_pek_destination_pickup',
+		'diagnose_pek_quote',
 	);
 
 	public function __construct(
@@ -28,7 +29,9 @@ final class PekAdminPage {
 		private PekSenderWarehouseService $warehouses,
 		private PekAdminNoticeStore $notices,
 		private PekDestinationPickupDiagnosticService $destination_diagnostics,
-		private PekDestinationPickupDiagnosticStore $destination_reports
+		private PekDestinationPickupDiagnosticStore $destination_reports,
+		private PekQuoteDiagnosticService $quote_diagnostics,
+		private PekQuoteDiagnosticStore $quote_reports
 	) {
 	}
 
@@ -63,6 +66,11 @@ final class PekAdminPage {
 				$result = $this->destination_diagnostics->run( $post );
 				$this->destination_reports->save_for_current_user( $result );
 				$notice = array( 'type' => $result['success'] ? 'success' : 'warning', 'message' => (string) ( $result['message'] ?? 'Диагностика направления ПЭК выполнена.' ) );
+			} elseif ( 'diagnose_pek_quote' === $action ) {
+				$this->quote_reports->clear_for_current_user();
+				$result = $this->quote_diagnostics->run( $post );
+				$this->quote_reports->save_for_current_user( $result );
+				$notice = array( 'type' => $result['success'] ? 'success' : 'warning', 'message' => $result['success'] ? 'Расчёт ПЭК успешно выполнен.' : 'Расчёт ПЭК завершился ошибкой. Подробности приведены в диагностическом отчёте.' );
 			}
 		} catch ( \Throwable $exception ) {
 			$notice = array( 'type' => 'error', 'message' => 'Не удалось выполнить действие ПЭК: ' . $this->safe_message( $exception->getMessage() ) );
@@ -80,6 +88,8 @@ final class PekAdminPage {
 		$diagnostic = $this->settings->last_diagnostic();
 		$search = $this->warehouses->last_search_for_current_user();
 		$destination_report = $this->destination_reports->consume_for_current_user();
+		$quote_report = $this->quote_reports->consume_for_current_user();
+		$quote_default = $this->quote_diagnostics->default_planned_datetime();
 		?>
 		<?php $this->render_notice( $notice ); ?>
 		<h3><?php echo esc_html__( 'Настройки ПЭК', 'walls-delivery-calc' ); ?></h3>
@@ -113,6 +123,10 @@ final class PekAdminPage {
 				<?php $this->text_row( PekSettings::SENDER_EMAIL_KEY, 'Email', $this->settings->sender_email() ); ?>
 				<?php $this->text_row( PekSettings::CLIENT_CARD_KEY, 'Номер карты клиента ПЭК', $this->settings->client_card() ); ?>
 				<?php $this->text_row( PekSettings::DEFAULT_CARGO_DESCRIPTION_KEY, 'Описание груза по умолчанию', $this->settings->default_cargo_description() ); ?>
+				<tr><th colspan="2"><h4><?php echo esc_html__( 'Доплаты для лёгких грузов', 'walls-delivery-calc' ); ?></h4><p class="description"><?php echo esc_html__( 'Доплаты применяются по весу товаров без учёта упаковочного веса. Они добавляются магазином к стоимости, возвращённой ПЭК. В запрос ПЭК мешок и пломбировка не передаются. Порог применяется строго: вес должен быть менее заданного значения.', 'walls-delivery-calc' ); ?></p></th></tr>
+				<?php $this->text_row( PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY, 'Стоимость мешка, руб.', $this->settings->light_cargo_bag_price_rub() ); ?>
+				<?php $this->text_row( PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, 'Стоимость пломбировки, руб.', $this->settings->light_cargo_sealing_price_rub() ); ?>
+				<?php $this->number_row( PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, 'Применять при весе товаров менее, г', $this->settings->light_cargo_weight_limit_g(), 1, 1000000 ); ?>
 				<?php $this->number_row( PekSettings::WAREHOUSE_SEARCH_RADIUS_KEY, 'Радиус поиска склада, км', $this->settings->warehouse_search_radius(), 1, 500 ); ?>
 				<?php $this->number_row( PekSettings::WAREHOUSE_SEARCH_LIMIT_KEY, 'Лимит результатов поиска', $this->settings->warehouse_search_limit(), 1, 50 ); ?>
 				<?php $this->number_row( PekSettings::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY, 'Радиус поиска терминалов назначения, км', $this->settings->pek_destination_terminal_search_radius(), 1, 500 ); ?>
@@ -167,6 +181,28 @@ final class PekAdminPage {
 			<?php submit_button( __( 'Проверить направление и терминалы ПЭК', 'walls-delivery-calc' ), 'secondary' ); ?>
 		</form>
 		<?php $this->render_destination_diagnostic_report( $destination_report ); ?>
+		<h3><?php echo esc_html__( 'Диагностика расчёта стоимости ПЭК', 'walls-delivery-calc' ); ?></h3>
+		<p class="description"><?php echo esc_html__( 'Закрытая live диагностика calculator/calculateprice: не включает PEK checkout rates, не сохраняет выбор терминала и выполняет API call только после нажатия кнопки.', 'walls-delivery-calc' ); ?></p>
+		<form method="post" style="max-width:760px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="diagnose_pek_quote">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<table class="form-table" role="presentation">
+				<?php $this->number_row( 'pek_quote_location_id', 'Canonical location ID', 0, 1, 999999999 ); ?>
+				<?php $this->select_row( 'pek_quote_mode', 'Режим расчёта', 'pickup', array( 'pickup' => 'Самопривоз → терминал выдачи', 'courier' => 'Самопривоз → курьерская доставка' ) ); ?>
+				<?php $this->text_row( 'pek_quote_receiver_warehouse_id', 'Receiver warehouse ID (optional)', '' ); ?>
+				<?php $this->text_row( 'pek_quote_delivery_address', 'Full courier address override (optional)', '' ); ?>
+				<?php $this->text_row( 'pek_quote_planned_datetime', 'Planned date/time', (string) $quote_default['planned'] ); ?>
+				<?php $this->decimal_row( 'pek_quote_weight_kg', 'Вес товаров без упаковки, кг', 1, 0.001, 100000, 0.001 ); ?>
+				<?php $this->decimal_row( 'pek_quote_length_cm', 'Длина, см', 10, 0.1, 2000, 0.1 ); ?>
+				<?php $this->decimal_row( 'pek_quote_width_cm', 'Ширина, см', 10, 0.1, 2000, 0.1 ); ?>
+				<?php $this->decimal_row( 'pek_quote_height_cm', 'Высота, см', 10, 0.1, 2000, 0.1 ); ?>
+				<?php $this->decimal_row( 'pek_quote_declared_value_rub', 'Объявленная ценность товаров, руб.', 1000, 0.01, 999999999, 0.01 ); ?>
+			</table>
+			<?php submit_button( __( 'Рассчитать стоимость ПЭК', 'walls-delivery-calc' ), 'secondary' ); ?>
+		</form>
+		<?php $this->render_quote_diagnostic_report( $quote_report ); ?>
 		<?php
 	}
 
@@ -366,6 +402,87 @@ final class PekAdminPage {
 				echo '<li>' . esc_html( $message ) . '</li>';
 			}
 			echo '</ul></td></tr>';
+		}
+		echo '</tbody></table>';
+	}
+
+	/** @param array<string,mixed> $report */
+	private function render_quote_diagnostic_report( array $report ): void {
+		if ( array() === $report ) {
+			return;
+		}
+		echo '<table class="widefat striped" style="max-width:1180px;"><tbody>';
+		foreach ( array( 'checked_at' => 'Проверено', 'success' => 'Статус', 'message' => 'Сообщение', 'error_code' => 'Код ошибки', 'error_message' => 'Ошибка', 'api_error_message' => 'Ошибка ПЭК', 'failure_stage' => 'Этап', 'endpoint' => 'Endpoint', 'http_status' => 'HTTP status' ) as $key => $label ) {
+			if ( ! array_key_exists( $key, $report ) ) {
+				continue;
+			}
+			$value = $this->destination_report_value( $report[ $key ], $key, $report );
+			if ( '—' === $value && ! in_array( $key, array( 'error_code' ), true ) ) {
+				continue;
+			}
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>';
+			echo 'error_code' === $key ? '<code>' . esc_html( $value ) . '</code>' : esc_html( $value );
+			echo '</td></tr>';
+		}
+		echo '</tbody></table>';
+		$this->render_destination_field_errors( $report['field_errors'] ?? array() );
+		$this->render_destination_named_section( 'Mode/location', is_array( $report['mode_location'] ?? null ) ? $report['mode_location'] : array(), array( 'mode' => 'Mode', 'location_id' => 'Canonical location ID', 'country' => 'Страна', 'resolution_method' => 'Resolution method', 'mapping_state' => 'Mapping state', 'branch' => 'Branch', 'zone' => 'Zone', 'receiver_warehouse_source' => 'Receiver warehouse source' ) );
+		$safe_request = is_array( $report['safe_request'] ?? null ) ? $report['safe_request'] : array();
+		$this->render_destination_named_section( 'Safe request', $safe_request, array( 'currencyCode' => 'Currency', 'types' => 'Types', 'senderWarehouseId' => 'Sender warehouse ID', 'receiverWarehouseId' => 'Receiver warehouse ID', 'isPickUp' => 'isPickUp', 'isDelivery' => 'isDelivery', 'delivery_address_present' => 'Delivery address present', 'coordinates_present' => 'Coordinates present', 'plannedDateTime' => 'plannedDateTime', 'insurance_enabled' => 'Insurance enabled', 'insurance_value' => 'Insurance value', 'cargo_count' => 'Cargo count', 'counterpart_present' => 'Counterpart present', 'client_card_present' => 'Client card present', 'whoMakesCalculation' => 'whoMakesCalculation' ), array( 'senderWarehouseId', 'receiverWarehouseId' ) );
+		$this->render_destination_named_section( 'Cargo policy', is_array( $safe_request['cargo_policy'] ?? null ) ? $safe_request['cargo_policy'] : array(), array( 'product_weight_g' => 'Вес товаров без упаковки, г', 'total_weight_g' => 'Расчётный вес с упаковкой, г', 'isHP' => 'Защитная транспортировочная упаковка в запросе ПЭК', 'sealingPositionsCount' => 'Пломбы в запросе ПЭК', 'product_weight_known' => 'Вес товаров известен' ) );
+		$this->render_destination_named_section( 'Pricing adjustment', is_array( $report['pricing_adjustment'] ?? null ) ? $report['pricing_adjustment'] : array(), array( 'product_weight_g' => 'Вес товаров без упаковки, г', 'light_cargo_weight_limit_g' => 'Предел веса лёгкого груза, г', 'light_cargo_eligible' => 'Груз подходит под доплату', 'bag_surcharge_kopecks' => 'Доплата за мешок, коп.', 'sealing_surcharge_kopecks' => 'Доплата за пломбировку, коп.', 'total_surcharge_kopecks' => 'Всего магазинных доплат, коп.', 'surcharge_applied' => 'Доплата применена', 'surcharge_reason' => 'Причина' ) );
+		$result = is_array( $report['result'] ?? null ) ? $report['result'] : array();
+		$this->render_destination_named_section( 'Result', $result, array( 'carrier_cost_total_rub' => 'Стоимость ПЭК, руб.', 'carrier_price_kopecks' => 'Стоимость ПЭК, коп.', 'bag_surcharge_kopecks' => 'Доплата за мешок, коп.', 'sealing_surcharge_kopecks' => 'Доплата за пломбировку, коп.', 'light_cargo_surcharge_kopecks' => 'Всего магазинных доплат, коп.', 'final_price_rub' => 'Итоговая базовая стоимость, руб.', 'price_kopecks' => 'Итоговая базовая стоимость, коп.', 'delivery_days' => 'Delivery days', 'sender_branch' => 'Sender branch', 'receiver_branch' => 'Receiver branch' ) );
+		$this->render_quote_surcharges( is_array( $result['surcharges'] ?? null ) ? $result['surcharges'] : array() );
+		$this->render_quote_services( is_array( $result['services'] ?? null ) ? $result['services'] : array() );
+		$this->render_destination_named_section( 'Response shape', is_array( $report['response_shape'] ?? null ) ? $report['response_shape'] : array(), array( 'root_type' => 'Root type', 'root_keys' => 'Root keys' ) );
+	}
+
+	/** @param array<int,mixed> $services */
+	private function render_quote_services( array $services, int $depth = 0 ): void {
+		if ( array() === $services || $depth > 3 ) {
+			return;
+		}
+		echo 0 === $depth ? '<h4>' . esc_html( 'Услуги, возвращённые ПЭК' ) . '</h4>' : '';
+		echo '<table class="widefat striped" style="max-width:1180px;"><tbody>';
+		foreach ( array_slice( $services, 0, 100 ) as $service ) {
+			if ( ! is_array( $service ) || array_is_list( $service ) ) {
+				continue;
+			}
+			$parts = array();
+			foreach ( array(
+				'serviceType' => 'Type',
+				'senderCity' => 'Sender city',
+				'cost' => 'Cost',
+				'info' => 'Info',
+				'insuranceTerm' => 'insuranceTerm',
+			) as $key => $label ) {
+				if ( array_key_exists( $key, $service ) ) {
+					$parts[] = $label . ': ' . $this->destination_report_value( $service[ $key ], $key );
+				}
+			}
+			echo '<tr><td>' . esc_html( str_repeat( '  ', $depth ) . implode( '; ', $parts ) ) . '</td></tr>';
+			if ( is_array( $service['services'] ?? null ) ) {
+				echo '<tr><td>';
+				$this->render_quote_services( $service['services'], $depth + 1 );
+				echo '</td></tr>';
+			}
+		}
+		echo '</tbody></table>';
+	}
+
+	/** @param array<int,mixed> $surcharges */
+	private function render_quote_surcharges( array $surcharges ): void {
+		if ( array() === $surcharges ) {
+			return;
+		}
+		echo '<h4>' . esc_html( 'Доплаты магазина' ) . '</h4>';
+		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
+		foreach ( array_slice( $surcharges, 0, 2 ) as $surcharge ) {
+			if ( ! is_array( $surcharge ) || array_is_list( $surcharge ) ) {
+				continue;
+			}
+			echo '<tr><th scope="row">' . esc_html( (string) ( $surcharge['title'] ?? '' ) ) . '</th><td>' . esc_html( $this->destination_report_value( $surcharge['price_kopecks'] ?? '', 'price_kopecks' ) ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
 	}

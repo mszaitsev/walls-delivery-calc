@@ -11,6 +11,8 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
+use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -27,6 +29,12 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
+use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -189,8 +197,13 @@ $location_repository = new LocationRepository( $wpdb );
 $location_resolver = new PekLocationResolver( $location_repository, new PekAddressBuilder(), new PekLocationMappingRepository( $wpdb ), $api, $settings );
 $terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $wpdb ), $settings );
 $pickup_provider = new PekPickupPointProvider( $terminal_service );
-$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( new CarrierPickupPointProviderRegistry( array( $pickup_provider ) ), $location_repository, $terminal_service, $settings, $credentials, new Logger() );
+$pickup_registry = new CarrierPickupPointProviderRegistry( array( $pickup_provider ) );
+$destination_diagnostic_service = new PekDestinationPickupDiagnosticService( $pickup_registry, $location_repository, $terminal_service, $settings, $credentials, new Logger() );
 $destination_report_store = new PekDestinationPickupDiagnosticStore();
+$quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
+$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
+$quote_diagnostic_service = new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service );
+$quote_report_store = new PekQuoteDiagnosticStore();
 $page = new PekAdminPage(
 	$settings,
 	$credentials,
@@ -198,7 +211,9 @@ $page = new PekAdminPage(
 	new PekSenderWarehouseService( $api, $settings, $cache ),
 	$notice_store,
 	$destination_diagnostic_service,
-	$destination_report_store
+	$destination_report_store,
+	$quote_diagnostic_service,
+	$quote_report_store
 );
 $service = DeliveryService::from_array( array( 'id' => 5, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => 'ПЭК' ) );
 
@@ -221,6 +236,9 @@ pek_ui_assert( ! str_contains( $html, 'ПЭК не подтвердил выбр
 pek_ui_assert( ! str_contains( $html, '&quot;products&quot;' ) && ! str_contains( $html, '{&quot;endpoint&quot;' ), 'PEK diagnostic checks must not render as raw nested JSON.' );
 pek_ui_assert( str_contains( $html, 'Saved &lt;safe&gt;' ), 'PEK admin notice must render escaped content.' );
 pek_ui_assert( 0 === count( $ui_http->requests ), 'Normal PEK admin page render must not call PEK API.' );
+pek_ui_assert( str_contains( $html, 'Диагностика расчёта стоимости ПЭК' ) && str_contains( $html, 'name="wdc_delivery_services_action" value="diagnose_pek_quote"' ) && str_contains( $html, 'pek_quote_planned_datetime' ), 'PEK admin UI must expose explicit quote diagnostic form without normal-render API calls.' );
+pek_ui_assert( str_contains( $html, 'Вес товаров без упаковки, кг' ), 'PEK quote diagnostic form must label manual weight as product weight before packaging.' );
+pek_ui_assert( str_contains( $html, 'Доплаты для лёгких грузов' ) && str_contains( $html, PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY ) && str_contains( $html, PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ) && str_contains( $html, PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ) && str_contains( $html, 'value="70"' ) && str_contains( $html, 'value="20"' ) && str_contains( $html, 'value="3000"' ), 'PEK admin settings UI must expose default light-cargo store surcharge fields.' );
 pek_ui_assert( str_contains( $html, '>free<' ), 'PEK admin UI must render sender warehouse source.' );
 pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
@@ -392,5 +410,69 @@ $destination_report_store->save_for_current_user(
 $sanitized_report = $destination_report_store->consume_for_current_user();
 $sanitized_json = wp_json_encode( $sanitized_report );
 pek_ui_assert( str_contains( $sanitized_json, 'safe-point' ) && str_contains( $sanitized_json, 'safe api message' ) && 'safe_field' === (string) ( $sanitized_report['field_errors'][0]['field'] ?? '' ) && str_contains( $sanitized_json, 'safe message' ) && ! str_contains( $sanitized_json, 'RejectedValue' ) && ! str_contains( $sanitized_json, 'AttemptedValue' ) && ! str_contains( $sanitized_json, 'must not survive' ) && ! str_contains( $sanitized_json, 'Authorization' ) && ! str_contains( $sanitized_json, 'api_key' ) && ! str_contains( $sanitized_json, 'raw_error' ) && ! str_contains( $sanitized_json, 'raw_response' ) && ! str_contains( $sanitized_json, 'credentials' ) && ! str_contains( $sanitized_json, 'secret' ), 'PEK destination diagnostic report store must preserve safe api_error_message/field_errors and recursively sanitize unsafe keys.' );
+
+$quote_report_store->save_for_current_user(
+	array(
+		'checked_at' => '2026-08-04 12:00:00',
+		'success' => true,
+		'message' => 'Расчёт ПЭК успешно выполнен.',
+		'api_error_message' => '[redacted] безопасное описание',
+		'field_errors' => array(
+			array( 'field' => 'counterpart.inn', 'messages' => array( '[redacted] значение' ) ),
+			array( 'field' => '<script>unknown_field</script>', 'messages' => array( '<b>safe field message</b>' ), 'raw_field' => '1234567890', 'original_field' => 'CLIENT-SECRET-777', 'rejectedValue' => 'very-secret-key', 'metadata' => array( 'authorization' => 'Basic secret' ) ),
+		),
+		'endpoint' => '/calculator/calculateprice/',
+		'method' => 'POST',
+		'http_status' => 200,
+		'safe_request' => array(
+			'cargo_policy' => array(
+				'product_weight_g' => 1000,
+				'total_weight_g' => 1000,
+				'isHP' => false,
+				'sealingPositionsCount' => 0,
+				'product_weight_known' => true,
+			),
+		),
+		'pricing_adjustment' => array(
+			'product_weight_g' => 1000,
+			'light_cargo_weight_limit_g' => 3000,
+			'light_cargo_eligible' => true,
+			'bag_surcharge_kopecks' => 7000,
+			'sealing_surcharge_kopecks' => 2000,
+			'total_surcharge_kopecks' => 9000,
+			'surcharge_applied' => true,
+			'surcharge_reason' => 'applied',
+		),
+		'result' => array(
+			'carrier_cost_total_rub' => 1234.56,
+			'carrier_price_kopecks' => 123456,
+			'bag_surcharge_kopecks' => 7000,
+			'sealing_surcharge_kopecks' => 2000,
+			'light_cargo_surcharge_kopecks' => 9000,
+			'final_price_rub' => 1324.56,
+			'price_kopecks' => 132456,
+			'delivery_days' => 3,
+			'sender_branch' => 'Новосибирск',
+			'receiver_branch' => 'Москва',
+			'surcharges' => array(
+				array( 'code' => 'light_cargo_bag', 'title' => 'Мешок', 'price_kopecks' => 7000, 'raw' => 'secret' ),
+				array( 'code' => 'light_cargo_sealing', 'title' => 'Пломбировка', 'price_kopecks' => 2000 ),
+				array( 'code' => 'raw_code', 'title' => 'Raw', 'price_kopecks' => 999 ),
+			),
+			'services' => array(
+				array( 'serviceType' => 'Страхование', 'cost' => 50, 'info' => 'Страхование:', 'insuranceTerm' => false, 'raw_response' => 'secret', 'counterpartClientCard' => 'secret', 'services' => array( array( 'serviceType' => 'Страхование', 'insuranceTerm' => true, 'AttemptedValue' => 'secret', 'services' => null ) ) ),
+			),
+		),
+	)
+);
+$stored_quote = $quote_report_store->consume_for_current_user();
+$stored_quote_json = wp_json_encode( $stored_quote );
+pek_ui_assert( false === $stored_quote['result']['services'][0]['insuranceTerm'] && true === $stored_quote['result']['services'][0]['services'][0]['insuranceTerm'], 'PEK quote diagnostic store must preserve Boolean insuranceTerm values including false.' );
+pek_ui_assert( 2 === count( $stored_quote['result']['surcharges'] ?? array() ) && ! str_contains( (string) $stored_quote_json, 'raw_code' ) && ! str_contains( (string) $stored_quote_json, 'raw_response' ) && ! str_contains( (string) $stored_quote_json, 'counterpartClientCard' ) && ! str_contains( (string) $stored_quote_json, 'AttemptedValue' ) && ! str_contains( (string) $stored_quote_json, 'raw_field' ) && ! str_contains( (string) $stored_quote_json, 'original_field' ) && ! str_contains( (string) $stored_quote_json, 'rejectedValue' ) && ! str_contains( (string) $stored_quote_json, 'metadata' ) && ! str_contains( (string) $stored_quote_json, 'very-secret-key' ) && ! str_contains( (string) $stored_quote_json, 'CLIENT-SECRET-777' ), 'PEK quote diagnostic store must keep field errors/service breakdown/surcharges allowlisted and free from unsafe nested keys.' );
+$quote_report_store->save_for_current_user( $stored_quote );
+ob_start();
+$page->render_embedded( $service );
+$quote_html = (string) ob_get_clean();
+pek_ui_assert( str_contains( $quote_html, 'POST /calculator/calculateprice/' ) && str_contains( $quote_html, '200' ) && str_contains( $quote_html, 'Услуги, возвращённые ПЭК' ) && str_contains( $quote_html, 'Доплаты магазина' ) && str_contains( $quote_html, 'Стоимость ПЭК, руб.' ) && str_contains( $quote_html, 'Итоговая базовая стоимость, руб.' ) && str_contains( $quote_html, 'insuranceTerm: нет' ) && str_contains( $quote_html, 'insuranceTerm: да' ) && str_contains( $quote_html, '[redacted] безопасное описание' ) && str_contains( $quote_html, 'Cargo policy' ) && str_contains( $quote_html, 'Защитная транспортировочная упаковка в запросе ПЭК' ) && str_contains( $quote_html, 'Пломбы в запросе ПЭК' ) && str_contains( $quote_html, 'Pricing adjustment' ) && str_contains( $quote_html, '&lt;script&gt;unknown_field&lt;/script&gt;' ) && str_contains( $quote_html, '&lt;b&gt;safe field message&lt;/b&gt;' ) && ! str_contains( $quote_html, '<script>unknown_field</script>' ) && ! str_contains( $quote_html, '<b>safe field message</b>' ) && ! str_contains( $quote_html, 'insuranceTerm: 1' ) && ! str_contains( $quote_html, 'raw_response' ) && ! str_contains( $quote_html, 'counterpartClientCard' ), 'PEK quote diagnostic UI must render endpoint/status, separated cargo policy, store surcharges, sanitized API message, escaped field errors and Boolean insuranceTerm as да/нет without unsafe service keys.' );
 
 echo "PEK admin UI smoke OK\n";
