@@ -514,3 +514,9 @@
     if (query.value || context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId) runSearch('location');
   }
 
+  window.wdcShipmentPickupPicker = Object.assign({}, window.wdcShipmentPickupPicker || {}, {
+    open: function (form, options) {
+      createPickupPicker(form, options || {});
+    }
+  });
+

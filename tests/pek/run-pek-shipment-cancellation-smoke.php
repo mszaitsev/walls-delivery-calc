@@ -21,6 +21,8 @@ foreach ( $iterator as $file ) {
 pek_cancel_assert( str_contains( $service, 'order_cancellation' ), 'Cancellation must use /order/cancellation/ wrapper.' );
 pek_cancel_assert( str_contains( $api, '/order/cancellation/' ), 'PEK API client must expose order cancellation.' );
 pek_cancel_assert( str_contains( $service, 'time() - $created >= 600' ), 'Cancellation must wait at least 10 minutes.' );
+pek_cancel_assert( str_contains( $service, '$this->statuses->fetch' ), 'Cancellation must fresh-check status before API call.' );
+pek_cancel_assert( str_contains( $service, 'pek_take_on_stock_datetime' ), 'Cancellation must inspect cargo acceptance timestamp.' );
 pek_cancel_assert( str_contains( $service, 'delete_for_carrier' ), 'Successful cancellation must remove local shipment.' );
 pek_cancel_assert( ! str_contains( strtolower( $all_php ), 'cancelandreturncargo' ), 'Return API must not be present.' );
 

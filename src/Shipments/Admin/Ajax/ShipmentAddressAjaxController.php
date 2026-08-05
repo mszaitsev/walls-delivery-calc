@@ -7,6 +7,8 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -54,7 +56,8 @@ final class ShipmentAddressAjaxController {
 		private ?DpdPickupPointService $dpd_pickup_points = null,
 		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
 		private ?AddressSuggestionService $address_suggestions = null,
-		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null
+		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
+		private ?PekSenderWarehouseService $pek_sender_warehouses = null
 	) {
 	}
 
@@ -120,6 +123,16 @@ final class ShipmentAddressAjaxController {
 		$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? '' ) );
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key && 'source_dropoff' === $purpose ) {
 			$this->ajax_search_yandex_source_dropoff_points( $mode, $limit );
+		}
+		if ( PekSettings::CARRIER_KEY === $carrier_key && 'sender_warehouse' === $purpose && $this->pek_sender_warehouses instanceof PekSenderWarehouseService ) {
+			$result = $this->pek_sender_warehouses->search( $query );
+			$items = array_slice( is_array( $result['items'] ?? null ) ? $result['items'] : array(), 0, $limit );
+			wp_send_json_success(
+				array(
+					'points' => array_map( array( $this, 'pek_sender_warehouse_ajax_row' ), $items ),
+					'message' => (string) ( $result['message'] ?? '' ),
+				)
+			);
 		}
 		if ( DpdSettings::CARRIER_KEY === $carrier_key && $this->dpd_pickup_points instanceof DpdPickupPointService ) {
 			$city_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['city_id'] ?? '' ) );
@@ -730,6 +743,30 @@ final class ShipmentAddressAjaxController {
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 			'source' => (string) ( $row['source'] ?? '' ),
+		);
+	}
+
+	private function pek_sender_warehouse_ajax_row( array $row ): array {
+		$warehouse_id = (string) ( $row['warehouseId'] ?? '' );
+		$title = (string) ( $row['divisionName'] ?? $row['branchName'] ?? $warehouse_id );
+
+		return array(
+			'carrier_key' => PekSettings::CARRIER_KEY,
+			'carrier' => PekSettings::CARRIER_KEY,
+			'service_key' => PekSettings::SERVICE_KEY,
+			'pickup_family' => PekSettings::SERVICE_KEY . ':sender_warehouse',
+			'point_code' => $warehouse_id,
+			'warehouseId' => $warehouse_id,
+			'display_code' => $warehouse_id,
+			'point_type' => 'sender_warehouse',
+			'type' => 'sender_warehouse',
+			'point_title' => $title,
+			'display_title' => $title,
+			'city_name' => (string) ( $row['branchName'] ?? '' ),
+			'city' => (string) ( $row['branchName'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+			'lat' => $row['coordinates']['latitude'] ?? null,
+			'lng' => $row['coordinates']['longitude'] ?? null,
 		);
 	}
 

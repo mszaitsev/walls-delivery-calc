@@ -15,8 +15,8 @@ final class PekShipmentCargoBuilder {
 
 	/** @return array{payload:array<string,mixed>,summary:array<string,mixed>} */
 	public function build( ShipmentCreateRequest $request, int $declared_value_kopecks ): array {
-		if ( count( $request->places ) < 1 || count( $request->places ) > 10 ) {
-			throw new \RuntimeException( 'Для заявки ПЭК допускается от 1 до 10 грузомест.' );
+		if ( count( $request->places ) < 1 || count( $request->places ) > 50 ) {
+			throw new \RuntimeException( 'Для заявки ПЭК допускается от 1 до 50 грузомест.' );
 		}
 		$places = array();
 		$weight = 0.0;
@@ -35,7 +35,6 @@ final class PekShipmentCargoBuilder {
 			$volume += $v;
 			$max_dimension = max( $max_dimension, $l, $wi, $h );
 			$places[] = array(
-				'position' => $place->place_number,
 				'quantity' => 1,
 				'weight' => $w,
 				'length' => $l,
@@ -58,13 +57,15 @@ final class PekShipmentCargoBuilder {
 			'payload' => array(
 				'common' => array(
 					'type' => PekSettings::LTL_PRODUCT_TYPE,
+					'customerCorrelation' => (string) ( $request->meta['pek_correlation'] ?? '' ),
+					'orderNumber' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 					'positionsCount' => count( $places ),
 					'weight' => $weight,
 					'volume' => $volume,
-					'cargoDescription' => $summary['description'],
+					'description' => $summary['description'],
+					'declaredCost' => round( $declared_value_kopecks / 100, 2 ),
+					'cargoPlaceList' => $places,
 				),
-				'cargoPlaceList' => $places,
-				'cost' => round( $declared_value_kopecks / 100, 2 ),
 			),
 			'summary' => $summary,
 		);

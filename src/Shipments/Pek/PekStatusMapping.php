@@ -43,7 +43,8 @@ final class PekStatusMapping {
 	}
 
 	private function normalize( string $value ): string {
-		$value = mb_strtolower( str_replace( 'ё', 'е', $value ), 'UTF-8' );
+		$value = str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $value );
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 		$value = preg_replace( '/[^\p{L}\p{N}]+/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
 

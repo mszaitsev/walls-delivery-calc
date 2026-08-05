@@ -34,9 +34,13 @@ final class PekSenderCounterpartService {
 			return array( 'success' => false, 'message' => 0 === count( $matches ) ? 'ПЭК не подтвердил контрагента отправителя по ИНН/КПП.' : 'ПЭК вернул несколько контрагентов отправителя; выбор заблокирован.' );
 		}
 		$row = $matches[0];
+		$guid = trim( (string) ( $row['guid'] ?? '' ) );
+		if ( 1 !== preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $guid ) ) {
+			return array( 'success' => false, 'message' => 'ПЭК вернул некорректный GUID контрагента отправителя.' );
+		}
 		$legal = is_array( $row['legal'] ?? null ) ? $row['legal'] : array();
 		$snapshot = array(
-			'guid' => (string) ( $row['guid'] ?? '' ),
+			'guid' => $guid,
 			'legalForm' => (int) ( $row['legalForm'] ?? 0 ),
 			'title' => (string) ( $row['title'] ?? '' ),
 			'inn_masked' => $this->mask( (string) ( $legal['inn'] ?? '' ) ),
@@ -44,7 +48,7 @@ final class PekSenderCounterpartService {
 			'client_card_present' => '' !== trim( (string) ( $row['counterpartClientCard'] ?? '' ) ),
 			'checked_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
 		);
-		$this->settings->save_sender_counterpart( (string) $row['guid'], $snapshot );
+		$this->settings->save_sender_counterpart( $guid, $snapshot );
 
 		return array( 'success' => true, 'message' => 'Контрагент отправителя ПЭК подтверждён.', 'snapshot' => $snapshot );
 	}

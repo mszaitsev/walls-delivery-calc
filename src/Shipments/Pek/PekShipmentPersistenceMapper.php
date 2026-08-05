@@ -34,6 +34,7 @@ final class PekShipmentPersistenceMapper implements CarrierShipmentPersistenceMa
 			'pek_sender_warehouse_source' => (string) ( $sender['source'] ?? '' ),
 			'pek_receiver_warehouse_id' => (string) ( $summary['receiver_warehouse_id'] ?? '' ),
 			'pek_receiver_warehouse_source' => '' !== (string) ( $summary['receiver_warehouse_id'] ?? '' ) ? 'checkout_selection' : '',
+			'pek_receiver_branch_id' => (string) ( $summary['receiver_branch_id'] ?? '' ),
 			'shipment_mode' => (string) ( $summary['shipment_mode'] ?? $request->delivery_type ),
 			'recipient_type' => 'physical',
 			'sms_release_requested' => true,
@@ -43,6 +44,7 @@ final class PekShipmentPersistenceMapper implements CarrierShipmentPersistenceMa
 			'pek_product_type' => PekSettings::LTL_PRODUCT_TYPE,
 			'pek_order_type' => 0,
 			'pek_correlation' => (string) ( $summary['correlation'] ?? '' ),
+			'sealing_requested' => ! empty( $summary['sealing_requested'] ),
 			'status' => 'created',
 			'status_title' => 'Создано в ПЭК',
 			'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
@@ -70,7 +72,7 @@ final class PekShipmentPersistenceMapper implements CarrierShipmentPersistenceMa
 			'pek_correlation' => (string) ( $ref['correlation'] ?? '' ),
 			'failure_stage' => (string) ( $ref['failure_stage'] ?? '' ),
 			'request_snapshot' => $preview,
-			'response_snapshot' => array( 'error_code' => $result->error_code, 'checked_at' => $now ),
+			'response_snapshot' => array( 'error_code' => $result->error_code, 'checked_at' => $now, 'summary' => is_array( $ref['summary'] ?? null ) ? $ref['summary'] : array() ),
 		);
 	}
 

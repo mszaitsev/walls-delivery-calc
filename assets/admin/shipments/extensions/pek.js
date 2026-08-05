@@ -25,6 +25,17 @@
     }));
   }
 
+  function senderWarehouseContext(form) {
+    return {
+      carrierKey: 'pek',
+      serviceKey: 'pek',
+      pickupFamily: 'pek:sender_warehouse',
+      countryCode: 'RU',
+      address: '',
+      purpose: 'sender_warehouse'
+    };
+  }
+
   register({
     carrierKey: 'pek',
     onModalReady: function (context) {
@@ -34,10 +45,23 @@
         return;
       }
       button.addEventListener('click', function () {
-        root.dispatchEvent(new CustomEvent('wdc:shipment-pickup-search-open', {
-          bubbles: true,
-          detail: { carrier: 'pek', purpose: 'sender_warehouse' }
-        }));
+        var picker = window.wdcShipmentPickupPicker;
+        var form = button.closest('form') || root.querySelector('form') || root;
+        if (!picker || typeof picker.open !== 'function') {
+          return;
+        }
+        picker.open(form, {
+          sender: true,
+          title: 'Выбор склада самопривоза ПЭК',
+          context: senderWarehouseContext(form),
+          onChoose: function (point) {
+            updateWarehouseCard(root, {
+              warehouseId: point.warehouseId || point.point_code || point.code || '',
+              title: point.display_title || point.point_title || point.address || '',
+              address: point.address || ''
+            });
+          }
+        });
       });
     },
     onCarrierData: function (context) {

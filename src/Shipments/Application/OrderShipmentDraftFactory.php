@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
@@ -39,7 +40,8 @@ final class OrderShipmentDraftFactory {
 		private ?DpdPickupPointService $dpd_pickup_points = null,
 		private ?DpdShipmentDateResolver $dpd_dates = null,
 		private ?YandexDeliverySettings $yandex_settings = null,
-		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null
+		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
+		private ?PekSettings $pek_settings = null
 	) {
 	}
 
@@ -53,6 +55,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_yandex_request_from_order( $order );
+		}
+		if ( PekSettings::CARRIER_KEY === $carrier_key ) {
+			return $this->create_pek_request_from_order( $order );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$delivery_type = $this->delivery_type_from_order( $order );
@@ -151,6 +156,20 @@ final class OrderShipmentDraftFactory {
 				),
 			);
 		}
+		if ( PekSettings::CARRIER_KEY === $request->carrier_key ) {
+			return array(
+				'request' => $request->to_array(),
+				'services' => array(),
+				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'requires_tariff' => false,
+					'requires_postoffice' => false,
+					'requires_successful_preview' => true,
+					'shows_sender_warehouse' => true,
+					'recipient_type' => 'physical',
+				),
+			);
+		}
 		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 		$service_variants = array();
 		if ( $service instanceof DeliveryService ) {
@@ -182,6 +201,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $base->carrier_key ) {
 			return $this->create_yandex_request_from_admin_data( $base, $data );
+		}
+		if ( PekSettings::CARRIER_KEY === $base->carrier_key ) {
+			return $this->create_pek_request_from_admin_data( $base, $data );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$service = $this->services->find_by_service_key( $service_key );
@@ -625,6 +647,139 @@ final class OrderShipmentDraftFactory {
 				'courier_original_address' => $full_address,
 				'calculation_data' => $calculation,
 				'rate_meta' => $this->rate_meta_data( $order ),
+			)
+		);
+	}
+
+	private function create_pek_request_from_order( object $order ): ShipmentCreateRequest {
+		$calculation = $this->calculation_data( $order );
+		$rate_meta = $this->rate_meta_data( $order );
+		$delivery_type = $this->delivery_type_from_order( $order );
+		$items = $this->order_items( $order );
+		$dimensions = is_array( $calculation['package']['dimensions_cm'] ?? null ) ? $calculation['package']['dimensions_cm'] : array();
+		$product_weight = (int) ( $calculation['package']['products_weight_g'] ?? 0 );
+		foreach ( $items as $item ) {
+			$product_weight += $product_weight > 0 ? 0 : ( $item instanceof PackageItem ? $item->get_total_weight_g() : 0 );
+		}
+		$place = new ShipmentPlace(
+			1,
+			max( 1, (int) ( $calculation['package']['weight_g'] ?? $product_weight ?: 1000 ) ),
+			max( 1, (int) ( $dimensions['length'] ?? 20 ) ),
+			max( 1, (int) ( $dimensions['width'] ?? 20 ) ),
+			max( 1, (int) ( $dimensions['height'] ?? 10 ) ),
+			Money::from_kopecks( 0 ),
+			$items
+		);
+		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		$api = is_array( $calculation['api'] ?? null ) ? $calculation['api'] : array();
+		$provider_query = is_array( $rate_meta['pickup_provider_query'] ?? null ) ? $rate_meta['pickup_provider_query'] : array();
+		$point_code = $this->first_non_empty(
+			$pickup['point_code'] ?? '',
+			$pickup['code'] ?? '',
+			$rate_meta['point_code'] ?? '',
+			$rate_meta['pickup_point_code'] ?? '',
+			$this->meta_string( $order, '_wdc_platform_pickup_code' ),
+			$this->meta_string( $order, '_wdc_pickup_point_code' )
+		);
+		$receiver_branch_id = $this->first_non_empty(
+			$pickup['branchId'] ?? '',
+			$pickup['branch_id'] ?? '',
+			$pickup['raw_reference']['branchId'] ?? '',
+			$rate_meta['receiver_branch_id'] ?? '',
+			$rate_meta['pek_receiver_branch_id'] ?? '',
+			$provider_query['branchId'] ?? '',
+			$api['receiver_branch_id'] ?? '',
+			$api['branchId'] ?? ''
+		);
+		$location_id = (int) $this->first_non_empty(
+			$provider_query['location_id'] ?? '',
+			$rate_meta['location_id'] ?? '',
+			$calculation['destination']['location_id'] ?? '',
+			$this->meta_string( $order, '_wdc_platform_location_id' )
+		);
+		$address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : (string) ( $pickup['address'] ?? $pickup['point_address'] ?? '' );
+
+		return new ShipmentCreateRequest(
+			order_id: $this->order_id( $order ),
+			carrier_key: PekSettings::CARRIER_KEY,
+			delivery_type: $delivery_type,
+			rate_id: PekSettings::SERVICE_KEY . ':' . $delivery_type,
+			recipient_address: $this->recipient_address( $order, $delivery_type, DeliveryType::PICKUP === $delivery_type ? array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) : null ),
+			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $point_code ? new PickupPointSelection( PekSettings::CARRIER_KEY, PekSettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
+			places: array( $place ),
+			declared_value: Money::from_kopecks( 0 ),
+			insurance_enabled: true,
+			services: array(),
+			recipient: array(
+				'name' => $this->recipient_name( $order ),
+				'phone' => $this->phone( $order ),
+				'email' => $this->email( $order ),
+			),
+			meta: array(
+				'carrier_key' => PekSettings::CARRIER_KEY,
+				'service_key' => PekSettings::SERVICE_KEY,
+				'delivery_type' => $delivery_type,
+				'service_title' => PekSettings::TITLE,
+				'order_num' => $this->order_number( $order ),
+				'pickup_family' => PekSettings::SERVICE_KEY . ':pickup',
+				'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $point_code : '',
+				'pickup_point_found' => DeliveryType::COURIER === $delivery_type || '' !== $point_code,
+				'pickup_point_row' => DeliveryType::PICKUP === $delivery_type ? array(
+					'point_code' => $point_code,
+					'address' => $address,
+					'branchId' => $receiver_branch_id,
+				) : array(),
+				'pek_receiver_branch_id' => $receiver_branch_id,
+				'pek_receiver_warehouse_id' => DeliveryType::PICKUP === $delivery_type ? $point_code : '',
+				'pek_destination_location_id' => $location_id,
+				'provider_destination_fingerprint' => (string) ( $rate_meta['provider_destination_fingerprint'] ?? $pickup['provider_destination_fingerprint'] ?? '' ),
+				'pickup_provider_query' => $provider_query,
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $address : '',
+				'calculation_data' => $calculation,
+				'rate_meta' => $rate_meta,
+				'pek_product_weight_g' => max( 0, $product_weight ),
+			)
+		);
+	}
+
+	private function create_pek_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
+		$places = array();
+		$place_rows = is_array( $data['places'] ?? null ) ? $data['places'] : array();
+		foreach ( $place_rows as $index => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$places[] = new ShipmentPlace(
+				(int) ( $row['place_number'] ?? $row['number'] ?? ( $index + 1 ) ),
+				$this->whole_number_from_place_row( $row, 'weight_g' ),
+				$this->whole_number_from_place_row( $row, 'length_cm' ),
+				$this->whole_number_from_place_row( $row, 'width_cm' ),
+				$this->whole_number_from_place_row( $row, 'height_cm' ),
+				Money::from_kopecks( 0 ),
+				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
+			);
+		}
+		$recipient_type = sanitize_key( wp_unslash( $data['recipient_type'] ?? 'physical' ) );
+		$sender_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_id'] ?? '' ) );
+
+		return new ShipmentCreateRequest(
+			$base->order_id,
+			$base->carrier_key,
+			$base->delivery_type,
+			$base->rate_id,
+			$base->recipient_address,
+			$base->pickup_point,
+			array() !== $places ? $places : $base->places,
+			$base->declared_value,
+			true,
+			array(),
+			$base->recipient,
+			array_merge(
+				$base->meta,
+				array(
+					'recipient_type' => 'physical' === $recipient_type ? 'physical' : 'unsupported',
+					'pek_sender_warehouse_id' => $sender_warehouse_id,
+				)
 			)
 		);
 	}

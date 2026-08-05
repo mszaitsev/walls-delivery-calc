@@ -689,6 +689,27 @@ final class PekApiClient {
 				default => 'shipment_create_contract',
 			};
 		}
+		foreach ( array(
+			'/cargos/status/' => 'shipment_status',
+			'/cargos/basicstatus/' => 'shipment_status_basic',
+			'/cargos/currentstatus/' => 'shipment_status_current',
+			'/order/print/' => 'shipment_document',
+			'/order/cancellation/' => 'shipment_cancellation',
+			'/auth/createtokentoaccessprivatedata/' => 'private_token',
+			'/counterparts/connecteddiscountsservicesagreements/' => 'counterpart_services',
+			'/counterparts/confirmedaccesstocounterparties/' => 'counterpart_confirmed',
+			'/branches/checknocalcservices/' => 'sms_geography',
+		) as $needle => $prefix ) {
+			if ( str_contains( $path, $needle ) ) {
+				return match ( $kind ) {
+					'request' => $prefix . '_request',
+					'transport' => $prefix . '_transport',
+					'http' => $prefix . '_http',
+					'logical' => $prefix . '_logical',
+					default => $prefix . '_contract',
+				};
+			}
+		}
 
 		return 'unknown';
 	}

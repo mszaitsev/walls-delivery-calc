@@ -1,0 +1,79 @@
+{
+  "common": {
+    "orderType": 0,
+    "counterpartClientCard": "CLIENT-CARD"
+  },
+  "sender": {
+    "legalForm": 1,
+    "fs": "ООО",
+    "title": "Тестовый отправитель",
+    "inn": "7700000000",
+    "kpp": "770001001",
+    "countryOfRegistrationCode": "643",
+    "person": "Иванов Иван",
+    "personPhones": [
+      {
+        "phone": "+79000000000"
+      }
+    ],
+    "warehouseId": "sender-warehouse-guid"
+  },
+  "cargos": [
+    {
+      "common": {
+        "type": 3,
+        "customerCorrelation": "wdc-pek-2",
+        "orderNumber": "1002",
+        "positionsCount": 1,
+        "weight": 3,
+        "volume": 0.02,
+        "description": "Товары интернет-магазина",
+        "declaredCost": 2000,
+        "cargoPlaceList": [
+          {
+            "quantity": 1,
+            "weight": 3,
+            "length": 0.2,
+            "width": 0.2,
+            "height": 0.2,
+            "volume": 0.01
+          }
+        ]
+      },
+      "receiver": {
+        "legalForm": 3,
+        "individual": {
+          "lastName": "Петров",
+          "firstName": "Петр"
+        },
+        "personPhones": [
+          {
+            "phone": "+79100000000"
+          }
+        ],
+        "addressStock": "Россия, Москва, Тверская улица, дом 1"
+      },
+      "services": {
+        "transporting": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          }
+        },
+        "insurance": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          },
+          "cost": 2000
+        },
+        "delivery": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          }
+        }
+      }
+    }
+  ]
+}

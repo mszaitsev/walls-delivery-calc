@@ -15,30 +15,23 @@ final class PekShipmentRecipientBuilder {
 		if ( '' === $phone ) {
 			throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен телефон получателя.' );
 		}
-		$name = trim( implode( ' ', array_filter( array(
-			method_exists( $order, 'get_shipping_last_name' ) ? (string) $order->get_shipping_last_name() : '',
-			method_exists( $order, 'get_shipping_first_name' ) ? (string) $order->get_shipping_first_name() : '',
-		) ) ) );
-		if ( '' === $name ) {
-			$name = trim( implode( ' ', array_filter( array(
-				method_exists( $order, 'get_billing_last_name' ) ? (string) $order->get_billing_last_name() : '',
-				method_exists( $order, 'get_billing_first_name' ) ? (string) $order->get_billing_first_name() : '',
-			) ) ) );
-		}
-		if ( '' === $name ) {
-			throw new \RuntimeException( 'Для заявки ПЭК нужно ФИО получателя.' );
+		$name = $this->name_parts( $order );
+		if ( '' === $name['lastName'] || '' === $name['firstName'] ) {
+			throw new \RuntimeException( 'Для заявки ПЭК нужны фамилия и имя получателя.' );
 		}
 		$receiver = array(
 			'legalForm' => 3,
-			'individual' => array( 'name' => $name ),
-			'person' => $name,
-			'phone' => $phone,
-			'email' => method_exists( $order, 'get_billing_email' ) ? (string) $order->get_billing_email() : '',
+			'individual' => array_filter( $name, static fn( string $value ): bool => '' !== $value ),
+			'personPhones' => array( array( 'phone' => $phone ) ),
 		);
+		$email = method_exists( $order, 'get_billing_email' ) ? trim( (string) $order->get_billing_email() ) : '';
+		if ( '' !== $email && ( ! function_exists( 'is_email' ) || false !== is_email( $email ) ) ) {
+			$receiver['email'] = $email;
+		}
 		if ( DeliveryType::PICKUP === $request->delivery_type ) {
 			$receiver['warehouseId'] = $receiver_warehouse_id;
 		} else {
-			$receiver['address'] = $this->courier_address( $order, $request );
+			$receiver['addressStock'] = $this->courier_address( $order, $request );
 		}
 
 		return $receiver;
@@ -52,11 +45,39 @@ final class PekShipmentRecipientBuilder {
 	private function phone( object $order ): string {
 		foreach ( array( 'get_shipping_phone', 'get_billing_phone' ) as $method ) {
 			if ( method_exists( $order, $method ) ) {
-				$phone = preg_replace( '/[^\d+]/', '', (string) $order->{$method}() ) ?? '';
-				if ( strlen( $phone ) >= 10 ) {
+				$phone = $this->normalize_ru_phone( (string) $order->{$method}() );
+				if ( '' !== $phone ) {
 					return $phone;
 				}
 			}
+		}
+
+		return '';
+	}
+
+	/** @return array{lastName:string,firstName:string,patronymic:string} */
+	private function name_parts( object $order ): array {
+		$last = method_exists( $order, 'get_shipping_last_name' ) ? trim( (string) $order->get_shipping_last_name() ) : '';
+		$first = method_exists( $order, 'get_shipping_first_name' ) ? trim( (string) $order->get_shipping_first_name() ) : '';
+		if ( '' === $last && '' === $first ) {
+			$last = method_exists( $order, 'get_billing_last_name' ) ? trim( (string) $order->get_billing_last_name() ) : '';
+			$first = method_exists( $order, 'get_billing_first_name' ) ? trim( (string) $order->get_billing_first_name() ) : '';
+		}
+		$middle = method_exists( $order, 'get_meta' ) ? trim( (string) $order->get_meta( '_billing_patronymic', true ) ) : '';
+
+		return array( 'lastName' => $last, 'firstName' => $first, 'patronymic' => $middle );
+	}
+
+	private function normalize_ru_phone( string $value ): string {
+		$value = preg_replace( '/[^\d+]/', '', $value ) ?? '';
+		if ( 1 === preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
+			return '+7' . $matches[1];
+		}
+		if ( 1 === preg_match( '/^7(\d{10})$/', $value, $matches ) ) {
+			return '+7' . $matches[1];
+		}
+		if ( 1 === preg_match( '/^\+7\d{10}$/', $value ) ) {
+			return $value;
 		}
 
 		return '';

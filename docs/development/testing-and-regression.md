@@ -1,8 +1,8 @@
 # Testing And Regression
 
-Version 0.134.0 adds five PEK shipment smokes to the regression manifest: `pek.shipment-create`, `pek.shipment-status`, `pek.shipment-documents`, `pek.shipment-cancellation`, and `pek.shipment-modal`. The PEK group remains fake/local only; automated tests must not call production PEK APIs.
+Version 0.134.1 keeps the PEK shipment smokes in the regression manifest and adds a focused picker smoke for the sender warehouse override flow. The PEK group remains fake/local only; automated tests must not call production PEK APIs.
 
-Version: 0.134.0
+Version: 0.134.1
 
 Jet Logistic critical coverage is registered as the mandatory `jet-logistic` group. It covers API envelope handling, token redaction, CSV/geography basics, one-call two-rate quoting, discounted package goods cost and `D_SDOC`, terminal-city presentation, status mapping with compact events, manual attach, unsupported create, and local remove.
 

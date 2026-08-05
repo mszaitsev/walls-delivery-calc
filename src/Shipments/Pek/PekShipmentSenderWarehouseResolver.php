@@ -5,7 +5,9 @@ namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -20,7 +22,7 @@ final class PekShipmentSenderWarehouseResolver {
 	public function resolve( ShipmentCreateRequest $request ): array {
 		$override = trim( (string) ( $request->meta['pek_sender_warehouse_id'] ?? $request->meta['sender_warehouse_id'] ?? '' ) );
 		if ( '' !== $override ) {
-			$result = $this->warehouses->validate_and_select( $override );
+			$result = $this->warehouses->validate_snapshot( $override, $this->constraints( $request ) );
 			$snapshot = is_array( $result['snapshot'] ?? null ) ? $result['snapshot'] : array();
 			if ( empty( $result['success'] ) || array() === $snapshot ) {
 				throw new \RuntimeException( 'ПЭК не подтвердил выбранный склад самопривоза.' );
@@ -34,6 +36,12 @@ final class PekShipmentSenderWarehouseResolver {
 		if ( array() === $snapshot ) {
 			throw new \RuntimeException( 'В настройках ПЭК не выбран склад самопривоза отправителя.' );
 		}
+		$result = $this->warehouses->validate_snapshot( (string) ( $snapshot['warehouseId'] ?? '' ), $this->constraints( $request ) );
+		$fresh = is_array( $result['snapshot'] ?? null ) ? $result['snapshot'] : array();
+		if ( empty( $result['success'] ) || array() === $fresh ) {
+			throw new \RuntimeException( 'ПЭК не подтвердил склад самопривоза из настроек.' );
+		}
+		$snapshot = $fresh;
 		$snapshot['source'] = (string) ( $snapshot['source'] ?? 'settings_default' );
 
 		return $this->assert_limits( $snapshot, $request );
@@ -65,5 +73,23 @@ final class PekShipmentSenderWarehouseResolver {
 		if ( is_numeric( $limit ) && (float) $limit > 0 && $value > (float) $limit ) {
 			throw new \RuntimeException( $message );
 		}
+	}
+
+	private function constraints( ShipmentCreateRequest $request ): PickupCargoConstraints {
+		$weight = 0;
+		$volume = 0;
+		$max_dimension = 0;
+		$max_place_weight = 0;
+		foreach ( $request->places as $place ) {
+			if ( ! $place instanceof ShipmentPlace ) {
+				continue;
+			}
+			$weight += max( 0, $place->weight_g );
+			$volume += max( 0, $place->get_volume_cm3() );
+			$max_dimension = max( $max_dimension, $place->length_cm, $place->width_cm, $place->height_cm );
+			$max_place_weight = max( $max_place_weight, $place->weight_g );
+		}
+
+		return new PickupCargoConstraints( $weight, $volume, $max_dimension, $max_place_weight, max( 1, count( $request->places ) ) );
 	}
 }

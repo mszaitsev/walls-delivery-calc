@@ -5,6 +5,8 @@ namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -14,7 +16,8 @@ final class PekShipmentService {
 		private PekApiClient $api,
 		private PekShipmentStatusService $statuses,
 		private OrderShipmentRepository $repository,
-		private PekShipmentButtonPolicy $buttons
+		private PekShipmentButtonPolicy $buttons,
+		private ShipmentActualCostService $actual_costs
 	) {
 	}
 
@@ -39,12 +42,16 @@ final class PekShipmentService {
 				$status,
 				array( 'updated_at' => $this->now() )
 			);
+			$actual = $shipment['actual_cost_candidate'] ?? null;
 			unset( $shipment['actual_cost_candidate'] );
 			$this->repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $shipment );
+			if ( $actual instanceof ShipmentActualCost ) {
+				$shipment = $this->actual_costs->apply_carrier_cost( $order, PekSettings::CARRIER_KEY, $actual );
+			}
 
 			return array( 'success' => true, 'message' => 'Код груза ПЭК прикреплён.', 'shipment' => $shipment );
 		} catch ( \Throwable $e ) {
-			return array( 'success' => false, 'message' => $e->getMessage() );
+			return array( 'success' => false, 'message' => 'ПЭК не подтвердил указанный код груза.' );
 		}
 	}
 
@@ -59,6 +66,15 @@ final class PekShipmentService {
 			return array( 'success' => false, 'message' => 'Заявку ПЭК можно отменить через несколько минут после создания.' );
 		}
 		if ( empty( $this->buttons->resolve( $shipment )['cancel'] ) ) {
+			return array( 'success' => false, 'message' => 'Принятый груз ПЭК не отменяется через API.' );
+		}
+		try {
+			$fresh = $this->statuses->fetch( $code, (string) ( $shipment['delivery_type'] ?? '' ) );
+		} catch ( \Throwable ) {
+			return array( 'success' => false, 'message' => 'Не удалось проверить текущий статус ПЭК перед отменой.' );
+		}
+		$fresh_shipment = array_merge( $shipment, $fresh );
+		if ( '' !== trim( (string) ( $fresh_shipment['pek_take_on_stock_datetime'] ?? '' ) ) || empty( $this->buttons->resolve( $fresh_shipment )['cancel'] ) ) {
 			return array( 'success' => false, 'message' => 'Принятый груз ПЭК не отменяется через API.' );
 		}
 		$result = $this->api->order_cancellation( array( $code ) );

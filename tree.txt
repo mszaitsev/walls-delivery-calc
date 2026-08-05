@@ -876,10 +876,12 @@ C:.
 |   |   |       PekShipmentCargoBuilder.php
 |   |   |       PekShipmentCorrelationResolver.php
 |   |   |       PekShipmentDeclaredValueResolver.php
+|   |   |       PekShipmentDestinationResolver.php
 |   |   |       PekShipmentDocumentProvider.php
 |   |   |       PekShipmentDocumentService.php
 |   |   |       PekShipmentModalExtension.php
 |   |   |       PekShipmentPersistenceMapper.php
+|   |   |       PekShipmentProductWeightResolver.php
 |   |   |       PekShipmentRecipientBuilder.php
 |   |   |       PekShipmentRequestBuilder.php
 |   |   |       PekShipmentSenderWarehouseResolver.php
@@ -1037,8 +1039,15 @@ C:.
     |       run-pek-shipment-create-smoke.php
     |       run-pek-shipment-documents-smoke.php
     |       run-pek-shipment-modal-smoke.php
+    |       run-pek-shipment-picker-smoke.php
     |       run-pek-shipment-status-smoke.php
     |       run-pek-warehouse-datetime-smoke.php
+    |
+    |   \---fixtures
+    |           order-print-response.json
+    |           preregistration-submit-courier.json
+    |           preregistration-submit-pickup.json
+    |           preregistration-submit-response.json
     |
     +---pickup
     |       run-carrier-pickup-provider-registry-smoke.php

@@ -38,27 +38,10 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	/** @return array<string,mixed> */
 	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array {
 		try {
-			$errors = $this->builder->validate( $request );
-			return array(
-				'method' => 'POST',
-				'path' => '/preregistration/submit/',
-				'body' => array() === $errors ? array(
-					'orderType' => 0,
-					'type' => PekSettings::LTL_PRODUCT_TYPE,
-					'order_number' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
-					'receiver_mode' => $request->delivery_type,
-					'place_count' => count( $request->places ),
-					'insurance_enabled' => true,
-					'sms_release_requested' => true,
-					'payers' => array( 'transporting' => 'sender', 'insurance' => 'sender', 'delivery' => 'sender', 'smsRelease' => 'sender' ),
-					'sealing' => false,
-					'client_card_present' => false,
-				) : array(),
-				'errors' => $errors,
-				'warnings' => array(),
-			);
+			$built = $this->builder->prepare( $this->order_from_request( $request ), $request, true );
+			return $built['preview'];
 		} catch ( \Throwable $e ) {
-			return array( 'method' => 'POST', 'path' => '/preregistration/submit/', 'body' => array(), 'errors' => array( $e->getMessage() ), 'warnings' => array() );
+			return array( 'method' => 'POST', 'path' => '/preregistration/submit/', 'body' => array(), 'errors' => array( $this->safe_error_message( $e ) ), 'warnings' => array() );
 		}
 	}
 
@@ -67,8 +50,9 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	}
 
 	public function create_for_order( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
+		$built = null;
 		try {
-			$built = $this->builder->build( $order, $request, true );
+			$built = $this->builder->prepare( $order, $request, true );
 			$response = $this->api->preregistration_submit( $built['payload'] );
 			$parsed = $this->parse_create_response( $response );
 			return new ShipmentCreateResult(
@@ -84,12 +68,12 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			return new ShipmentCreateResult(
 				false,
 				error_code: $uncertain ? 'pek_uncertain_submit' : (string) ( $context['error_code'] ?? 'pek_create_failed' ),
-				error_message: $uncertain ? 'Результат создания заявки ПЭК не определён. Проверьте кабинет ПЭК перед повтором.' : $e->getMessage(),
-				raw_reference: array( 'failure_stage' => $stage, 'endpoint' => $context['endpoint'] ?? '/preregistration/submit/' )
+				error_message: $uncertain ? 'Результат создания заявки ПЭК не определён. Проверьте кабинет ПЭК перед повтором.' : 'ПЭК отклонил создание заявки.',
+				raw_reference: array( 'failure_stage' => $stage, 'endpoint' => $context['endpoint'] ?? '/preregistration/submit/', 'http_status' => $context['http_status'] ?? '', 'correlation' => is_array( $built ) ? (string) ( $built['summary']['correlation'] ?? '' ) : '', 'summary' => is_array( $built ) ? $built['summary'] : array() )
 			);
 		} catch ( \Throwable $e ) {
 			$this->log( 'PEK shipment create failed.', $e );
-			return new ShipmentCreateResult( false, error_code: 'pek_validation_failed', error_message: $e->getMessage() );
+			return new ShipmentCreateResult( false, error_code: 'pek_validation_failed', error_message: $this->safe_error_message( $e ) );
 		}
 	}
 
@@ -170,32 +154,40 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	}
 
 	public function auto_sync_throttle_microseconds(): int {
-		return 600000;
+		return 1200000;
 	}
 
 	/** @param array<string,mixed> $response @return array<string,string|array<int,string>> */
 	private function parse_create_response( array $response ): array {
-		$document_id = trim( (string) ( $response['documentId'] ?? $response['document_id'] ?? '' ) );
+		$document_id = trim( (string) ( $response['documentId'] ?? '' ) );
 		$cargos = is_array( $response['cargos'] ?? null ) ? $response['cargos'] : array();
 		$cargo = is_array( $cargos[0] ?? null ) ? $cargos[0] : array();
-		$code = trim( (string) ( $cargo['code'] ?? $cargo['cargoCode'] ?? $response['cargoCode'] ?? '' ) );
-		if ( '' === $document_id || '' === $code ) {
+		$code = trim( (string) ( $cargo['cargoCode'] ?? '' ) );
+		if ( '' === $document_id || '' === $code || 1 !== count( $cargos ) ) {
 			throw new \RuntimeException( 'ПЭК не вернул обязательные идентификаторы заявки и груза.' );
+		}
+		$positions = array();
+		foreach ( is_array( $cargo['positions'] ?? null ) ? $cargo['positions'] : array() as $position ) {
+			if ( is_array( $position ) && '' !== trim( (string) ( $position['barcode'] ?? '' ) ) ) {
+				$positions[] = trim( (string) $position['barcode'] );
+			}
 		}
 
 		return array(
 			'document_id' => $document_id,
 			'cargo_code' => $code,
-			'cargo_barcode' => (string) ( $cargo['cargoBarCode'] ?? $cargo['barcode'] ?? '' ),
-			'position_barcodes' => is_array( $cargo['positionBarCodes'] ?? null ) ? array_values( array_filter( $cargo['positionBarCodes'], 'is_string' ) ) : array(),
+			'cargo_barcode' => (string) ( $cargo['barсode'] ?? $cargo['barcode'] ?? '' ),
+			'position_barcodes' => $positions,
 		);
 	}
 
-	private function order_stub(): object {
-		return new class() {
-			public function get_billing_phone(): string { return ''; }
-			public function get_billing_email(): string { return ''; }
-		};
+	private function order_from_request( ShipmentCreateRequest $request ): object {
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $request->order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			throw new \RuntimeException( 'Не удалось загрузить заказ для preview ПЭК.' );
+		}
+
+		return $order;
 	}
 
 	/** @param array<string,mixed> $shipment */
@@ -209,5 +201,11 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		if ( $this->logger instanceof Logger ) {
 			$this->logger->warning( $message, array( 'error' => $e->getMessage(), 'carrier_key' => PekSettings::CARRIER_KEY ) );
 		}
+	}
+
+	private function safe_error_message( \Throwable $e ): string {
+		return $e instanceof \RuntimeException || $e instanceof \InvalidArgumentException
+			? $e->getMessage()
+			: 'Не удалось подготовить заявку ПЭК.';
 	}
 }

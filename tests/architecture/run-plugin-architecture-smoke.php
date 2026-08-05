@@ -581,6 +581,42 @@ foreach ( plugin_architecture_js_files( 'assets/admin/shipments' ) as $file ) {
 	plugin_architecture_assert( ! str_contains( $source, $legacy_document_payload_key ), 'Legacy document payload alias must be absent from ' . str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) ) );
 }
 
+$draft_factory_source = plugin_architecture_source( 'src/Shipments/Application/OrderShipmentDraftFactory.php' );
+$shipment_creation_source = plugin_architecture_source( 'src/Shipments/Application/ShipmentCreationService.php' );
+$shipment_metabox_source = plugin_architecture_source( 'src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$pek_request_builder_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentRequestBuilder.php' );
+$pek_cargo_builder_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentCargoBuilder.php' );
+$pek_recipient_builder_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentRecipientBuilder.php' );
+$pek_adapter_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentAdapter.php' );
+$pek_service_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentService.php' );
+$pek_sms_source = plugin_architecture_source( 'src/Shipments/Pek/PekSmsReleaseAvailabilityService.php' );
+$pek_sender_warehouse_source = plugin_architecture_source( 'src/Carriers/Pek/Api/PekSenderWarehouseService.php' );
+$pek_sender_resolver_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentSenderWarehouseResolver.php' );
+$generic_picker_source = plugin_architecture_source( 'assets/admin/shipments/shipment-picker.js' );
+$pek_picker_source = plugin_architecture_source( 'assets/admin/shipments/extensions/pek.js' );
+plugin_architecture_assert( str_contains( $draft_factory_source, 'create_pek_request_from_order' ) && str_contains( $draft_factory_source, 'create_pek_request_from_admin_data' ), 'PEK shipment request creation must be wired in the carrier-aware draft factory.' );
+plugin_architecture_assert( ! str_contains( $shipment_creation_source, 'PekSettings::CARRIER_KEY' ) && ! str_contains( $shipment_creation_source, "'pek'" ) && ! str_contains( $shipment_creation_source, '"pek"' ), 'ShipmentCreationService must not gain a PEK carrier branch.' );
+plugin_architecture_assert( ! str_contains( $shipment_metabox_source, 'PekSettings::CARRIER_KEY' ), 'OrderShipmentsMetabox must not gain a PEK render branch.' );
+plugin_architecture_assert( str_contains( $pek_request_builder_source, "'common' => array(" ) && str_contains( $pek_request_builder_source, "'sender' => \$this->sender_payload" ) && str_contains( $pek_request_builder_source, "'cargos' => array(" ), 'PEK preregistration submit payload must use root common/sender/cargos hierarchy.' );
+plugin_architecture_assert( ! str_contains( $pek_request_builder_source, "'payer' => 'sender'" ) && ! str_contains( $pek_request_builder_source, '"payer": "sender"' ) && str_contains( $pek_request_builder_source, "'payer' => array( 'type' => 1 )" ), 'PEK services must use documented numeric payer object.' );
+plugin_architecture_assert( ! str_contains( $pek_request_builder_source . $pek_cargo_builder_source, "'smsRelease'" ) && ! str_contains( $pek_request_builder_source . $pek_cargo_builder_source, '"smsRelease"' ), 'PEK submit payload must not send invented smsRelease field.' );
+plugin_architecture_assert( str_contains( $pek_cargo_builder_source, "'cargoPlaceList' => \$places" ) && ! str_contains( $pek_cargo_builder_source, "'position' =>" ) && ! str_contains( $pek_cargo_builder_source, "'cargoDescription'" ) && ! str_contains( $pek_cargo_builder_source, "'cost' =>" ), 'PEK cargo places and declared cost must use the official cargo common shape without legacy aliases.' );
+plugin_architecture_assert( str_contains( $pek_recipient_builder_source, "'personPhones' => array(" ) && str_contains( $pek_recipient_builder_source, "'individual' => array_filter" ) && str_contains( $pek_recipient_builder_source, "'addressStock'" ) && ! str_contains( $pek_recipient_builder_source, "'identityCard'" ) && ! str_contains( $pek_recipient_builder_source, "'passport'" ) && ! str_contains( $pek_recipient_builder_source, "'name' => \$name" ), 'PEK physical receiver must use documented individual/personPhones/addressStock shape without passport aliases.' );
+plugin_architecture_assert( str_contains( $pek_adapter_source, "'documentId'" ) && str_contains( $pek_adapter_source, "'cargoCode'" ) && ! str_contains( $pek_adapter_source, "'cargoBarCode'" ) && ! str_contains( $pek_adapter_source, "'positionBarCodes'" ), 'PEK create parser must use preregistration response fixture fields, not cargos/status aliases.' );
+plugin_architecture_assert( str_contains( $pek_sender_warehouse_source, 'function validate_snapshot' ) && str_contains( $pek_sender_resolver_source, 'validate_snapshot' ) && ! str_contains( $pek_sender_resolver_source, 'validate_and_select' ), 'PEK shipment sender warehouse validation must be fresh and non-mutating.' );
+plugin_architecture_assert( str_contains( $generic_picker_source, 'window.wdcShipmentPickupPicker' ) && str_contains( $pek_picker_source, 'window.wdcShipmentPickupPicker' ) && str_contains( $pek_picker_source, 'picker.open(form' ) && ! str_contains( $generic_picker_source, "carrier === 'pek'" ) && ! str_contains( $pek_picker_source, 'wdc:shipment-pickup-search-open' ), 'PEK sender warehouse picker must consume a working generic picker API without a generic PEK branch.' );
+plugin_architecture_assert( str_contains( $pek_request_builder_source, 'PekShipmentDestinationResolver' ) && str_contains( $pek_request_builder_source, 'PekShipmentProductWeightResolver' ), 'PEK preview/create path must run fresh destination and product-weight resolvers.' );
+plugin_architecture_assert( str_contains( $pek_sms_source, "specialCondition'") && str_contains( $pek_sms_source, 'CODMaxSum' ) && str_contains( $pek_sms_source, 'MoneyParser::numeric_to_kopecks' ), 'PEK SMS availability must scope CODMaxSum to the SMS special-condition row and parse money strictly.' );
+plugin_architecture_assert( str_contains( $pek_service_source, 'ShipmentActualCostService' ) && str_contains( $pek_service_source, 'apply_carrier_cost' ), 'PEK manual attach must merge actual cost through the shared service.' );
+plugin_architecture_assert( str_contains( $pek_service_source, '$this->statuses->fetch' ) && str_contains( $pek_service_source, 'pek_take_on_stock_datetime' ), 'PEK cancellation must fresh-check acceptance before API cancellation.' );
+foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
+	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
+	$source = (string) file_get_contents( $file );
+	plugin_architecture_assert( ! str_contains( strtolower( $source ), 'cancelandreturncargo' ), 'PEK return API must not be present in production source: ' . $relative );
+	plugin_architecture_assert( ! str_contains( $source, 'pek_actual_cost_' ), 'PEK actual cost must use shared canonical fields only: ' . $relative );
+}
+plugin_architecture_assert( ! is_dir( plugin_architecture_path( 'src/Shipments/Pek/Storage' ) ) && ! is_file( plugin_architecture_path( 'database/migrations/0060_create_pek_shipments.php' ) ), 'PEK shipment correction must not add shipment storage or PEK shipment migrations.' );
+
 foreach ( array( 'admin_post_cdek_barcode_pdf', 'admin_post_dpd_documents_zip', 'admin_post_yandex_label_pdf', 'ACTION_CDEK_BARCODE_PDF', 'ACTION_DPD_DOCUMENTS_ZIP', 'ACTION_YANDEX_LABEL_PDF' ) as $old_handler ) {
 	foreach ( plugin_architecture_php_files( 'src' ) as $file ) {
 		plugin_architecture_assert( ! str_contains( (string) file_get_contents( $file ), $old_handler ), 'Old per-carrier document handler must be absent: ' . $old_handler );
@@ -776,6 +812,9 @@ foreach ( array( 'src/Shipments/Application', 'src/Shipments/Admin', 'src/Shipme
 }
 foreach ( $generic_shipment_sources as $relative => $source ) {
 	plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic Shipment Framework must not branch on Jet Logistic in ' . $relative );
+	if ( in_array( $relative, array( 'src/Shipments/Application/OrderShipmentDraftFactory.php', 'src/Shipments/Admin/Ajax/ShipmentAddressAjaxController.php' ), true ) ) {
+		continue;
+	}
 	plugin_architecture_assert( ! str_contains( $source, "'pek'" ) && ! str_contains( $source, 'Pek' ), 'PEK foundation must not be registered or branched in generic Shipment Framework source ' . $relative );
 }
 foreach ( plugin_architecture_js_files( 'assets/admin/shipments' ) as $file ) {

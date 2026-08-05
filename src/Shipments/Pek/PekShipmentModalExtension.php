@@ -27,11 +27,16 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 		return array(
 			'default_sender_warehouse' => $warehouse,
 			'current_sender_warehouse_id' => (string) ( $meta['pek_sender_warehouse_id'] ?? $warehouse['warehouseId'] ?? '' ),
+			'receiver_warehouse_id' => (string) ( $meta['pek_receiver_warehouse_id'] ?? $meta['pickup_point_code'] ?? '' ),
+			'receiver_branch_id' => (string) ( $meta['pek_receiver_branch_id'] ?? '' ),
+			'destination_location_id' => (int) ( $meta['pek_destination_location_id'] ?? 0 ),
+			'provider_destination_fingerprint' => (string) ( $meta['provider_destination_fingerprint'] ?? '' ),
 			'recipient_type' => 'physical',
 			'sms_release_status' => 'required',
 			'destination_summary' => (string) ( $meta['selected_pickup_point_title'] ?? $meta['pickup_point_title'] ?? '' ),
 			'delivery_type' => (string) ( $request['delivery_type'] ?? '' ),
 			'declared_value' => is_array( $request['declared_value'] ?? null ) ? $request['declared_value'] : array(),
+			'product_weight_g' => (int) ( $meta['pek_product_weight_g'] ?? 0 ),
 			'cargo_constraints' => array( 'type' => PekSettings::LTL_PRODUCT_TYPE, 'orderType' => 0 ),
 		);
 	}
@@ -55,7 +60,6 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 	public function render_pickup_fields( object $order, array $draft, array $context ): void {
 		unset( $order, $draft );
 		?>
-		<input type="hidden" name="pickup_point_code" value="<?php echo esc_attr( (string) ( $context['receiver_warehouse_id'] ?? '' ) ); ?>">
 		<p><strong><?php echo esc_html__( 'Терминал ПЭК получателя', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $context['destination_summary'] ?? '-' ) ); ?></p>
 		<?php
 	}

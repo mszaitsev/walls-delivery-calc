@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 
 defined( 'ABSPATH' ) || exit;
@@ -19,9 +20,10 @@ final class PekShipmentDeclaredValueResolver {
 			if ( ! is_object( $item ) || ! method_exists( $item, 'get_total' ) ) {
 				continue;
 			}
-			$total += $this->rub_to_kopecks( (string) $item->get_total() );
-			if ( method_exists( $item, 'get_total_tax' ) ) {
-				$total += $this->rub_to_kopecks( (string) $item->get_total_tax() );
+			$total += MoneyParser::rubles_to_kopecks( (string) $item->get_total() );
+			$prices_include_tax = function_exists( 'wc_prices_include_tax' ) && wc_prices_include_tax();
+			if ( $prices_include_tax && method_exists( $item, 'get_total_tax' ) ) {
+				$total += MoneyParser::rubles_to_kopecks( (string) $item->get_total_tax() );
 			}
 		}
 		if ( $total <= 0 ) {
@@ -29,17 +31,5 @@ final class PekShipmentDeclaredValueResolver {
 		}
 
 		return Money::from_kopecks( $total, 'RUB' );
-	}
-
-	private function rub_to_kopecks( string $value ): int {
-		$value = str_replace( ',', '.', trim( $value ) );
-		if ( ! is_numeric( $value ) ) {
-			return 0;
-		}
-		$parts = explode( '.', $value, 2 );
-		$rub = (int) preg_replace( '/\D+/', '', $parts[0] );
-		$kop = str_pad( preg_replace( '/\D+/', '', $parts[1] ?? '' ) ?? '', 2, '0' );
-
-		return $rub * 100 + (int) substr( $kop, 0, 2 );
 	}
 }

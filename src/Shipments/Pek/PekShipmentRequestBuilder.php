@@ -17,35 +17,43 @@ final class PekShipmentRequestBuilder {
 		private PekShipmentCargoBuilder $cargo,
 		private PekShipmentRecipientBuilder $recipients,
 		private PekShipmentCorrelationResolver $correlations,
-		private PekSmsReleaseAvailabilityService $sms
+		private PekSmsReleaseAvailabilityService $sms,
+		private PekShipmentDestinationResolver $destinations,
+		private PekShipmentProductWeightResolver $product_weights
 	) {
 	}
 
 	/** @return array{payload:array<string,mixed>,preview:array<string,mixed>,summary:array<string,mixed>} */
 	public function build( object $order, ShipmentCreateRequest $request, bool $live_sms_check ): array {
+		return $this->prepare( $order, $request, $live_sms_check );
+	}
+
+	/** @return array{payload:array<string,mixed>,preview:array<string,mixed>,summary:array<string,mixed>} */
+	public function prepare( object $order, ShipmentCreateRequest $request, bool $live_sms_check ): array {
 		$this->validate_scope( $request );
 		$declared = $this->declared_values->resolve( $request );
 		$declared_kopecks = $declared->get_kopecks();
 		$sender = $this->sender_warehouses->resolve( $request );
-		$receiver_warehouse_id = $this->receiver_warehouse_id( $request );
+		$destination = $this->destinations->resolve( $request );
+		$receiver_warehouse_id = (string) ( $destination['warehouse_id'] ?? '' );
+		$correlation = $this->correlations->resolve( $request, (string) $sender['warehouseId'], $receiver_warehouse_id );
 		$cargo = $this->cargo->build( $request, $declared_kopecks );
+		$cargo['payload']['common']['customerCorrelation'] = $correlation;
+		$cargo['payload']['common']['orderNumber'] = (string) ( $request->meta['order_num'] ?? $request->order_id );
+		$sealing = $this->product_weights->sealing_required( $request );
 		$counterpart_guid = $this->settings->sender_counterpart_guid();
 		if ( '' === $counterpart_guid ) {
 			throw new \RuntimeException( 'Не подтверждён контрагент отправителя ПЭК.' );
 		}
 		$sms = $live_sms_check
-			? $this->sms->check( $counterpart_guid, (string) ( $sender['branchId'] ?? '' ), $this->receiver_branch_id( $request ), $declared_kopecks )
+			? $this->sms->check( $counterpart_guid, (string) ( $sender['branchId'] ?? '' ), (string) ( $destination['branch_id'] ?? '' ), $declared_kopecks )
 			: new PekSmsReleaseResult( true, $this->settings->sms_release_limit_rub() * 100, true, true );
 		if ( ! $sms->success ) {
 			throw new \RuntimeException( $sms->message );
 		}
-		$correlation = $this->correlations->resolve( $request, (string) $sender['warehouseId'], $receiver_warehouse_id );
 		$payload = array(
 			'common' => array(
 				'orderType' => 0,
-				'type' => PekSettings::LTL_PRODUCT_TYPE,
-				'customerCorrelation' => $correlation,
-				'orderNumber' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 				'counterpartClientCard' => $this->settings->client_card(),
 			),
 			'sender' => $this->sender_payload( $sender ),
@@ -54,22 +62,24 @@ final class PekShipmentRequestBuilder {
 					$cargo['payload'],
 					array(
 						'receiver' => $this->recipients->build_physical_recipient( $order, $request, $receiver_warehouse_id ),
-						'services' => $this->services( $request, $declared_kopecks ),
+						'services' => $this->services( $request, $declared_kopecks, $sealing ),
 					)
 				),
 			),
-			'payer' => array( 'type' => 'sender' ),
 		);
 		$summary = array(
 			'correlation' => $correlation,
 			'sender_warehouse' => $sender,
 			'receiver_warehouse_id' => $receiver_warehouse_id,
-			'receiver_branch_id' => $this->receiver_branch_id( $request ),
+			'receiver_branch_id' => (string) ( $destination['branch_id'] ?? '' ),
+			'destination' => $destination,
 			'declared_value_kopecks' => $declared_kopecks,
+			'product_weight_g' => $this->product_weights->product_weight_g( $request ),
 			'sms' => $sms->to_safe_array(),
 			'cargo' => $cargo['summary'],
 			'shipment_mode' => $request->delivery_type,
 			'recipient_type' => 'physical',
+			'sealing_requested' => $sealing,
 		);
 
 		return array( 'payload' => $payload, 'preview' => $this->preview( $summary ), 'summary' => $summary );
@@ -99,7 +109,8 @@ final class PekShipmentRequestBuilder {
 
 	/** @param array<string,mixed> $sender @return array<string,mixed> */
 	private function sender_payload( array $sender ): array {
-		return array(
+		$this->validate_sender_settings();
+		$payload = array(
 			'legalForm' => $this->settings->sender_legal_form(),
 			'fs' => $this->settings->sender_fs(),
 			'title' => $this->settings->sender_full_name(),
@@ -107,49 +118,67 @@ final class PekShipmentRequestBuilder {
 			'kpp' => $this->settings->sender_kpp(),
 			'countryOfRegistrationCode' => $this->settings->sender_registration_classifier_code(),
 			'person' => $this->settings->sender_contact_name(),
-			'phone' => $this->settings->sender_phone(),
-			'email' => $this->settings->sender_email(),
+			'personPhones' => array( array( 'phone' => $this->normalize_ru_phone( $this->settings->sender_phone() ) ) ),
 			'warehouseId' => (string) $sender['warehouseId'],
 		);
+		$email = trim( $this->settings->sender_email() );
+		if ( '' !== $email && ( ! function_exists( 'is_email' ) || false !== is_email( $email ) ) ) {
+			$payload['email'] = $email;
+		}
+
+		return $payload;
 	}
 
 	/** @return array<string,mixed> */
-	private function services( ShipmentCreateRequest $request, int $declared_kopecks ): array {
-		return array(
-			'transporting' => array( 'enabled' => true, 'payer' => 'sender' ),
-			'insurance' => array( 'enabled' => true, 'payer' => 'sender', 'cost' => round( $declared_kopecks / 100, 2 ) ),
-			'delivery' => array( 'enabled' => DeliveryType::COURIER === $request->delivery_type, 'payer' => 'sender' ),
-			'smsRelease' => array( 'enabled' => true, 'payer' => 'sender' ),
-			'hardPacking' => array( 'enabled' => false ),
-			'sealing' => array( 'enabled' => false ),
+	private function services( ShipmentCreateRequest $request, int $declared_kopecks, bool $sealing ): array {
+		$services = array(
+			'transporting' => array( 'enabled' => true, 'payer' => array( 'type' => 1 ) ),
+			'insurance' => array( 'enabled' => true, 'payer' => array( 'type' => 1 ), 'cost' => round( $declared_kopecks / 100, 2 ) ),
 		);
-	}
-
-	private function receiver_warehouse_id( ShipmentCreateRequest $request ): string {
 		if ( DeliveryType::COURIER === $request->delivery_type ) {
-			return '';
+			$services['delivery'] = array( 'enabled' => true, 'payer' => array( 'type' => 1 ) );
 		}
-		$code = trim( (string) ( $request->pickup_point?->point_code ?? $request->meta['pickup_point_code'] ?? '' ) );
-		if ( '' === $code ) {
-			throw new \RuntimeException( 'Не выбран терминал ПЭК.' );
+		if ( $sealing ) {
+			$services['sealing'] = array( 'enabled' => true, 'payer' => array( 'type' => 1 ) );
 		}
 
-		return $code;
+		return $services;
 	}
 
-	private function receiver_branch_id( ShipmentCreateRequest $request ): string {
-		$branch = trim( (string) ( $request->meta['pek_receiver_branch_id'] ?? $request->meta['receiver_branch_id'] ?? '' ) );
-		if ( '' === $branch && is_array( $request->meta['pickup_provider_query'] ?? null ) ) {
-			$branch = trim( (string) ( $request->meta['pickup_provider_query']['branchId'] ?? '' ) );
+	private function validate_sender_settings(): void {
+		foreach ( array(
+			'legal form' => (string) $this->settings->sender_legal_form(),
+			'fs' => $this->settings->sender_fs(),
+			'title' => $this->settings->sender_full_name(),
+			'inn' => $this->settings->sender_inn(),
+			'country' => $this->settings->sender_registration_classifier_code(),
+			'person' => $this->settings->sender_contact_name(),
+		) as $value ) {
+			if ( '' === trim( $value ) ) {
+				throw new \RuntimeException( 'Не заполнены обязательные данные отправителя ПЭК.' );
+			}
 		}
-		if ( '' === $branch ) {
-			$branch = trim( (string) ( $request->meta['pek_destination_branch_id'] ?? '' ) );
+		if ( '' === $this->normalize_ru_phone( $this->settings->sender_phone() ) ) {
+			throw new \RuntimeException( 'Некорректный телефон отправителя ПЭК.' );
 		}
-		if ( '' === $branch ) {
-			throw new \RuntimeException( 'Не подтверждён филиал назначения ПЭК для SMS.' );
+		if ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $this->settings->sender_legal_form() && '' === $this->settings->sender_kpp() ) {
+			throw new \RuntimeException( 'Для юрлица-отправителя ПЭК нужен КПП.' );
+		}
+	}
+
+	private function normalize_ru_phone( string $value ): string {
+		$value = preg_replace( '/[^\d+]/', '', $value ) ?? '';
+		if ( 1 === preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
+			return '+7' . $matches[1];
+		}
+		if ( 1 === preg_match( '/^7(\d{10})$/', $value, $matches ) ) {
+			return '+7' . $matches[1];
+		}
+		if ( 1 === preg_match( '/^\+7\d{10}$/', $value ) ) {
+			return $value;
 		}
 
-		return $branch;
+		return '';
 	}
 
 	/** @param array<string,mixed> $summary @return array<string,mixed> */
@@ -175,8 +204,10 @@ final class PekShipmentRequestBuilder {
 			'insurance_value_kopecks' => (int) ( $summary['declared_value_kopecks'] ?? 0 ),
 			'sms_release_requested' => true,
 			'sms_release_confirmed' => ! empty( $sms['success'] ),
-			'payers' => array( 'transporting' => 'sender', 'insurance' => 'sender', 'delivery' => 'sender', 'smsRelease' => 'sender' ),
-			'sealing' => false,
+			'sms_effective_limit_kopecks' => (int) ( $sms['effective_limit_kopecks'] ?? 0 ),
+			'payers' => array( 'transporting' => 1, 'insurance' => 1, 'delivery' => 1, 'sealing' => 1 ),
+			'sealing' => ! empty( $summary['sealing_requested'] ),
+			'product_weight_g' => (int) ( $summary['product_weight_g'] ?? 0 ),
 			'client_card_present' => '' !== $this->settings->client_card(),
 			'counterpart_confirmed' => '' !== $this->settings->sender_counterpart_guid(),
 		);

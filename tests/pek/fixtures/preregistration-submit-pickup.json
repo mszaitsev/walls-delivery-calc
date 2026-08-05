@@ -1,0 +1,79 @@
+{
+  "common": {
+    "orderType": 0,
+    "counterpartClientCard": "CLIENT-CARD"
+  },
+  "sender": {
+    "legalForm": 1,
+    "fs": "ООО",
+    "title": "Тестовый отправитель",
+    "inn": "7700000000",
+    "kpp": "770001001",
+    "countryOfRegistrationCode": "643",
+    "person": "Иванов Иван",
+    "personPhones": [
+      {
+        "phone": "+79000000000"
+      }
+    ],
+    "warehouseId": "sender-warehouse-guid"
+  },
+  "cargos": [
+    {
+      "common": {
+        "type": 3,
+        "customerCorrelation": "wdc-pek-1",
+        "orderNumber": "1001",
+        "positionsCount": 1,
+        "weight": 1.25,
+        "volume": 0.02,
+        "description": "Товары интернет-магазина",
+        "declaredCost": 1500,
+        "cargoPlaceList": [
+          {
+            "quantity": 1,
+            "weight": 1.25,
+            "length": 0.2,
+            "width": 0.2,
+            "height": 0.2,
+            "volume": 0.01
+          }
+        ]
+      },
+      "receiver": {
+        "legalForm": 3,
+        "individual": {
+          "lastName": "Петров",
+          "firstName": "Петр"
+        },
+        "personPhones": [
+          {
+            "phone": "+79100000000"
+          }
+        ],
+        "warehouseId": "receiver-warehouse-guid"
+      },
+      "services": {
+        "transporting": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          }
+        },
+        "insurance": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          },
+          "cost": 1500
+        },
+        "sealing": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          }
+        }
+      }
+    }
+  ]
+}

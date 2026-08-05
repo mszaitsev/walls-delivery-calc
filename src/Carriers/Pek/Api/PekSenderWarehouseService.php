@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Pek\Api;
 
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -105,6 +106,32 @@ final class PekSenderWarehouseService {
 			$this->settings->save_sender_warehouse( $previous );
 
 			return array( 'success' => false, 'message' => 'Не удалось подтвердить склад ПЭК. Ранее выбранный склад сохранён.', 'snapshot' => $previous );
+		}
+	}
+
+	/** @return array{success:bool,message:string,snapshot:array<string,mixed>} */
+	public function validate_snapshot( string $warehouse_id, ?PickupCargoConstraints $constraints = null ): array {
+		$warehouse_id = trim( $warehouse_id );
+		if ( '' === $warehouse_id ) {
+			return array( 'success' => false, 'message' => 'Не выбран склад самопривоза ПЭК.', 'snapshot' => array() );
+		}
+		try {
+			$branches = $this->api->branches_all_for_warehouse( $warehouse_id );
+			$item = $this->find_warehouse_in_branches_all( $branches, $warehouse_id );
+			if ( array() === $item || ! $this->supports_ltl_pickup( $item ) ) {
+				return array( 'success' => false, 'message' => 'ПЭК не подтвердил выбранный warehouse ID как склад приёма для LTL.', 'snapshot' => array() );
+			}
+			$availability = $this->availability_status( $item );
+			if ( ! $availability['success'] ) {
+				return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => array() );
+			}
+			if ( $constraints instanceof PickupCargoConstraints && ! $this->fits_constraints( $item, $constraints ) ) {
+				return array( 'success' => false, 'message' => 'Склад ПЭК не принимает текущие габариты или количество мест.', 'snapshot' => array() );
+			}
+
+			return array( 'success' => true, 'message' => 'Склад ПЭК подтверждён.', 'snapshot' => $this->snapshot( $item ) );
+		} catch ( PekApiException ) {
+			return array( 'success' => false, 'message' => 'Не удалось подтвердить склад ПЭК.', 'snapshot' => array() );
 		}
 	}
 
@@ -316,6 +343,27 @@ final class PekSenderWarehouseService {
 		$operation = trim( preg_replace( '/\s+/u', ' ', $operation ) ?? $operation );
 
 		return 1 === preg_match( '/^при[её]м грузов$/iu', $operation );
+	}
+
+	private function fits_constraints( array $item, PickupCargoConstraints $constraints ): bool {
+		$checks = array(
+			'maxWeight' => $constraints->weight_g / 1000,
+			'maxVolume' => $constraints->volume_cm3 / 1000000,
+			'maxDimension' => $constraints->max_dimension_cm / 100,
+			'maxWeightOnePlace' => $constraints->max_place_weight_g / 1000,
+			'maxCount' => $constraints->places_count,
+		);
+		foreach ( $checks as $key => $actual ) {
+			if ( ! array_key_exists( $key, $item ) || null === $item[ $key ] || '' === trim( (string) $item[ $key ] ) ) {
+				continue;
+			}
+			$limit = (float) str_replace( ',', '.', (string) $item[ $key ] );
+			if ( $limit > 0 && $actual > $limit ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/** @param array<string,mixed> $item @return array{success:bool,code:string,message:string} */

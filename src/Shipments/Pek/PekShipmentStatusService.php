@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
@@ -100,11 +101,19 @@ final class PekShipmentStatusService {
 	/** @param array<string,mixed> $row */
 	private function actual_cost_candidate( array $row ): ?ShipmentActualCost {
 		$sum = $row['services']['sum'] ?? null;
-		if ( ! is_numeric( $sum ) || (float) $sum <= 0 || ! is_finite( (float) $sum ) ) {
+		if ( ! is_int( $sum ) && ! is_float( $sum ) && ! is_string( $sum ) ) {
+			return null;
+		}
+		$value = trim( (string) $sum );
+		if ( 1 !== preg_match( '/^\d+(?:[.,]\d{1,2})?$/', $value ) ) {
+			return null;
+		}
+		$kopecks = MoneyParser::numeric_to_kopecks( $value );
+		if ( null === $kopecks || $kopecks <= 0 ) {
 			return null;
 		}
 
-		return new ShipmentActualCost( (int) round( (float) $sum * 100 ), 'RUB', 'carrier_status', 'pek_cargos_status_services_sum', $this->now() );
+		return new ShipmentActualCost( $kopecks, 'RUB', 'carrier', 'pek_cargos_status_services_sum', $this->now() );
 	}
 
 	private function now(): string {
