@@ -20,6 +20,7 @@
 	var isPlacingOrder = false;
 	var placeOrderGuardTimer = 0;
 	var placeOrderResetGuardUntil = 0;
+	var pickupInlineNotices = {};
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
 	var selectedPickupPoints = extractPickupSelections(checkoutConfig);
 	if (checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint) {
@@ -363,6 +364,123 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 	}
 
+	function pickupInlineNoticeElement(container) {
+		return container ? container.querySelector('[data-wdc-pickup-inline-notice]') : null;
+	}
+
+	function pickupInlineNoticeFamily(container) {
+		var method = containerMethod(container) || activeMethod || currentShippingMethod();
+		var family = shippingMethodFamily(method);
+		if (isPickupFamily(family)) {
+			return family;
+		}
+		var fieldFamily = containerSelectedPickupFamily(container);
+		return isPickupFamily(fieldFamily) ? fieldFamily : '';
+	}
+
+	function currentDestinationFingerprint() {
+		return destinationFingerprint(currentContext) || destinationFingerprint(contextFromFields());
+	}
+
+	function capturePickupInlineNotice(container) {
+		var element = pickupInlineNoticeElement(container);
+		var family = pickupInlineNoticeFamily(container);
+		if (!element || !family) {
+			return false;
+		}
+		if (element.getAttribute('data-wdc-pickup-inline-notice-source') === 'memory') {
+			return false;
+		}
+		var message = meaningfulText(element.textContent || '');
+		if (!message) {
+			return false;
+		}
+		pickupInlineNotices[family] = {
+			message: message,
+			destinationFingerprint: currentDestinationFingerprint(),
+			createdAt: Date.now()
+		};
+		return true;
+	}
+
+	function restorePickupInlineNotice(container) {
+		var element = pickupInlineNoticeElement(container);
+		var family = pickupInlineNoticeFamily(container);
+		if (!element || !family) {
+			return;
+		}
+		var notice = pickupInlineNotices[family] || null;
+		if (!notice || !notice.message) {
+			clearPickupInlineNoticeElement(element);
+			return;
+		}
+		var current = currentDestinationFingerprint();
+		if (notice.destinationFingerprint && current && notice.destinationFingerprint !== current) {
+			clearPickupInlineNotice(family);
+			clearPickupInlineNoticeElement(element);
+			return;
+		}
+		element.textContent = notice.message;
+		element.hidden = false;
+		element.classList.remove('wdc-is-hidden');
+		element.setAttribute('aria-hidden', 'false');
+		element.setAttribute('data-wdc-pickup-inline-notice-source', 'memory');
+	}
+
+	function clearPickupInlineNotice(family) {
+		family = String(family || '').trim();
+		if (family) {
+			delete pickupInlineNotices[family];
+		}
+	}
+
+	function clearPickupInlineNoticesForDestinationChange() {
+		pickupInlineNotices = {};
+	}
+
+	function clearPickupInlineNoticeElement(element) {
+		if (!element) {
+			return;
+		}
+		element.textContent = '';
+		element.hidden = true;
+		element.classList.add('wdc-is-hidden');
+		element.setAttribute('aria-hidden', 'true');
+		element.setAttribute('data-wdc-pickup-inline-notice-source', '');
+	}
+
+	function syncPickupInlineNotices() {
+		var eventFamilies = {};
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			if (capturePickupInlineNotice(container)) {
+				eventFamilies[pickupInlineNoticeFamily(container)] = true;
+			}
+		});
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			var family = pickupInlineNoticeFamily(container);
+			if (!family) {
+				return;
+			}
+			if (!eventFamilies[family] && hasSuccessfulPickupSelection(container, family)) {
+				clearPickupInlineNotice(family);
+			}
+			restorePickupInlineNotice(container);
+		});
+	}
+
+	function hasSuccessfulPickupSelection(container, family) {
+		if (isContainerSelectionComplete(container, family)) {
+			return true;
+		}
+		var selected = selectedPickupPointForFamily(family);
+		if (selected && isValidSelectedPointForCard(selected, family) && sameSelectionDestination(selected)) {
+			return true;
+		}
+		var configSelections = window.wdcPickupCheckout && window.wdcPickupCheckout.pickupSelections;
+		var configSelected = configSelections && configSelections[family] ? normalizeSelectedPoint(configSelections[family]) : null;
+		return !!(configSelected && isValidSelectedPointForCard(configSelected, family) && sameSelectionDestination(configSelected));
+	}
+
 	function geolocationErrorMessage(error) {
 		if (error && error.code === 1) {
 			return 'Браузер не дал доступ к местоположению. Разрешите доступ или используйте поиск адреса.';
@@ -486,6 +604,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		invalidatePrefetch();
+		clearPickupInlineNoticesForDestinationChange();
 		selectedPickupPoints = {};
 		if (window.wdcPickupCheckout) {
 			window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
@@ -1974,6 +2093,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);
 		restoreSelectedPickupUi();
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+		syncPickupInlineNotices();
 	}
 
 	function selectedPickupPointId() {
@@ -2109,6 +2229,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				return;
 			}
 			lastDestinationFingerprint = newFingerprint;
+			clearPickupInlineNoticesForDestinationChange();
 			resetSelection('destination_changed');
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 			return;
@@ -2120,12 +2241,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				activeMethod = nextMethod;
 				syncSelectedPickupRate(nextMethod);
 				document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+				syncPickupInlineNotices();
 				schedulePrefetch();
 				return;
 			}
+			clearPickupInlineNotice(shippingMethodFamily(previousMethod));
 			activeMethod = nextMethod;
 			restoreSelectedPickupUi();
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+			syncPickupInlineNotices();
 			schedulePrefetch();
 		}
 	});
@@ -2151,12 +2275,14 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		lastDestinationFingerprint = newFingerprint;
+		clearPickupInlineNoticesForDestinationChange();
 		resetSelection('location_changed');
 		schedulePrefetch();
 	});
 	document.body.addEventListener('wdc:location-cleared', function () {
 		invalidatePrefetch();
 		updateCurrentContext(contextFromFields());
+		clearPickupInlineNoticesForDestinationChange();
 		resetSelection('destination_changed');
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 	});
@@ -2191,6 +2317,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				triggerCheckoutUpdate();
 				return;
 			}
+			syncPickupInlineNotices();
 			if (isPlacingOrder) {
 				releasePlaceOrderGuardSoon();
 				return;

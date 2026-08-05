@@ -848,6 +848,16 @@ $pickup_map_js_source = plugin_architecture_source( 'assets/frontend/pickup-map/
 plugin_architecture_assert( str_contains( $pickup_map_js_source, 'typeLabel !== title' ) && str_contains( $pickup_map_js_source, "carrier === 'pek'" ), 'Generic pickup map must hide duplicate title/type rows and avoid displaying PEK technical UUID codes.' );
 $pickup_checkout_js_source = plugin_architecture_source( 'assets/frontend/pickup-map/wdc-pickup-checkout.js' );
 plugin_architecture_assert( str_contains( $pickup_checkout_js_source, 'hasAuthoritativeSelections' ) && str_contains( $pickup_checkout_js_source, '? extractPickupSelections(response)' ) && str_contains( $pickup_checkout_js_source, ': null;' ), 'Checkout pickup frontend must treat state selections as authoritative and clear stale selected cards after server-side recovery.' );
+plugin_architecture_assert( str_contains( $pickup_checkout_js_source, 'var pickupInlineNotices = {};' ) && str_contains( $pickup_checkout_js_source, 'pickupInlineNotices[family]' ) && str_contains( $pickup_checkout_js_source, 'shippingMethodFamily(' ), 'Checkout pickup frontend must keep rejected pickup inline notices in a generic in-memory map keyed by normalized pickup family.' );
+plugin_architecture_assert( str_contains( $pickup_checkout_js_source, 'function capturePickupInlineNotice' ) && str_contains( $pickup_checkout_js_source, 'function restorePickupInlineNotice' ) && str_contains( $pickup_checkout_js_source, 'data-wdc-pickup-inline-notice-source' ), 'Checkout pickup frontend must capture one-render server notice events and restore them after checkout DOM replacement without recapturing memory-rendered text.' );
+plugin_architecture_assert( substr_count( $pickup_checkout_js_source, 'syncPickupInlineNotices();' ) >= 3 && str_contains( $pickup_checkout_js_source, "window.jQuery(document.body).on('updated_checkout'" ), 'Checkout pickup inline notice latch must survive repeated updated_checkout renders.' );
+plugin_architecture_assert( str_contains( $pickup_checkout_js_source, 'hasSuccessfulPickupSelection' ) && str_contains( $pickup_checkout_js_source, 'clearPickupInlineNotice(family)' ), 'Checkout pickup inline notice latch must clear after a valid selected pickup calculation.' );
+plugin_architecture_assert( str_contains( $pickup_checkout_js_source, 'clearPickupInlineNoticesForDestinationChange' ) && str_contains( $pickup_checkout_js_source, 'destinationFingerprint(context)' ), 'Checkout pickup inline notice latch must be bound to destination fingerprint and clear on destination changes.' );
+plugin_architecture_assert( str_contains( $pickup_checkout_js_source, 'previousMethod' ) && str_contains( $pickup_checkout_js_source, 'clearPickupInlineNotice(shippingMethodFamily(previousMethod))' ), 'Checkout pickup inline notice latch must clear on genuine shipping method family changes.' );
+plugin_architecture_assert( ! str_contains( $pickup_checkout_js_source, 'localStorage' ) && ! str_contains( $pickup_checkout_js_source, 'sessionStorage' ) && ! str_contains( $pickup_checkout_js_source, 'document.cookie' ), 'Checkout pickup inline notice latch must not use browser storage or cookies.' );
+plugin_architecture_assert( ! str_contains( $pickup_checkout_js_source, 'pickupInlineNoticeInput' ) && ! str_contains( $pickup_checkout_js_source, 'wdc_pickup_inline_notice' ), 'Checkout pickup inline notice latch must not serialize notices into hidden form fields.' );
+plugin_architecture_assert( ! preg_match( '/setTimeout\s*\([^;]*(pickupInlineNotice|pickupInlineNotices)/s', $pickup_checkout_js_source ), 'Checkout pickup inline notice latch must not auto-hide via timeout.' );
+plugin_architecture_assert( ! str_contains( $pickup_checkout_js_source, 'pek:pickup' ) && ! str_contains( $pickup_checkout_js_source, "carrier === 'pek'" ), 'Checkout pickup inline notice latch must not contain a PEK-specific frontend branch.' );
 
 $pek_planned_resolver_source = plugin_architecture_source( 'src/Carriers/Pek/Quote/PekQuotePlannedDateTimeResolver.php' );
 plugin_architecture_assert( str_contains( $pek_planned_resolver_source, 'private ?string $resolved = null' ) && str_contains( $pek_planned_resolver_source, 'null !== $this->resolved' ) && str_contains( $pek_planned_resolver_source, '$this->resolved =' ), 'PEK plannedDateTime resolver must memoize per service instance.' );
@@ -858,7 +868,7 @@ plugin_architecture_assert( ! str_contains( $checkout_orchestrator_source, 'PekC
 $migration_files = glob( plugin_architecture_path( 'src/Infrastructure/Migrations/*.php' ) ) ?: array();
 foreach ( $migration_files as $migration_file ) {
 	$name = basename( $migration_file );
-	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.7 must not add a new PEK migration: ' . $name );
+	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.8 must not add a new PEK migration: ' . $name );
 }
 
 echo "Plugin architecture smoke passed.\n";
