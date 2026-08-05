@@ -50,6 +50,8 @@ final class PekSettings {
 	public const SENDER_PHONE_KEY = 'pek_sender_phone';
 	public const SENDER_EMAIL_KEY = 'pek_sender_email';
 	public const CLIENT_CARD_KEY = 'pek_client_card';
+	public const SENDER_COUNTERPART_GUID_KEY = 'pek_sender_counterpart_guid';
+	public const SENDER_COUNTERPART_SNAPSHOT_KEY = 'pek_sender_counterpart_snapshot';
 	public const DEFAULT_CARGO_DESCRIPTION_KEY = 'pek_default_cargo_description';
 	public const WAREHOUSE_SEARCH_RADIUS_KEY = 'pek_warehouse_search_radius';
 	public const WAREHOUSE_SEARCH_LIMIT_KEY = 'pek_warehouse_search_limit';
@@ -84,6 +86,8 @@ final class PekSettings {
 			self::SENDER_PHONE_KEY => '',
 			self::SENDER_EMAIL_KEY => '',
 			self::CLIENT_CARD_KEY => '',
+			self::SENDER_COUNTERPART_GUID_KEY => '',
+			self::SENDER_COUNTERPART_SNAPSHOT_KEY => array(),
 			self::DEFAULT_CARGO_DESCRIPTION_KEY => self::DEFAULT_CARGO_DESCRIPTION,
 			self::WAREHOUSE_SEARCH_RADIUS_KEY => 50,
 			self::WAREHOUSE_SEARCH_LIMIT_KEY => 5,
@@ -155,6 +159,24 @@ final class PekSettings {
 
 	public function client_card(): string {
 		return $this->sanitize_text( $this->settings->get_string( self::CLIENT_CARD_KEY, '' ) );
+	}
+
+	public function sender_counterpart_guid(): string {
+		return $this->sanitize_text( $this->settings->get_string( self::SENDER_COUNTERPART_GUID_KEY, '' ) );
+	}
+
+	/** @return array<string,mixed> */
+	public function sender_counterpart_snapshot(): array {
+		$value = $this->settings->get_array( self::SENDER_COUNTERPART_SNAPSHOT_KEY, array() );
+
+		return $this->sanitize_counterpart_snapshot( $value );
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	public function save_sender_counterpart( string $guid, array $snapshot ): void {
+		$guid = $this->sanitize_text( $guid );
+		$this->settings->set( self::SENDER_COUNTERPART_GUID_KEY, $guid );
+		$this->settings->set( self::SENDER_COUNTERPART_SNAPSHOT_KEY, '' !== $guid ? $this->sanitize_counterpart_snapshot( $snapshot ) : array() );
 	}
 
 	public function default_cargo_description(): string {
@@ -292,6 +314,24 @@ final class PekSettings {
 				'endOfCostCalculationAvailability' => $this->snapshot_nullable_string( $availability['endOfCostCalculationAvailability'] ?? null ),
 				'departmentClosingDate' => $this->snapshot_nullable_string( $availability['departmentClosingDate'] ?? null ),
 			),
+			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
+		);
+	}
+
+	/** @param array<string,mixed> $value @return array<string,mixed> */
+	private function sanitize_counterpart_snapshot( array $value ): array {
+		$guid = $this->sanitize_text( (string) ( $value['guid'] ?? '' ) );
+		if ( '' === $guid ) {
+			return array();
+		}
+
+		return array(
+			'guid' => $guid,
+			'legalForm' => (int) ( $value['legalForm'] ?? 0 ),
+			'title' => $this->sanitize_text( (string) ( $value['title'] ?? '' ) ),
+			'inn_masked' => $this->sanitize_text( (string) ( $value['inn_masked'] ?? '' ) ),
+			'kpp_masked' => $this->sanitize_text( (string) ( $value['kpp_masked'] ?? '' ) ),
+			'client_card_present' => ! empty( $value['client_card_present'] ),
 			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
 		);
 	}

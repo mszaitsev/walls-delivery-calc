@@ -1,6 +1,8 @@
 # Shipments
 
-Version: 0.133.9
+PEK shipment runtime in 0.134.0 supports create, preview, persistence, manual attach, status update/autosync, actual carrier cost, documents, pre-acceptance cancellation, and local removal after cargo acceptance. Declared value authority is the WooCommerce product line total after discounts and taxes, excluding shipping and fees. SMS release must be confirmed by geography and counterpart service checks before create; no passport or identityCard fallback is used.
+
+Version: 0.134.0
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 

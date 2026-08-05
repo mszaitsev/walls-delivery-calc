@@ -120,6 +120,107 @@ final class PekApiClient {
 		return $result;
 	}
 
+	/** @param array<string,mixed> $payload @return array<string,mixed> */
+	public function preregistration_submit( array $payload ): array {
+		$result = $this->call( 'POST', '/preregistration/submit/', $payload );
+		if ( ! is_array( $result ) || array() === $result || array_is_list( $result ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру создания заявки.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_preregistration_submit', 'failure_stage' => 'shipment_create_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
+		}
+
+		return $result;
+	}
+
+	/** @param array<int,string> $cargo_codes @return array<string,mixed> */
+	public function cargo_status( array $cargo_codes ): array {
+		$result = $this->call( 'POST', '/cargos/status/', array( 'cargoCodes' => $this->cargo_codes( $cargo_codes, 15 ) ) );
+		if ( ! is_array( $result ) || ! isset( $result['cargos'] ) || ! is_array( $result['cargos'] ) || ! array_is_list( $result['cargos'] ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру статуса груза.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_cargos_status', 'failure_stage' => 'shipment_status_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
+		}
+
+		return $result;
+	}
+
+	/** @param array<int,string> $cargo_codes @return array<string,mixed> */
+	public function cargo_basic_status( array $cargo_codes ): array {
+		$result = $this->call( 'POST', '/cargos/basicstatus/', array( 'cargoCodes' => $this->cargo_codes( $cargo_codes, 50 ) ) );
+		if ( ! is_array( $result ) || ! isset( $result['cargos'] ) || ! is_array( $result['cargos'] ) || ! array_is_list( $result['cargos'] ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру базового статуса груза.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_cargos_basicstatus', 'failure_stage' => 'shipment_status_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
+		}
+
+		return $result;
+	}
+
+	/** @param array<int,string> $cargo_codes @return array<string,mixed> */
+	public function cargo_current_status( array $cargo_codes ): array {
+		$result = $this->call( 'POST', '/cargos/currentstatus/', array( 'cargoCodes' => $this->cargo_codes( $cargo_codes, 50 ) ) );
+		if ( ! is_array( $result ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру текущего статуса груза.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_cargos_currentstatus', 'failure_stage' => 'shipment_status_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
+		}
+
+		return $result;
+	}
+
+	/** @param array<int,string> $cargo_codes @return array<int,array<string,mixed>> */
+	public function cargo_status_full_history( array $cargo_codes ): array {
+		$result = $this->call( 'POST', '/cargos/statusfullhistory/', array( 'cargoCodes' => $this->cargo_codes( $cargo_codes, 15 ) ) );
+
+		return $this->expect_list( $result, 'cargos/statusfullhistory' );
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function cargo_status_tables(): array {
+		return $this->expect_list( $this->call( 'POST', '/cargos/statustables/', array() ), 'cargos/statustables' );
+	}
+
+	public function order_print( string $cargo_code, string $type ): string {
+		$result = $this->call( 'POST', '/order/print/', array( 'cargoIndex' => $this->cargo_code( $cargo_code ), 'type' => $this->document_type( $type ) ) );
+		if ( is_string( $result ) && '' !== trim( $result ) ) {
+			return $result;
+		}
+		if ( is_array( $result ) && 1 === count( $result ) ) {
+			$value = reset( $result );
+			if ( is_string( $value ) && '' !== trim( $value ) ) {
+				return $value;
+			}
+		}
+		throw new PekApiException( 'ПЭК вернул неожиданную структуру документа.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_order_print', 'failure_stage' => 'shipment_document_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
+	}
+
+	/** @param array<int,string> $cargo_codes @return array<int,array<string,mixed>> */
+	public function order_cancellation( array $cargo_codes ): array {
+		return $this->expect_list( $this->call( 'POST', '/order/cancellation/', $this->cargo_codes( $cargo_codes, 50 ) ), 'order/cancellation' );
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function check_no_calc_services( string $sender_branch_id, string $receiver_branch_id ): array {
+		return $this->expect_list( $this->call( 'POST', '/branches/checknocalcservices/', array( 'branchSenderId' => $this->required_string( $sender_branch_id, 'branchSenderId' ), 'branchReceiverId' => $this->required_string( $receiver_branch_id, 'branchReceiverId' ) ) ), 'branches/checknocalcservices' );
+	}
+
+	/** @return array<string,mixed> */
+	public function create_private_access_token(): array {
+		$result = $this->call( 'POST', '/auth/createtokentoaccessprivatedata/', array() );
+		if ( ! is_array( $result ) || array_is_list( $result ) || '' === trim( (string) ( $result['access_token'] ?? '' ) ) || '' === trim( (string) ( $result['expires_in_unix'] ?? $result['expires_in'] ?? '' ) ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру private token.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_private_token', 'failure_stage' => 'private_token_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
+		}
+
+		return $result;
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function confirmed_counterparties( string $access_token ): array {
+		return $this->expect_list( $this->call( 'POST', '/counterparts/confirmedaccesstocounterparties/', array( 'access_token' => $this->required_string( $access_token, 'access_token' ) ) ), 'counterparts/confirmedaccesstocounterparties' );
+	}
+
+	/** @return array<string,mixed> */
+	public function connected_services( string $access_token, string $counterpart_guid ): array {
+		$result = $this->call( 'POST', '/counterparts/connecteddiscountsservicesagreements/', array( 'access_token' => $this->required_string( $access_token, 'access_token' ), 'counterpartGUID' => $this->required_string( $counterpart_guid, 'counterpartGUID' ) ) );
+		if ( ! is_array( $result ) || array_is_list( $result ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру подключённых сервисов.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_connected_services', 'failure_stage' => 'counterpart_services_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
+		}
+
+		return $result;
+	}
+
 	/** @return array{endpoint:string,method:string,http_status:int|string} */
 	public function last_response_meta(): array {
 		$endpoint = is_string( $this->last_response_meta['endpoint'] ?? null ) ? $this->last_response_meta['endpoint'] : '';
@@ -310,6 +411,8 @@ final class PekApiClient {
 	private function safe_message( string $message ): string {
 		$message = str_replace( array( $this->credentials->api_key(), $this->credentials->login() . ':' . $this->credentials->api_key() ), '[redacted]', $message );
 		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
+		$message = preg_replace( '/"access_token"\s*:\s*"[^"]+"/i', '"access_token":"[redacted]"', $message ) ?? $message;
+		$message = preg_replace( '/"token_type"\s*:\s*"[^"]+"/i', '"token_type":"[redacted]"', $message ) ?? $message;
 
 		return trim( $message );
 	}
@@ -462,8 +565,53 @@ final class PekApiClient {
 		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
 		$message = preg_replace( '/([?&])(?:api_key|apikey|token|password|authorization|login)=[^&\s]+/i', '$1[redacted]', $message ) ?? $message;
 		$message = preg_replace( '/\b(?:api_key|apikey|token|password|authorization|login)\s*[:=]\s*["\']?[^"\'\s,;&]+/i', '[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/"access_token"\s*:\s*"[^"]+"/i', '"access_token":"[redacted]"', $message ) ?? $message;
+		$message = preg_replace( '/"token_type"\s*:\s*"[^"]+"/i', '"token_type":"[redacted]"', $message ) ?? $message;
 
 		return $message;
+	}
+
+	/** @param array<int,string> $codes @return array<int,string> */
+	private function cargo_codes( array $codes, int $limit ): array {
+		$result = array();
+		foreach ( $codes as $code ) {
+			$result[] = $this->cargo_code( $code );
+			if ( count( $result ) >= $limit ) {
+				break;
+			}
+		}
+		if ( array() === $result ) {
+			throw new PekApiException( 'Не указан код груза ПЭК.', array( 'error_code' => 'pek_empty_cargo_codes' ) );
+		}
+
+		return $result;
+	}
+
+	private function cargo_code( string $value ): string {
+		$value = trim( $value );
+		if ( '' === $value || strlen( $value ) > 64 || 1 !== preg_match( '/^[A-Za-z0-9_\-]+$/', $value ) ) {
+			throw new PekApiException( 'Некорректный код груза ПЭК.', array( 'error_code' => 'pek_invalid_cargo_code' ) );
+		}
+
+		return $value;
+	}
+
+	private function document_type( string $value ): string {
+		$value = trim( $value );
+		if ( ! in_array( $value, array( 'big', 'simple', 'multiple' ), true ) ) {
+			throw new PekApiException( 'Некорректный тип документа ПЭК.', array( 'error_code' => 'pek_invalid_document_type' ) );
+		}
+
+		return $value;
+	}
+
+	private function required_string( string $value, string $field ): string {
+		$value = trim( $value );
+		if ( '' === $value ) {
+			throw new PekApiException( 'Не заполнен обязательный параметр ПЭК.', array( 'error_code' => 'pek_required_field_missing', 'field' => $field ) );
+		}
+
+		return $value;
 	}
 
 	/** @return array<string,mixed> */
@@ -530,6 +678,15 @@ final class PekApiClient {
 				'http' => 'quote_calculator_http',
 				'logical' => 'quote_calculator_logical',
 				default => 'quote_calculator_contract',
+			};
+		}
+		if ( str_contains( $path, '/preregistration/submit/' ) ) {
+			return match ( $kind ) {
+				'request' => 'shipment_create_request',
+				'transport' => 'shipment_create_transport',
+				'http' => 'shipment_create_http',
+				'logical' => 'shipment_create_logical',
+				default => 'shipment_create_contract',
 			};
 		}
 

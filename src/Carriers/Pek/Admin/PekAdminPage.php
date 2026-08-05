@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\Shipments\Pek\PekSenderCounterpartService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -19,6 +20,7 @@ final class PekAdminPage {
 		'check_pek_connection',
 		'search_pek_sender_warehouse',
 		'select_pek_sender_warehouse',
+		'verify_pek_sender_counterpart',
 		'diagnose_pek_destination_pickup',
 		'diagnose_pek_quote',
 	);
@@ -33,7 +35,8 @@ final class PekAdminPage {
 		private PekDestinationPickupDiagnosticStore $destination_reports,
 		private PekQuoteDiagnosticService $quote_diagnostics,
 		private PekQuoteDiagnosticStore $quote_reports,
-		private ?DeliveryQuoteCacheManager $quote_cache = null
+		private ?DeliveryQuoteCacheManager $quote_cache = null,
+		private ?PekSenderCounterpartService $counterparts = null
 	) {
 	}
 
@@ -64,6 +67,12 @@ final class PekAdminPage {
 			} elseif ( 'select_pek_sender_warehouse' === $action ) {
 				$result = $this->warehouses->validate_and_select( $this->string_from_post( $post, 'pek_sender_warehouse_id' ) );
 				$notice = array( 'type' => $result['success'] ? 'success' : 'error', 'message' => (string) $result['message'] );
+			} elseif ( 'verify_pek_sender_counterpart' === $action ) {
+				if ( ! $this->counterparts instanceof PekSenderCounterpartService ) {
+					throw new \RuntimeException( 'Проверка контрагента ПЭК недоступна.' );
+				}
+				$result = $this->counterparts->verify_and_save();
+				$notice = array( 'type' => $result['success'] ? 'success' : 'error', 'message' => (string) $result['message'] );
 			} elseif ( 'diagnose_pek_destination_pickup' === $action ) {
 				$this->destination_reports->clear_for_current_user();
 				$result = $this->destination_diagnostics->run( $post );
@@ -88,6 +97,7 @@ final class PekAdminPage {
 		}
 		$notice = $this->notices->consume_for_current_user();
 		$warehouse = $this->settings->sender_warehouse();
+		$counterpart = $this->settings->sender_counterpart_snapshot();
 		$diagnostic = $this->settings->last_diagnostic();
 		$search = $this->warehouses->last_search_for_current_user();
 		$destination_report = $this->destination_reports->consume_for_current_user();
@@ -139,6 +149,16 @@ final class PekAdminPage {
 				<?php $this->number_row( PekSettings::SMS_RELEASE_LIMIT_RUB_KEY, 'Договорный предел SMS-выдачи, руб.', $this->settings->sms_release_limit_rub(), 1, 999999999 ); ?>
 			</table>
 			<?php submit_button( __( 'Сохранить настройки ПЭК', 'walls-delivery-calc' ) ); ?>
+		</form>
+
+		<h3><?php echo esc_html__( 'Контрагент отправителя ПЭК', 'walls-delivery-calc' ); ?></h3>
+		<?php $this->render_counterpart_snapshot( $counterpart ); ?>
+		<form method="post">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="verify_pek_sender_counterpart">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<?php submit_button( __( 'Проверить контрагента отправителя', 'walls-delivery-calc' ), 'secondary' ); ?>
 		</form>
 
 		<h3><?php echo esc_html__( 'Диагностика подключения', 'walls-delivery-calc' ); ?></h3>
@@ -253,6 +273,23 @@ final class PekAdminPage {
 		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
 		foreach ( array( 'warehouseId' => 'Warehouse ID', 'source' => 'Источник выбора', 'branchName' => 'Филиал', 'divisionName' => 'Отделение', 'departmentType' => 'Тип', 'address' => 'Адрес', 'branchTimezone' => 'Часовой пояс филиала', 'checked_at' => 'Проверено' ) as $key => $label ) {
 			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) ( $snapshot[ $key ] ?? '' ) ) . '</td></tr>';
+		}
+		echo '</tbody></table>';
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function render_counterpart_snapshot( array $snapshot ): void {
+		if ( array() === $snapshot ) {
+			echo '<p class="description">' . esc_html__( 'Контрагент отправителя ещё не подтверждён через API ПЭК.', 'walls-delivery-calc' ) . '</p>';
+			return;
+		}
+		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
+		foreach ( array( 'guid' => 'GUID', 'legalForm' => 'Legal form', 'title' => 'Название', 'inn_masked' => 'ИНН', 'kpp_masked' => 'КПП', 'client_card_present' => 'Карта клиента', 'checked_at' => 'Проверено' ) as $key => $label ) {
+			$value = $snapshot[ $key ] ?? '';
+			if ( is_bool( $value ) ) {
+				$value = $value ? 'yes' : 'no';
+			}
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) $value ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
 	}

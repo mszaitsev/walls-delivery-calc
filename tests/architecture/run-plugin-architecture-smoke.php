@@ -137,6 +137,9 @@ function plugin_architecture_adapter_public_api_exceptions(): array {
 			'create_for_order' => 'Yandex order-aware creation hook used by ShipmentCreationService.',
 			'mark_polling_exhausted' => 'Yandex polling exhaustion hook used by the status AJAX controller.',
 		),
+		\WallsShop\WDC\Shipments\Pek\PekShipmentAdapter::class => array(
+			'create_for_order' => 'PEK order-aware creation hook used by ShipmentCreationService for canonical declared value and recipient data.',
+		),
 	);
 }
 
@@ -778,6 +781,10 @@ foreach ( $generic_shipment_sources as $relative => $source ) {
 foreach ( plugin_architecture_js_files( 'assets/admin/shipments' ) as $file ) {
 	$relative = str_replace( '\\', '/', substr( $file, strlen( plugin_architecture_root() ) + 1 ) );
 	$source = (string) file_get_contents( $file );
+	if ( 'assets/admin/shipments/extensions/pek.js' === $relative ) {
+		plugin_architecture_assert( str_contains( $source, "carrierKey: 'pek'" ) && ! str_contains( $source, 'wp.ajax.post' ), 'PEK shipment JS must be a carrier-owned hook extension without create/status/document AJAX.' );
+		continue;
+	}
 	plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic shipment JS must not contain Jet Logistic branches in ' . $relative );
 	plugin_architecture_assert( ! str_contains( $source, "'pek'" ) && ! str_contains( $source, 'Pek' ), 'PEK foundation must not add generic shipment JS branches in ' . $relative );
 }

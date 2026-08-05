@@ -68,6 +68,11 @@ return array(
 	'pek.pickup-provider' => array( 'path' => 'tests/pek/run-pek-pickup-provider-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.quote-foundation' => array( 'path' => 'tests/pek/run-pek-quote-foundation-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.checkout-runtime' => array( 'path' => 'tests/pek/run-pek-checkout-runtime-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.shipment-create' => array( 'path' => 'tests/pek/run-pek-shipment-create-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.shipment-status' => array( 'path' => 'tests/pek/run-pek-shipment-status-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.shipment-documents' => array( 'path' => 'tests/pek/run-pek-shipment-documents-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.shipment-cancellation' => array( 'path' => 'tests/pek/run-pek-shipment-cancellation-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.shipment-modal' => array( 'path' => 'tests/pek/run-pek-shipment-modal-smoke.php', 'groups' => array( 'pek' ) ),
 
 	'status.order-status-mapping' => array( 'path' => 'tests/statuses/run-order-status-mapping-smoke.php', 'groups' => array( 'status-core' ) ),
 	'status.status-autosync' => array( 'path' => 'tests/statuses/run-status-autosync-smoke.php', 'groups' => array( 'status-core' ) ),

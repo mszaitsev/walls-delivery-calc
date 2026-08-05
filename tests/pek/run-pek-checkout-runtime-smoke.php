@@ -582,6 +582,6 @@ $pickup_rest_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Re
 pek_checkout_assert( strpos( $pickup_rest_source, 'save_registry_backed_selection( $request' ) < strpos( $pickup_rest_source, "'cdek' === \$carrier" ), 'Registry-backed PEK selection save must run before legacy carrier/browser-payload fallback.' );
 $pek_carrier_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Runtime/PekCarrier.php' ) ?: '';
 pek_checkout_assert( ! str_contains( $pek_carrier_source, 'transportingTypes' ) && ! str_contains( $pek_carrier_source, 'senderCityId' ) && ! str_contains( $pek_carrier_source, 'receiverCityId' ) && ! str_contains( $pek_carrier_source, 'overSize' ), 'PEK checkout runtime must not introduce deprecated calculator fields.' );
-pek_checkout_assert( ! is_dir( dirname( __DIR__, 2 ) . '/src/Shipments/Pek' ), 'Checkout runtime stage must not add PEK Shipment Framework files.' );
+pek_checkout_assert( is_dir( dirname( __DIR__, 2 ) . '/src/Shipments/Pek' ), 'PEK Shipment Framework files must exist after 0.134.0 shipment runtime.' );
 
 echo "PEK checkout runtime smoke passed.\n";
