@@ -33,6 +33,7 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuotePlannedDateTimeResolver;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
@@ -146,7 +147,7 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 		new PekAdminNoticeStore(),
 		new PekDestinationPickupDiagnosticService( $pickup_registry, $location_repository, $terminal_service, $settings, $credentials ),
 		new PekDestinationPickupDiagnosticStore(),
-		new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service ),
+		new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service, new PekQuotePlannedDateTimeResolver( $settings ) ),
 		new PekQuoteDiagnosticStore()
 	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();

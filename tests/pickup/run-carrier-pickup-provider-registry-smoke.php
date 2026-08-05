@@ -56,9 +56,9 @@ pickup_registry_assert( ! preg_match( '/CarrierPickupPointProviderRegistry\\(\\s
 
 $points_rest = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
 $checkout_rest = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' );
-foreach ( array( $points_rest, $checkout_rest ) as $source ) {
-	pickup_registry_assert( ! str_contains( $source, "'pek'" ) && ! str_contains( $source, 'Pek' ), 'Public pickup REST controllers must not branch on PEK.' );
-	pickup_registry_assert( ! str_contains( $source, 'CarrierPickupPointProviderRegistry' ), 'Public pickup REST controllers must not receive provider registry yet.' );
-}
+pickup_registry_assert( str_contains( $points_rest, 'CarrierPickupPointProviderRegistry' ) && str_contains( $points_rest, 'CheckoutPickupPointProviderQueryResolver' ) && str_contains( $points_rest, 'registry_points_response' ), 'Public pickup points REST must use registry-backed trusted query context for PEK checkout.' );
+pickup_registry_assert( str_contains( $checkout_rest, 'CarrierPickupPointProviderRegistry' ) && str_contains( $checkout_rest, 'save_registry_backed_selection' ) && str_contains( $checkout_rest, 'resolve_selection' ), 'Checkout pickup save REST must fresh-validate registry-backed PEK selections.' );
+pickup_registry_assert( ! preg_match( '/CarrierPickupPointProviderRegistry\\(\\s*array\\([^)]*(Cdek|Dpd|Yandex|RussianPost)/s', $plugin ), 'Existing carriers must still not be migrated into the registry.' );
+pickup_registry_assert( strpos( $checkout_rest, 'save_registry_backed_selection( $request' ) < strpos( $checkout_rest, "'cdek' === \$carrier" ), 'Registry-backed save must run before legacy browser-payload fallback.' );
 
 echo "Carrier pickup provider registry smoke OK\n";

@@ -186,4 +186,82 @@ $carrier_specific = $builder->build(
 );
 builder_smoke_assert( 270 === (int) ( $carrier_specific['api']['cdek_to_city_code'] ?? 0 ) && 'PCL' === (string) ( $carrier_specific['api']['dpd_service_code'] ?? '' ) && 'getServiceCostByParcels3' === (string) ( $carrier_specific['api']['dpd_tariff_method'] ?? '' ), 'Builder must preserve representative CDEK/DPD calculation fields.' );
 
+$pek_adjusted = $builder->build(
+	array(
+		'carrier_key' => 'pek',
+		'service_key' => 'pek',
+		'service_title' => 'ПЭК',
+		'rate_id' => 'pek:pickup',
+		'selected_tariff_object' => 'pek_ltl_pickup',
+		'selected_tariff_title' => 'До терминала',
+		'delivery_type' => 'pickup',
+		'cost' => '1100',
+		'rate_meta' => array(
+			'api_base_price_rub' => 1017.92,
+			'pek_carrier_base_price_rub' => 927.92,
+			'pek_carrier_price_kopecks' => 92792,
+			'pek_bag_surcharge_kopecks' => 7000,
+			'pek_sealing_surcharge_kopecks' => 2000,
+			'pek_light_cargo_surcharge_kopecks' => 9000,
+			'final_price_rub' => 1100,
+		),
+	)
+);
+$pek_formula = $pek_adjusted['rules']['formula_visualization'] ?? array();
+builder_smoke_assert( 1017.92 === (float) ( $pek_adjusted['api']['api_base_price_rub'] ?? 0 ) && 927.92 === (float) ( $pek_adjusted['api']['pek_carrier_base_price_rub'] ?? 0 ) && 92792 === (int) ( $pek_adjusted['api']['pek_carrier_price_kopecks'] ?? 0 ), 'PEK calculation data must keep adjusted API base and pure carrier cost separately.' );
+builder_smoke_assert( abs( 82.08 - (float) ( $pek_adjusted['rules']['price_delta_rub'] ?? 0 ) ) < 0.0001, 'PEK store surcharges must not be counted as Rule Engine price delta.' );
+builder_smoke_assert( in_array( 'Добавлен мешок и пломбировка', $pek_formula, true ) && ! in_array( 'Добавлен мешок и пломбировка', $pek_adjusted['rules']['applied_rules'] ?? array(), true ), 'PEK light-cargo surcharge note must appear in formula, not applied_rules.' );
+
+$pek_no_rules = $builder->build(
+	array(
+		'carrier_key' => 'pek',
+		'service_key' => 'pek',
+		'service_title' => 'ПЭК',
+		'rate_id' => 'pek:pickup',
+		'delivery_type' => 'pickup',
+		'cost' => '1017.92',
+		'rate_meta' => array(
+			'api_base_price_rub' => 1017.92,
+			'final_price_rub' => 1017.92,
+			'pek_bag_surcharge_kopecks' => 7000,
+			'pek_sealing_surcharge_kopecks' => 2000,
+		),
+	)
+);
+$pek_no_rules_formula = $pek_no_rules['rules']['formula_visualization'] ?? array();
+builder_smoke_assert( in_array( 'Базовая цена API: 1 017.92 руб.', $pek_no_rules_formula, true ) && in_array( 'Добавлен мешок и пломбировка', $pek_no_rules_formula, true ) && in_array( 'Итог: 1 017.92 руб.', $pek_no_rules_formula, true ), 'PEK surcharge note must create a formula even without regular rules, round, or minimum.' );
+
+foreach ( array(
+	array( 7000, 2000, 'Добавлен мешок и пломбировка' ),
+	array( 7000, 0, 'Добавлен мешок' ),
+	array( 0, 2000, 'Добавлена пломбировка' ),
+) as $case ) {
+	$result = $builder->build(
+		array(
+			'carrier_key' => 'pek',
+			'cost' => '100',
+			'rate_meta' => array(
+				'api_base_price_rub' => 100.0,
+				'final_price_rub' => 100.0,
+				'pek_bag_surcharge_kopecks' => $case[0],
+				'pek_sealing_surcharge_kopecks' => $case[1],
+			),
+		)
+	);
+	builder_smoke_assert( in_array( $case[2], $result['rules']['formula_visualization'] ?? array(), true ), 'Builder must render PEK surcharge comment: ' . $case[2] );
+}
+$pek_zero_surcharge = $builder->build(
+	array(
+		'carrier_key' => 'pek',
+		'cost' => '100',
+		'rate_meta' => array(
+			'api_base_price_rub' => 100.0,
+			'final_price_rub' => 100.0,
+			'pek_bag_surcharge_kopecks' => 0,
+			'pek_sealing_surcharge_kopecks' => 0,
+		),
+	)
+);
+builder_smoke_assert( array() === ( $pek_zero_surcharge['rules']['formula_visualization'] ?? array() ), 'Builder must not render PEK surcharge comment when both configurable surcharges are zero.' );
+
 echo "Delivery calculation data builder smoke OK\n";

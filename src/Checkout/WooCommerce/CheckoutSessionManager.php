@@ -520,6 +520,11 @@ final class CheckoutSessionManager {
 		if ( is_array( $selection['snapshot'] ?? null ) && empty( $selection['snapshot']['point_id'] ) && ! empty( $selection['snapshot']['id'] ) ) {
 			$selection['snapshot']['point_id'] = $selection['snapshot']['id'];
 		}
+		$provider_fingerprint = $this->safe_provider_destination_fingerprint( $selection['provider_destination_fingerprint'] ?? $snapshot['provider_destination_fingerprint'] ?? '' );
+		if ( '' !== $provider_fingerprint ) {
+			$selection['provider_destination_fingerprint'] = $provider_fingerprint;
+			$snapshot['provider_destination_fingerprint'] = $provider_fingerprint;
+		}
 		$selection['snapshot'] = $snapshot;
 
 		if ( $with_current_location ) {
@@ -527,6 +532,16 @@ final class CheckoutSessionManager {
 		}
 
 		return $selection;
+	}
+
+	private function safe_provider_destination_fingerprint( mixed $value ): string {
+		if ( ! is_scalar( $value ) ) {
+			return '';
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', (string) $value ) ?? (string) $value;
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+
+		return substr( $value, 0, 128 );
 	}
 
 	/**

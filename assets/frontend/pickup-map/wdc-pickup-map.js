@@ -136,7 +136,10 @@
 			if (titleComment) {
 				rows.push('<div class="wdc-pickup-popup__title-comment">' + escapeHtml(titleComment) + '</div>');
 			}
-			rows.push('<div class="wdc-pickup-popup__type">' + escapeHtml(pointTypeLabel(point)) + '</div>');
+			var typeLabel = pointTypeLabel(point);
+			if (typeLabel && typeLabel !== title) {
+				rows.push('<div class="wdc-pickup-popup__type">' + escapeHtml(typeLabel) + '</div>');
+			}
 			if (storageNotice(point)) {
 				rows.push('<div class="wdc-pickup-popup__storage">' + escapeHtml(storageNotice(point)) + '</div>');
 			}
@@ -999,6 +1002,9 @@
 		}
 		var carrier = String(point.carrier_key || point.carrier || (point.snapshot && (point.snapshot.carrier_key || point.snapshot.carrier)) || '').trim();
 		if (carrier === 'yandex_delivery') {
+			return '';
+		}
+		if (carrier === 'pek') {
 			return '';
 		}
 		if (carrier === 'russian_post_domestic' || carrier === 'russian_post') {

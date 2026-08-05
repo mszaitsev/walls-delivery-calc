@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 
 defined( 'ABSPATH' ) || exit;
@@ -31,7 +32,8 @@ final class PekAdminPage {
 		private PekDestinationPickupDiagnosticService $destination_diagnostics,
 		private PekDestinationPickupDiagnosticStore $destination_reports,
 		private PekQuoteDiagnosticService $quote_diagnostics,
-		private PekQuoteDiagnosticStore $quote_reports
+		private PekQuoteDiagnosticStore $quote_reports,
+		private ?DeliveryQuoteCacheManager $quote_cache = null
 	) {
 	}
 
@@ -52,6 +54,7 @@ final class PekAdminPage {
 				if ( ! $this->credentials->save_from_admin( $post ) ) {
 					$notice = array( 'type' => 'warning', 'message' => 'Настройки ПЭК сохранены, но API key не обновлён: задайте APP_ENCRYPTION_KEY.' );
 				}
+				$this->quote_cache?->clear_all_delivery_cache();
 			} elseif ( 'check_pek_connection' === $action ) {
 				$result = $this->diagnostics->run();
 				$notice = array( 'type' => $result['success'] ? 'success' : 'warning', 'message' => (string) $result['message'] );

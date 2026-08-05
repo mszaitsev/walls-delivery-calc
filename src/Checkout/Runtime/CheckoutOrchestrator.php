@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\Runtime;
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
@@ -85,9 +86,10 @@ final class CheckoutOrchestrator {
 			if ( $service instanceof DeliveryService ) {
 				$service_request = $this->request_for_service( $service_request, $service, $delivery_type );
 			}
+			$carrier_cache_context = $carrier instanceof CarrierQuoteCacheContextProviderInterface ? $carrier->quote_cache_context( $service_request ) : array();
 
 			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
-				$quote = $this->quote_cache->get( $service_request, $carrier_key, $delivery_type, $service_key );
+				$quote = $this->quote_cache->get( $service_request, $carrier_key, $delivery_type, $service_key, $carrier_cache_context );
 				if ( $quote instanceof DeliveryQuote ) {
 					++$cache_hits;
 					$this->logger->info( 'Quote cache hit.', array( 'carrier' => $carrier_key ) );
@@ -99,7 +101,7 @@ final class CheckoutOrchestrator {
 			if ( ! $quote instanceof DeliveryQuote ) {
 				$quote = $this->execution_guard->quote( $carrier, $service_request, $carrier_errors );
 				if ( $cache_enabled && $this->quote_cache instanceof QuoteCache && $this->should_cache_quote( $quote ) ) {
-					$this->quote_cache->set( $service_request, $carrier_key, $quote, $delivery_type, $service_key );
+					$this->quote_cache->set( $service_request, $carrier_key, $quote, $delivery_type, $service_key, $carrier_cache_context );
 				}
 			}
 

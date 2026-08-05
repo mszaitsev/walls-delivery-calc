@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -104,6 +105,9 @@ final class CheckoutValidation {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
 			return;
 		}
+		if ( PekSettings::PICKUP_FAMILY === $active_family && array() !== $active_selection ) {
+			$this->session_manager->clear_pickup_selection_for_family( $active_family, 'stale_pek_destination_selection' );
+		}
 		$matches_before_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		if ( $matches_before_restore ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
@@ -140,6 +144,7 @@ final class CheckoutValidation {
 			RussianPostDomesticSettings::CARRIER_KEY => __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' ),
 			DpdSettings::CARRIER_KEY => __( 'Выберите пункт выдачи DPD.', 'walls-delivery-calc' ),
 			YandexDeliverySettings::CARRIER_KEY => __( 'Выберите пункт выдачи Яндекс.Доставки.', 'walls-delivery-calc' ),
+			PekSettings::CARRIER_KEY => __( 'Выберите терминал ПЭК.', 'walls-delivery-calc' ),
 			default => __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ),
 		};
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
@@ -297,9 +302,13 @@ final class CheckoutValidation {
 		$is_russian_post_family = RussianPostDomesticSettings::CARRIER_KEY . ':pickup' === $family;
 		$is_dpd_family = DpdSettings::CARRIER_KEY . ':pickup' === $family;
 		$is_yandex_family = YandexDeliverySettings::CARRIER_KEY . ':pickup' === $family;
+		$is_pek_family = PekSettings::PICKUP_FAMILY === $family;
 		$selection = array();
 		if ( '' !== $point_code ) {
 			$selection = $this->selection_from_current_pickup_session( $point_code, $rate );
+		}
+		if ( $is_pek_family ) {
+			return array() !== $selection && $this->session_manager->valid_pickup_selection_for_checkout( $family );
 		}
 		if ( array() === $selection && $is_russian_post_family ) {
 			$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();

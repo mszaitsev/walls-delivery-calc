@@ -7,12 +7,18 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
+use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\Services\PickupPointLocationResolver;
 
@@ -28,7 +34,10 @@ final class CheckoutPickupPointRestController {
 		private ?CdekDeliveryPointService $cdek_points = null,
 		private ?DpdPickupPointService $dpd_points = null,
 		private ?YandexDeliveryPickupPointV2Repository $yandex_points = null,
-		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null
+		private ?YandexDeliveryCheckoutPickupPointFormatter $yandex_formatter = null,
+		private ?CarrierPickupPointProviderRegistry $provider_registry = null,
+		private ?CheckoutPickupPointProviderQueryResolver $provider_query_resolver = null,
+		private ?WooCommerceSessionBootstrapper $session_bootstrapper = null
 	) {
 		$this->yandex_formatter ??= new YandexDeliveryCheckoutPickupPointFormatter();
 	}
@@ -88,7 +97,9 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function save( mixed $request ): mixed {
-		$this->ensure_woocommerce_session();
+		if ( ! $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper || ! $this->session_bootstrapper->ensure() ) {
+			return $this->error( 'provider_session_unavailable', 'Checkout session is unavailable.', 503 );
+		}
 		$point_id_raw = $this->param( $request, 'point_id' );
 		$point_id = (int) $point_id_raw;
 		$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
@@ -98,7 +109,11 @@ final class CheckoutPickupPointRestController {
 			return $this->error( 'unsupported_shipping_method', 'Pickup point can only be saved for supported pickup rates.', 400 );
 		}
 
-		if ( 'cdek' === $carrier ) {
+		if ( $this->is_registry_backed_carrier( $carrier ) ) {
+			return $this->save_registry_backed_selection( $request, $method_id, $carrier, $selection_intent );
+		}
+
+		if ( 'cdek' === $carrier && $this->cdek_points instanceof CdekDeliveryPointService ) {
 			$rate = $this->rate_for_shipping_method( $method_id );
 			if ( ! $this->is_cdek_pickup_rate( $rate, $method_id ) ) {
 				return $this->error( 'unsupported_shipping_method', 'Pickup point can only be saved for a CDEK pickup rate.', 400 );
@@ -168,7 +183,9 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function delete( mixed $request = null ): mixed {
-		$this->ensure_woocommerce_session();
+		if ( $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper ) {
+			$this->session_bootstrapper->ensure();
+		}
 		$family = $this->param( $request, 'pickup_family' );
 		if ( '' === $family ) {
 			$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
@@ -194,7 +211,9 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function state( mixed $request = null ): mixed {
-		$this->ensure_woocommerce_session();
+		if ( $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper ) {
+			$this->session_bootstrapper->ensure();
+		}
 		$family = $this->param( $request, 'pickup_family' );
 		$active_family = '' !== $family ? $family : $this->active_pickup_family();
 		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
@@ -212,39 +231,6 @@ final class CheckoutPickupPointRestController {
 				'city_context' => $this->city_context(),
 			)
 		);
-	}
-
-	private function ensure_woocommerce_session(): void {
-		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) ) {
-			return;
-		}
-
-		$woocommerce = WC();
-		if ( ! isset( $woocommerce->session ) || ! is_object( $woocommerce->session ) ) {
-			if ( class_exists( '\WC_Session_Handler' ) ) {
-				$session = new \WC_Session_Handler();
-				if ( method_exists( $session, 'init' ) ) {
-					$session->init();
-				}
-				$woocommerce->session = $session;
-			}
-		}
-
-		if ( isset( $woocommerce->session ) && is_object( $woocommerce->session ) && method_exists( $woocommerce->session, 'set_customer_session_cookie' ) ) {
-			$woocommerce->session->set_customer_session_cookie( true );
-		}
-
-		if ( ( ! isset( $woocommerce->customer ) || ! is_object( $woocommerce->customer ) ) && class_exists( '\WC_Customer' ) ) {
-			$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
-			try {
-				$woocommerce->customer = new \WC_Customer( $user_id, true );
-			} catch ( \Throwable ) {
-				try {
-					$woocommerce->customer = new \WC_Customer( 0, true );
-				} catch ( \Throwable ) {
-				}
-			}
-		}
 	}
 
 	public function resolve_location( mixed $request ): mixed {
@@ -351,6 +337,7 @@ final class CheckoutPickupPointRestController {
 			'location_id' => $selection['location_id'] ?? $snapshot['location_id'] ?? '',
 			'fias_id' => $selection['fias_id'] ?? $snapshot['fias_id'] ?? '',
 			'gar_object_id' => $selection['gar_object_id'] ?? $snapshot['gar_object_id'] ?? '',
+			'provider_destination_fingerprint' => $selection['provider_destination_fingerprint'] ?? $snapshot['provider_destination_fingerprint'] ?? '',
 			'destination_fingerprint' => $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '',
 			'country_code' => $selection['country_code'] ?? $snapshot['country_code'] ?? '',
 			'cdek_city_code' => $selection['cdek_city_code'] ?? $snapshot['cdek_city_code'] ?? 0,
@@ -388,6 +375,120 @@ final class CheckoutPickupPointRestController {
 
 		return '';
 	}
+
+	private function is_registry_backed_carrier( string $carrier ): bool {
+		return $this->provider_registry instanceof CarrierPickupPointProviderRegistry
+			&& $this->provider_query_resolver instanceof CheckoutPickupPointProviderQueryResolver
+			&& $this->session_bootstrapper instanceof WooCommerceSessionBootstrapper
+			&& $this->provider_registry->has( $carrier );
+	}
+
+	private function save_registry_backed_selection( mixed $request, string $method_id, string $carrier, string $selection_intent ): mixed {
+		$family = $this->session_manager->shipping_method_family( $method_id );
+		try {
+			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );
+		} catch ( \RuntimeException $exception ) {
+			$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
+			return $this->error( $code, 'Pickup rate context is invalid.', 400 );
+		} catch ( \Throwable ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is invalid.', 400 );
+		}
+		$provider = $this->provider_registry?->get( $carrier );
+		if ( null === $provider ) {
+			return $this->error( 'pickup_provider_unavailable', 'Pickup provider is unavailable.', 503 );
+		}
+		$code = trim( $this->param( $request, 'point_code' ) );
+		if ( '' === $code ) {
+			$code = trim( $this->param( $request, 'point_id' ) );
+		}
+		if ( '' === $code ) {
+			return $this->error( 'invalid_point', 'Pickup point code is required.', 400 );
+		}
+		$point = $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, $code ) );
+		if ( ! $point instanceof PickupPoint || $point->code !== $code ) {
+			return $this->error( 'not_found', 'Pickup point not found.', 404 );
+		}
+		$fingerprint = $this->provider_query_resolver->destination_fingerprint( $method_id );
+		if ( '' === trim( $fingerprint ) ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
+		}
+		$selection = $this->selection_from_provider_point( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code );
+		$this->save_selection( $selection, $carrier, $method_id, $selection_intent );
+
+		return $this->selection_response( $selection, $method_id );
+	}
+
+	private function selection_from_provider_point( PickupPoint $point, string $carrier, string $family, string $destination_fingerprint, int $location_id, string $country_code ): array {
+		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
+		$source = (string) ( $raw['source'] ?? '' );
+		$type = 'paid' === $source ? 'pvz' : ( 'free' === $source || 'terminal' === $point->type ? 'terminal' : 'pvz' );
+		$title = 'terminal' === $type ? 'Собственный пункт выдачи ПЭК' : 'Партнерский пункт выдачи ПЭК';
+		$comment = 'paid' === $source ? 'Возможна небольшая доплата за доставку в этот пункт' : '';
+		$point_name = $this->public_provider_point_name( $point, $raw );
+		$snapshot = array(
+			'carrier_key' => $carrier,
+			'service_key' => $carrier,
+			'pickup_family' => $family,
+			'point_code' => $point->code,
+			'point_id' => $point->code,
+			'point_type' => $type,
+			'point_type_label' => $title,
+			'point_title' => $title,
+			'card_title' => $title,
+			'point_name' => $point_name,
+			'point_address' => $point->address,
+			'address' => $point->address,
+			'city_name' => $point->city,
+			'region_name' => $point->region,
+			'lat' => $point->latitude,
+			'lng' => $point->longitude,
+			'latitude' => $point->latitude,
+			'longitude' => $point->longitude,
+			'work_time' => $point->work_time,
+			'description' => $point->comment,
+			'presentation_comment' => $comment,
+			'marker_type' => 'terminal' === $type ? 'terminal' : 'pickup',
+			'source' => in_array( $source, array( 'free', 'paid' ), true ) ? $source : '',
+			'location_id' => $location_id,
+			'country_code' => strtoupper( trim( $country_code ) ),
+			'destination_fingerprint' => $destination_fingerprint,
+			'provider_destination_fingerprint' => $destination_fingerprint,
+			'requires_rate_refresh' => true,
+			'validation_source' => 'provider_resolve_selection',
+			'selected_at' => gmdate( 'c' ),
+		);
+
+		return array_merge( $snapshot, array( 'id' => $point->code, 'snapshot' => $snapshot ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $raw
+	 */
+	private function public_provider_point_name( PickupPoint $point, array $raw ): string {
+		foreach ( array( $raw['division_name'] ?? null, $raw['branch_name'] ?? null ) as $candidate ) {
+			if ( ! is_scalar( $candidate ) ) {
+				continue;
+			}
+			$name = trim( (string) $candidate );
+			if ( '' === $name || $name === $point->code || $this->looks_like_internal_point_identifier( $name ) ) {
+				continue;
+			}
+			return $name;
+		}
+
+		return '';
+	}
+
+	private function looks_like_internal_point_identifier( string $value ): bool {
+		if ( 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $value ) ) {
+			return true;
+		}
+
+		return 1 === preg_match( '/^[a-z0-9_-]{16,}$/i', $value )
+			&& 1 === preg_match( '/[0-9]/', $value )
+			&& 1 === preg_match( '/[a-z]/i', $value );
+	}
+
 	private function carrier_from_request( mixed $request, string $method_id ): string {
 		$carrier = sanitize_key( wp_unslash( $this->param( $request, 'carrier' ) ) );
 		if ( 'russian_post' === $carrier ) {
@@ -404,6 +505,9 @@ final class CheckoutPickupPointRestController {
 		}
 		if ( str_starts_with( $method_id, YandexDeliverySettings::CARRIER_KEY . ':' ) || 'yandex_pickup' === $method_id ) {
 			return YandexDeliverySettings::CARRIER_KEY;
+		}
+		if ( str_starts_with( $method_id, PekSettings::CARRIER_KEY . ':' ) ) {
+			return PekSettings::CARRIER_KEY;
 		}
 
 		return RussianPostDomesticSettings::CARRIER_KEY;
@@ -942,6 +1046,9 @@ final class CheckoutPickupPointRestController {
 
 	private function is_supported_shipping_method( string $method_id, string $carrier ): bool {
 		if ( 'cdek' === $carrier ) {
+			if ( ! $this->cdek_points instanceof CdekDeliveryPointService ) {
+				return str_ends_with( $this->session_manager->shipping_method_family( $method_id ), ':pickup' );
+			}
 			return $this->is_cdek_pickup_rate( $this->rate_for_shipping_method( $method_id ), $method_id );
 		}
 		if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier ) {

@@ -136,7 +136,9 @@
 			'city_fias_id',
 			'gar_id',
 			'gar_object_id',
-			'location_id'
+			'location_id',
+			'shipping_method_id',
+			'pickup_family'
 		].forEach(function (key) {
 			if (context[key]) {
 				params.set(key, context[key]);

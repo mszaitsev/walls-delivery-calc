@@ -479,12 +479,25 @@ final class OrderShippingMetaPersister {
 	 * @return array<string,mixed>
 	 */
 	private function sanitized_rate_meta( array $meta ): array {
+		foreach ( $this->transient_pickup_rejection_keys() as $key ) {
+			unset( $meta[ $key ] );
+		}
 		unset( $meta['raw_response'] );
 		if ( is_array( $meta['api_result'] ?? null ) ) {
 			unset( $meta['api_result']['raw'], $meta['api_result']['parsed_response'], $meta['api_result']['raw_response'] );
 		}
 
 		return $meta;
+	}
+
+	/** @return array<int,string> */
+	private function transient_pickup_rejection_keys(): array {
+		return array(
+			'pickup_selection_rejected',
+			'pickup_selection_rejected_family',
+			'pickup_selection_rejected_code',
+			'pickup_selection_rejected_message',
+		);
 	}
 
 	/**

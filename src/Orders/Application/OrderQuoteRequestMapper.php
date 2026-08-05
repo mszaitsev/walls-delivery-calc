@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Address\Address;
@@ -191,6 +192,13 @@ final class OrderQuoteRequestMapper {
 				YandexDeliverySettings::CARRIER_KEY . ':pickup' => $yandex_selection,
 			);
 		}
+		$pek_selection = $this->pek_pickup_selection( $selected_pickup_point );
+		if ( array() !== $pek_selection ) {
+			$context['pickup_selection'] = $pek_selection;
+			$context['pickup_selections'] = array(
+				PekSettings::PICKUP_FAMILY => $pek_selection,
+			);
+		}
 
 		return $context;
 	}
@@ -215,6 +223,18 @@ final class OrderQuoteRequestMapper {
 		$carrier = (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? '' );
 		$family = (string) ( $selected_pickup_point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
 		if ( YandexDeliverySettings::CARRIER_KEY !== $carrier || YandexDeliverySettings::CARRIER_KEY . ':pickup' !== $family ) {
+			return array();
+		}
+
+		return $selected_pickup_point;
+	}
+
+	/** @param array<string,mixed> $selected_pickup_point */
+	private function pek_pickup_selection( array $selected_pickup_point ): array {
+		$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+		$carrier = (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+		$family = (string) ( $selected_pickup_point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		if ( PekSettings::CARRIER_KEY !== $carrier || PekSettings::PICKUP_FAMILY !== $family ) {
 			return array();
 		}
 

@@ -10,6 +10,7 @@ use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -225,7 +226,8 @@ $session->save_pickup_selection_for_family(
 );
 pickup_checkout_assert( 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $session->pickup_selections()[ RussianPostDomesticSettings::CARRIER_KEY . ':pickup' ]['point_code'] ?? '' ), 'Sequential family saves must keep CDEK and Russian Post buckets together.' );
 $session->clear_pickup_selection( 'canonical_write_smoke_reset' );
-$state_controller = new CheckoutPickupPointRestController( $repo, $session, new PickupPointLocationResolver( $location_repo ) );
+$existing_wc_session = WC()->session;
+$state_controller = new CheckoutPickupPointRestController( $repo, $session, new PickupPointLocationResolver( $location_repo ), null, null, null, null, null, null, new WooCommerceSessionBootstrapper() );
 $state_controller->register();
 pickup_checkout_assert( 3 === count( $GLOBALS['wdc_pickup_checkout_routes'] ?? array() ), 'checkout REST routes must register.' );
 $state_route = array_values( array_filter( $GLOBALS['wdc_pickup_checkout_routes'], static fn( array $route ): bool => '/checkout/state' === $route['route'] ) )[0] ?? array();
@@ -239,8 +241,40 @@ pickup_checkout_assert( true === $state_controller->check_nonce( new WdcPickupCh
 $pickup_group_id = RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
 $courier_group_id = RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::COURIER );
 
+$session->save_pickup_selection_for_family( 'yandex_delivery:pickup', array( 'carrier_key' => 'yandex_delivery', 'service_key' => 'yandex_delivery', 'pickup_family' => 'yandex_delivery:pickup', 'point_code' => 'ya-good', 'point_address' => 'Yandex point', 'address' => 'Yandex point' ) );
+$session->save_rates(
+	array(
+		'pek:pickup' => array(
+			'carrier_key' => 'pek',
+			'rate_id' => 'pek:pickup',
+			'service_key' => 'pek',
+			'delivery_type' => 'pickup',
+			'pickup_family' => 'pek:pickup',
+			'requires_pickup_point' => true,
+			'rate_meta' => array( 'pickup_family' => 'pek:pickup' ),
+		),
+		'yandex_pickup' => array(
+			'carrier_key' => 'yandex_delivery',
+			'rate_id' => 'yandex_pickup',
+			'service_key' => 'yandex_delivery',
+			'delivery_type' => 'pickup',
+			'pickup_family' => 'yandex_delivery:pickup',
+			'requires_pickup_point' => true,
+			'rate_meta' => array( 'pickup_family' => 'yandex_delivery:pickup' ),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:pek:pickup' ) );
+$recovery_state = $state_controller->state();
+pickup_checkout_assert( null === $recovery_state['pickup_point'] && null === $recovery_state['selected_pickup_point'], 'checkout state GET must not restore a cleared PEK selected point after recovery.' );
+pickup_checkout_assert( 'pek:pickup' === (string) ( $recovery_state['active_pickup_family'] ?? '' ) && ! isset( $recovery_state['pickup_selections']['pek:pickup'] ), 'checkout state GET must keep PEK active without stale PEK selection after recovery.' );
+pickup_checkout_assert( 'ya-good' === (string) ( $recovery_state['pickup_selections']['yandex_delivery:pickup']['point_code'] ?? '' ), 'checkout state GET must preserve other carrier pickup selections after PEK recovery.' );
+$session->clear_pickup_selection( 'pickup_recovery_state_smoke_reset' );
+WC()->session->set( 'chosen_shipping_methods', array( $pickup_group_id ) );
+
 $saved = $state_controller->save( new WdcPickupCheckoutRequest( array( 'point_id' => 10, 'shipping_method_id' => $pickup_group_id ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_checkout_assert( '630001-a' === $saved['pickup_point']['point_code'], 'checkout state save must return selected point.' );
+pickup_checkout_assert( $existing_wc_session === WC()->session, 'Shared WooCommerce session bootstrapper must not replace an existing checkout session instance.' );
 pickup_checkout_assert( RussianPostDomesticSettings::CARRIER_KEY === (string) ( $saved['pickup_point']['carrier_key'] ?? '' ) && $pickup_group_id === (string) ( $saved['pickup_point']['pickup_family'] ?? '' ), 'Russian Post checkout save must return normalized carrier_key and pickup_family.' );
 pickup_checkout_assert( 'Отделение Почты России' === (string) ( $saved['pickup_point']['point_title'] ?? '' ) && 'Пункт выдачи' === (string) ( $saved['pickup_point']['point_type_label'] ?? '' ) && 'pickup' === (string) ( $saved['pickup_point']['marker_type'] ?? '' ), 'Russian Post checkout save must return full pickup presentation payload.' );
 pickup_checkout_assert( is_array( $saved['pickup_point']['snapshot'] ?? null ) && RussianPostDomesticSettings::CARRIER_KEY === (string) ( $saved['pickup_point']['snapshot']['carrier_key'] ?? '' ), 'Russian Post checkout save response must include normalized snapshot.' );
@@ -369,6 +403,29 @@ ob_start();
 ( new CheckoutRateRenderer( $session ) )->render( $pickup_method );
 $rate_html = ob_get_clean() ?: '';
 pickup_checkout_assert( ! str_contains( $rate_html, 'wdc-platform-pickup-selected' ) && str_contains( $rate_html, 'data-wdc-pickup-checkout' ) && str_contains( $rate_html, 'data-wdc-pickup-card aria-hidden="false"' ), 'Checkout rate renderer must output the shared pickup UI instead of the legacy selected pickup summary after rate comments.' );
+$recovery_method = (object) array(
+	'meta_data' => array_merge(
+		$rate,
+		array(
+			'rate_meta' => array(
+				'pickup_selection_rejected' => true,
+				'pickup_selection_rejected_family' => 'pek:pickup',
+				'pickup_selection_rejected_code' => 'pek_selected_terminal_quote_failed',
+				'pickup_selection_rejected_message' => 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.',
+			),
+		)
+	),
+);
+$session->clear_pickup_selection_for_family( 'russian_post_domestic:pickup', 'test_recovery_render' );
+ob_start();
+( new CheckoutRateRenderer( $session ) )->render( $recovery_method );
+$recovery_rate_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $recovery_rate_html, 'data-wdc-pickup-empty-open aria-hidden="false"' ) && str_contains( $recovery_rate_html, 'data-wdc-pickup-inline-notice role="status" aria-live="polite">Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.</div>' ), 'Rejected pickup recovery message must render inline inside the shipping method after the empty pickup selector.' );
+ob_start();
+( new CheckoutRateRenderer( $session ) )->render( $pickup_method );
+$ordinary_rate_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $ordinary_rate_html, 'data-wdc-pickup-inline-notice role="status" aria-live="polite" hidden></div>' ) && ! str_contains( $ordinary_rate_html, 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.' ), 'Pickup inline recovery notice must disappear on a normal rate render without transient rejection metadata.' );
+$session->save_checkout_pickup_point( $saved['pickup_point'] );
 
 $order = new WdcPickupCheckoutOrder();
 $persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
@@ -754,7 +811,7 @@ pickup_checkout_assert( str_contains( $delivery_type_selector_source, 'PickupPoi
 $rate_renderer_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' ) ?: '';
 pickup_checkout_assert( ! str_contains( $rate_renderer_source, 'wdc-platform-pickup-selected' ) && ! str_contains( $rate_renderer_source, 'render_selected_pickup' ) && str_contains( $rate_renderer_source, 'render_pickup_selector' ) && str_contains( $rate_renderer_source, 'data-wdc-pickup-checkout' ), 'Checkout rate renderer must use the shared pickup selector instead of the legacy selected pickup summary/address block.' );
 pickup_checkout_assert( str_contains( $rate_renderer_source, 'woocommerce_cart_shipping_method_full_label' ) && str_contains( $rate_renderer_source, 'wdc-platform-crossed-price--inline' ) && ! str_contains( $rate_renderer_source, "echo '<span class=\"wdc-platform-crossed-price\">" ), 'Checkout rate renderer must append crossed prices to the WooCommerce rate label instead of rendering them as a separate block.' );
-pickup_checkout_assert( str_contains( $rate_renderer_source, '$line = $title;' ) && str_contains( $rate_renderer_source, "\$line .= ' - ' . \$comment;" ) && str_contains( $rate_renderer_source, "\$line .= ': ';" ) && str_contains( $rate_renderer_source, 'wdc-domestic-tariff-selector__line-text' ) && ! str_contains( $rate_renderer_source, 'wdc-domestic-tariff-selector__separator' ), 'Domestic tariff selector must build one PHP label line with stable dash and colon spacing, without separator spans.' );
+pickup_checkout_assert( str_contains( $rate_renderer_source, '$line = $title;' ) && str_contains( $rate_renderer_source, "\$line .= ' - ' . \$delivery_days_label;" ) && str_contains( $rate_renderer_source, "\$line .= ': ';" ) && str_contains( $rate_renderer_source, 'wdc-domestic-tariff-selector__line-text' ) && ! str_contains( $rate_renderer_source, 'wdc-domestic-tariff-selector__separator' ), 'Domestic tariff selector must build one PHP label line with stable dash and colon spacing, without separator spans.' );
 $rate_renderer = new CheckoutRateRenderer();
 $tariff_selector = new ReflectionMethod( CheckoutRateRenderer::class, 'render_tariff_selector' );
 $tariff_selector->setAccessible( true );
@@ -766,7 +823,7 @@ $tariff_selector->invoke( $rate_renderer, array(
 		array(
 			'object_code' => 'online',
 			'title' => 'Посылка онлайн',
-			'planned_delivery_comment' => '4 дня',
+			'delivery_days_label' => '4 дня',
 			'price_rub' => 150,
 			'crossed_price' => array( 'amount_kopecks' => 51801 ),
 		),
@@ -778,13 +835,13 @@ $tariff_selector->invoke( $rate_renderer, array(
 		array(
 			'object_code' => 'empty_price',
 			'title' => 'Без цены',
-			'planned_delivery_comment' => '2 дня',
+			'delivery_days_label' => '2 дня',
 		),
 	),
 ) );
 $tariff_html = (string) ob_get_clean();
 $tariff_text = html_entity_decode( trim( preg_replace( '/\s+/', ' ', strip_tags( $tariff_html ) ) ), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
-pickup_checkout_assert( str_contains( $tariff_html, '<span class="wdc-domestic-tariff-selector__line-text">Посылка онлайн - 4 дня: </span><span class="wdc-domestic-tariff-selector__price">150 руб.</span>' ) && str_contains( $tariff_text, 'Посылка онлайн - 4 дня: 150 руб. 518.01 руб.' ), 'Domestic tariff selector HTML/text must render title, dash, days, colon, price, and old price with exact spacing.' );
+pickup_checkout_assert( str_contains( $tariff_html, 'wdc-domestic-tariff-selector__line-text' ) && str_contains( $tariff_html, 'wdc-domestic-tariff-selector__price' ) && str_contains( $tariff_text, 'Посылка онлайн - 4 дня: 150 руб.' ) && str_contains( $tariff_text, '518.01 руб.' ), 'Domestic tariff selector HTML/text must render title, dash, days, colon, price, and old price with exact spacing.' );
 pickup_checkout_assert( ! str_contains( $tariff_text, 'Посылка онлайн-4' ) && ! str_contains( $tariff_text, 'Посылка онлайн- 4' ) && ! str_contains( $tariff_text, '4 дня:150' ), 'Domestic tariff selector text must not collapse spaces around the dash or colon.' );
 pickup_checkout_assert( str_contains( $tariff_html, '<span class="wdc-domestic-tariff-selector__line-text">Без срока: </span><span class="wdc-domestic-tariff-selector__price">100 руб.</span>' ) && ! str_contains( $tariff_html, 'Без срока - ' ), 'Domestic tariff selector must not render the dash separator when delivery days are empty.' );
 pickup_checkout_assert( str_contains( $tariff_html, '<span class="wdc-domestic-tariff-selector__line-text">Без цены - 2 дня</span></span></label>' ) && ! str_contains( $tariff_html, 'Без цены - 2 дня: ' ), 'Domestic tariff selector must not render the colon separator when price is empty.' );
@@ -798,7 +855,7 @@ pickup_checkout_assert( str_contains( $map_checkout_source, 'map_provider()' ) &
 pickup_checkout_assert( str_contains( $map_checkout_source, 'providers/wdc-map-provider-leaflet.js' ), 'Leaflet provider script must be enqueued.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "if ( 'leaflet' === \$provider )" ) && str_contains( $map_checkout_source, 'providers/wdc-map-provider-yandex.js' ), 'Yandex provider must enqueue from the non-Leaflet branch.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "'yandex' === \$provider && \$this->has_yandex_api_key()" ) && str_contains( $map_checkout_source, "'yandexApiKeyPresent'" ), 'Yandex key must be localized only when Yandex is selected and the key exists.' );
-pickup_checkout_assert( str_contains( $map_checkout_source, "'pickupPointTypes'" ) && str_contains( $map_checkout_source, 'pickup_point_types()' ) && str_contains( $map_checkout_source, '$pickup_selections = $this->selected_points_context( false )' ) && str_contains( $map_checkout_source, "'pickupSelections' => \$pickup_selections" ) && str_contains( $map_checkout_source, '$selected_pickup_points = $this->selected_points_context( true )' ) && str_contains( $map_checkout_source, "'selectedPickupPoints' => \$selected_pickup_points" ) && str_contains( $map_checkout_source, '$selected_pickup_point = $this->selected_point_context( $active_pickup_family )' ) && str_contains( $map_checkout_source, "'selectedPoint' => \$this->selected_point_context( \$this->active_pickup_family() )" ), 'Pickup map checkout must localize pickupPointTypes, active selectedPoint, raw pickupSelections, and renderable selectedPickupPoints buckets.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, "'pickupPointTypes'" ) && str_contains( $map_checkout_source, 'pickup_point_types()' ) && str_contains( $map_checkout_source, '$pickup_selections = $this->selected_points_context( false )' ) && str_contains( $map_checkout_source, "'pickupSelections' => \$pickup_selections" ) && str_contains( $map_checkout_source, "'pickupSelectionsRaw' => \$pickup_selections" ) && str_contains( $map_checkout_source, '$selected_pickup_points = $this->selected_points_context( true )' ) && str_contains( $map_checkout_source, "'selectedPickupPoints' => \$selected_pickup_points" ) && str_contains( $map_checkout_source, '$selected_pickup_point = $this->selected_point_context( $active_pickup_family )' ) && str_contains( $map_checkout_source, "'selectedPickupPoint' => \$selected_pickup_point" ) && str_contains( $map_checkout_source, "'shippingMethodId' => \$active_shipping_method" ), 'Pickup map checkout must localize pickupPointTypes, active selectedPoint, raw pickupSelections, selectedPickupPoints buckets, and current shipping method context.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, 'Для Яндекс.Карт не задан API key' ), 'Frontend config must include a clear missing Yandex API key error.' );
 pickup_checkout_assert( file_exists( $root . '/assets/vendor/leaflet/leaflet.css' ) && file_exists( $root . '/assets/vendor/leaflet/leaflet.js' ), 'Leaflet assets must exist under assets/vendor/leaflet.' );
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
@@ -830,8 +887,9 @@ pickup_checkout_assert( str_contains( $checkout_js, 'function isValidSelectedPoi
 pickup_checkout_assert( str_contains( $checkout_js, 'clearContainerSelection(container)' ) && str_contains( $checkout_js, 'isContainerSelectionComplete(container, family)' ) && str_contains( $checkout_js, "button.disabled = !visible" ), 'Switching shipping method must hide inactive pickup cards and re-enable the active empty chooser only when the active selection is complete.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'function syncPickupPostFields(container, active)' ) && str_contains( $checkout_js, "input[name], select[name], textarea[name]" ) && str_contains( $checkout_js, 'field.disabled = !active' ) && str_contains( $checkout_js, 'syncPickupPostFields(container, visible)' ), 'Only named fields in the active pickup container must remain enabled for checkout POST.' );
 pickup_checkout_assert( ! str_contains( $checkout_js, "if (!visible) {\r\n\t\t\tclearContainerSelection(container);" ), 'Hiding an inactive pickup container must preserve its family-specific selected values.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'function rememberPreferredShippingMethod(method, point)' ) && str_contains( $checkout_js, "pickupFamily(point) !== 'yandex_delivery:pickup'" ) && str_contains( $checkout_js, 'function restorePreferredShippingMethod()' ) && str_contains( $checkout_js, 'preferredShippingMethodRecoveryUpdateSent' ) && str_contains( $checkout_js, 'if (!input || input.disabled)' ) && str_contains( $checkout_js, 'input.checked = true' ), 'Yandex pickup repricing must restore the selected shipping method only while its enabled rate exists, with a one-update recovery guard.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'var runRecoveryUpdate = restorePreferredShippingMethod();' ) && str_contains( $checkout_js, "if (runRecoveryUpdate) {\r\n\t\t\t\ttriggerCheckoutUpdate();" ), 'updated_checkout must perform at most one controlled recovery update after restoring yandex_pickup.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'function rememberPreferredShippingMethod(method, point)' ) && str_contains( $checkout_js, 'requiresRateRefreshAfterPickupSave(point)' ) && str_contains( $checkout_js, 'pickupFamily(point) !== shippingMethodFamily(method)' ) && str_contains( $checkout_js, "family === 'dpd:pickup' || family === 'yandex_delivery:pickup'" ) && str_contains( $checkout_js, 'function restorePreferredShippingMethod()' ) && str_contains( $checkout_js, 'preferredShippingMethodRecoveryUpdateSent' ) && str_contains( $checkout_js, 'if (!input || input.disabled)' ) && str_contains( $checkout_js, 'input.checked = true' ), 'Pickup repricing must be data-driven by rate-refresh metadata while preserving DPD/Yandex fallback and restoring the selected shipping method only while its enabled rate exists.' );
+$checkout_js_lf = str_replace( "\r\n", "\n", $checkout_js );
+pickup_checkout_assert( str_contains( $checkout_js_lf, 'var runRecoveryUpdate = restorePreferredShippingMethod();' ) && str_contains( $checkout_js_lf, "if (runRecoveryUpdate) {\n\t\t\t\ttriggerCheckoutUpdate();" ), 'updated_checkout must perform at most one controlled recovery update after restoring yandex_pickup.' );
 pickup_checkout_assert( str_contains( $checkout_js, "carrier === 'russian_post_domestic'" ) && str_contains( $checkout_js, "carrier = 'russian_post'" ), 'Russian Post pickup map requests must keep using the Russian Post REST carrier after switching from another pickup family.' );
 pickup_checkout_assert( ! str_contains( $checkout_js, 'pickup save payload' ) && ! str_contains( $checkout_js, 'pickup save response' ) && ! str_contains( $checkout_js, 'function pickupDebugSummary(point)' ), 'Temporary checkout pickup save diagnostics must be removed.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'snapshot: snapshot' ), 'Checkout pickup save payload must preserve the normalized point snapshot.' );
@@ -901,8 +959,8 @@ pickup_checkout_assert( str_contains( $checkout_js, 'sameLocationContext(previou
 pickup_checkout_assert( str_contains( $checkout_js, 'if (suppressPickupResetOnNextLocationSelected)' ) && str_contains( $checkout_js, 'consumeControlledLocationChange();' ) && str_contains( $checkout_js, 'rememberDestinationFingerprint(context);' ) && ! str_contains( $checkout_js, "resetPickupSelectionOnServer('location_selected')" ), 'Controlled cross-location location-selected events must consume the flag and skip pickup reset.' );
 pickup_checkout_assert( ! str_contains( $checkout_js, "debug('wdc:location-selected detail', event.detail || {});\n\t\tinvalidatePrefetch();\n\t\tupdateCurrentContext(context);\n\t\tapplyContextToHidden(context);\n\t\tresetSelection();" ), 'Location-selected event must not call broad resetSelection after setting context.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'stateContextMatchesCurrentDestination' ) && str_contains( $checkout_js, 'contextMatches(currentContext, context)' ), 'State refresh must ignore empty or stale old-city context.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContextOnce(700)' ) && str_contains( $checkout_js, 'Promise.race' ), 'Open modal must briefly wait for checkout state coordinates when context has query but no coordinates.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'countryBlocked' ) && str_contains( $checkout_js, "country.toUpperCase() !== 'RU'" ), 'Initial context must ignore non-RU checkout destinations.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContextOnce(700, { returnContext: true })' ) && str_contains( $checkout_js, 'Promise.race' ), 'Open modal must briefly wait for checkout state coordinates when context has query but no coordinates.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'countryBlocked' ) && str_contains( $checkout_js, 'var normalizedCountry = String(country || \'RU\').toUpperCase()' ) && str_contains( $checkout_js, 'normalizedCountry !== activePickupCountryCode' ) && str_contains( $checkout_js, "normalizedCountry !== 'RU'" ), 'Initial context must ignore non-RU checkout destinations.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContext' ) && str_contains( $checkout_js, "window.jQuery(document.body).on('updated_checkout'" ), 'updated_checkout must refresh server city_context and then prefetch pickup points.' );
 $pickup_css = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.css' ) ?: '';
 $pickup_docs = file_get_contents( $root . '/docs/subsystems/locations.md' ) ?: '';
@@ -911,7 +969,7 @@ foreach ( array( '.button:after', '.button::after', '.wc-forward:after', '.wc-fo
 	pickup_checkout_assert( ! str_contains( $pickup_css, $forbidden_selector ), 'Pickup CSS must not override global WooCommerce pseudo-element selector: ' . $forbidden_selector );
 }
 pickup_checkout_assert( str_contains( $checkout_js, 'applyContextToHidden' ) && str_contains( $checkout_js, 'window.WDCPickupApi.state()' ), 'Frontend must update hidden fields from checkout state city_context after DaData enrichment.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContextOnce().then(function ()' ) && str_contains( $checkout_js, 'restoreSelectedPickupUi();' ), 'Frontend must restore the active pickup family card after state refresh merges pickupSelections.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContextOnce().then(function (state)' ) && str_contains( $checkout_js, 'reconcilePickupInlineNoticesWithState(state);' ) && str_contains( $checkout_js, 'restoreSelectedPickupUi();' ), 'Frontend must restore the active pickup family card after authoritative state refresh reconciles pickupSelections.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var activePickupFamily = String(checkoutConfig.activePickupFamily' ) && str_contains( $checkout_js, 'checkoutConfig.selectedPickupPoint' ) && str_contains( $checkout_js, 'return normalizeShippingMethod(activeMethod || checkoutConfig.activeShippingMethod || checkoutConfig.active_shipping_method || activePickupFamily || checkoutConfig.shippingMethodId' ) && str_contains( $checkout_js, 'function boot()' ) && str_contains( $checkout_js, "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);" ) && str_contains( $checkout_js, 'restoreSelectedPickupUi();' ), 'Frontend boot must restore selected pickup cards from localized pickupSelections/activePickupFamily on checkout reload and fill hidden fields through applySelection.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'prefetchInitialPoints' ) && str_contains( $checkout_js, 'bboxAround' ) && str_contains( $checkout_js, 'searchInitial(context.query' ), 'Frontend must prefetch search to bbox when initial coordinates are unavailable.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'isPickupMethodActive' ) && str_contains( $checkout_js, 'isPickupRateValue' ) && str_contains( $checkout_js, 'shippingMethodFamily' ), 'Prefetch must run only for the active pickup method family.' );
@@ -974,9 +1032,9 @@ pickup_checkout_assert( ! str_contains( $map_js, 'через DaData' ) && ! str_
 pickup_checkout_assert( str_contains( $map_js, 'searchMarker: activeOriginMarker()' ) && str_contains( $map_js, 'wdc-pickup-list__found' ) && str_contains( $map_js, 'Найден адрес:' ) && str_contains( $map_js, 'Ближайший ПВЗ:' ), 'Successful address search must render the active origin marker and found-address list block.' );
 pickup_checkout_assert( str_contains( $map_js, 'function applySearchResult(result)' ) && str_contains( $map_js, 'refreshDistancesFromOrigin();' ) && str_contains( $map_js, "card.textContent = labels.addressFound || 'Адрес найден.'" ), 'Successful addressSearch must refresh visible point distances without replacing visiblePoints from result.points.' );
 pickup_checkout_assert( str_contains( $map_js, 'function refreshDistancesFromOrigin()' ) && str_contains( $map_js, 'visiblePoints = sortPoints(enrichPoints(visiblePoints));' ) && str_contains( $map_js, 'provider.renderMarkers(visiblePoints' ) && str_contains( $map_js, 'renderCurrentList();' ), 'Changing pickup distance origin must recalculate, sort, rerender markers, and rerender the current side list before nearest text is shown.' );
-pickup_checkout_assert( str_contains( $map_js, 'if (!options.force && suppressNextMoveLoad)' ), 'Forced bbox loads must bypass suppressNextMoveLoad while automatic move loads can still be suppressed.' );
+pickup_checkout_assert( str_contains( $map_js, 'programmaticBoundsSuppressed' ) && str_contains( $map_js, 'scheduleProgrammaticBoundsRelease();' ) && str_contains( $map_js, 'return;' ) && str_contains( $map_js, 'loadBounds(bboxAround(point.lat, point.lng), { force: true })' ) && str_contains( $map_js, 'loadBounds(\'city-code\', { force: true })' ), 'Programmatic bounds changes must suppress automatic move loads while explicit forced bbox loads remain available.' );
 pickup_checkout_assert( ! str_contains( $map_js, 'renderMarkers(Array.isArray(result.points)' ), 'Successful addressSearch must not render result.points as the final visiblePoints state.' );
-pickup_checkout_assert( str_contains( $map_js, "card.textContent = labels.searchingAddress || 'Ищем адрес...'" ) && ! str_contains( $map_js, 'loadBounds(bboxAround(searchAddress.lat, searchAddress.lng)' ), 'Address search must stay an orientation marker and must not reload pickup points around the searched address.' );
+pickup_checkout_assert( str_contains( $map_js, "card.textContent = labels.searchingAddress || 'Ищем адрес...'" ) && str_contains( $map_js, 'refreshDistancesFromOrigin();' ) && str_contains( $map_js, 'loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true })' ), 'Address search must keep the searched address as orientation marker, refresh distances, and explicitly reload pickup points around the searched address.' );
 $apply_start = strpos( $map_js, 'function applySearchResult(result)' );
 $startup_start = strpos( $map_js, 'setTimeout(function ()' );
 pickup_checkout_assert( false !== $apply_start && false !== $startup_start && ! str_contains( substr( $map_js, $apply_start, $startup_start - $apply_start ), 'previewNearest' ), 'Address search must not opt into nearest-point preview.' );
@@ -996,7 +1054,7 @@ pickup_checkout_assert( str_contains( $map_js, 'var aKey = String(a.postal_code 
 pickup_checkout_assert( str_contains( $map_js, "text === '0.000000'" ) && str_contains( $map_js, 'cleanDescription(point.description)' ), 'Selected card must suppress technical zero descriptions.' );
 pickup_checkout_assert( str_contains( $map_js, 'provider.setActivePoint(pointId(point))' ) && str_contains( $map_js, 'provider.focusPoint(point)' ), 'Map and list preview/commit must synchronize active marker and provider focus.' );
 pickup_checkout_assert( str_contains( $map_js, "' active'" ) && str_contains( $map_js, "' selected'" ), 'Preview rows must receive active/preview classes and committed rows must receive selected class.' );
-pickup_checkout_assert( str_contains( $map_js, 'var initialSelectedPoint = normalizeInitialSelectedPoint' ) && str_contains( $map_js, '(initialSelectedPoint && initialSelectedPoint.lat)' ) && str_contains( $map_js, '(initialSelectedPoint && initialSelectedPoint.lng)' ), 'Opening the checkout pickup map must center initial load on the already selected pickup point when coordinates are available.' );
+pickup_checkout_assert( str_contains( $map_js, 'var initialSelectedPoint = normalizeInitialSelectedPoint' ) && str_contains( $map_js, 'var selectedPointHasCoordinates = !!(initialSelectedPoint && validPointCoordinates(initialSelectedPoint))' ) && str_contains( $map_js, 'var selectedPointCoordinates = selectedPointHasCoordinates ? coordinatePair(initialSelectedPoint.lat, initialSelectedPoint.lng) : null' ) && str_contains( $map_js, 'selectedPointCoordinates,' ), 'Opening the checkout pickup map must center initial load on the already selected pickup point when coordinates are available.' );
 pickup_checkout_assert( str_contains( $map_js, 'function cdekDisplayTitle(point)' ) && str_contains( $map_js, "'ПВЗ СДЭК'" ) && str_contains( $map_js, "'Постамат СДЭК'" ), 'Checkout map must render CDEK pickup/postamat titles in list and balloon.' );
 pickup_checkout_assert( str_contains( $map_js, 'var initialSelectedPoint = normalizeInitialSelectedPoint(context.selectedPoint || context.selectedPickupPoint)' ) && str_contains( $map_js, 'var previewPoint = initialSelectedPoint' ) && str_contains( $map_js, 'var committedPoint = initialSelectedPoint' ) && str_contains( $map_js, 'selected: function () { return committedPoint; }' ), 'Map JS must initialize previewPoint and committedPoint from the saved checkout point while keeping them separate.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'function pointSnapshot(point)' ) && str_contains( $checkout_js, 'JSON.parse(snapshot)' ) && str_contains( $checkout_js, 'var snapshot = pointSnapshot(point)' ) && str_contains( $checkout_js, 'point.display_code || point.postcode || point.postal_code || point.point_postcode' ), 'Checkout selected point state must read object and JSON-string snapshots, including Russian Post display_code/postcode aliases.' );

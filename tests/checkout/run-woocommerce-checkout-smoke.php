@@ -71,6 +71,24 @@ if ( ! function_exists( 'checked' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wc_add_notice' ) ) {
+	function wc_add_notice( string $message, string $type = 'success' ): void {
+		$GLOBALS['wdc_test_wc_notices'][] = array( 'message' => $message, 'type' => $type );
+	}
+}
+
+if ( ! function_exists( 'wc_has_notice' ) ) {
+	function wc_has_notice( string $message, string $type = 'success' ): bool {
+		foreach ( $GLOBALS['wdc_test_wc_notices'] ?? array() as $notice ) {
+			if ( $message === (string) ( $notice['message'] ?? '' ) && $type === (string) ( $notice['type'] ?? '' ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+}
+
 if ( ! function_exists( 'trailingslashit' ) ) {
 	function trailingslashit( string $value ): string {
 		return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR;
@@ -1205,6 +1223,65 @@ NewShippingMethod::configure(
 );
 
 $method = new NewShippingMethod();
+$session->save_pickup_selection_for_family( 'pek:pickup', array( 'carrier_key' => 'pek', 'service_key' => 'pek', 'pickup_family' => 'pek:pickup', 'point_code' => 'bad-free', 'point_address' => 'Bad terminal', 'address' => 'Bad terminal' ) );
+$session->save_pickup_selection_for_family( 'yandex_delivery:pickup', array( 'carrier_key' => 'yandex_delivery', 'service_key' => 'yandex_delivery', 'pickup_family' => 'yandex_delivery:pickup', 'point_code' => 'ya-good', 'point_address' => 'Yandex point', 'address' => 'Yandex point' ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:yandex_pickup' ) );
+$GLOBALS['wdc_test_wc_notices'] = array();
+$rejected_handler = new ReflectionMethod( NewShippingMethod::class, 'handle_rejected_pickup_selection_rate' );
+$rejected_handler->setAccessible( true );
+$rejected_handler->invoke(
+	$method,
+	array(
+		'carrier_key' => 'pek',
+		'rate_id' => 'pek:pickup',
+		'delivery_type' => 'pickup',
+		'pickup_family' => 'pek:pickup',
+		'requires_pickup_point' => true,
+		'rate_meta' => array(
+			'pickup_family' => 'pek:pickup',
+			'pickup_selection_rejected' => true,
+			'pickup_selection_rejected_family' => 'pek:pickup',
+			'pickup_selection_rejected_code' => 'pek_selected_terminal_quote_failed',
+			'pickup_selection_rejected_message' => 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.',
+		),
+	),
+	'pek:pickup'
+);
+wc_checkout_smoke_assert( array() === $session->pickup_selection_for_family( 'pek:pickup' ), 'Rejected pickup selection recovery must clear only the rejected PEK family.' );
+wc_checkout_smoke_assert( 'ya-good' === (string) ( $session->pickup_selection_for_family( 'yandex_delivery:pickup' )['point_code'] ?? '' ), 'Rejected PEK pickup recovery must preserve other pickup carrier selections.' );
+wc_checkout_smoke_assert( array( 'wdc_platform_delivery:pek:pickup' ) === WC()->session->get( 'chosen_shipping_methods', array() ), 'Rejected pickup recovery must preserve the recovered PEK pickup method as chosen.' );
+wc_checkout_smoke_assert( false === wc_has_notice( 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.', 'notice' ), 'Rejected pickup recovery must not add a global WooCommerce notice.' );
+$scrubber = new ReflectionMethod( NewShippingMethod::class, 'rate_without_transient_render_meta' );
+$scrubber->setAccessible( true );
+$scrubbed_rate = $scrubber->invoke(
+	$method,
+	array(
+		'pickup_selection_rejected' => true,
+		'pickup_selection_rejected_message' => 'transient',
+		'rate_meta' => array(
+			'pickup_selection_rejected' => true,
+			'pickup_selection_rejected_family' => 'pek:pickup',
+			'pickup_selection_rejected_code' => 'pek_selected_terminal_quote_failed',
+			'pickup_selection_rejected_message' => 'transient',
+			'api_base_price_rub' => 1205.0,
+		),
+	)
+);
+wc_checkout_smoke_assert( ! array_key_exists( 'pickup_selection_rejected', $scrubbed_rate ) && ! array_key_exists( 'pickup_selection_rejected_message', $scrubbed_rate ) && ! array_key_exists( 'pickup_selection_rejected', $scrubbed_rate['rate_meta'] ?? array() ) && 1205.0 === (float) ( $scrubbed_rate['rate_meta']['api_base_price_rub'] ?? 0 ), 'Rejected pickup render metadata must be stripped before storing checkout rates while preserving persistent rate meta.' );
+$meta_sanitizer = new ReflectionMethod( OrderShippingMetaPersister::class, 'sanitized_rate_meta' );
+$meta_sanitizer->setAccessible( true );
+$sanitized_order_meta = $meta_sanitizer->invoke(
+	new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ),
+	array(
+		'pickup_selection_rejected' => true,
+		'pickup_selection_rejected_family' => 'pek:pickup',
+		'pickup_selection_rejected_code' => 'pek_selected_terminal_quote_failed',
+		'pickup_selection_rejected_message' => 'transient',
+		'pek_carrier_price_kopecks' => 120500,
+	)
+);
+wc_checkout_smoke_assert( ! array_key_exists( 'pickup_selection_rejected', $sanitized_order_meta ) && ! array_key_exists( 'pickup_selection_rejected_message', $sanitized_order_meta ) && 120500 === (int) ( $sanitized_order_meta['pek_carrier_price_kopecks'] ?? 0 ), 'Order rate meta sanitizer must drop transient rejected pickup fields while keeping safe PEK rate metadata.' );
+
 $method->calculate_shipping( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( count( $method->rates ) > 0, 'New WC shipping method must add rates.' );
 wc_checkout_smoke_assert( isset( $method->rates[0]['meta_data']['planned_delivery_comment'] ), 'WC rate must contain planned delivery comment metadata.' );

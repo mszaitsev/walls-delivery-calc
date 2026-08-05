@@ -647,8 +647,9 @@ wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_p
 
 $delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-$carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 800 );
-wdc_ds_assert( ! str_contains( $carrier_registry_block, 'Pek' ) && ! str_contains( $carrier_registry_block, "'pek'" ), 'PEK foundation must not register PEK in CarrierRegistry.' );
+$carrier_registry_block = substr( $plugin_source, (int) strpos( $plugin_source, 'CarrierRegistry::class' ), 1800 );
+wdc_ds_assert( str_contains( $plugin_source, '$this->container->register( PekCarrier::class' ) && str_contains( $carrier_registry_block, '$registry->register( $this->container->get( PekCarrier::class ) );' ), 'PEK checkout runtime must register PekCarrier in CarrierRegistry.' );
+wdc_ds_assert( ! str_contains( $plugin_source, 'PekShipment' ) && ! file_exists( dirname( __DIR__, 2 ) . '/src/Shipments/Pek' ), 'PEK checkout runtime must not register PEK in Shipment Framework.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && ! str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render availability fields inside main tab and not expose a separate availability tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, "JetLogisticSettings::SERVICE_KEY === \$service->service_key" ) && str_contains( $delivery_admin_source, "\$tabs['jet_geography']" ) && str_contains( $delivery_admin_source, "\$tabs['jet_statuses']" ), 'Jet Logistic geography/status UI must be exposed only as delivery service tabs.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'PekSettings::SERVICE_KEY === $service->service_key' ) && str_contains( $delivery_admin_source, 'PekAdminPage::TAB_KEY' ) && str_contains( $delivery_admin_source, 'render_pek_settings_tab' ), 'PEK settings UI must be exposed only as a delivery service tab.' );

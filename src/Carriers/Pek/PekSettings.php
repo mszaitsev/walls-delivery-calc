@@ -12,6 +12,13 @@ final class PekSettings {
 	public const SERVICE_KEY = 'pek';
 	public const TITLE = 'ПЭК';
 	public const PUBLIC_TITLE = 'ПЭК';
+	public const PICKUP_RATE_ID = 'pek:pickup';
+	public const COURIER_RATE_ID = 'pek:courier';
+	public const PICKUP_FAMILY = 'pek:pickup';
+	public const PICKUP_TARIFF_KEY = 'pek_ltl_pickup';
+	public const COURIER_TARIFF_KEY = 'pek_ltl_courier';
+	public const PICKUP_TARIFF_NAME = 'До терминала';
+	public const COURIER_TARIFF_NAME = 'Курьером';
 	public const LTL_PRODUCT_TYPE = 3;
 	public const PLANNED_COUNTRIES = array( 'RU', 'AM', 'BY', 'KG', 'KZ' );
 	public const INITIAL_COUNTRIES = array( 'RU' );

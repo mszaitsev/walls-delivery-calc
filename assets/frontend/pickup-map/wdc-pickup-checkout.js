@@ -20,6 +20,10 @@
 	var isPlacingOrder = false;
 	var placeOrderGuardTimer = 0;
 	var placeOrderResetGuardUntil = 0;
+	var pickupInlineNotices = {};
+	var authoritativePickupSelections = {};
+	var authoritativePickupStateLoaded = false;
+	var authoritativePickupStateRevision = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
 	var selectedPickupPoints = extractPickupSelections(checkoutConfig);
 	if (checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint) {
@@ -60,7 +64,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function openModal(container, method) {
 		var baseContext = initialContext();
 		var contextPromise = baseContext.query && !validCoordinate(baseContext.lat, baseContext.lng)
-			? refreshCheckoutContextOnce(700).then(function (freshContext) { return freshContext || baseContext; })
+			? refreshCheckoutContextOnce(700, { returnContext: true }).then(function (freshContext) { return freshContext || baseContext; })
 			: Promise.resolve(baseContext);
 
 		contextPromise.then(function (resolvedContext) {
@@ -363,6 +367,165 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 	}
 
+	function pickupInlineNoticeElement(container) {
+		return container ? container.querySelector('[data-wdc-pickup-inline-notice]') : null;
+	}
+
+	function pickupInlineNoticeFamily(container) {
+		var method = containerMethod(container) || activeMethod || currentShippingMethod();
+		var family = shippingMethodFamily(method);
+		if (isPickupFamily(family)) {
+			return family;
+		}
+		var fieldFamily = containerSelectedPickupFamily(container);
+		return isPickupFamily(fieldFamily) ? fieldFamily : '';
+	}
+
+	function currentDestinationFingerprint() {
+		return destinationFingerprint(currentContext) || destinationFingerprint(contextFromFields());
+	}
+
+	function capturePickupInlineNotice(container) {
+		var element = pickupInlineNoticeElement(container);
+		var family = pickupInlineNoticeFamily(container);
+		if (!element || !family) {
+			return false;
+		}
+		if (element.getAttribute('data-wdc-pickup-inline-notice-source') === 'memory') {
+			return false;
+		}
+		var message = meaningfulText(element.textContent || '');
+		if (!message) {
+			return false;
+		}
+		pickupInlineNotices[family] = {
+			message: message,
+			destinationFingerprint: currentDestinationFingerprint(),
+			createdAt: Date.now()
+		};
+		return true;
+	}
+
+	function restorePickupInlineNotice(container) {
+		var element = pickupInlineNoticeElement(container);
+		var family = pickupInlineNoticeFamily(container);
+		if (!element || !family) {
+			return;
+		}
+		var notice = pickupInlineNotices[family] || null;
+		if (!notice || !notice.message) {
+			clearPickupInlineNoticeElement(element);
+			return;
+		}
+		var current = currentDestinationFingerprint();
+		if (notice.destinationFingerprint && current && notice.destinationFingerprint !== current) {
+			clearPickupInlineNotice(family);
+			clearPickupInlineNoticeElement(element);
+			return;
+		}
+		element.textContent = notice.message;
+		element.hidden = false;
+		element.classList.remove('wdc-is-hidden');
+		element.setAttribute('aria-hidden', 'false');
+		element.setAttribute('data-wdc-pickup-inline-notice-source', 'memory');
+	}
+
+	function clearPickupInlineNotice(family) {
+		family = String(family || '').trim();
+		if (family) {
+			delete pickupInlineNotices[family];
+		}
+	}
+
+	function clearPickupInlineNoticesForDestinationChange() {
+		pickupInlineNotices = {};
+	}
+
+	function clearPickupInlineNoticeElement(element) {
+		if (!element) {
+			return;
+		}
+		element.textContent = '';
+		element.hidden = true;
+		element.classList.add('wdc-is-hidden');
+		element.setAttribute('aria-hidden', 'true');
+		element.setAttribute('data-wdc-pickup-inline-notice-source', '');
+	}
+
+	function syncPickupInlineNotices() {
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			capturePickupInlineNotice(container);
+		});
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			var family = pickupInlineNoticeFamily(container);
+			if (!family) {
+				return;
+			}
+			restorePickupInlineNotice(container);
+		});
+	}
+
+	function authoritativeSelectedPointForFamily(family) {
+		family = String(family || '').trim();
+		return family && authoritativePickupSelections[family] ? authoritativePickupSelections[family] : null;
+	}
+
+	function hasPickupContainerForFamily(family) {
+		var found = false;
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			if (pickupInlineNoticeFamily(container) === family) {
+				found = true;
+			}
+		});
+		return found;
+	}
+
+	function removeLocalPickupSelection(family) {
+		family = String(family || '').trim();
+		if (!family) {
+			return;
+		}
+		delete selectedPickupPoints[family];
+		if (window.wdcPickupCheckout) {
+			if (window.wdcPickupCheckout.pickupSelections && typeof window.wdcPickupCheckout.pickupSelections === 'object') {
+				delete window.wdcPickupCheckout.pickupSelections[family];
+			}
+			if (window.wdcPickupCheckout.selectedPickupPoints && typeof window.wdcPickupCheckout.selectedPickupPoints === 'object') {
+				delete window.wdcPickupCheckout.selectedPickupPoints[family];
+			}
+			if (window.wdcPickupCheckout.selectedPickupPoint && pickupFamily(window.wdcPickupCheckout.selectedPickupPoint) === family) {
+				window.wdcPickupCheckout.selectedPickupPoint = null;
+			}
+		}
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			if (pickupInlineNoticeFamily(container) === family) {
+				clearContainerSelection(container);
+				toggleForMethod(container);
+			}
+		});
+	}
+
+	function reconcilePickupInlineNoticesWithState(state) {
+		if (!hasAuthoritativePickupSelections(state || {})) {
+			syncPickupInlineNotices();
+			return;
+		}
+		Object.keys(pickupInlineNotices).forEach(function (family) {
+			var point = authoritativeSelectedPointForFamily(family);
+			if (
+				point
+				&& hasPickupContainerForFamily(family)
+				&& isValidSelectedPointForCard(point, family)
+				&& sameSelectionDestination(point)
+			) {
+				clearPickupInlineNotice(family);
+				return;
+			}
+			removeLocalPickupSelection(family);
+		});
+		syncPickupInlineNotices();
+	}
+
 	function geolocationErrorMessage(error) {
 		if (error && error.code === 1) {
 			return 'Браузер не дал доступ к местоположению. Разрешите доступ или используйте поиск адреса.';
@@ -486,8 +649,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		invalidatePrefetch();
+		clearPickupInlineNoticesForDestinationChange();
 		selectedPickupPoints = {};
 		if (window.wdcPickupCheckout) {
+			window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 			window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 			window.wdcPickupCheckout.selectedPickupPoint = null;
 		}
@@ -886,6 +1051,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		context.carrier = carrier;
 		context.carrier_key = carrier;
 		context.pickup_family = family;
+		context.shipping_method_id = normalizeShippingMethod(method || activeMethod || currentShippingMethod());
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
 		}
@@ -966,21 +1132,24 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function refreshCheckoutContext() {
-		return refreshCheckoutContextOnce().then(function () {
+		return refreshCheckoutContextOnce().then(function (state) {
+			reconcilePickupInlineNoticesWithState(state);
 			restoreSelectedPickupUi();
+			syncPickupInlineNotices();
 			schedulePrefetch();
 		}).catch(function () {
-			restoreSelectedPickupUi();
+			syncPickupInlineNotices();
 			schedulePrefetch();
 		});
 	}
 
-	function refreshCheckoutContextOnce(timeout) {
+	function refreshCheckoutContextOnce(timeout, options) {
 		if (!window.WDCPickupApi || !window.WDCPickupApi.state) {
 			return Promise.resolve(null);
 		}
+		options = options || {};
 		var stateRequest = window.WDCPickupApi.state().then(function (state) {
-			mergePickupSelectionsFromResponse(state);
+			mergePickupSelectionsFromResponse(state, { authoritativeState: true });
 			if (state && (state.activePickupFamily || state.active_pickup_family)) {
 				activePickupFamily = String(state.activePickupFamily || state.active_pickup_family || '').trim();
 				if (window.wdcPickupCheckout) {
@@ -991,9 +1160,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			if ((context.query || validCoordinate(context.lat, context.lng)) && stateContextMatchesCurrentDestination(context)) {
 				updateCurrentContext(context);
 				applyContextToHidden(context);
-				return context;
+				return true === options.returnContext ? context : state;
 			}
-			return null;
+			return true === options.returnContext ? null : (state || null);
 		}).catch(function () { return null; });
 		if (!timeout) {
 			return stateRequest;
@@ -1140,10 +1309,19 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		return extracted;
 	}
 
-	function mergePickupSelectionsFromResponse(response) {
+	function hasAuthoritativePickupSelections(response) {
+		response = response || {};
+		return Object.prototype.hasOwnProperty.call(response, 'pickupSelections')
+			|| Object.prototype.hasOwnProperty.call(response, 'pickup_selections')
+			|| Object.prototype.hasOwnProperty.call(response, 'selectedPickupPoints')
+			|| Object.prototype.hasOwnProperty.call(response, 'selected_pickup_points');
+	}
+
+	function mergePickupSelectionsFromResponse(response, options) {
 		if (!response) {
 			return;
 		}
+		options = options || {};
 		if (Object.prototype.hasOwnProperty.call(response, 'activePickupFamily') || Object.prototype.hasOwnProperty.call(response, 'active_pickup_family')) {
 			activePickupFamily = String(response.activePickupFamily || response.active_pickup_family || '').trim();
 			if (window.wdcPickupCheckout) {
@@ -1156,14 +1334,24 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
 			}
 		}
-		selectedPickupPoints = mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));
+		var hasAuthoritativeSelections = hasAuthoritativePickupSelections(response);
+		selectedPickupPoints = hasAuthoritativeSelections
+			? extractPickupSelections(response)
+			: mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));
+		if (true === options.authoritativeState && hasAuthoritativeSelections) {
+			authoritativePickupSelections = Object.assign({}, selectedPickupPoints);
+			authoritativePickupStateLoaded = true;
+			authoritativePickupStateRevision++;
+		}
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
 		}
 		window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 		window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
-		if (response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point) {
-			window.wdcPickupCheckout.selectedPickupPoint = normalizeSelectedPoint(response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point || {});
+		if (Object.prototype.hasOwnProperty.call(response, 'selectedPickupPoint') || Object.prototype.hasOwnProperty.call(response, 'selected_pickup_point') || Object.prototype.hasOwnProperty.call(response, 'pickup_point')) {
+			window.wdcPickupCheckout.selectedPickupPoint = response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point
+				? normalizeSelectedPoint(response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point || {})
+				: null;
 		}
 	}
 
@@ -1906,7 +2094,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function rememberPreferredShippingMethod(method, point) {
 		method = normalizeShippingMethod(method);
-		if (pickupFamily(point) !== 'yandex_delivery:pickup' || shippingMethodFamily(method) !== 'yandex_delivery:pickup') {
+		if (!requiresRateRefreshAfterPickupSave(point) || pickupFamily(point) !== shippingMethodFamily(method)) {
 			return;
 		}
 		preferredShippingMethod = method;
@@ -1950,14 +2138,27 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function requiresRateRefreshAfterPickupSave(point) {
+		var snapshot = pointSnapshot(point);
+		if (point && Object.prototype.hasOwnProperty.call(point, 'requires_rate_refresh')) {
+			return point.requires_rate_refresh === true || point.requires_rate_refresh === '1' || point.requires_rate_refresh === 'true';
+		}
+		if (snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'requires_rate_refresh')) {
+			return snapshot.requires_rate_refresh === true || snapshot.requires_rate_refresh === '1' || snapshot.requires_rate_refresh === 'true';
+		}
 		var family = pickupFamily(point);
 		return family === 'dpd:pickup' || family === 'yandex_delivery:pickup';
 	}
 
-	function boot() {
+	function bootContainers() {
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);
-		restoreSelectedPickupUi();
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+		syncPickupInlineNotices();
+	}
+
+	function boot() {
+		bootContainers();
+		restoreSelectedPickupUi();
+		syncPickupInlineNotices();
 	}
 
 	function selectedPickupPointId() {
@@ -2093,6 +2294,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				return;
 			}
 			lastDestinationFingerprint = newFingerprint;
+			clearPickupInlineNoticesForDestinationChange();
 			resetSelection('destination_changed');
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 			return;
@@ -2104,12 +2306,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				activeMethod = nextMethod;
 				syncSelectedPickupRate(nextMethod);
 				document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+				syncPickupInlineNotices();
 				schedulePrefetch();
 				return;
 			}
+			clearPickupInlineNotice(shippingMethodFamily(previousMethod));
 			activeMethod = nextMethod;
 			restoreSelectedPickupUi();
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+			syncPickupInlineNotices();
 			schedulePrefetch();
 		}
 	});
@@ -2135,12 +2340,14 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		lastDestinationFingerprint = newFingerprint;
+		clearPickupInlineNoticesForDestinationChange();
 		resetSelection('location_changed');
 		schedulePrefetch();
 	});
 	document.body.addEventListener('wdc:location-cleared', function () {
 		invalidatePrefetch();
 		updateCurrentContext(contextFromFields());
+		clearPickupInlineNoticesForDestinationChange();
 		resetSelection('destination_changed');
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 	});
@@ -2169,8 +2376,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		window.jQuery(document.body).on('checkout_error', releasePlaceOrderGuardSoon);
 		window.jQuery(document.body).on('updated_checkout', function () {
 			var runRecoveryUpdate = restorePreferredShippingMethod();
-			boot();
-			restoreSelectedPickupUi();
+			bootContainers();
 			if (runRecoveryUpdate) {
 				triggerCheckoutUpdate();
 				return;
