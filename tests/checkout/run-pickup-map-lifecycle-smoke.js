@@ -751,6 +751,7 @@ function createCheckoutNoticeHarness() {
 	const bodyListeners = {};
 	const jqueryHandlers = {};
 	let containers = [];
+	let stateResponse = null;
 	const shippingInputs = {
 		'pek:pickup': new FakeElement('shipping-pek'),
 		yandex_pickup: new FakeElement('shipping-yandex')
@@ -803,7 +804,7 @@ function createCheckoutNoticeHarness() {
 				currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' },
 				initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' }
 			},
-			WDCPickupApi: { state: () => Promise.resolve(null), reset: () => Promise.resolve({}) },
+			WDCPickupApi: { state: () => Promise.resolve(stateResponse), reset: () => Promise.resolve({}) },
 			jQuery: (target) => ({
 				on: (event, callback) => { jqueryHandlers[event] = callback; },
 				trigger: (event) => { if (jqueryHandlers[event]) { jqueryHandlers[event](); } },
@@ -845,6 +846,9 @@ function createCheckoutNoticeHarness() {
 			jqueryHandlers.updated_checkout();
 		}
 	}
+	function setStateResponse(response) {
+		stateResponse = response;
+	}
 	function changeMethod(method) {
 		Object.keys(shippingInputs).forEach((key) => { shippingInputs[key].checked = key === method; });
 		(listeners.change || []).forEach((callback) => callback({ target: shippingInputs[method] }));
@@ -855,24 +859,47 @@ function createCheckoutNoticeHarness() {
 		fields.wdc_platform_location_city_name = displayName;
 		(listeners.change || []).forEach((callback) => callback({ target: { matches: (selector) => selector.indexOf('shipping_city') !== -1 } }));
 	}
-	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, sandbox };
+	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, sandbox };
 }
 
 async function checkoutInlineNoticeLatchLifecycle() {
 	const message = 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.';
 	const harness = createCheckoutNoticeHarness();
+	const stalePoint = {
+		id: 'bad',
+		point_code: 'bad',
+		carrier_key: 'pek',
+		service_key: 'pek',
+		pickup_family: 'pek:pickup',
+		point_address: 'Bad terminal',
+		address: 'Bad terminal',
+		country_code: 'RU',
+		location_id: '153912',
+		destination_location_id: '153912',
+		destination_city_name: 'Москва',
+		destination_fingerprint: 'ru|москва|153912'
+	};
+	harness.sandbox.window.wdcPickupCheckout.pickupSelections = { 'pek:pickup': stalePoint };
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoints = { 'pek:pickup': stalePoint };
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint = stalePoint;
+	harness.setStateResponse({ pickup_selections: {} });
 	let recovery = createCheckoutContainer('pek:pickup', 'pek:pickup', message);
 	harness.setContainers([recovery]);
-	harness.dispatchDomReady();
+	harness.updatedCheckout();
 	assert.strictEqual(recovery.notice.hidden, false, 'server recovery render must show inline pickup notice');
 	assert.strictEqual(recovery.notice.textContent, message, 'server recovery render must keep message text');
 
 	let ordinary = createCheckoutContainer('pek:pickup', 'pek:pickup', '');
 	harness.setContainers([ordinary]);
 	harness.updatedCheckout();
-	await wait(20);
 	assert.strictEqual(ordinary.notice.hidden, false, 'ordinary stabilization update must restore remembered inline notice');
 	assert.strictEqual(ordinary.notice.textContent, message, 'ordinary stabilization update must preserve message text');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['pek:pickup'].point_code, 'bad', 'stale local point exists before authoritative state resolves');
+	await wait(20);
+	assert.strictEqual(ordinary.notice.hidden, false, 'authoritative empty state must not clear remembered inline notice');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['pek:pickup'], undefined, 'authoritative empty state must remove stale local pickup selection');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint, null, 'authoritative empty state must clear stale global selected point');
+	assert.strictEqual(ordinary.emptyButton.hidden, false, 'authoritative empty state must leave empty pickup chooser visible');
 
 	let third = createCheckoutContainer('pek:pickup', 'pek:pickup', '');
 	harness.setContainers([third]);
@@ -895,6 +922,7 @@ async function checkoutInlineNoticeLatchLifecycle() {
 		destination_city_name: 'Москва',
 		destination_fingerprint: 'ru|москва|153912'
 	};
+	harness.setStateResponse(null);
 	harness.sandbox.window.wdcPickupCheckout.pickupSelections['pek:pickup'] = selectedPoint;
 	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoints['pek:pickup'] = selectedPoint;
 	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint = selectedPoint;
@@ -902,7 +930,12 @@ async function checkoutInlineNoticeLatchLifecycle() {
 	harness.setContainers([selected]);
 	harness.updatedCheckout();
 	await wait(20);
-	assert.strictEqual(selected.notice.hidden, true, 'successful selected calculation must clear remembered inline notice');
+	assert.strictEqual(selected.notice.hidden, false, 'POST save optimistic selected point alone must not clear remembered inline notice');
+
+	harness.setStateResponse({ pickup_selections: { 'pek:pickup': selectedPoint } });
+	harness.updatedCheckout();
+	await wait(20);
+	assert.strictEqual(selected.notice.hidden, true, 'authoritative successful selected calculation must clear remembered inline notice');
 	assert.strictEqual(selected.notice.textContent, '', 'successful selected calculation must clear message text');
 
 	let afterSelected = createCheckoutContainer('pek:pickup', 'pek:pickup', '');
@@ -914,6 +947,7 @@ async function checkoutInlineNoticeLatchLifecycle() {
 	delete harness.sandbox.window.wdcPickupCheckout.pickupSelections['pek:pickup'];
 	delete harness.sandbox.window.wdcPickupCheckout.selectedPickupPoints['pek:pickup'];
 	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint = null;
+	harness.setStateResponse({ pickup_selections: {} });
 	let invalidAgain = createCheckoutContainer('pek:pickup', 'pek:pickup', message);
 	harness.setContainers([invalidAgain]);
 	harness.updatedCheckout();
@@ -953,14 +987,18 @@ async function checkoutInlineNoticeLatchLifecycle() {
 }
 
 async function run() {
-	assert(checkoutSource.includes('var hasAuthoritativeSelections = Object.prototype.hasOwnProperty.call(response, \'pickupSelections\')')
+	assert(checkoutSource.includes('function hasAuthoritativePickupSelections(response)')
 		&& checkoutSource.includes('? extractPickupSelections(response)')
 		&& checkoutSource.includes(': mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response))'), 'checkout state response with explicit pickup selections must replace local selections instead of preserving stale selected points.');
 	assert(checkoutSource.includes('window.wdcPickupCheckout.selectedPickupPoint = response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point')
 		&& checkoutSource.includes(': null;'), 'checkout state response with selected_pickup_point=null must clear the selected pickup card.');
 	assert(checkoutSource.includes('var pickupInlineNotices = {};')
+		&& checkoutSource.includes('var authoritativePickupSelections = {};')
 		&& checkoutSource.includes('function syncPickupInlineNotices()')
 		&& checkoutSource.includes('function clearPickupInlineNotice(family)')
+		&& checkoutSource.includes('function reconcilePickupInlineNoticesWithState(state)')
+		&& checkoutSource.includes('function removeLocalPickupSelection(family)')
+		&& !checkoutSource.includes('hasSuccessfulPickupSelection')
 		&& !checkoutSource.includes('localStorage')
 		&& !checkoutSource.includes('sessionStorage')
 		&& !checkoutSource.includes('document.cookie')

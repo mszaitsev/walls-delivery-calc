@@ -1,6 +1,6 @@
 # Testing And Regression
 
-Version: 0.133.8
+Version: 0.133.9
 
 Jet Logistic critical coverage is registered as the mandatory `jet-logistic` group. It covers API envelope handling, token redaction, CSV/geography basics, one-call two-rate quoting, discounted package goods cost and `D_SDOC`, terminal-city presentation, status mapping with compact events, manual attach, unsupported create, and local remove.
 
@@ -21,7 +21,7 @@ php tests/shipments/run-shipment-regression-profile.php
 
 Also run `php -l` for changed PHP files, `node --check` for changed JS files, docs link checks, and `git diff --check`.
 
-Checkout pickup map lifecycle changes should also run `node tests/checkout/run-pickup-map-lifecycle-smoke.js`. This smoke executes the frontend map controller with fake providers/API and protects one-shot auto-fit, user interaction cancellation, provider pending-fit cancellation, coordinate validation, and the checkout pickup inline-notice latch. The latch test verifies that a rejected selected pickup point message is captured from the one-render server event, restored through repeated `updated_checkout` DOM replacements for the same family/destination, cleared by a valid selected point, destination change, method change, or reload, and never written to browser storage.
+Checkout pickup map lifecycle changes should also run `node tests/checkout/run-pickup-map-lifecycle-smoke.js`. This smoke executes the frontend map controller with fake providers/API and protects one-shot auto-fit, user interaction cancellation, provider pending-fit cancellation, coordinate validation, and the checkout pickup inline-notice latch. The latch test verifies that a rejected selected pickup point message is captured from the one-render server event, restored through repeated `updated_checkout` DOM replacements for the same family/destination, survives stale local selected-point memory until `/checkout/state` answers, clears only after authoritative state confirms a valid selected point, remains visible when authoritative state returns an empty selection bucket, clears on destination/method/reload, and is never written to browser storage.
 
 Checkout city selector changes should also run `node tests/checkout/run-checkout-city-selector-smoke.js`. This smoke executes the frontend selector with a minimal DOM/timer harness and protects selected local-location field application, canonical hidden fields, country-change clearing, first-load and same-country no-op behavior, active shipping/billing scope handling, and the single `update_checkout` recalculation contract.
 
