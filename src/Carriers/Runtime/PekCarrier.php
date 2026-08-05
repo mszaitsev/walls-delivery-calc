@@ -138,6 +138,9 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 
 	/** @param array<string,mixed> $context @return array{rate:?DeliveryRate,diagnostic:array<string,mixed>} */
 	private function calculate_mode( QuoteRequest $request, array $context, string $mode ): array {
+		if ( PekQuoteOptions::MODE_PICKUP === $mode ) {
+			return $this->calculate_pickup_mode( $request, $context );
+		}
 		$options = $mode === PekQuoteOptions::MODE_PICKUP
 			? ( $context['pickup_options']['options'] ?? null )
 			: ( $context['courier_options']['options'] ?? null );
@@ -182,8 +185,122 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		);
 	}
 
+	/** @param array<string,mixed> $context @return array{rate:?DeliveryRate,diagnostic:array<string,mixed>} */
+	private function calculate_pickup_mode( QuoteRequest $request, array $context ): array {
+		$options = $context['pickup_options']['options'] ?? null;
+		if ( ! $options instanceof PekQuoteOptions ) {
+			$error = is_array( $context['pickup_options_error'] ?? null )
+				? $context['pickup_options_error']
+				: array( 'success' => false, 'error_code' => 'pek_checkout_pickup_options_missing' );
+			return array( 'rate' => null, 'diagnostic' => $error );
+		}
+
+		$result = $this->quotes->calculate( $request, $options );
+		if ( $result->success ) {
+			return array(
+				'rate' => $this->rate_from_result( $request, $result, $context ),
+				'diagnostic' => array( 'success' => true, 'price_kopecks' => $result->price_kopecks ),
+			);
+		}
+
+		$selected = ! empty( $context['pickup_options']['selected'] );
+		$code = $selected ? 'pek_selected_terminal_quote_failed' : $result->error_code;
+		$selected_attempt = array(
+			'success' => false,
+			'error_code' => $code,
+			'failure_stage' => $result->failure_stage,
+			'http_status' => $result->http_status,
+		);
+		$this->log_pickup_failure( $context, $result, $code, $selected, false, false );
+
+		if ( ! $selected || 'pek_selected_terminal_quote_failed' !== $code ) {
+			return array( 'rate' => null, 'diagnostic' => $selected_attempt );
+		}
+
+		$preliminary_options = $context['pickup_preliminary_options']['options'] ?? null;
+		if ( ! $preliminary_options instanceof PekQuoteOptions ) {
+			return array(
+				'rate' => null,
+				'diagnostic' => array(
+					'success' => false,
+					'selected_attempt' => $selected_attempt,
+					'recovery_attempt' => is_array( $context['pickup_preliminary_options_error'] ?? null )
+						? $context['pickup_preliminary_options_error']
+						: array( 'success' => false, 'error_code' => 'pek_checkout_pickup_recovery_options_missing' ),
+				),
+			);
+		}
+
+		$recovery_context = $context;
+		$recovery_pickup = is_array( $context['pickup_preliminary_options'] ?? null ) ? $context['pickup_preliminary_options'] : array();
+		$source = (string) ( $recovery_pickup['warehouse_source'] ?? 'provider_first' );
+		$recovery_pickup['warehouse_source'] = str_starts_with( $source, 'recovery_' ) ? $source : 'recovery_' . $source;
+		$recovery_pickup['selected'] = false;
+		$recovery_context['pickup_options'] = $recovery_pickup;
+		$recovery_result = $this->quotes->calculate( $request, $preliminary_options );
+		if ( $recovery_result->success ) {
+			$this->log_pickup_failure( $context, $result, $code, true, true, true );
+			return array(
+				'rate' => $this->rate_from_result( $request, $recovery_result, $recovery_context, $this->pickup_rejection_meta() ),
+				'diagnostic' => array(
+					'success' => true,
+					'selected_attempt' => $selected_attempt,
+					'recovery_attempt' => array(
+						'success' => true,
+						'warehouse_source' => (string) ( $recovery_pickup['warehouse_source'] ?? '' ),
+						'price_kopecks' => $recovery_result->price_kopecks,
+					),
+				),
+			);
+		}
+
+		$this->log_pickup_failure( $recovery_context, $recovery_result, $recovery_result->error_code, false, true, false );
+		return array(
+			'rate' => null,
+			'diagnostic' => array(
+				'success' => false,
+				'selected_attempt' => $selected_attempt,
+				'recovery_attempt' => array(
+					'success' => false,
+					'error_code' => $recovery_result->error_code,
+					'failure_stage' => $recovery_result->failure_stage,
+					'http_status' => $recovery_result->http_status,
+				),
+			),
+		);
+	}
+
 	/** @param array<string,mixed> $context */
-	private function rate_from_result( QuoteRequest $request, PekQuoteResult $result, array $context ): DeliveryRate {
+	private function log_pickup_failure( array $context, PekQuoteResult $result, string $code, bool $selected, bool $recovery_attempted, bool $recovery_success ): void {
+		$this->logger->warning(
+			'PEK checkout quote mode unavailable.',
+			array(
+				'carrier' => self::KEY,
+				'mode' => PekQuoteOptions::MODE_PICKUP,
+				'selected_terminal' => $selected,
+				'error_code' => $code,
+				'failure_stage' => $result->failure_stage,
+				'location_id' => (int) ( $context['location_id'] ?? 0 ),
+				'http_status' => $result->http_status,
+				'receiver_warehouse_source' => (string) ( $context['pickup_options']['warehouse_source'] ?? '' ),
+				'recovery_attempted' => $recovery_attempted,
+				'recovery_success' => $recovery_success,
+			)
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function pickup_rejection_meta(): array {
+		return array(
+			'pickup_selection_rejected' => true,
+			'pickup_selection_rejected_family' => PekSettings::PICKUP_FAMILY,
+			'pickup_selection_rejected_code' => 'pek_selected_terminal_quote_failed',
+			'pickup_selection_rejected_message' => 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.',
+		);
+	}
+
+	/** @param array<string,mixed> $context */
+	private function rate_from_result( QuoteRequest $request, PekQuoteResult $result, array $context, array $extra_meta = array() ): DeliveryRate {
 		$is_pickup = PekQuoteOptions::MODE_PICKUP === $result->mode;
 		$price = Money::from_kopecks( $result->price_kopecks );
 		$days = DateRange::single( $result->delivery_days, DateRange::UNIT_CALENDAR_DAYS );
@@ -218,6 +335,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			$meta['pek_courier_quote_scope'] = (string) ( $context['courier_options']['scope'] ?? 'location' );
 			$meta['requires_courier_address'] = 'location' === (string) ( $context['courier_options']['scope'] ?? 'location' );
 		}
+		$meta = array_merge( $meta, $extra_meta );
 
 		return new DeliveryRate(
 			$is_pickup ? PekSettings::PICKUP_RATE_ID : PekSettings::COURIER_RATE_ID,

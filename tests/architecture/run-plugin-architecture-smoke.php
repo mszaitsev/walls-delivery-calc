@@ -827,6 +827,18 @@ $pek_carrier_source_for_cache = plugin_architecture_source( 'src/Carriers/Runtim
 $quote_cache_source_for_pickup = plugin_architecture_source( 'src/Checkout/Cache/QuoteCache.php' );
 plugin_architecture_assert( str_contains( $pek_carrier_source_for_cache, 'pek_selection_provider_destination_fingerprint' ) && str_contains( $quote_cache_source_for_pickup, 'provider_destination_fingerprint' ), 'PEK and generic quote cache context must include selected point provider fingerprint.' );
 plugin_architecture_assert( str_contains( $pek_carrier_source_for_cache, "'api_base_price_rub' => \$result->price_kopecks / 100" ) && str_contains( $pek_carrier_source_for_cache, "'pek_carrier_base_price_rub' => \$result->carrier_price_kopecks / 100" ) && str_contains( $pek_carrier_source_for_cache, "'pek_carrier_price_kopecks' => \$result->carrier_price_kopecks" ), 'PEK carrier must expose adjusted API base and preserve carrier-only cost separately.' );
+plugin_architecture_assert( ! str_contains( $pek_carrier_source_for_cache, 'CheckoutSessionManager' ) && ! str_contains( $pek_carrier_source_for_cache, 'WC()->session' ), 'PEK carrier must not mutate WooCommerce session directly.' );
+plugin_architecture_assert( str_contains( $pek_carrier_source_for_cache, 'pickup_preliminary_options' ) && str_contains( $pek_carrier_source_for_cache, 'pek_selected_terminal_quote_failed' ) && str_contains( $pek_carrier_source_for_cache, 'pickup_rejection_meta' ) && str_contains( $pek_carrier_source_for_cache, 'pickup_selection_rejected' ), 'PEK carrier must attempt explicit preliminary recovery and mark selected pickup rejection with generic metadata.' );
+plugin_architecture_assert( str_contains( $pek_context_source, 'preliminary_pickup_options' ) && str_contains( $pek_context_source, 'selected_pickup_options' ), 'PEK checkout context resolver must share preliminary pickup policy between initial quote and recovery.' );
+$new_shipping_method_source = plugin_architecture_source( 'src/Checkout/WooCommerce/NewShippingMethod.php' );
+plugin_architecture_assert( str_contains( $new_shipping_method_source, 'handle_rejected_pickup_selection_rate' ) && str_contains( $new_shipping_method_source, 'clear_pickup_selection_for_family' ) && str_contains( $new_shipping_method_source, 'carrier_selected_pickup_quote_failed' ), 'Generic WooCommerce shipping method must clear rejected pickup selections by family.' );
+plugin_architecture_assert( str_contains( $new_shipping_method_source, 'rate_without_transient_render_meta' ) && str_contains( $new_shipping_method_source, 'transient_pickup_rejection_keys' ) && str_contains( $new_shipping_method_source, 'preserve_shipping_method_choice' ), 'Generic rejected pickup recovery must preserve recovered shipping method choice and strip transient rejection metadata before session storage.' );
+plugin_architecture_assert( ! str_contains( $new_shipping_method_source, 'wc_add_notice( $message, ' ) && ! str_contains( $new_shipping_method_source, 'wc_has_notice( $message, ' ), 'Rejected pickup recovery must not use global WooCommerce notices.' );
+$checkout_rate_renderer_source = plugin_architecture_source( 'src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
+$checkout_delivery_type_selector_source = plugin_architecture_source( 'src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+plugin_architecture_assert( str_contains( $checkout_rate_renderer_source, 'wdc-pickup-inline-notice' ) && str_contains( $checkout_rate_renderer_source, 'pickup_selection_rejected_message' ) && str_contains( $checkout_delivery_type_selector_source, 'wdc-pickup-inline-notice' ), 'Rejected pickup recovery message must render inline inside the affected pickup shipping method.' );
+$order_meta_persister_source = plugin_architecture_source( 'src/Checkout/WooCommerce/OrderShippingMetaPersister.php' );
+plugin_architecture_assert( str_contains( $order_meta_persister_source, 'transient_pickup_rejection_keys' ) && str_contains( $order_meta_persister_source, 'unset( $meta[ $key ]' ), 'Order rate meta sanitizer must not persist transient rejected pickup render fields.' );
 $calculation_builder_source = plugin_architecture_source( 'src/Orders/Application/DeliveryCalculationDataBuilder.php' );
 plugin_architecture_assert( str_contains( $calculation_builder_source, 'base_price_adjustment_lines' ) && str_contains( $calculation_builder_source, 'Добавлен мешок и пломбировка' ) && str_contains( $calculation_builder_source, 'Добавлен мешок' ) && str_contains( $calculation_builder_source, 'Добавлена пломбировка' ), 'Delivery calculation builder must render PEK base adjustment formula notes for both/bag-only/sealing-only cases.' );
 plugin_architecture_assert( str_contains( $calculation_builder_source, 'array() !== $audit || $round || $minimum || array() !== $base_adjustments' ) && str_contains( $calculation_builder_source, 'insert_base_price_adjustment_lines' ), 'Delivery calculation builder must render surcharge notes even without regular rules.' );
@@ -834,6 +846,8 @@ plugin_architecture_assert( str_contains( $calculation_builder_source, "'applied
 plugin_architecture_assert( str_contains( $calculation_builder_source, "'price_delta_rub' => \$final - \$api_base" ) && ! str_contains( $calculation_builder_source, 'pek_light_cargo_surcharge_kopecks +=' ), 'Rule delta must be calculated from adjusted base and builder must not add PEK surcharges again.' );
 $pickup_map_js_source = plugin_architecture_source( 'assets/frontend/pickup-map/wdc-pickup-map.js' );
 plugin_architecture_assert( str_contains( $pickup_map_js_source, 'typeLabel !== title' ) && str_contains( $pickup_map_js_source, "carrier === 'pek'" ), 'Generic pickup map must hide duplicate title/type rows and avoid displaying PEK technical UUID codes.' );
+$pickup_checkout_js_source = plugin_architecture_source( 'assets/frontend/pickup-map/wdc-pickup-checkout.js' );
+plugin_architecture_assert( str_contains( $pickup_checkout_js_source, 'hasAuthoritativeSelections' ) && str_contains( $pickup_checkout_js_source, '? extractPickupSelections(response)' ) && str_contains( $pickup_checkout_js_source, ': null;' ), 'Checkout pickup frontend must treat state selections as authoritative and clear stale selected cards after server-side recovery.' );
 
 $pek_planned_resolver_source = plugin_architecture_source( 'src/Carriers/Pek/Quote/PekQuotePlannedDateTimeResolver.php' );
 plugin_architecture_assert( str_contains( $pek_planned_resolver_source, 'private ?string $resolved = null' ) && str_contains( $pek_planned_resolver_source, 'null !== $this->resolved' ) && str_contains( $pek_planned_resolver_source, '$this->resolved =' ), 'PEK plannedDateTime resolver must memoize per service instance.' );
@@ -844,7 +858,7 @@ plugin_architecture_assert( ! str_contains( $checkout_orchestrator_source, 'PekC
 $migration_files = glob( plugin_architecture_path( 'src/Infrastructure/Migrations/*.php' ) ) ?: array();
 foreach ( $migration_files as $migration_file ) {
 	$name = basename( $migration_file );
-	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.5 must not add a new PEK migration: ' . $name );
+	plugin_architecture_assert( ! preg_match( '/005[2-9]_.*pek/i', $name ), 'Patch 0.133.7 must not add a new PEK migration: ' . $name );
 }
 
 echo "Plugin architecture smoke passed.\n";

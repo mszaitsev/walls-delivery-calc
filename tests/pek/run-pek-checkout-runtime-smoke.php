@@ -513,6 +513,36 @@ pek_checkout_assert( 'paid-wh' === (string) ( $selected_payloads[0]['receiverWar
 pek_checkout_assert( 135792 === $selected_quote->rates[0]->price->get_kopecks() && 'selection' === (string) $selected_quote->rates[0]->meta['pek_receiver_warehouse_source'], 'Selected PEK partner terminal must recalculate pickup price using the selected warehouse.' );
 pek_checkout_assert( $selected_quote->quote_id !== $quote->quote_id, 'Selected terminal must change PEK quote ID/cache identity.' );
 
+$bad_selection = $normalized_selection;
+$bad_selection['point_code'] = 'bad-free';
+$bad_selection['point_id'] = 'bad-free';
+$bad_selection['id'] = 'bad-free';
+$bad_selection['snapshot']['point_code'] = 'bad-free';
+$bad_selection['snapshot']['point_id'] = 'bad-free';
+list( $recovery_carrier, $recovery_http ) = pek_checkout_boot(
+	array(
+		pek_checkout_zone_response(),
+		array( 'hasError' => true, 'errorMessage' => 'selected terminal cannot be calculated' ),
+		pek_checkout_calc_response( 1205.00 ),
+		pek_checkout_calc_response( 2000.00 ),
+	),
+	array( pek_checkout_point( 'main-wh' ), pek_checkout_point( 'bad-free', 'free' ), pek_checkout_point( 'paid-wh', 'paid' ) )
+);
+$recovery_quote = $recovery_carrier->quote( pek_checkout_request( array( 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $bad_selection ) ) ) );
+$recovery_payloads = pek_checkout_calc_payloads( $recovery_http );
+$recovery_pickup = null;
+foreach ( $recovery_quote->rates as $rate ) {
+	if ( PekSettings::PICKUP_RATE_ID === $rate->rate_id ) {
+		$recovery_pickup = $rate;
+		break;
+	}
+}
+pek_checkout_assert( $recovery_quote->success && $recovery_pickup instanceof DeliveryRate, 'Selected PEK terminal calculator failure must return a recovered preliminary pickup rate.' );
+pek_checkout_assert( 'bad-free' === (string) ( $recovery_payloads[0]['receiverWarehouseId'] ?? '' ) && 'main-wh' === (string) ( $recovery_payloads[1]['receiverWarehouseId'] ?? '' ), 'PEK selected-terminal recovery must first try selected warehouse and then preliminary warehouse.' );
+pek_checkout_assert( 129500 === $recovery_pickup->price->get_kopecks() && 'recovery_mapping_main_warehouse' === (string) $recovery_pickup->meta['pek_receiver_warehouse_source'], 'PEK recovery pickup rate must use preliminary warehouse pricing and mark recovery source.' );
+pek_checkout_assert( true === (bool) ( $recovery_pickup->meta['pickup_selection_rejected'] ?? false ) && PekSettings::PICKUP_FAMILY === (string) ( $recovery_pickup->meta['pickup_selection_rejected_family'] ?? '' ) && 'pek_selected_terminal_quote_failed' === (string) ( $recovery_pickup->meta['pickup_selection_rejected_code'] ?? '' ), 'PEK recovery pickup rate must expose generic rejected-selection metadata.' );
+pek_checkout_assert( str_contains( (string) ( $recovery_pickup->meta['pickup_selection_rejected_message'] ?? '' ), 'Выберите другой пункт' ), 'PEK recovery pickup rate must carry a safe customer recovery message.' );
+
 list( $courier_only, $courier_only_http ) = pek_checkout_boot(
 	array( pek_checkout_zone_response(), pek_checkout_calc_response( 2000.00 ) ),
 	array()

@@ -5,6 +5,7 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..', '..');
 const source = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-pickup-map.js'), 'utf8');
+const checkoutSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-pickup-checkout.js'), 'utf8');
 const yandexProviderSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js'), 'utf8');
 
 function wait(ms) {
@@ -640,6 +641,11 @@ async function destroyAfterAddressSearchPreventsLatePointsMutation() {
 }
 
 async function run() {
+	assert(checkoutSource.includes('var hasAuthoritativeSelections = Object.prototype.hasOwnProperty.call(response, \'pickupSelections\')')
+		&& checkoutSource.includes('? extractPickupSelections(response)')
+		&& checkoutSource.includes(': mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response))'), 'checkout state response with explicit pickup selections must replace local selections instead of preserving stale selected points.');
+	assert(checkoutSource.includes('window.wdcPickupCheckout.selectedPickupPoint = response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point')
+		&& checkoutSource.includes(': null;'), 'checkout state response with selected_pickup_point=null must clear the selected pickup card.');
 	await programmaticSuppressionAllowsFirstUserPan();
 	await lateAsyncDoesNotAutoFitAfterInteraction();
 	await preloadedPointsFitOnceWithoutSelection();

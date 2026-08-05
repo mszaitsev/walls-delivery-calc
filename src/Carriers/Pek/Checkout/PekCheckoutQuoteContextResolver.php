@@ -52,15 +52,23 @@ final class PekCheckoutQuoteContextResolver {
 		$selection = $this->trusted_selection( $request, $fingerprint );
 		$planned = $this->planned_datetime->resolve();
 		$pickup_options = array();
+		$pickup_preliminary_options = array();
 		$pickup_error = array();
+		$pickup_preliminary_error = array();
 		try {
-			$pickup_options = $this->pickup_options( $planned, $query, $mapping, $selection, $fingerprint );
+			$pickup_preliminary_options = $this->preliminary_pickup_options( $planned, $query, $mapping, $fingerprint );
 		} catch ( PekApiException $exception ) {
-			$pickup_error = array(
+			$pickup_preliminary_error = array(
 				'success' => false,
 				'error_code' => (string) ( $exception->context()['error_code'] ?? 'pek_checkout_pickup_options_missing' ),
 				'failure_stage' => (string) ( $exception->context()['failure_stage'] ?? 'checkout_context' ),
 			);
+		}
+		if ( is_array( $selection ) && '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+			$pickup_options = $this->selected_pickup_options( $planned, $selection );
+		} else {
+			$pickup_options = $pickup_preliminary_options;
+			$pickup_error = $pickup_preliminary_error;
 		}
 
 		return array(
@@ -74,6 +82,8 @@ final class PekCheckoutQuoteContextResolver {
 			'plannedDateTime' => $planned,
 			'pickup_options' => $pickup_options,
 			'pickup_options_error' => $pickup_error,
+			'pickup_preliminary_options' => $pickup_preliminary_options,
+			'pickup_preliminary_options_error' => $pickup_preliminary_error,
 			'courier_options' => $this->courier_options( $request, $location, $mapping, $planned ),
 		);
 	}
@@ -160,16 +170,18 @@ final class PekCheckoutQuoteContextResolver {
 		return 64 === strlen( $value ) && ctype_xdigit( $value );
 	}
 
+	/** @param array<string,mixed> $selection @return array<string,mixed> */
+	private function selected_pickup_options( string $planned, array $selection ): array {
+		return array(
+			'options' => new PekQuoteOptions( PekQuoteOptions::MODE_PICKUP, $planned, (string) $selection['point_code'] ),
+			'warehouse_id' => (string) $selection['point_code'],
+			'warehouse_source' => 'selection',
+			'selected' => true,
+		);
+	}
+
 	/** @return array<string,mixed> */
-	private function pickup_options( string $planned, CarrierPickupPointQuery $query, array $mapping, ?array $selection, string $fingerprint ): array {
-		if ( is_array( $selection ) && '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
-			return array(
-				'options' => new PekQuoteOptions( PekQuoteOptions::MODE_PICKUP, $planned, (string) $selection['point_code'] ),
-				'warehouse_id' => (string) $selection['point_code'],
-				'warehouse_source' => 'selection',
-				'selected' => true,
-			);
-		}
+	private function preliminary_pickup_options( string $planned, CarrierPickupPointQuery $query, array $mapping, string $fingerprint ): array {
 		$provider = $this->pickup_providers->get( PekSettings::CARRIER_KEY );
 		$points = null !== $provider ? $provider->search( $query ) : array();
 		if ( array() === $points ) {

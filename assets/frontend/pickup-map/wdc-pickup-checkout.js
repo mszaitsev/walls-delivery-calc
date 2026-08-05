@@ -1157,14 +1157,22 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
 			}
 		}
-		selectedPickupPoints = mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));
+		var hasAuthoritativeSelections = Object.prototype.hasOwnProperty.call(response, 'pickupSelections')
+			|| Object.prototype.hasOwnProperty.call(response, 'pickup_selections')
+			|| Object.prototype.hasOwnProperty.call(response, 'selectedPickupPoints')
+			|| Object.prototype.hasOwnProperty.call(response, 'selected_pickup_points');
+		selectedPickupPoints = hasAuthoritativeSelections
+			? extractPickupSelections(response)
+			: mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
 		}
 		window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 		window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
-		if (response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point) {
-			window.wdcPickupCheckout.selectedPickupPoint = normalizeSelectedPoint(response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point || {});
+		if (Object.prototype.hasOwnProperty.call(response, 'selectedPickupPoint') || Object.prototype.hasOwnProperty.call(response, 'selected_pickup_point') || Object.prototype.hasOwnProperty.call(response, 'pickup_point')) {
+			window.wdcPickupCheckout.selectedPickupPoint = response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point
+				? normalizeSelectedPoint(response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point || {})
+				: null;
 		}
 	}
 

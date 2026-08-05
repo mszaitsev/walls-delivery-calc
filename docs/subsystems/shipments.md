@@ -1,6 +1,6 @@
 # Shipments
 
-Version: 0.133.5
+Version: 0.133.7
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 

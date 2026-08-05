@@ -122,9 +122,11 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 						'minimum_price_applied'    => ! empty( $rate->meta['minimum_price_applied'] ),
 					)
 				);
-				$stored[ $mapped['id'] ] = $stored_rate;
-				$stored[ self::METHOD_ID . ':' . $mapped['id'] ] = $stored_rate;
+				$this->handle_rejected_pickup_selection_rate( $stored_rate, $mapped['id'] );
 				$this->add_rate( $mapped );
+				$session_rate = $this->rate_without_transient_render_meta( $stored_rate );
+				$stored[ $mapped['id'] ] = $session_rate;
+				$stored[ self::METHOD_ID . ':' . $mapped['id'] ] = $session_rate;
 			}
 
 			$this->session_manager->save_rates( $stored );
@@ -191,6 +193,61 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		}
 
 		return $sorter->sort_methods( array_values( array_filter( $output, static fn( mixed $rate ): bool => $rate instanceof DeliveryRate ) ), $sort );
+	}
+
+	/**
+	 * @param array<string,mixed> $stored_rate
+	 */
+	private function handle_rejected_pickup_selection_rate( array $stored_rate, string $method_id ): void {
+		$meta = is_array( $stored_rate['rate_meta'] ?? null ) ? $stored_rate['rate_meta'] : array();
+		if ( empty( $meta['pickup_selection_rejected'] ) && empty( $stored_rate['pickup_selection_rejected'] ) ) {
+			return;
+		}
+		$family = trim( (string) ( $meta['pickup_selection_rejected_family'] ?? $stored_rate['pickup_selection_rejected_family'] ?? $stored_rate['pickup_family'] ?? $meta['pickup_family'] ?? '' ) );
+		if ( '' === $family || ! str_ends_with( $family, ':pickup' ) ) {
+			return;
+		}
+
+		$this->session_manager->clear_pickup_selection_for_family( $family, 'carrier_selected_pickup_quote_failed' );
+		$this->preserve_shipping_method_choice( $method_id );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function rate_without_transient_render_meta( array $rate ): array {
+		foreach ( $this->transient_pickup_rejection_keys() as $key ) {
+			unset( $rate[ $key ] );
+		}
+		if ( is_array( $rate['rate_meta'] ?? null ) ) {
+			foreach ( $this->transient_pickup_rejection_keys() as $key ) {
+				unset( $rate['rate_meta'][ $key ] );
+			}
+		}
+
+		return $rate;
+	}
+
+	/** @return array<int,string> */
+	private function transient_pickup_rejection_keys(): array {
+		return array(
+			'pickup_selection_rejected',
+			'pickup_selection_rejected_family',
+			'pickup_selection_rejected_code',
+			'pickup_selection_rejected_message',
+		);
+	}
+
+	private function preserve_shipping_method_choice( string $method_id ): void {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'set' ) ) {
+			return;
+		}
+		$method_id = $this->session_manager->normalize_rate_id( $method_id );
+		if ( '' === $method_id ) {
+			return;
+		}
+		WC()->session->set( 'chosen_shipping_methods', array( self::METHOD_ID . ':' . $method_id ) );
 	}
 
 	/**

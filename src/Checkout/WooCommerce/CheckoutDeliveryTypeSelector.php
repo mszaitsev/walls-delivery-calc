@@ -49,7 +49,7 @@ final class CheckoutDeliveryTypeSelector {
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
 		if ( ! empty( $meta['requires_pickup_point'] ) && ! $this->skip_pickup_selection( $meta ) ) {
-			$this->render_pickup_map_selector( (string) $meta['carrier_key'], $rate_id );
+			$this->render_pickup_map_selector( (string) $meta['carrier_key'], $rate_id, $meta );
 		}
 	}
 
@@ -95,7 +95,10 @@ final class CheckoutDeliveryTypeSelector {
 		echo '</div>';
 	}
 
-	private function render_pickup_map_selector( string $carrier_key, string $rate_id ): void {
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_pickup_map_selector( string $carrier_key, string $rate_id, array $meta = array() ): void {
 		$family = $this->session_manager->shipping_method_family( $rate_id );
 		$selection = $this->session_manager->checkout_pickup_point_for_family( $family );
 		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id );
@@ -131,6 +134,7 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<input type="hidden" name="wdc_pickup_destination_fingerprint" data-wdc-pickup-destination-fingerprint value="' . esc_attr( (string) ( $selection['destination_fingerprint'] ?? '' ) ) . '">';
 		$empty_button_class = 'button wdc-rp-pickup-checkout__button' . ( $has_selection ? ' wdc-is-hidden' : '' );
 		echo '<button type="button" class="' . esc_attr( $empty_button_class ) . '" data-wdc-pickup-open data-wdc-pickup-empty-open aria-hidden="' . esc_attr( $has_selection ? 'true' : 'false' ) . '"' . ( $has_selection ? ' hidden style="display:none;"' : '' ) . '>' . esc_html( __( 'Выбрать пункт выдачи', 'walls-delivery-calc' ) ) . '</button>';
+		$this->render_pickup_inline_notice( $meta );
 		echo $this->card_renderer->render(
 			array_merge(
 				$selection,
@@ -144,6 +148,22 @@ final class CheckoutDeliveryTypeSelector {
 			false
 		);
 		echo '</div>';
+	}
+
+	/** @param array<string,mixed> $meta */
+	private function render_pickup_inline_notice( array $meta ): void {
+		$message = $this->pickup_inline_notice_message( $meta );
+		echo '<div class="wdc-pickup-inline-notice" data-wdc-pickup-inline-notice role="status" aria-live="polite"' . ( '' === $message ? ' hidden' : '' ) . '>' . esc_html( $message ) . '</div>';
+	}
+
+	/** @param array<string,mixed> $meta */
+	private function pickup_inline_notice_message( array $meta ): string {
+		$rate_meta = is_array( $meta['rate_meta'] ?? null ) ? $meta['rate_meta'] : array();
+		if ( empty( $rate_meta['pickup_selection_rejected'] ) && empty( $meta['pickup_selection_rejected'] ) ) {
+			return '';
+		}
+
+		return trim( (string) ( $rate_meta['pickup_selection_rejected_message'] ?? $meta['pickup_selection_rejected_message'] ?? '' ) );
 	}
 
 	/**

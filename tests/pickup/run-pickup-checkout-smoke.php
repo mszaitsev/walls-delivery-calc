@@ -241,6 +241,37 @@ pickup_checkout_assert( true === $state_controller->check_nonce( new WdcPickupCh
 $pickup_group_id = RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
 $courier_group_id = RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::COURIER );
 
+$session->save_pickup_selection_for_family( 'yandex_delivery:pickup', array( 'carrier_key' => 'yandex_delivery', 'service_key' => 'yandex_delivery', 'pickup_family' => 'yandex_delivery:pickup', 'point_code' => 'ya-good', 'point_address' => 'Yandex point', 'address' => 'Yandex point' ) );
+$session->save_rates(
+	array(
+		'pek:pickup' => array(
+			'carrier_key' => 'pek',
+			'rate_id' => 'pek:pickup',
+			'service_key' => 'pek',
+			'delivery_type' => 'pickup',
+			'pickup_family' => 'pek:pickup',
+			'requires_pickup_point' => true,
+			'rate_meta' => array( 'pickup_family' => 'pek:pickup' ),
+		),
+		'yandex_pickup' => array(
+			'carrier_key' => 'yandex_delivery',
+			'rate_id' => 'yandex_pickup',
+			'service_key' => 'yandex_delivery',
+			'delivery_type' => 'pickup',
+			'pickup_family' => 'yandex_delivery:pickup',
+			'requires_pickup_point' => true,
+			'rate_meta' => array( 'pickup_family' => 'yandex_delivery:pickup' ),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:pek:pickup' ) );
+$recovery_state = $state_controller->state();
+pickup_checkout_assert( null === $recovery_state['pickup_point'] && null === $recovery_state['selected_pickup_point'], 'checkout state GET must not restore a cleared PEK selected point after recovery.' );
+pickup_checkout_assert( 'pek:pickup' === (string) ( $recovery_state['active_pickup_family'] ?? '' ) && ! isset( $recovery_state['pickup_selections']['pek:pickup'] ), 'checkout state GET must keep PEK active without stale PEK selection after recovery.' );
+pickup_checkout_assert( 'ya-good' === (string) ( $recovery_state['pickup_selections']['yandex_delivery:pickup']['point_code'] ?? '' ), 'checkout state GET must preserve other carrier pickup selections after PEK recovery.' );
+$session->clear_pickup_selection( 'pickup_recovery_state_smoke_reset' );
+WC()->session->set( 'chosen_shipping_methods', array( $pickup_group_id ) );
+
 $saved = $state_controller->save( new WdcPickupCheckoutRequest( array( 'point_id' => 10, 'shipping_method_id' => $pickup_group_id ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_checkout_assert( '630001-a' === $saved['pickup_point']['point_code'], 'checkout state save must return selected point.' );
 pickup_checkout_assert( $existing_wc_session === WC()->session, 'Shared WooCommerce session bootstrapper must not replace an existing checkout session instance.' );
@@ -372,6 +403,29 @@ ob_start();
 ( new CheckoutRateRenderer( $session ) )->render( $pickup_method );
 $rate_html = ob_get_clean() ?: '';
 pickup_checkout_assert( ! str_contains( $rate_html, 'wdc-platform-pickup-selected' ) && str_contains( $rate_html, 'data-wdc-pickup-checkout' ) && str_contains( $rate_html, 'data-wdc-pickup-card aria-hidden="false"' ), 'Checkout rate renderer must output the shared pickup UI instead of the legacy selected pickup summary after rate comments.' );
+$recovery_method = (object) array(
+	'meta_data' => array_merge(
+		$rate,
+		array(
+			'rate_meta' => array(
+				'pickup_selection_rejected' => true,
+				'pickup_selection_rejected_family' => 'pek:pickup',
+				'pickup_selection_rejected_code' => 'pek_selected_terminal_quote_failed',
+				'pickup_selection_rejected_message' => 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.',
+			),
+		)
+	),
+);
+$session->clear_pickup_selection_for_family( 'russian_post_domestic:pickup', 'test_recovery_render' );
+ob_start();
+( new CheckoutRateRenderer( $session ) )->render( $recovery_method );
+$recovery_rate_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $recovery_rate_html, 'data-wdc-pickup-empty-open aria-hidden="false"' ) && str_contains( $recovery_rate_html, 'data-wdc-pickup-inline-notice role="status" aria-live="polite">Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.</div>' ), 'Rejected pickup recovery message must render inline inside the shipping method after the empty pickup selector.' );
+ob_start();
+( new CheckoutRateRenderer( $session ) )->render( $pickup_method );
+$ordinary_rate_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $ordinary_rate_html, 'data-wdc-pickup-inline-notice role="status" aria-live="polite" hidden></div>' ) && ! str_contains( $ordinary_rate_html, 'Не удалось рассчитать доставку в выбранный пункт ПЭК. Выберите другой пункт.' ), 'Pickup inline recovery notice must disappear on a normal rate render without transient rejection metadata.' );
+$session->save_checkout_pickup_point( $saved['pickup_point'] );
 
 $order = new WdcPickupCheckoutOrder();
 $persister = new OrderShippingMetaPersister( $session, new \WallsShop\WDC\Calendar\Services\DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );

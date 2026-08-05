@@ -10,6 +10,19 @@
 	border-radius: 8px;
 }
 
+.wdc-pickup-inline-notice {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 2px 0 8px;
+	padding: 10px 12px;
+	border-left: 3px solid #d97706;
+	background: #fffbeb;
+	color: #92400e;
+	font-size: 12px;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
 .wdc-rp-pickup-checkout [hidden],
 .wdc-rp-pickup-checkout .wdc-is-hidden {
 	display: none !important;
