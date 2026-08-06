@@ -17,7 +17,7 @@ final class PekSenderWarehouseService {
 	}
 
 	/** @return array{success:bool,message:string,items:array<int,array<string,mixed>>,requested:array<string,mixed>} */
-	public function search( string $address ): array {
+	public function search( string $address, ?PickupCargoConstraints $constraints = null ): array {
 		$this->clear_last_search_for_current_user();
 		$address = trim( $address );
 		if ( '' === $address ) {
@@ -28,6 +28,9 @@ final class PekSenderWarehouseService {
 			$this->normalize_department_list( is_array( $response['freeDepartments'] ?? null ) ? $response['freeDepartments'] : array(), 'free' ),
 			$this->normalize_department_list( is_array( $response['paidDepartments'] ?? null ) ? $response['paidDepartments'] : array(), 'paid' )
 		);
+		if ( $constraints instanceof PickupCargoConstraints ) {
+			$items = array_values( array_filter( $items, fn( array $item ): bool => $this->fits_constraints( $item, $constraints ) ) );
+		}
 		$result = array(
 			'success' => true,
 			'message' => array() === $items ? 'Склады ПЭК не найдены.' : 'Склады ПЭК найдены.',

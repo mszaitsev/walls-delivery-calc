@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -15,7 +16,7 @@ use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentDestinationResolver {
-	public function __construct( private PekPickupPointProvider $pickup_points ) {
+	public function __construct( private PekPickupPointProvider $pickup_points, private PekLocationResolver $locations ) {
 	}
 
 	/** @return array<string,mixed> */
@@ -70,13 +71,21 @@ final class PekShipmentDestinationResolver {
 
 	/** @return array<string,mixed> */
 	private function resolve_courier( ShipmentCreateRequest $request ): array {
-		$branch_id = trim( (string) ( $request->meta['pek_receiver_branch_id'] ?? $request->meta['pek_destination_branch_id'] ?? '' ) );
-		if ( '' === $branch_id ) {
-			throw new \RuntimeException( 'Не подтверждён филиал назначения ПЭК для SMS.' );
-		}
 		if ( 'RU' !== strtoupper( $request->recipient_address->country_code ) ) {
 			throw new \RuntimeException( 'Создание отправлений ПЭК поддерживает только RU.' );
 		}
+		$location_id = (int) ( $request->meta['pek_destination_location_id'] ?? 0 );
+		if ( $location_id <= 0 ) {
+			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
+		}
+		$mapping = $this->locations->resolve( $location_id );
+		$branch_id = trim( (string) ( $mapping['branch_id'] ?? '' ) );
+		$country = strtoupper( trim( (string) ( $mapping['country_code'] ?? 'RU' ) ) );
+		$state = (string) ( $mapping['mapping_state'] ?? '' );
+		if ( 'RU' !== $country || '' === $branch_id || ! in_array( $state, array( 'resolved', 'near' ), true ) ) {
+			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
+		}
+		$saved_branch = trim( (string) ( $request->meta['pek_receiver_branch_id'] ?? $request->meta['pek_destination_branch_id'] ?? '' ) );
 
 		return array(
 			'mode' => DeliveryType::COURIER,
@@ -84,9 +93,11 @@ final class PekShipmentDestinationResolver {
 			'branch_id' => $branch_id,
 			'title' => '',
 			'address' => $request->recipient_address->raw_address,
-			'source' => 'order_address',
-			'location_id' => (int) ( $request->meta['pek_destination_location_id'] ?? 0 ),
-			'provider_destination_fingerprint' => (string) ( $request->meta['provider_destination_fingerprint'] ?? '' ),
+			'source' => 'fresh_location_mapping',
+			'location_id' => $location_id,
+			'provider_destination_fingerprint' => (string) ( $mapping['address_fingerprint'] ?? $request->meta['provider_destination_fingerprint'] ?? '' ),
+			'saved_branch_id' => $saved_branch,
+			'branch_mismatch' => '' !== $saved_branch && $saved_branch !== $branch_id,
 		);
 	}
 

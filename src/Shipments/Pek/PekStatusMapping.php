@@ -44,10 +44,22 @@ final class PekStatusMapping {
 
 	private function normalize( string $value ): string {
 		$value = str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $value );
-		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : $this->lower_utf8_without_mbstring( $value );
 		$value = preg_replace( '/[^\p{L}\p{N}]+/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
 
 		return trim( $value );
+	}
+
+	private function lower_utf8_without_mbstring( string $value ): string {
+		return strtr(
+			strtolower( $value ),
+			array(
+				'А' => 'а', 'Б' => 'б', 'В' => 'в', 'Г' => 'г', 'Д' => 'д', 'Е' => 'е', 'Ж' => 'ж', 'З' => 'з',
+				'И' => 'и', 'Й' => 'й', 'К' => 'к', 'Л' => 'л', 'М' => 'м', 'Н' => 'н', 'О' => 'о', 'П' => 'п',
+				'Р' => 'р', 'С' => 'с', 'Т' => 'т', 'У' => 'у', 'Ф' => 'ф', 'Х' => 'х', 'Ц' => 'ц', 'Ч' => 'ч',
+				'Ш' => 'ш', 'Щ' => 'щ', 'Ъ' => 'ъ', 'Ы' => 'ы', 'Ь' => 'ь', 'Э' => 'э', 'Ю' => 'ю', 'Я' => 'я',
+			)
+		);
 	}
 }

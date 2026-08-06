@@ -122,7 +122,10 @@ final class PekShipmentRequestBuilder {
 			'warehouseId' => (string) $sender['warehouseId'],
 		);
 		$email = trim( $this->settings->sender_email() );
-		if ( '' !== $email && ( ! function_exists( 'is_email' ) || false !== is_email( $email ) ) ) {
+		if ( '' !== $email && function_exists( 'is_email' ) && false === is_email( $email ) ) {
+			throw new \RuntimeException( 'Некорректный email отправителя ПЭК.' );
+		}
+		if ( '' !== $email ) {
 			$payload['email'] = $email;
 		}
 
@@ -132,7 +135,7 @@ final class PekShipmentRequestBuilder {
 	/** @return array<string,mixed> */
 	private function services( ShipmentCreateRequest $request, int $declared_kopecks, bool $sealing ): array {
 		$services = array(
-			'transporting' => array( 'enabled' => true, 'payer' => array( 'type' => 1 ) ),
+			'transporting' => array( 'payer' => array( 'type' => 1 ) ),
 			'insurance' => array( 'enabled' => true, 'payer' => array( 'type' => 1 ), 'cost' => round( $declared_kopecks / 100, 2 ) ),
 		);
 		if ( DeliveryType::COURIER === $request->delivery_type ) {
@@ -146,22 +149,31 @@ final class PekShipmentRequestBuilder {
 	}
 
 	private function validate_sender_settings(): void {
+		$legal_form = $this->settings->sender_legal_form();
 		foreach ( array(
-			'legal form' => (string) $this->settings->sender_legal_form(),
-			'fs' => $this->settings->sender_fs(),
-			'title' => $this->settings->sender_full_name(),
-			'inn' => $this->settings->sender_inn(),
-			'country' => $this->settings->sender_registration_classifier_code(),
-			'person' => $this->settings->sender_contact_name(),
+			(string) $legal_form,
+			$this->settings->sender_fs(),
+			$this->settings->sender_full_name(),
+			$this->settings->sender_inn(),
+			$this->settings->sender_registration_classifier_code(),
+			$this->settings->sender_contact_name(),
 		) as $value ) {
 			if ( '' === trim( $value ) ) {
 				throw new \RuntimeException( 'Не заполнены обязательные данные отправителя ПЭК.' );
 			}
 		}
+		$inn = preg_replace( '/\D+/', '', $this->settings->sender_inn() ) ?? '';
+		$kpp = preg_replace( '/\D+/', '', $this->settings->sender_kpp() ) ?? '';
+		if ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $legal_form && 10 !== strlen( $inn ) ) {
+			throw new \RuntimeException( 'Некорректный ИНН юрлица-отправителя ПЭК.' );
+		}
+		if ( PekSettings::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $legal_form && 12 !== strlen( $inn ) ) {
+			throw new \RuntimeException( 'Некорректный ИНН ИП-отправителя ПЭК.' );
+		}
 		if ( '' === $this->normalize_ru_phone( $this->settings->sender_phone() ) ) {
 			throw new \RuntimeException( 'Некорректный телефон отправителя ПЭК.' );
 		}
-		if ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $this->settings->sender_legal_form() && '' === $this->settings->sender_kpp() ) {
+		if ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $legal_form && 9 !== strlen( $kpp ) ) {
 			throw new \RuntimeException( 'Для юрлица-отправителя ПЭК нужен КПП.' );
 		}
 	}

@@ -50,7 +50,7 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 		<input type="hidden" name="recipient_type" value="physical">
 		<input type="hidden" name="pek_sender_warehouse_id" value="<?php echo esc_attr( (string) ( $context['current_sender_warehouse_id'] ?? '' ) ); ?>" data-wdc-pek-sender-warehouse-id>
 		<p><strong><?php echo esc_html__( 'Склад самопривоза ПЭК', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pek-sender-warehouse-title><?php echo esc_html( (string) ( $warehouse['divisionName'] ?? $warehouse['branchName'] ?? '-' ) ); ?></span></p>
-		<p class="description"><?php echo esc_html( (string) ( $warehouse['address'] ?? '' ) ); ?></p>
+		<p class="description" data-wdc-pek-sender-warehouse-address><?php echo esc_html( (string) ( $warehouse['address'] ?? '' ) ); ?></p>
 		<p><button type="button" class="button" data-wdc-pek-open-sender-warehouse-picker><?php echo esc_html__( 'Выбрать другой склад ПЭК', 'walls-delivery-calc' ); ?></button></p>
 		<p class="description"><?php echo esc_html__( 'Страхование и выдача по СМС обязательны; объявленная стоимость берётся из товарных строк заказа.', 'walls-delivery-calc' ); ?></p>
 		<?php

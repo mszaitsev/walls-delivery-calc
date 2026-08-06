@@ -658,8 +658,12 @@ final class OrderShipmentDraftFactory {
 		$items = $this->order_items( $order );
 		$dimensions = is_array( $calculation['package']['dimensions_cm'] ?? null ) ? $calculation['package']['dimensions_cm'] : array();
 		$product_weight = (int) ( $calculation['package']['products_weight_g'] ?? 0 );
-		foreach ( $items as $item ) {
-			$product_weight += $product_weight > 0 ? 0 : ( $item instanceof PackageItem ? $item->get_total_weight_g() : 0 );
+		if ( $product_weight <= 0 ) {
+			foreach ( $items as $item ) {
+				if ( $item instanceof PackageItem ) {
+					$product_weight += $item->get_total_weight_g();
+				}
+			}
 		}
 		$place = new ShipmentPlace(
 			1,

@@ -34,6 +34,8 @@ foreach ( $cases as $external => $expected ) {
 }
 pek_status_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping->map( 'Прибыл', DeliveryType::PICKUP ), 'Arrived pickup must be ready_for_pickup.' );
 pek_status_assert( DeliveryStatus::IN_TRANSIT === $mapping->map( 'Прибыл', DeliveryType::COURIER ), 'Arrived courier must remain in_transit.' );
+pek_status_assert( DeliveryStatus::IN_TRANSIT === $mapping->map( 'РАЗГРУЖАЕТСЯ. ОЖИДАЙТЕ ОПОВЕЩЕНИЯ', DeliveryType::PICKUP ), 'Uppercase Cyrillic status must normalize without mbstring dependency.' );
+pek_status_assert( DeliveryStatus::RETURNED_TO_SENDER === $mapping->map( 'ВОЗВРАЩЁН ОТПРАВИТЕЛЮ', DeliveryType::PICKUP ), 'Ё/Е status normalization must be stable.' );
 
 $service = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentStatusService.php' ) ?: '';
 pek_status_assert( str_contains( $service, 'cargo_status' ), 'Expanded /cargos/status/ must be primary.' );

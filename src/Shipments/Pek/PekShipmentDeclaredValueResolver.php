@@ -21,8 +21,7 @@ final class PekShipmentDeclaredValueResolver {
 				continue;
 			}
 			$total += MoneyParser::rubles_to_kopecks( (string) $item->get_total() );
-			$prices_include_tax = function_exists( 'wc_prices_include_tax' ) && wc_prices_include_tax();
-			if ( $prices_include_tax && method_exists( $item, 'get_total_tax' ) ) {
+			if ( method_exists( $item, 'get_total_tax' ) ) {
 				$total += MoneyParser::rubles_to_kopecks( (string) $item->get_total_tax() );
 			}
 		}

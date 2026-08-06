@@ -16,12 +16,18 @@ final class PekShipmentRecipientBuilder {
 			throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен телефон получателя.' );
 		}
 		$name = $this->name_parts( $order );
-		if ( '' === $name['lastName'] || '' === $name['firstName'] ) {
-			throw new \RuntimeException( 'Для заявки ПЭК нужны фамилия и имя получателя.' );
+		if ( '' === $name['lastName'] ) {
+			throw new \RuntimeException( 'Для заявки ПЭК нужна фамилия получателя.' );
 		}
+		if ( '' === $name['firstName'] ) {
+			throw new \RuntimeException( 'Для заявки ПЭК нужно имя получателя.' );
+		}
+		$title = trim( implode( ' ', array_filter( array( $name['lastName'], $name['firstName'], $name['patronymic'] ), static fn( string $value ): bool => '' !== trim( $value ) ) ) );
 		$receiver = array(
 			'legalForm' => 3,
+			'title' => $title,
 			'individual' => array_filter( $name, static fn( string $value ): bool => '' !== $value ),
+			'person' => $title,
 			'personPhones' => array( array( 'phone' => $phone ) ),
 		);
 		$email = method_exists( $order, 'get_billing_email' ) ? trim( (string) $order->get_billing_email() ) : '';

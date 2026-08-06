@@ -30,12 +30,13 @@ final class PekShipmentStatusService {
 			return array( 'success' => false, 'message' => 'Не указан код груза ПЭК.' );
 		}
 		$status = $this->fetch( $code, (string) ( $shipment['delivery_type'] ?? '' ) );
+		$candidate = $status['actual_cost_candidate'] ?? null;
+		unset( $status['actual_cost_candidate'] );
 		$shipment = array_merge( $shipment, $status, array( 'updated_at' => $this->now() ) );
 		$this->repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $shipment );
-		if ( $status['actual_cost_candidate'] instanceof ShipmentActualCost ) {
-			$shipment = $this->actual_costs->apply_carrier_cost( $order, PekSettings::CARRIER_KEY, $status['actual_cost_candidate'] );
+		if ( $candidate instanceof ShipmentActualCost ) {
+			$shipment = $this->actual_costs->apply_carrier_cost( $order, PekSettings::CARRIER_KEY, $candidate );
 		}
-		unset( $status['actual_cost_candidate'] );
 
 		return array( 'success' => true, 'message' => 'Статус ПЭК обновлён.', 'shipment' => $shipment, 'status' => $status );
 	}

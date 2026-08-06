@@ -12,12 +12,16 @@
     }
     var idField = root.querySelector('[data-wdc-pek-sender-warehouse-id]');
     var title = root.querySelector('[data-wdc-pek-sender-warehouse-title]');
+    var address = root.querySelector('[data-wdc-pek-sender-warehouse-address]');
     if (idField && warehouse.warehouseId) {
       idField.value = warehouse.warehouseId;
       idField.dispatchEvent(new Event('change', { bubbles: true }));
     }
     if (title) {
       title.textContent = warehouse.title || warehouse.divisionName || warehouse.branchName || warehouse.warehouseId || '';
+    }
+    if (address) {
+      address.textContent = warehouse.address || '';
     }
     root.dispatchEvent(new CustomEvent('wdc:shipment-carrier-field-change', {
       bubbles: true,

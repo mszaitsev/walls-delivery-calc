@@ -18,15 +18,18 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
+use WallsShop\WDC\Shipments\Application\ShipmentModalRequestMapper;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
@@ -57,7 +60,9 @@ final class ShipmentAddressAjaxController {
 		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
 		private ?AddressSuggestionService $address_suggestions = null,
 		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
-		private ?PekSenderWarehouseService $pek_sender_warehouses = null
+		private ?PekSenderWarehouseService $pek_sender_warehouses = null,
+		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
+		private ?OrderShipmentDraftFactory $draft_factory = null
 	) {
 	}
 
@@ -125,7 +130,7 @@ final class ShipmentAddressAjaxController {
 			$this->ajax_search_yandex_source_dropoff_points( $mode, $limit );
 		}
 		if ( PekSettings::CARRIER_KEY === $carrier_key && 'sender_warehouse' === $purpose && $this->pek_sender_warehouses instanceof PekSenderWarehouseService ) {
-			$result = $this->pek_sender_warehouses->search( $query );
+			$result = $this->pek_sender_warehouses->search( $query, $this->pek_sender_warehouse_constraints() );
 			$items = array_slice( is_array( $result['items'] ?? null ) ? $result['items'] : array(), 0, $limit );
 			wp_send_json_success(
 				array(
@@ -768,6 +773,49 @@ final class ShipmentAddressAjaxController {
 			'lat' => $row['coordinates']['latitude'] ?? null,
 			'lng' => $row['coordinates']['longitude'] ?? null,
 		);
+	}
+
+	private function pek_sender_warehouse_constraints(): ?PickupCargoConstraints {
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = $order_id > 0 && function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			return null;
+		}
+		$places = array();
+		$data = wp_unslash( $_POST );
+		if ( is_array( $data['places'] ?? null ) && $this->shipment_modal_mapper instanceof ShipmentModalRequestMapper ) {
+			try {
+				$places = $this->shipment_modal_mapper->places( $data );
+			} catch ( \Throwable ) {
+				$places = array();
+			}
+		}
+		if ( array() === $places && $this->draft_factory instanceof OrderShipmentDraftFactory ) {
+			try {
+				$request = $this->draft_factory->create_request_from_order( $order );
+				$places = $request->places;
+			} catch ( \Throwable ) {
+				$places = array();
+			}
+		}
+		if ( array() === $places ) {
+			return null;
+		}
+		$weight = 0;
+		$volume = 0;
+		$max_dimension = 0;
+		$max_place_weight = 0;
+		foreach ( $places as $place ) {
+			if ( ! $place instanceof ShipmentPlace ) {
+				continue;
+			}
+			$weight += max( 0, $place->weight_g );
+			$volume += max( 0, $place->length_cm ) * max( 0, $place->width_cm ) * max( 0, $place->height_cm );
+			$max_dimension = max( $max_dimension, $place->length_cm, $place->width_cm, $place->height_cm );
+			$max_place_weight = max( $max_place_weight, $place->weight_g );
+		}
+
+		return new PickupCargoConstraints( $weight, $volume, $max_dimension, $max_place_weight, max( 1, count( $places ) ) );
 	}
 
 }

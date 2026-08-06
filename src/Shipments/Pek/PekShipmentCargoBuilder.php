@@ -15,12 +15,13 @@ final class PekShipmentCargoBuilder {
 
 	/** @return array{payload:array<string,mixed>,summary:array<string,mixed>} */
 	public function build( ShipmentCreateRequest $request, int $declared_value_kopecks ): array {
-		if ( count( $request->places ) < 1 || count( $request->places ) > 50 ) {
-			throw new \RuntimeException( 'Для заявки ПЭК допускается от 1 до 50 грузомест.' );
+		unset( $declared_value_kopecks );
+		if ( count( $request->places ) < 1 ) {
+			throw new \RuntimeException( 'Для заявки ПЭК нужно минимум одно грузоместо.' );
 		}
 		$places = array();
 		$weight = 0.0;
-		$volume = 0.0;
+		$raw_volume_sum = 0.0;
 		$max_dimension = 0.0;
 		foreach ( $request->places as $place ) {
 			if ( ! $place instanceof ShipmentPlace || array() !== $place->validate() ) {
@@ -30,9 +31,10 @@ final class PekShipmentCargoBuilder {
 			$l = $this->ceil2( $place->length_cm / 100 );
 			$wi = $this->ceil2( $place->width_cm / 100 );
 			$h = $this->ceil2( $place->height_cm / 100 );
-			$v = $this->ceil2( $l * $wi * $h );
+			$raw_volume = $l * $wi * $h;
+			$v = $this->ceil2( $raw_volume );
 			$weight += $w;
-			$volume += $v;
+			$raw_volume_sum += $raw_volume;
 			$max_dimension = max( $max_dimension, $l, $wi, $h );
 			$places[] = array(
 				'quantity' => 1,
@@ -44,7 +46,7 @@ final class PekShipmentCargoBuilder {
 			);
 		}
 		$weight = $this->ceil2( $weight );
-		$volume = $this->ceil2( $volume );
+		$volume = $this->ceil2( $raw_volume_sum );
 		$summary = array(
 			'place_count' => count( $places ),
 			'aggregate_weight_kg' => $weight,
@@ -63,7 +65,6 @@ final class PekShipmentCargoBuilder {
 					'weight' => $weight,
 					'volume' => $volume,
 					'description' => $summary['description'],
-					'declaredCost' => round( $declared_value_kopecks / 100, 2 ),
 					'cargoPlaceList' => $places,
 				),
 			),

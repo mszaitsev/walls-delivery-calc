@@ -1,8 +1,8 @@
 # Project Status
 
-0.134.1: PEK is now registered in the Shipment Framework as the Shipment Framework implementation under contract verification; production submit disabled pending live validation for PEK shipment creation and lifecycle. Remaining PEK shipment work is legal-recipient UI/payload, AM/BY/KG/KZ creation, international documents, accounting documents, and accepted-cargo return handling in the PEK cabinet outside this plugin.
+0.134.2: PEK is now registered in the Shipment Framework as the Shipment Framework implementation under contract verification; production submit is not yet approved pending live validation for PEK shipment creation and lifecycle. Remaining PEK shipment work is legal-recipient UI/payload, AM/BY/KG/KZ creation, international documents, accounting documents, and accepted-cargo return handling in the PEK cabinet outside this plugin.
 
-Version: 0.134.1
+Version: 0.134.2
 
 Stable subsystems:
 

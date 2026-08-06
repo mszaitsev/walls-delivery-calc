@@ -15,7 +15,7 @@ final class PekShipmentProductWeightResolver {
 
 	public function product_weight_g( ShipmentCreateRequest $request ): int {
 		$calculation = is_array( $request->meta['calculation_data'] ?? null ) ? $request->meta['calculation_data'] : array();
-		$weight = (int) ( $calculation['package']['products_weight_g'] ?? $request->meta['pek_product_weight_g'] ?? 0 );
+		$weight = (int) ( $calculation['package']['products_weight_g'] ?? 0 );
 		if ( $weight > 0 ) {
 			return $weight;
 		}

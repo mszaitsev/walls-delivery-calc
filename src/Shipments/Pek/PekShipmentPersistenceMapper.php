@@ -72,7 +72,16 @@ final class PekShipmentPersistenceMapper implements CarrierShipmentPersistenceMa
 			'pek_correlation' => (string) ( $ref['correlation'] ?? '' ),
 			'failure_stage' => (string) ( $ref['failure_stage'] ?? '' ),
 			'request_snapshot' => $preview,
-			'response_snapshot' => array( 'error_code' => $result->error_code, 'checked_at' => $now, 'summary' => is_array( $ref['summary'] ?? null ) ? $ref['summary'] : array() ),
+			'request_summary' => is_array( $ref['summary'] ?? null ) ? $ref['summary'] : array(),
+			'response_snapshot' => array(
+				'error_code' => $result->error_code,
+				'endpoint' => (string) ( $ref['endpoint'] ?? '/preregistration/submit/' ),
+				'method' => (string) ( $ref['method'] ?? 'POST' ),
+				'http_status' => $ref['http_status'] ?? '',
+				'failure_stage' => (string) ( $ref['failure_stage'] ?? '' ),
+				'correlation' => (string) ( $ref['correlation'] ?? '' ),
+				'checked_at' => $now,
+			),
 		);
 	}
 
