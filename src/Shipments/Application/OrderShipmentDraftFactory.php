@@ -23,6 +23,7 @@ use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Shipments\Pek\PekShipmentCourierAddressResolver;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 
 defined( 'ABSPATH' ) || exit;
@@ -41,7 +42,8 @@ final class OrderShipmentDraftFactory {
 		private ?DpdShipmentDateResolver $dpd_dates = null,
 		private ?YandexDeliverySettings $yandex_settings = null,
 		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
-		private ?PekSettings $pek_settings = null
+		private ?PekSettings $pek_settings = null,
+		private ?PekShipmentCourierAddressResolver $pek_courier_addresses = null
 	) {
 	}
 
@@ -708,7 +710,7 @@ final class OrderShipmentDraftFactory {
 			carrier_key: PekSettings::CARRIER_KEY,
 			delivery_type: $delivery_type,
 			rate_id: PekSettings::SERVICE_KEY . ':' . $delivery_type,
-			recipient_address: DeliveryType::COURIER === $delivery_type ? $this->pek_courier_address_from_order( $order ) : $this->recipient_address( $order, $delivery_type, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
+			recipient_address: DeliveryType::COURIER === $delivery_type ? $this->pek_courier_address_from_order( $order, $calculation ) : $this->recipient_address( $order, $delivery_type, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
 			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $point_code ? new PickupPointSelection( PekSettings::CARRIER_KEY, PekSettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
 			places: array( $place ),
 			declared_value: Money::from_kopecks( 0 ),
@@ -788,40 +790,12 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
-	private function pek_courier_address_from_order( object $order ): Address {
-		$city = method_exists( $order, 'get_shipping_city' ) ? trim( (string) $order->get_shipping_city() ) : '';
-		$address_1 = method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() ) : '';
-		$apartment = method_exists( $order, 'get_shipping_address_2' ) ? trim( (string) $order->get_shipping_address_2() ) : '';
-		$parsed = $this->pek_parse_street_house( $address_1 );
-		$street = '' !== $parsed['street'] ? $parsed['street'] : $address_1;
-		$house = $parsed['house'];
-		$raw = implode( ', ', array_filter( array( 'Россия', $city, $street, '' !== $house ? 'дом ' . $house : '', $apartment ), static fn( string $value ): bool => '' !== trim( $value ) ) );
-
-		return new Address(
-			country_code: 'RU',
-			region_name: method_exists( $order, 'get_shipping_state' ) ? (string) $order->get_shipping_state() : '',
-			city: $city,
-			postcode: method_exists( $order, 'get_shipping_postcode' ) ? (string) $order->get_shipping_postcode() : '',
-			street: $street,
-			house: $house,
-			apartment: $apartment,
-			raw_address: $raw,
-			fias_id: $this->meta_string( $order, '_wdc_platform_fias_id' ),
-			gar_id: $this->meta_string( $order, '_wdc_platform_gar_id' )
-		);
-	}
-
-	/** @return array{street:string,house:string} */
-	private function pek_parse_street_house( string $value ): array {
-		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
-		if ( 1 !== preg_match( '/^(?<street>.+?)(?:,\s*(?:д\.?\s*|дом\s*)?|(?:\s+д\.?\s*|\s+дом\s+))(?<house>\d+[А-Яа-яA-Za-z0-9\/-]*(?:\s*(?:к|корп|корпус|стр|строение)\.?\s*\d+[А-Яа-яA-Za-z0-9\/-]*)?)\s*$/u', $value, $matches ) ) {
-			return array( 'street' => '', 'house' => '' );
+	private function pek_courier_address_from_order( object $order, array $calculation ): Address {
+		if ( ! $this->pek_courier_addresses instanceof PekShipmentCourierAddressResolver ) {
+			throw new \RuntimeException( 'Не настроен PEK resolver адреса курьерской доставки.' );
 		}
 
-		return array(
-			'street' => trim( (string) $matches['street'], " \t\n\r\0\x0B," ),
-			'house' => trim( (string) $matches['house'] ),
-		);
+		return $this->pek_courier_addresses->from_order( $order, $calculation );
 	}
 
 	private function create_dpd_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {

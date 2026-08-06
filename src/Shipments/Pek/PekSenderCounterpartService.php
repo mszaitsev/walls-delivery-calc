@@ -20,12 +20,14 @@ final class PekSenderCounterpartService {
 	public function verify_and_save(): array {
 		$rows = $this->api->confirmed_counterparties( $this->tokens->token() );
 		$matches = array();
+		$configured_card = trim( $this->settings->client_card() );
 		foreach ( $rows as $row ) {
 			$legal = is_array( $row['legal'] ?? null ) ? $row['legal'] : array();
 			if (
 				(int) ( $row['legalForm'] ?? 0 ) === $this->settings->sender_legal_form()
 				&& $this->digits( (string) ( $legal['inn'] ?? '' ) ) === $this->settings->sender_inn()
-				&& ( '' === $this->settings->sender_kpp() || $this->digits( (string) ( $legal['kpp'] ?? '' ) ) === $this->settings->sender_kpp() )
+				&& ( PekSettings::LEGAL_FORM_LEGAL_ENTITY !== $this->settings->sender_legal_form() || $this->digits( (string) ( $legal['kpp'] ?? '' ) ) === $this->settings->sender_kpp() )
+				&& ( '' === $configured_card || trim( (string) ( $row['counterpartClientCard'] ?? '' ) ) === $configured_card )
 			) {
 				$matches[] = $row;
 			}
@@ -46,6 +48,7 @@ final class PekSenderCounterpartService {
 			'inn_masked' => $this->mask( (string) ( $legal['inn'] ?? '' ) ),
 			'kpp_masked' => $this->mask( (string) ( $legal['kpp'] ?? '' ) ),
 			'client_card_present' => '' !== trim( (string) ( $row['counterpartClientCard'] ?? '' ) ),
+			'identity_hash' => $this->settings->sender_identity_hash(),
 			'checked_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
 		);
 		$this->settings->save_sender_counterpart( $guid, $snapshot );

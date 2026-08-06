@@ -57,11 +57,13 @@ final class PekShipmentPersistenceMapper implements CarrierShipmentPersistenceMa
 
 	/** @param array<string,mixed> $preview @return array<string,mixed>|null */
 	public function build_failed_fields( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $preview, string $now ): ?array {
-		unset( $request );
 		if ( 'pek_uncertain_submit' !== $result->error_code ) {
 			return null;
 		}
 		$ref = is_array( $result->raw_reference ) ? $result->raw_reference : array();
+		$summary = is_array( $ref['summary'] ?? null ) ? $ref['summary'] : array();
+		$sender = is_array( $summary['sender_warehouse'] ?? null ) ? $summary['sender_warehouse'] : array();
+		$sms = is_array( $summary['sms'] ?? null ) ? $summary['sms'] : array();
 
 		return array(
 			'status' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
@@ -70,9 +72,23 @@ final class PekShipmentPersistenceMapper implements CarrierShipmentPersistenceMa
 			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ),
 			'pending_creation_in_carrier' => true,
 			'pek_correlation' => (string) ( $ref['correlation'] ?? '' ),
+			'rate_id' => $request->rate_id,
+			'shipment_mode' => (string) ( $summary['shipment_mode'] ?? $request->delivery_type ),
+			'recipient_type' => 'physical',
+			'pek_sender_warehouse_id' => (string) ( $sender['warehouseId'] ?? '' ),
+			'pek_sender_warehouse_title' => (string) ( $sender['divisionName'] ?? $sender['branchName'] ?? '' ),
+			'pek_sender_warehouse_source' => (string) ( $sender['source'] ?? '' ),
+			'pek_receiver_warehouse_id' => (string) ( $summary['receiver_warehouse_id'] ?? '' ),
+			'pek_receiver_warehouse_source' => '' !== (string) ( $summary['receiver_warehouse_id'] ?? '' ) ? 'checkout_selection' : '',
+			'pek_receiver_branch_id' => (string) ( $summary['receiver_branch_id'] ?? '' ),
+			'declared_value_kopecks' => (int) ( $summary['declared_value_kopecks'] ?? 0 ),
+			'sealing_requested' => ! empty( $summary['sealing_requested'] ),
+			'sms_release_requested' => true,
+			'sms_release_confirmed' => ! empty( $sms['success'] ),
+			'sms_release_effective_limit_kopecks' => (int) ( $sms['effective_limit_kopecks'] ?? 0 ),
 			'failure_stage' => (string) ( $ref['failure_stage'] ?? '' ),
 			'request_snapshot' => $preview,
-			'request_summary' => is_array( $ref['summary'] ?? null ) ? $ref['summary'] : array(),
+			'request_summary' => $summary,
 			'response_snapshot' => array(
 				'error_code' => $result->error_code,
 				'endpoint' => (string) ( $ref['endpoint'] ?? '/preregistration/submit/' ),

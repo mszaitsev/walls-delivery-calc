@@ -41,7 +41,7 @@ pek_cancel_assert( ! $mapping->is_pre_acceptance_status( 'UNKNOWN' ), 'UNKNOWN m
 pek_cancel_assert( ! $mapping->is_pre_acceptance_status( 'Принят к перевозке' ), 'Accepted cargo must not be pre-acceptance.' );
 pek_cancel_assert( ! $mapping->is_pre_acceptance_status( 'Принят на ПВЗ' ), 'PVZ accepted cargo must not be pre-acceptance.' );
 
-$buttons = new PekShipmentButtonPolicy();
+$buttons = new PekShipmentButtonPolicy( $mapping );
 $pending = $buttons->resolve( array( 'universal_status_code' => DeliveryStatus::PENDING_CREATION_IN_CARRIER, 'pending_creation_in_carrier' => true ) );
 pek_cancel_assert( false === $pending['create'] && true === $pending['manual_attach'] && false === $pending['update'] && false === $pending['cancel'] && true === $pending['remove'], 'Pending PEK shipment must allow manual reconciliation and local remove only.' );
 

@@ -8,8 +8,7 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentButtonPolicy {
-	public function __construct( private ?PekStatusMapping $mapping = null ) {
-		$this->mapping = $this->mapping ?? new PekStatusMapping();
+	public function __construct( private PekStatusMapping $mapping ) {
 	}
 
 	/** @param array<string,mixed> $shipment @return array<string,bool> */

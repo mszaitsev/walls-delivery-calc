@@ -1048,10 +1048,13 @@ C:.
     |       run-pek-warehouse-datetime-smoke.php
     |
     |   \---fixtures
+    |           confirmed-counterparties-response.json
+    |           connected-services-response.json
     |           order-print-response.json
     |           preregistration-submit-courier.json
     |           preregistration-submit-pickup.json
     |           preregistration-submit-response.json
+    |           private-token-response.json
     |
     +---pickup
     |       run-carrier-pickup-provider-registry-smoke.php

@@ -66,6 +66,7 @@ final class PekSmsReleaseAvailabilityService {
 
 	/** @param array<string,mixed> $services */
 	private function api_limit_kopecks( array $services, string $sender_branch_id, string $receiver_branch_id ): int {
+		unset( $sender_branch_id, $receiver_branch_id );
 		$rows = is_array( $services['specialConditionsWithParams'] ?? null ) ? $services['specialConditionsWithParams'] : array();
 		$matches = array();
 		foreach ( $rows as $row ) {
@@ -74,9 +75,6 @@ final class PekSmsReleaseAvailabilityService {
 			}
 			$condition = is_array( $row['specialCondition'] ?? null ) ? $row['specialCondition'] : array();
 			if ( strtolower( self::SMS_SERVICE_UID ) !== strtolower( (string) ( $condition['UID'] ?? '' ) ) ) {
-				continue;
-			}
-			if ( ! $this->applicability_matches( $row, $sender_branch_id, $receiver_branch_id ) ) {
 				continue;
 			}
 			$matches[] = $row;
@@ -94,11 +92,11 @@ final class PekSmsReleaseAvailabilityService {
 			if ( ! is_array( $param ) || 'CODMaxSum' !== (string) ( $param['key'] ?? '' ) || 'Money' !== (string) ( $param['type'] ?? '' ) ) {
 				continue;
 			}
-			$values = is_array( $param['values'] ?? null ) ? $param['values'] : array( $param['value'] ?? null );
+			$values = $this->parameter_values( $param );
 			if ( 1 !== count( $values ) ) {
 				break;
 			}
-			$kopecks = MoneyParser::numeric_to_kopecks( is_scalar( $values[0] ) ? (string) $values[0] : '' );
+			$kopecks = MoneyParser::numeric_to_kopecks( $values[0] );
 			if ( null !== $kopecks && $kopecks > 0 ) {
 				return $kopecks;
 			}
@@ -108,22 +106,28 @@ final class PekSmsReleaseAvailabilityService {
 	}
 
 	/** @param array<string,mixed> $row */
-	private function applicability_matches( array $row, string $sender_branch_id, string $receiver_branch_id ): bool {
-		foreach ( is_array( $row['params'] ?? null ) ? $row['params'] : ( is_array( $row['parameters'] ?? null ) ? $row['parameters'] : array() ) as $param ) {
-			if ( ! is_array( $param ) ) {
-				continue;
-			}
-			$key = (string) ( $param['key'] ?? '' );
-			$values = array_map( 'strtolower', array_map( 'strval', is_array( $param['values'] ?? null ) ? $param['values'] : array( $param['value'] ?? '' ) ) );
-			if ( in_array( $key, array( 'SenderBranchUID', 'BranchSenderUID' ), true ) && ! in_array( strtolower( $sender_branch_id ), $values, true ) ) {
-				return false;
-			}
-			if ( in_array( $key, array( 'ReceiverBranchUID', 'BranchReceiverUID', 'BranchUID' ), true ) && ! in_array( strtolower( $receiver_branch_id ), $values, true ) ) {
-				return false;
+	/**
+	 * @param array<string,mixed> $param
+	 * @return array<int,int|float|string|bool>
+	 */
+	private function parameter_values( array $param ): array {
+		if ( ! array_key_exists( 'values', $param ) ) {
+			throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_param_values_missing' ) );
+		}
+		$values = $param['values'];
+		if ( is_int( $values ) || is_float( $values ) || is_string( $values ) || is_bool( $values ) ) {
+			return array( $values );
+		}
+		if ( ! is_array( $values ) || ! array_is_list( $values ) || array() === $values ) {
+			throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_param_values_malformed' ) );
+		}
+		foreach ( $values as $value ) {
+			if ( ! is_int( $value ) && ! is_float( $value ) && ! is_string( $value ) && ! is_bool( $value ) ) {
+				throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_param_values_malformed' ) );
 			}
 		}
 
-		return true;
+		return $values;
 	}
 
 	private function fail(): PekSmsReleaseResult {

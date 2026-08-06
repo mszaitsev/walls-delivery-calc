@@ -42,9 +42,7 @@ final class PekShipmentRequestBuilder {
 		$cargo['payload']['common']['orderNumber'] = (string) ( $request->meta['order_num'] ?? $request->order_id );
 		$sealing = $this->product_weights->sealing_required( $request );
 		$counterpart_guid = $this->settings->sender_counterpart_guid();
-		if ( '' === $counterpart_guid ) {
-			throw new \RuntimeException( 'Не подтверждён контрагент отправителя ПЭК.' );
-		}
+		$this->assert_counterpart_current( $counterpart_guid );
 		$sms = $live_sms_check
 			? $this->sms->check( $counterpart_guid, (string) ( $sender['branchId'] ?? '' ), (string) ( $destination['branch_id'] ?? '' ), $declared_kopecks )
 			: new PekSmsReleaseResult( true, $this->settings->sms_release_limit_rub() * 100, true, true );
@@ -106,6 +104,18 @@ final class PekShipmentRequestBuilder {
 		}
 		if ( 'RU' !== strtoupper( $request->recipient_address->country_code ) ) {
 			throw new \RuntimeException( 'Создание отправлений ПЭК поддерживает только RU.' );
+		}
+	}
+
+	private function assert_counterpart_current( string $counterpart_guid ): void {
+		$snapshot = $this->settings->sender_counterpart_snapshot();
+		if (
+			'' === $counterpart_guid
+			|| $counterpart_guid !== (string) ( $snapshot['guid'] ?? '' )
+			|| (int) ( $snapshot['legalForm'] ?? 0 ) !== $this->settings->sender_legal_form()
+			|| (string) ( $snapshot['identity_hash'] ?? '' ) !== $this->settings->sender_identity_hash()
+		) {
+			throw new \RuntimeException( 'Данные отправителя ПЭК изменились. Повторно подтвердите контрагента в настройках.' );
 		}
 	}
 

@@ -179,6 +179,22 @@ final class PekSettings {
 		$this->settings->set( self::SENDER_COUNTERPART_SNAPSHOT_KEY, '' !== $guid ? $this->sanitize_counterpart_snapshot( $snapshot ) : array() );
 	}
 
+	public function sender_identity_hash(): string {
+		return hash(
+			'sha256',
+			implode(
+				'|',
+				array(
+					(string) $this->sender_legal_form(),
+					$this->sender_inn(),
+					$this->sender_kpp(),
+					$this->client_card(),
+					$this->sender_registration_country(),
+				)
+			)
+		);
+	}
+
 	public function default_cargo_description(): string {
 		$value = $this->sanitize_text( $this->settings->get_string( self::DEFAULT_CARGO_DESCRIPTION_KEY, self::DEFAULT_CARGO_DESCRIPTION ) );
 
@@ -255,6 +271,7 @@ final class PekSettings {
 
 	/** @param array<string,mixed> $input */
 	public function save_from_admin( array $input ): void {
+		$old_identity_hash = $this->sender_identity_hash();
 		$this->settings->set( self::REQUEST_TIMEOUT_KEY, $this->clamp_raw_int( $input[ self::REQUEST_TIMEOUT_KEY ] ?? 15, 1, 60 ) );
 		$this->settings->set( self::REQUESTS_PER_MINUTE_KEY, $this->clamp_raw_int( $input[ self::REQUESTS_PER_MINUTE_KEY ] ?? 90, 1, 100 ) );
 		$this->settings->set( self::SENDER_LEGAL_FORM_KEY, self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === (int) ( $input[ self::SENDER_LEGAL_FORM_KEY ] ?? 1 ) ? 2 : 1 );
@@ -278,6 +295,9 @@ final class PekSettings {
 		$this->settings->set( self::LIGHT_CARGO_BAG_PRICE_RUB_KEY, $this->sanitize_rub_setting( $input[ self::LIGHT_CARGO_BAG_PRICE_RUB_KEY ] ?? $this->light_cargo_bag_price_rub(), '70' ) );
 		$this->settings->set( self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, $this->sanitize_rub_setting( $input[ self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ] ?? $this->light_cargo_sealing_price_rub(), '20' ) );
 		$this->settings->set( self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, $this->clamp_raw_int( $input[ self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ] ?? $this->light_cargo_weight_limit_g(), 1, 1000000 ) );
+		if ( $old_identity_hash !== $this->sender_identity_hash() ) {
+			$this->save_sender_counterpart( '', array() );
+		}
 	}
 
 	/** @param array<string,mixed> $value */
@@ -332,6 +352,7 @@ final class PekSettings {
 			'inn_masked' => $this->sanitize_text( (string) ( $value['inn_masked'] ?? '' ) ),
 			'kpp_masked' => $this->sanitize_text( (string) ( $value['kpp_masked'] ?? '' ) ),
 			'client_card_present' => ! empty( $value['client_card_present'] ),
+			'identity_hash' => 1 === preg_match( '/^[a-f0-9]{64}$/', (string) ( $value['identity_hash'] ?? '' ) ) ? (string) $value['identity_hash'] : '',
 			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
 		);
 	}

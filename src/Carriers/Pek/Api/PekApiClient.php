@@ -188,18 +188,27 @@ final class PekApiClient {
 
 	/** @param array<int,string> $cargo_codes @return array<int,array<string,mixed>> */
 	public function order_cancellation( array $cargo_codes ): array {
-		return $this->expect_list( $this->call( 'POST', '/order/cancellation/', $this->cargo_codes( $cargo_codes, 50 ) ), 'order/cancellation' );
+		return $this->expect_object_list( $this->call( 'POST', '/order/cancellation/', $this->cargo_codes( $cargo_codes, 50 ) ), 'order/cancellation', 'shipment_cancellation_contract' );
 	}
 
 	/** @return array<int,array<string,mixed>> */
 	public function check_no_calc_services( string $sender_branch_id, string $receiver_branch_id ): array {
-		return $this->expect_list( $this->call( 'POST', '/branches/checknocalcservices/', array( 'branchSenderId' => $this->required_string( $sender_branch_id, 'branchSenderId' ), 'branchReceiverId' => $this->required_string( $receiver_branch_id, 'branchReceiverId' ) ) ), 'branches/checknocalcservices' );
+		return $this->expect_object_list( $this->call( 'POST', '/branches/checknocalcservices/', array( 'branchSenderId' => $this->required_string( $sender_branch_id, 'branchSenderId' ), 'branchReceiverId' => $this->required_string( $receiver_branch_id, 'branchReceiverId' ) ) ), 'branches/checknocalcservices', 'sms_geography_contract' );
 	}
 
 	/** @return array<string,mixed> */
 	public function create_private_access_token(): array {
 		$result = $this->call( 'POST', '/auth/createtokentoaccessprivatedata/', array() );
-		if ( ! is_array( $result ) || array_is_list( $result ) || '' === trim( (string) ( $result['access_token'] ?? '' ) ) || '' === trim( (string) ( $result['expires_in_unix'] ?? $result['expires_in'] ?? '' ) ) ) {
+		if (
+			! is_array( $result )
+			|| array_is_list( $result )
+			|| ! is_string( $result['access_token'] ?? null )
+			|| '' === trim( $result['access_token'] )
+			|| strlen( trim( $result['access_token'] ) ) > 8192
+			|| ! is_string( $result['token_type'] ?? null )
+			|| 'bearer' !== strtolower( trim( $result['token_type'] ) )
+			|| ( ! is_int( $result['expires_in_unix'] ?? null ) && ! ( is_string( $result['expires_in_unix'] ?? null ) && 1 === preg_match( '/^\d+$/', trim( $result['expires_in_unix'] ) ) ) && ! is_string( $result['expires_in'] ?? null ) )
+		) {
 			throw new PekApiException( 'ПЭК вернул неожиданную структуру private token.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_private_token', 'failure_stage' => 'private_token_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
 		}
 
@@ -208,7 +217,7 @@ final class PekApiClient {
 
 	/** @return array<int,array<string,mixed>> */
 	public function confirmed_counterparties( string $access_token ): array {
-		return $this->expect_list( $this->call( 'POST', '/counterparts/confirmedaccesstocounterparties/', array( 'access_token' => $this->required_string( $access_token, 'access_token' ) ) ), 'counterparts/confirmedaccesstocounterparties' );
+		return $this->expect_object_list( $this->call( 'POST', '/counterparts/confirmedaccesstocounterparties/', array( 'access_token' => $this->required_string( $access_token, 'access_token' ) ) ), 'counterparts/confirmedaccesstocounterparties', 'counterpart_contract' );
 	}
 
 	/** @return array<string,mixed> */
@@ -320,6 +329,20 @@ final class PekApiClient {
 		}
 
 		return array_values( array_filter( $value, 'is_array' ) );
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	private function expect_object_list( mixed $value, string $name, string $failure_stage ): array {
+		if ( ! is_array( $value ) || ! array_is_list( $value ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру списка.', array_merge( $this->last_response_meta(), array( 'method' => $name, 'error_code' => 'pek_unexpected_list_structure', 'failure_stage' => $failure_stage, 'response_shape' => $this->response_shape( $value ) ) ) );
+		}
+		foreach ( $value as $row ) {
+			if ( ! is_array( $row ) || array_is_list( $row ) ) {
+				throw new PekApiException( 'ПЭК вернул неожиданную структуру списка.', array_merge( $this->last_response_meta(), array( 'method' => $name, 'error_code' => 'pek_unexpected_list_row', 'failure_stage' => $failure_stage, 'response_shape' => $this->response_shape( $value ) ) ) );
+			}
+		}
+
+		return $value;
 	}
 
 	/** @return array<string,mixed> */

@@ -27,6 +27,9 @@ final class PekManualAttachContextResolver {
 		} catch ( \Throwable ) {
 			$request = null;
 		}
+		if ( is_object( $request ) && ( PekSettings::CARRIER_KEY !== $request->carrier_key || $request->order_id !== (int) ( method_exists( $order, 'get_id' ) ? $order->get_id() : $request->order_id ) ) ) {
+			$request = null;
+		}
 		if ( null === $request && array() === $existing_shipment ) {
 			throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
 		}
@@ -46,7 +49,7 @@ final class PekManualAttachContextResolver {
 			'delivery_type' => $delivery_type,
 			'shipment_mode' => (string) ( $existing_shipment['shipment_mode'] ?? $delivery_type ),
 			'rate_id' => (string) ( $existing_shipment['rate_id'] ?? ( is_object( $request ) ? $request->rate_id : '' ) ),
-			'places' => is_object( $request ) ? $this->places( $request->places ) : ( is_array( $existing_shipment['places'] ?? null ) ? $existing_shipment['places'] : array() ),
+			'places' => $this->context_places( $existing_shipment, $request ),
 			'order_num' => (string) ( $existing_shipment['order_num'] ?? ( is_object( $request ) ? ( $request->meta['order_num'] ?? $order_id ) : $order_id ) ),
 			'pek_sender_warehouse_id' => (string) ( $existing_shipment['pek_sender_warehouse_id'] ?? $sender['warehouseId'] ?? '' ),
 			'pek_sender_warehouse_title' => (string) ( $existing_shipment['pek_sender_warehouse_title'] ?? $sender['divisionName'] ?? $sender['branchName'] ?? '' ),
@@ -84,5 +87,27 @@ final class PekManualAttachContextResolver {
 		}
 
 		return $result;
+	}
+
+	/** @param array<string,mixed> $existing_shipment @return array<int,array<string,mixed>> */
+	private function context_places( array $existing_shipment, ?object $request ): array {
+		if ( array_key_exists( 'places', $existing_shipment ) ) {
+			$places = $existing_shipment['places'];
+			if ( ! is_array( $places ) || array() === $places ) {
+				throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+			}
+			foreach ( $places as $place ) {
+				if ( ! is_array( $place ) || (int) ( $place['weight_g'] ?? 0 ) <= 0 ) {
+					throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+				}
+			}
+
+			return $places;
+		}
+		if ( is_object( $request ) ) {
+			return $this->places( $request->places );
+		}
+
+		throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
 	}
 }

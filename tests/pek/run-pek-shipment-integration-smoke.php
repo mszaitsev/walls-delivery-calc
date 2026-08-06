@@ -7,6 +7,25 @@ defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'pek-shipment-i
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public int $insert_id = 1;
+		/** @var array<int,array<string,mixed>> */
+		public array $locations = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $pek_location_mappings = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $pek_terminals = array();
+		public function insert( string $table, array $data, array $format = array() ): bool { unset( $table, $data, $format ); return true; }
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool { unset( $table, $data, $where, $format, $where_format ); return true; }
+		public function get_results( string $query, string $output = OBJECT ): array { unset( $query, $output ); return array(); }
+		public function get_row( string $query, string $output = OBJECT ): mixed { unset( $query, $output ); return null; }
+		public function prepare( string $query, mixed ...$args ): string { unset( $args ); return $query; }
+		public function get_charset_collate(): string { return ''; }
+	}
+}
+
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $key, mixed $default = false ): mixed {
 		return $GLOBALS['wdc_pek_integration_options'][ $key ] ?? $default;
@@ -67,28 +86,56 @@ if ( ! function_exists( 'do_action' ) ) {
 		unset( $hook, $args );
 	}
 }
+if ( ! function_exists( 'wc_get_order' ) ) {
+	function wc_get_order( int $order_id ): ?object {
+		return $GLOBALS['wdc_pek_integration_orders'][ $order_id ] ?? null;
+	}
+}
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
+use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
+use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
+use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
+use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
+use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Pek\PekManualAttachContextResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentAdapter;
 use WallsShop\WDC\Shipments\Pek\PekShipmentButtonPolicy;
+use WallsShop\WDC\Shipments\Pek\PekShipmentCargoBuilder;
+use WallsShop\WDC\Shipments\Pek\PekShipmentCorrelationResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCourierAddressResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCreateResponseParser;
+use WallsShop\WDC\Shipments\Pek\PekShipmentDeclaredValueResolver;
+use WallsShop\WDC\Shipments\Pek\PekShipmentDestinationResolver;
+use WallsShop\WDC\Shipments\Pek\PekShipmentPersistenceMapper;
+use WallsShop\WDC\Shipments\Pek\PekShipmentProductWeightResolver;
+use WallsShop\WDC\Shipments\Pek\PekShipmentRecipientBuilder;
 use WallsShop\WDC\Shipments\Pek\PekShipmentRequestBuilder;
+use WallsShop\WDC\Shipments\Pek\PekShipmentSenderWarehouseResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentService;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusService;
+use WallsShop\WDC\Shipments\Pek\PekSmsReleaseAvailabilityService;
 use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
 use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
@@ -117,6 +164,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 	public array $statuses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $cancellations = array();
+	public string $submit_mode = 'success';
 
 	public function request( string $method, string $url, array $args ): array {
 		$this->calls[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
@@ -153,6 +201,81 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 				),
 			);
 		}
+		if ( str_contains( $url, '/auth/createtokentoaccessprivatedata/' ) ) {
+			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/private-token-response.json' ) ?: '{}' );
+		}
+		if ( str_contains( $url, '/branches/all/' ) ) {
+			return array(
+				'status' => 200,
+				'body' => wp_json_encode(
+					array(
+						'branches' => array(
+							array(
+								'id' => 'BR-S',
+								'title' => 'Новосибирск',
+								'timezone' => 'UTC+07:00',
+								'divisions' => array(
+									array(
+										'name' => 'Склад A',
+										'departmentTypeId' => 1,
+										'departmentType' => 'Склад',
+										'kindsOfTransportation' => array( array( 'type' => 3, 'operations' => array( 'Прием грузов' ) ) ),
+										'warehouses' => array(
+											array(
+												'id' => 'WH-A',
+												'address' => 'Россия, Новосибирск, Складская, дом 1',
+												'coordinatesobj' => array( 'latitude' => '55.0', 'longitude' => '82.9' ),
+												'types' => array( 3 ),
+												'maxWeight' => 1000,
+												'maxVolume' => 100,
+												'maxDimension' => 10,
+												'maxWeightOnePlace' => 1000,
+												'maxCount' => 100,
+											),
+										),
+									),
+								),
+							),
+						),
+					),
+					JSON_UNESCAPED_UNICODE
+				),
+			);
+		}
+		if ( str_contains( $url, '/branches/findzonebyaddress/' ) ) {
+			return array(
+				'status' => 200,
+				'body' => wp_json_encode(
+					array(
+						'zoneId' => 'ZONE-R',
+						'zoneName' => 'Москва',
+						'branchUID' => 'BR-R',
+						'branchTitle' => 'Москва',
+						'mainWarehouseId' => 'WH-R',
+						'GeoData' => array(
+							'precision' => 'exact',
+							'Address' => array(
+								'formatted' => 'Россия, Московская область, Видное',
+								'country_code' => 'RU',
+							),
+						),
+					),
+					JSON_UNESCAPED_UNICODE
+				),
+			);
+		}
+		if ( str_contains( $url, '/counterparts/confirmedaccesstocounterparties/' ) ) {
+			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/confirmed-counterparties-response.json' ) ?: '[]' );
+		}
+		if ( str_contains( $url, '/counterparts/connecteddiscountsservicesagreements/' ) ) {
+			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/connected-services-response.json' ) ?: '{}' );
+		}
+		if ( str_contains( $url, '/branches/checknocalcservices/' ) ) {
+			return array(
+				'status' => 200,
+				'body' => wp_json_encode( array( array( 'specialCondition' => array( 'UID' => 'ffb40421-4761-11e8-80c9-00155d668927' ) ) ), JSON_UNESCAPED_UNICODE ),
+			);
+		}
 		if ( str_contains( $url, '/order/cancellation/' ) ) {
 			$this->cancellations[] = array( 'method' => $method, 'args' => $args );
 			return array(
@@ -160,8 +283,71 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 				'body' => wp_json_encode( array( array( 'code' => 'PEK-777', 'success' => true ) ), JSON_UNESCAPED_UNICODE ),
 			);
 		}
+		if ( str_contains( $url, '/preregistration/submit/' ) ) {
+			if ( 'http500' === $this->submit_mode ) {
+				return array( 'status' => 500, 'body' => '{}' );
+			}
+			if ( 'logical' === $this->submit_mode ) {
+				return array( 'status' => 400, 'body' => wp_json_encode( array( 'title' => 'Validation', 'message' => 'Invalid request' ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'malformed' === $this->submit_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( 'documentId' => 136, 'cargos' => array( array( 'cargoCode' => array() ) ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/preregistration-submit-response.json' ) ?: '{}' );
+		}
 
 		return array( 'status' => 500, 'body' => '{}' );
+	}
+}
+
+final class PekIntegrationProduct {
+	public function get_weight(): string {
+		return '1.25';
+	}
+
+	public function get_length(): string {
+		return '20';
+	}
+
+	public function get_width(): string {
+		return '20';
+	}
+
+	public function get_height(): string {
+		return '10';
+	}
+
+	public function get_sku(): string {
+		return 'SKU-1';
+	}
+}
+
+final class PekIntegrationItem {
+	public function __construct( private string $name, private int $quantity, private string $total, private string $tax = '0.00' ) {
+	}
+
+	public function get_product(): object {
+		return new PekIntegrationProduct();
+	}
+
+	public function get_quantity(): int {
+		return $this->quantity;
+	}
+
+	public function get_total(): string {
+		return $this->total;
+	}
+
+	public function get_total_tax(): string {
+		return $this->tax;
+	}
+
+	public function get_name(): string {
+		return $this->name;
+	}
+
+	public function get_id(): int {
+		return 1;
 	}
 }
 
@@ -187,6 +373,59 @@ final class PekIntegrationOrder {
 
 	public function save(): void {
 	}
+
+	public function get_order_number(): string {
+		return (string) $this->id;
+	}
+
+	public function get_shipping_country(): string {
+		return 'RU';
+	}
+
+	public function get_shipping_state(): string {
+		return 'Московская область';
+	}
+
+	public function get_shipping_city(): string {
+		return 'Видное';
+	}
+
+	public function get_shipping_postcode(): string {
+		return '142700';
+	}
+
+	public function get_shipping_address_1(): string {
+		return 'улица Советская, дом 10';
+	}
+
+	public function get_shipping_address_2(): string {
+		return 'квартира 5';
+	}
+
+	public function get_shipping_first_name(): string {
+		return 'Иван';
+	}
+
+	public function get_shipping_last_name(): string {
+		return 'Иванов';
+	}
+
+	public function get_shipping_phone(): string {
+		return '89991234567';
+	}
+
+	public function get_billing_phone(): string {
+		return '89991234567';
+	}
+
+	public function get_billing_email(): string {
+		return 'buyer@example.test';
+	}
+
+	public function get_items( string $type = '' ): array {
+		unset( $type );
+		return array( new PekIntegrationItem( 'Товар', 2, '100000.00' ) );
+	}
 }
 
 $GLOBALS['wdc_pek_integration_options'] = array();
@@ -195,32 +434,183 @@ $encryption = new EncryptionService();
 $settings_repository->set( PekSettings::LOGIN_KEY, 'fake-login' );
 $settings_repository->set( PekSettings::API_KEY_ENCRYPTED_KEY, $encryption->encrypt( 'fake-api-key' ) );
 $settings_repository->set( PekSettings::REQUESTS_PER_MINUTE_KEY, 100 );
-$settings_repository->set( PekSettings::CLIENT_CARD_KEY, 'CLIENT-CARD-1' );
+$settings_repository->set( PekSettings::CLIENT_CARD_KEY, 'CLIENT-CARD' );
+$settings_repository->set( PekSettings::SENDER_LEGAL_FORM_KEY, 1 );
+$settings_repository->set( PekSettings::SENDER_FS_KEY, 'ООО' );
+$settings_repository->set( PekSettings::SENDER_FULL_NAME_KEY, 'Тестовый отправитель' );
+$settings_repository->set( PekSettings::SENDER_INN_KEY, '5400000000' );
+$settings_repository->set( PekSettings::SENDER_KPP_KEY, '540001001' );
+$settings_repository->set( PekSettings::SENDER_REGISTRATION_COUNTRY_KEY, 'RU' );
+$settings_repository->set( PekSettings::SENDER_CONTACT_NAME_KEY, 'Петров Петр' );
+$settings_repository->set( PekSettings::SENDER_PHONE_KEY, '83831234567' );
+$settings_repository->set( PekSettings::SENDER_EMAIL_KEY, 'sender@example.test' );
 
 $settings = new PekSettings( $settings_repository );
 $credentials = new PekCredentials( $settings_repository, $encryption );
 $http = new PekIntegrationFakeHttp();
 $api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
+$settings->save_sender_warehouse(
+	array(
+		'warehouseId' => 'WH-A',
+		'branchId' => 'BR-S',
+		'title' => 'Склад A',
+		'address' => 'Россия, Новосибирск, Складская, дом 1',
+		'source' => 'default',
+	)
+);
+$settings->save_sender_counterpart(
+	'11111111-2222-3333-4444-555555555555',
+	array(
+		'guid' => '11111111-2222-3333-4444-555555555555',
+		'legalForm' => 1,
+		'title' => 'Тестовый отправитель',
+		'identity_hash' => $settings->sender_identity_hash(),
+		'client_card_present' => true,
+		'checked_at' => '2026-08-06 12:00:00',
+	)
+);
 $repository = new OrderShipmentRepository();
 $actual_costs = new ShipmentActualCostService( $repository );
 $mapping = new PekStatusMapping();
 $status_service = new PekShipmentStatusService( $api, $mapping, $repository, $actual_costs );
 $button_policy = new PekShipmentButtonPolicy( $mapping );
-$dummy_drafts = ( new ReflectionClass( OrderShipmentDraftFactory::class ) )->newInstanceWithoutConstructor();
-$manual_contexts = new PekManualAttachContextResolver( $dummy_drafts, $repository );
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->locations = array(
+	array(
+		'id' => 77,
+		'country_code' => 'RU',
+		'region_name' => 'Московская область',
+		'region_type' => 'область',
+		'city_name' => 'Видное',
+		'city_type' => 'г',
+		'display_name' => 'Видное',
+		'active' => 1,
+		'latitude' => '',
+		'longitude' => '',
+	),
+);
+$GLOBALS['wpdb']->pek_location_mappings = array();
+$GLOBALS['wpdb']->pek_terminals = array();
+$drafts = new OrderShipmentDraftFactory( new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new ShipmentServiceSettings(), null, null, null, null, null, null, null, null, null, null, $settings, new PekShipmentCourierAddressResolver() );
+$manual_contexts = new PekManualAttachContextResolver( $drafts, $repository );
 $shipment_service = new PekShipmentService( $api, $status_service, $repository, $button_policy, $actual_costs, $mapping, $manual_contexts );
 $actual_cost_resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
+$request_builder = new PekShipmentRequestBuilder(
+	$settings,
+	new PekShipmentDeclaredValueResolver(),
+	new PekShipmentSenderWarehouseResolver( $settings, new PekSenderWarehouseService( $api, $settings, new PekSenderWarehouseSearchCache() ) ),
+	new PekShipmentCargoBuilder( $settings ),
+	new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver() ),
+	new PekShipmentCorrelationResolver(),
+	new PekSmsReleaseAvailabilityService( $api, new WallsShop\WDC\Shipments\Pek\PekPrivateAccessTokenService( $api ), $settings ),
+	new PekShipmentDestinationResolver(
+		new PekPickupPointProvider(
+			new PekTerminalService(
+				new PekLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), new PekAddressBuilder(), new PekLocationMappingRepository( $GLOBALS['wpdb'] ), $api, $settings ),
+				$api,
+				new PekCargoConstraintsConverter(),
+				new PekDestinationTerminalSearchCache(),
+				new PekTerminalRepository( $GLOBALS['wpdb'] ),
+				$settings
+			)
+		),
+		new PekLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), new PekAddressBuilder(), new PekLocationMappingRepository( $GLOBALS['wpdb'] ), $api, $settings )
+	),
+	new PekShipmentProductWeightResolver( $settings )
+);
 $adapter = new PekShipmentAdapter(
 	$api,
-	( new ReflectionClass( PekShipmentRequestBuilder::class ) )->newInstanceWithoutConstructor(),
+	$request_builder,
 	$status_service,
 	$shipment_service,
 	$button_policy,
 	new PekShipmentCreateResponseParser(),
 	$actual_cost_resolver
 );
+$creation = new ShipmentCreationService( $repository, array( $adapter ), $actual_costs, null, null, array( new PekShipmentPersistenceMapper() ) );
+pek_integration_assert( $creation instanceof ShipmentCreationService && $drafts instanceof OrderShipmentDraftFactory && $request_builder instanceof PekShipmentRequestBuilder, 'Integration smoke must construct real draft factory, request builder, adapter, creation service and mapper.' );
+
+$sms = new PekSmsReleaseAvailabilityService( $api, new WallsShop\WDC\Shipments\Pek\PekPrivateAccessTokenService( $api ), $settings );
+$settings_repository->set( PekSettings::SMS_RELEASE_LIMIT_RUB_KEY, 500000 );
+$sms_result = $sms->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+pek_integration_assert( $sms_result->success && 10000000 === $sms_result->effective_limit_kopecks, 'Official scalar CODMaxSum must produce effective 100000 RUB SMS limit.' );
+$sms_over = $sms->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000001 );
+pek_integration_assert( ! $sms_over->success, 'Declared value above official scalar CODMaxSum must fail before submit.' );
 
 $order = new PekIntegrationOrder( 1001 );
+$GLOBALS['wdc_pek_integration_orders'][1001] = $order;
+$order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$order->update_meta_data(
+	'_wdc_delivery_calculation_data',
+	array(
+		'carrier_key' => PekSettings::CARRIER_KEY,
+		'delivery_type' => DeliveryType::COURIER,
+		'destination' => array(
+			'location_id' => 77,
+			'address' => array(
+				'country' => 'RU',
+				'region' => 'Московская область',
+				'city' => 'Видное',
+				'street' => 'улица Советская',
+				'house' => '10',
+				'apartment' => '5',
+				'postcode' => '142700',
+			),
+		),
+		'package' => array(
+			'products_weight_g' => 2500,
+			'packaging_weight_g' => 500,
+			'final_weight_g' => 3000,
+			'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ),
+		),
+	)
+);
+$request = $drafts->create_request_from_order( $order );
+pek_integration_assert( PekSettings::CARRIER_KEY === $request->carrier_key, 'Real draft factory must create PEK request.' );
+$before_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
+$preview = $creation->safe_preview( $request );
+$after_preview_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
+pek_integration_assert( $before_submit === $after_preview_submit, 'Safe preview must not submit PEK preregistration.' );
+pek_integration_assert( 'POST' === $preview['method'] && '/preregistration/submit/' === $preview['path'] && array() === $preview['errors'], 'Safe preview must return canonical PEK envelope: ' . wp_json_encode( $preview, JSON_UNESCAPED_UNICODE ) );
+$create_result = $creation->create( $order, $request );
+$submit_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
+pek_integration_assert( true === $create_result->success, 'Production chain create must succeed through fake PEK submit.' );
+pek_integration_assert( 1 === count( $submit_calls ), 'Fake preregistration submit must be called exactly once in success case.' );
+$created = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( '999940950644' === $created['tracking_number'] && '136' === $created['external_id'], 'Creation service and mapper must persist PEK identifiers.' );
+pek_integration_assert_plain_data( $created );
+
+$duplicate = $creation->create( $order, $request );
+pek_integration_assert( false === $duplicate->success && 'shipment_already_created' === $duplicate->error_code, 'Created PEK shipment must block duplicate automatic create.' );
+
+$uncertain_order = new PekIntegrationOrder( 1002 );
+$GLOBALS['wdc_pek_integration_orders'][1002] = $uncertain_order;
+$uncertain_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$uncertain_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$uncertain_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$uncertain_order->update_meta_data( '_wdc_delivery_calculation_data', $order->get_meta( '_wdc_delivery_calculation_data', true ) );
+$uncertain_request = $drafts->create_request_from_order( $uncertain_order );
+$http->submit_mode = 'http500';
+$uncertain_result = $creation->create( $uncertain_order, $uncertain_request );
+pek_integration_assert( false === $uncertain_result->success && 'pek_uncertain_submit' === $uncertain_result->error_code, 'HTTP 500 submit must create uncertain result.' );
+$uncertain_shipment = $repository->find_by_carrier( $uncertain_order, PekSettings::CARRIER_KEY );
+pek_integration_assert( ! empty( $uncertain_shipment['pending_creation_in_carrier'] ) && '' !== (string) ( $uncertain_shipment['pek_correlation'] ?? '' ), 'HTTP 500 uncertain result must persist pending correlation.' );
+pek_integration_assert_plain_data( $uncertain_shipment );
+
+$logical_order = new PekIntegrationOrder( 1003 );
+$GLOBALS['wdc_pek_integration_orders'][1003] = $logical_order;
+$logical_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$logical_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$logical_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$logical_order->update_meta_data( '_wdc_delivery_calculation_data', $order->get_meta( '_wdc_delivery_calculation_data', true ) );
+$logical_request = $drafts->create_request_from_order( $logical_order );
+$http->submit_mode = 'logical';
+$logical_result = $creation->create( $logical_order, $logical_request );
+pek_integration_assert( false === $logical_result->success && array() === $repository->find_by_carrier( $logical_order, PekSettings::CARRIER_KEY ), 'Structured logical rejection must not persist pending shipment.' );
+$http->submit_mode = 'success';
+
 $pending = array(
 	'carrier_key' => PekSettings::CARRIER_KEY,
 	'status' => 'pending_creation_in_carrier',
@@ -324,7 +714,7 @@ pek_integration_assert( str_contains( $request_builder_source, "if ( '' !== \$cl
 pek_integration_assert( ! str_contains( $request_builder_source, "'counterpartClientCard' => \$this->settings->client_card()" ), 'PEK request builder must not serialize empty client card directly.' );
 
 $all_urls = implode( "\n", array_map( static fn ( array $call ): string => $call['url'], $http->calls ) );
-pek_integration_assert( ! str_contains( $all_urls, '/preregistration/submit/' ), 'Integration smoke must not submit PEK preregistration.' );
+pek_integration_assert( str_contains( $all_urls, '/preregistration/submit/' ), 'Integration smoke must invoke fake PEK preregistration submit.' );
 pek_integration_assert( ! str_contains( $all_urls, '/order/print/' ), 'Integration smoke must not download production documents.' );
 pek_integration_assert( ! str_contains( $all_urls, '/cargos/cancelandreturncargo/' ), 'Integration smoke must not call PEK return API.' );
 

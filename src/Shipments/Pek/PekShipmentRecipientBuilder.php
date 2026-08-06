@@ -9,8 +9,7 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentRecipientBuilder {
-	public function __construct( private ?PekShipmentCourierAddressResolver $courier_addresses = null ) {
-		$this->courier_addresses = $this->courier_addresses ?? new PekShipmentCourierAddressResolver();
+	public function __construct( private PekShipmentCourierAddressResolver $courier_addresses ) {
 	}
 
 	/** @return array<string,mixed> */

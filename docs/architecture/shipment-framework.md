@@ -1,8 +1,8 @@
 # Shipment Framework
 
-Version 0.134.4 keeps PEK Shipment Framework implementation under contract verification; production submit is not yet approved pending live validation. The adapter is thin and delegates payload building, status/manual attach/cancellation, and documents to carrier-owned services under `src/Shipments/Pek/`; persistence stays in `PekShipmentPersistenceMapper`, document actions stay in `PekShipmentDocumentProvider`, and actual cost continues to use shared `actual_cost_*` fields. PEK creation is RU-only physical-recipient SMS release, LTL `type=3`, `orderType=0`, sender self-delivery, sender-paid services, mandatory insurance, pickup/courier destination modes, safe preview only, and fail-closed SMS validation. Pending uncertain submissions expose manual attach and local remove through the same generic capability payload, with server-side PEK context restoration before reconciliation.
+Version 0.134.5 keeps PEK Shipment Framework implementation under read-only contract verification; production submit is not yet approved pending live validation. The adapter is thin and delegates payload building, status/manual attach/cancellation, and documents to carrier-owned services under `src/Shipments/Pek/`; persistence stays in `PekShipmentPersistenceMapper`, document actions stay in `PekShipmentDocumentProvider`, and actual cost continues to use shared `actual_cost_*` fields. PEK creation is RU-only physical-recipient SMS release, LTL `type=3`, `orderType=0`, sender self-delivery, sender-paid services, mandatory insurance, pickup/courier destination modes, safe preview only, and fail-closed SMS validation. Pending uncertain submissions expose manual attach and local remove through the same generic capability payload, with server-side PEK context restoration before reconciliation.
 
-Version: 0.134.4
+Version: 0.134.5
 
 The Shipment Framework lets carriers share admin creation, persistence, lifecycle, documents, modal UI, status presentation, polling, and regression coverage. It is not one linear pipeline; each runtime flow has its own owner.
 

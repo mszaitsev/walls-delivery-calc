@@ -27,6 +27,7 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Shipments\Pek\PekShipmentAdapter;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCargoBuilder;
+use WallsShop\WDC\Shipments\Pek\PekShipmentCourierAddressResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCreateResponseParser;
 use WallsShop\WDC\Shipments\Pek\PekShipmentProductWeightResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentRecipientBuilder;
@@ -182,7 +183,7 @@ $receiver_order = new class {
 	public function get_shipping_address_2(): string { return ''; }
 	public function get_meta( string $key, bool $single = true ): string { unset( $key, $single ); return ''; }
 };
-$receiver = ( new PekShipmentRecipientBuilder() )->build_physical_recipient( $receiver_order, $request, 'receiver-warehouse-guid' );
+$receiver = ( new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver() ) )->build_physical_recipient( $receiver_order, $request, 'receiver-warehouse-guid' );
 pek_shipment_create_assert( 'Петров Петр' === $receiver['title'] && 'Петров Петр' === $receiver['person'] && '+79100000000' === $receiver['personPhones'][0]['phone'], 'Receiver builder must produce title/person and one normalized phone.' );
 
 $parser = new PekShipmentCreateResponseParser();
