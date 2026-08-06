@@ -197,7 +197,7 @@ $page = pek_route_page( $http, $settings_repository, $cache );
 $settings = new PekSettings( $settings_repository );
 
 $cache->save_for_current_user( array( 'success' => true, 'message' => 'old', 'items' => array( array( 'warehouseId' => 'old-wh' ) ), 'requested' => array( 'departmentOperation' => 2, 'type' => 3 ) ) );
-$redirect = pek_route_run_action( $page, 'save_pek_settings', array( PekSettings::LOGIN_KEY => 'login', PekSettings::REQUEST_TIMEOUT_KEY => '22', PekSettings::SENDER_FULL_NAME_KEY => 'ООО Test' ) );
+$redirect = pek_route_run_action( $page, 'save_pek_settings', array( PekSettings::LOGIN_KEY => 'login', PekSettings::REQUEST_TIMEOUT_KEY => '22', PekSettings::SENDER_LEGAL_FORM_KEY => '1', PekSettings::SENDER_FULL_NAME_KEY => 'ООО Test', PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::SENDER_PHONE_KEY => '+79991234567', PekSettings::SENDER_EMAIL_KEY => 'sender@example.test' ) );
 pek_route_assert( $settings->request_timeout() === 22 && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'save_pek_settings must reach PekAdminPage and redirect to PEK tab.' );
 pek_route_assert( array() === $cache->current_for_current_user(), 'save_pek_settings must clear current-user PEK warehouse search cache.' );
 pek_route_assert( array() === $settings_repository->get_array( 'pek_admin_notice', array() ), 'PEK admin notices must not be persisted in SettingsRepository.' );

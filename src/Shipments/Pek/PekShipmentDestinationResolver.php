@@ -107,6 +107,9 @@ final class PekShipmentDestinationResolver {
 			'location_id' => $location_id,
 			'location_match' => true,
 			'location_identity_source' => $location_evidence['source'],
+			'location_level' => $location_evidence['level'],
+			'parent_city_match' => $location_evidence['parent_city_match'],
+			'settlement_match' => $location_evidence['settlement_match'],
 			'provider_destination_fingerprint' => (string) ( $mapping['address_fingerprint'] ?? $request->meta['provider_destination_fingerprint'] ?? '' ),
 			'saved_branch_id' => $saved_branch,
 			'branch_mismatch' => '' !== $saved_branch && $saved_branch !== $branch_id,
@@ -114,7 +117,7 @@ final class PekShipmentDestinationResolver {
 		);
 	}
 
-	/** @return array{source:string} */
+	/** @return array{source:string,level:string,parent_city_match:bool,settlement_match:bool} */
 	private function assert_location_matches_request( int $location_id, ShipmentCreateRequest $request ): array {
 		$location = $this->canonical_locations->find_by_id( $location_id );
 		if ( ! $location instanceof Location || ! $location->active ) {
@@ -127,28 +130,62 @@ final class PekShipmentDestinationResolver {
 		if ( '' !== trim( $address->region_name ) && '' !== trim( $location->region_name ) && ! $this->same_region_name( $address->region_name, $location->region_name ) ) {
 			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
 		}
-		if ( '' !== trim( $address->city ) && ! $this->matches_location_locality( $address->city, $location ) ) {
+		$evidence = is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array();
+		$request_city_fias = $this->normalize_guid( (string) ( $evidence['courier_city_fias_id'] ?? '' ) );
+		$request_settlement_fias = $this->normalize_guid( (string) ( $evidence['courier_settlement_fias_id'] ?? $address->fias_id ) );
+		$location_city_fias = $this->normalize_guid( $location->city_fias_id );
+		$location_fias = $this->normalize_guid( $location->fias_id );
+		$level = $this->location_level( $location );
+		$parent_city_match = $this->city_matches_location( $address->city, $request_city_fias, $location );
+		$settlement_match = $this->settlement_matches_location( $address->settlement, $request_settlement_fias, $location );
+
+		if ( 'city' === $level ) {
+			if ( ! $parent_city_match ) {
+				throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+			}
+			if ( '' !== trim( $address->settlement ) && '' !== $request_city_fias && '' !== $location_city_fias && $request_city_fias !== $location_city_fias && $request_city_fias !== $location_fias ) {
+				throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+			}
+
+			return array( 'source' => 'canonical_location_repository', 'level' => $level, 'parent_city_match' => true, 'settlement_match' => '' !== trim( $address->settlement ) );
+		}
+		if ( ! $settlement_match ) {
 			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
 		}
-		if ( '' !== trim( $address->settlement ) && ! $this->matches_location_locality( $address->settlement, $location ) ) {
-			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
-		}
-		$fias = trim( $address->fias_id );
-		if ( '' !== $fias && ! in_array( $this->normalize_guid( $fias ), array_filter( array_map( fn( string $value ): string => $this->normalize_guid( $value ), array( $location->fias_id, $location->city_fias_id ) ) ), true ) ) {
+		if ( '' !== trim( $address->city ) && ! $parent_city_match ) {
 			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
 		}
 
-		return array( 'source' => 'canonical_location_repository' );
+		return array( 'source' => 'canonical_location_repository', 'level' => $level, 'parent_city_match' => $parent_city_match, 'settlement_match' => true );
 	}
 
-	private function matches_location_locality( string $value, Location $location ): bool {
-		foreach ( array( $location->city_name, $location->settlement_name, $location->resolved_place_name() ) as $candidate ) {
-			if ( '' !== trim( $candidate ) && $this->same_location_name( $value, $candidate ) ) {
-				return true;
-			}
+	private function location_level( Location $location ): string {
+		$settlement = trim( $location->settlement_name );
+		if ( '' === $settlement || $this->same_location_name( $settlement, $location->city_name ) ) {
+			return 'city';
 		}
 
-		return false;
+		return 'settlement';
+	}
+
+	private function city_matches_location( string $request_city, string $request_city_fias, Location $location ): bool {
+		$location_city_fias = $this->normalize_guid( $location->city_fias_id );
+		if ( '' !== $request_city_fias && '' !== $location_city_fias && $request_city_fias === $location_city_fias ) {
+			return true;
+		}
+		if ( '' !== $request_city_fias && '' === $location_city_fias && $request_city_fias === $this->normalize_guid( $location->fias_id ) ) {
+			return true;
+		}
+
+		return '' !== trim( $request_city ) && $this->same_location_name( $request_city, $location->city_name );
+	}
+
+	private function settlement_matches_location( string $request_settlement, string $request_settlement_fias, Location $location ): bool {
+		if ( '' !== $request_settlement_fias && $request_settlement_fias === $this->normalize_guid( $location->fias_id ) ) {
+			return true;
+		}
+
+		return '' !== trim( $request_settlement ) && $this->same_location_name( $request_settlement, $location->settlement_name );
 	}
 
 	private function same_location_name( string $left, string $right ): bool {

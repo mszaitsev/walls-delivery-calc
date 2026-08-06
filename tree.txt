@@ -889,6 +889,7 @@ C:.
 |   |   |       PekShipmentRequestBuilder.php
 |   |   |       PekShipmentSenderWarehouseResolver.php
 |   |   |       PekShipmentStatusService.php
+|   |   |       PekShipmentStatusResponseNormalizer.php
 |   |   |       PekSmsReleaseAvailabilityService.php
 |   |   |       PekSmsReleaseResult.php
 |   |   |       PekStatusMapping.php

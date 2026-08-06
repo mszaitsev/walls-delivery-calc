@@ -1,8 +1,8 @@
 # Shipments
 
-PEK shipment runtime in 0.134.8 is under read-only contract verification before live submit: the code path covers create payload preparation, preview, persistence, manual attach, status update/autosync, actual carrier cost, documents, pre-acceptance cancellation, and local removal after cargo acceptance, but production submit is not yet approved pending live validation. Declared value authority is the WooCommerce product line total after discounts and taxes, excluding shipping and fees. SMS release must be confirmed by geography and counterpart service checks before create; no passport or identityCard fallback is used. Courier addressStock is built from persisted order DaData/Woo address data only, with safe completeness evidence in preview. Uncertain pending PEK submissions can be reconciled manually by cargo code without trusting browser delivery type; the server restores PEK context from the pending record or order draft.
+PEK shipment runtime in 0.134.9 is under read-only contract verification before live submit: the code path covers create payload preparation, preview, persistence, manual attach, status update/autosync, actual carrier cost, documents, pre-acceptance cancellation, and local removal after cargo acceptance, but production submit is not yet approved pending live validation. Declared value authority is the WooCommerce product line total after discounts and taxes, excluding shipping and fees. SMS release must be confirmed by geography and counterpart service checks before create; no passport or identityCard fallback is used. Courier addressStock is built from persisted order DaData/Woo address data only, with safe completeness evidence in preview. Uncertain pending PEK submissions can be reconciled manually by cargo code without trusting browser delivery type; the server restores PEK context from the pending record or order draft.
 
-Version: 0.134.8
+Version: 0.134.9
 
 Shipment code lives under `src/Shipments` and `src/Carriers/*/Shipment*` where carrier APIs require it.
 

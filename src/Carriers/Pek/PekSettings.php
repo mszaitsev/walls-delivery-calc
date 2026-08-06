@@ -126,11 +126,21 @@ final class PekSettings {
 	}
 
 	public function sender_inn(): string {
-		return preg_replace( '/\D+/', '', $this->settings->get_string( self::SENDER_INN_KEY, '' ) ) ?? '';
+		$value = trim( $this->settings->get_string( self::SENDER_INN_KEY, '' ) );
+		if ( self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $this->sender_legal_form() ) {
+			return 1 === preg_match( '/^\d{12}$/', $value ) ? $value : '';
+		}
+
+		return 1 === preg_match( '/^\d{10}$/', $value ) ? $value : '';
 	}
 
 	public function sender_kpp(): string {
-		return preg_replace( '/\D+/', '', $this->settings->get_string( self::SENDER_KPP_KEY, '' ) ) ?? '';
+		$value = trim( $this->settings->get_string( self::SENDER_KPP_KEY, '' ) );
+		if ( self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $this->sender_legal_form() && '' === $value ) {
+			return '';
+		}
+
+		return 1 === preg_match( '/^\d{9}$/', $value ) ? $value : '';
 	}
 
 	public function sender_registration_country(): string {
@@ -280,8 +290,25 @@ final class PekSettings {
 		foreach ( array( self::SENDER_FS_KEY, self::SENDER_FULL_NAME_KEY, self::SENDER_CONTACT_NAME_KEY, self::CLIENT_CARD_KEY, self::DEFAULT_CARGO_DESCRIPTION_KEY ) as $key ) {
 			$candidate[ $key ] = $this->sanitize_text( (string) ( $input[ $key ] ?? '' ) );
 		}
-		$candidate[ self::SENDER_INN_KEY ] = preg_replace( '/\D+/', '', (string) ( $input[ self::SENDER_INN_KEY ] ?? '' ) ) ?? '';
-		$candidate[ self::SENDER_KPP_KEY ] = preg_replace( '/\D+/', '', (string) ( $input[ self::SENDER_KPP_KEY ] ?? '' ) ) ?? '';
+		$inn = trim( (string) ( $input[ self::SENDER_INN_KEY ] ?? '' ) );
+		$kpp = trim( (string) ( $input[ self::SENDER_KPP_KEY ] ?? '' ) );
+		if ( self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $candidate[ self::SENDER_LEGAL_FORM_KEY ] ) {
+			if ( 1 !== preg_match( '/^\d{12}$/', $inn ) ) {
+				throw new \InvalidArgumentException( 'Некорректный ИНН отправителя ПЭК.' );
+			}
+			if ( '' !== $kpp && 1 !== preg_match( '/^\d{9}$/', $kpp ) ) {
+				throw new \InvalidArgumentException( 'Некорректный КПП отправителя ПЭК.' );
+			}
+		} else {
+			if ( 1 !== preg_match( '/^\d{10}$/', $inn ) ) {
+				throw new \InvalidArgumentException( 'Некорректный ИНН отправителя ПЭК.' );
+			}
+			if ( 1 !== preg_match( '/^\d{9}$/', $kpp ) ) {
+				throw new \InvalidArgumentException( 'Некорректный КПП отправителя ПЭК.' );
+			}
+		}
+		$candidate[ self::SENDER_INN_KEY ] = $inn;
+		$candidate[ self::SENDER_KPP_KEY ] = $kpp;
 		$country = strtoupper( $this->sanitize_key( (string) ( $input[ self::SENDER_REGISTRATION_COUNTRY_KEY ] ?? 'RU' ) ) );
 		$candidate[ self::SENDER_REGISTRATION_COUNTRY_KEY ] = array_key_exists( $country, self::COUNTRY_CLASSIFIER_CODES ) ? $country : 'RU';
 		$candidate[ self::SENDER_PHONE_KEY ] = trim( preg_replace( '/[^\d+]/', '', (string) ( $input[ self::SENDER_PHONE_KEY ] ?? '' ) ) ?? '' );

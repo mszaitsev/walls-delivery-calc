@@ -174,14 +174,22 @@ function pek_integration_assert_same_payload( array $actual, array $expected, st
 	pek_integration_assert( $actual_json === $expected_json, $label . " payload mismatch.\nExpected: " . (string) $expected_json . "\nActual: " . (string) $actual_json );
 }
 
-function pek_integration_set_dadata( PekIntegrationOrder $order, string $scope, string $region, string $city, string $street, string $house, string $flat = '', string $settlement = '' ): void {
+function pek_integration_set_dadata( PekIntegrationOrder $order, string $scope, string $region, string $city, string $street, string $house, string $flat = '', string $settlement = '', string $block = '', string $block_type = '', string $city_fias_id = '', string $settlement_fias_id = '' ): void {
 	$order->update_meta_data( '_' . $scope . '_dadata_status', 'house_selected' );
 	$order->update_meta_data( '_' . $scope . '_dadata_region_with_type', $region );
+	$order->update_meta_data( '_' . $scope . '_dadata_region_fias_id', 'region-fias-' . $scope );
 	$order->update_meta_data( '_' . $scope . '_dadata_city_with_type', $city );
+	$order->update_meta_data( '_' . $scope . '_dadata_city_fias_id', $city_fias_id );
 	$order->update_meta_data( '_' . $scope . '_dadata_settlement_with_type', $settlement );
+	$order->update_meta_data( '_' . $scope . '_dadata_settlement_fias_id', $settlement_fias_id );
 	$order->update_meta_data( '_' . $scope . '_dadata_street_with_type', $street );
 	$order->update_meta_data( '_' . $scope . '_dadata_house', $house );
+	$order->update_meta_data( '_' . $scope . '_dadata_house_type', 'д' );
+	$order->update_meta_data( '_' . $scope . '_dadata_block', $block );
+	$order->update_meta_data( '_' . $scope . '_dadata_block_type', $block_type );
 	$order->update_meta_data( '_' . $scope . '_dadata_flat', $flat );
+	$order->update_meta_data( '_' . $scope . '_dadata_flat_type', '' !== $flat ? 'кв' : '' );
+	$order->update_meta_data( '_' . $scope . '_dadata_fias_id', '' !== $settlement_fias_id ? $settlement_fias_id : $city_fias_id );
 }
 
 final class PekIntegrationFakeHttp implements PekHttpClientInterface {
@@ -662,6 +670,37 @@ $GLOBALS['wpdb']->locations = array(
 		'latitude' => '',
 		'longitude' => '',
 	),
+	array(
+		'id' => 78,
+		'country_code' => 'RU',
+		'region_name' => 'Москва',
+		'region_type' => 'г',
+		'city_name' => 'Москва',
+		'city_type' => 'г',
+		'city_fias_id' => 'moscow-city-fias',
+		'fias_id' => 'moscow-city-fias',
+		'settlement_name' => 'Москва',
+		'display_name' => 'Москва',
+		'active' => 1,
+		'latitude' => '',
+		'longitude' => '',
+	),
+	array(
+		'id' => 79,
+		'country_code' => 'RU',
+		'region_name' => 'Москва',
+		'region_type' => 'г',
+		'city_name' => 'Москва',
+		'city_type' => 'г',
+		'city_fias_id' => 'moscow-city-fias',
+		'fias_id' => 'sosenskoye-fias',
+		'settlement_name' => 'поселение Сосенское',
+		'settlement_type' => 'поселение',
+		'display_name' => 'Москва, поселение Сосенское',
+		'active' => 1,
+		'latitude' => '',
+		'longitude' => '',
+	),
 );
 $GLOBALS['wpdb']->pek_location_mappings = array();
 $GLOBALS['wpdb']->pek_terminals = array();
@@ -904,6 +943,42 @@ $location_mismatch_preview = $creation->safe_preview( $location_mismatch_request
 $connected_after_location_mismatch = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
 pek_integration_assert( array() !== $location_mismatch_preview['errors'] && str_contains( (string) ( $location_mismatch_preview['errors'][0] ?? '' ), 'Повторно рассчитайте доставку ПЭК' ), 'Location mismatch must fail with public recalculation message.' );
 pek_integration_assert( $connected_before_location_mismatch === $connected_after_location_mismatch && $submit_before_location_mismatch === count( $http->submit_bodies ), 'Location mismatch must stop before SMS/private services and preregistration submit.' );
+
+$city_level_order = new PekIntegrationOrder( 1093 );
+$GLOBALS['wdc_pek_integration_orders'][1093] = $city_level_order;
+$city_level_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'улица Липовый парк, дом 2', 'address_2' => '' ) );
+pek_integration_set_dadata( $city_level_order, 'shipping', 'Москва', 'Москва', 'улица Липовый парк', '2', '', 'поселение Сосенское', '', '', 'moscow-city-fias', 'sosenskoye-fias' );
+$city_level_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$city_level_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$city_level_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$city_level_order->update_meta_data( '_wdc_platform_location_fias_id', 'moscow-city-fias' );
+$city_level_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 78 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$city_level_preview = $creation->safe_preview( $drafts->create_request_from_order( $city_level_order ) );
+pek_integration_assert( array() === $city_level_preview['errors'] && 'city' === (string) ( $city_level_preview['body']['courier_location_level'] ?? '' ) && true === (bool) ( $city_level_preview['body']['courier_parent_city_match'] ?? false ), 'City-level canonical location must allow verified child settlement with matching parent city FIAS.' );
+
+$settlement_level_order = new PekIntegrationOrder( 1094 );
+$GLOBALS['wdc_pek_integration_orders'][1094] = $settlement_level_order;
+$settlement_level_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'улица Липовый парк, дом 2', 'address_2' => '' ) );
+pek_integration_set_dadata( $settlement_level_order, 'shipping', 'Москва', 'Москва', 'улица Липовый парк', '2', '', 'поселение Сосенское', '', '', 'moscow-city-fias', 'sosenskoye-fias' );
+$settlement_level_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$settlement_level_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$settlement_level_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$settlement_level_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 79 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$settlement_level_preview = $creation->safe_preview( $drafts->create_request_from_order( $settlement_level_order ) );
+pek_integration_assert( array() === $settlement_level_preview['errors'] && 'settlement' === (string) ( $settlement_level_preview['body']['courier_location_level'] ?? '' ) && true === (bool) ( $settlement_level_preview['body']['courier_settlement_match'] ?? false ), 'Settlement-level canonical location must require and accept exact settlement identity.' );
+
+$parent_only_order = new PekIntegrationOrder( 1095 );
+$GLOBALS['wdc_pek_integration_orders'][1095] = $parent_only_order;
+$parent_only_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'улица Липовый парк, дом 2', 'address_2' => '' ) );
+pek_integration_set_dadata( $parent_only_order, 'shipping', 'Москва', 'Москва', 'улица Липовый парк', '2', '', '', '', '', 'moscow-city-fias', '' );
+$parent_only_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$parent_only_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$parent_only_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$parent_only_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 79 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$connected_before_parent_only = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
+$parent_only_preview = $creation->safe_preview( $drafts->create_request_from_order( $parent_only_order ) );
+$connected_after_parent_only = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
+pek_integration_assert( array() !== $parent_only_preview['errors'] && $connected_before_parent_only === $connected_after_parent_only, 'Settlement-level location cannot be authorized by parent city only and must stop before private SMS call.' );
 $before_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 $preview = $creation->safe_preview( $request );
 $after_preview_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
@@ -911,6 +986,7 @@ pek_integration_assert( $before_submit === $after_preview_submit, 'Safe preview 
 pek_integration_assert( 'POST' === $preview['method'] && '/preregistration/submit/' === $preview['path'] && array() === $preview['errors'], 'Safe preview must return canonical PEK envelope: ' . wp_json_encode( $preview, JSON_UNESCAPED_UNICODE ) );
 pek_integration_assert( 'shipping_dadata' === (string) ( $preview['body']['courier_address_source'] ?? '' ) && ! empty( $preview['body']['courier_region_present'] ) && ! empty( $preview['body']['courier_house_present'] ) && '' !== (string) ( $preview['body']['courier_address_hash'] ?? '' ), 'Safe preview must expose courier address evidence without raw address.' );
 pek_integration_assert( 77 === (int) ( $preview['body']['courier_location_id'] ?? 0 ) && true === (bool) ( $preview['body']['courier_location_match'] ?? false ) && 'canonical_location_repository' === (string) ( $preview['body']['courier_location_identity_source'] ?? '' ) && 'fresh_location_mapping' === (string) ( $preview['body']['courier_branch_source'] ?? '' ), 'Safe preview must expose courier location/branch binding evidence.' );
+pek_integration_assert( 'city' === (string) ( $preview['body']['courier_location_level'] ?? '' ) && true === (bool) ( $preview['body']['courier_parent_city_match'] ?? false ) && ! array_key_exists( 'courier_city_fias_id', $preview['body'] ), 'Safe preview must expose only safe location match evidence without raw FIAS IDs.' );
 $create_result = $creation->create( $order, $request );
 $submit_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 pek_integration_assert( true === $create_result->success, 'Production chain create must succeed through fake PEK submit.' );
@@ -1256,6 +1332,15 @@ $moscow = $addresses->normalize( new Address( country_code: 'RU', region_name: '
 pek_integration_assert( 'Россия, Москва, Тверская улица, дом 1' === $addresses->address_stock( $moscow ), 'Federal city region must not be duplicated.' );
 $parsed = $addresses->normalize( new Address( country_code: 'RU', city: 'Москва', raw_address: '2-я Мелитопольская улица, 12Ас1' ) );
 pek_integration_assert( '12Ас1' === $parsed->house, 'Courier parser must accept explicit house with letter/corpus.' );
+$parsed_corpus = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, д 10, к 1' ) );
+pek_integration_assert( 'Россия, Московская область, Видное, улица Советская, дом 10 к 1' === $addresses->address_stock( $parsed_corpus ), 'Courier parser must preserve comma-separated corpus in addressStock.' );
+$parsed_structure = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, дом 10, стр. 2' ) );
+pek_integration_assert( 'Россия, Московская область, Видное, улица Советская, дом 10 стр. 2' === $addresses->address_stock( $parsed_structure ), 'Courier parser must preserve comma-separated structure in addressStock.' );
+$typed_block_order = new PekIntegrationOrder( 2018 );
+$typed_block_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'улица Советская, дом 10, к 1', 'address_2' => '' ) );
+pek_integration_set_dadata( $typed_block_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '', '', '1', 'к' );
+$typed_block_evidence = $addresses->from_order_with_evidence( $typed_block_order );
+pek_integration_assert( str_contains( $typed_block_evidence['address']->raw_address, 'дом 10 к 1' ) && ! str_contains( $typed_block_evidence['address']->raw_address, 'дом 10 1' ), 'Typed DaData block must be appended with type and never as ambiguous bare number.' );
 
 $request_builder_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentRequestBuilder.php' ) ?: '';
 pek_integration_assert( str_contains( $request_builder_source, "if ( '' !== \$client_card )" ), 'PEK request builder must omit empty counterpartClientCard.' );

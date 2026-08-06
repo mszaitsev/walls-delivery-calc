@@ -198,9 +198,15 @@ pek_assert( PekSettings::PLANNED_COUNTRIES === array( 'RU', 'AM', 'BY', 'KG', 'K
 pek_assert( PekSettings::INITIAL_COUNTRIES === array( 'RU' ), 'PEK initial countries must be RU only.' );
 pek_assert( PekSettings::COUNTRY_CLASSIFIER_CODES === array( 'RU' => '643', 'AM' => '051', 'BY' => '112', 'KG' => '417', 'KZ' => '398' ), 'PEK classifier codes must be centralized.' );
 pek_assert( $settings->request_timeout() === 15 && $settings->request_soft_limit_per_minute() === 90, 'PEK settings defaults must be safe.' );
-$settings->save_from_admin( array( PekSettings::REQUEST_TIMEOUT_KEY => 999, PekSettings::REQUESTS_PER_MINUTE_KEY => 999, PekSettings::SENDER_INN_KEY => ' 12-34 ', PekSettings::SENDER_PHONE_KEY => '+7 (999) 123-45-67', PekSettings::SENDER_EMAIL_KEY => 'sender@example.test', PekSettings::SENDER_REGISTRATION_COUNTRY_KEY => 'KZ', PekSettings::SMS_RELEASE_LIMIT_RUB_KEY => 0 ) );
+$settings->save_from_admin( array( PekSettings::REQUEST_TIMEOUT_KEY => 999, PekSettings::REQUESTS_PER_MINUTE_KEY => 999, PekSettings::SENDER_LEGAL_FORM_KEY => 1, PekSettings::SENDER_INN_KEY => '1234567890', PekSettings::SENDER_KPP_KEY => '123456789', PekSettings::SENDER_PHONE_KEY => '+7 (999) 123-45-67', PekSettings::SENDER_EMAIL_KEY => 'sender@example.test', PekSettings::SENDER_REGISTRATION_COUNTRY_KEY => 'KZ', PekSettings::SMS_RELEASE_LIMIT_RUB_KEY => 0 ) );
 pek_assert( $settings->request_timeout() === 60 && $settings->request_soft_limit_per_minute() === 100, 'PEK numeric settings must clamp.' );
-pek_assert( $settings->sender_inn() === '1234' && $settings->sender_phone() === '+79991234567' && $settings->sender_registration_classifier_code() === '398', 'PEK sender settings must be normalized.' );
+pek_assert( $settings->sender_inn() === '1234567890' && $settings->sender_kpp() === '123456789' && $settings->sender_phone() === '+79991234567' && $settings->sender_registration_classifier_code() === '398', 'PEK sender settings must be normalized without cleaning malformed identity values.' );
+try {
+	$settings->save_from_admin( array( PekSettings::SENDER_LEGAL_FORM_KEY => 1, PekSettings::SENDER_INN_KEY => '12-34', PekSettings::SENDER_KPP_KEY => '123456789', PekSettings::SENDER_PHONE_KEY => '+79991234567', PekSettings::SENDER_EMAIL_KEY => 'sender@example.test' ) );
+	pek_assert( false, 'Malformed PEK sender INN must be rejected.' );
+} catch ( InvalidArgumentException ) {
+	pek_assert( $settings->sender_inn() === '1234567890', 'Rejected malformed PEK sender INN must not partially update settings.' );
+}
 pek_assert( $settings->sms_release_limit_rub() === 1, 'PEK SMS limit must clamp lower bound.' );
 $settings_repository->set( PekSettings::SMS_RELEASE_LIMIT_RUB_KEY, PekSettings::DEFAULT_SMS_RELEASE_LIMIT_RUB );
 pek_assert( $settings->sms_release_limit_rub() === 500000, 'PEK SMS limit default must be 500000 rub.' );

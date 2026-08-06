@@ -208,6 +208,24 @@ order_meta_smoke_assert( 1000 === ( $calculation['package']['products_weight_g']
 order_meta_smoke_assert( 3810.06 === ( $calculation['api']['api_base_price_rub'] ?? 0.0 ) && 5338.0 === ( $calculation['result']['final_price_rub'] ?? 0.0 ), 'Calculation data must contain API and final prices.' );
 order_meta_smoke_assert( 'service' === ( $calculation['rules']['rules_source'] ?? '' ) && ! empty( $calculation['rules']['applied_rules'] ) && ! empty( $calculation['rules']['formula_visualization'] ), 'Calculation data must contain rules source, audit and formula.' );
 order_meta_smoke_assert( (bool) preg_grep( '/Итог: 5 338 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula final line must match actual shipping cost.' );
+
+$dadata_type_order = new WdcOrderMetaSmokeOrder();
+$persister->persist(
+	$dadata_type_order,
+	array(
+		'shipping_dadata_status' => 'house_selected',
+		'shipping_dadata_house' => '10',
+		'shipping_dadata_house_type' => 'д',
+		'shipping_dadata_block' => '1',
+		'shipping_dadata_block_type' => 'к',
+		'shipping_dadata_stead' => '',
+		'shipping_dadata_stead_type' => '',
+		'shipping_dadata_flat' => '5',
+		'shipping_dadata_flat_type' => 'кв',
+	)
+);
+order_meta_smoke_assert( '1' === (string) ( $dadata_type_order->meta['_shipping_dadata_block'] ?? '' ) && 'к' === (string) ( $dadata_type_order->meta['_shipping_dadata_block_type'] ?? '' ), 'DaData block and block_type must persist from checkout data to order meta.' );
+order_meta_smoke_assert( 'д' === (string) ( $dadata_type_order->meta['_shipping_dadata_house_type'] ?? '' ) && 'кв' === (string) ( $dadata_type_order->meta['_shipping_dadata_flat_type'] ?? '' ), 'DaData house_type and flat_type must persist from checkout data to order meta.' );
 order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
 

@@ -46,10 +46,11 @@
 		'dadata_house_kladr_id',
 		'dadata_block',
 		'dadata_block_type',
-		'dadata_stead',
-		'dadata_stead_type',
-		'dadata_flat',
-		'dadata_fias_id',
+    'dadata_stead',
+    'dadata_stead_type',
+    'dadata_flat',
+    'dadata_flat_type',
+    'dadata_fias_id',
 		'dadata_kladr_id',
 		'dadata_fias_level'
 	];
@@ -210,10 +211,11 @@
 			'dadata_house_kladr_id',
 			'dadata_block',
 			'dadata_block_type',
-			'dadata_stead',
-			'dadata_stead_type',
-			'dadata_flat',
-			'dadata_fias_id',
+          'dadata_stead',
+          'dadata_stead_type',
+          'dadata_flat',
+          'dadata_flat_type',
+          'dadata_fias_id',
 			'dadata_kladr_id',
 			'dadata_fias_level'
 		].forEach( function ( key ) {

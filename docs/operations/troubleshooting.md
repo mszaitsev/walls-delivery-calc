@@ -2,7 +2,7 @@
 
 For PEK shipment create failures, first check sender counterpart confirmation, PEK account login consistency, sender warehouse validity, RU-only destination, selected pickup terminal freshness, declared value limits, and SMS release availability. Courier preview/create may reject an order when persisted DaData no longer matches current Woo shipping fields, billing data would replace a distinct shipping destination, country is not current RU, or the saved address cannot prove street plus house. PEK settings save is validate-before-write; invalid sender email or invalid bounded settings should leave the previous sender identity and counterpart snapshot unchanged. Uncertain transport/contract failures after submit are persisted as `pending_creation_in_carrier`; managers must verify the PEK cabinet and either manually attach the cargo code or remove the pending local attempt before retrying.
 
-Version: 0.134.8
+Version: 0.134.9
 
 Start with:
 
