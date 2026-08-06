@@ -667,7 +667,7 @@ final class OrderShipmentDraftFactory {
 		}
 		$place = new ShipmentPlace(
 			1,
-			max( 1, (int) ( $calculation['package']['weight_g'] ?? $product_weight ?: 1000 ) ),
+			$this->pek_transport_weight_g( $order, $items, $product_weight ),
 			max( 1, (int) ( $dimensions['length'] ?? 20 ) ),
 			max( 1, (int) ( $dimensions['width'] ?? 20 ) ),
 			max( 1, (int) ( $dimensions['height'] ?? 10 ) ),
@@ -1029,7 +1029,7 @@ final class OrderShipmentDraftFactory {
 		$package = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
 		$products_weight = (int) ( $package['products_weight_g'] ?? 0 );
 		$packaging_weight = (int) ( $package['packaging_weight_g'] ?? 0 );
-		$weight = (int) ( $package['package_weight_with_packaging_g'] ?? $package['final_weight_g'] ?? 0 );
+		$weight = (int) ( $package['final_weight_g'] ?? $package['package_weight_with_packaging_g'] ?? 0 );
 		if ( $weight <= 0 && $products_weight > 0 ) {
 			$weight = $products_weight + max( 0, $packaging_weight );
 		}
@@ -1042,6 +1042,30 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return max( 1, $total ?: 1000 );
+	}
+
+	/** @param array<int,PackageItem> $items */
+	private function pek_transport_weight_g( object $order, array $items, int $product_weight_g ): int {
+		$calculation = $this->calculation_data( $order );
+		$package = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
+		$weight = (int) ( $package['final_weight_g'] ?? $package['package_weight_with_packaging_g'] ?? 0 );
+		if ( $weight > 0 ) {
+			return $weight;
+		}
+		$packaging_weight = (int) ( $package['packaging_weight_g'] ?? 0 );
+		if ( $product_weight_g > 0 ) {
+			return max( 1, $product_weight_g + max( 0, $packaging_weight ) );
+		}
+		$total = 0;
+		foreach ( $items as $item ) {
+			$total += $item instanceof PackageItem ? $item->get_total_weight_g() : 0;
+		}
+
+		if ( $total > 0 ) {
+			return $total;
+		}
+
+		throw new \RuntimeException( 'Для заявки ПЭК нужно подтвердить вес груза.' );
 	}
 
 	/**

@@ -32,7 +32,7 @@ final class PekShipmentDocumentProvider implements CarrierShipmentDocumentProvid
 			new ShipmentDocumentAction( self::ACTION_APPLICATION, 'Скачать заявку ПЭК', true, 'download' ),
 			new ShipmentDocumentAction( self::ACTION_LABEL, 'Скачать этикетку ПЭК', true, 'download' ),
 		);
-		if ( count( is_array( $shipment['pek_position_barcodes'] ?? null ) ? $shipment['pek_position_barcodes'] : array() ) > 1 ) {
+		if ( count( is_array( $shipment['pek_cargo_codes'] ?? null ) ? $shipment['pek_cargo_codes'] : array() ) > 1 ) {
 			$actions[] = new ShipmentDocumentAction( self::ACTION_ALL_LABELS, 'Скачать все этикетки ПЭК', true, 'download' );
 		}
 

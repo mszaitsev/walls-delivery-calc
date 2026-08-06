@@ -14,6 +14,9 @@ final class PekShipmentButtonPolicy {
 			return array( 'create' => true, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => false );
 		}
 		$status = (string) ( $shipment['universal_status_code'] ?? '' );
+		if ( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $status || ! empty( $shipment['pending_creation_in_carrier'] ) ) {
+			return array( 'create' => false, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => true );
+		}
 		$accepted = '' !== (string) ( $shipment['pek_take_on_stock_datetime'] ?? '' )
 			|| in_array( $status, array( DeliveryStatus::IN_TRANSIT, DeliveryStatus::READY_FOR_PICKUP, DeliveryStatus::HANDED_TO_COURIER, DeliveryStatus::DELIVERED, DeliveryStatus::RETURNING_TO_SENDER, DeliveryStatus::RETURNED_TO_SENDER ), true );
 

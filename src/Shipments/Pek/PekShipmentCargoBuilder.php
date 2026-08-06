@@ -20,38 +20,38 @@ final class PekShipmentCargoBuilder {
 			throw new \RuntimeException( 'Для заявки ПЭК нужно минимум одно грузоместо.' );
 		}
 		$places = array();
-		$weight = 0.0;
-		$raw_volume_sum = 0.0;
-		$max_dimension = 0.0;
+		$weight_hundredths_kg = 0;
+		$raw_volume_sum_cm3 = 0;
+		$max_dimension_cm = 0;
 		foreach ( $request->places as $place ) {
 			if ( ! $place instanceof ShipmentPlace || array() !== $place->validate() ) {
 				throw new \RuntimeException( 'Некорректные грузоместа ПЭК.' );
 			}
-			$w = $this->ceil2( $place->weight_g / 1000 );
-			$l = $this->ceil2( $place->length_cm / 100 );
-			$wi = $this->ceil2( $place->width_cm / 100 );
-			$h = $this->ceil2( $place->height_cm / 100 );
-			$raw_volume = $l * $wi * $h;
-			$v = $this->ceil2( $raw_volume );
-			$weight += $w;
-			$raw_volume_sum += $raw_volume;
-			$max_dimension = max( $max_dimension, $l, $wi, $h );
+			$w = $this->hundredths_kg( $place->weight_g );
+			$l = $this->hundredths_m( $place->length_cm );
+			$wi = $this->hundredths_m( $place->width_cm );
+			$h = $this->hundredths_m( $place->height_cm );
+			$raw_volume_cm3 = $place->length_cm * $place->width_cm * $place->height_cm;
+			$v = $this->hundredths_m3( $raw_volume_cm3 );
+			$weight_hundredths_kg += $w;
+			$raw_volume_sum_cm3 += $raw_volume_cm3;
+			$max_dimension_cm = max( $max_dimension_cm, $place->length_cm, $place->width_cm, $place->height_cm );
 			$places[] = array(
 				'quantity' => 1,
-				'weight' => $w,
-				'length' => $l,
-				'width' => $wi,
-				'height' => $h,
-				'volume' => $v,
+				'weight' => $this->decimal_hundredths( $w ),
+				'length' => $this->decimal_hundredths( $l ),
+				'width' => $this->decimal_hundredths( $wi ),
+				'height' => $this->decimal_hundredths( $h ),
+				'volume' => $this->decimal_hundredths( $v ),
 			);
 		}
-		$weight = $this->ceil2( $weight );
-		$volume = $this->ceil2( $raw_volume_sum );
+		$weight = $this->decimal_hundredths( $weight_hundredths_kg );
+		$volume = $this->decimal_hundredths( $this->hundredths_m3( $raw_volume_sum_cm3 ) );
 		$summary = array(
 			'place_count' => count( $places ),
 			'aggregate_weight_kg' => $weight,
 			'aggregate_volume_m3' => $volume,
-			'max_dimension_m' => $this->ceil2( $max_dimension ),
+			'max_dimension_m' => $this->decimal_hundredths( $this->hundredths_m( $max_dimension_cm ) ),
 			'description' => $this->description( $request ),
 		);
 
@@ -72,8 +72,24 @@ final class PekShipmentCargoBuilder {
 		);
 	}
 
-	private function ceil2( float $value ): float {
-		return ceil( $value * 100 ) / 100;
+	private function hundredths_kg( int $weight_g ): int {
+		return intdiv( max( 1, $weight_g ) + 9, 10 );
+	}
+
+	private function hundredths_m( int $centimeters ): int {
+		return max( 1, $centimeters );
+	}
+
+	private function hundredths_m3( int $volume_cm3 ): int {
+		return intdiv( max( 1, $volume_cm3 ) + 9999, 10000 );
+	}
+
+	private function decimal_hundredths( int $hundredths ): int|float {
+		if ( 0 === $hundredths % 100 ) {
+			return intdiv( $hundredths, 100 );
+		}
+
+		return (float) ( intdiv( $hundredths, 100 ) . '.' . str_pad( (string) ( $hundredths % 100 ), 2, '0', STR_PAD_LEFT ) );
 	}
 
 	private function description( ShipmentCreateRequest $request ): string {

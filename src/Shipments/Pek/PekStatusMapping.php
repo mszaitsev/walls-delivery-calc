@@ -9,6 +9,14 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 defined( 'ABSPATH' ) || exit;
 
 final class PekStatusMapping {
+	public function is_pre_acceptance_status( string $status ): bool {
+		return in_array(
+			$this->normalize( $status ),
+			array( 'заявка на забор зарегистрирована', 'ожидается передача груза от отправителя', 'оформлен' ),
+			true
+		);
+	}
+
 	public function map( string $status, string $delivery_type = DeliveryType::PICKUP ): string {
 		$normalized = $this->normalize( $status );
 		if ( 'аннулировано до приемки груза' === $normalized ) {

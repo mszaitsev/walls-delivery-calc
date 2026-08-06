@@ -115,12 +115,15 @@ final class PekShipmentRequestBuilder {
 			'fs' => $this->settings->sender_fs(),
 			'title' => $this->settings->sender_full_name(),
 			'inn' => $this->settings->sender_inn(),
-			'kpp' => $this->settings->sender_kpp(),
 			'countryOfRegistrationCode' => $this->settings->sender_registration_classifier_code(),
 			'person' => $this->settings->sender_contact_name(),
 			'personPhones' => array( array( 'phone' => $this->normalize_ru_phone( $this->settings->sender_phone() ) ) ),
 			'warehouseId' => (string) $sender['warehouseId'],
 		);
+		$kpp = trim( $this->settings->sender_kpp() );
+		if ( '' !== $kpp ) {
+			$payload['kpp'] = $kpp;
+		}
 		$email = trim( $this->settings->sender_email() );
 		if ( '' !== $email && function_exists( 'is_email' ) && false === is_email( $email ) ) {
 			throw new \RuntimeException( 'Некорректный email отправителя ПЭК.' );
@@ -136,7 +139,7 @@ final class PekShipmentRequestBuilder {
 	private function services( ShipmentCreateRequest $request, int $declared_kopecks, bool $sealing ): array {
 		$services = array(
 			'transporting' => array( 'payer' => array( 'type' => 1 ) ),
-			'insurance' => array( 'enabled' => true, 'payer' => array( 'type' => 1 ), 'cost' => round( $declared_kopecks / 100, 2 ) ),
+			'insurance' => array( 'enabled' => true, 'payer' => array( 'type' => 1 ), 'cost' => $this->kopecks_to_rub_number( $declared_kopecks ) ),
 		);
 		if ( DeliveryType::COURIER === $request->delivery_type ) {
 			$services['delivery'] = array( 'enabled' => true, 'payer' => array( 'type' => 1 ) );
@@ -193,6 +196,16 @@ final class PekShipmentRequestBuilder {
 		return '';
 	}
 
+	private function kopecks_to_rub_number( int $kopecks ): int|float {
+		$rubles = intdiv( $kopecks, 100 );
+		$cents = $kopecks % 100;
+		if ( 0 === $cents ) {
+			return $rubles;
+		}
+
+		return (float) ( $rubles . '.' . str_pad( (string) $cents, 2, '0', STR_PAD_LEFT ) );
+	}
+
 	/** @param array<string,mixed> $summary @return array<string,mixed> */
 	private function preview( array $summary ): array {
 		$sender = is_array( $summary['sender_warehouse'] ?? null ) ? $summary['sender_warehouse'] : array();
@@ -217,7 +230,15 @@ final class PekShipmentRequestBuilder {
 			'sms_release_requested' => true,
 			'sms_release_confirmed' => ! empty( $sms['success'] ),
 			'sms_effective_limit_kopecks' => (int) ( $sms['effective_limit_kopecks'] ?? 0 ),
-			'payers' => array( 'transporting' => 1, 'insurance' => 1, 'delivery' => 1, 'sealing' => 1 ),
+			'payers' => array_filter(
+				array(
+					'transporting' => 1,
+					'insurance' => 1,
+					'delivery' => DeliveryType::COURIER === (string) ( $summary['shipment_mode'] ?? '' ) ? 1 : null,
+					'sealing' => ! empty( $summary['sealing_requested'] ) ? 1 : null,
+				),
+				static fn( mixed $value ): bool => null !== $value
+			),
 			'sealing' => ! empty( $summary['sealing_requested'] ),
 			'product_weight_g' => (int) ( $summary['product_weight_g'] ?? 0 ),
 			'client_card_present' => '' !== $this->settings->client_card(),

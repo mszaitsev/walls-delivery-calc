@@ -47,7 +47,17 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	}
 
 	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult {
-		return $this->create_for_order( $this->order_stub(), $request );
+		try {
+			$order = $this->order_from_request( $request );
+		} catch ( \Throwable ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'pek_order_not_found',
+				error_message: 'Не удалось загрузить заказ для создания заявки ПЭК.'
+			);
+		}
+
+		return $this->create_for_order( $order, $request );
 	}
 
 	public function create_for_order( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
@@ -68,7 +78,7 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		} catch ( PekApiException $e ) {
 			$context = $e->context();
 			$stage = (string) ( $context['failure_stage'] ?? '' );
-			$uncertain = in_array( $stage, array( 'shipment_create_transport', 'shipment_create_contract' ), true );
+			$uncertain = is_array( $built ) && $this->is_uncertain_submit_exception( $context );
 			return new ShipmentCreateResult(
 				false,
 				error_code: $uncertain ? 'pek_uncertain_submit' : (string) ( $context['error_code'] ?? 'pek_create_failed' ),
@@ -181,7 +191,7 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	private function order_from_request( ShipmentCreateRequest $request ): object {
 		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $request->order_id ) : null;
 		if ( ! is_object( $order ) ) {
-			throw new \RuntimeException( 'Не удалось загрузить заказ для preview ПЭК.' );
+			throw new \RuntimeException( 'Не удалось загрузить заказ для ПЭК.' );
 		}
 
 		return $order;
@@ -189,9 +199,41 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 
 	/** @param array<string,mixed> $shipment */
 	private function is_old_enough_for_cancel( array $shipment ): bool {
-		$created = strtotime( (string) ( $shipment['created_at'] ?? '' ) );
+		$created = $this->stored_timestamp( (string) ( $shipment['created_at'] ?? '' ) );
+		$now = function_exists( 'current_datetime' ) ? current_datetime()->getTimestamp() : time();
 
-		return false !== $created && time() - $created >= 600;
+		return null !== $created && $now - $created >= 600;
+	}
+
+	private function stored_timestamp( string $value ): ?int {
+		$value = trim( $value );
+		if ( '' === $value ) {
+			return null;
+		}
+		$timezone = function_exists( 'wp_timezone' ) ? wp_timezone() : new \DateTimeZone( 'UTC' );
+		foreach ( array( '!Y-m-d H:i:s', \DateTimeInterface::ATOM ) as $format ) {
+			$date = \DateTimeImmutable::createFromFormat( $format, $value, $timezone );
+			$errors = \DateTimeImmutable::getLastErrors();
+			if ( $date instanceof \DateTimeImmutable && ( false === $errors || ( 0 === $errors['warning_count'] && 0 === $errors['error_count'] ) ) ) {
+				return $date->getTimestamp();
+			}
+		}
+
+		return null;
+	}
+
+	/** @param array<string,mixed> $context */
+	private function is_uncertain_submit_exception( array $context ): bool {
+		$stage = (string) ( $context['failure_stage'] ?? '' );
+		if ( in_array( $stage, array( 'shipment_create_transport', 'shipment_create_contract' ), true ) ) {
+			return true;
+		}
+		$status = (int) ( $context['http_status'] ?? 0 );
+		if ( 408 === $status || ( $status >= 500 && $status <= 599 ) ) {
+			return true;
+		}
+
+		return in_array( (string) ( $context['error_code'] ?? '' ), array( 'pek_http_500', 'pek_http_non_2xx' ), true ) && $status >= 500;
 	}
 
 	private function log( string $message, \Throwable $e ): void {

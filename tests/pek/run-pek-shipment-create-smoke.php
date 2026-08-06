@@ -25,6 +25,7 @@ use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Shipments\Pek\PekShipmentAdapter;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCargoBuilder;
 use WallsShop\WDC\Shipments\Pek\PekShipmentCreateResponseParser;
 use WallsShop\WDC\Shipments\Pek\PekShipmentProductWeightResolver;
@@ -107,7 +108,33 @@ $common = $built['payload']['common'];
 $place = $common['cargoPlaceList'][0];
 pek_shipment_create_assert( ! isset( $built['payload']['cargoPlaceList'], $built['payload']['cost'] ), 'Cargo payload must not use legacy top-level cargo aliases.' );
 pek_shipment_create_assert( $common['weight'] === $place['weight'], 'Aggregate weight must equal transmitted place sum.' );
-pek_shipment_create_assert( $common['volume'] === ceil( ( $place['length'] * $place['width'] * $place['height'] ) * 100 ) / 100, 'Aggregate volume must match transmitted place dimensions.' );
+pek_shipment_create_assert( 1.25 === $common['weight'] && 0.2 === $place['length'] && 0.2 === $place['width'] && 0.2 === $place['height'], '1241 g and 20 cm measures must serialize to exact PEK hundredths.' );
+pek_shipment_create_assert( 0.01 === $common['volume'], '0.2 x 0.2 x 0.2 aggregate volume must be 0.01.' );
+
+$measure_request = new ShipmentCreateRequest(
+	1,
+	PekSettings::CARRIER_KEY,
+	DeliveryType::PICKUP,
+	'pek:pickup',
+	new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ),
+	null,
+	array(
+		new ShipmentPlace( 1, 70, 7, 14, 28, Money::from_kopecks( 0 ), array(), false, 'Товары интернет-магазина' ),
+		new ShipmentPlace( 2, 140, 55, 56, 7, Money::from_kopecks( 0 ), array(), false, 'Товары интернет-магазина' ),
+		new ShipmentPlace( 3, 550, 14, 14, 14, Money::from_kopecks( 0 ), array(), false, 'Товары интернет-магазина' ),
+		new ShipmentPlace( 4, 560, 28, 28, 7, Money::from_kopecks( 0 ), array(), false, 'Товары интернет-магазина' ),
+		new ShipmentPlace( 5, 1090, 100, 100, 100, Money::from_kopecks( 0 ), array(), false, 'Товары интернет-магазина' ),
+	),
+	Money::from_kopecks( 0 ),
+	true,
+	array(),
+	array(),
+	array( 'order_num' => '1001', 'pek_correlation' => 'wdc-pek-1' )
+);
+$measures = $builder->build( $measure_request, 150000 )['payload']['common'];
+pek_shipment_create_assert( array( 0.07, 0.14, 0.55, 0.56, 1.09 ) === array_column( $measures['cargoPlaceList'], 'weight' ), 'Weights must be integer-scaled upward to hundredths of kg.' );
+pek_shipment_create_assert( array( 0.07, 0.55, 0.14, 0.28, 1 ) === array_column( $measures['cargoPlaceList'], 'length' ), 'Dimensions must map integer cm directly to hundredths of meters.' );
+pek_shipment_create_assert( 2.41 === $measures['weight'], 'Aggregate weight must sum transmitted hundredths exactly.' );
 
 $multi_request = new ShipmentCreateRequest(
 	1,
@@ -161,17 +188,33 @@ pek_shipment_create_assert( 'Петров Петр' === $receiver['title'] && '�
 $parser = new PekShipmentCreateResponseParser();
 $parsed = $parser->parse( $response );
 pek_shipment_create_assert( '136' === $parsed['document_id'] && '999940950644' === $parsed['cargo_code'], 'Create response parser must parse official preregistration identifiers.' );
-try {
-	$parser->parse( array( 'documentId' => 136, 'cargos' => array( array() ) ) );
-	pek_shipment_create_assert( false, 'Missing cargoCode must fail parser.' );
-} catch ( RuntimeException ) {
-	pek_shipment_create_assert( true, 'Missing cargoCode fails parser.' );
+foreach ( array(
+	array( 'documentId' => array(), 'cargos' => array( array( 'cargoCode' => '1' ) ) ),
+	array( 'documentId' => false, 'cargos' => array( array( 'cargoCode' => '1' ) ) ),
+	array( 'documentId' => 0, 'cargos' => array( array( 'cargoCode' => '1' ) ) ),
+	array( 'documentId' => 1, 'cargos' => array( 'cargoCode' => '1' ) ),
+	array( 'documentId' => 1, 'cargos' => array( array( 'cargoCode' => array() ) ) ),
+	array( 'documentId' => 1, 'cargos' => array( array( 'cargoCode' => true ) ) ),
+	array( 'documentId' => 1, 'cargos' => array( array( 'cargoCode' => '1', 'positions' => 'bad' ) ) ),
+	array( 'documentId' => 1, 'cargos' => array( array( 'cargoCode' => '1', 'positions' => array( array( 'barcode' => array() ) ) ) ) ),
+) as $bad_response ) {
+	try {
+		$parser->parse( $bad_response );
+		pek_shipment_create_assert( false, 'Malformed create response must fail parser.' );
+	} catch ( RuntimeException ) {
+		pek_shipment_create_assert( true, 'Malformed create response fails parser.' );
+	}
 }
 
 $adapter_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentAdapter.php' ) ?: '';
 $status_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentStatusService.php' ) ?: '';
+/** @var PekShipmentAdapter $adapter_without_constructor */
+$adapter_without_constructor = ( new ReflectionClass( PekShipmentAdapter::class ) )->newInstanceWithoutConstructor();
+$missing_order_result = $adapter_without_constructor->create( new ShipmentCreateRequest( 999999, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 1000, 20, 20, 20, Money::from_kopecks( 0 ) ) ), Money::from_kopecks( 0 ) ) );
+pek_shipment_create_assert( $missing_order_result instanceof ShipmentCreateResult && ! $missing_order_result->success && 'pek_order_not_found' === $missing_order_result->error_code, 'Direct adapter create must return failed result when Woo order is missing, not fatal.' );
 pek_shipment_create_assert( str_contains( $adapter_source, "'method' => 'POST'" ) && str_contains( $adapter_source, "'path' => '/preregistration/submit/'" ) && str_contains( $adapter_source, "'body' => \$built['preview']" ), 'Preview must return canonical framework envelope.' );
 pek_shipment_create_assert( str_contains( $adapter_source, '$submitted' ) && str_contains( $adapter_source, "error_code: 'pek_uncertain_submit'" ) && str_contains( $adapter_source, 'safe_summary' ), 'Post-submit parser failures must become uncertain with safe summary.' );
+pek_shipment_create_assert( ! str_contains( $adapter_source, 'order_stub' ), 'Adapter direct create must not call undefined order_stub.' );
 pek_shipment_create_assert( strpos( $status_source, 'unset( $status[\'actual_cost_candidate\'] );' ) < strpos( $status_source, 'save_for_carrier' ), 'Status service must unset actual cost candidate before persistence.' );
 pek_shipment_create_assert( PekShipmentAdapter::class !== '', 'PEK adapter class must be autoloadable.' );
 

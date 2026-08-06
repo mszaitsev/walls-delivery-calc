@@ -17,7 +17,8 @@ final class PekShipmentService {
 		private PekShipmentStatusService $statuses,
 		private OrderShipmentRepository $repository,
 		private PekShipmentButtonPolicy $buttons,
-		private ShipmentActualCostService $actual_costs
+		private ShipmentActualCostService $actual_costs,
+		private PekStatusMapping $mapping
 	) {
 	}
 
@@ -28,6 +29,7 @@ final class PekShipmentService {
 			return array( 'success' => false, 'message' => 'Некорректный код груза ПЭК.' );
 		}
 		try {
+			$existing = $this->repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 			$status = $this->statuses->fetch( $code, (string) ( $payload['delivery_type'] ?? '' ) );
 			$shipment = array_merge(
 				array(
@@ -37,6 +39,7 @@ final class PekShipmentService {
 					'barcode' => $code,
 					'pek_cargo_code' => $code,
 					'manual_attach' => true,
+					'pek_reconciled_pending_correlation' => (string) ( $existing['pek_correlation'] ?? $existing['request_summary']['correlation'] ?? '' ),
 					'created_at' => $this->now(),
 				),
 				$status,
@@ -74,7 +77,12 @@ final class PekShipmentService {
 			return array( 'success' => false, 'message' => 'Не удалось проверить текущий статус ПЭК перед отменой.' );
 		}
 		$fresh_shipment = array_merge( $shipment, $fresh );
-		if ( '' !== trim( (string) ( $fresh_shipment['pek_take_on_stock_datetime'] ?? '' ) ) || empty( $this->buttons->resolve( $fresh_shipment )['cancel'] ) ) {
+		$external_status = (string) ( $fresh_shipment['pek_cargo_status'] ?? $fresh_shipment['status_title'] ?? '' );
+		if (
+			'' !== trim( (string) ( $fresh_shipment['pek_take_on_stock_datetime'] ?? '' ) )
+			|| ! $this->mapping->is_pre_acceptance_status( $external_status )
+			|| empty( $this->buttons->resolve( $fresh_shipment )['cancel'] )
+		) {
 			return array( 'success' => false, 'message' => 'Принятый груз ПЭК не отменяется через API.' );
 		}
 		$result = $this->api->order_cancellation( array( $code ) );
@@ -102,8 +110,27 @@ final class PekShipmentService {
 
 	/** @param array<string,mixed> $shipment */
 	private function is_old_enough_for_cancel( array $shipment ): bool {
-		$created = strtotime( (string) ( $shipment['created_at'] ?? '' ) );
-		return false !== $created && time() - $created >= 600;
+		$created = $this->stored_timestamp( (string) ( $shipment['created_at'] ?? '' ) );
+		$now = function_exists( 'current_datetime' ) ? current_datetime()->getTimestamp() : time();
+
+		return null !== $created && $now - $created >= 600;
+	}
+
+	private function stored_timestamp( string $value ): ?int {
+		$value = trim( $value );
+		if ( '' === $value ) {
+			return null;
+		}
+		$timezone = function_exists( 'wp_timezone' ) ? wp_timezone() : new \DateTimeZone( 'UTC' );
+		foreach ( array( '!Y-m-d H:i:s', \DateTimeInterface::ATOM ) as $format ) {
+			$date = \DateTimeImmutable::createFromFormat( $format, $value, $timezone );
+			$errors = \DateTimeImmutable::getLastErrors();
+			if ( $date instanceof \DateTimeImmutable && ( false === $errors || ( 0 === $errors['warning_count'] && 0 === $errors['error_count'] ) ) ) {
+				return $date->getTimestamp();
+			}
+		}
+
+		return null;
 	}
 
 	private function now(): string {

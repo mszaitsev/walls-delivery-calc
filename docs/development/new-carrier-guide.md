@@ -1,8 +1,8 @@
 # New Carrier Guide
 
-PEK 0.134.2 is the under-review reference for adding a Shipment Framework runtime without changing generic contracts: place production classes under `src/Shipments/<Carrier>/`, keep API transport under `src/Carriers/<Carrier>/Api/`, register adapter/mapper/modal/provider in `Plugin.php`, keep safe preview redacted, persist carrier fields only through the mapper, expose documents only through a provider, use shared actual-cost fields, and rely on shared autosync/cancel/remove controllers.
+PEK 0.134.3 is the under-review reference for adding a Shipment Framework runtime without changing generic contracts: place production classes under `src/Shipments/<Carrier>/`, keep API transport under `src/Carriers/<Carrier>/Api/`, register adapter/mapper/modal/provider in `Plugin.php`, keep safe preview redacted, persist carrier fields only through the mapper, expose documents only through a provider, use shared actual-cost fields, and rely on shared autosync/cancel/remove controllers.
 
-Version: 0.134.2
+Version: 0.134.3
 
 For carriers like Jet Logistic that return multiple delivery options from one quote call, prefer a carrier-agnostic capability path: a carrier whose capabilities include pickup and courier can return multiple `DeliveryRate` objects from one `quote()` call. A pickup `DeliveryRate` may set `requires_pickup_point=false` when the carrier has no selectable pickup-point identifiers.
 

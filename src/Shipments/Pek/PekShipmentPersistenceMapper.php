@@ -65,7 +65,7 @@ final class PekShipmentPersistenceMapper implements CarrierShipmentPersistenceMa
 
 		return array(
 			'status' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
-			'status_title' => 'Неопределённый результат создания ПЭК',
+			'status_title' => 'Результат создания заявки не определён. Проверьте кабинет ПЭК перед повторной попыткой.',
 			'universal_status_code' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
 			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ),
 			'pending_creation_in_carrier' => true,

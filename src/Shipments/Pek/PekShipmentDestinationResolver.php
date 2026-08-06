@@ -52,7 +52,7 @@ final class PekShipmentDestinationResolver {
 			throw new \RuntimeException( 'Терминал ПЭК не прошёл свежую проверку.' );
 		}
 		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
-		$branch_id = trim( (string) ( $raw['branchId'] ?? $raw['branch_id'] ?? $request->meta['pek_receiver_branch_id'] ?? '' ) );
+		$branch_id = trim( (string) ( $raw['branchId'] ?? $raw['branch_id'] ?? '' ) );
 		if ( '' === $branch_id ) {
 			throw new \RuntimeException( 'Не подтверждён филиал назначения ПЭК для SMS.' );
 		}
@@ -78,7 +78,7 @@ final class PekShipmentDestinationResolver {
 		if ( $location_id <= 0 ) {
 			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
 		}
-		$mapping = $this->locations->resolve( $location_id );
+		$mapping = $this->locations->resolve_for_shipment( $location_id );
 		$branch_id = trim( (string) ( $mapping['branch_id'] ?? '' ) );
 		$country = strtoupper( trim( (string) ( $mapping['country_code'] ?? 'RU' ) ) );
 		$state = (string) ( $mapping['mapping_state'] ?? '' );

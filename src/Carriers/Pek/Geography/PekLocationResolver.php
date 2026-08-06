@@ -71,6 +71,24 @@ final class PekLocationResolver {
 		return $mapping;
 	}
 
+	/** @return array<string,mixed> */
+	public function resolve_for_shipment( int $location_id ): array {
+		$mapping = $this->resolve( $location_id );
+		if ( ! empty( $mapping['stale_fallback'] ) ) {
+			throw new PekApiException(
+				'ПЭК не подтвердил направление доставки.',
+				array(
+					'endpoint' => '/branches/findzonebyaddress/',
+					'method' => 'POST',
+					'error_code' => 'pek_shipment_location_stale',
+					'failure_stage' => 'shipment_destination_contract',
+				)
+			);
+		}
+
+		return $mapping;
+	}
+
 	public function fingerprint( Location $location ): string {
 		$inputs = $this->addresses->fingerprint_inputs( $location );
 		$inputs['pek_mapping_contract_version'] = self::MAPPING_CONTRACT_VERSION;

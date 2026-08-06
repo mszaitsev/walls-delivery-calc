@@ -24,4 +24,16 @@ pek_docs_assert( str_contains( $service, "order_print" ) && str_contains( $servi
 pek_docs_assert( is_array( $fixture ) && 1 === count( $fixture ) && str_starts_with( base64_decode( (string) reset( $fixture ), true ) ?: '', '%PDF-' ), 'Official order/print fixture must be one-value base64 PDF object.' );
 pek_docs_assert( ! str_contains( $adapter, 'document_actions' ) && ! str_contains( $adapter, 'ShipmentBinaryDocument' ), 'Adapter must not own document actions or stream documents.' );
 
+$provider_instance = ( new ReflectionClass( WallsShop\WDC\Shipments\Pek\PekShipmentDocumentProvider::class ) )->newInstanceWithoutConstructor();
+$actions = $provider_instance->actions(
+	new stdClass(),
+	array(
+		'pek_cargo_code' => '999940950644',
+		'pek_position_barcodes' => array( 'p1', 'p2', 'p3', 'p4', 'p5' ),
+	)
+);
+$keys = array_map( static fn( object $action ): string => $action->key, $actions );
+pek_docs_assert( in_array( 'download_application', $keys, true ) && in_array( 'download_label', $keys, true ), 'One PEK cargo must expose application and simple label actions.' );
+pek_docs_assert( ! in_array( 'download_all_labels', $keys, true ), 'Multiple position barcodes of one cargo must not expose type=multiple.' );
+
 echo "PEK shipment documents smoke passed.\n";

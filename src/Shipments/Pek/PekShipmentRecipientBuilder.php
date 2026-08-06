@@ -31,7 +31,10 @@ final class PekShipmentRecipientBuilder {
 			'personPhones' => array( array( 'phone' => $phone ) ),
 		);
 		$email = method_exists( $order, 'get_billing_email' ) ? trim( (string) $order->get_billing_email() ) : '';
-		if ( '' !== $email && ( ! function_exists( 'is_email' ) || false !== is_email( $email ) ) ) {
+		if ( '' !== $email && function_exists( 'is_email' ) && false === is_email( $email ) ) {
+			throw new \RuntimeException( 'Некорректный email получателя ПЭК.' );
+		}
+		if ( '' !== $email ) {
 			$receiver['email'] = $email;
 		}
 		if ( DeliveryType::PICKUP === $request->delivery_type ) {
@@ -90,11 +93,23 @@ final class PekShipmentRecipientBuilder {
 	}
 
 	private function courier_address( object $order, ShipmentCreateRequest $request ): string {
+		if ( 'RU' !== strtoupper( $request->recipient_address->country_code ) ) {
+			throw new \RuntimeException( 'Создание отправлений ПЭК поддерживает только RU.' );
+		}
+		$address_1 = method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() ) : '';
+		$house = trim( $request->recipient_address->house );
+		if ( '' === $address_1 || ( '' === $house && ! $this->contains_house_token( $address_1 ) ) ) {
+			throw new \RuntimeException( 'Для курьерской доставки ПЭК нужен полный адрес с улицей и номером дома.' );
+		}
+		$city = method_exists( $order, 'get_shipping_city' ) ? trim( (string) $order->get_shipping_city() ) : trim( $request->recipient_address->city );
+		if ( '' === $city ) {
+			throw new \RuntimeException( 'Для курьерской доставки ПЭК нужен полный адрес с улицей и номером дома.' );
+		}
 		$parts = array(
 			'Россия',
 			method_exists( $order, 'get_shipping_state' ) ? (string) $order->get_shipping_state() : '',
-			method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '',
-			method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
+			$city,
+			$address_1,
 			method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '',
 		);
 		$address = trim( implode( ', ', array_filter( $parts, static fn( string $part ): bool => '' !== trim( $part ) ) ) );
@@ -106,5 +121,9 @@ final class PekShipmentRecipientBuilder {
 		}
 
 		return $address;
+	}
+
+	private function contains_house_token( string $value ): bool {
+		return 1 === preg_match( '/(?:^|[\s,])(?:д\.?|дом|house)?\s*\d+[А-Яа-яA-Za-z0-9\/-]*(?:\s*(?:к|корп|корпус|стр|строение)\.?\s*\d+[А-Яа-яA-Za-z0-9\/-]*)?(?:$|[\s,])/u', $value );
 	}
 }
