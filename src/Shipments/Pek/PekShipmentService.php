@@ -18,7 +18,8 @@ final class PekShipmentService {
 		private OrderShipmentRepository $repository,
 		private PekShipmentButtonPolicy $buttons,
 		private ShipmentActualCostService $actual_costs,
-		private PekStatusMapping $mapping
+		private PekStatusMapping $mapping,
+		private PekManualAttachContextResolver $manual_contexts
 	) {
 	}
 
@@ -30,30 +31,69 @@ final class PekShipmentService {
 		}
 		try {
 			$existing = $this->repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
-			$status = $this->statuses->fetch( $code, (string) ( $payload['delivery_type'] ?? '' ) );
+			$context = $this->manual_contexts->resolve( $order, $existing );
+			$status = $this->statuses->fetch( $code, (string) $context['delivery_type'] );
+			$actual = $status['actual_cost_candidate'] ?? null;
+			unset( $status['actual_cost_candidate'] );
 			$shipment = array_merge(
 				array(
 					'carrier_key' => PekSettings::CARRIER_KEY,
-					'service_key' => PekSettings::SERVICE_KEY,
+					'service_key' => (string) $context['service_key'],
+					'service_title' => (string) $context['service_title'],
+					'order_id' => (int) $context['order_id'],
+					'delivery_type' => (string) $context['delivery_type'],
+					'shipment_mode' => (string) $context['shipment_mode'],
+					'rate_id' => (string) $context['rate_id'],
 					'tracking_number' => $code,
 					'barcode' => $code,
 					'pek_cargo_code' => $code,
 					'manual_attach' => true,
-					'pek_reconciled_pending_correlation' => (string) ( $existing['pek_correlation'] ?? $existing['request_summary']['correlation'] ?? '' ),
-					'created_at' => $this->now(),
+					'pending_creation_in_carrier' => false,
+					'pek_correlation' => (string) $context['pek_correlation'],
+					'pek_reconciled_pending_correlation' => (string) $context['pek_correlation'],
+					'created_at' => '' !== (string) $context['original_created_at'] ? (string) $context['original_created_at'] : $this->now(),
+					'reconciled_at' => $this->now(),
+					'reconciliation_source' => 'manual_cargo_code',
+					'pek_sender_warehouse_id' => (string) $context['pek_sender_warehouse_id'],
+					'pek_sender_warehouse_title' => (string) $context['pek_sender_warehouse_title'],
+					'pek_sender_warehouse_source' => (string) $context['pek_sender_warehouse_source'],
+					'pek_receiver_warehouse_id' => (string) $context['pek_receiver_warehouse_id'],
+					'pek_receiver_warehouse_source' => (string) $context['pek_receiver_warehouse_source'],
+					'pek_receiver_branch_id' => (string) $context['pek_receiver_branch_id'],
+					'recipient_type' => (string) $context['recipient_type'],
+					'declared_value_kopecks' => (int) $context['declared_value_kopecks'],
+					'sealing_requested' => ! empty( $context['sealing_requested'] ),
+					'sms_release_requested' => ! empty( $context['sms_release_requested'] ),
+					'sms_release_confirmed' => ! empty( $context['sms_release_confirmed'] ),
+					'sms_release_effective_limit_kopecks' => (int) $context['sms_release_effective_limit_kopecks'],
+					'places' => $context['places'],
+					'order_num' => (string) $context['order_num'],
+					'request_snapshot' => $context['request_snapshot'],
+					'request_summary' => $context['request_summary'],
+					'pek_reconciliation' => array(
+						'correlation' => (string) $context['pek_correlation'],
+						'original_created_at' => (string) $context['original_created_at'],
+						'reconciled_at' => $this->now(),
+						'source' => 'manual_cargo_code',
+					),
 				),
 				$status,
 				array( 'updated_at' => $this->now() )
 			);
-			$actual = $shipment['actual_cost_candidate'] ?? null;
-			unset( $shipment['actual_cost_candidate'] );
+			unset( $shipment['failure_stage'] );
+			if ( is_array( $shipment['response_snapshot'] ?? null ) ) {
+				unset( $shipment['response_snapshot']['error_code'], $shipment['response_snapshot']['failure_stage'] );
+			}
 			$this->repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $shipment );
 			if ( $actual instanceof ShipmentActualCost ) {
 				$shipment = $this->actual_costs->apply_carrier_cost( $order, PekSettings::CARRIER_KEY, $actual );
 			}
 
-			return array( 'success' => true, 'message' => 'Код груза ПЭК прикреплён.', 'shipment' => $shipment );
+			return array( 'success' => true, 'message' => 'Код груза ПЭК прикреплён.', 'tracking_number' => $code, 'shipment' => $shipment );
 		} catch ( \Throwable $e ) {
+			if ( str_contains( $e->getMessage(), 'Не удалось восстановить данные отправления ПЭК' ) ) {
+				return array( 'success' => false, 'message' => 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+			}
 			return array( 'success' => false, 'message' => 'ПЭК не подтвердил указанный код груза.' );
 		}
 	}

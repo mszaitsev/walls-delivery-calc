@@ -1,8 +1,8 @@
 # Project Status
 
-0.134.3: PEK is now registered in the Shipment Framework as the Shipment Framework implementation under contract verification; production submit is not yet approved pending live validation for PEK shipment creation and lifecycle. Remaining PEK shipment work is legal-recipient UI/payload, AM/BY/KG/KZ creation, international documents, accounting documents, and accepted-cargo return handling in the PEK cabinet outside this plugin.
+0.134.4: PEK is now registered in the Shipment Framework as the Shipment Framework implementation under contract verification; production submit is not yet approved pending live validation for PEK shipment creation and lifecycle. This patch hardens status capabilities, uncertain pending reconciliation, structured courier address validation, cancellation button policy, and fake-only integration coverage. Remaining PEK shipment work is legal-recipient UI/payload, AM/BY/KG/KZ creation, international documents, accounting documents, and accepted-cargo return handling in the PEK cabinet outside this plugin.
 
-Version: 0.134.3
+Version: 0.134.4
 
 Stable subsystems:
 

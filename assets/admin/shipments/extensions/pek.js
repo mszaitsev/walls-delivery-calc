@@ -57,6 +57,12 @@
         picker.open(form, {
           sender: true,
           title: 'Выбор склада самопривоза ПЭК',
+          entitySingular: 'склад',
+          entityPlural: 'Склады ПЭК',
+          confirmText: 'Выбрать этот склад',
+          selectText: 'Выберите склад',
+          emptyText: 'Склады ПЭК не найдены',
+          codeLabel: 'Warehouse ID',
           context: senderWarehouseContext(form),
           onChoose: function (point) {
             updateWarehouseCard(root, {

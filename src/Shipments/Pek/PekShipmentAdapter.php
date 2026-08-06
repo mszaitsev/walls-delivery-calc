@@ -134,6 +134,8 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			array(
 				'carrier_key' => PekSettings::CARRIER_KEY,
 				'has_shipment' => array() !== $shipment,
+				'can_create' => ! empty( $policy['create'] ),
+				'can_attach_manual' => ! empty( $policy['manual_attach'] ),
 				'external_status' => (string) ( $shipment['pek_cargo_status'] ?? $shipment['status_title'] ?? '' ),
 				'external_status_id' => (string) ( $shipment['pek_cargo_status_id'] ?? '' ),
 				'status_title' => (string) ( $shipment['status_title'] ?? '' ),

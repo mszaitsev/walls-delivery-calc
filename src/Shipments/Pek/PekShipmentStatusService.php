@@ -29,7 +29,7 @@ final class PekShipmentStatusService {
 		if ( '' === $code ) {
 			return array( 'success' => false, 'message' => 'Не указан код груза ПЭК.' );
 		}
-		$status = $this->fetch( $code, (string) ( $shipment['delivery_type'] ?? '' ) );
+		$status = $this->fetch( $code, (string) ( $shipment['delivery_type'] ?? $shipment['shipment_mode'] ?? '' ) );
 		$candidate = $status['actual_cost_candidate'] ?? null;
 		unset( $status['actual_cost_candidate'] );
 		$shipment = array_merge( $shipment, $status, array( 'updated_at' => $this->now() ) );

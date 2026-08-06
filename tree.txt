@@ -875,11 +875,13 @@ C:.
 |   |   |       PekShipmentButtonPolicy.php
 |   |   |       PekShipmentCargoBuilder.php
 |   |   |       PekShipmentCorrelationResolver.php
+|   |   |       PekShipmentCourierAddressResolver.php
 |   |   |       PekShipmentCreateResponseParser.php
 |   |   |       PekShipmentDeclaredValueResolver.php
 |   |   |       PekShipmentDestinationResolver.php
 |   |   |       PekShipmentDocumentProvider.php
 |   |   |       PekShipmentDocumentService.php
+|   |   |       PekManualAttachContextResolver.php
 |   |   |       PekShipmentModalExtension.php
 |   |   |       PekShipmentPersistenceMapper.php
 |   |   |       PekShipmentProductWeightResolver.php
@@ -1039,6 +1041,7 @@ C:.
     |       run-pek-shipment-cancellation-smoke.php
     |       run-pek-shipment-create-smoke.php
     |       run-pek-shipment-documents-smoke.php
+    |       run-pek-shipment-integration-smoke.php
     |       run-pek-shipment-modal-smoke.php
     |       run-pek-shipment-picker-smoke.php
     |       run-pek-shipment-status-smoke.php

@@ -51,11 +51,13 @@ final class PekShipmentRequestBuilder {
 		if ( ! $sms->success ) {
 			throw new \RuntimeException( $sms->message );
 		}
+		$common = array( 'orderType' => 0 );
+		$client_card = trim( $this->settings->client_card() );
+		if ( '' !== $client_card ) {
+			$common['counterpartClientCard'] = $client_card;
+		}
 		$payload = array(
-			'common' => array(
-				'orderType' => 0,
-				'counterpartClientCard' => $this->settings->client_card(),
-			),
+			'common' => $common,
 			'sender' => $this->sender_payload( $sender ),
 			'cargos' => array(
 				array_merge(
