@@ -8,7 +8,7 @@ use WallsShop\WDC\Domain\Address\Address;
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentCourierAddressResolver {
-	private const PUBLIC_ERROR = 'Для курьерской доставки ПЭК нужен полный адрес с улицей и номером дома.';
+	private const PUBLIC_ERROR = 'Для курьерской доставки ПЭК нужен подтверждённый полный адрес с улицей и номером дома.';
 
 	/** @param array<string,mixed> $calculation_data */
 	public function from_order( object $order, array $calculation_data = array() ): Address {
@@ -223,6 +223,7 @@ final class PekShipmentCourierAddressResolver {
 			'courier_address_source' => $source,
 			'courier_region_present' => '' !== trim( $address->region_name ),
 			'courier_city_present' => '' !== trim( $address->city ) || '' !== trim( $address->settlement ),
+			'courier_settlement_present' => '' !== trim( $address->settlement ),
 			'courier_street_present' => '' !== trim( $address->street ),
 			'courier_house_present' => '' !== trim( $address->house ),
 			'courier_apartment_present' => '' !== trim( $address->apartment ),
@@ -254,7 +255,7 @@ final class PekShipmentCourierAddressResolver {
 			return $value;
 		}
 
-		return $value;
+		return '';
 	}
 
 	private function order_method_string( object $order, string $method ): string {
@@ -282,12 +283,22 @@ final class PekShipmentCourierAddressResolver {
 
 	private function destination_scope( object $order ): string {
 		$shipping = $this->woo_address( $order, 'shipping' );
-		$shipping_filled = '' !== trim( $shipping->country_code ) || '' !== trim( $shipping->city ) || '' !== trim( $shipping->raw_address );
-		if ( ! $shipping_filled ) {
+		if ( ! $this->has_meaningful_shipping_destination( $order, $shipping ) ) {
 			return 'billing';
 		}
 
 		return 'shipping';
+	}
+
+	private function has_meaningful_shipping_destination( object $order, Address $shipping ): bool {
+		if ( $this->dadata_address( $order, 'shipping' ) instanceof Address ) {
+			return true;
+		}
+		if ( '' !== trim( $shipping->city ) && '' !== trim( $shipping->raw_address ) ) {
+			return true;
+		}
+
+		return false;
 	}
 
 	private function same_destination( Address $left, Address $right ): bool {
@@ -301,21 +312,51 @@ final class PekShipmentCourierAddressResolver {
 		if ( strtoupper( trim( $candidate->country_code ) ) !== strtoupper( trim( $woo->country_code ) ) ) {
 			return false;
 		}
-		if ( '' !== trim( $woo->city ) && ! $this->same_location_name( trim( $woo->city ), trim( $candidate->city ) ?: trim( $candidate->settlement ) ) ) {
+		if ( '' !== trim( $woo->region_name ) && ! $this->same_region_name( $woo->region_name, $candidate->region_name ) ) {
+			return false;
+		}
+		if ( '' !== trim( $woo->city ) && ! $this->matches_candidate_locality( trim( $woo->city ), $candidate ) ) {
 			return false;
 		}
 		$parsed = $this->parse_raw( $woo->raw_address );
-		if ( '' !== $parsed['street'] && ! $this->same_location_name( $parsed['street'], $candidate->street ) ) {
-			return false;
+		if ( '' !== trim( $woo->raw_address ) ) {
+			if ( '' === $parsed['street'] || '' === $parsed['house'] ) {
+				return false;
+			}
+			if ( ! $this->same_location_name( $parsed['street'], $candidate->street ) ) {
+				return false;
+			}
+			if ( $this->normalize_location_name( $parsed['house'] ) !== $this->normalize_location_name( $candidate->house ) ) {
+				return false;
+			}
 		}
-		if ( '' !== $parsed['house'] && $this->normalize_location_name( $parsed['house'] ) !== $this->normalize_location_name( $candidate->house ) ) {
-			return false;
-		}
-		if ( '' !== trim( $woo->apartment ) && '' !== trim( $candidate->apartment ) && $this->normalize_location_name( $woo->apartment ) !== $this->normalize_location_name( $candidate->apartment ) ) {
+		if ( '' !== trim( $woo->apartment ) && ( '' === trim( $candidate->apartment ) || $this->normalize_location_name( $woo->apartment ) !== $this->normalize_location_name( $candidate->apartment ) ) ) {
 			return false;
 		}
 
 		return true;
+	}
+
+	private function matches_candidate_locality( string $current_city, Address $candidate ): bool {
+		foreach ( array( $candidate->city, $candidate->settlement ) as $candidate_value ) {
+			if ( '' !== trim( $candidate_value ) && $this->same_location_name( $current_city, $candidate_value ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function same_region_name( string $left, string $right ): bool {
+		return '' !== trim( $right ) && $this->normalize_region_name( $left ) === $this->normalize_region_name( $right );
+	}
+
+	private function normalize_region_name( string $value ): string {
+		$value = $this->lower( $value );
+		$value = preg_replace( '/\b(?:город\s+федерального\s+значения|город|г|область|обл|край|республика|респ)\b\.?\s*/u', '', $value ) ?? $value;
+		$value = preg_replace( '/[^\p{L}\p{N}]+/u', '', $value ) ?? $value;
+
+		return trim( $value );
 	}
 
 	private function first_non_empty( mixed ...$values ): string {

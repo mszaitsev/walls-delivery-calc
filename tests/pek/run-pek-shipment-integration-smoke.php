@@ -382,7 +382,25 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			if ( 'geography_malformed' === $this->connected_services_mode ) {
 				return array(
 					'status' => 200,
-					'body' => wp_json_encode( array( array( 'specialCondition' => array( 'UID' => 'ffb40421-4761-11e8-80c9-00155d668927' ) ), 'malformed' ), JSON_UNESCAPED_UNICODE ),
+					'body' => wp_json_encode( array( array( 'specialCondition' => array( 'UID' => 'ffb40421-4761-11e8-80c9-00155d668927' ) ), array( 'specialCondition' => 'malformed' ) ), JSON_UNESCAPED_UNICODE ),
+				);
+			}
+			if ( 'geography_missing_uid' === $this->connected_services_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode( array( array( 'specialCondition' => array( 'UID' => 'ffb40421-4761-11e8-80c9-00155d668927' ) ), array( 'specialCondition' => array() ) ), JSON_UNESCAPED_UNICODE ),
+				);
+			}
+			if ( 'geography_duplicate' === $this->connected_services_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode( array( array( 'specialCondition' => array( 'UID' => 'ffb40421-4761-11e8-80c9-00155d668927' ) ), array( 'specialCondition' => array( 'UID' => 'ffb40421-4761-11e8-80c9-00155d668927' ) ) ), JSON_UNESCAPED_UNICODE ),
+				);
+			}
+			if ( 'geography_unrelated' === $this->connected_services_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode( array( array( 'specialCondition' => array( 'UID' => '00000000-0000-0000-0000-000000000000' ) ), array( 'specialCondition' => array( 'UID' => 'ffb40421-4761-11e8-80c9-00155d668927' ) ) ), JSON_UNESCAPED_UNICODE ),
 				);
 			}
 			return array(
@@ -662,7 +680,8 @@ $destination_resolver = new PekShipmentDestinationResolver(
 			$settings
 		)
 	),
-	new PekLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), new PekAddressBuilder(), new PekLocationMappingRepository( $GLOBALS['wpdb'] ), $api, $settings )
+	new PekLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), new PekAddressBuilder(), new PekLocationMappingRepository( $GLOBALS['wpdb'] ), $api, $settings ),
+	new LocationRepository( $GLOBALS['wpdb'] )
 );
 $request_builder = new PekShipmentRequestBuilder(
 	$settings,
@@ -723,7 +742,16 @@ $sms_missing_uid = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateA
 pek_integration_assert( ! $sms_missing_uid->success, 'Missing SMS UID must fail strict SMS validation.' );
 $http->connected_services_mode = 'geography_malformed';
 $sms_bad_geography = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
-pek_integration_assert( ! $sms_bad_geography->success, 'Malformed checknocalcservices row must fail strict geography validation.' );
+pek_integration_assert( ! $sms_bad_geography->success, 'Malformed checknocalcservices sibling after valid SMS row must fail strict geography validation.' );
+$http->connected_services_mode = 'geography_missing_uid';
+$sms_missing_geography_uid = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+pek_integration_assert( ! $sms_missing_geography_uid->success, 'Geography row without UID must fail strict validation.' );
+$http->connected_services_mode = 'geography_duplicate';
+$sms_duplicate_geography = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+pek_integration_assert( ! $sms_duplicate_geography->success, 'Duplicate geography SMS UID rows must fail closed.' );
+$http->connected_services_mode = 'geography_unrelated';
+$sms_unrelated_geography = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+pek_integration_assert( $sms_unrelated_geography->success, 'Unrelated valid geography row plus exactly one SMS row must pass.' );
 $http->connected_services_mode = 'success';
 $http->token_mode = 'malformed';
 $submit_count_before_bad_token = count( $http->submit_bodies );
@@ -767,6 +795,7 @@ $http->confirmed_counterparties_mode = 'card_mismatch';
 $settings_repository->set( PekSettings::CLIENT_CARD_KEY, 'OTHER-REQUESTED-CARD' );
 $card_mismatch = $counterparts->verify_and_save();
 pek_integration_assert( false === $card_mismatch['success'], 'Client-card mismatch must block counterpart verification.' );
+pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Failed counterpart verification must clear old GUID and snapshot.' );
 $http->confirmed_counterparties_mode = 'success';
 $settings_repository->set( PekSettings::CLIENT_CARD_KEY, 'CLIENT-CARD' );
 $counterparts->verify_and_save();
@@ -814,8 +843,11 @@ if ( $api_key_login_hash !== $credentials->account_login_hash() ) {
 pek_integration_assert( $before_api_key_guid === $settings->sender_counterpart_guid(), 'API key rotation with unchanged PEK login must preserve counterpart verification.' );
 $http->confirmed_counterparties_mode = 'bad_inn_letters';
 pek_integration_assert( false === $counterparts->verify_and_save()['success'], 'Malformed API INN characters must fail counterpart verification.' );
+pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Malformed API INN must clear counterpart verification.' );
+$counterparts->verify_and_save();
 $http->confirmed_counterparties_mode = 'bad_kpp_letters';
 pek_integration_assert( false === $counterparts->verify_and_save()['success'], 'Malformed API KPP characters must fail counterpart verification.' );
+pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Malformed API KPP must clear counterpart verification.' );
 $http->confirmed_counterparties_mode = 'success';
 $counterparts->verify_and_save();
 pek_integration_assert( isset( $before_login_guid ), 'Counterpart account-binding setup must keep local variables live.' );
@@ -857,12 +889,28 @@ $stale_account_preview = $creation->safe_preview( $request );
 $connected_after_stale_account = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
 pek_integration_assert( array() !== $stale_account_preview['errors'] && $connected_before_stale_account === $connected_after_stale_account, 'Wrong PEK account_login_hash must block preview before connected-services API call.' );
 $counterparts->verify_and_save();
+$location_mismatch_order = new PekIntegrationOrder( 1092 );
+$GLOBALS['wdc_pek_integration_orders'][1092] = $location_mismatch_order;
+$location_mismatch_order->set_shipping_fields( array( 'state' => 'Санкт-Петербург', 'city' => 'Санкт-Петербург', 'address_1' => 'Невский проспект, дом 10', 'address_2' => '' ) );
+pek_integration_set_dadata( $location_mismatch_order, 'shipping', 'Санкт-Петербург', 'Санкт-Петербург', 'Невский проспект', '10' );
+$location_mismatch_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$location_mismatch_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$location_mismatch_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$location_mismatch_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 77 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$location_mismatch_request = $drafts->create_request_from_order( $location_mismatch_order );
+$connected_before_location_mismatch = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
+$submit_before_location_mismatch = count( $http->submit_bodies );
+$location_mismatch_preview = $creation->safe_preview( $location_mismatch_request );
+$connected_after_location_mismatch = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
+pek_integration_assert( array() !== $location_mismatch_preview['errors'] && str_contains( (string) ( $location_mismatch_preview['errors'][0] ?? '' ), 'Повторно рассчитайте доставку ПЭК' ), 'Location mismatch must fail with public recalculation message.' );
+pek_integration_assert( $connected_before_location_mismatch === $connected_after_location_mismatch && $submit_before_location_mismatch === count( $http->submit_bodies ), 'Location mismatch must stop before SMS/private services and preregistration submit.' );
 $before_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 $preview = $creation->safe_preview( $request );
 $after_preview_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 pek_integration_assert( $before_submit === $after_preview_submit, 'Safe preview must not submit PEK preregistration.' );
 pek_integration_assert( 'POST' === $preview['method'] && '/preregistration/submit/' === $preview['path'] && array() === $preview['errors'], 'Safe preview must return canonical PEK envelope: ' . wp_json_encode( $preview, JSON_UNESCAPED_UNICODE ) );
 pek_integration_assert( 'shipping_dadata' === (string) ( $preview['body']['courier_address_source'] ?? '' ) && ! empty( $preview['body']['courier_region_present'] ) && ! empty( $preview['body']['courier_house_present'] ) && '' !== (string) ( $preview['body']['courier_address_hash'] ?? '' ), 'Safe preview must expose courier address evidence without raw address.' );
+pek_integration_assert( 77 === (int) ( $preview['body']['courier_location_id'] ?? 0 ) && true === (bool) ( $preview['body']['courier_location_match'] ?? false ) && 'canonical_location_repository' === (string) ( $preview['body']['courier_location_identity_source'] ?? '' ) && 'fresh_location_mapping' === (string) ( $preview['body']['courier_branch_source'] ?? '' ), 'Safe preview must expose courier location/branch binding evidence.' );
 $create_result = $creation->create( $order, $request );
 $submit_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 pek_integration_assert( true === $create_result->success, 'Production chain create must succeed through fake PEK submit.' );
@@ -1132,12 +1180,48 @@ $stale_order->set_shipping_fields( array( 'address_1' => 'улица Новая,
 $stale_evidence = $addresses->from_order_with_evidence( $stale_order );
 pek_integration_assert( ! str_contains( $stale_evidence['address']->raw_address, 'Советская' ) && str_contains( $stale_evidence['address']->raw_address, 'Новая' ), 'Stale DaData snapshot must not override edited Woo shipping address.' );
 
+$unparseable_stale_order = new PekIntegrationOrder( 2013 );
+pek_integration_set_dadata( $unparseable_stale_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '5' );
+$unparseable_stale_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'ул. Новая 11', 'address_2' => '' ) );
+try {
+	$addresses->from_order_with_evidence( $unparseable_stale_order );
+	pek_integration_assert( false, 'Unparseable edited Woo address must not be authorized by stale DaData.' );
+} catch ( RuntimeException $expected ) {
+	pek_integration_assert( str_contains( $expected->getMessage(), 'подтверждённый полный адрес' ), 'Unparseable edited address must fail closed instead of returning old DaData.' );
+}
+
+$region_mismatch_order = new PekIntegrationOrder( 2014 );
+pek_integration_set_dadata( $region_mismatch_order, 'shipping', 'Краснодарский край', 'Красный', 'улица Советская', '10' );
+$region_mismatch_order->set_shipping_fields( array( 'city' => 'Красный', 'state' => 'Ростовская область', 'address_1' => 'улица Советская, дом 10', 'address_2' => '' ) );
+$region_mismatch_evidence = $addresses->from_order_with_evidence( $region_mismatch_order );
+pek_integration_assert( ! str_contains( $region_mismatch_evidence['address']->raw_address, 'Краснодарский край' ) && str_contains( $region_mismatch_evidence['address']->raw_address, 'Ростовская область' ), 'Region mismatch must reject DaData candidate for same-named city.' );
+
+$settlement_city_match_order = new PekIntegrationOrder( 2015 );
+$settlement_city_match_order->set_shipping_fields( array( 'city' => 'поселение Сосенское', 'state' => 'Москва', 'address_1' => 'улица Липовый парк, дом 2', 'address_2' => '' ) );
+pek_integration_set_dadata( $settlement_city_match_order, 'shipping', 'Москва', 'Москва', 'улица Липовый парк', '2', '', 'поселение Сосенское' );
+$settlement_city_match = $addresses->from_order_with_evidence( $settlement_city_match_order );
+pek_integration_assert( 'shipping_dadata' === $settlement_city_match['evidence']['courier_address_source'], 'Woo city may match candidate settlement while candidate city keeps the parent locality.' );
+
 $billing_fallback_order = new PekIntegrationOrder( 2004 );
 $billing_fallback_order->set_shipping_fields( array( 'country' => '', 'state' => '', 'city' => '', 'postcode' => '', 'address_1' => '', 'address_2' => '' ) );
 $billing_fallback_order->set_billing_fields( array( 'city' => 'Москва', 'state' => 'Москва', 'address_1' => 'Тверская улица, дом 1', 'address_2' => 'кв. 5' ) );
 pek_integration_set_dadata( $billing_fallback_order, 'billing', 'Москва', 'Москва', 'Тверская улица', '1', '5' );
 $billing_evidence = $addresses->from_order_with_evidence( $billing_fallback_order );
 pek_integration_assert( 'billing_dadata' === $billing_evidence['evidence']['courier_address_source'], 'Billing DaData may be used only when shipping destination is empty.' );
+
+$country_only_shipping_order = new PekIntegrationOrder( 2016 );
+$country_only_shipping_order->set_shipping_fields( array( 'country' => 'RU', 'state' => '', 'city' => '', 'postcode' => '', 'address_1' => '', 'address_2' => '' ) );
+$country_only_shipping_order->set_billing_fields( array( 'city' => 'Москва', 'state' => 'Москва', 'address_1' => 'Тверская улица, дом 1', 'address_2' => '' ) );
+pek_integration_set_dadata( $country_only_shipping_order, 'billing', 'Москва', 'Москва', 'Тверская улица', '1' );
+$country_only_evidence = $addresses->from_order_with_evidence( $country_only_shipping_order );
+pek_integration_assert( 'billing_dadata' === $country_only_evidence['evidence']['courier_address_source'], 'Shipping country alone must not block valid billing fallback.' );
+
+$city_only_shipping_order = new PekIntegrationOrder( 2017 );
+$city_only_shipping_order->set_shipping_fields( array( 'country' => 'RU', 'state' => 'Москва', 'city' => 'Москва', 'postcode' => '', 'address_1' => '', 'address_2' => '' ) );
+$city_only_shipping_order->set_billing_fields( array( 'city' => 'Москва', 'state' => 'Москва', 'address_1' => 'Тверская улица, дом 1', 'address_2' => '' ) );
+pek_integration_set_dadata( $city_only_shipping_order, 'billing', 'Москва', 'Москва', 'Тверская улица', '1' );
+$city_only_evidence = $addresses->from_order_with_evidence( $city_only_shipping_order );
+pek_integration_assert( 'billing_dadata' === $city_only_evidence['evidence']['courier_address_source'], 'Shipping country plus city without address must not be treated as a complete courier destination.' );
 
 $non_ru_order = new PekIntegrationOrder( 2005 );
 $non_ru_order->set_shipping_fields( array( 'country' => 'KZ', 'city' => 'Алматы', 'state' => '', 'address_1' => 'улица Абая, дом 10', 'address_2' => '' ) );

@@ -36,10 +36,10 @@ final class PekSenderCounterpartService {
 				}
 			}
 		} catch ( \Throwable ) {
-			return array( 'success' => false, 'message' => 'ПЭК вернул некорректные данные контрагента отправителя.' );
+			return $this->failed_verification( 'ПЭК вернул некорректные данные контрагента отправителя.' );
 		}
 		if ( 1 !== count( $matches ) ) {
-			return array( 'success' => false, 'message' => 0 === count( $matches ) ? 'ПЭК не подтвердил контрагента отправителя по ИНН/КПП.' : 'ПЭК вернул несколько контрагентов отправителя; выбор заблокирован.' );
+			return $this->failed_verification( 0 === count( $matches ) ? 'ПЭК не подтвердил контрагента отправителя по ИНН/КПП.' : 'ПЭК вернул несколько контрагентов отправителя; выбор заблокирован.' );
 		}
 		$row = $matches[0];
 		$guid = $row['guid'];
@@ -57,6 +57,13 @@ final class PekSenderCounterpartService {
 		$this->settings->save_sender_counterpart( $guid, $snapshot );
 
 		return array( 'success' => true, 'message' => 'Контрагент отправителя ПЭК подтверждён.', 'snapshot' => $snapshot );
+	}
+
+	/** @return array{success:false,message:string} */
+	private function failed_verification( string $message ): array {
+		$this->settings->save_sender_counterpart( '', array() );
+
+		return array( 'success' => false, 'message' => $message );
 	}
 
 	/** @param mixed $row @return array{legalForm:int,title:string,guid:string,counterpartClientCard:string,inn:string,kpp:string} */

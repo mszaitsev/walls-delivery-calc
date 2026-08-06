@@ -228,6 +228,7 @@ final class PekShipmentRequestBuilder {
 		$cargo = is_array( $summary['cargo'] ?? null ) ? $summary['cargo'] : array();
 		$sms = is_array( $summary['sms'] ?? null ) ? $summary['sms'] : array();
 		$courier_evidence = is_array( $summary['courier_address_evidence'] ?? null ) ? $summary['courier_address_evidence'] : array();
+		$destination = is_array( $summary['destination'] ?? null ) ? $summary['destination'] : array();
 
 		return array(
 			'orderType' => 0,
@@ -242,11 +243,16 @@ final class PekShipmentRequestBuilder {
 			'courier_address_source' => (string) ( $courier_evidence['courier_address_source'] ?? '' ),
 			'courier_region_present' => ! empty( $courier_evidence['courier_region_present'] ),
 			'courier_city_present' => ! empty( $courier_evidence['courier_city_present'] ),
+			'courier_settlement_present' => ! empty( $courier_evidence['courier_settlement_present'] ),
 			'courier_street_present' => ! empty( $courier_evidence['courier_street_present'] ),
 			'courier_house_present' => ! empty( $courier_evidence['courier_house_present'] ),
 			'courier_apartment_present' => ! empty( $courier_evidence['courier_apartment_present'] ),
 			'courier_postcode_present' => ! empty( $courier_evidence['courier_postcode_present'] ),
 			'courier_address_hash' => (string) ( $courier_evidence['courier_address_hash'] ?? '' ),
+			'courier_location_id' => (int) ( $destination['location_id'] ?? 0 ),
+			'courier_location_match' => ! empty( $destination['location_match'] ),
+			'courier_location_identity_source' => (string) ( $destination['location_identity_source'] ?? '' ),
+			'courier_branch_source' => (string) ( $destination['branch_source'] ?? $destination['source'] ?? '' ),
 			'place_count' => (int) ( $cargo['place_count'] ?? 0 ),
 			'aggregate_weight_kg' => $cargo['aggregate_weight_kg'] ?? null,
 			'aggregate_volume_m3' => $cargo['aggregate_volume_m3'] ?? null,

@@ -54,16 +54,21 @@ final class PekSmsReleaseAvailabilityService {
 
 	/** @param array<int,array<string,mixed>> $rows */
 	private function has_sms_geography( array $rows ): bool {
+		$matches = 0;
 		foreach ( $rows as $row ) {
 			if ( ! is_array( $row ) || array_is_list( $row ) || ! is_array( $row['specialCondition'] ?? null ) || array_is_list( $row['specialCondition'] ) || ! is_string( $row['specialCondition']['UID'] ?? null ) ) {
 				throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_geography_malformed' ) );
 			}
-			if ( strtolower( self::SMS_SERVICE_UID ) === strtolower( $row['specialCondition']['UID'] ) ) {
-				return true;
+			if ( strtolower( self::SMS_SERVICE_UID ) === strtolower( trim( $row['specialCondition']['UID'] ) ) ) {
+				++$matches;
 			}
 		}
 
-		return false;
+		if ( $matches > 1 ) {
+			throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_geography_duplicate' ) );
+		}
+
+		return 1 === $matches;
 	}
 
 	/** @param array<string,mixed> $services */

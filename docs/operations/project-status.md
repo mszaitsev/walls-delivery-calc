@@ -1,8 +1,8 @@
 # Project Status
 
-0.134.7: PEK is registered in the Shipment Framework under read-only contract verification; production submit is not yet approved pending live validation for PEK shipment creation and lifecycle. This patch hardens effective courier destination authority, rejects stale DaData against current Woo order fields, keeps current non-RU destinations from being converted by stale RU snapshots, preserves city/settlement components, deduplicates federal cities, makes PEK settings save validate-before-write, binds counterpart snapshots to the PEK account login hash, strict-validates SMS list/scalar roots and counterpart INN/KPP rows, and expands fake-only pickup/courier production-chain coverage. Remaining PEK shipment work is legal-recipient UI/payload, AM/BY/KG/KZ creation, international documents, accounting documents, and accepted-cargo return handling in the PEK cabinet outside this plugin.
+0.134.8: PEK is registered in the Shipment Framework under read-only contract verification; production submit is not yet approved pending live validation for PEK shipment creation and lifecycle. This patch hardens effective courier destination authority, rejects stale DaData against current Woo order fields, keeps current non-RU destinations from being converted by stale RU snapshots, preserves city/settlement components, deduplicates federal cities, makes PEK settings save validate-before-write, binds counterpart snapshots to the PEK account login hash, strict-validates SMS list/scalar roots and counterpart INN/KPP rows, and expands fake-only pickup/courier production-chain coverage. Remaining PEK shipment work is legal-recipient UI/payload, AM/BY/KG/KZ creation, international documents, accounting documents, and accepted-cargo return handling in the PEK cabinet outside this plugin.
 
-Version: 0.134.7
+Version: 0.134.8
 
 Stable subsystems:
 

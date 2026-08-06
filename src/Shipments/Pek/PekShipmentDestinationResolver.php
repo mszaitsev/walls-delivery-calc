@@ -9,6 +9,8 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
 use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
@@ -16,7 +18,13 @@ use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentDestinationResolver {
-	public function __construct( private PekPickupPointProvider $pickup_points, private PekLocationResolver $locations ) {
+	private const LOCATION_MISMATCH_MESSAGE = 'Адрес заказа изменился после расчёта доставки. Повторно рассчитайте доставку ПЭК для актуального города.';
+
+	public function __construct(
+		private PekPickupPointProvider $pickup_points,
+		private PekLocationResolver $locations,
+		private LocationRepository $canonical_locations
+	) {
 	}
 
 	/** @return array<string,mixed> */
@@ -79,6 +87,7 @@ final class PekShipmentDestinationResolver {
 		if ( $location_id <= 0 ) {
 			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
 		}
+		$location_evidence = $this->assert_location_matches_request( $location_id, $request );
 		$mapping = $this->locations->resolve_for_shipment( $location_id );
 		$branch_id = trim( (string) ( $mapping['branch_id'] ?? '' ) );
 		$country = strtoupper( trim( (string) ( $mapping['country_code'] ?? 'RU' ) ) );
@@ -96,10 +105,93 @@ final class PekShipmentDestinationResolver {
 			'address' => $request->recipient_address->raw_address,
 			'source' => 'fresh_location_mapping',
 			'location_id' => $location_id,
+			'location_match' => true,
+			'location_identity_source' => $location_evidence['source'],
 			'provider_destination_fingerprint' => (string) ( $mapping['address_fingerprint'] ?? $request->meta['provider_destination_fingerprint'] ?? '' ),
 			'saved_branch_id' => $saved_branch,
 			'branch_mismatch' => '' !== $saved_branch && $saved_branch !== $branch_id,
+			'branch_source' => 'fresh_location_mapping',
 		);
+	}
+
+	/** @return array{source:string} */
+	private function assert_location_matches_request( int $location_id, ShipmentCreateRequest $request ): array {
+		$location = $this->canonical_locations->find_by_id( $location_id );
+		if ( ! $location instanceof Location || ! $location->active ) {
+			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+		}
+		$address = $request->recipient_address;
+		if ( strtoupper( trim( $location->country_code ) ) !== strtoupper( trim( $address->country_code ) ) ) {
+			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+		}
+		if ( '' !== trim( $address->region_name ) && '' !== trim( $location->region_name ) && ! $this->same_region_name( $address->region_name, $location->region_name ) ) {
+			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+		}
+		if ( '' !== trim( $address->city ) && ! $this->matches_location_locality( $address->city, $location ) ) {
+			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+		}
+		if ( '' !== trim( $address->settlement ) && ! $this->matches_location_locality( $address->settlement, $location ) ) {
+			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+		}
+		$fias = trim( $address->fias_id );
+		if ( '' !== $fias && ! in_array( $this->normalize_guid( $fias ), array_filter( array_map( fn( string $value ): string => $this->normalize_guid( $value ), array( $location->fias_id, $location->city_fias_id ) ) ), true ) ) {
+			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+		}
+
+		return array( 'source' => 'canonical_location_repository' );
+	}
+
+	private function matches_location_locality( string $value, Location $location ): bool {
+		foreach ( array( $location->city_name, $location->settlement_name, $location->resolved_place_name() ) as $candidate ) {
+			if ( '' !== trim( $candidate ) && $this->same_location_name( $value, $candidate ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function same_location_name( string $left, string $right ): bool {
+		return '' !== trim( $right ) && $this->normalize_location_name( $left ) === $this->normalize_location_name( $right );
+	}
+
+	private function same_region_name( string $left, string $right ): bool {
+		return '' !== trim( $right ) && $this->normalize_region_name( $left ) === $this->normalize_region_name( $right );
+	}
+
+	private function normalize_location_name( string $value ): string {
+		$value = $this->lower( $value );
+		$value = preg_replace( '/\b(?:город\s+федерального\s+значения|город|г)\b\.?\s*/u', '', $value ) ?? $value;
+		$value = preg_replace( '/[^\p{L}\p{N}]+/u', '', $value ) ?? $value;
+
+		return trim( $value );
+	}
+
+	private function normalize_region_name( string $value ): string {
+		$value = $this->lower( $value );
+		$value = preg_replace( '/\b(?:город\s+федерального\s+значения|город|г|область|обл|край|республика|респ)\b\.?\s*/u', '', $value ) ?? $value;
+		$value = preg_replace( '/[^\p{L}\p{N}]+/u', '', $value ) ?? $value;
+
+		return trim( $value );
+	}
+
+	private function normalize_guid( string $value ): string {
+		return strtolower( trim( $value ) );
+	}
+
+	private function lower( string $value ): string {
+		if ( function_exists( 'mb_strtolower' ) ) {
+			return mb_strtolower( $value, 'UTF-8' );
+		}
+
+		return preg_replace_callback(
+			'/[А-ЯЁ]/u',
+			static function ( array $m ): string {
+				$map = array( 'А' => 'а', 'Б' => 'б', 'В' => 'в', 'Г' => 'г', 'Д' => 'д', 'Е' => 'е', 'Ё' => 'ё', 'Ж' => 'ж', 'З' => 'з', 'И' => 'и', 'Й' => 'й', 'К' => 'к', 'Л' => 'л', 'М' => 'м', 'Н' => 'н', 'О' => 'о', 'П' => 'п', 'Р' => 'р', 'С' => 'с', 'Т' => 'т', 'У' => 'у', 'Ф' => 'ф', 'Х' => 'х', 'Ц' => 'ц', 'Ч' => 'ч', 'Ш' => 'ш', 'Щ' => 'щ', 'Ъ' => 'ъ', 'Ы' => 'ы', 'Ь' => 'ь', 'Э' => 'э', 'Ю' => 'ю', 'Я' => 'я' );
+				return $map[ $m[0] ] ?? $m[0];
+			},
+			strtolower( $value )
+		) ?? strtolower( $value );
 	}
 
 	private function constraints( ShipmentCreateRequest $request ): PickupCargoConstraints {

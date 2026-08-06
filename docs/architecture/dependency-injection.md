@@ -1,8 +1,8 @@
 # Dependency Injection
 
-Version 0.134.7 wires PEK shipment dependencies into `Plugin.php`: adapter registry, persistence mapper list, modal extension registry, document provider registry, private access token service, sender counterpart verification, SMS release availability, declared-value resolver, sender warehouse resolver, request/cargo/recipient builders, manual attach context resolver, structured courier address resolver, status mapping/service, cancellation/button policy, document service, and PEK credentials for account-bound counterpart checks. Private tokens are request-local only and are never stored in options, transients, order meta, previews, or logs. Counterpart snapshots store only safe sender identity and PEK account login hashes, never raw login or API keys.
+Version 0.134.8 wires PEK shipment dependencies into `Plugin.php`: adapter registry, persistence mapper list, modal extension registry, document provider registry, private access token service, sender counterpart verification, SMS release availability, declared-value resolver, sender warehouse resolver, request/cargo/recipient builders, manual attach context resolver, structured courier address resolver, status mapping/service, cancellation/button policy, document service, and PEK credentials for account-bound counterpart checks. Private tokens are request-local only and are never stored in options, transients, order meta, previews, or logs. Counterpart snapshots store only safe sender identity and PEK account login hashes, never raw login or API keys.
 
-Version: 0.134.7
+Version: 0.134.8
 
 `src/Core/Plugin.php` is the composition root. `src/Core/Container.php` is a small lazy singleton container with `register()`, `get()`, and `has()`.
 

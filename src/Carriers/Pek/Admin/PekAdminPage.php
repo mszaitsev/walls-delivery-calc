@@ -55,10 +55,11 @@ final class PekAdminPage {
 				$old_login_hash = $this->credentials->account_login_hash();
 				$this->settings->save_from_admin( $post );
 				$this->warehouses->clear_last_search_for_current_user();
-				if ( ! $this->credentials->save_from_admin( $post ) ) {
-					$notice = array( 'type' => 'warning', 'message' => 'Настройки ПЭК сохранены, но API key не обновлён: задайте APP_ENCRYPTION_KEY.' );
+				$credentials_saved = $this->credentials->save_from_admin( $post );
+				if ( ! $credentials_saved ) {
+					$notice = array( 'type' => 'warning', 'message' => 'Настройки ПЭК сохранены, но credentials не изменены: проверьте APP_ENCRYPTION_KEY.' );
 				}
-				if ( $old_login_hash !== $this->credentials->account_login_hash() ) {
+				if ( $credentials_saved && $old_login_hash !== $this->credentials->account_login_hash() ) {
 					$this->settings->save_sender_counterpart( '', array() );
 				}
 				$this->quote_cache?->clear_all_delivery_cache();
