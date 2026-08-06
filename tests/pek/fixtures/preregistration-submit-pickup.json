@@ -7,23 +7,24 @@
     "legalForm": 1,
     "fs": "ООО",
     "title": "Тестовый отправитель",
-    "inn": "7700000000",
-    "kpp": "770001001",
+    "inn": "5400000000",
     "countryOfRegistrationCode": "643",
-    "person": "Иванов Иван",
+    "person": "Петров Петр",
     "personPhones": [
       {
-        "phone": "+79000000000"
+        "phone": "+73831234567"
       }
     ],
-    "warehouseId": "sender-warehouse-guid"
+    "warehouseId": "WH-A",
+    "kpp": "540001001",
+    "email": "sender@example.test"
   },
   "cargos": [
     {
       "common": {
         "type": 3,
-        "customerCorrelation": "wdc-pek-1",
-        "orderNumber": "1001",
+        "customerCorrelation": "wdc-a0c261de469f9549756a68103b33c553",
+        "orderNumber": "1004",
         "positionsCount": 1,
         "weight": 1.25,
         "volume": 0.01,
@@ -41,18 +42,19 @@
       },
       "receiver": {
         "legalForm": 3,
-        "title": "Петров Петр",
+        "title": "Иванов Иван",
         "individual": {
-          "lastName": "Петров",
-          "firstName": "Петр"
+          "lastName": "Иванов",
+          "firstName": "Иван"
         },
-        "person": "Петров Петр",
+        "person": "Иванов Иван",
         "personPhones": [
           {
-            "phone": "+79100000000"
+            "phone": "+79991234567"
           }
         ],
-        "warehouseId": "receiver-warehouse-guid"
+        "email": "buyer@example.test",
+        "warehouseId": "WH-R"
       },
       "services": {
         "transporting": {
@@ -65,7 +67,7 @@
           "payer": {
             "type": 1
           },
-          "cost": 1500
+          "cost": 100000
         },
         "sealing": {
           "enabled": true,

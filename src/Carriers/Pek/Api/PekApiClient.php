@@ -202,12 +202,7 @@ final class PekApiClient {
 		if (
 			! is_array( $result )
 			|| array_is_list( $result )
-			|| ! is_string( $result['access_token'] ?? null )
-			|| '' === trim( $result['access_token'] )
-			|| strlen( trim( $result['access_token'] ) ) > 8192
-			|| ! is_string( $result['token_type'] ?? null )
-			|| 'bearer' !== strtolower( trim( $result['token_type'] ) )
-			|| ( ! is_int( $result['expires_in_unix'] ?? null ) && ! ( is_string( $result['expires_in_unix'] ?? null ) && 1 === preg_match( '/^\d+$/', trim( $result['expires_in_unix'] ) ) ) && ! is_string( $result['expires_in'] ?? null ) )
+			|| ! $this->valid_private_access_token_response( $result )
 		) {
 			throw new PekApiException( 'ПЭК вернул неожиданную структуру private token.', array_merge( $this->last_response_meta(), array( 'error_code' => 'pek_unexpected_private_token', 'failure_stage' => 'private_token_contract', 'response_shape' => $this->response_shape( $result ) ) ) );
 		}
@@ -635,6 +630,43 @@ final class PekApiClient {
 		}
 
 		return $value;
+	}
+
+	/** @param array<string,mixed> $result */
+	private function valid_private_access_token_response( array $result ): bool {
+		$token = $result['access_token'] ?? null;
+		if ( ! is_string( $token ) || '' === trim( $token ) || strlen( trim( $token ) ) > 8192 || 1 === preg_match( '/[\x00-\x1F\x7F]/', trim( $token ) ) ) {
+			return false;
+		}
+		$type = $result['token_type'] ?? null;
+		if ( ! is_string( $type ) || 'bearer' !== strtolower( trim( $type ) ) ) {
+			return false;
+		}
+		$unix = $result['expires_in_unix'] ?? null;
+		if ( is_int( $unix ) ) {
+			return $unix > 0;
+		}
+		if ( is_string( $unix ) ) {
+			$value = trim( $unix );
+			return 1 === preg_match( '/^\d+$/', $value )
+				&& strlen( $value ) <= strlen( (string) PHP_INT_MAX )
+				&& strcmp( str_pad( $value, strlen( (string) PHP_INT_MAX ), '0', STR_PAD_LEFT ), (string) PHP_INT_MAX ) <= 0
+				&& (int) $value > 0;
+		}
+		if ( null !== $unix ) {
+			return false;
+		}
+		$text = $result['expires_in'] ?? null;
+		if ( ! is_string( $text ) || '' === trim( $text ) ) {
+			return false;
+		}
+		$text = trim( $text );
+		$date = \DateTimeImmutable::createFromFormat( 'Y-m-d\ZH:i:s', $text, new \DateTimeZone( 'UTC' ) );
+		$errors = \DateTimeImmutable::getLastErrors();
+
+		return $date instanceof \DateTimeImmutable
+			&& $date->format( 'Y-m-d\ZH:i:s' ) === $text
+			&& ( false === $errors || ( 0 === $errors['warning_count'] && 0 === $errors['error_count'] ) );
 	}
 
 	/** @return array<string,mixed> */

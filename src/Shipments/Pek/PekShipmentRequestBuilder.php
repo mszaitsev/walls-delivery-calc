@@ -80,6 +80,7 @@ final class PekShipmentRequestBuilder {
 			'shipment_mode' => $request->delivery_type,
 			'recipient_type' => 'physical',
 			'sealing_requested' => $sealing,
+			'courier_address_evidence' => is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array(),
 		);
 
 		return array( 'payload' => $payload, 'preview' => $this->preview( $summary ), 'summary' => $summary );
@@ -223,6 +224,7 @@ final class PekShipmentRequestBuilder {
 		$sender = is_array( $summary['sender_warehouse'] ?? null ) ? $summary['sender_warehouse'] : array();
 		$cargo = is_array( $summary['cargo'] ?? null ) ? $summary['cargo'] : array();
 		$sms = is_array( $summary['sms'] ?? null ) ? $summary['sms'] : array();
+		$courier_evidence = is_array( $summary['courier_address_evidence'] ?? null ) ? $summary['courier_address_evidence'] : array();
 
 		return array(
 			'orderType' => 0,
@@ -234,6 +236,14 @@ final class PekShipmentRequestBuilder {
 			'receiver_mode' => (string) ( $summary['shipment_mode'] ?? '' ),
 			'receiver_warehouse_id' => (string) ( $summary['receiver_warehouse_id'] ?? '' ),
 			'courier_address_present' => '' === (string) ( $summary['receiver_warehouse_id'] ?? '' ),
+			'courier_address_source' => (string) ( $courier_evidence['courier_address_source'] ?? '' ),
+			'courier_region_present' => ! empty( $courier_evidence['courier_region_present'] ),
+			'courier_city_present' => ! empty( $courier_evidence['courier_city_present'] ),
+			'courier_street_present' => ! empty( $courier_evidence['courier_street_present'] ),
+			'courier_house_present' => ! empty( $courier_evidence['courier_house_present'] ),
+			'courier_apartment_present' => ! empty( $courier_evidence['courier_apartment_present'] ),
+			'courier_postcode_present' => ! empty( $courier_evidence['courier_postcode_present'] ),
+			'courier_address_hash' => (string) ( $courier_evidence['courier_address_hash'] ?? '' ),
 			'place_count' => (int) ( $cargo['place_count'] ?? 0 ),
 			'aggregate_weight_kg' => $cargo['aggregate_weight_kg'] ?? null,
 			'aggregate_volume_m3' => $cargo['aggregate_volume_m3'] ?? null,

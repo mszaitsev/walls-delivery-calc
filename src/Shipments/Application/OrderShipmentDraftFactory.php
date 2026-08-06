@@ -704,13 +704,14 @@ final class OrderShipmentDraftFactory {
 			$this->meta_string( $order, '_wdc_platform_location_id' )
 		);
 		$address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : (string) ( $pickup['address'] ?? $pickup['point_address'] ?? '' );
+		$courier = DeliveryType::COURIER === $delivery_type ? $this->pek_courier_address_with_evidence_from_order( $order ) : array( 'address' => null, 'evidence' => array() );
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
 			carrier_key: PekSettings::CARRIER_KEY,
 			delivery_type: $delivery_type,
 			rate_id: PekSettings::SERVICE_KEY . ':' . $delivery_type,
-			recipient_address: DeliveryType::COURIER === $delivery_type ? $this->pek_courier_address_from_order( $order, $calculation ) : $this->recipient_address( $order, $delivery_type, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
+			recipient_address: DeliveryType::COURIER === $delivery_type && $courier['address'] instanceof Address ? $courier['address'] : $this->recipient_address( $order, $delivery_type, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
 			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $point_code ? new PickupPointSelection( PekSettings::CARRIER_KEY, PekSettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
 			places: array( $place ),
 			declared_value: Money::from_kopecks( 0 ),
@@ -741,6 +742,7 @@ final class OrderShipmentDraftFactory {
 				'provider_destination_fingerprint' => (string) ( $rate_meta['provider_destination_fingerprint'] ?? $pickup['provider_destination_fingerprint'] ?? '' ),
 				'pickup_provider_query' => $provider_query,
 				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $address : '',
+				'pek_courier_address_evidence' => DeliveryType::COURIER === $delivery_type && is_array( $courier['evidence'] ?? null ) ? $courier['evidence'] : array(),
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
 				'pek_product_weight_g' => max( 0, $product_weight ),
@@ -790,12 +792,13 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
-	private function pek_courier_address_from_order( object $order, array $calculation ): Address {
+	/** @return array{address:Address,evidence:array<string,mixed>} */
+	private function pek_courier_address_with_evidence_from_order( object $order ): array {
 		if ( ! $this->pek_courier_addresses instanceof PekShipmentCourierAddressResolver ) {
 			throw new \RuntimeException( 'Не настроен PEK resolver адреса курьерской доставки.' );
 		}
 
-		return $this->pek_courier_addresses->from_order( $order, $calculation );
+		return $this->pek_courier_addresses->from_order_with_evidence( $order );
 	}
 
 	private function create_dpd_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {

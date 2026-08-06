@@ -96,18 +96,47 @@ final class PekManualAttachContextResolver {
 			if ( ! is_array( $places ) || array() === $places ) {
 				throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
 			}
+			$result = array();
+			$numbers = array();
 			foreach ( $places as $place ) {
-				if ( ! is_array( $place ) || (int) ( $place['weight_g'] ?? 0 ) <= 0 ) {
+				if ( ! is_array( $place ) || array_is_list( $place ) ) {
 					throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
 				}
+				foreach ( $place as $value ) {
+					if ( is_object( $value ) || is_resource( $value ) ) {
+						throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+					}
+				}
+				$number = $this->positive_int_field( $place, 'place_number', 1, 1000 );
+				if ( isset( $numbers[ $number ] ) ) {
+					throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+				}
+				$numbers[ $number ] = true;
+				$result[] = array(
+					'place_number' => $number,
+					'weight_g' => $this->positive_int_field( $place, 'weight_g', 1, 100000000 ),
+					'length_cm' => $this->positive_int_field( $place, 'length_cm', 1, 100000 ),
+					'width_cm' => $this->positive_int_field( $place, 'width_cm', 1, 100000 ),
+					'height_cm' => $this->positive_int_field( $place, 'height_cm', 1, 100000 ),
+				);
 			}
 
-			return $places;
+			return $result;
 		}
 		if ( is_object( $request ) ) {
 			return $this->places( $request->places );
 		}
 
 		throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+	}
+
+	/** @param array<string,mixed> $row */
+	private function positive_int_field( array $row, string $key, int $min, int $max ): int {
+		$value = $row[ $key ] ?? null;
+		if ( ! is_int( $value ) || $value < $min || $value > $max ) {
+			throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+		}
+
+		return $value;
 	}
 }

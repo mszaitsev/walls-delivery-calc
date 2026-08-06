@@ -283,8 +283,11 @@ final class PekSettings {
 		$country = strtoupper( $this->sanitize_key( (string) ( $input[ self::SENDER_REGISTRATION_COUNTRY_KEY ] ?? 'RU' ) ) );
 		$this->settings->set( self::SENDER_REGISTRATION_COUNTRY_KEY, array_key_exists( $country, self::COUNTRY_CLASSIFIER_CODES ) ? $country : 'RU' );
 		$this->settings->set( self::SENDER_PHONE_KEY, trim( preg_replace( '/[^\d+]/', '', (string) ( $input[ self::SENDER_PHONE_KEY ] ?? '' ) ) ?? '' ) );
-		$email = (string) ( $input[ self::SENDER_EMAIL_KEY ] ?? '' );
-		$this->settings->set( self::SENDER_EMAIL_KEY, function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : trim( $email ) );
+		$email = trim( (string) ( $input[ self::SENDER_EMAIL_KEY ] ?? '' ) );
+		if ( '' !== $email && ( function_exists( 'is_email' ) ? false === is_email( $email ) : 1 !== preg_match( '/^[^@\s]+@[^@\s]+\.[^@\s]+$/', $email ) ) ) {
+			throw new \InvalidArgumentException( 'Некорректный email отправителя ПЭК.' );
+		}
+		$this->settings->set( self::SENDER_EMAIL_KEY, function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : $email );
 		$this->settings->set( self::WAREHOUSE_SEARCH_RADIUS_KEY, $this->clamp_raw_int( $input[ self::WAREHOUSE_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 ) );
 		$this->settings->set( self::WAREHOUSE_SEARCH_LIMIT_KEY, $this->clamp_raw_int( $input[ self::WAREHOUSE_SEARCH_LIMIT_KEY ] ?? 5, 1, 50 ) );
 		$this->settings->set( self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 ) );

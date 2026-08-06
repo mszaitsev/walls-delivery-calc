@@ -44,7 +44,7 @@ final class PekPrivateAccessTokenService {
 			throw new PekApiException( 'ПЭК вернул недействительный private token.', array( 'error_code' => 'pek_private_token_invalid_access_token', 'failure_stage' => 'private_token_contract' ) );
 		}
 		$value = trim( $value );
-		if ( '' === $value || strlen( $value ) > 8192 ) {
+		if ( '' === $value || strlen( $value ) > 8192 || 1 === preg_match( '/[\x00-\x1F\x7F]/', $value ) ) {
 			throw new PekApiException( 'ПЭК вернул недействительный private token.', array( 'error_code' => 'pek_private_token_invalid_access_token', 'failure_stage' => 'private_token_contract' ) );
 		}
 
@@ -57,17 +57,25 @@ final class PekPrivateAccessTokenService {
 		if ( is_int( $unix ) && $unix > 0 ) {
 			return (int) $unix;
 		}
-		if ( is_string( $unix ) && 1 === preg_match( '/^\d+$/', trim( $unix ) ) ) {
-			return (int) trim( $unix );
+		if ( is_string( $unix ) ) {
+			$trimmed = trim( $unix );
+			if ( 1 !== preg_match( '/^\d+$/', $trimmed ) || strlen( $trimmed ) > strlen( (string) PHP_INT_MAX ) || strcmp( str_pad( $trimmed, strlen( (string) PHP_INT_MAX ), '0', STR_PAD_LEFT ), (string) PHP_INT_MAX ) > 0 ) {
+				return 0;
+			}
+			return (int) $trimmed;
+		}
+		if ( null !== $unix ) {
+			return 0;
 		}
 		$text = $response['expires_in'] ?? null;
 		if ( ! is_string( $text ) || '' === trim( $text ) ) {
 			return 0;
 		}
-		$date = \DateTimeImmutable::createFromFormat( 'Y-m-d\ZH:i:s', trim( $text ), new \DateTimeZone( 'UTC' ) );
+		$text = trim( $text );
+		$date = \DateTimeImmutable::createFromFormat( 'Y-m-d\ZH:i:s', $text, new \DateTimeZone( 'UTC' ) );
 		$errors = \DateTimeImmutable::getLastErrors();
 
-		return $date instanceof \DateTimeImmutable && ( false === $errors || ( 0 === $errors['warning_count'] && 0 === $errors['error_count'] ) ) ? $date->getTimestamp() : 0;
+		return $date instanceof \DateTimeImmutable && $date->format( 'Y-m-d\ZH:i:s' ) === $text && ( false === $errors || ( 0 === $errors['warning_count'] && 0 === $errors['error_count'] ) ) ? $date->getTimestamp() : 0;
 	}
 
 	private function now(): int {

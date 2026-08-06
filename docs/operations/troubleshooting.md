@@ -2,7 +2,7 @@
 
 For PEK shipment create failures, first check sender counterpart confirmation, sender warehouse validity, RU-only destination, selected pickup terminal freshness, declared value limits, and SMS release availability. Uncertain transport/contract failures after submit are persisted as `pending_creation_in_carrier`; managers must verify the PEK cabinet and either manually attach the cargo code or remove the pending local attempt before retrying.
 
-Version: 0.134.5
+Version: 0.134.6
 
 Start with:
 
