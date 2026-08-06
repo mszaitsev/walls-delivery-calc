@@ -35,17 +35,18 @@ final class PekShipmentDestinationResolver {
 			throw new \RuntimeException( 'Не выбран терминал ПЭК.' );
 		}
 		$query_data = is_array( $request->meta['pickup_provider_query'] ?? null ) ? $request->meta['pickup_provider_query'] : array();
+		$coordinates = $this->coordinate_pair( $query_data['latitude'] ?? null, $query_data['longitude'] ?? null );
 		$query = new CarrierPickupPointQuery(
 			PekSettings::CARRIER_KEY,
 			(int) ( $request->meta['pek_destination_location_id'] ?? $query_data['location_id'] ?? 0 ),
 			'RU',
 			(string) ( $query_data['fallback_address'] ?? $request->recipient_address->raw_address ),
-			$this->nullable_float( $query_data['latitude'] ?? null ),
-			$this->nullable_float( $query_data['longitude'] ?? null ),
+			$coordinates['latitude'],
+			$coordinates['longitude'],
 			$this->constraints( $request ),
 			CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
-			max( 1, (int) ( $query_data['radius_km'] ?? 50 ) ),
-			max( 1, (int) ( $query_data['limit'] ?? 50 ) )
+			$this->bounded_int( $query_data['radius_km'] ?? 50, 1, 500, 50 ),
+			$this->bounded_int( $query_data['limit'] ?? 50, 1, 100, 50 )
 		);
 		$point = $this->pickup_points->resolve_selection( new CarrierPickupPointSelectionQuery( $query, $code ) );
 		if ( null === $point || $point->code !== $code || ! $point->active ) {
@@ -119,7 +120,49 @@ final class PekShipmentDestinationResolver {
 		return new PickupCargoConstraints( $weight, $volume, $max_dimension, $max_place_weight, max( 1, count( $request->places ) ) );
 	}
 
-	private function nullable_float( mixed $value ): ?float {
-		return null === $value || '' === trim( (string) $value ) ? null : (float) $value;
+	/** @return array{latitude:?float,longitude:?float} */
+	private function coordinate_pair( mixed $latitude, mixed $longitude ): array {
+		$lat_empty = null === $latitude || ( is_string( $latitude ) && '' === trim( $latitude ) );
+		$lon_empty = null === $longitude || ( is_string( $longitude ) && '' === trim( $longitude ) );
+		if ( $lat_empty && $lon_empty ) {
+			return array( 'latitude' => null, 'longitude' => null );
+		}
+		if ( $lat_empty || $lon_empty ) {
+			throw new \RuntimeException( 'Некорректные координаты пункта ПЭК.' );
+		}
+		$lat = $this->strict_float( $latitude );
+		$lon = $this->strict_float( $longitude );
+		if ( $lat < -90 || $lat > 90 || $lon < -180 || $lon > 180 ) {
+			throw new \RuntimeException( 'Некорректные координаты пункта ПЭК.' );
+		}
+
+		return array( 'latitude' => $lat, 'longitude' => $lon );
+	}
+
+	private function strict_float( mixed $value ): float {
+		if ( is_bool( $value ) || is_array( $value ) || is_object( $value ) ) {
+			throw new \RuntimeException( 'Некорректные координаты пункта ПЭК.' );
+		}
+		if ( is_int( $value ) || is_float( $value ) ) {
+			$result = (float) $value;
+		} elseif ( is_string( $value ) && 1 === preg_match( '/^-?\d+(?:\.\d+)?$/', trim( $value ) ) ) {
+			$result = (float) trim( $value );
+		} else {
+			throw new \RuntimeException( 'Некорректные координаты пункта ПЭК.' );
+		}
+		if ( ! is_finite( $result ) ) {
+			throw new \RuntimeException( 'Некорректные координаты пункта ПЭК.' );
+		}
+
+		return $result;
+	}
+
+	private function bounded_int( mixed $value, int $min, int $max, int $default ): int {
+		if ( ! is_int( $value ) && ! ( is_string( $value ) && 1 === preg_match( '/^\d+$/', trim( $value ) ) ) ) {
+			return $default;
+		}
+		$value = (int) $value;
+
+		return max( $min, min( $max, $value ) );
 	}
 }

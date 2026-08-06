@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 
 defined( 'ABSPATH' ) || exit;
@@ -12,25 +13,30 @@ final class PekSenderCounterpartService {
 	public function __construct(
 		private PekApiClient $api,
 		private PekPrivateAccessTokenService $tokens,
-		private PekSettings $settings
+		private PekSettings $settings,
+		private PekCredentials $credentials
 	) {
 	}
 
 	/** @return array<string,mixed> */
 	public function verify_and_save(): array {
-		$rows = $this->api->confirmed_counterparties( $this->tokens->token() );
-		$matches = array();
-		$configured_card = trim( $this->settings->client_card() );
-		foreach ( $rows as $row ) {
-			$row = $this->normalize_row( $row );
-			if (
-				$row['legalForm'] === $this->settings->sender_legal_form()
-				&& $row['inn'] === $this->settings->sender_inn()
-				&& ( PekSettings::LEGAL_FORM_LEGAL_ENTITY !== $this->settings->sender_legal_form() || $row['kpp'] === $this->settings->sender_kpp() )
-				&& ( '' === $configured_card || $row['counterpartClientCard'] === $configured_card )
-			) {
-				$matches[] = $row;
+		try {
+			$rows = $this->api->confirmed_counterparties( $this->tokens->token() );
+			$matches = array();
+			$configured_card = trim( $this->settings->client_card() );
+			foreach ( $rows as $row ) {
+				$row = $this->normalize_row( $row );
+				if (
+					$row['legalForm'] === $this->settings->sender_legal_form()
+					&& $row['inn'] === $this->settings->sender_inn()
+					&& ( PekSettings::LEGAL_FORM_LEGAL_ENTITY !== $this->settings->sender_legal_form() || $row['kpp'] === $this->settings->sender_kpp() )
+					&& ( '' === $configured_card || $row['counterpartClientCard'] === $configured_card )
+				) {
+					$matches[] = $row;
+				}
 			}
+		} catch ( \Throwable ) {
+			return array( 'success' => false, 'message' => 'ПЭК вернул некорректные данные контрагента отправителя.' );
 		}
 		if ( 1 !== count( $matches ) ) {
 			return array( 'success' => false, 'message' => 0 === count( $matches ) ? 'ПЭК не подтвердил контрагента отправителя по ИНН/КПП.' : 'ПЭК вернул несколько контрагентов отправителя; выбор заблокирован.' );
@@ -45,6 +51,7 @@ final class PekSenderCounterpartService {
 			'kpp_masked' => $this->mask( $row['kpp'] ),
 			'client_card_present' => '' !== $row['counterpartClientCard'],
 			'identity_hash' => $this->settings->sender_identity_hash(),
+			'account_login_hash' => $this->credentials->account_login_hash(),
 			'checked_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
 		);
 		$this->settings->save_sender_counterpart( $guid, $snapshot );
@@ -77,11 +84,22 @@ final class PekSenderCounterpartService {
 		if ( ! is_string( $legal['inn'] ?? null ) ) {
 			throw new \RuntimeException( 'ПЭК вернул некорректные данные контрагента отправителя.' );
 		}
+		$inn = trim( $legal['inn'] );
+		if ( 1 !== preg_match( '/^\d+$/', $inn ) || ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $row['legalForm'] && 10 !== strlen( $inn ) ) || ( PekSettings::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $row['legalForm'] && 12 !== strlen( $inn ) ) ) {
+			throw new \RuntimeException( 'ПЭК вернул некорректные данные контрагента отправителя.' );
+		}
 		$kpp = $legal['kpp'] ?? null;
 		if ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $row['legalForm'] && ! is_string( $kpp ) ) {
 			throw new \RuntimeException( 'ПЭК вернул некорректные данные контрагента отправителя.' );
 		}
 		if ( PekSettings::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $row['legalForm'] && null !== $kpp && ! is_string( $kpp ) ) {
+			throw new \RuntimeException( 'ПЭК вернул некорректные данные контрагента отправителя.' );
+		}
+		$kpp = is_string( $kpp ) ? trim( $kpp ) : '';
+		if ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $row['legalForm'] && 1 !== preg_match( '/^\d{9}$/', $kpp ) ) {
+			throw new \RuntimeException( 'ПЭК вернул некорректные данные контрагента отправителя.' );
+		}
+		if ( PekSettings::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $row['legalForm'] && '' !== $kpp && 1 !== preg_match( '/^\d{1,12}$/', $kpp ) ) {
 			throw new \RuntimeException( 'ПЭК вернул некорректные данные контрагента отправителя.' );
 		}
 
@@ -90,8 +108,8 @@ final class PekSenderCounterpartService {
 			'title' => trim( $row['title'] ),
 			'guid' => trim( $row['guid'] ),
 			'counterpartClientCard' => null === $card ? '' : trim( $card ),
-			'inn' => $this->digits( $legal['inn'] ),
-			'kpp' => is_string( $kpp ) ? $this->digits( $kpp ) : '',
+			'inn' => $inn,
+			'kpp' => $kpp,
 		);
 	}
 

@@ -19,6 +19,12 @@ final class PekCredentials {
 		return $this->sanitize_login( $this->settings->get_string( PekSettings::LOGIN_KEY, '' ) );
 	}
 
+	public function account_login_hash(): string {
+		$login = $this->login();
+
+		return '' !== $login ? hash( 'sha256', $login ) : '';
+	}
+
 	public function api_key(): string {
 		$encrypted = $this->settings->get_string( PekSettings::API_KEY_ENCRYPTED_KEY, '' );
 		if ( '' === trim( $encrypted ) ) {

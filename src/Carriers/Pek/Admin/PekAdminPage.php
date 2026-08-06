@@ -52,10 +52,14 @@ final class PekAdminPage {
 		$notice = array( 'type' => 'success', 'message' => 'Настройки ПЭК сохранены.' );
 		try {
 			if ( 'save_pek_settings' === $action ) {
+				$old_login_hash = $this->credentials->account_login_hash();
 				$this->settings->save_from_admin( $post );
 				$this->warehouses->clear_last_search_for_current_user();
 				if ( ! $this->credentials->save_from_admin( $post ) ) {
 					$notice = array( 'type' => 'warning', 'message' => 'Настройки ПЭК сохранены, но API key не обновлён: задайте APP_ENCRYPTION_KEY.' );
+				}
+				if ( $old_login_hash !== $this->credentials->account_login_hash() ) {
+					$this->settings->save_sender_counterpart( '', array() );
 				}
 				$this->quote_cache?->clear_all_delivery_cache();
 			} elseif ( 'check_pek_connection' === $action ) {
@@ -136,7 +140,7 @@ final class PekAdminPage {
 				<?php $this->text_row( PekSettings::SENDER_EMAIL_KEY, 'Email', $this->settings->sender_email() ); ?>
 				<?php $this->text_row( PekSettings::CLIENT_CARD_KEY, 'Номер карты клиента ПЭК', $this->settings->client_card() ); ?>
 				<?php $this->text_row( PekSettings::DEFAULT_CARGO_DESCRIPTION_KEY, 'Описание груза по умолчанию', $this->settings->default_cargo_description() ); ?>
-				<tr><th colspan="2"><h4><?php echo esc_html__( 'Доплаты для лёгких грузов', 'walls-delivery-calc' ); ?></h4><p class="description"><?php echo esc_html__( 'Доплаты применяются по весу товаров без учёта упаковочного веса. Они добавляются магазином к стоимости, возвращённой ПЭК. В запрос ПЭК мешок и пломбировка не передаются. Порог применяется строго: вес должен быть менее заданного значения.', 'walls-delivery-calc' ); ?></p></th></tr>
+				<tr><th colspan="2"><h4><?php echo esc_html__( 'Доплаты для лёгких грузов', 'walls-delivery-calc' ); ?></h4><p class="description"><?php echo esc_html__( 'В calculator quote payload магазин не запрашивает мешок и пломбировку; магазинные доплаты добавляются отдельно. При создании заявки documented service sealing может быть запрошен для груза ниже настроенного порога. Недокументированный bag field не передаётся.', 'walls-delivery-calc' ); ?></p></th></tr>
 				<?php $this->text_row( PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY, 'Стоимость мешка, руб.', $this->settings->light_cargo_bag_price_rub() ); ?>
 				<?php $this->text_row( PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, 'Стоимость пломбировки, руб.', $this->settings->light_cargo_sealing_price_rub() ); ?>
 				<?php $this->number_row( PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, 'Применять при весе товаров менее, г', $this->settings->light_cargo_weight_limit_g(), 1, 1000000 ); ?>
@@ -172,7 +176,7 @@ final class PekAdminPage {
 		<?php $this->render_compact_report( $diagnostic ); ?>
 
 		<h3><?php echo esc_html__( 'Склад самопривоза отправителя', 'walls-delivery-calc' ); ?></h3>
-		<p class="description"><?php echo esc_html__( 'Выбранный склад является default для будущих отправлений. При создании конкретного отправления ограничения склада будут повторно проверяться по весу, объёму, габаритам и количеству мест. Позднее склад можно будет заменить в shipment modal; modal override на этом этапе ещё не реализован.', 'walls-delivery-calc' ); ?></p>
+		<p class="description"><?php echo esc_html__( 'Выбранный склад является default для будущих отправлений. Склад можно заменить для конкретного отправления в shipment modal; default в настройках при этом не меняется. При создании конкретного отправления ограничения склада будут повторно проверяться по весу, объёму, габаритам и количеству мест.', 'walls-delivery-calc' ); ?></p>
 		<?php $this->render_warehouse_snapshot( $warehouse ); ?>
 		<form method="post" style="max-width:760px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>

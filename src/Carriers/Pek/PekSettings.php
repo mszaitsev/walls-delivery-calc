@@ -272,35 +272,58 @@ final class PekSettings {
 	/** @param array<string,mixed> $input */
 	public function save_from_admin( array $input ): void {
 		$old_identity_hash = $this->sender_identity_hash();
-		$this->settings->set( self::REQUEST_TIMEOUT_KEY, $this->clamp_raw_int( $input[ self::REQUEST_TIMEOUT_KEY ] ?? 15, 1, 60 ) );
-		$this->settings->set( self::REQUESTS_PER_MINUTE_KEY, $this->clamp_raw_int( $input[ self::REQUESTS_PER_MINUTE_KEY ] ?? 90, 1, 100 ) );
-		$this->settings->set( self::SENDER_LEGAL_FORM_KEY, self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === (int) ( $input[ self::SENDER_LEGAL_FORM_KEY ] ?? 1 ) ? 2 : 1 );
+		$candidate = array(
+			self::REQUEST_TIMEOUT_KEY => $this->bounded_raw_int( $input[ self::REQUEST_TIMEOUT_KEY ] ?? 15, 1, 60 ),
+			self::REQUESTS_PER_MINUTE_KEY => $this->bounded_raw_int( $input[ self::REQUESTS_PER_MINUTE_KEY ] ?? 90, 1, 100 ),
+			self::SENDER_LEGAL_FORM_KEY => self::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === (int) ( $input[ self::SENDER_LEGAL_FORM_KEY ] ?? 1 ) ? 2 : 1,
+		);
 		foreach ( array( self::SENDER_FS_KEY, self::SENDER_FULL_NAME_KEY, self::SENDER_CONTACT_NAME_KEY, self::CLIENT_CARD_KEY, self::DEFAULT_CARGO_DESCRIPTION_KEY ) as $key ) {
-			$this->settings->set( $key, $this->sanitize_text( (string) ( $input[ $key ] ?? '' ) ) );
+			$candidate[ $key ] = $this->sanitize_text( (string) ( $input[ $key ] ?? '' ) );
 		}
-		$this->settings->set( self::SENDER_INN_KEY, preg_replace( '/\D+/', '', (string) ( $input[ self::SENDER_INN_KEY ] ?? '' ) ) ?? '' );
-		$this->settings->set( self::SENDER_KPP_KEY, preg_replace( '/\D+/', '', (string) ( $input[ self::SENDER_KPP_KEY ] ?? '' ) ) ?? '' );
+		$candidate[ self::SENDER_INN_KEY ] = preg_replace( '/\D+/', '', (string) ( $input[ self::SENDER_INN_KEY ] ?? '' ) ) ?? '';
+		$candidate[ self::SENDER_KPP_KEY ] = preg_replace( '/\D+/', '', (string) ( $input[ self::SENDER_KPP_KEY ] ?? '' ) ) ?? '';
 		$country = strtoupper( $this->sanitize_key( (string) ( $input[ self::SENDER_REGISTRATION_COUNTRY_KEY ] ?? 'RU' ) ) );
-		$this->settings->set( self::SENDER_REGISTRATION_COUNTRY_KEY, array_key_exists( $country, self::COUNTRY_CLASSIFIER_CODES ) ? $country : 'RU' );
-		$this->settings->set( self::SENDER_PHONE_KEY, trim( preg_replace( '/[^\d+]/', '', (string) ( $input[ self::SENDER_PHONE_KEY ] ?? '' ) ) ?? '' ) );
+		$candidate[ self::SENDER_REGISTRATION_COUNTRY_KEY ] = array_key_exists( $country, self::COUNTRY_CLASSIFIER_CODES ) ? $country : 'RU';
+		$candidate[ self::SENDER_PHONE_KEY ] = trim( preg_replace( '/[^\d+]/', '', (string) ( $input[ self::SENDER_PHONE_KEY ] ?? '' ) ) ?? '' );
 		$email = trim( (string) ( $input[ self::SENDER_EMAIL_KEY ] ?? '' ) );
 		if ( '' !== $email && ( function_exists( 'is_email' ) ? false === is_email( $email ) : 1 !== preg_match( '/^[^@\s]+@[^@\s]+\.[^@\s]+$/', $email ) ) ) {
 			throw new \InvalidArgumentException( 'Некорректный email отправителя ПЭК.' );
 		}
-		$this->settings->set( self::SENDER_EMAIL_KEY, function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : $email );
-		$this->settings->set( self::WAREHOUSE_SEARCH_RADIUS_KEY, $this->clamp_raw_int( $input[ self::WAREHOUSE_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 ) );
-		$this->settings->set( self::WAREHOUSE_SEARCH_LIMIT_KEY, $this->clamp_raw_int( $input[ self::WAREHOUSE_SEARCH_LIMIT_KEY ] ?? 5, 1, 50 ) );
-		$this->settings->set( self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 ) );
-		$this->settings->set( self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY ] ?? 50, 1, 100 ) );
-		$this->settings->set( self::DESTINATION_TERMINAL_CACHE_TTL_KEY, $this->clamp_raw_int( $input[ self::DESTINATION_TERMINAL_CACHE_TTL_KEY ] ?? 600, 60, 3600 ) );
-		$this->settings->set( self::LOCATION_MAPPING_TTL_DAYS_KEY, $this->clamp_raw_int( $input[ self::LOCATION_MAPPING_TTL_DAYS_KEY ] ?? 30, 1, 365 ) );
-		$this->settings->set( self::SMS_RELEASE_LIMIT_RUB_KEY, $this->clamp_raw_int( $input[ self::SMS_RELEASE_LIMIT_RUB_KEY ] ?? self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 ) );
-		$this->settings->set( self::LIGHT_CARGO_BAG_PRICE_RUB_KEY, $this->sanitize_rub_setting( $input[ self::LIGHT_CARGO_BAG_PRICE_RUB_KEY ] ?? $this->light_cargo_bag_price_rub(), '70' ) );
-		$this->settings->set( self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, $this->sanitize_rub_setting( $input[ self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ] ?? $this->light_cargo_sealing_price_rub(), '20' ) );
-		$this->settings->set( self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, $this->clamp_raw_int( $input[ self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ] ?? $this->light_cargo_weight_limit_g(), 1, 1000000 ) );
-		if ( $old_identity_hash !== $this->sender_identity_hash() ) {
+		$candidate[ self::SENDER_EMAIL_KEY ] = function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : $email;
+		$candidate[ self::WAREHOUSE_SEARCH_RADIUS_KEY ] = $this->bounded_raw_int( $input[ self::WAREHOUSE_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 );
+		$candidate[ self::WAREHOUSE_SEARCH_LIMIT_KEY ] = $this->bounded_raw_int( $input[ self::WAREHOUSE_SEARCH_LIMIT_KEY ] ?? 5, 1, 50 );
+		$candidate[ self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY ] = $this->bounded_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_RADIUS_KEY ] ?? 50, 1, 500 );
+		$candidate[ self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY ] = $this->bounded_raw_int( $input[ self::DESTINATION_TERMINAL_SEARCH_LIMIT_KEY ] ?? 50, 1, 100 );
+		$candidate[ self::DESTINATION_TERMINAL_CACHE_TTL_KEY ] = $this->bounded_raw_int( $input[ self::DESTINATION_TERMINAL_CACHE_TTL_KEY ] ?? 600, 60, 3600 );
+		$candidate[ self::LOCATION_MAPPING_TTL_DAYS_KEY ] = $this->bounded_raw_int( $input[ self::LOCATION_MAPPING_TTL_DAYS_KEY ] ?? 30, 1, 365 );
+		$candidate[ self::SMS_RELEASE_LIMIT_RUB_KEY ] = $this->bounded_raw_int( $input[ self::SMS_RELEASE_LIMIT_RUB_KEY ] ?? self::DEFAULT_SMS_RELEASE_LIMIT_RUB, 1, 999999999 );
+		$candidate[ self::LIGHT_CARGO_BAG_PRICE_RUB_KEY ] = $this->sanitize_rub_setting_strict( $input[ self::LIGHT_CARGO_BAG_PRICE_RUB_KEY ] ?? $this->light_cargo_bag_price_rub(), '70' );
+		$candidate[ self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ] = $this->sanitize_rub_setting_strict( $input[ self::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ] ?? $this->light_cargo_sealing_price_rub(), '20' );
+		$candidate[ self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ] = $this->bounded_raw_int( $input[ self::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ] ?? $this->light_cargo_weight_limit_g(), 1, 1000000 );
+		$new_identity_hash = $this->sender_identity_hash_for_values( $candidate );
+		foreach ( $candidate as $key => $value ) {
+			$this->settings->set( $key, $value );
+		}
+		if ( $old_identity_hash !== $new_identity_hash ) {
 			$this->save_sender_counterpart( '', array() );
 		}
+	}
+
+	/** @param array<string,mixed> $values */
+	private function sender_identity_hash_for_values( array $values ): string {
+		return hash(
+			'sha256',
+			implode(
+				'|',
+				array(
+					(string) ( $values[ self::SENDER_LEGAL_FORM_KEY ] ?? 1 ),
+					(string) ( $values[ self::SENDER_INN_KEY ] ?? '' ),
+					(string) ( $values[ self::SENDER_KPP_KEY ] ?? '' ),
+					(string) ( $values[ self::CLIENT_CARD_KEY ] ?? '' ),
+					(string) ( $values[ self::SENDER_REGISTRATION_COUNTRY_KEY ] ?? 'RU' ),
+				)
+			)
+		);
 	}
 
 	/** @param array<string,mixed> $value */
@@ -356,6 +379,7 @@ final class PekSettings {
 			'kpp_masked' => $this->sanitize_text( (string) ( $value['kpp_masked'] ?? '' ) ),
 			'client_card_present' => ! empty( $value['client_card_present'] ),
 			'identity_hash' => 1 === preg_match( '/^[a-f0-9]{64}$/', (string) ( $value['identity_hash'] ?? '' ) ) ? (string) $value['identity_hash'] : '',
+			'account_login_hash' => 1 === preg_match( '/^[a-f0-9]{64}$/', (string) ( $value['account_login_hash'] ?? '' ) ) ? (string) $value['account_login_hash'] : '',
 			'checked_at' => $this->sanitize_text( (string) ( $value['checked_at'] ?? '' ) ),
 		);
 	}
@@ -366,6 +390,15 @@ final class PekSettings {
 
 	private function clamp_raw_int( mixed $value, int $min, int $max ): int {
 		return max( $min, min( $max, is_numeric( $value ) ? (int) $value : $min ) );
+	}
+
+	private function bounded_raw_int( mixed $value, int $min, int $max ): int {
+		if ( is_bool( $value ) || is_array( $value ) || is_object( $value ) || ( ! is_int( $value ) && ! ( is_string( $value ) && 1 === preg_match( '/^\d+$/', trim( $value ) ) ) ) ) {
+			throw new \InvalidArgumentException( 'Некорректное числовое значение настройки ПЭК.' );
+		}
+		$number = (int) $value;
+
+		return max( $min, min( $max, $number ) );
 	}
 
 	private function sanitize_text( string $value ): string {
@@ -414,6 +447,25 @@ final class PekSettings {
 		$cents = $kopecks % 100;
 
 		return 0 === $cents ? (string) $rubles : (string) $rubles . '.' . str_pad( (string) $cents, 2, '0', STR_PAD_LEFT );
+	}
+
+	private function sanitize_rub_setting_strict( mixed $value, string $default ): string {
+		if ( is_array( $value ) || is_object( $value ) ) {
+			throw new \InvalidArgumentException( 'Некорректное рублёвое значение настройки ПЭК.' );
+		}
+		$raw = trim( str_replace( ',', '.', (string) $value ) );
+		if ( '' === $raw ) {
+			return $default;
+		}
+		if ( 1 !== preg_match( '/^\d+(?:\.\d{1,2})?$/', $raw ) ) {
+			throw new \InvalidArgumentException( 'Некорректное рублёвое значение настройки ПЭК.' );
+		}
+		$kopecks = $this->rub_string_to_kopecks( $raw );
+		if ( $kopecks < 0 || $kopecks > 10000000 ) {
+			throw new \InvalidArgumentException( 'Некорректное рублёвое значение настройки ПЭК.' );
+		}
+
+		return $this->sanitize_rub_setting( $raw, $default );
 	}
 
 	private function rub_string_to_kopecks( string $value ): int {

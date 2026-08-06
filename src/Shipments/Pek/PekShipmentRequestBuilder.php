@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 
@@ -19,7 +20,8 @@ final class PekShipmentRequestBuilder {
 		private PekShipmentCorrelationResolver $correlations,
 		private PekSmsReleaseAvailabilityService $sms,
 		private PekShipmentDestinationResolver $destinations,
-		private PekShipmentProductWeightResolver $product_weights
+		private PekShipmentProductWeightResolver $product_weights,
+		private PekCredentials $credentials
 	) {
 	}
 
@@ -115,6 +117,7 @@ final class PekShipmentRequestBuilder {
 			|| $counterpart_guid !== (string) ( $snapshot['guid'] ?? '' )
 			|| (int) ( $snapshot['legalForm'] ?? 0 ) !== $this->settings->sender_legal_form()
 			|| (string) ( $snapshot['identity_hash'] ?? '' ) !== $this->settings->sender_identity_hash()
+			|| (string) ( $snapshot['account_login_hash'] ?? '' ) !== $this->credentials->account_login_hash()
 		) {
 			throw new \RuntimeException( 'Данные отправителя ПЭК изменились. Повторно подтвердите контрагента в настройках.' );
 		}

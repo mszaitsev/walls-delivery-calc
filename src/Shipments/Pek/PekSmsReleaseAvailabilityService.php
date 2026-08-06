@@ -25,7 +25,7 @@ final class PekSmsReleaseAvailabilityService {
 	}
 
 	public function check( string $counterpart_guid, string $sender_branch_id, string $receiver_branch_id, int $declared_value_kopecks ): PekSmsReleaseResult {
-		$key = hash( 'sha256', implode( '|', array( $counterpart_guid, $sender_branch_id, $receiver_branch_id, (string) min( $declared_value_kopecks, 1000000000 ) ) ) );
+		$key = hash( 'sha256', implode( '|', array( $counterpart_guid, $sender_branch_id, $receiver_branch_id, (string) $declared_value_kopecks ) ) );
 		if ( isset( $this->cache[ $key ] ) ) {
 			return $this->cache[ $key ];
 		}
@@ -55,8 +55,10 @@ final class PekSmsReleaseAvailabilityService {
 	/** @param array<int,array<string,mixed>> $rows */
 	private function has_sms_geography( array $rows ): bool {
 		foreach ( $rows as $row ) {
-			$condition = is_array( $row['specialCondition'] ?? null ) ? $row['specialCondition'] : array();
-			if ( self::SMS_SERVICE_UID === strtolower( (string) ( $condition['UID'] ?? '' ) ) ) {
+			if ( ! is_array( $row ) || array_is_list( $row ) || ! is_array( $row['specialCondition'] ?? null ) || array_is_list( $row['specialCondition'] ) || ! is_string( $row['specialCondition']['UID'] ?? null ) ) {
+				throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_geography_malformed' ) );
+			}
+			if ( strtolower( self::SMS_SERVICE_UID ) === strtolower( $row['specialCondition']['UID'] ) ) {
 				return true;
 			}
 		}
@@ -88,14 +90,16 @@ final class PekSmsReleaseAvailabilityService {
 	/** @param array<string,mixed> $services */
 	private function api_limit_kopecks( array $services, string $sender_branch_id, string $receiver_branch_id ): int {
 		unset( $sender_branch_id, $receiver_branch_id );
-		$rows = is_array( $services['specialConditionsWithParams'] ?? null ) ? $services['specialConditionsWithParams'] : array();
+		if ( ! array_key_exists( 'specialConditionsWithParams', $services ) || ! is_array( $services['specialConditionsWithParams'] ) || ! array_is_list( $services['specialConditionsWithParams'] ) ) {
+			throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_special_conditions_malformed' ) );
+		}
+		$rows = $services['specialConditionsWithParams'];
 		$matches = array();
 		foreach ( $rows as $row ) {
-			if ( ! is_array( $row ) ) {
-				continue;
+			if ( ! is_array( $row ) || array_is_list( $row ) || ! is_array( $row['specialCondition'] ?? null ) || array_is_list( $row['specialCondition'] ) || ! is_string( $row['specialCondition']['UID'] ?? null ) ) {
+				throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_special_conditions_malformed' ) );
 			}
-			$condition = is_array( $row['specialCondition'] ?? null ) ? $row['specialCondition'] : array();
-			if ( strtolower( self::SMS_SERVICE_UID ) !== strtolower( (string) ( $condition['UID'] ?? '' ) ) ) {
+			if ( strtolower( self::SMS_SERVICE_UID ) !== strtolower( $row['specialCondition']['UID'] ) ) {
 				continue;
 			}
 			$matches[] = $row;
@@ -134,37 +138,13 @@ final class PekSmsReleaseAvailabilityService {
 		throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_cod_limit_malformed' ) );
 	}
 
-	/**
-	 * @param array<string,mixed> $param
-	 * @return array<int,int|float|string|bool>
-	 */
-	private function parameter_values( array $param ): array {
-		if ( ! array_key_exists( 'values', $param ) ) {
-			throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_param_values_missing' ) );
-		}
-		$values = $param['values'];
-		if ( is_int( $values ) || is_float( $values ) || is_string( $values ) || is_bool( $values ) ) {
-			return array( $values );
-		}
-		if ( ! is_array( $values ) || ! array_is_list( $values ) || array() === $values ) {
-			throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_param_values_malformed' ) );
-		}
-		foreach ( $values as $value ) {
-			if ( ! is_int( $value ) && ! is_float( $value ) && ! is_string( $value ) && ! is_bool( $value ) ) {
-				throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_param_values_malformed' ) );
-			}
-		}
-
-		return $values;
-	}
-
 	/** @param array<string,mixed> $param */
 	private function money_scalar_value( array $param ): int|float|string {
 		if ( ! array_key_exists( 'values', $param ) ) {
 			throw new PekApiException( self::PUBLIC_FAILURE, array( 'error_code' => 'pek_sms_param_values_missing' ) );
 		}
 		$value = $param['values'];
-		if ( is_int( $value ) || is_float( $value ) || is_string( $value ) ) {
+		if ( is_int( $value ) || ( is_float( $value ) && is_finite( $value ) ) || is_string( $value ) ) {
 			return $value;
 		}
 

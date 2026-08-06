@@ -1,8 +1,8 @@
 # Testing And Regression
 
-Version 0.134.6 keeps the PEK shipment smokes in the regression manifest and strengthens the integration smoke into fake-only pickup/courier production-chain coverage with exact outbound payload fixtures, pending reconciliation, SMS/counterpart contract checks, cancellation call counts, structured courier address validation, and actual-cost merge. The PEK group remains fake/local only; automated tests must not call production PEK APIs.
+Version 0.134.7 keeps the PEK shipment smokes in the regression manifest and strengthens the integration smoke into fake-only pickup/courier production-chain coverage with exact outbound payload fixtures, pending reconciliation, SMS/counterpart contract checks, cancellation call counts, structured courier address validation, and actual-cost merge. The integration smoke covers destination-scope selection, stale DaData rejection, RU country authority, city/settlement and federal-city normalization, exact SMS declared-value cache keys, strict `availableTypesOfDelivery`/`specialConditionsWithParams` roots, strict counterpart INN/KPP rows, account-login snapshot binding, atomic settings save, and strict pickup coordinate pairs. The PEK group remains fake/local only; automated tests must not call production PEK APIs.
 
-Version: 0.134.6
+Version: 0.134.7
 
 Jet Logistic critical coverage is registered as the mandatory `jet-logistic` group. It covers API envelope handling, token redaction, CSV/geography basics, one-call two-rate quoting, discounted package goods cost and `D_SDOC`, terminal-city presentation, status mapping with compact events, manual attach, unsupported create, and local remove.
 
