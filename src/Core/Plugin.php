@@ -338,6 +338,7 @@ use WallsShop\WDC\Shipments\Pek\PekShipmentRecipientBuilder;
 use WallsShop\WDC\Shipments\Pek\PekShipmentRequestBuilder;
 use WallsShop\WDC\Shipments\Pek\PekShipmentSenderWarehouseResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentService;
+use WallsShop\WDC\Shipments\Pek\PekShipmentStatusResponseNormalizer;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusService;
 use WallsShop\WDC\Shipments\Pek\PekSmsReleaseAvailabilityService;
 use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
@@ -487,7 +488,8 @@ final class Plugin {
 		$this->container->register( PekShipmentCorrelationResolver::class, fn(): PekShipmentCorrelationResolver => new PekShipmentCorrelationResolver() );
 		$this->container->register( PekShipmentRequestBuilder::class, fn(): PekShipmentRequestBuilder => new PekShipmentRequestBuilder( $this->container->get( PekSettings::class ), $this->container->get( PekShipmentDeclaredValueResolver::class ), $this->container->get( PekShipmentSenderWarehouseResolver::class ), $this->container->get( PekShipmentCargoBuilder::class ), $this->container->get( PekShipmentRecipientBuilder::class ), $this->container->get( PekShipmentCorrelationResolver::class ), $this->container->get( PekSmsReleaseAvailabilityService::class ), $this->container->get( PekShipmentDestinationResolver::class ), $this->container->get( PekShipmentProductWeightResolver::class ), $this->container->get( PekCredentials::class ) ) );
 		$this->container->register( PekStatusMapping::class, fn(): PekStatusMapping => new PekStatusMapping() );
-		$this->container->register( PekShipmentStatusService::class, fn(): PekShipmentStatusService => new PekShipmentStatusService( $this->container->get( PekApiClient::class ), $this->container->get( PekStatusMapping::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentActualCostService::class ) ) );
+		$this->container->register( PekShipmentStatusResponseNormalizer::class, fn(): PekShipmentStatusResponseNormalizer => new PekShipmentStatusResponseNormalizer() );
+		$this->container->register( PekShipmentStatusService::class, fn(): PekShipmentStatusService => new PekShipmentStatusService( $this->container->get( PekApiClient::class ), $this->container->get( PekStatusMapping::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentActualCostService::class ), $this->container->get( PekShipmentStatusResponseNormalizer::class ) ) );
 		$this->container->register( PekShipmentButtonPolicy::class, fn(): PekShipmentButtonPolicy => new PekShipmentButtonPolicy( $this->container->get( PekStatusMapping::class ) ) );
 		$this->container->register( PekManualAttachContextResolver::class, fn(): PekManualAttachContextResolver => new PekManualAttachContextResolver( $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( OrderShipmentRepository::class ) ) );
 		$this->container->register( PekShipmentService::class, fn(): PekShipmentService => new PekShipmentService( $this->container->get( PekApiClient::class ), $this->container->get( PekShipmentStatusService::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( PekShipmentButtonPolicy::class ), $this->container->get( ShipmentActualCostService::class ), $this->container->get( PekStatusMapping::class ), $this->container->get( PekManualAttachContextResolver::class ) ) );

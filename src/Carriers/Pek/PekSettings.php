@@ -311,7 +311,9 @@ final class PekSettings {
 		$candidate[ self::SENDER_KPP_KEY ] = $kpp;
 		$country = strtoupper( $this->sanitize_key( (string) ( $input[ self::SENDER_REGISTRATION_COUNTRY_KEY ] ?? 'RU' ) ) );
 		$candidate[ self::SENDER_REGISTRATION_COUNTRY_KEY ] = array_key_exists( $country, self::COUNTRY_CLASSIFIER_CODES ) ? $country : 'RU';
-		$candidate[ self::SENDER_PHONE_KEY ] = trim( preg_replace( '/[^\d+]/', '', (string) ( $input[ self::SENDER_PHONE_KEY ] ?? '' ) ) ?? '' );
+		$candidate[ self::SENDER_PHONE_KEY ] = array_key_exists( self::SENDER_PHONE_KEY, $input )
+			? $this->normalize_sender_phone_input( $input[ self::SENDER_PHONE_KEY ] )
+			: $this->sender_phone();
 		$email = trim( (string) ( $input[ self::SENDER_EMAIL_KEY ] ?? '' ) );
 		if ( '' !== $email && ( function_exists( 'is_email' ) ? false === is_email( $email ) : 1 !== preg_match( '/^[^@\s]+@[^@\s]+\.[^@\s]+$/', $email ) ) ) {
 			throw new \InvalidArgumentException( 'Некорректный email отправителя ПЭК.' );
@@ -351,6 +353,28 @@ final class PekSettings {
 				)
 			)
 		);
+	}
+
+	private function normalize_sender_phone_input( mixed $value ): string {
+		if ( is_bool( $value ) || is_array( $value ) || is_object( $value ) ) {
+			throw new \InvalidArgumentException( 'Некорректный телефон отправителя ПЭК.' );
+		}
+		$raw = trim( (string) $value );
+		if ( '' === $raw || 1 !== preg_match( '/^[\d+\s()\-]+$/', $raw ) ) {
+			throw new \InvalidArgumentException( 'Некорректный телефон отправителя ПЭК.' );
+		}
+		$normalized = preg_replace( '/[\s()\-]+/', '', $raw ) ?? '';
+		if ( 1 === preg_match( '/^8\d{10}$/', $normalized ) ) {
+			return '+7' . substr( $normalized, 1 );
+		}
+		if ( 1 === preg_match( '/^7\d{10}$/', $normalized ) ) {
+			return '+' . $normalized;
+		}
+		if ( 1 === preg_match( '/^\+7\d{10}$/', $normalized ) ) {
+			return $normalized;
+		}
+
+		throw new \InvalidArgumentException( 'Некорректный телефон отправителя ПЭК.' );
 	}
 
 	/** @param array<string,mixed> $value */

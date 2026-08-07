@@ -80,13 +80,13 @@ final class PekShipmentCourierAddressResolver {
 		$settlement = trim( $address->settlement );
 		$street = trim( $address->street );
 		$house = $this->normalize_house( $address->house );
-		$apartment = $this->normalize_apartment( $address->apartment );
+		$apartment = $this->normalize_unit( $address->apartment, '' );
 		$raw = trim( $address->raw_address );
 		if ( '' === $street || '' === $house ) {
 			$parsed = $this->parse_raw( '' !== $raw ? $raw : $street );
 			$street = '' !== $street ? $street : $parsed['street'];
 			$house = '' !== $house ? $house : $this->normalize_house( $parsed['house'] );
-			$apartment = '' !== $apartment ? $apartment : $this->normalize_apartment( $parsed['apartment'] );
+			$apartment = '' !== $apartment ? $apartment : $this->normalize_unit( $parsed['apartment'], '' );
 		}
 		if ( ( '' === $city && '' === $settlement ) || '' === $street || '' === $house ) {
 			throw new \RuntimeException( self::PUBLIC_ERROR );
@@ -167,7 +167,7 @@ final class PekShipmentCourierAddressResolver {
 		$parts[] = $street;
 		$parts[] = 'дом ' . $house;
 		if ( '' !== $apartment ) {
-			$parts[] = 'кв. ' . $this->normalize_apartment( $apartment );
+			$parts[] = $this->format_unit( $apartment );
 		}
 		unset( $postcode );
 
@@ -207,7 +207,7 @@ final class PekShipmentCourierAddressResolver {
 			return null;
 		}
 		$region = $this->first_non_empty( $this->meta_string( $order, '_' . $scope . '_dadata_region_with_type' ), $this->meta_string( $order, '_' . $scope . '_dadata_region' ) );
-		$apartment = $this->normalize_apartment( $this->meta_string( $order, '_' . $scope . '_dadata_flat' ) );
+		$apartment = $this->normalize_unit( $this->meta_string( $order, '_' . $scope . '_dadata_flat' ), $this->meta_string( $order, '_' . $scope . '_dadata_flat_type' ) );
 		$postcode = $this->order_method_string( $order, 'get_' . $scope . '_postcode' );
 		$candidate = new Address( country_code: $country, region_name: $region, city: $city, settlement: $settlement, postcode: $postcode, street: $street, house: $house, apartment: $apartment, raw_address: '', fias_id: $this->meta_string( $order, '_' . $scope . '_dadata_fias_id' ) );
 
@@ -222,7 +222,7 @@ final class PekShipmentCourierAddressResolver {
 			postcode: $this->order_method_string( $order, 'get_' . $scope . '_postcode' ),
 			street: '',
 			house: '',
-			apartment: $this->normalize_apartment( $this->order_method_string( $order, 'get_' . $scope . '_address_2' ) ),
+			apartment: $this->normalize_unit( $this->order_method_string( $order, 'get_' . $scope . '_address_2' ), '' ),
 			raw_address: $this->order_method_string( $order, 'get_' . $scope . '_address_1' ),
 			fias_id: $this->meta_string( $order, '_wdc_platform_fias_id' ),
 			gar_id: $this->meta_string( $order, '_wdc_platform_gar_id' )
@@ -250,6 +250,9 @@ final class PekShipmentCourierAddressResolver {
 			'courier_street_present' => '' !== trim( $address->street ),
 			'courier_house_present' => '' !== trim( $address->house ),
 			'courier_apartment_present' => '' !== trim( $address->apartment ),
+			'courier_unit_type' => $this->unit_type( $address->apartment ),
+			'courier_block_present' => str_contains( $this->lower( $address->house ), ' к ' ) || str_contains( $this->lower( $address->house ), ' стр.' ),
+			'courier_block_type_confirmed' => str_contains( $this->lower( $address->house ), ' к ' ) || str_contains( $this->lower( $address->house ), ' стр.' ),
 			'courier_postcode_present' => '' !== trim( $address->postcode ),
 			'courier_address_hash' => hash( 'sha256', $canonical ),
 		);
@@ -269,11 +272,36 @@ final class PekShipmentCourierAddressResolver {
 		return trim( $value );
 	}
 
-	private function normalize_apartment( string $value ): string {
+	private function normalize_unit( string $value, string $type ): string {
 		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
-		$value = preg_replace( '/^(?:квартира|помещение|офис|кв\.?)\s*/iu', '', $value ) ?? $value;
+		if ( '' === $value ) {
+			return '';
+		}
+		$type = $this->canonical_unit_type( $type );
+		if ( '' === $type ) {
+			if ( 1 === preg_match( '/^(кв\.?|квартира)\s+(?<value>.+)$/iu', $value, $matches ) ) {
+				$type = 'кв.';
+				$value = trim( (string) $matches['value'] );
+			} elseif ( 1 === preg_match( '/^офис\s+(?<value>.+)$/iu', $value, $matches ) ) {
+				$type = 'офис';
+				$value = trim( (string) $matches['value'] );
+			} elseif ( 1 === preg_match( '/^(помещение|пом\.?)\s+(?<value>.+)$/iu', $value, $matches ) ) {
+				$type = 'помещение';
+				$value = trim( (string) $matches['value'] );
+			} elseif ( 1 === preg_match( '/^\d+[А-Яа-яA-Za-z0-9\/-]*$/u', $value ) ) {
+				$type = 'кв.';
+			}
+		}
+		if ( '' === $type ) {
+			throw new \RuntimeException( self::PUBLIC_ERROR );
+		}
+		$value = preg_replace( '/^(?:квартира|помещение|офис|пом\.?|кв\.?)\s*/iu', '', $value ) ?? $value;
+		$value = trim( $value );
+		if ( '' === $value ) {
+			throw new \RuntimeException( self::PUBLIC_ERROR );
+		}
 
-		return trim( $value );
+		return trim( $type . ' ' . $value );
 	}
 
 	private function normalize_block( string $value ): string {
@@ -301,7 +329,7 @@ final class PekShipmentCourierAddressResolver {
 			return '';
 		}
 		if ( ! is_scalar( $block ) ) {
-			return $house;
+			throw new \RuntimeException( 'Не удалось однозначно определить корпус или строение в адресе курьерской доставки ПЭК.' );
 		}
 		$block_value = trim( preg_replace( '/\s+/u', ' ', (string) $block ) ?? (string) $block );
 		if ( '' === $block_value ) {
@@ -309,7 +337,7 @@ final class PekShipmentCourierAddressResolver {
 		}
 		$type = $this->canonical_block_type( $block_type );
 		if ( '' === $type ) {
-			return $house;
+			throw new \RuntimeException( 'Не удалось однозначно определить корпус или строение в адресе курьерской доставки ПЭК.' );
 		}
 		$component = trim( $type . ' ' . $block_value );
 		if ( str_contains( $this->normalize_location_name( $house ), $this->normalize_location_name( $component ) ) ) {
@@ -327,6 +355,36 @@ final class PekShipmentCourierAddressResolver {
 			'стр', 'строение' => 'стр.',
 			default => '',
 		};
+	}
+
+	private function canonical_unit_type( string $value ): string {
+		$value = $this->lower( trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value ) );
+		$value = rtrim( $value, '.' );
+		return match ( $value ) {
+			'кв', 'квартира' => 'кв.',
+			'офис' => 'офис',
+			'пом', 'помещение' => 'помещение',
+			default => '',
+		};
+	}
+
+	private function format_unit( string $value ): string {
+		return $this->normalize_unit( $value, '' );
+	}
+
+	private function unit_type( string $value ): string {
+		$value = $this->lower( trim( $value ) );
+		if ( str_starts_with( $value, 'офис ' ) ) {
+			return 'office';
+		}
+		if ( str_starts_with( $value, 'помещение ' ) ) {
+			return 'premise';
+		}
+		if ( str_starts_with( $value, 'кв. ' ) ) {
+			return 'apartment';
+		}
+
+		return '';
 	}
 
 	private function order_method_string( object $order, string $method ): string {

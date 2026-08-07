@@ -19,9 +19,8 @@ final class PekShipmentStatusService {
 		private PekStatusMapping $mapping,
 		private OrderShipmentRepository $repository,
 		private ShipmentActualCostService $actual_costs,
-		private ?PekShipmentStatusResponseNormalizer $normalizer = null
+		private PekShipmentStatusResponseNormalizer $normalizer
 	) {
-		$this->normalizer = $normalizer ?? new PekShipmentStatusResponseNormalizer();
 	}
 
 	/** @return array<string,mixed> */
@@ -45,6 +44,7 @@ final class PekShipmentStatusService {
 
 	/** @return array<string,mixed> */
 	public function fetch( string $cargo_code, string $delivery_type ): array {
+		$source = 'expanded';
 		try {
 			$response = $this->api->cargo_status( array( $cargo_code ) );
 		} catch ( PekApiException $exception ) {
@@ -52,6 +52,7 @@ final class PekShipmentStatusService {
 				throw new \RuntimeException( 'Не удалось получить статус ПЭК.' );
 			}
 			$response = $this->api->cargo_basic_status( array( $cargo_code ) );
+			$source = 'basic';
 		}
 		$normalized = $this->normalizer->normalize( $response, $cargo_code, $this->now() );
 		$status_title = (string) $normalized['status_title'];
@@ -61,6 +62,7 @@ final class PekShipmentStatusService {
 			$normalized,
 			array(
 			'status' => 'created',
+			'pek_status_source' => $source,
 			'universal_status_code' => $universal,
 			'universal_status_label' => DeliveryStatus::label( $universal ),
 			)

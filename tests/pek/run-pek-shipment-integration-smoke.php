@@ -138,6 +138,7 @@ use WallsShop\WDC\Shipments\Pek\PekShipmentRequestBuilder;
 use WallsShop\WDC\Shipments\Pek\PekShipmentSenderWarehouseResolver;
 use WallsShop\WDC\Shipments\Pek\PekShipmentService;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusService;
+use WallsShop\WDC\Shipments\Pek\PekShipmentStatusResponseNormalizer;
 use WallsShop\WDC\Shipments\Pek\PekSmsReleaseAvailabilityService;
 use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
@@ -205,12 +206,24 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 	public string $connected_services_mode = 'success';
 	public string $confirmed_counterparties_mode = 'success';
 	public string $token_mode = 'success';
+	public string $status_mode = 'expanded';
+
+	private function requested_cargo_code( array $args ): string {
+		$body = json_decode( (string) ( $args['body'] ?? '' ), true );
+		$codes = is_array( $body ) ? ( $body['cargoCodes'] ?? array() ) : array();
+		if ( is_array( $codes ) && isset( $codes[0] ) && is_string( $codes[0] ) && '' !== trim( $codes[0] ) ) {
+			return trim( $codes[0] );
+		}
+
+		return 'PEK-777';
+	}
 
 	public function request( string $method, string $url, array $args ): array {
 		$this->calls[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
-		if ( str_contains( $url, '/cargos/status/' ) ) {
+		if ( str_contains( $url, '/cargos/basicstatus/' ) ) {
 			$status = array_shift( $this->statuses );
-			$status = is_string( $status ) ? $status : 'Прибыл';
+			$status = is_string( $status ) ? $status : 'Оформлен';
+			$code = $this->requested_cargo_code( $args );
 			return array(
 				'status' => 200,
 				'body' => wp_json_encode(
@@ -218,7 +231,50 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 						'cargos' => array(
 							array(
 								'cargo' => array(
-									'code' => 'PEK-777',
+									'code' => $code,
+								),
+								'info' => array(
+									'cargoStatus' => $status,
+								),
+							),
+						),
+					),
+					JSON_UNESCAPED_UNICODE
+				),
+			);
+		}
+		if ( str_contains( $url, '/cargos/status/' ) ) {
+			if ( 'expanded_403' === $this->status_mode ) {
+				return array( 'status' => 403, 'body' => wp_json_encode( array( 'title' => 'Forbidden', 'message' => 'Expanded status unavailable' ), JSON_UNESCAPED_UNICODE ) );
+			}
+			$status = array_shift( $this->statuses );
+			$status = is_string( $status ) ? $status : 'Прибыл';
+			$code = $this->requested_cargo_code( $args );
+			if ( 'malformed_status' === $this->status_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode(
+						array(
+							'cargos' => array(
+								array(
+									'cargo' => array( 'code' => $code ),
+									'info' => array( 'cargoStatus' => array( 'bad' ) ),
+								),
+							),
+						),
+						JSON_UNESCAPED_UNICODE
+					),
+				);
+			}
+			$sms_flag = 'expanded_false' === $this->status_mode ? false : true;
+			return array(
+				'status' => 200,
+				'body' => wp_json_encode(
+					array(
+						'cargos' => array(
+							array(
+								'cargo' => array(
+									'code' => $code,
 									'cargoBarCode' => 'BAR-777',
 									'positionBarCodes' => array( 'POS-1', 'POS-2' ),
 								),
@@ -228,7 +284,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 									'takeOnStockDateTime' => 'Принят к перевозке' === $status ? '2026-08-06 12:00:00' : '',
 								),
 								'receiver' => array(
-									'receivingBySMSCode' => true,
+									'receivingBySMSCode' => $sms_flag,
 									'receivingByDocument' => false,
 								),
 								'services' => array(
@@ -654,7 +710,7 @@ $settings->save_sender_warehouse(
 $repository = new OrderShipmentRepository();
 $actual_costs = new ShipmentActualCostService( $repository );
 $mapping = new PekStatusMapping();
-$status_service = new PekShipmentStatusService( $api, $mapping, $repository, $actual_costs );
+$status_service = new PekShipmentStatusService( $api, $mapping, $repository, $actual_costs, new PekShipmentStatusResponseNormalizer() );
 $button_policy = new PekShipmentButtonPolicy( $mapping );
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
@@ -845,6 +901,13 @@ try {
 } catch ( InvalidArgumentException ) {
 	pek_integration_assert( 'sender@example.test' === $settings->sender_email(), 'Invalid sender email must not erase existing valid value.' );
 }
+$before_phone = $settings->sender_phone();
+try {
+	$settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER_PHONE_KEY => '+7abc9991234567' ) ) );
+	pek_integration_assert( false, 'Malformed sender phone with letters must be rejected.' );
+} catch ( InvalidArgumentException ) {
+	pek_integration_assert( $before_phone === $settings->sender_phone(), 'Invalid sender phone must be rejected atomically without changing previous setting.' );
+}
 $counterparts->verify_and_save();
 $before_atomic_guid = $settings->sender_counterpart_guid();
 $before_atomic_snapshot = $settings->sender_counterpart_snapshot();
@@ -995,6 +1058,37 @@ pek_integration_assert_same_payload( $http->submit_bodies[0] ?? array(), pek_int
 $created = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 pek_integration_assert( '999940950644' === $created['tracking_number'] && '136' === $created['external_id'], 'Creation service and mapper must persist PEK identifiers.' );
 pek_integration_assert_plain_data( $created );
+
+$http->status_mode = 'expanded';
+$http->statuses = array( 'Прибыл' );
+$expanded_status_result = $status_service->update( $order );
+$expanded_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $expanded_status_result['success'] && 'expanded' === (string) ( $expanded_shipment['pek_status_source'] ?? '' ), 'Expanded status update must persist source.' );
+pek_integration_assert( true === (bool) ( $expanded_shipment['pek_receiving_by_sms_code'] ?? false ) && 12345 === (int) ( $expanded_shipment['actual_cost_kopecks'] ?? 0 ), 'Expanded status must persist receiver flag and actual cost.' );
+
+$http->status_mode = 'expanded_403';
+$http->statuses = array( 'Оформлен' );
+$basic_status_result = $status_service->update( $order );
+$basic_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $basic_status_result['success'] && 'basic' === (string) ( $basic_shipment['pek_status_source'] ?? '' ), 'Explicit 403 expanded failure must use basic status fallback.' );
+pek_integration_assert( true === (bool) ( $basic_shipment['pek_receiving_by_sms_code'] ?? false ) && 12345 === (int) ( $basic_shipment['actual_cost_kopecks'] ?? 0 ), 'Basic fallback must preserve expanded-only receiver flags and actual cost.' );
+pek_integration_assert( '42' === (string) ( $basic_shipment['pek_cargo_status_id'] ?? '' ), 'Basic fallback must not erase status ID when basic response omits it.' );
+
+$http->status_mode = 'expanded_false';
+$http->statuses = array( 'Прибыл' );
+$false_status_result = $status_service->update( $order );
+$false_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $false_status_result['success'] && false === (bool) ( $false_shipment['pek_receiving_by_sms_code'] ?? true ), 'Explicit false from expanded status must replace previous true.' );
+
+$before_malformed_status = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+$http->status_mode = 'malformed_status';
+try {
+	$status_service->update( $order );
+	pek_integration_assert( false, 'Malformed expanded HTTP 200 status must fail.' );
+} catch ( RuntimeException ) {
+	pek_integration_assert( $before_malformed_status === $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY ), 'Malformed expanded status must not change persisted shipment state.' );
+}
+$http->status_mode = 'expanded';
 
 $pickup_order = new PekIntegrationOrder( 1004 );
 $GLOBALS['wdc_pek_integration_orders'][1004] = $pickup_order;
@@ -1341,6 +1435,42 @@ $typed_block_order->set_shipping_fields( array( 'city' => 'Видное', 'state
 pek_integration_set_dadata( $typed_block_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '', '', '1', 'к' );
 $typed_block_evidence = $addresses->from_order_with_evidence( $typed_block_order );
 pek_integration_assert( str_contains( $typed_block_evidence['address']->raw_address, 'дом 10 к 1' ) && ! str_contains( $typed_block_evidence['address']->raw_address, 'дом 10 1' ), 'Typed DaData block must be appended with type and never as ambiguous bare number.' );
+$office_order = new PekIntegrationOrder( 2019 );
+$office_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'улица Советская, дом 10', 'address_2' => 'офис 7' ) );
+pek_integration_set_dadata( $office_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '7' );
+$office_order->update_meta_data( '_shipping_dadata_flat_type', 'офис' );
+$office_evidence = $addresses->from_order_with_evidence( $office_order );
+pek_integration_assert( str_contains( $addresses->address_stock( $office_evidence['address'] ), 'офис 7' ) && ! str_contains( $addresses->address_stock( $office_evidence['address'] ), 'кв. 7' ) && 'office' === (string) ( $office_evidence['evidence']['courier_unit_type'] ?? '' ), 'flat_type=office must not be formatted as apartment.' );
+$premise_order = new PekIntegrationOrder( 2020 );
+$premise_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'улица Советская, дом 10', 'address_2' => 'помещение 3' ) );
+pek_integration_set_dadata( $premise_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '3' );
+$premise_order->update_meta_data( '_shipping_dadata_flat_type', 'помещение' );
+$premise_evidence = $addresses->from_order_with_evidence( $premise_order );
+pek_integration_assert( str_contains( $addresses->address_stock( $premise_evidence['address'] ), 'помещение 3' ) && ! str_contains( $addresses->address_stock( $premise_evidence['address'] ), 'кв. 3' ) && 'premise' === (string) ( $premise_evidence['evidence']['courier_unit_type'] ?? '' ), 'flat_type=premise must not be formatted as apartment.' );
+$untyped_block_order = new PekIntegrationOrder( 2021 );
+$untyped_block_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'улица Советская, дом 10', 'address_2' => '' ) );
+pek_integration_set_dadata( $untyped_block_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '', '', '1', '' );
+try {
+	$addresses->from_order_with_evidence( $untyped_block_order );
+	pek_integration_assert( false, 'Untyped non-empty DaData block must not silently disappear.' );
+} catch ( RuntimeException $expected ) {
+	pek_integration_assert( str_contains( $expected->getMessage(), 'корпус' ), 'Untyped non-empty block must fail with safe public message.' );
+}
+$stead_order = new PekIntegrationOrder( 2022 );
+$stead_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'участок 15', 'address_2' => '' ) );
+$stead_order->update_meta_data( '_shipping_dadata_status', 'house_selected' );
+$stead_order->update_meta_data( '_shipping_dadata_region_with_type', 'Московская область' );
+$stead_order->update_meta_data( '_shipping_dadata_city_with_type', 'г Видное' );
+$stead_order->update_meta_data( '_shipping_dadata_street_with_type', '' );
+$stead_order->update_meta_data( '_shipping_dadata_house', '' );
+$stead_order->update_meta_data( '_shipping_dadata_stead', '15' );
+$stead_order->update_meta_data( '_shipping_dadata_stead_type', 'участок' );
+try {
+	$addresses->from_order_with_evidence( $stead_order );
+	pek_integration_assert( false, 'Unsupported stead must not become ordinary house.' );
+} catch ( RuntimeException $expected ) {
+	pek_integration_assert( str_contains( $expected->getMessage(), 'улицей и номером дома' ) || str_contains( $expected->getMessage(), 'подтверждённый полный адрес' ), 'Unsupported stead must fail closed with public-safe address message.' );
+}
 
 $request_builder_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentRequestBuilder.php' ) ?: '';
 pek_integration_assert( str_contains( $request_builder_source, "if ( '' !== \$client_card )" ), 'PEK request builder must omit empty counterpartClientCard.' );
