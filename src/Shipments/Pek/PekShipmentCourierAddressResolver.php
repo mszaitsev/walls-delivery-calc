@@ -36,7 +36,7 @@ final class PekShipmentCourierAddressResolver {
 				}
 			}
 
-			return $this->normalize_from_woo( $shipping );
+			return $this->normalize_from_woo( $shipping, $order, 'shipping' );
 		}
 
 		$billing_dadata = $this->dadata_address( $order, 'billing' );
@@ -45,20 +45,21 @@ final class PekShipmentCourierAddressResolver {
 			return array( 'address' => $normalized, 'evidence' => $this->evidence( $normalized, 'billing_dadata', $order, 'billing' ) );
 		}
 
-		return $this->normalize_from_woo( $this->woo_address( $order, 'billing' ) );
+		return $this->normalize_from_woo( $this->woo_address( $order, 'billing' ), $order, 'billing' );
 	}
 
 	/** @return array{address:Address,evidence:array<string,mixed>} */
-	private function normalize_from_woo( Address $woo ): array {
+	private function normalize_from_woo( Address $woo, object $order, string $scope ): array {
 		try {
 			$normalized = $this->normalize( $woo );
-			return array( 'address' => $normalized, 'evidence' => $this->evidence( $normalized, 'woo_structured' ) );
+			return array( 'address' => $normalized, 'evidence' => $this->evidence( $normalized, 'woo_structured', $order, $scope ) );
 		} catch ( \RuntimeException ) {
 			$parsed = $this->parse_raw( $woo->raw_address );
 			$parsed_address = new Address(
 				country_code: $woo->country_code,
 				region_name: $woo->region_name,
 				city: $woo->city,
+				settlement: $woo->settlement,
 				postcode: $woo->postcode,
 				street: $parsed['street'],
 				house: $parsed['house'],
@@ -68,7 +69,7 @@ final class PekShipmentCourierAddressResolver {
 				gar_id: $woo->gar_id
 			);
 			$normalized = $this->normalize( $parsed_address );
-			return array( 'address' => $normalized, 'evidence' => $this->evidence( $normalized, 'parsed_address_1' ) );
+			return array( 'address' => $normalized, 'evidence' => $this->evidence( $normalized, 'parsed_address_1', $order, $scope ) );
 		}
 	}
 
@@ -197,9 +198,9 @@ final class PekShipmentCourierAddressResolver {
 		$street = $this->first_non_empty( $this->meta_string( $order, '_' . $scope . '_dadata_street_with_type' ), $this->meta_string( $order, '_' . $scope . '_dadata_street' ) );
 		$house = $this->normalize_house_component(
 			$this->meta_string( $order, '_' . $scope . '_dadata_house' ),
-			$this->meta_string( $order, '_' . $scope . '_dadata_house_type' ),
+			$this->first_non_empty( $this->meta_string( $order, '_' . $scope . '_dadata_house_type_full' ), $this->meta_string( $order, '_' . $scope . '_dadata_house_type' ) ),
 			$this->meta_string( $order, '_' . $scope . '_dadata_block' ),
-			$this->meta_string( $order, '_' . $scope . '_dadata_block_type' ),
+			$this->first_non_empty( $this->meta_string( $order, '_' . $scope . '_dadata_block_type_full' ), $this->meta_string( $order, '_' . $scope . '_dadata_block_type' ) ),
 			$this->meta_string( $order, '_' . $scope . '_dadata_stead' ),
 			$this->meta_string( $order, '_' . $scope . '_dadata_stead_type' )
 		);
@@ -207,7 +208,7 @@ final class PekShipmentCourierAddressResolver {
 			return null;
 		}
 		$region = $this->first_non_empty( $this->meta_string( $order, '_' . $scope . '_dadata_region_with_type' ), $this->meta_string( $order, '_' . $scope . '_dadata_region' ) );
-		$apartment = $this->normalize_unit( $this->meta_string( $order, '_' . $scope . '_dadata_flat' ), $this->meta_string( $order, '_' . $scope . '_dadata_flat_type' ) );
+		$apartment = $this->normalize_unit( $this->meta_string( $order, '_' . $scope . '_dadata_flat' ), $this->first_non_empty( $this->meta_string( $order, '_' . $scope . '_dadata_flat_type_full' ), $this->meta_string( $order, '_' . $scope . '_dadata_flat_type' ) ) );
 		$postcode = $this->order_method_string( $order, 'get_' . $scope . '_postcode' );
 		$candidate = new Address( country_code: $country, region_name: $region, city: $city, settlement: $settlement, postcode: $postcode, street: $street, house: $house, apartment: $apartment, raw_address: '', fias_id: $this->meta_string( $order, '_' . $scope . '_dadata_fias_id' ) );
 
@@ -232,14 +233,12 @@ final class PekShipmentCourierAddressResolver {
 	/** @return array<string,mixed> */
 	private function evidence( Address $address, string $source, ?object $order = null, string $scope = '' ): array {
 		$canonical = $this->format( trim( $address->region_name ), trim( $address->city ), trim( $address->settlement ), trim( $address->street ), trim( $address->house ), trim( $address->apartment ), '' );
+		$use_dadata_locality_ids = in_array( $source, array( 'shipping_dadata', 'billing_dadata' ), true );
 		$ids = null !== $order && '' !== $scope ? array(
-			'courier_region_fias_id' => $this->meta_string( $order, '_' . $scope . '_dadata_region_fias_id' ),
-			'courier_city_fias_id' => $this->meta_string( $order, '_' . $scope . '_dadata_city_fias_id' ),
-			'courier_settlement_fias_id' => $this->meta_string( $order, '_' . $scope . '_dadata_settlement_fias_id' ),
-			'courier_selected_location_fias_id' => $this->first_non_empty(
-				$this->meta_string( $order, '_wdc_platform_location_fias_id' ),
-				$this->meta_string( $order, '_wdc_platform_fias_id' )
-			),
+			'courier_region_fias_id' => $use_dadata_locality_ids ? $this->meta_string( $order, '_' . $scope . '_dadata_region_fias_id' ) : '',
+			'courier_city_fias_id' => $use_dadata_locality_ids ? $this->meta_string( $order, '_' . $scope . '_dadata_city_fias_id' ) : '',
+			'courier_settlement_fias_id' => $use_dadata_locality_ids ? $this->meta_string( $order, '_' . $scope . '_dadata_settlement_fias_id' ) : '',
+			'courier_selected_location_fias_id' => $this->meta_string( $order, '_wdc_platform_location_fias_id' ),
 		) : array();
 
 		$evidence = array(

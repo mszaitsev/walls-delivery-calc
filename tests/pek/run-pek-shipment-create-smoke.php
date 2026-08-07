@@ -86,7 +86,7 @@ pek_shipment_create_assert( isset( $pickup['cargos'][0]['receiver']['warehouseId
 pek_shipment_create_assert( isset( $courier['cargos'][0]['receiver']['addressStock'], $courier['cargos'][0]['services']['delivery'] ) && ! isset( $courier['cargos'][0]['receiver']['warehouseId'] ), 'Courier must use addressStock and delivery service.' );
 pek_shipment_create_assert( isset( $response['documentId'], $response['cargos'][0]['cargoCode'], $response['cargos'][0]['positions'][0]['barcode'] ), 'Create response fixture must use preregistration identifiers.' );
 
-$settings = new PekSettings( new SettingsRepository() );
+$settings = new PekSettings( new SettingsRepository(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $builder = new PekShipmentCargoBuilder( $settings );
 $request = new ShipmentCreateRequest(
 	1,
@@ -183,7 +183,7 @@ $receiver_order = new class {
 	public function get_shipping_address_2(): string { return ''; }
 	public function get_meta( string $key, bool $single = true ): string { unset( $key, $single ); return ''; }
 };
-$receiver = ( new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver() ) )->build_physical_recipient( $receiver_order, $request, 'receiver-warehouse-guid' );
+$receiver = ( new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() ) )->build_physical_recipient( $receiver_order, $request, 'receiver-warehouse-guid' );
 pek_shipment_create_assert( 'Петров Петр' === $receiver['title'] && 'Петров Петр' === $receiver['person'] && '+79100000000' === $receiver['personPhones'][0]['phone'], 'Receiver builder must produce title/person and one normalized phone.' );
 
 $parser = new PekShipmentCreateResponseParser();

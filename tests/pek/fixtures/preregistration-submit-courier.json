@@ -44,8 +44,8 @@
         "legalForm": 3,
         "title": "Иванов Иван",
         "individual": {
-          "lastName": "Иванов",
-          "firstName": "Иван"
+          "firstName": "Иван",
+          "lastName": "Иванов"
         },
         "person": "Иванов Иван",
         "personPhones": [

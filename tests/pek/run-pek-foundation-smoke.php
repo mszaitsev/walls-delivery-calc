@@ -177,7 +177,7 @@ function pek_json_response( mixed $body ): array {
 }
 
 function pek_boot_api( SettingsRepository $settings_repository, PekFakeHttp $http ): array {
-	$settings = new PekSettings( $settings_repository );
+	$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 	$credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 	return array( $settings, $credentials, new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) ) );
@@ -189,7 +189,7 @@ $GLOBALS['pek_current_user_id'] = 1;
 $GLOBALS['pek_now'] = 1785652800;
 
 $settings_repository = new SettingsRepository();
-$settings = new PekSettings( $settings_repository );
+$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 
 pek_assert( PekSettings::CARRIER_KEY === 'pek' && PekSettings::SERVICE_KEY === 'pek', 'PEK keys must be stable.' );
@@ -552,7 +552,7 @@ pek_assert( ! $all_403['connection_ok'] && ! $all_403['success'] && ! $all_403['
 $saved_options_for_missing_credentials = $GLOBALS['pek_options'];
 $GLOBALS['pek_options'] = array();
 $missing_credentials_http = new PekFakeHttp( array( pek_json_response( array() ) ) );
-$missing_credentials_settings = new PekSettings( new SettingsRepository() );
+$missing_credentials_settings = new PekSettings( new SettingsRepository(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $missing_credentials = new PekCredentials( new SettingsRepository(), new EncryptionService() );
 $missing_result = ( new PekConnectionDiagnosticService( $missing_credentials_settings, $missing_credentials, new PekApiClient( $missing_credentials_settings, $missing_credentials, $missing_credentials_http, new PekRequestBudget( $missing_credentials_settings ) ) ) )->run();
 pek_assert( ! $missing_result['connection_ok'] && ! $missing_result['success'] && count( $missing_credentials_http->requests ) === 0, 'PEK missing credentials diagnostic must not perform API requests.' );

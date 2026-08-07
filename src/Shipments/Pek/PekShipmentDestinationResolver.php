@@ -132,7 +132,7 @@ final class PekShipmentDestinationResolver {
 		}
 		$evidence = is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array();
 		$request_city_fias = $this->normalize_guid( (string) ( $evidence['courier_city_fias_id'] ?? '' ) );
-		$request_settlement_fias = $this->normalize_guid( (string) ( $evidence['courier_settlement_fias_id'] ?? $address->fias_id ) );
+		$request_settlement_fias = $this->normalize_guid( (string) ( $evidence['courier_settlement_fias_id'] ?? '' ) );
 		$selected_location_fias = $this->normalize_guid( (string) ( $evidence['courier_selected_location_fias_id'] ?? '' ) );
 		$location_city_fias = $this->normalize_guid( $location->city_fias_id );
 		$location_fias = $this->normalize_guid( $location->fias_id );
@@ -194,7 +194,7 @@ final class PekShipmentDestinationResolver {
 			return true;
 		}
 
-		return '' !== trim( $request_settlement ) && $this->same_location_name( $request_settlement, $location->settlement_name );
+		return '' !== trim( $request_settlement ) && $this->same_settlement_name( $request_settlement, $location );
 	}
 
 	private function selected_location_matches( string $selected_fias, Location $location, string $level ): bool {
@@ -233,6 +233,33 @@ final class PekShipmentDestinationResolver {
 
 	private function same_location_name( string $left, string $right ): bool {
 		return '' !== trim( $right ) && $this->normalize_location_name( $left ) === $this->normalize_location_name( $right );
+	}
+
+	private function same_settlement_name( string $request_settlement, Location $location ): bool {
+		$canonical = trim( $location->settlement_name );
+		if ( '' === $canonical ) {
+			return false;
+		}
+		$canonical_type = trim( $location->settlement_type );
+		$candidates = array( $canonical );
+		if ( '' !== $canonical_type ) {
+			$candidates[] = trim( $canonical_type . ' ' . $canonical );
+		}
+		foreach ( $candidates as $candidate ) {
+			if ( $this->normalize_settlement_name( $request_settlement ) === $this->normalize_settlement_name( $candidate ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function normalize_settlement_name( string $value ): string {
+		$value = $this->lower( $value );
+		$value = preg_replace( '/^\s*(?:поселение|пос\.?|п\.?|село|с\.?|деревня|д\.?|рабочий\s+пос[её]лок|рп\.?)\s+/u', '', $value ) ?? $value;
+		$value = preg_replace( '/[^\p{L}\p{N}]+/u', '', $value ) ?? $value;
+
+		return trim( $value );
 	}
 
 	private function same_region_name( string $left, string $right ): bool {

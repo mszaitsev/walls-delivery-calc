@@ -171,7 +171,7 @@ function pek_dt_nearest_item( string $warehouse_id, mixed $time_zone, array $fie
 function pek_dt_service( array $responses, ?PekDatetimeFakeHttp &$http = null, ?PekSettings &$settings = null, ?PekSenderWarehouseSearchCache &$cache = null ): PekSenderWarehouseService {
 	$GLOBALS['pek_dt_options'] = array();
 	$repository = new SettingsRepository();
-	$settings = new PekSettings( $repository );
+	$settings = new PekSettings( $repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 	$credentials = new PekCredentials( $repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 	$http = new PekDatetimeFakeHttp( $responses );
@@ -378,7 +378,7 @@ $result = $fallback_service->validate_and_select( 'cache-unresolved' );
 pek_dt_assert( $result['success'] && count( $fallback_http->requests ) === 1 && $fallback_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/all/' && $fallback_settings->sender_warehouse()['branchTimezone'] === 'UTC+03:00', 'PEK unresolved cached timezone/date must trigger fresh branches/all validation.' );
 
 $snapshot_repository = new SettingsRepository();
-$snapshot_settings = new PekSettings( $snapshot_repository );
+$snapshot_settings = new PekSettings( $snapshot_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $snapshot_settings->save_sender_warehouse(
 	array(
 		'warehouseId' => 'sanitize',

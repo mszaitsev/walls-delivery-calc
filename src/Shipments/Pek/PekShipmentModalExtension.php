@@ -22,7 +22,19 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 		unset( $order );
 		$request = is_array( $draft['request'] ?? null ) ? $draft['request'] : array();
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
+		$recipient_address = is_array( $request['recipient_address'] ?? null ) ? $request['recipient_address'] : array();
+		$pickup_point = is_array( $request['pickup_point'] ?? null ) ? $request['pickup_point'] : array();
+		$pickup_row = is_array( $meta['pickup_point_row'] ?? null ) ? $meta['pickup_point_row'] : array();
+		$courier_evidence = is_array( $meta['pek_courier_address_evidence'] ?? null ) ? $meta['pek_courier_address_evidence'] : array();
 		$warehouse = $this->settings->sender_warehouse();
+		$pickup_summary = $this->first_non_empty(
+			$pickup_point['address'] ?? '',
+			$pickup_row['address'] ?? '',
+			$meta['selected_pickup_point_address'] ?? '',
+			$meta['pickup_point_address'] ?? '',
+			$meta['selected_pickup_point_title'] ?? '',
+			$meta['pickup_point_title'] ?? ''
+		);
 
 		return array(
 			'default_sender_warehouse' => $warehouse,
@@ -33,7 +45,9 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 			'provider_destination_fingerprint' => (string) ( $meta['provider_destination_fingerprint'] ?? '' ),
 			'recipient_type' => 'physical',
 			'sms_release_status' => 'required',
-			'destination_summary' => (string) ( $meta['selected_pickup_point_title'] ?? $meta['pickup_point_title'] ?? '' ),
+			'destination_summary' => $pickup_summary,
+			'courier_destination_summary' => (string) ( $recipient_address['raw_address'] ?? '' ),
+			'courier_destination_source' => (string) ( $courier_evidence['courier_address_source'] ?? '' ),
 			'delivery_type' => (string) ( $request['delivery_type'] ?? '' ),
 			'declared_value' => is_array( $request['declared_value'] ?? null ) ? $request['declared_value'] : array(),
 			'product_weight_g' => (int) ( $meta['pek_product_weight_g'] ?? 0 ),
@@ -66,10 +80,24 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 
 	/** @param array<string,mixed> $draft @param array<string,mixed> $context */
 	public function render_courier_fields( object $order, array $draft, array $context ): void {
-		unset( $draft, $context );
-		$address = method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() . ' ' . (string) $order->get_shipping_address_2() ) : '';
+		unset( $order, $draft );
+		$address = trim( (string) ( $context['courier_destination_summary'] ?? '' ) );
+		$source = trim( (string) ( $context['courier_destination_source'] ?? '' ) );
 		?>
 		<p><strong><?php echo esc_html__( 'Адрес доставки ПЭК', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== $address ? $address : '-' ); ?></p>
+		<?php if ( '' !== $source ) : ?>
+			<p class="description"><?php echo esc_html( sprintf( __( 'Источник адреса: %s', 'walls-delivery-calc' ), $source ) ); ?></p>
+		<?php endif; ?>
 		<?php
+	}
+
+	private function first_non_empty( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			if ( is_scalar( $value ) && '' !== trim( (string) $value ) ) {
+				return trim( (string) $value );
+			}
+		}
+
+		return '';
 	}
 }

@@ -67,8 +67,8 @@ final class PekSettings {
 
 	private PekRuPhoneNormalizer $phones;
 
-	public function __construct( private SettingsRepository $settings, ?PekRuPhoneNormalizer $phones = null ) {
-		$this->phones = $phones ?? new PekRuPhoneNormalizer();
+	public function __construct( private SettingsRepository $settings, PekRuPhoneNormalizer $phones ) {
+		$this->phones = $phones;
 	}
 
 	/** @return array<string,mixed> */

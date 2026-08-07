@@ -108,7 +108,7 @@ $GLOBALS['pek_ui_wc_logger'] = new PekUiFakeWooLogger();
 define( 'APP_ENCRYPTION_KEY', 'pek-ui-key' );
 
 $settings_repository = new SettingsRepository();
-$settings = new PekSettings( $settings_repository );
+$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'diagnostic-user', 'pek_api_key' => 'very-secret-key' ) );
 $settings->save_sender_warehouse( array( 'warehouseId' => 'nearest-timezone-wh', 'source' => 'free', 'branchTimezone' => 'UTC+04:00', 'branchName' => 'Самара', 'divisionName' => 'Самара Запад' ) );

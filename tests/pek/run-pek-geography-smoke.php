@@ -95,7 +95,7 @@ $wpdb->locations = array(
 );
 
 $settings_repo = new SettingsRepository();
-$settings = new PekSettings( $settings_repo );
+$settings = new PekSettings( $settings_repo, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $encryption = new EncryptionService( 'test-key' );
 $credentials = new PekCredentials( $settings_repo, $encryption );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );

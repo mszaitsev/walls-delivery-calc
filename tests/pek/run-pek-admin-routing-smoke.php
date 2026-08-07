@@ -128,7 +128,7 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$GLOBALS['wpdb'] = new wpdb();
 	$services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 	$service = $services->ensure_pek_service();
-	$settings = new PekSettings( $settings_repository );
+	$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 	$credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
@@ -194,7 +194,7 @@ $http = new PekRouteFakeHttp( array(
 	pek_route_json( array( 'freeDepartments' => array( array( 'warehouseId' => 'wh-route', 'branchId' => 'br', 'branchName' => 'Branch', 'divisionName' => 'Division', 'address' => 'Address' ) ), 'paidDepartments' => array() ) ),
 ) );
 $page = pek_route_page( $http, $settings_repository, $cache );
-$settings = new PekSettings( $settings_repository );
+$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 
 $cache->save_for_current_user( array( 'success' => true, 'message' => 'old', 'items' => array( array( 'warehouseId' => 'old-wh' ) ), 'requested' => array( 'departmentOperation' => 2, 'type' => 3 ) ) );
 $redirect = pek_route_run_action( $page, 'save_pek_settings', array( PekSettings::LOGIN_KEY => 'login', PekSettings::REQUEST_TIMEOUT_KEY => '22', PekSettings::SENDER_LEGAL_FORM_KEY => '1', PekSettings::SENDER_FULL_NAME_KEY => 'ООО Test', PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::SENDER_PHONE_KEY => '+79991234567', PekSettings::SENDER_EMAIL_KEY => 'sender@example.test' ) );

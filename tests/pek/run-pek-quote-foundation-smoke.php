@@ -134,7 +134,7 @@ function pek_quote_boot( array $responses, array $sensitive = array(), bool $wit
 	$GLOBALS['pek_quote_transients'] = array();
 	$GLOBALS['pek_quote_wc_logger'] = new PekQuoteFakeWooLogger();
 	$repository = new SettingsRepository();
-	$settings = new PekSettings( $repository );
+	$settings = new PekSettings( $repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 	$credentials = new PekCredentials( $repository, new EncryptionService() );
 	if ( ! defined( 'APP_ENCRYPTION_KEY' ) ) {
 		define( 'APP_ENCRYPTION_KEY', 'pek-quote-test-key' );
@@ -291,7 +291,7 @@ pek_quote_assert( ! $root_error->success && 'pek_quote_root_error' === $root_err
 list( $settings_generic, $credentials_generic, $api_generic ) = ( function (): array {
 	$GLOBALS['pek_quote_options'] = array();
 	$repository = new SettingsRepository();
-	$settings = new PekSettings( $repository );
+	$settings = new PekSettings( $repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 	$credentials = new PekCredentials( $repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
 	$api = new PekApiClient( $settings, $credentials, new PekQuoteFakeHttp( array( pek_quote_response( array( 'hasError' => true, 'errorMessage' => 'generic failure' ) ) ) ), new PekRequestBudget( $settings ) );

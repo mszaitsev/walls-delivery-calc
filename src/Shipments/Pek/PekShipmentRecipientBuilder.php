@@ -12,8 +12,8 @@ defined( 'ABSPATH' ) || exit;
 final class PekShipmentRecipientBuilder {
 	private PekRuPhoneNormalizer $phones;
 
-	public function __construct( private PekShipmentCourierAddressResolver $courier_addresses, ?PekRuPhoneNormalizer $phones = null ) {
-		$this->phones = $phones ?? new PekRuPhoneNormalizer();
+	public function __construct( private PekShipmentCourierAddressResolver $courier_addresses, PekRuPhoneNormalizer $phones ) {
+		$this->phones = $phones;
 	}
 
 	/** @return array<string,mixed> */
@@ -29,11 +29,14 @@ final class PekShipmentRecipientBuilder {
 		if ( '' === $name['firstName'] ) {
 			throw new \RuntimeException( 'Для заявки ПЭК нужно имя получателя.' );
 		}
-		$title = trim( implode( ' ', array_filter( array( $name['lastName'], $name['firstName'], $name['patronymic'] ), static fn( string $value ): bool => '' !== trim( $value ) ) ) );
+		$title = trim( $name['lastName'] . ' ' . $name['firstName'] );
 		$receiver = array(
 			'legalForm' => 3,
 			'title' => $title,
-			'individual' => array_filter( $name, static fn( string $value ): bool => '' !== $value ),
+			'individual' => array(
+				'firstName' => $name['firstName'],
+				'lastName' => $name['lastName'],
+			),
 			'person' => $title,
 			'personPhones' => array( array( 'phone' => $phone ) ),
 		);
@@ -60,30 +63,34 @@ final class PekShipmentRecipientBuilder {
 
 	private function phone( object $order ): string {
 		if ( method_exists( $order, 'get_shipping_phone' ) ) {
-			$shipping = trim( (string) $order->get_shipping_phone() );
-			if ( '' !== $shipping ) {
+			$shipping = $order->get_shipping_phone();
+			if ( is_string( $shipping ) && '' !== trim( $shipping ) ) {
 				try {
 					return $this->phones->normalize( $shipping );
 				} catch ( \InvalidArgumentException ) {
 					throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен корректный телефон получателя.' );
 				}
+			} elseif ( ! is_string( $shipping ) && null !== $shipping && '' !== $shipping ) {
+				throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен корректный телефон получателя.' );
 			}
 		}
 		if ( method_exists( $order, 'get_billing_phone' ) ) {
-			$billing = trim( (string) $order->get_billing_phone() );
-			if ( '' !== $billing ) {
+			$billing = $order->get_billing_phone();
+			if ( is_string( $billing ) && '' !== trim( $billing ) ) {
 				try {
 					return $this->phones->normalize( $billing );
 				} catch ( \InvalidArgumentException ) {
 					throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен корректный телефон получателя.' );
 				}
+			} elseif ( ! is_string( $billing ) && null !== $billing && '' !== $billing ) {
+				throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен корректный телефон получателя.' );
 			}
 		}
 
 		return '';
 	}
 
-	/** @return array{lastName:string,firstName:string,patronymic:string} */
+	/** @return array{lastName:string,firstName:string} */
 	private function name_parts( object $order ): array {
 		$last = method_exists( $order, 'get_shipping_last_name' ) ? trim( (string) $order->get_shipping_last_name() ) : '';
 		$first = method_exists( $order, 'get_shipping_first_name' ) ? trim( (string) $order->get_shipping_first_name() ) : '';
@@ -91,9 +98,8 @@ final class PekShipmentRecipientBuilder {
 			$last = method_exists( $order, 'get_billing_last_name' ) ? trim( (string) $order->get_billing_last_name() ) : '';
 			$first = method_exists( $order, 'get_billing_first_name' ) ? trim( (string) $order->get_billing_first_name() ) : '';
 		}
-		$middle = method_exists( $order, 'get_meta' ) ? trim( (string) $order->get_meta( '_billing_patronymic', true ) ) : '';
 
-		return array( 'lastName' => $last, 'firstName' => $first, 'patronymic' => $middle );
+		return array( 'lastName' => $last, 'firstName' => $first );
 	}
 
 }

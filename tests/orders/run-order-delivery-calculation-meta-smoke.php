@@ -216,16 +216,20 @@ $persister->persist(
 		'shipping_dadata_status' => 'house_selected',
 		'shipping_dadata_house' => '10',
 		'shipping_dadata_house_type' => 'д',
+		'shipping_dadata_house_type_full' => 'дом',
 		'shipping_dadata_block' => '1',
 		'shipping_dadata_block_type' => 'к',
+		'shipping_dadata_block_type_full' => 'корпус',
 		'shipping_dadata_stead' => '',
 		'shipping_dadata_stead_type' => '',
 		'shipping_dadata_flat' => '5',
 		'shipping_dadata_flat_type' => 'кв',
+		'shipping_dadata_flat_type_full' => 'квартира',
 	)
 );
 order_meta_smoke_assert( '1' === (string) ( $dadata_type_order->meta['_shipping_dadata_block'] ?? '' ) && 'к' === (string) ( $dadata_type_order->meta['_shipping_dadata_block_type'] ?? '' ), 'DaData block and block_type must persist from checkout data to order meta.' );
 order_meta_smoke_assert( 'д' === (string) ( $dadata_type_order->meta['_shipping_dadata_house_type'] ?? '' ) && 'кв' === (string) ( $dadata_type_order->meta['_shipping_dadata_flat_type'] ?? '' ), 'DaData house_type and flat_type must persist from checkout data to order meta.' );
+order_meta_smoke_assert( 'дом' === (string) ( $dadata_type_order->meta['_shipping_dadata_house_type_full'] ?? '' ) && 'корпус' === (string) ( $dadata_type_order->meta['_shipping_dadata_block_type_full'] ?? '' ) && 'квартира' === (string) ( $dadata_type_order->meta['_shipping_dadata_flat_type_full'] ?? '' ), 'Full DaData house/block/flat type values must persist from checkout data to order meta.' );
 order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
 

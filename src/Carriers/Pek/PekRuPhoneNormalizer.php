@@ -7,10 +7,14 @@ defined( 'ABSPATH' ) || exit;
 
 final class PekRuPhoneNormalizer {
 	public function normalize( mixed $value ): string {
-		if ( null === $value || is_bool( $value ) || is_array( $value ) || is_object( $value ) ) {
+		if ( ! is_string( $value ) && ! is_int( $value ) ) {
 			throw new \InvalidArgumentException( 'Некорректный телефон ПЭК.' );
 		}
-		$raw = trim( (string) $value );
+		$raw = (string) $value;
+		if ( 1 === preg_match( '/[\x00-\x1F\x7F-\x9F]/u', $raw ) ) {
+			throw new \InvalidArgumentException( 'Некорректный телефон ПЭК.' );
+		}
+		$raw = trim( $raw );
 		if ( '' === $raw || 1 !== preg_match( '/^[\d+ ()\-]+$/', $raw ) ) {
 			throw new \InvalidArgumentException( 'Некорректный телефон ПЭК.' );
 		}

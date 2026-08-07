@@ -25,9 +25,9 @@ final class PekShipmentRequestBuilder {
 		private PekShipmentDestinationResolver $destinations,
 		private PekShipmentProductWeightResolver $product_weights,
 		private PekCredentials $credentials,
-		?PekRuPhoneNormalizer $phones = null
+		PekRuPhoneNormalizer $phones
 	) {
-		$this->phones = $phones ?? new PekRuPhoneNormalizer();
+		$this->phones = $phones;
 	}
 
 	/** @return array{payload:array<string,mixed>,preview:array<string,mixed>,summary:array<string,mixed>} */

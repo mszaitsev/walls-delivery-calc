@@ -263,7 +263,7 @@ function pek_checkout_boot( array $responses, array $points ): array {
 	$wpdb = new wpdb();
 	$wpdb->locations = pek_checkout_location_rows();
 	$repository = new SettingsRepository();
-	$settings = new PekSettings( $repository );
+	$settings = new PekSettings( $repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 	$credentials = new PekCredentials( $repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'checkout-login', 'pek_api_key' => 'checkout-secret' ) );
 	$settings->save_from_admin( array( PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::CLIENT_CARD_KEY => 'card-secret' ) );
@@ -445,7 +445,7 @@ pek_checkout_assert( '' !== $base_context_planned, 'PEK quote cache context must
 pek_checkout_assert( $base_context_planned === (string) ( $payloads[0]['plannedDateTime'] ?? '' ) && $base_context_planned === (string) ( $payloads[1]['plannedDateTime'] ?? '' ), 'PEK plannedDateTime must be identical between quote cache context and calculator payloads in one calculation lifecycle.' );
 
 $memo_repository = new SettingsRepository();
-$memo_settings = new PekSettings( $memo_repository );
+$memo_settings = new PekSettings( $memo_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $memo_repository->set( PekSettings::SENDER_WAREHOUSE_KEY, array( 'warehouseId' => 'sender-wh', 'source' => 'free', 'branchTimezone' => 'UTC' ) );
 $GLOBALS['pek_checkout_current_datetime'] = '2026-08-04 12:14:59';
 $memo_resolver = new PekQuotePlannedDateTimeResolver( $memo_settings );
