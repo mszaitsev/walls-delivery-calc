@@ -60,7 +60,10 @@ final class PekSenderWarehouseService {
 
 	/** @return array{success:bool,message:string,snapshot:array<string,mixed>} */
 	public function select_from_cached_search( string $warehouse_id ): array {
-		$warehouse_id = trim( $warehouse_id );
+		$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
+		if ( '' === $warehouse_id ) {
+			return array( 'success' => false, 'message' => 'ПЭК не вернул корректный warehouse ID для выбранного склада.', 'snapshot' => array() );
+		}
 		$search = $this->search_cache->current_for_current_user();
 		$requested = is_array( $search['requested'] ?? null ) ? $search['requested'] : array();
 		if ( 2 !== (int) ( $requested['departmentOperation'] ?? 0 ) || PekSettings::LTL_PRODUCT_TYPE !== (int) ( $requested['type'] ?? 0 ) ) {
@@ -68,7 +71,7 @@ final class PekSenderWarehouseService {
 		}
 		$items = is_array( $search['items'] ?? null ) ? $search['items'] : array();
 		foreach ( $items as $item ) {
-			if ( is_array( $item ) && $warehouse_id === (string) ( $item['warehouseId'] ?? '' ) ) {
+			if ( is_array( $item ) && $warehouse_id === self::normalize_warehouse_id( $item['warehouseId'] ?? '' ) ) {
 				$availability = $this->availability_status( $item );
 				if ( ! $availability['success'] ) {
 					return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => array() );
@@ -86,12 +89,16 @@ final class PekSenderWarehouseService {
 	public function validate_and_select( string $warehouse_id ): array {
 		$previous = $this->settings->sender_warehouse();
 		try {
+			$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
+			if ( '' === $warehouse_id ) {
+				return array( 'success' => false, 'message' => 'ПЭК не вернул корректный warehouse ID для выбранного склада.', 'snapshot' => $previous );
+			}
 			$cached = $this->select_from_cached_search( $warehouse_id );
 			if ( $cached['success'] ) {
 				return $cached;
 			}
-			$branches = $this->api->branches_all_for_warehouse( $warehouse_id );
-			$item = $this->find_warehouse_in_branches_all( $branches, $warehouse_id );
+			$lookup = $this->lookup_warehouse_in_branches_all( $warehouse_id );
+			$item = $lookup['item'];
 			if ( array() === $item || ! $this->supports_ltl_pickup( $item ) ) {
 				$this->settings->save_sender_warehouse( $previous );
 				return array( 'success' => false, 'message' => 'ПЭК не подтвердил выбранный warehouse ID как склад приёма для LTL.', 'snapshot' => $previous );
@@ -114,15 +121,16 @@ final class PekSenderWarehouseService {
 
 	/** @return array{success:bool,message:string,snapshot:array<string,mixed>,diagnostic:array<string,mixed>} */
 	public function validate_snapshot( string $warehouse_id, ?PickupCargoConstraints $constraints = null ): array {
-		$warehouse_id = trim( $warehouse_id );
-		$diagnostic = $this->validation_diagnostic( 'empty_warehouse_id' );
+		$raw_warehouse_id = $warehouse_id;
+		$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
+		$diagnostic = $this->validation_diagnostic( '' === trim( $raw_warehouse_id ) ? 'empty_warehouse_id' : 'invalid_warehouse_id' );
 		if ( '' === $warehouse_id ) {
 			return array( 'success' => false, 'message' => 'Не выбран склад самопривоза ПЭК.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 		}
 		try {
-			$branches = $this->api->branches_all_for_warehouse( $warehouse_id );
-			$item = $this->find_warehouse_in_branches_all( $branches, $warehouse_id );
-			$diagnostic = $this->diagnostic_from_item( $item );
+			$lookup = $this->lookup_warehouse_in_branches_all( $warehouse_id );
+			$item = $lookup['item'];
+			$diagnostic = $this->diagnostic_from_lookup( $lookup, $warehouse_id );
 			if ( array() === $item ) {
 				$diagnostic['reason'] = 'warehouse_not_found';
 				return array( 'success' => false, 'message' => 'ПЭК не подтвердил warehouse ID склада самопривоза.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
@@ -175,8 +183,10 @@ final class PekSenderWarehouseService {
 
 	/** @param array<string,mixed> $row @return array<string,mixed> */
 	private function normalize_department( array $row, string $source, int $priority ): array {
+		$warehouse_id = self::normalize_warehouse_id( $row['warehouseId'] ?? ( $row['id'] ?? '' ) );
+
 		return array(
-			'warehouseId' => trim( (string) ( $row['warehouseId'] ?? ( $row['id'] ?? '' ) ) ),
+			'warehouseId' => $warehouse_id,
 			'branchId' => trim( (string) ( $row['branchId'] ?? '' ) ),
 			'branchName' => trim( (string) ( $row['branchName'] ?? '' ) ),
 			'divisionName' => trim( (string) ( $row['divisionName'] ?? '' ) ),
@@ -254,23 +264,23 @@ final class PekSenderWarehouseService {
 		if ( ! is_array( $branch ) || ! is_array( $division ) || ! is_array( $warehouse ) ) {
 			return array();
 		}
-		$division_has_capabilities = array_key_exists( 'kindsOfTransportation', $division );
-		$warehouse_has_capabilities = array_key_exists( 'kindsOfTransportation', $warehouse );
+		$division_has_capabilities = array_key_exists( 'kindsOfTransportation', $division ) && is_array( $division['kindsOfTransportation'] ?? null ) && array() !== $division['kindsOfTransportation'];
+		$warehouse_has_capabilities = array_key_exists( 'kindsOfTransportation', $warehouse ) && is_array( $warehouse['kindsOfTransportation'] ?? null ) && array() !== $warehouse['kindsOfTransportation'];
 		$effective_capabilities = array();
 		$effective_capability_source = 'none';
-		if ( $division_has_capabilities ) {
-			$effective_capabilities = is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array();
-			$effective_capability_source = 'division';
-		} elseif ( $warehouse_has_capabilities ) {
+		if ( $warehouse_has_capabilities ) {
 			$effective_capabilities = is_array( $warehouse['kindsOfTransportation'] ?? null ) ? $warehouse['kindsOfTransportation'] : array();
 			$effective_capability_source = 'warehouse';
+		} elseif ( $division_has_capabilities ) {
+			$effective_capabilities = is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array();
+			$effective_capability_source = 'division';
 		}
 
 		return $this->normalize_department(
 			array_merge(
 				$warehouse,
 				array(
-					'warehouseId' => self::normalized_warehouse_id( $warehouse['id'] ?? '' ),
+					'warehouseId' => self::normalize_warehouse_id( $warehouse['id'] ?? '' ),
 					'branchId' => (string) ( $branch['id'] ?? '' ),
 					'branchName' => (string) ( $branch['title'] ?? '' ),
 					'divisionName' => (string) ( $warehouse['divisionName'] ?? ( $division['name'] ?? '' ) ),
@@ -295,13 +305,14 @@ final class PekSenderWarehouseService {
 		$result = array(
 			'warehouse_found' => false,
 			'matched_id' => '',
+			'matched_id_hash' => '',
 			'matched_field' => '',
 			'branches_checked' => 0,
 			'divisions_checked' => 0,
 			'warehouses_checked' => 0,
 			'unexpected_structure' => false,
 		);
-		$warehouse_id = self::normalized_warehouse_id( $warehouse_id );
+		$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
 		$branches = self::branches_from_response( $response );
 		if ( null === $branches ) {
 			$result['unexpected_structure'] = true;
@@ -322,10 +333,11 @@ final class PekSenderWarehouseService {
 						continue;
 					}
 					++$result['warehouses_checked'];
-					$id = self::normalized_warehouse_id( $warehouse['id'] ?? '' );
+					$id = self::normalize_warehouse_id( $warehouse['id'] ?? '' );
 					if ( '' !== $id && $id === $warehouse_id ) {
 						$result['warehouse_found'] = true;
 						$result['matched_id'] = $id;
+						$result['matched_id_hash'] = hash( 'sha256', $id );
 						$result['matched_field'] = 'id';
 						$result['branch_index'] = (int) $branch_index;
 						$result['division_index'] = (int) $division_index;
@@ -351,8 +363,16 @@ final class PekSenderWarehouseService {
 		return null;
 	}
 
-	private static function normalized_warehouse_id( mixed $value ): string {
-		return is_scalar( $value ) ? trim( (string) $value ) : '';
+	private static function normalize_warehouse_id( mixed $value ): string {
+		if ( ! is_string( $value ) ) {
+			return '';
+		}
+		$value = trim( $value, " \t\n\r\0\x0B" );
+		if ( 1 !== preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $value ) ) {
+			return '';
+		}
+
+		return strtolower( $value );
 	}
 
 	/** @param array<string,mixed> $item */
@@ -374,6 +394,8 @@ final class PekSenderWarehouseService {
 		}
 		$type_ok = array() === $types || in_array( PekSettings::LTL_PRODUCT_TYPE, $types, true );
 		$kinds = is_array( $item['kindsOfTransportation'] ?? null ) ? $item['kindsOfTransportation'] : array();
+		$ltl_type_present = false;
+		$acceptance_operation_present = false;
 		foreach ( $kinds as $kind ) {
 			if ( ! is_array( $kind ) || array_is_list( $kind ) || ! array_key_exists( 'type', $kind ) || ! is_int( $kind['type'] ) ) {
 				return array( 'success' => false, 'reason' => 'capability_contract', 'ltl_type_present' => false, 'acceptance_operation_present' => false );
@@ -381,6 +403,7 @@ final class PekSenderWarehouseService {
 			if ( PekSettings::LTL_PRODUCT_TYPE !== $kind['type'] ) {
 				continue;
 			}
+			$ltl_type_present = true;
 			$operations = $kind['operations'] ?? null;
 			if ( ! is_array( $operations ) || ! array_is_list( $operations ) ) {
 				return array( 'success' => false, 'reason' => 'capability_contract', 'ltl_type_present' => true, 'acceptance_operation_present' => false );
@@ -390,10 +413,14 @@ final class PekSenderWarehouseService {
 					return array( 'success' => false, 'reason' => 'capability_contract', 'ltl_type_present' => true, 'acceptance_operation_present' => false );
 				}
 				if ( $this->is_cargo_acceptance_operation( $operation ) ) {
-					return array( 'success' => $type_ok, 'reason' => $type_ok ? '' : 'warehouse_type_mismatch', 'ltl_type_present' => true, 'acceptance_operation_present' => true );
+					$acceptance_operation_present = true;
 				}
 			}
-
+		}
+		if ( $acceptance_operation_present ) {
+			return array( 'success' => $type_ok, 'reason' => $type_ok ? '' : 'warehouse_type_mismatch', 'ltl_type_present' => true, 'acceptance_operation_present' => true );
+		}
+		if ( $ltl_type_present ) {
 			return array( 'success' => false, 'reason' => 'acceptance_operation_missing', 'ltl_type_present' => true, 'acceptance_operation_present' => false );
 		}
 
@@ -434,7 +461,14 @@ final class PekSenderWarehouseService {
 			'reason' => $reason,
 			'endpoint' => '/branches/all/',
 			'http_status' => '',
+			'lookup_source' => 'filtered',
+			'requested_id_present' => false,
+			'requested_id_hash' => '',
+			'branches_checked' => 0,
+			'divisions_checked' => 0,
+			'warehouses_checked' => 0,
 			'warehouse_found' => false,
+			'matched_id_hash' => '',
 			'division_capabilities_present' => false,
 			'warehouse_capabilities_present' => false,
 			'effective_capability_source' => 'none',
@@ -457,6 +491,45 @@ final class PekSenderWarehouseService {
 		$diagnostic['warehouse_capabilities_present'] = true === ( $item['warehouseCapabilitiesPresent'] ?? false );
 		$source = (string) ( $item['effectiveCapabilitySource'] ?? 'none' );
 		$diagnostic['effective_capability_source'] = in_array( $source, array( 'division', 'warehouse', 'none' ), true ) ? $source : 'none';
+
+		return $diagnostic;
+	}
+
+	/** @return array{item:array<string,mixed>,match:array<string,mixed>,lookup_source:string,http_status:int|string} */
+	private function lookup_warehouse_in_branches_all( string $warehouse_id ): array {
+		$branches = $this->api->branches_all_for_warehouse( $warehouse_id );
+		$match = self::find_warehouse_in_branches_response( $branches, $warehouse_id );
+		$item = $this->find_warehouse_in_branches_all( $branches, $warehouse_id );
+		if ( true === ( $match['warehouse_found'] ?? false ) || true === ( $match['unexpected_structure'] ?? false ) ) {
+			return array( 'item' => $item, 'match' => $match, 'lookup_source' => 'filtered', 'http_status' => $this->api->last_response_meta()['http_status'] );
+		}
+
+		$branches = $this->api->branches_all();
+		$fallback_match = self::find_warehouse_in_branches_response( $branches, $warehouse_id );
+		$fallback_item = $this->find_warehouse_in_branches_all( $branches, $warehouse_id );
+
+		return array(
+			'item' => $fallback_item,
+			'match' => $fallback_match,
+			'lookup_source' => true === ( $fallback_match['warehouse_found'] ?? false ) ? 'unfiltered_fallback' : 'filtered',
+			'http_status' => $this->api->last_response_meta()['http_status'],
+		);
+	}
+
+	/** @param array{item:array<string,mixed>,match:array<string,mixed>,lookup_source:string,http_status:int|string} $lookup @return array<string,mixed> */
+	private function diagnostic_from_lookup( array $lookup, string $warehouse_id ): array {
+		$item = $lookup['item'];
+		$match = $lookup['match'];
+		$diagnostic = $this->diagnostic_from_item( $item );
+		$diagnostic['lookup_source'] = in_array( $lookup['lookup_source'], array( 'filtered', 'unfiltered_fallback' ), true ) ? $lookup['lookup_source'] : 'filtered';
+		$diagnostic['http_status'] = $lookup['http_status'];
+		$diagnostic['requested_id_present'] = '' !== $warehouse_id;
+		$diagnostic['requested_id_hash'] = '' !== $warehouse_id ? hash( 'sha256', $warehouse_id ) : '';
+		$diagnostic['branches_checked'] = (int) ( $match['branches_checked'] ?? 0 );
+		$diagnostic['divisions_checked'] = (int) ( $match['divisions_checked'] ?? 0 );
+		$diagnostic['warehouses_checked'] = (int) ( $match['warehouses_checked'] ?? 0 );
+		$diagnostic['warehouse_found'] = true === ( $match['warehouse_found'] ?? false );
+		$diagnostic['matched_id_hash'] = is_string( $match['matched_id_hash'] ?? null ) ? $match['matched_id_hash'] : '';
 
 		return $diagnostic;
 	}

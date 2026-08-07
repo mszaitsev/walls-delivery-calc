@@ -61,6 +61,10 @@
     };
   }
 
+  function isCanonicalWarehouseId(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(value || '').trim().toLowerCase());
+  }
+
   function openSenderWarehousePicker(root, button) {
     var picker = window.wdcShipmentPickupPicker;
     var form = (button && button.closest && button.closest('form')) || (root && root.querySelector && root.querySelector('form')) || root || document;
@@ -78,8 +82,13 @@
       codeLabel: 'Warehouse ID',
       context: senderWarehouseContext(form, root),
       onChoose: function (point) {
+        var warehouseId = point.warehouseId || '';
+        if (!isCanonicalWarehouseId(warehouseId)) {
+          window.alert('ПЭК не вернул корректный warehouse ID для выбранного склада.');
+          return false;
+        }
         updateWarehouseCard(root, {
-          warehouseId: point.warehouseId || point.point_code || point.code || '',
+          warehouseId: String(warehouseId).trim().toLowerCase(),
           title: point.display_title || point.point_title || point.address || '',
           branchName: point.branchName || point.branch_title || '',
           divisionName: point.divisionName || point.division_title || '',
@@ -87,6 +96,7 @@
           latitude: point.latitude || point.lat || '',
           longitude: point.longitude || point.lng || ''
         });
+        return true;
       }
     });
     return true;

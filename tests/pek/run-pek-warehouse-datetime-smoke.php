@@ -23,6 +23,12 @@ function pek_dt_assert( bool $condition, string $message ): void {
 	}
 }
 
+function pek_dt_uuid( string $seed ): string {
+	$hash = substr( hash( 'sha256', $seed ), 0, 32 );
+
+	return substr( $hash, 0, 8 ) . '-' . substr( $hash, 8, 4 ) . '-' . substr( $hash, 12, 4 ) . '-' . substr( $hash, 16, 4 ) . '-' . substr( $hash, 20, 12 );
+}
+
 function current_datetime(): DateTimeImmutable { return new DateTimeImmutable( $GLOBALS['pek_dt_now'] ); }
 function current_time( string $type ): int|string {
 	if ( 'timestamp' === $type || 'U' === $type ) {
@@ -191,9 +197,9 @@ $GLOBALS['pek_dt_options'] = array();
 $GLOBALS['pek_dt_transients'] = array();
 $GLOBALS['pek_dt_now'] = '2026-08-02T12:00:00+07:00';
 
-$result = pek_dt_select_from_branches( 'clock-ok', 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) );
+$result = pek_dt_select_from_branches( pek_dt_uuid( 'clock-ok' ), 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) );
 pek_dt_assert( $result['success'], 'PEK availability must compare real Unix instants, not site-offset current_time timestamps.' );
-$boundary = pek_dt_select_from_branches( 'clock-boundary', 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T08:00:00' ) );
+$boundary = pek_dt_select_from_branches( pek_dt_uuid( 'clock-boundary' ), 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T08:00:00' ) );
 pek_dt_assert( ! $boundary['success'], 'PEK exact expiry instant must be rejected when now >= expiry.' );
 
 foreach ( array(
@@ -206,7 +212,7 @@ foreach ( array(
 	'explicit_offset' => array( 'UTC+03:00', '2026-08-02T09:00:00+03:00' ),
 	'negative_offset_future' => array( 'UTC-05:00', '2026-08-02T01:00:00' ),
 ) as $name => $case ) {
-	$result = pek_dt_select_from_branches( 'valid-' . $name, $case[0], array( 'endOfAvailabilityBeforeClosing' => $case[1] ) );
+	$result = pek_dt_select_from_branches( pek_dt_uuid( 'valid-' . $name ), $case[0], array( 'endOfAvailabilityBeforeClosing' => $case[1] ) );
 	pek_dt_assert( $result['success'], 'PEK valid availability date must be accepted: ' . $name );
 }
 
@@ -223,7 +229,7 @@ foreach ( array(
 	'invalid_offset_14_30' => '2027-08-02T12:00:00+14:30',
 	'localized' => '02 августа 2026',
 ) as $name => $date_value ) {
-	$result = pek_dt_select_from_branches( 'invalid-' . $name, 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => $date_value ), $settings );
+	$result = pek_dt_select_from_branches( pek_dt_uuid( 'invalid-' . $name ), 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => $date_value ), $settings );
 	pek_dt_assert( ! $result['success'] && array() === $settings->sender_warehouse(), 'PEK invalid date must fail closed and not save warehouse: ' . $name );
 }
 
@@ -232,21 +238,22 @@ foreach ( array(
 	'past_cost' => array( 'endOfCostCalculationAvailability', '2026-08-02T07:59:59' ),
 	'past_closing' => array( 'departmentClosingDate', '2026-08-02T07:59:59' ),
 ) as $name => $case ) {
-	$service = pek_dt_service( array( pek_dt_json_response( pek_dt_branches_all( 'past-' . $name, 'UTC+03:00', array( $case[0] => $case[1] ) ) ) ), $http, $settings, $cache );
+	$past_id = pek_dt_uuid( 'past-' . $name );
+	$service = pek_dt_service( array( pek_dt_json_response( pek_dt_branches_all( $past_id, 'UTC+03:00', array( $case[0] => $case[1] ) ) ) ), $http, $settings, $cache );
 	$settings->save_sender_warehouse( array( 'warehouseId' => 'previous', 'branchName' => 'Previous' ) );
-	$result = $service->validate_and_select( 'past-' . $name );
+	$result = $service->validate_and_select( $past_id );
 	pek_dt_assert( ! $result['success'] && $settings->sender_warehouse()['warehouseId'] === 'previous', 'PEK past ' . $case[0] . ' must reject and preserve previous warehouse.' );
 }
 
-$timezone_less_missing = pek_dt_select_from_branches( 'missing-tz', '__missing__', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) );
+$timezone_less_missing = pek_dt_select_from_branches( pek_dt_uuid( 'missing-tz' ), '__missing__', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) );
 pek_dt_assert( ! $timezone_less_missing['success'], 'PEK timezone-less date must require branch timezone.' );
-$timezone_less_invalid = pek_dt_select_from_branches( 'invalid-tz', 'UTC+25:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) );
+$timezone_less_invalid = pek_dt_select_from_branches( pek_dt_uuid( 'invalid-tz' ), 'UTC+25:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) );
 pek_dt_assert( ! $timezone_less_invalid['success'], 'PEK invalid branch timezone must reject timezone-less date.' );
-$explicit_missing_timezone = pek_dt_select_from_branches( 'explicit-missing-tz', '__missing__', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T06:00:00+00:00' ) );
+$explicit_missing_timezone = pek_dt_select_from_branches( pek_dt_uuid( 'explicit-missing-tz' ), '__missing__', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T06:00:00+00:00' ) );
 pek_dt_assert( $explicit_missing_timezone['success'], 'PEK explicit timestamp must not require branch timezone.' );
-$absent_dates_missing_timezone = pek_dt_select_from_branches( 'absent-dates-missing-tz', '__missing__' );
+$absent_dates_missing_timezone = pek_dt_select_from_branches( pek_dt_uuid( 'absent-dates-missing-tz' ), '__missing__' );
 pek_dt_assert( $absent_dates_missing_timezone['success'], 'PEK missing branch timezone must not reject warehouse without closing fields.' );
-$negative_offset_past = pek_dt_select_from_branches( 'negative-offset-past', 'UTC-05:00', array( 'departmentClosingDate' => '2026-08-01T23:59:59' ) );
+$negative_offset_past = pek_dt_select_from_branches( pek_dt_uuid( 'negative-offset-past' ), 'UTC-05:00', array( 'departmentClosingDate' => '2026-08-01T23:59:59' ) );
 pek_dt_assert( ! $negative_offset_past['success'], 'PEK UTC-05 branch timezone must compare by instant and reject past expiry.' );
 
 $service = pek_dt_service( array(), $http, $settings, $cache );
@@ -256,7 +263,7 @@ $cache_payload = array(
 	'requested' => array( 'address' => 'Test', 'departmentOperation' => 2, 'type' => 3 ),
 	'items' => array(
 		pek_dt_cached_item(
-			'cache-roundtrip',
+			pek_dt_uuid( 'cache-roundtrip' ),
 			'UTC+03:00',
 			array(
 				'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00',
@@ -269,7 +276,7 @@ $cache_payload = array(
 $cache->save_for_current_user( $cache_payload );
 $cached = $cache->current_for_current_user();
 pek_dt_assert( ( $cached['items'][0]['branchTimezone'] ?? '' ) === 'UTC+03:00' && ( $cached['items'][0]['endOfAvailabilityBeforeClosing'] ?? '' ) === '2026-08-02T09:00:00' && ( $cached['items'][0]['departmentClosingDate'] ?? '' ) === '2026-08-03', 'PEK search cache must preserve branch timezone and availability fields after round-trip.' );
-$result = $service->validate_and_select( 'cache-roundtrip' );
+$result = $service->validate_and_select( pek_dt_uuid( 'cache-roundtrip' ) );
 $snapshot = $settings->sender_warehouse();
 pek_dt_assert( $result['success'] && count( $http->requests ) === 0 && $snapshot['branchTimezone'] === 'UTC+03:00' && $snapshot['availability']['departmentClosingDate'] === '2026-08-03', 'PEK cached future warehouse can be selected and snapshot preserves timezone/availability fields.' );
 
@@ -277,7 +284,7 @@ $nearest_service = pek_dt_service(
 	array(
 		pek_dt_json_response(
 			array(
-				'freeDepartments' => array( pek_dt_nearest_item( 'nearest-timezone-wh', '04:00:00' ) ),
+				'freeDepartments' => array( pek_dt_nearest_item( pek_dt_uuid( 'nearest-timezone-wh' ), '04:00:00' ) ),
 				'paidDepartments' => array(),
 			)
 		),
@@ -289,7 +296,7 @@ $nearest_service = pek_dt_service(
 $nearest_search = $nearest_service->search( 'Самара' );
 $nearest_cached = $nearest_cache->current_for_current_user();
 pek_dt_assert( ( $nearest_search['items'][0]['branchTimezone'] ?? '' ) === 'UTC+04:00' && ( $nearest_cached['items'][0]['branchTimezone'] ?? '' ) === 'UTC+04:00' && ( $nearest_cached['items'][0]['source'] ?? '' ) === 'free', 'PEK nearestdepartments timeZone and free source must normalize and survive cache round-trip.' );
-$nearest_result = $nearest_service->validate_and_select( 'nearest-timezone-wh' );
+$nearest_result = $nearest_service->validate_and_select( pek_dt_uuid( 'nearest-timezone-wh' ) );
 $nearest_snapshot = $nearest_settings->sender_warehouse();
 pek_dt_assert( $nearest_result['success'] && count( $nearest_http->requests ) === 1 && $nearest_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/nearestdepartments/' && $nearest_snapshot['branchTimezone'] === 'UTC+04:00' && $nearest_snapshot['source'] === 'free' && ! array_key_exists( 'timeZone', $nearest_snapshot ), 'PEK search/select path must save cached canonical timezone and source without branches/all fallback or raw timeZone field.' );
 
@@ -298,7 +305,7 @@ $paid_service = pek_dt_service(
 		pek_dt_json_response(
 			array(
 				'freeDepartments' => array(),
-				'paidDepartments' => array( pek_dt_nearest_item( 'paid-timezone-wh', '05:30:00' ) ),
+				'paidDepartments' => array( pek_dt_nearest_item( pek_dt_uuid( 'paid-timezone-wh' ), '05:30:00' ) ),
 			)
 		),
 	),
@@ -310,25 +317,25 @@ $paid_service->search( 'Самара' );
 pek_dt_assert( ( $paid_cache->current_for_current_user()['items'][0]['branchTimezone'] ?? '' ) === 'UTC+05:30' && ( $paid_cache->current_for_current_user()['items'][0]['source'] ?? '' ) === 'paid', 'PEK paidDepartments timeZone must use the same normalizer and preserve paid source.' );
 
 foreach ( array( '00:00:00' => 'UTC+00:00', '03:00:00' => 'UTC+03:00', '04:30:00' => 'UTC+04:30', '14:00:00' => 'UTC+14:00' ) as $source_timezone => $canonical_timezone ) {
-	$timezone_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( 'valid-tz-' . str_replace( ':', '-', $source_timezone ), $source_timezone ) ), 'paidDepartments' => array() ) ) ), $timezone_http, $timezone_settings, $timezone_cache );
+	$timezone_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( pek_dt_uuid( 'valid-tz-' . str_replace( ':', '-', $source_timezone ) ), $source_timezone ) ), 'paidDepartments' => array() ) ) ), $timezone_http, $timezone_settings, $timezone_cache );
 	$timezone_service->search( 'Самара' );
 	pek_dt_assert( ( $timezone_cache->current_for_current_user()['items'][0]['branchTimezone'] ?? '' ) === $canonical_timezone, 'PEK nearestdepartments valid timeZone must normalize: ' . $source_timezone );
 }
 
 foreach ( array( '3:00:00', '03:0:00', '03:00', '03:00:01', '03:60:00', '15:00:00', '14:30:00', '-05:00:00', 'UTC+03:00:00', 'MSK', 'Europe/Moscow', 'arbitrary string' ) as $invalid_timezone ) {
-	$invalid_tz_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( 'invalid-tz-' . md5( $invalid_timezone ), $invalid_timezone ) ), 'paidDepartments' => array() ) ) ), $invalid_tz_http, $invalid_tz_settings, $invalid_tz_cache );
+	$invalid_tz_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( pek_dt_uuid( 'invalid-tz-' . md5( $invalid_timezone ) ), $invalid_timezone ) ), 'paidDepartments' => array() ) ) ), $invalid_tz_http, $invalid_tz_settings, $invalid_tz_cache );
 	$invalid_tz_service->search( 'Самара' );
 	$invalid_item = $invalid_tz_cache->current_for_current_user()['items'][0] ?? array();
 	pek_dt_assert( is_array( $invalid_item ) && null === ( $invalid_item['branchTimezone'] ?? null ) && ! str_contains( json_encode( $invalid_item, JSON_UNESCAPED_UNICODE ) ?: '', 'secret-key' ), 'PEK invalid nearestdepartments timeZone must not persist raw source or credentials: ' . $invalid_timezone );
 }
 
-$missing_tz_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( 'missing-timezone-wh', null ) ), 'paidDepartments' => array() ) ) ), $missing_tz_http, $missing_tz_settings, $missing_tz_cache );
+$missing_tz_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( pek_dt_uuid( 'missing-timezone-wh' ), null ) ), 'paidDepartments' => array() ) ) ), $missing_tz_http, $missing_tz_settings, $missing_tz_cache );
 $missing_tz_service->search( 'Самара' );
-pek_dt_assert( $missing_tz_service->validate_and_select( 'missing-timezone-wh' )['success'] && null === ( $missing_tz_settings->sender_warehouse()['branchTimezone'] ?? null ), 'PEK missing nearestdepartments timeZone must not reject item without closing fields.' );
+pek_dt_assert( $missing_tz_service->validate_and_select( pek_dt_uuid( 'missing-timezone-wh' ) )['success'] && null === ( $missing_tz_settings->sender_warehouse()['branchTimezone'] ?? null ), 'PEK missing nearestdepartments timeZone must not reject item without closing fields.' );
 
 $unresolved_cached_service = pek_dt_service(
 	array(
-		pek_dt_json_response( pek_dt_branches_all( 'cached-unresolved-nearest-tz', 'UTC+04:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T10:00:00' ) ) ),
+		pek_dt_json_response( pek_dt_branches_all( pek_dt_uuid( 'cached-unresolved-nearest-tz' ), 'UTC+04:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T10:00:00' ) ) ),
 	),
 	$unresolved_cached_http,
 	$unresolved_cached_settings,
@@ -338,10 +345,10 @@ $unresolved_cached_cache->save_for_current_user(
 	array(
 		'success' => true,
 		'requested' => array( 'address' => 'Самара', 'departmentOperation' => 2, 'type' => 3 ),
-		'items' => array( pek_dt_nearest_item( 'cached-unresolved-nearest-tz', 'bad', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T10:00:00' ) ) ),
+		'items' => array( pek_dt_nearest_item( pek_dt_uuid( 'cached-unresolved-nearest-tz' ), 'bad', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T10:00:00' ) ) ),
 	)
 );
-$unresolved_result = $unresolved_cached_service->validate_and_select( 'cached-unresolved-nearest-tz' );
+$unresolved_result = $unresolved_cached_service->validate_and_select( pek_dt_uuid( 'cached-unresolved-nearest-tz' ) );
 pek_dt_assert( $unresolved_result['success'] && count( $unresolved_cached_http->requests ) === 1 && $unresolved_cached_settings->sender_warehouse()['branchTimezone'] === 'UTC+04:00', 'PEK cached timezone-less date without canonical branchTimezone must fall back to branches/all.' );
 
 $settings->save_sender_warehouse( array( 'warehouseId' => 'previous-cache', 'branchName' => 'Previous cache' ) );
@@ -349,10 +356,10 @@ $cache->save_for_current_user(
 	array(
 		'success' => true,
 		'requested' => array( 'address' => 'Test', 'departmentOperation' => 2, 'type' => 3 ),
-		'items' => array( pek_dt_cached_item( 'cache-past', 'UTC+03:00', array( 'departmentClosingDate' => '2026-08-02T07:59:59' ) ) ),
+		'items' => array( pek_dt_cached_item( pek_dt_uuid( 'cache-past' ), 'UTC+03:00', array( 'departmentClosingDate' => '2026-08-02T07:59:59' ) ) ),
 	)
 );
-$result = $service->validate_and_select( 'cache-past' );
+$result = $service->validate_and_select( pek_dt_uuid( 'cache-past' ) );
 pek_dt_assert( ! $result['success'] && $settings->sender_warehouse()['warehouseId'] === 'previous-cache', 'PEK cached past warehouse must not authorize selection and must preserve previous warehouse.' );
 
 $settings->save_sender_warehouse( array( 'warehouseId' => 'previous-invalid-cache', 'branchName' => 'Previous invalid cache' ) );
@@ -360,28 +367,28 @@ $cache->save_for_current_user(
 	array(
 		'success' => true,
 		'requested' => array( 'address' => 'Test', 'departmentOperation' => 2, 'type' => 3 ),
-		'items' => array( pek_dt_cached_item( 'cache-invalid-date', 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2027-02-30' ) ) ),
+		'items' => array( pek_dt_cached_item( pek_dt_uuid( 'cache-invalid-date' ), 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2027-02-30' ) ) ),
 	)
 );
-$result = $service->validate_and_select( 'cache-invalid-date' );
+$result = $service->validate_and_select( pek_dt_uuid( 'cache-invalid-date' ) );
 pek_dt_assert( ! $result['success'] && $settings->sender_warehouse()['warehouseId'] === 'previous-invalid-cache', 'PEK cached invalid date must not authorize warehouse selection.' );
 
-$fallback_service = pek_dt_service( array( pek_dt_json_response( pek_dt_branches_all( 'cache-unresolved', 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) ) ) ), $fallback_http, $fallback_settings, $fallback_cache );
+$fallback_service = pek_dt_service( array( pek_dt_json_response( pek_dt_branches_all( pek_dt_uuid( 'cache-unresolved' ), 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) ) ) ), $fallback_http, $fallback_settings, $fallback_cache );
 $fallback_cache->save_for_current_user(
 	array(
 		'success' => true,
 		'requested' => array( 'address' => 'Test', 'departmentOperation' => 2, 'type' => 3 ),
-		'items' => array( pek_dt_cached_item( 'cache-unresolved', null, array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) ) ),
+		'items' => array( pek_dt_cached_item( pek_dt_uuid( 'cache-unresolved' ), null, array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) ) ),
 	)
 );
-$result = $fallback_service->validate_and_select( 'cache-unresolved' );
+$result = $fallback_service->validate_and_select( pek_dt_uuid( 'cache-unresolved' ) );
 pek_dt_assert( $result['success'] && count( $fallback_http->requests ) === 1 && $fallback_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/all/' && $fallback_settings->sender_warehouse()['branchTimezone'] === 'UTC+03:00', 'PEK unresolved cached timezone/date must trigger fresh branches/all validation.' );
 
 $snapshot_repository = new SettingsRepository();
 $snapshot_settings = new PekSettings( $snapshot_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $snapshot_settings->save_sender_warehouse(
 	array(
-		'warehouseId' => 'sanitize',
+		'warehouseId' => pek_dt_uuid( 'sanitize' ),
 		'source' => 'free',
 		'branchTimezone' => 'UTC+03:00',
 		'availability' => array(

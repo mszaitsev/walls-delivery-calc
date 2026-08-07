@@ -76,6 +76,16 @@ final class PekApiClient {
 	}
 
 	/** @return array<string,mixed> */
+	public function branches_all(): array {
+		$result = $this->call( 'POST', '/branches/all/', array() );
+		if ( ! is_array( $result ) ) {
+			throw new PekApiException( 'ПЭК вернул неожиданную структуру справочника складов.', array( 'error_code' => 'pek_unexpected_branches_all' ) );
+		}
+
+		return $result;
+	}
+
+	/** @return array<string,mixed> */
 	public function find_zone_by_coordinates( float $latitude, float $longitude ): array {
 		$result = $this->call( 'POST', '/branches/findzonebycoordinates/', array( array( 'latitude' => $latitude, 'longitude' => $longitude ) ) );
 

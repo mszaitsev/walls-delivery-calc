@@ -299,7 +299,9 @@
 
     function choose(point) {
       if (typeof settings.onChoose === 'function') {
-        settings.onChoose(point);
+        if (settings.onChoose(point) === false) {
+          return;
+        }
       } else {
         updatePickupDraft(form, point);
       }

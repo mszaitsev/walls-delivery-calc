@@ -49,6 +49,12 @@ if ( ! function_exists( 'set_transient' ) ) {
 		return true;
 	}
 }
+if ( ! function_exists( 'delete_transient' ) ) {
+	function delete_transient( string $key ): bool {
+		unset( $GLOBALS['wdc_pek_integration_transients'][ $key ] );
+		return true;
+	}
+}
 if ( ! function_exists( 'current_time' ) ) {
 	function current_time( string $type ): string {
 		unset( $type );
@@ -211,6 +217,12 @@ function pek_integration_count_calls( PekIntegrationFakeHttp $http, string $need
 	return count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], $needle ) ) );
 }
 
+const PEK_INTEGRATION_SENDER_WAREHOUSE_A = '85974fc8-d0b8-11e5-9833-00155d668909';
+const PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER = '85974FC8-D0B8-11E5-9833-00155D668909';
+const PEK_INTEGRATION_SENDER_WAREHOUSE_B = '5c7775d4-0013-11ec-80cf-00155d4a0436';
+const PEK_INTEGRATION_RECEIVER_WAREHOUSE = '77968d17-65bc-11e9-80cd-00155d4a0436';
+const PEK_INTEGRATION_MISSING_WAREHOUSE = 'c496b0c6-8e45-11df-bb3b-0019bbc941ce';
+
 function pek_integration_set_dadata( PekIntegrationOrder $order, string $scope, string $region, string $city, string $street, string $house, string $flat = '', string $settlement = '', string $block = '', string $block_type = '', string $city_fias_id = '', string $settlement_fias_id = '' ): void {
 	$order->update_meta_data( '_' . $scope . '_dadata_status', 'house_selected' );
 	$order->update_meta_data( '_' . $scope . '_dadata_region_with_type', $region );
@@ -350,17 +362,25 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/private-token-response.json' ) ?: '{}' );
 		}
 		if ( str_contains( $url, '/branches/nearestdepartments/' ) ) {
+			$body = json_decode( (string) ( $args['body'] ?? '' ), true );
+			$address = is_array( $body ) ? (string) ( $body['address'] ?? '' ) : '';
+			$warehouse_id = str_contains( $address, 'Новосибирск' ) ? PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER : PEK_INTEGRATION_RECEIVER_WAREHOUSE;
+			$branch_id = str_contains( $address, 'Новосибирск' ) ? 'BR-S' : 'BR-R';
+			$branch_title = str_contains( $address, 'Новосибирск' ) ? 'Новосибирск' : 'Москва';
+			$division_name = str_contains( $address, 'Новосибирск' ) ? 'Склад A' : 'Склад получателя';
+			$department_address = str_contains( $address, 'Новосибирск' ) ? 'Россия, Новосибирск, Складская, дом 1' : 'Россия, Московская область, Видное, Терминальная, дом 2';
 			return array(
 				'status' => 200,
 				'body' => wp_json_encode(
 					array(
 						'freeDepartments' => array(
 							array(
-								'warehouseId' => 'WH-R',
-								'branchId' => 'BR-R',
-								'branchTitle' => 'Москва',
-								'divisionName' => 'Склад получателя',
-								'address' => 'Россия, Московская область, Видное, Терминальная, дом 2',
+								'warehouseId' => $warehouse_id,
+								'branchId' => $branch_id,
+								'branchTitle' => $branch_title,
+								'branchName' => $branch_title,
+								'divisionName' => $division_name,
+								'address' => $department_address,
 								'departmentTypeId' => 1,
 								'departmentType' => 'Склад',
 								'coordinates' => array( 'latitude' => '55.5', 'longitude' => '37.7' ),
@@ -379,7 +399,16 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 		}
 		if ( str_contains( $url, '/branches/all/' ) ) {
 			$division_kinds = array( array( 'type' => 3, 'operations' => array( 'Прием грузов' ) ) );
-			$warehouse_id = 'WH-A';
+			$warehouse_kinds = array();
+			$body = json_decode( (string) ( $args['body'] ?? '' ), true );
+			$requested_warehouse_id = is_array( $body ) ? (string) ( $body['warehouseId'] ?? '' ) : '';
+			if ( 'filtered_empty_then_unfiltered_success' === $this->branches_all_mode && '' !== $requested_warehouse_id ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( 'branches' => array() ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'filtered_empty_then_unfiltered_missing' === $this->branches_all_mode && '' !== $requested_warehouse_id ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( 'branches' => array() ), JSON_UNESCAPED_UNICODE ) );
+			}
+			$warehouse_id = PEK_INTEGRATION_SENDER_WAREHOUSE_A;
 			$warehouse_limits = array(
 				'maxWeight' => 1000,
 				'maxVolume' => 100,
@@ -388,13 +417,26 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 				'maxCount' => 100,
 			);
 			if ( 'missing_id' === $this->branches_all_mode ) {
-				$warehouse_id = 'WH-MISSING';
+				$warehouse_id = PEK_INTEGRATION_MISSING_WAREHOUSE;
+			}
+			if ( 'filtered_empty_then_unfiltered_missing' === $this->branches_all_mode ) {
+				$warehouse_id = PEK_INTEGRATION_MISSING_WAREHOUSE;
 			}
 			if ( 'no_ltl_type' === $this->branches_all_mode ) {
 				$division_kinds = array( array( 'type' => 1, 'operations' => array( 'Прием грузов' ) ) );
 			}
 			if ( 'no_acceptance' === $this->branches_all_mode ) {
 				$division_kinds = array( array( 'type' => 3, 'operations' => array( 'Выдача грузов' ) ) );
+			}
+			if ( 'warehouse_capability' === $this->branches_all_mode ) {
+				$division_kinds = array();
+				$warehouse_kinds = array( array( 'type' => 3, 'operations' => array( 'Приём грузов' ) ) );
+			}
+			if ( 'multiple_type3_rows' === $this->branches_all_mode ) {
+				$division_kinds = array(
+					array( 'type' => 3, 'operations' => array( 'Выдача грузов' ) ),
+					array( 'type' => 3, 'operations' => array( 'Прием грузов' ) ),
+				);
 			}
 			if ( 'constraints_exceeded' === $this->branches_all_mode ) {
 				$warehouse_limits['maxWeight'] = 0.1;
@@ -420,7 +462,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 												'address' => 'Россия, Новосибирск, Складская, дом 1',
 												'coordinatesobj' => array( 'latitude' => '55.0', 'longitude' => '82.9' ),
 												'types' => array( 3 ),
-												'kindsOfTransportation' => array(),
+												'kindsOfTransportation' => $warehouse_kinds,
 												'maxWeight' => $warehouse_limits['maxWeight'],
 												'maxVolume' => $warehouse_limits['maxVolume'],
 												'maxDimension' => $warehouse_limits['maxDimension'],
@@ -428,11 +470,11 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 												'maxCount' => $warehouse_limits['maxCount'],
 											),
 											array(
-												'id' => 'WH-B',
+												'id' => PEK_INTEGRATION_SENDER_WAREHOUSE_B,
 												'address' => 'Россия, Новосибирск, улица Большая, 280',
 												'coordinatesobj' => array( 'latitude' => '55.1', 'longitude' => '82.8' ),
 												'types' => array( 3 ),
-												'kindsOfTransportation' => array(),
+												'kindsOfTransportation' => $warehouse_kinds,
 												'maxWeight' => 1000,
 												'maxVolume' => 100,
 												'maxDimension' => 10,
@@ -458,7 +500,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 						'zoneName' => 'Москва',
 						'branchUID' => 'BR-R',
 						'branchTitle' => 'Москва',
-						'mainWarehouseId' => 'WH-R',
+						'mainWarehouseId' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
 						'GeoData' => array(
 							'precision' => 'exact',
 							'Address' => array(
@@ -844,7 +886,7 @@ $http = new PekIntegrationFakeHttp();
 $api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
 $settings->save_sender_warehouse(
 	array(
-		'warehouseId' => 'WH-A',
+		'warehouseId' => PEK_INTEGRATION_SENDER_WAREHOUSE_A,
 		'branchId' => 'BR-S',
 		'title' => 'Склад A',
 		'address' => 'Россия, Новосибирск, Складская, дом 1',
@@ -1228,31 +1270,66 @@ try {
 } catch ( RuntimeException $expected ) {
 	pek_integration_assert( str_contains( $expected->getMessage(), 'Сценарий доставки ПЭК изменился' ), 'Tampered PEK delivery_type must fail closed with public stale-modal message.' );
 }
-$admin_default_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => 'WH-A' ) );
+$admin_default_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A ) );
 pek_integration_assert( ! array_key_exists( 'pek_sender_warehouse_id', $admin_default_request->meta ), 'Initial modal must not post settings default as shipment_modal_override.' );
-$admin_override_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => 'WH-A', 'pek_sender_warehouse_override_id' => 'WH-B' ) );
-pek_integration_assert( 'WH-B' === (string) ( $admin_override_request->meta['pek_sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $admin_override_request->meta['pek_sender_warehouse_source'] ?? '' ) && 'WH-A' === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ), 'Explicit modal sender warehouse override must stay local and leave settings default unchanged.' );
+$admin_override_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A, 'pek_sender_warehouse_override_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_B ) );
+pek_integration_assert( PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $admin_override_request->meta['pek_sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $admin_override_request->meta['pek_sender_warehouse_source'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ), 'Explicit modal sender warehouse override must stay local and leave settings default unchanged.' );
 $warehouse_constraints = new PickupCargoConstraints( 2500, 4000, 20, 2500, 1 );
 $http->branches_all_mode = 'success';
-$warehouse_valid = $sender_warehouse_service->validate_snapshot( 'WH-A', $warehouse_constraints );
-pek_integration_assert( true === $warehouse_valid['success'] && 'division' === (string) ( $warehouse_valid['diagnostic']['effective_capability_source'] ?? '' ) && true === (bool) ( $warehouse_valid['diagnostic']['division_capabilities_present'] ?? false ) && true === (bool) ( $warehouse_valid['diagnostic']['warehouse_capabilities_present'] ?? false ), 'Saved sender warehouse must accept division operations even when warehouse kinds array is empty.' );
+$branches_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
+$warehouse_valid = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER, $warehouse_constraints );
+pek_integration_assert( true === $warehouse_valid['success'] && 'filtered' === (string) ( $warehouse_valid['diagnostic']['lookup_source'] ?? '' ) && 1 === pek_integration_count_calls( $http, '/branches/all/' ) - $branches_calls_before && 'division' === (string) ( $warehouse_valid['diagnostic']['effective_capability_source'] ?? '' ) && true === (bool) ( $warehouse_valid['diagnostic']['division_capabilities_present'] ?? false ) && false === (bool) ( $warehouse_valid['diagnostic']['warehouse_capabilities_present'] ?? true ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $warehouse_valid['snapshot']['warehouseId'] ?? '' ), 'Saved sender warehouse must normalize UUID case, use filtered lookup once, and accept division operations when warehouse kinds array is empty.' );
+$hash = hash( 'sha256', PEK_INTEGRATION_SENDER_WAREHOUSE_A );
+pek_integration_assert( ( $warehouse_valid['diagnostic']['requested_id_hash'] ?? '' ) === $hash && ( $warehouse_valid['diagnostic']['matched_id_hash'] ?? '' ) === $hash && (int) ( $warehouse_valid['diagnostic']['warehouses_checked'] ?? 0 ) > 0, 'Sender warehouse validation diagnostic must expose safe ID hashes and lookup counters.' );
+$invalid_id_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
+$invalid_id = $sender_warehouse_service->validate_snapshot( 'WH-A', $warehouse_constraints );
+pek_integration_assert( false === $invalid_id['success'] && $invalid_id_calls_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Invalid non-UUID sender warehouse ID must fail before branches/all.' );
+$http->branches_all_mode = 'filtered_empty_then_unfiltered_success';
+$fallback_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
+$fallback_valid = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
+pek_integration_assert( true === $fallback_valid['success'] && 'unfiltered_fallback' === (string) ( $fallback_valid['diagnostic']['lookup_source'] ?? '' ) && 2 === pek_integration_count_calls( $http, '/branches/all/' ) - $fallback_calls_before, 'Filtered branches/all empty result may use exactly one unfiltered fallback and still match the exact UUID.' );
+$http->branches_all_mode = 'filtered_empty_then_unfiltered_missing';
+$fallback_missing_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
+$fallback_missing = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
+pek_integration_assert( false === $fallback_missing['success'] && 'warehouse_not_found' === (string) ( $fallback_missing['diagnostic']['reason'] ?? '' ) && 2 === pek_integration_count_calls( $http, '/branches/all/' ) - $fallback_missing_calls_before, 'Filtered plus unfiltered missing warehouse must fail closed after two branches/all calls.' );
+$http->branches_all_mode = 'warehouse_capability';
+$warehouse_capability = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
+pek_integration_assert( true === $warehouse_capability['success'] && 'warehouse' === (string) ( $warehouse_capability['diagnostic']['effective_capability_source'] ?? '' ), 'Non-empty warehouse-level kindsOfTransportation must be supported as documented compatibility source.' );
+$http->branches_all_mode = 'multiple_type3_rows';
+$multiple_type3 = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
+pek_integration_assert( true === $multiple_type3['success'] && true === (bool) ( $multiple_type3['diagnostic']['acceptance_operation_present'] ?? false ), 'Multiple type=3 capability rows must be fully scanned until an acceptance operation is found.' );
+$http->branches_all_mode = 'success';
+$search_before = pek_integration_count_calls( $http, '/branches/nearestdepartments/' );
+$sender_search = $sender_warehouse_service->search( 'Россия, Новосибирск' );
+pek_integration_assert( $sender_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $sender_search['items'][0]['warehouseId'] ?? '' ) && 1 === pek_integration_count_calls( $http, '/branches/nearestdepartments/' ) - $search_before, 'Sender warehouse search must normalize nearestdepartments warehouseId into canonical UUID.' );
+$selected_from_search = $sender_warehouse_service->select_from_cached_search( PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER );
+pek_integration_assert( $selected_from_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $selected_from_search['snapshot']['warehouseId'] ?? '' ), 'Cached sender warehouse selection must match uppercase nearestdepartments UUID case-insensitively and persist canonical ID.' );
+$settings->save_sender_warehouse(
+	array(
+		'warehouseId' => PEK_INTEGRATION_SENDER_WAREHOUSE_A,
+		'branchId' => 'BR-S',
+		'title' => 'Склад A',
+		'address' => 'Россия, Новосибирск, Складская, дом 1',
+		'source' => 'default',
+	)
+);
 $default_preview_submit_before = count( $http->submit_bodies );
 $default_preview = $creation->safe_preview( $admin_default_request );
 pek_integration_assert( array() === $default_preview['errors'] && in_array( (string) ( $default_preview['body']['sender_warehouse_source'] ?? '' ), array( 'default', 'settings_default' ), true ) && $default_preview_submit_before === count( $http->submit_bodies ), 'Initial preview must use settings default sender warehouse without submit.' );
 $override_preview_submit_before = count( $http->submit_bodies );
 $override_preview = $creation->safe_preview( $admin_override_request );
-pek_integration_assert( array() === $override_preview['errors'] && 'WH-B' === (string) ( $override_preview['body']['sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $override_preview['body']['sender_warehouse_source'] ?? '' ) && 'WH-A' === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ) && $override_preview_submit_before === count( $http->submit_bodies ), 'Explicit sender warehouse override must affect only current shipment preview.' );
+pek_integration_assert( array() === $override_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $override_preview['body']['sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $override_preview['body']['sender_warehouse_source'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ) && $override_preview_submit_before === count( $http->submit_bodies ), 'Explicit sender warehouse override must affect only current shipment preview.' );
 $http->branches_all_mode = 'missing_id';
-$warehouse_missing = $sender_warehouse_service->validate_snapshot( 'WH-A', $warehouse_constraints );
+$warehouse_missing = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
 pek_integration_assert( false === $warehouse_missing['success'] && str_contains( $warehouse_missing['message'], 'warehouse ID' ) && false === (bool) ( $warehouse_missing['diagnostic']['warehouse_found'] ?? true ), 'Missing sender warehouse ID must fail with safe diagnostic.' );
 $http->branches_all_mode = 'no_ltl_type';
-$warehouse_no_ltl = $sender_warehouse_service->validate_snapshot( 'WH-A', $warehouse_constraints );
+$warehouse_no_ltl = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
 pek_integration_assert( false === $warehouse_no_ltl['success'] && 'ltl_type_missing' === (string) ( $warehouse_no_ltl['diagnostic']['reason'] ?? '' ), 'Sender warehouse without LTL type must fail safely.' );
 $http->branches_all_mode = 'no_acceptance';
-$warehouse_no_acceptance = $sender_warehouse_service->validate_snapshot( 'WH-A', $warehouse_constraints );
+$warehouse_no_acceptance = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
 pek_integration_assert( false === $warehouse_no_acceptance['success'] && 'acceptance_operation_missing' === (string) ( $warehouse_no_acceptance['diagnostic']['reason'] ?? '' ), 'Sender warehouse without cargo acceptance operation must fail safely.' );
 $http->branches_all_mode = 'constraints_exceeded';
-$warehouse_constraints_fail = $sender_warehouse_service->validate_snapshot( 'WH-A', $warehouse_constraints );
+$warehouse_constraints_fail = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
 pek_integration_assert( false === $warehouse_constraints_fail['success'] && false === (bool) ( $warehouse_constraints_fail['diagnostic']['constraints_match'] ?? true ), 'Sender warehouse constraints mismatch must be diagnosable.' );
 $http->branches_all_mode = 'success';
 $good_sender_phone = $settings->sender_phone();
@@ -1531,7 +1608,7 @@ $pickup_order->update_meta_data(
 		'delivery_type' => DeliveryType::PICKUP,
 		'destination' => array( 'location_id' => 77 ),
 		'pickup' => array(
-			'point_code' => 'WH-R',
+			'point_code' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
 			'address' => 'Россия, Московская область, Видное, Терминальная, дом 2',
 			'branchId' => 'BR-R',
 			'provider_destination_fingerprint' => 'pickup-fingerprint',
@@ -1547,7 +1624,7 @@ $pickup_order->update_meta_data(
 $pickup_order->update_meta_data(
 	'_wdc_platform_rate_meta',
 	array(
-		'point_code' => 'WH-R',
+		'point_code' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
 		'provider_destination_fingerprint' => 'pickup-fingerprint',
 		'pickup_provider_query' => array(
 			'location_id' => 77,
@@ -1589,13 +1666,13 @@ foreach (
 }
 $pickup_preview = $creation->safe_preview( $pickup_request );
 pek_integration_assert( count( $http->submit_bodies ) === $pickup_before_submit, 'Pickup safe preview must not submit PEK preregistration.' );
-pek_integration_assert( DeliveryType::PICKUP === $pickup_request->delivery_type && 'WH-R' === (string) ( $pickup_preview['body']['receiver_warehouse_id'] ?? '' ), 'Pickup draft/preview must carry selected receiver warehouse.' );
+pek_integration_assert( DeliveryType::PICKUP === $pickup_request->delivery_type && PEK_INTEGRATION_RECEIVER_WAREHOUSE === (string) ( $pickup_preview['body']['receiver_warehouse_id'] ?? '' ), 'Pickup draft/preview must carry selected receiver warehouse.' );
 $pickup_result = $creation->create( $pickup_order, $pickup_request );
 pek_integration_assert( true === $pickup_result->success, 'Pickup production chain create must succeed through fake PEK submit.' );
 pek_integration_assert( count( $http->submit_bodies ) === $pickup_before_submit + 1, 'Pickup fake submit must be called exactly once.' );
 pek_integration_assert_same_payload( $http->submit_bodies[ $pickup_before_submit ] ?? array(), pek_integration_fixture( 'preregistration-submit-pickup.json' ), 'Pickup production chain' );
 $pickup_created = $repository->find_by_carrier( $pickup_order, PekSettings::CARRIER_KEY );
-pek_integration_assert( 'WH-R' === $pickup_created['pek_receiver_warehouse_id'] && 'BR-R' === $pickup_created['pek_receiver_branch_id'], 'Pickup fresh point code and branch must persist.' );
+pek_integration_assert( PEK_INTEGRATION_RECEIVER_WAREHOUSE === $pickup_created['pek_receiver_warehouse_id'] && 'BR-R' === $pickup_created['pek_receiver_branch_id'], 'Pickup fresh point code and branch must persist.' );
 pek_integration_assert_plain_data( $pickup_created );
 
 $duplicate = $creation->create( $order, $request );
@@ -1680,10 +1757,10 @@ $pending = array(
 	'pek_correlation' => 'wdc-pek-correlation-1001',
 	'request_summary' => array( 'correlation' => 'wdc-pek-correlation-1001', 'receiver_mode' => 'pickup' ),
 	'request_snapshot' => array( 'method' => 'POST', 'path' => '/preregistration/submit/', 'body' => array( 'receiver_mode' => 'pickup' ) ),
-	'pek_sender_warehouse_id' => 'WH-A',
+	'pek_sender_warehouse_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A,
 	'pek_sender_warehouse_title' => 'Склад A',
 	'pek_sender_warehouse_source' => 'default',
-	'pek_receiver_warehouse_id' => 'WH-R',
+	'pek_receiver_warehouse_id' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
 	'pek_receiver_warehouse_source' => 'fresh_pickup',
 	'pek_receiver_branch_id' => 'BR-R',
 	'recipient_type' => 'physical',
@@ -1766,18 +1843,18 @@ $addresses = new PekShipmentCourierAddressResolver();
 $recipient_builder = new PekShipmentRecipientBuilder( $addresses, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $recipient_phone_order = new PekIntegrationOrder( 3001 );
 $recipient_phone_order->set_shipping_fields( array( 'phone' => '8 (999) 123-45-67' ) );
-$recipient_payload = $recipient_builder->build_physical_recipient( $recipient_phone_order, $request, 'WH-R' );
+$recipient_payload = $recipient_builder->build_physical_recipient( $recipient_phone_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 pek_integration_assert( '+79991234567' === (string) ( $recipient_payload['personPhones'][0]['phone'] ?? '' ), 'Recipient shipping phone must normalize through PEK RU phone contract.' );
 $recipient_billing_fallback_order = new PekIntegrationOrder( 3002 );
 $recipient_billing_fallback_order->set_shipping_fields( array( 'phone' => '' ) );
 $recipient_billing_fallback_order->set_billing_fields( array( 'phone' => '79991234567' ) );
-$recipient_fallback_payload = $recipient_builder->build_physical_recipient( $recipient_billing_fallback_order, $request, 'WH-R' );
+$recipient_fallback_payload = $recipient_builder->build_physical_recipient( $recipient_billing_fallback_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 pek_integration_assert( '+79991234567' === (string) ( $recipient_fallback_payload['personPhones'][0]['phone'] ?? '' ), 'Empty shipping phone may fall back to billing phone.' );
 $recipient_malformed_order = new PekIntegrationOrder( 3003 );
 $recipient_malformed_order->set_shipping_fields( array( 'phone' => '+7abc9991234567' ) );
 $recipient_malformed_order->set_billing_fields( array( 'phone' => '79991234567' ) );
 try {
-	$recipient_builder->build_physical_recipient( $recipient_malformed_order, $request, 'WH-R' );
+	$recipient_builder->build_physical_recipient( $recipient_malformed_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 	pek_integration_assert( false, 'Malformed non-empty shipping recipient phone must not silently fall back to billing.' );
 } catch ( RuntimeException $expected ) {
 	pek_integration_assert( str_contains( $expected->getMessage(), 'корректный телефон получателя' ), 'Malformed recipient phone must fail with SMS public message.' );
@@ -1786,7 +1863,7 @@ foreach ( array( "\n+79991234567", "+79991234567\t", "++79991234567" ) as $bad_p
 	$recipient_bad_control_order = new PekIntegrationOrder( 3004 );
 	$recipient_bad_control_order->set_shipping_fields( array( 'phone' => $bad_phone ) );
 	try {
-		$recipient_builder->build_physical_recipient( $recipient_bad_control_order, $request, 'WH-R' );
+		$recipient_builder->build_physical_recipient( $recipient_bad_control_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 		pek_integration_assert( false, 'Malformed recipient phone must fail before trimming/stripping.' );
 	} catch ( RuntimeException $expected ) {
 		pek_integration_assert( str_contains( $expected->getMessage(), 'корректный телефон получателя' ), 'Recipient phone control chars/multiple plus signs must be rejected.' );
@@ -1795,18 +1872,18 @@ foreach ( array( "\n+79991234567", "+79991234567\t", "++79991234567" ) as $bad_p
 $recipient_shipping_name_order = new PekIntegrationOrder( 3005 );
 $recipient_shipping_name_order->set_shipping_fields( array( 'first_name' => 'Иван', 'last_name' => 'Петров', 'phone' => '79991234567' ) );
 $recipient_shipping_name_order->set_billing_fields( array( 'first_name' => 'Пётр', 'last_name' => 'Сидоров' ) );
-$recipient_shipping_name_payload = $recipient_builder->build_physical_recipient( $recipient_shipping_name_order, $request, 'WH-R' );
+$recipient_shipping_name_payload = $recipient_builder->build_physical_recipient( $recipient_shipping_name_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 pek_integration_assert( 'Петров Иван' === (string) ( $recipient_shipping_name_payload['title'] ?? '' ) && 'Петров Иван' === (string) ( $recipient_shipping_name_payload['person'] ?? '' ) && 'Иван' === (string) ( $recipient_shipping_name_payload['individual']['firstName'] ?? '' ) && 'Петров' === (string) ( $recipient_shipping_name_payload['individual']['lastName'] ?? '' ), 'PEK recipient must use shipping first and last names when present.' );
 $recipient_billing_name_order = new PekIntegrationOrder( 3006 );
 $recipient_billing_name_order->set_shipping_fields( array( 'first_name' => '', 'last_name' => '', 'phone' => '79991234567' ) );
 $recipient_billing_name_order->set_billing_fields( array( 'first_name' => 'Пётр', 'last_name' => 'Сидоров' ) );
-$recipient_billing_name_payload = $recipient_builder->build_physical_recipient( $recipient_billing_name_order, $request, 'WH-R' );
+$recipient_billing_name_payload = $recipient_builder->build_physical_recipient( $recipient_billing_name_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 pek_integration_assert( 'Сидоров Пётр' === (string) ( $recipient_billing_name_payload['title'] ?? '' ) && 'Сидоров Пётр' === (string) ( $recipient_billing_name_payload['person'] ?? '' ), 'PEK recipient may use billing first and last names only when shipping names are both absent.' );
 $recipient_partial_shipping_order = new PekIntegrationOrder( 3007 );
 $recipient_partial_shipping_order->set_shipping_fields( array( 'first_name' => 'Иван', 'last_name' => '', 'phone' => '79991234567' ) );
 $recipient_partial_shipping_order->set_billing_fields( array( 'first_name' => 'Пётр', 'last_name' => 'Сидоров' ) );
 try {
-	$recipient_builder->build_physical_recipient( $recipient_partial_shipping_order, $request, 'WH-R' );
+	$recipient_builder->build_physical_recipient( $recipient_partial_shipping_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 	pek_integration_assert( false, 'Partial shipping recipient name must not be mixed with billing fallback.' );
 } catch ( RuntimeException $expected ) {
 	pek_integration_assert( str_contains( $expected->getMessage(), 'фамилия получателя' ), 'Partial shipping first name must fail with missing last name.' );
@@ -1815,7 +1892,7 @@ $recipient_partial_last_order = new PekIntegrationOrder( 3008 );
 $recipient_partial_last_order->set_shipping_fields( array( 'first_name' => '', 'last_name' => 'Петров', 'phone' => '79991234567' ) );
 $recipient_partial_last_order->set_billing_fields( array( 'first_name' => 'Пётр', 'last_name' => 'Сидоров' ) );
 try {
-	$recipient_builder->build_physical_recipient( $recipient_partial_last_order, $request, 'WH-R' );
+	$recipient_builder->build_physical_recipient( $recipient_partial_last_order, $request, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 	pek_integration_assert( false, 'Partial shipping recipient last name must not be mixed with billing fallback.' );
 } catch ( RuntimeException $expected ) {
 	pek_integration_assert( str_contains( $expected->getMessage(), 'имя получателя' ), 'Partial shipping last name must fail with missing first name.' );

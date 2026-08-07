@@ -191,11 +191,12 @@ define( 'APP_ENCRYPTION_KEY', 'pek-route-test-key' );
 
 $settings_repository = new SettingsRepository();
 $cache = new PekSenderWarehouseSearchCache();
+$route_warehouse_id = '85974fc8-d0b8-11e5-9833-00155d668909';
 $http = new PekRouteFakeHttp( array(
 	pek_route_json( array( array( 'type' => 3 ) ) ),
 	pek_route_json( array( array( 'shortName' => 'RU', 'codeByClassifier' => '643' ) ) ),
 	pek_route_json( array( array( 'name' => 'ООО' ) ) ),
-	pek_route_json( array( 'freeDepartments' => array( array( 'warehouseId' => 'wh-route', 'branchId' => 'br', 'branchName' => 'Branch', 'divisionName' => 'Division', 'address' => 'Address' ) ), 'paidDepartments' => array() ) ),
+	pek_route_json( array( 'freeDepartments' => array( array( 'warehouseId' => strtoupper( $route_warehouse_id ), 'branchId' => 'br', 'branchName' => 'Branch', 'divisionName' => 'Division', 'address' => 'Address' ) ), 'paidDepartments' => array() ) ),
 ) );
 $page = pek_route_page( $http, $settings_repository, $cache );
 $settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
@@ -213,10 +214,10 @@ pek_route_assert( array_column( array_slice( $http->requests, 0, 3 ), 'method' )
 pek_route_assert( str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'check_pek_connection must redirect to PEK tab.' );
 
 $redirect = pek_route_run_action( $page, 'search_pek_sender_warehouse', array( 'pek_warehouse_search_address' => 'Новосибирск' ) );
-pek_route_assert( ( $cache->current_for_current_user()['items'][0]['warehouseId'] ?? '' ) === 'wh-route' && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'search_pek_sender_warehouse must reach PekAdminPage, save user cache, and redirect to PEK tab.' );
+pek_route_assert( ( $cache->current_for_current_user()['items'][0]['warehouseId'] ?? '' ) === $route_warehouse_id && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'search_pek_sender_warehouse must reach PekAdminPage, save user cache, and redirect to PEK tab.' );
 
-$redirect = pek_route_run_action( $page, 'select_pek_sender_warehouse', array( 'pek_sender_warehouse_id' => 'wh-route' ) );
-pek_route_assert( $settings->sender_warehouse()['warehouseId'] === 'wh-route' && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'select_pek_sender_warehouse must reach PekAdminPage and redirect to PEK tab.' );
+$redirect = pek_route_run_action( $page, 'select_pek_sender_warehouse', array( 'pek_sender_warehouse_id' => strtoupper( $route_warehouse_id ) ) );
+pek_route_assert( $settings->sender_warehouse()['warehouseId'] === $route_warehouse_id && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'select_pek_sender_warehouse must reach PekAdminPage and redirect to PEK tab.' );
 $notice_store = new PekAdminNoticeStore();
 $GLOBALS['pek_route_current_user_id'] = 8;
 pek_route_assert( array() === $notice_store->consume_for_current_user(), 'PEK notice must be scoped away from another admin user.' );

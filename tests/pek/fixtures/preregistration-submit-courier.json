@@ -15,7 +15,7 @@
         "phone": "+73831234567"
       }
     ],
-    "warehouseId": "WH-A",
+    "warehouseId": "85974fc8-d0b8-11e5-9833-00155d668909",
     "kpp": "540001001",
     "email": "sender@example.test"
   },
@@ -23,7 +23,7 @@
     {
       "common": {
         "type": 3,
-        "customerCorrelation": "wdc-aeb7a6e0a7ea2983aa0928b0afdc90e9",
+        "customerCorrelation": "wdc-b8435885f06ea9fb4d37c50d40699f47",
         "orderNumber": "1001",
         "positionsCount": 1,
         "weight": 3,
