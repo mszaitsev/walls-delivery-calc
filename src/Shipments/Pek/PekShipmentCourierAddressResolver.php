@@ -125,9 +125,9 @@ final class PekShipmentCourierAddressResolver {
 		}
 		$apartment = '';
 		$value = preg_replace_callback(
-			'/,\s*(?:квартира|помещение|офис|кв\.?)\s*(?<apartment>[А-Яа-яA-Za-z0-9\/-]+)\s*$/u',
-			static function ( array $matches ) use ( &$apartment ): string {
-				$apartment = trim( (string) $matches['apartment'] );
+			'/,\s*(?<unit_type>квартира|помещение|пом\.?|офис|кв\.?)\s*(?<unit>[А-Яа-яA-Za-z0-9\/-]+)\s*$/iu',
+			function ( array $matches ) use ( &$apartment ): string {
+				$apartment = $this->normalize_unit( (string) $matches['unit'], (string) $matches['unit_type'] );
 				return '';
 			},
 			$value
@@ -317,7 +317,11 @@ final class PekShipmentCourierAddressResolver {
 	}
 
 	private function normalize_house_component( string $house, string $house_type, mixed $block, string $block_type, mixed $stead, string $stead_type ): string {
-		unset( $house_type );
+		$raw_house_type = trim( $house_type );
+		$house_type = $this->canonical_house_type( $house_type );
+		if ( '' === $house_type && '' !== $raw_house_type ) {
+			throw new \RuntimeException( 'Не удалось однозначно определить тип дома в адресе курьерской доставки ПЭК.' );
+		}
 		$house = $this->normalize_house( $house );
 		if ( '' === $house ) {
 			$house = $this->normalize_house( is_scalar( $stead ) ? (string) $stead : '' );
@@ -345,6 +349,15 @@ final class PekShipmentCourierAddressResolver {
 		}
 
 		return trim( $house . ' ' . $component );
+	}
+
+	private function canonical_house_type( string $value ): string {
+		$value = $this->lower( trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value ) );
+		$value = rtrim( $value, '.' );
+		return match ( $value ) {
+			'', 'д', 'дом' => 'дом',
+			default => '',
+		};
 	}
 
 	private function canonical_block_type( string $value ): string {

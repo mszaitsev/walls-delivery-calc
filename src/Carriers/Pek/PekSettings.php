@@ -65,7 +65,10 @@ final class PekSettings {
 	public const LIGHT_CARGO_WEIGHT_LIMIT_G_KEY = 'pek_light_cargo_weight_limit_g';
 	public const LAST_DIAGNOSTIC_KEY = 'pek_last_diagnostic';
 
-	public function __construct( private SettingsRepository $settings ) {
+	private PekRuPhoneNormalizer $phones;
+
+	public function __construct( private SettingsRepository $settings, ?PekRuPhoneNormalizer $phones = null ) {
+		$this->phones = $phones ?? new PekRuPhoneNormalizer();
 	}
 
 	/** @return array<string,mixed> */
@@ -158,7 +161,7 @@ final class PekSettings {
 	}
 
 	public function sender_phone(): string {
-		return trim( preg_replace( '/[^\d+]/', '', $this->settings->get_string( self::SENDER_PHONE_KEY, '' ) ) ?? '' );
+		return trim( $this->settings->get_string( self::SENDER_PHONE_KEY, '' ) );
 	}
 
 	public function sender_email(): string {
@@ -356,25 +359,11 @@ final class PekSettings {
 	}
 
 	private function normalize_sender_phone_input( mixed $value ): string {
-		if ( is_bool( $value ) || is_array( $value ) || is_object( $value ) ) {
+		try {
+			return $this->phones->normalize( $value );
+		} catch ( \InvalidArgumentException ) {
 			throw new \InvalidArgumentException( 'Некорректный телефон отправителя ПЭК.' );
 		}
-		$raw = trim( (string) $value );
-		if ( '' === $raw || 1 !== preg_match( '/^[\d+\s()\-]+$/', $raw ) ) {
-			throw new \InvalidArgumentException( 'Некорректный телефон отправителя ПЭК.' );
-		}
-		$normalized = preg_replace( '/[\s()\-]+/', '', $raw ) ?? '';
-		if ( 1 === preg_match( '/^8\d{10}$/', $normalized ) ) {
-			return '+7' . substr( $normalized, 1 );
-		}
-		if ( 1 === preg_match( '/^7\d{10}$/', $normalized ) ) {
-			return '+' . $normalized;
-		}
-		if ( 1 === preg_match( '/^\+7\d{10}$/', $normalized ) ) {
-			return $normalized;
-		}
-
-		throw new \InvalidArgumentException( 'Некорректный телефон отправителя ПЭК.' );
 	}
 
 	/** @param array<string,mixed> $value */

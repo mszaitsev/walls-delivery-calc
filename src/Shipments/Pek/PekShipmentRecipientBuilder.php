@@ -3,13 +3,17 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Pek;
 
+use WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentRecipientBuilder {
-	public function __construct( private PekShipmentCourierAddressResolver $courier_addresses ) {
+	private PekRuPhoneNormalizer $phones;
+
+	public function __construct( private PekShipmentCourierAddressResolver $courier_addresses, ?PekRuPhoneNormalizer $phones = null ) {
+		$this->phones = $phones ?? new PekRuPhoneNormalizer();
 	}
 
 	/** @return array<string,mixed> */
@@ -55,11 +59,23 @@ final class PekShipmentRecipientBuilder {
 	}
 
 	private function phone( object $order ): string {
-		foreach ( array( 'get_shipping_phone', 'get_billing_phone' ) as $method ) {
-			if ( method_exists( $order, $method ) ) {
-				$phone = $this->normalize_ru_phone( (string) $order->{$method}() );
-				if ( '' !== $phone ) {
-					return $phone;
+		if ( method_exists( $order, 'get_shipping_phone' ) ) {
+			$shipping = trim( (string) $order->get_shipping_phone() );
+			if ( '' !== $shipping ) {
+				try {
+					return $this->phones->normalize( $shipping );
+				} catch ( \InvalidArgumentException ) {
+					throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен корректный телефон получателя.' );
+				}
+			}
+		}
+		if ( method_exists( $order, 'get_billing_phone' ) ) {
+			$billing = trim( (string) $order->get_billing_phone() );
+			if ( '' !== $billing ) {
+				try {
+					return $this->phones->normalize( $billing );
+				} catch ( \InvalidArgumentException ) {
+					throw new \RuntimeException( 'Для выдачи ПЭК по СМС нужен корректный телефон получателя.' );
 				}
 			}
 		}
@@ -78,21 +94,6 @@ final class PekShipmentRecipientBuilder {
 		$middle = method_exists( $order, 'get_meta' ) ? trim( (string) $order->get_meta( '_billing_patronymic', true ) ) : '';
 
 		return array( 'lastName' => $last, 'firstName' => $first, 'patronymic' => $middle );
-	}
-
-	private function normalize_ru_phone( string $value ): string {
-		$value = preg_replace( '/[^\d+]/', '', $value ) ?? '';
-		if ( 1 === preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
-			return '+7' . $matches[1];
-		}
-		if ( 1 === preg_match( '/^7(\d{10})$/', $value, $matches ) ) {
-			return '+7' . $matches[1];
-		}
-		if ( 1 === preg_match( '/^\+7\d{10}$/', $value ) ) {
-			return $value;
-		}
-
-		return '';
 	}
 
 }

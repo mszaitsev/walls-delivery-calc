@@ -175,6 +175,10 @@ function pek_integration_assert_same_payload( array $actual, array $expected, st
 	pek_integration_assert( $actual_json === $expected_json, $label . " payload mismatch.\nExpected: " . (string) $expected_json . "\nActual: " . (string) $actual_json );
 }
 
+function pek_integration_count_calls( PekIntegrationFakeHttp $http, string $needle ): int {
+	return count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], $needle ) ) );
+}
+
 function pek_integration_set_dadata( PekIntegrationOrder $order, string $scope, string $region, string $city, string $street, string $house, string $flat = '', string $settlement = '', string $block = '', string $block_type = '', string $city_fias_id = '', string $settlement_fias_id = '' ): void {
 	$order->update_meta_data( '_' . $scope . '_dadata_status', 'house_selected' );
 	$order->update_meta_data( '_' . $scope . '_dadata_region_with_type', $region );
@@ -757,6 +761,18 @@ $GLOBALS['wpdb']->locations = array(
 		'latitude' => '',
 		'longitude' => '',
 	),
+	array(
+		'id' => 80,
+		'country_code' => 'RU',
+		'region_name' => 'Московская область',
+		'region_type' => 'область',
+		'city_name' => 'Видное',
+		'city_type' => 'г',
+		'display_name' => 'Видное без FIAS',
+		'active' => 1,
+		'latitude' => '',
+		'longitude' => '',
+	),
 );
 $GLOBALS['wpdb']->pek_location_mappings = array();
 $GLOBALS['wpdb']->pek_terminals = array();
@@ -901,13 +917,22 @@ try {
 } catch ( InvalidArgumentException ) {
 	pek_integration_assert( 'sender@example.test' === $settings->sender_email(), 'Invalid sender email must not erase existing valid value.' );
 }
+$settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER_PHONE_KEY => '8 (999) 123-45-67' ) ) );
+pek_integration_assert( '+79991234567' === $settings->sender_phone(), 'Sender phone 8XXXXXXXXXX with formatting must normalize to +7.' );
+$settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER_PHONE_KEY => '79991234567' ) ) );
+pek_integration_assert( '+79991234567' === $settings->sender_phone(), 'Sender phone 7XXXXXXXXXX must normalize to +7.' );
+$settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER_PHONE_KEY => '+79991234567' ) ) );
+pek_integration_assert( '+79991234567' === $settings->sender_phone(), 'Sender phone +7XXXXXXXXXX must stay normalized.' );
 $before_phone = $settings->sender_phone();
-try {
-	$settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER_PHONE_KEY => '+7abc9991234567' ) ) );
-	pek_integration_assert( false, 'Malformed sender phone with letters must be rejected.' );
-} catch ( InvalidArgumentException ) {
-	pek_integration_assert( $before_phone === $settings->sender_phone(), 'Invalid sender phone must be rejected atomically without changing previous setting.' );
+foreach ( array( '+7abc9991234567', '++79991234567', "+7999\n1234567" ) as $bad_sender_phone ) {
+	try {
+		$settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER_PHONE_KEY => $bad_sender_phone ) ) );
+		pek_integration_assert( false, 'Malformed sender phone must be rejected: ' . json_encode( $bad_sender_phone ) );
+	} catch ( InvalidArgumentException ) {
+		pek_integration_assert( $before_phone === $settings->sender_phone(), 'Invalid sender phone must be rejected atomically without changing previous setting.' );
+	}
 }
+$settings->save_from_admin( $admin_base );
 $counterparts->verify_and_save();
 $before_atomic_guid = $settings->sender_counterpart_guid();
 $before_atomic_snapshot = $settings->sender_counterpart_snapshot();
@@ -983,6 +1008,13 @@ $order->update_meta_data(
 );
 $request = $drafts->create_request_from_order( $order );
 pek_integration_assert( PekSettings::CARRIER_KEY === $request->carrier_key, 'Real draft factory must create PEK request.' );
+$good_sender_phone = $settings->sender_phone();
+$settings_repository->set( PekSettings::SENDER_PHONE_KEY, '+7abc9991234567' );
+$legacy_phone_external_before = array( pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+$legacy_phone_preview = $creation->safe_preview( $request );
+$legacy_phone_external_after = array( pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+pek_integration_assert( array() !== $legacy_phone_preview['errors'] && str_contains( (string) ( $legacy_phone_preview['errors'][0] ?? '' ), 'телефон отправителя' ) && $legacy_phone_external_before === $legacy_phone_external_after, 'Legacy malformed sender phone must block preview before private/SMS/submit calls and must not be cleaned into validity.' );
+$settings_repository->set( PekSettings::SENDER_PHONE_KEY, $good_sender_phone );
 $snapshot = $settings->sender_counterpart_snapshot();
 $snapshot['account_login_hash'] = str_repeat( '0', 64 );
 $settings->save_sender_counterpart( '11111111-2222-3333-4444-555555555555', $snapshot );
@@ -1042,6 +1074,60 @@ $connected_before_parent_only = count( array_filter( $http->calls, static fn( ar
 $parent_only_preview = $creation->safe_preview( $drafts->create_request_from_order( $parent_only_order ) );
 $connected_after_parent_only = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
 pek_integration_assert( array() !== $parent_only_preview['errors'] && $connected_before_parent_only === $connected_after_parent_only, 'Settlement-level location cannot be authorized by parent city only and must stop before private SMS call.' );
+
+$city_fias_mismatch_order = new PekIntegrationOrder( 1096 );
+$GLOBALS['wdc_pek_integration_orders'][1096] = $city_fias_mismatch_order;
+$city_fias_mismatch_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'улица Липовый парк, дом 2', 'address_2' => '' ) );
+pek_integration_set_dadata( $city_fias_mismatch_order, 'shipping', 'Москва', 'Москва', 'улица Липовый парк', '2', '', '', '', '', 'different-city-fias', '' );
+$city_fias_mismatch_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$city_fias_mismatch_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$city_fias_mismatch_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$city_fias_mismatch_order->update_meta_data( '_wdc_platform_location_fias_id', 'moscow-city-fias' );
+$city_fias_mismatch_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 78 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$before_city_fias_external = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+$city_fias_mismatch_preview = $creation->safe_preview( $drafts->create_request_from_order( $city_fias_mismatch_order ) );
+$after_city_fias_external = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+pek_integration_assert( array() !== $city_fias_mismatch_preview['errors'] && $before_city_fias_external === $after_city_fias_external, 'Explicit city FIAS mismatch must not fall back to same city name and must stop before PEK mapping/SMS/private/submit.' );
+
+$settlement_fias_mismatch_order = new PekIntegrationOrder( 1097 );
+$GLOBALS['wdc_pek_integration_orders'][1097] = $settlement_fias_mismatch_order;
+$settlement_fias_mismatch_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'улица Липовый парк, дом 2', 'address_2' => '' ) );
+pek_integration_set_dadata( $settlement_fias_mismatch_order, 'shipping', 'Москва', 'Москва', 'улица Липовый парк', '2', '', 'поселение Сосенское', '', '', 'moscow-city-fias', 'different-settlement-fias' );
+$settlement_fias_mismatch_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$settlement_fias_mismatch_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$settlement_fias_mismatch_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$settlement_fias_mismatch_order->update_meta_data( '_wdc_platform_location_fias_id', 'sosenskoye-fias' );
+$settlement_fias_mismatch_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 79 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$before_settlement_fias_external = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+$settlement_fias_mismatch_preview = $creation->safe_preview( $drafts->create_request_from_order( $settlement_fias_mismatch_order ) );
+$after_settlement_fias_external = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+pek_integration_assert( array() !== $settlement_fias_mismatch_preview['errors'] && $before_settlement_fias_external === $after_settlement_fias_external, 'Explicit settlement FIAS mismatch must not fall back to same settlement name and must stop before PEK mapping/SMS/private/submit.' );
+
+$selected_fias_mismatch_order = new PekIntegrationOrder( 1098 );
+$GLOBALS['wdc_pek_integration_orders'][1098] = $selected_fias_mismatch_order;
+$selected_fias_mismatch_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'улица Липовый парк, дом 2', 'address_2' => '' ) );
+pek_integration_set_dadata( $selected_fias_mismatch_order, 'shipping', 'Москва', 'Москва', 'улица Липовый парк', '2', '', '', '', '', 'moscow-city-fias', '' );
+$selected_fias_mismatch_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$selected_fias_mismatch_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$selected_fias_mismatch_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$selected_fias_mismatch_order->update_meta_data( '_wdc_platform_location_fias_id', 'different-selected-fias' );
+$selected_fias_mismatch_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 78 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$before_selected_fias_external = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+$selected_fias_mismatch_preview = $creation->safe_preview( $drafts->create_request_from_order( $selected_fias_mismatch_order ) );
+$after_selected_fias_external = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+pek_integration_assert( array() !== $selected_fias_mismatch_preview['errors'] && $before_selected_fias_external === $after_selected_fias_external, 'Selected platform FIAS mismatch must stop before PEK mapping/SMS/private/submit.' );
+
+$canonical_ids_absent_order = new PekIntegrationOrder( 1099 );
+$GLOBALS['wdc_pek_integration_orders'][1099] = $canonical_ids_absent_order;
+$canonical_ids_absent_order->set_shipping_fields( array( 'state' => 'Московская область', 'city' => 'Видное', 'address_1' => 'улица Советская, дом 10', 'address_2' => '' ) );
+pek_integration_set_dadata( $canonical_ids_absent_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '', '', '', '', 'request-city-fias', '' );
+$canonical_ids_absent_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$canonical_ids_absent_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$canonical_ids_absent_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$canonical_ids_absent_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array( 'location_id' => 80 ), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$canonical_ids_absent_preview = $creation->safe_preview( $drafts->create_request_from_order( $canonical_ids_absent_order ) );
+pek_integration_assert( array() === $canonical_ids_absent_preview['errors'] && true === (bool) ( $canonical_ids_absent_preview['body']['courier_location_match'] ?? false ), 'Canonical IDs absent must still allow bounded normalized-name fallback.' );
+
 $before_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 $preview = $creation->safe_preview( $request );
 $after_preview_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
@@ -1330,6 +1416,25 @@ pek_integration_assert( true === $shipment_service->cancel_in_carrier( $order )[
 pek_integration_assert( $before_cancel_calls + 1 === count( $http->cancellations ), 'Pre-acceptance cancellation must call PEK exactly once.' );
 
 $addresses = new PekShipmentCourierAddressResolver();
+$recipient_builder = new PekShipmentRecipientBuilder( $addresses );
+$recipient_phone_order = new PekIntegrationOrder( 3001 );
+$recipient_phone_order->set_shipping_fields( array( 'phone' => '8 (999) 123-45-67' ) );
+$recipient_payload = $recipient_builder->build_physical_recipient( $recipient_phone_order, $request, 'WH-R' );
+pek_integration_assert( '+79991234567' === (string) ( $recipient_payload['personPhones'][0]['phone'] ?? '' ), 'Recipient shipping phone must normalize through PEK RU phone contract.' );
+$recipient_billing_fallback_order = new PekIntegrationOrder( 3002 );
+$recipient_billing_fallback_order->set_shipping_fields( array( 'phone' => '' ) );
+$recipient_billing_fallback_order->set_billing_fields( array( 'phone' => '79991234567' ) );
+$recipient_fallback_payload = $recipient_builder->build_physical_recipient( $recipient_billing_fallback_order, $request, 'WH-R' );
+pek_integration_assert( '+79991234567' === (string) ( $recipient_fallback_payload['personPhones'][0]['phone'] ?? '' ), 'Empty shipping phone may fall back to billing phone.' );
+$recipient_malformed_order = new PekIntegrationOrder( 3003 );
+$recipient_malformed_order->set_shipping_fields( array( 'phone' => '+7abc9991234567' ) );
+$recipient_malformed_order->set_billing_fields( array( 'phone' => '79991234567' ) );
+try {
+	$recipient_builder->build_physical_recipient( $recipient_malformed_order, $request, 'WH-R' );
+	pek_integration_assert( false, 'Malformed non-empty shipping recipient phone must not silently fall back to billing.' );
+} catch ( RuntimeException $expected ) {
+	pek_integration_assert( str_contains( $expected->getMessage(), 'корректный телефон получателя' ), 'Malformed recipient phone must fail with SMS public message.' );
+}
 $address_order = new PekIntegrationOrder( 2001 );
 $address_order->set_billing_fields( array( 'city' => 'Москва', 'state' => 'Москва', 'address_1' => 'Тверская улица, дом 1', 'address_2' => 'кв. 9' ) );
 pek_integration_set_dadata( $address_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', 'квартира 5' );
@@ -1430,6 +1535,16 @@ $parsed_corpus = $addresses->normalize( new Address( country_code: 'RU', city: '
 pek_integration_assert( 'Россия, Московская область, Видное, улица Советская, дом 10 к 1' === $addresses->address_stock( $parsed_corpus ), 'Courier parser must preserve comma-separated corpus in addressStock.' );
 $parsed_structure = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, дом 10, стр. 2' ) );
 pek_integration_assert( 'Россия, Московская область, Видное, улица Советская, дом 10 стр. 2' === $addresses->address_stock( $parsed_structure ), 'Courier parser must preserve comma-separated structure in addressStock.' );
+$raw_office = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, дом 10, офис 7' ) );
+pek_integration_assert( str_contains( $addresses->address_stock( $raw_office ), 'офис 7' ) && ! str_contains( $addresses->address_stock( $raw_office ), 'кв. 7' ), 'Raw address parser must preserve office unit type.' );
+$raw_premise = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, дом 10, помещение 3' ) );
+pek_integration_assert( str_contains( $addresses->address_stock( $raw_premise ), 'помещение 3' ) && ! str_contains( $addresses->address_stock( $raw_premise ), 'кв. 3' ), 'Raw address parser must preserve premise unit type.' );
+$raw_apartment = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, дом 10, кв. 5' ) );
+pek_integration_assert( str_contains( $addresses->address_stock( $raw_apartment ), 'кв. 5' ), 'Raw address parser must preserve apartment unit type.' );
+$address2_office = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, дом 10', apartment: 'офис 7' ) );
+pek_integration_assert( str_contains( $addresses->address_stock( $address2_office ), 'офис 7' ) && ! str_contains( $addresses->address_stock( $address2_office ), 'кв. 7' ), 'Woo address_2 office must remain office.' );
+$address2_premise = $addresses->normalize( new Address( country_code: 'RU', city: 'Видное', region_name: 'Московская область', raw_address: 'улица Советская, дом 10', apartment: 'помещение 3' ) );
+pek_integration_assert( str_contains( $addresses->address_stock( $address2_premise ), 'помещение 3' ) && ! str_contains( $addresses->address_stock( $address2_premise ), 'кв. 3' ), 'Woo address_2 premise must remain premise.' );
 $typed_block_order = new PekIntegrationOrder( 2018 );
 $typed_block_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'улица Советская, дом 10, к 1', 'address_2' => '' ) );
 pek_integration_set_dadata( $typed_block_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10', '', '', '1', 'к' );
@@ -1455,6 +1570,16 @@ try {
 	pek_integration_assert( false, 'Untyped non-empty DaData block must not silently disappear.' );
 } catch ( RuntimeException $expected ) {
 	pek_integration_assert( str_contains( $expected->getMessage(), 'корпус' ), 'Untyped non-empty block must fail with safe public message.' );
+}
+$unsupported_house_type_order = new PekIntegrationOrder( 2023 );
+$unsupported_house_type_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'улица Советская, дом 10', 'address_2' => '' ) );
+pek_integration_set_dadata( $unsupported_house_type_order, 'shipping', 'Московская область', 'г Видное', 'улица Советская', '10' );
+$unsupported_house_type_order->update_meta_data( '_shipping_dadata_house_type', 'владение' );
+try {
+	$addresses->from_order_with_evidence( $unsupported_house_type_order );
+	pek_integration_assert( false, 'Unsupported non-empty house_type must fail closed.' );
+} catch ( RuntimeException $expected ) {
+	pek_integration_assert( str_contains( $expected->getMessage(), 'тип дома' ), 'Unsupported house_type must fail with safe public message.' );
 }
 $stead_order = new PekIntegrationOrder( 2022 );
 $stead_order->set_shipping_fields( array( 'city' => 'Видное', 'state' => 'Московская область', 'address_1' => 'участок 15', 'address_2' => '' ) );

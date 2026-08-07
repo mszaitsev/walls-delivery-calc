@@ -5,12 +5,15 @@ namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
+use WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentRequestBuilder {
+	private PekRuPhoneNormalizer $phones;
+
 	public function __construct(
 		private PekSettings $settings,
 		private PekShipmentDeclaredValueResolver $declared_values,
@@ -21,8 +24,10 @@ final class PekShipmentRequestBuilder {
 		private PekSmsReleaseAvailabilityService $sms,
 		private PekShipmentDestinationResolver $destinations,
 		private PekShipmentProductWeightResolver $product_weights,
-		private PekCredentials $credentials
+		private PekCredentials $credentials,
+		?PekRuPhoneNormalizer $phones = null
 	) {
+		$this->phones = $phones ?? new PekRuPhoneNormalizer();
 	}
 
 	/** @return array{payload:array<string,mixed>,preview:array<string,mixed>,summary:array<string,mixed>} */
@@ -33,6 +38,7 @@ final class PekShipmentRequestBuilder {
 	/** @return array{payload:array<string,mixed>,preview:array<string,mixed>,summary:array<string,mixed>} */
 	public function prepare( object $order, ShipmentCreateRequest $request, bool $live_sms_check ): array {
 		$this->validate_scope( $request );
+		$this->validate_sender_settings();
 		$declared = $this->declared_values->resolve( $request );
 		$declared_kopecks = $declared->get_kopecks();
 		$sender = $this->sender_warehouses->resolve( $request );
@@ -133,7 +139,7 @@ final class PekShipmentRequestBuilder {
 			'inn' => $this->settings->sender_inn(),
 			'countryOfRegistrationCode' => $this->settings->sender_registration_classifier_code(),
 			'person' => $this->settings->sender_contact_name(),
-			'personPhones' => array( array( 'phone' => $this->normalize_ru_phone( $this->settings->sender_phone() ) ) ),
+			'personPhones' => array( array( 'phone' => $this->normalize_sender_phone() ) ),
 			'warehouseId' => (string) $sender['warehouseId'],
 		);
 		$kpp = trim( $this->settings->sender_kpp() );
@@ -189,27 +195,18 @@ final class PekShipmentRequestBuilder {
 		if ( PekSettings::LEGAL_FORM_INDIVIDUAL_ENTREPRENEUR === $legal_form && 12 !== strlen( $inn ) ) {
 			throw new \RuntimeException( 'Некорректный ИНН ИП-отправителя ПЭК.' );
 		}
-		if ( '' === $this->normalize_ru_phone( $this->settings->sender_phone() ) ) {
-			throw new \RuntimeException( 'Некорректный телефон отправителя ПЭК.' );
-		}
+		$this->normalize_sender_phone();
 		if ( PekSettings::LEGAL_FORM_LEGAL_ENTITY === $legal_form && 9 !== strlen( $kpp ) ) {
 			throw new \RuntimeException( 'Для юрлица-отправителя ПЭК нужен КПП.' );
 		}
 	}
 
-	private function normalize_ru_phone( string $value ): string {
-		$value = preg_replace( '/[^\d+]/', '', $value ) ?? '';
-		if ( 1 === preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
-			return '+7' . $matches[1];
+	private function normalize_sender_phone(): string {
+		try {
+			return $this->phones->normalize( $this->settings->sender_phone() );
+		} catch ( \InvalidArgumentException ) {
+			throw new \RuntimeException( 'Некорректный телефон отправителя ПЭК.' );
 		}
-		if ( 1 === preg_match( '/^7(\d{10})$/', $value, $matches ) ) {
-			return '+7' . $matches[1];
-		}
-		if ( 1 === preg_match( '/^\+7\d{10}$/', $value ) ) {
-			return $value;
-		}
-
-		return '';
 	}
 
 	private function kopecks_to_rub_number( int $kopecks ): int|float {

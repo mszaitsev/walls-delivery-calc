@@ -133,17 +133,18 @@ final class PekShipmentDestinationResolver {
 		$evidence = is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array();
 		$request_city_fias = $this->normalize_guid( (string) ( $evidence['courier_city_fias_id'] ?? '' ) );
 		$request_settlement_fias = $this->normalize_guid( (string) ( $evidence['courier_settlement_fias_id'] ?? $address->fias_id ) );
+		$selected_location_fias = $this->normalize_guid( (string) ( $evidence['courier_selected_location_fias_id'] ?? '' ) );
 		$location_city_fias = $this->normalize_guid( $location->city_fias_id );
 		$location_fias = $this->normalize_guid( $location->fias_id );
 		$level = $this->location_level( $location );
+		if ( ! $this->selected_location_matches( $selected_location_fias, $location, $level ) ) {
+			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+		}
 		$parent_city_match = $this->city_matches_location( $address->city, $request_city_fias, $location );
 		$settlement_match = $this->settlement_matches_location( $address->settlement, $request_settlement_fias, $location );
 
 		if ( 'city' === $level ) {
 			if ( ! $parent_city_match ) {
-				throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
-			}
-			if ( '' !== trim( $address->settlement ) && '' !== $request_city_fias && '' !== $location_city_fias && $request_city_fias !== $location_city_fias && $request_city_fias !== $location_fias ) {
 				throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
 			}
 
@@ -169,11 +170,15 @@ final class PekShipmentDestinationResolver {
 	}
 
 	private function city_matches_location( string $request_city, string $request_city_fias, Location $location ): bool {
-		$location_city_fias = $this->normalize_guid( $location->city_fias_id );
-		if ( '' !== $request_city_fias && '' !== $location_city_fias && $request_city_fias === $location_city_fias ) {
-			return true;
+		$canonical_city_fias = $this->normalize_guid( $location->city_fias_id );
+		if ( '' === $canonical_city_fias && 'city' === $this->location_level( $location ) ) {
+			$canonical_city_fias = $this->normalize_guid( $location->fias_id );
 		}
-		if ( '' !== $request_city_fias && '' === $location_city_fias && $request_city_fias === $this->normalize_guid( $location->fias_id ) ) {
+		$id_match = $this->identifier_match( $request_city_fias, $canonical_city_fias );
+		if ( false === $id_match ) {
+			return false;
+		}
+		if ( true === $id_match ) {
 			return true;
 		}
 
@@ -181,11 +186,49 @@ final class PekShipmentDestinationResolver {
 	}
 
 	private function settlement_matches_location( string $request_settlement, string $request_settlement_fias, Location $location ): bool {
-		if ( '' !== $request_settlement_fias && $request_settlement_fias === $this->normalize_guid( $location->fias_id ) ) {
+		$id_match = $this->identifier_match( $request_settlement_fias, $this->normalize_guid( $location->fias_id ) );
+		if ( false === $id_match ) {
+			return false;
+		}
+		if ( true === $id_match ) {
 			return true;
 		}
 
 		return '' !== trim( $request_settlement ) && $this->same_location_name( $request_settlement, $location->settlement_name );
+	}
+
+	private function selected_location_matches( string $selected_fias, Location $location, string $level ): bool {
+		if ( '' === $selected_fias ) {
+			return true;
+		}
+		$location_fias = $this->normalize_guid( $location->fias_id );
+		$city_fias = $this->normalize_guid( $location->city_fias_id );
+		if ( 'city' === $level ) {
+			foreach ( array( $location_fias, $city_fias ) as $canonical ) {
+				$id_match = $this->identifier_match( $selected_fias, $canonical );
+				if ( true === $id_match ) {
+					return true;
+				}
+			}
+
+			return '' === $location_fias && '' === $city_fias;
+		}
+		$id_match = $this->identifier_match( $selected_fias, $location_fias );
+		if ( null === $id_match ) {
+			return true;
+		}
+
+		return $id_match;
+	}
+
+	private function identifier_match( string $request_id, string $canonical_id ): ?bool {
+		$request_id = $this->normalize_guid( $request_id );
+		$canonical_id = $this->normalize_guid( $canonical_id );
+		if ( '' === $request_id || '' === $canonical_id ) {
+			return null;
+		}
+
+		return $request_id === $canonical_id;
 	}
 
 	private function same_location_name( string $left, string $right ): bool {
