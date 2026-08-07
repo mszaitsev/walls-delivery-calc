@@ -698,10 +698,9 @@ final class OrderShipmentDraftFactory {
 			$api['branchId'] ?? ''
 		);
 		$location_id = (int) $this->first_non_empty(
-			$provider_query['location_id'] ?? '',
 			$rate_meta['location_id'] ?? '',
 			$calculation['destination']['location_id'] ?? '',
-			$this->meta_string( $order, '_wdc_platform_location_id' )
+			DeliveryType::PICKUP === $delivery_type ? ( $provider_query['location_id'] ?? '' ) : ''
 		);
 		$address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : (string) ( $pickup['address'] ?? $pickup['point_address'] ?? '' );
 		$courier = DeliveryType::COURIER === $delivery_type ? $this->pek_courier_address_with_evidence_from_order( $order ) : array( 'address' => null, 'evidence' => array() );
@@ -739,7 +738,7 @@ final class OrderShipmentDraftFactory {
 				'pek_receiver_branch_id' => $receiver_branch_id,
 				'pek_receiver_warehouse_id' => DeliveryType::PICKUP === $delivery_type ? $point_code : '',
 				'pek_destination_location_id' => $location_id,
-				'provider_destination_fingerprint' => (string) ( $rate_meta['provider_destination_fingerprint'] ?? $pickup['provider_destination_fingerprint'] ?? '' ),
+				'provider_destination_fingerprint' => (string) ( $rate_meta['provider_destination_fingerprint'] ?? $rate_meta['destination_fingerprint'] ?? $pickup['provider_destination_fingerprint'] ?? '' ),
 				'pickup_provider_query' => $provider_query,
 				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $address : '',
 				'pek_courier_address_evidence' => DeliveryType::COURIER === $delivery_type && is_array( $courier['evidence'] ?? null ) ? $courier['evidence'] : array(),

@@ -182,6 +182,8 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 $session = new CheckoutSessionManager();
 $persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $rate = wdc_order_meta_rate();
+$rate['rate_meta']['location_id'] = 153912;
+$rate['rate_meta']['destination_fingerprint'] = 'country=RU|location_id=153912';
 $session->save_rates( array( 'russian_post_worldwide_parcel' => $rate ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );
 
@@ -202,6 +204,7 @@ foreach ( array( 'carrier_key', 'service_key', 'rules_source', 'no_pickup_select
 $calculation = $order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
 order_meta_smoke_assert( is_array( $calculation ) && array() !== $calculation, 'Delivery calculation data must be saved.' );
 order_meta_smoke_assert( ! array_key_exists( 'raw_response', $order->meta['_wdc_platform_rate_meta'] ?? array() ) && ! str_contains( wp_json_encode( $calculation ), 'raw_response' ), 'Order calculation data must not store raw API response.' );
+order_meta_smoke_assert( 153912 === (int) ( $order->meta['_wdc_platform_rate_meta']['location_id'] ?? 0 ) && 'country=RU|location_id=153912' === (string) ( $order->meta['_wdc_platform_rate_meta']['destination_fingerprint'] ?? '' ), 'Order meta must persist sanitized carrier rate destination identity.' );
 order_meta_smoke_assert( 'Почта России — международная доставка' === ( $calculation['service_title'] ?? '' ), 'Calculation data must contain service title.' );
 order_meta_smoke_assert( 'PL' === ( $calculation['destination']['country_code'] ?? '' ) && 'Польша' === ( $calculation['destination']['country_name'] ?? '' ), 'Calculation data must contain destination country.' );
 order_meta_smoke_assert( 1000 === ( $calculation['package']['products_weight_g'] ?? 0 ) && 150 === ( $calculation['package']['packaging_weight_g'] ?? 0 ) && 1150 === ( $calculation['package']['final_weight_g'] ?? 0 ), 'Calculation data must contain package weights.' );

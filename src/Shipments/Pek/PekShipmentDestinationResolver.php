@@ -19,6 +19,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentDestinationResolver {
 	private const LOCATION_MISMATCH_MESSAGE = 'Адрес заказа изменился после расчёта доставки. Повторно рассчитайте доставку ПЭК для актуального города.';
+	private const LOCATION_IDENTITY_MESSAGE = 'Не удалось восстановить населённый пункт курьерской доставки ПЭК. Повторно рассчитайте доставку для заказа.';
 
 	public function __construct(
 		private PekPickupPointProvider $pickup_points,
@@ -83,11 +84,9 @@ final class PekShipmentDestinationResolver {
 		if ( 'RU' !== strtoupper( $request->recipient_address->country_code ) ) {
 			throw new \RuntimeException( 'Создание отправлений ПЭК поддерживает только RU.' );
 		}
-		$location_id = (int) ( $request->meta['pek_destination_location_id'] ?? 0 );
-		if ( $location_id <= 0 ) {
-			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
-		}
-		$location_evidence = $this->assert_location_matches_request( $location_id, $request );
+		$location_identity = $this->resolve_canonical_location_identity( $request );
+		$location_id = $location_identity['location_id'];
+		$location_evidence = $this->assert_location_matches_request( $location_identity['location'], $request, $location_identity['source'] );
 		$mapping = $this->locations->resolve_delivery_address_for_shipment( $request->recipient_address->raw_address, 'RU' );
 		$branch_id = trim( (string) ( $mapping['branch_id'] ?? '' ) );
 		$country = strtoupper( trim( (string) ( $mapping['country_code'] ?? 'RU' ) ) );
@@ -99,7 +98,7 @@ final class PekShipmentDestinationResolver {
 			throw new \RuntimeException( 'ПЭК не подтвердил адрес курьерской доставки. Проверьте улицу и номер дома.' );
 		}
 		if ( '' === $branch_id || '' === $zone_id || '' === $main_warehouse_id || ! in_array( $state, array( 'resolved', 'near' ), true ) || ! in_array( $precision, array( 'exact', 'near' ), true ) ) {
-			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
+			throw new \RuntimeException( 'Не удалось подтвердить зону курьерской доставки ПЭК.' );
 		}
 		$saved_branch = trim( (string) ( $request->meta['pek_receiver_branch_id'] ?? $request->meta['pek_destination_branch_id'] ?? '' ) );
 		$formatted = trim( (string) ( $mapping['normalized_address'] ?? '' ) );
@@ -131,12 +130,41 @@ final class PekShipmentDestinationResolver {
 		);
 	}
 
-	/** @return array{source:string,level:string,parent_city_match:bool,settlement_match:bool} */
-	private function assert_location_matches_request( int $location_id, ShipmentCreateRequest $request ): array {
-		$location = $this->canonical_locations->find_by_id( $location_id );
-		if ( ! $location instanceof Location || ! $location->active ) {
-			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
+	/** @return array{location:Location,location_id:int,source:string} */
+	private function resolve_canonical_location_identity( ShipmentCreateRequest $request ): array {
+		$location_id = (int) ( $request->meta['pek_destination_location_id'] ?? 0 );
+		if ( $location_id > 0 ) {
+			$location = $this->canonical_locations->find_by_id( $location_id );
+			if ( ! $location instanceof Location || ! $location->active || null === $location->id || (int) $location->id <= 0 || 'RU' !== strtoupper( trim( $location->country_code ) ) ) {
+				throw new \RuntimeException( self::LOCATION_IDENTITY_MESSAGE );
+			}
+
+			return array(
+				'location' => $location,
+				'location_id' => (int) $location->id,
+				'source' => 'request_location_id',
+			);
 		}
+
+		$evidence = is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array();
+		$selected_fias = $this->canonical_guid( $evidence['courier_selected_location_fias_id'] ?? null );
+		if ( '' === $selected_fias ) {
+			throw new \RuntimeException( self::LOCATION_IDENTITY_MESSAGE );
+		}
+		$location = $this->canonical_locations->find_by_fias_id( $selected_fias );
+		if ( ! $location instanceof Location || ! $location->active || null === $location->id || (int) $location->id <= 0 || 'RU' !== strtoupper( trim( $location->country_code ) ) ) {
+			throw new \RuntimeException( self::LOCATION_IDENTITY_MESSAGE );
+		}
+
+		return array(
+			'location' => $location,
+			'location_id' => (int) $location->id,
+			'source' => 'selected_location_fias_fallback',
+		);
+	}
+
+	/** @return array{source:string,level:string,parent_city_match:bool,settlement_match:bool} */
+	private function assert_location_matches_request( Location $location, ShipmentCreateRequest $request, string $identity_source ): array {
 		$address = $request->recipient_address;
 		if ( strtoupper( trim( $location->country_code ) ) !== strtoupper( trim( $address->country_code ) ) ) {
 			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
@@ -162,7 +190,7 @@ final class PekShipmentDestinationResolver {
 				throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
 			}
 
-			return array( 'source' => 'canonical_location_repository', 'level' => $level, 'parent_city_match' => true, 'settlement_match' => '' !== trim( $address->settlement ) );
+			return array( 'source' => $identity_source, 'level' => $level, 'parent_city_match' => true, 'settlement_match' => '' !== trim( $address->settlement ) );
 		}
 		if ( ! $settlement_match ) {
 			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
@@ -171,7 +199,7 @@ final class PekShipmentDestinationResolver {
 			throw new \RuntimeException( self::LOCATION_MISMATCH_MESSAGE );
 		}
 
-		return array( 'source' => 'canonical_location_repository', 'level' => $level, 'parent_city_match' => $parent_city_match, 'settlement_match' => true );
+		return array( 'source' => $identity_source, 'level' => $level, 'parent_city_match' => $parent_city_match, 'settlement_match' => true );
 	}
 
 	private function location_level( Location $location ): string {
@@ -298,6 +326,18 @@ final class PekShipmentDestinationResolver {
 
 	private function normalize_guid( string $value ): string {
 		return strtolower( trim( $value ) );
+	}
+
+	private function canonical_guid( mixed $value ): string {
+		if ( ! is_string( $value ) ) {
+			return '';
+		}
+		$value = strtolower( trim( $value ) );
+		if ( 1 !== preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $value ) ) {
+			return '';
+		}
+
+		return $value;
 	}
 
 	private function lower( string $value ): string {

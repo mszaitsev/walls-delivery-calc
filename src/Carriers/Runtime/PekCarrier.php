@@ -328,6 +328,14 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			'pek_calculator_http_status' => $result->http_status,
 			'requires_rate_refresh_on_pickup_selection' => $is_pickup,
 		);
+		$location_id = (int) ( $context['location_id'] ?? 0 );
+		if ( $location_id > 0 ) {
+			$meta['location_id'] = $location_id;
+		}
+		$destination_fingerprint = trim( (string) ( $context['destination_fingerprint'] ?? '' ) );
+		if ( '' !== $destination_fingerprint ) {
+			$meta['destination_fingerprint'] = $destination_fingerprint;
+		}
 		if ( $is_pickup ) {
 			$meta['pickup_family'] = PekSettings::PICKUP_FAMILY;
 			$meta['pickup_provider_query'] = is_array( $context['pickup_provider_query'] ?? null ) ? $context['pickup_provider_query'] : array();

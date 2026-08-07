@@ -549,6 +549,7 @@ list( $courier_only, $courier_only_http ) = pek_checkout_boot(
 );
 $courier_only_quote = $courier_only->quote( pek_checkout_request() );
 pek_checkout_assert( $courier_only_quote->success && 1 === count( $courier_only_quote->rates ) && PekSettings::COURIER_RATE_ID === $courier_only_quote->rates[0]->rate_id, 'Pickup point absence must not suppress courier PEK rate.' );
+pek_checkout_assert( 153912 === (int) ( $courier_only_quote->rates[0]->meta['location_id'] ?? 0 ) && '' !== (string) ( $courier_only_quote->rates[0]->meta['destination_fingerprint'] ?? '' ), 'PEK courier rate_meta must persist trusted destination location identity for future shipment preview.' );
 
 list( $full_address_carrier, $full_address_http ) = pek_checkout_boot(
 	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1000.00 ), pek_checkout_calc_response( 2000.00 ) ),
