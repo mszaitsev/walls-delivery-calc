@@ -42,6 +42,8 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Shipments\Pek\PekPrivateAccessTokenService;
+use WallsShop\WDC\Shipments\Pek\PekSenderCounterpartService;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 
 function pek_route_assert( bool $condition, string $message ): void {
@@ -148,7 +150,9 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 		new PekDestinationPickupDiagnosticService( $pickup_registry, $location_repository, $terminal_service, $settings, $credentials ),
 		new PekDestinationPickupDiagnosticStore(),
 		new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service, new PekQuotePlannedDateTimeResolver( $settings ) ),
-		new PekQuoteDiagnosticStore()
+		new PekQuoteDiagnosticStore(),
+		null,
+		new PekSenderCounterpartService( $api, new PekPrivateAccessTokenService( $api ), $settings, $credentials )
 	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
 	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin ) as $property => $value ) {
@@ -219,6 +223,23 @@ pek_route_assert( array() === $notice_store->consume_for_current_user(), 'PEK no
 $GLOBALS['pek_route_current_user_id'] = 7;
 $notice = $notice_store->consume_for_current_user();
 pek_route_assert( array() !== $notice && array() === $notice_store->consume_for_current_user() && $notice_store->ttl_seconds() <= 120, 'PEK notice must be one-shot and TTL must be <= 120 seconds.' );
+
+$verify_settings_repository = new SettingsRepository();
+$verify_http = new PekRouteFakeHttp(
+	array(
+		pek_route_json( array( 'access_token' => 'fake-private-token', 'token_type' => 'Bearer', 'expires_in_unix' => '1893456000' ) ),
+		pek_route_json( array( array( 'legalForm' => 4, 'title' => 'PRIVATE_TITLE', 'guid' => 'PRIVATE_GUID', 'documents' => array( array( 'number' => 'PRIVATE_PASSPORT_NUMBER' ) ) ) ) ),
+	)
+);
+$verify_page = pek_route_page( $verify_http, $verify_settings_repository, new PekSenderWarehouseSearchCache() );
+$verify_settings = new PekSettings( $verify_settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
+$verify_settings->save_sender_counterpart( '11111111-2222-3333-4444-555555555555', array( 'guid' => '11111111-2222-3333-4444-555555555555' ) );
+pek_route_run_action( $verify_page, 'verify_pek_sender_counterpart' );
+$verify_notice = ( new PekAdminNoticeStore() )->consume_for_current_user();
+$verify_notice_json = json_encode( $verify_notice, JSON_UNESCAPED_UNICODE ) ?: '';
+pek_route_assert( str_contains( $verify_notice_json, 'counterpart_contract' ) && str_contains( $verify_notice_json, 'unsupported_legal_form' ) && str_contains( $verify_notice_json, 'строка: 0' ), 'Counterpart admin notice must render only safe diagnostic stage/reason/row.' );
+pek_route_assert( ! str_contains( $verify_notice_json, 'PRIVATE_TITLE' ) && ! str_contains( $verify_notice_json, 'PRIVATE_GUID' ) && ! str_contains( $verify_notice_json, 'PRIVATE_PASSPORT_NUMBER' ), 'Counterpart admin notice must not render PII/raw response values.' );
+pek_route_assert( '' === $verify_settings->sender_counterpart_guid() && array() === $verify_settings->sender_counterpart_snapshot(), 'Counterpart admin failed verification must clear old snapshot.' );
 
 $before = $settings->request_timeout();
 $_POST = array(

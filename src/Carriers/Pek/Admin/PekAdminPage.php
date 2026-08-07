@@ -77,7 +77,7 @@ final class PekAdminPage {
 					throw new \RuntimeException( 'Проверка контрагента ПЭК недоступна.' );
 				}
 				$result = $this->counterparts->verify_and_save();
-				$notice = array( 'type' => $result['success'] ? 'success' : 'error', 'message' => (string) $result['message'] );
+				$notice = array( 'type' => $result['success'] ? 'success' : 'error', 'message' => $this->counterpart_notice_message( $result ) );
 			} elseif ( 'diagnose_pek_destination_pickup' === $action ) {
 				$this->destination_reports->clear_for_current_user();
 				$result = $this->destination_diagnostics->run( $post );
@@ -746,5 +746,27 @@ final class PekAdminPage {
 		$message = preg_replace( '/[A-Za-z0-9._~+\-\/]{24,}/', '[redacted]', $message ) ?? $message;
 
 		return trim( $message );
+	}
+
+	/** @param array<string,mixed> $result */
+	private function counterpart_notice_message( array $result ): string {
+		$message = (string) ( $result['message'] ?? 'Проверка контрагента ПЭК завершена.' );
+		if ( ! empty( $result['success'] ) || ! is_array( $result['diagnostic'] ?? null ) ) {
+			return $message;
+		}
+		$diagnostic = $result['diagnostic'];
+		$parts = array();
+		foreach ( array( 'stage' => 'Этап', 'reason' => 'причина' ) as $key => $label ) {
+			$value = $diagnostic[ $key ] ?? '';
+			if ( is_string( $value ) && '' !== trim( $value ) && 1 === preg_match( '/^[a-z0-9_:-]{1,80}$/', $value ) ) {
+				$parts[] = $label . ': ' . $value;
+			}
+		}
+		$row_index = $diagnostic['row_index'] ?? null;
+		if ( is_int( $row_index ) && $row_index >= 0 ) {
+			$parts[] = 'строка: ' . (string) $row_index;
+		}
+
+		return array() === $parts ? $message : $message . ' ' . implode( '; ', $parts ) . '.';
 	}
 }

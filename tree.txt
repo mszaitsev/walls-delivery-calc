@@ -1050,6 +1050,8 @@ C:.
     |       run-pek-warehouse-datetime-smoke.php
     |
     |   \---fixtures
+    |           confirmed-counterparties-mixed-response.json
+    |           confirmed-counterparties-physical-only-response.json
     |           confirmed-counterparties-response.json
     |           connected-services-response.json
     |           order-print-response.json

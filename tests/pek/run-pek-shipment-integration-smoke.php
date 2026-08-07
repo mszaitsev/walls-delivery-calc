@@ -182,6 +182,14 @@ function pek_integration_fixture( string $name ): array {
 	return $data;
 }
 
+function pek_integration_assert_no_private_markers( mixed $value, string $label ): void {
+	$json = wp_json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+	$json = is_string( $json ) ? $json : '';
+	foreach ( array( 'PRIVATE_TITLE', 'PRIVATE_GUID', 'PRIVATE_CARD', 'PRIVATE_INN', 'PRIVATE_KPP', 'PRIVATE_PASSPORT_SERIES', 'PRIVATE_PASSPORT_NUMBER', 'PRIVATE_TOKEN' ) as $marker ) {
+		pek_integration_assert( ! str_contains( $json, $marker ), $label . ' must not contain private marker ' . $marker );
+	}
+}
+
 function pek_integration_assert_same_payload( array $actual, array $expected, string $label ): void {
 	$actual_json = wp_json_encode( $actual, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 	$expected_json = wp_json_encode( $expected, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
@@ -318,8 +326,14 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			);
 		}
 		if ( str_contains( $url, '/auth/createtokentoaccessprivatedata/' ) ) {
+			if ( 'http500' === $this->token_mode ) {
+				return array( 'status' => 500, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'boom' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
 			if ( 'malformed' === $this->token_mode ) {
 				return array( 'status' => 200, 'body' => wp_json_encode( array( 'access_token' => array(), 'token_type' => 'Bearer', 'expires_in_unix' => '1893456000' ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'private_marker_malformed' === $this->token_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( 'access_token' => 'PRIVATE_TOKEN', 'token_type' => 'Wrong', 'expires_in_unix' => '1893456000' ), JSON_UNESCAPED_UNICODE ) );
 			}
 			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/private-token-response.json' ) ?: '{}' );
 		}
@@ -412,6 +426,60 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			);
 		}
 		if ( str_contains( $url, '/counterparts/confirmedaccesstocounterparties/' ) ) {
+			if ( 'mixed_legal' === $this->confirmed_counterparties_mode ) {
+				return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/confirmed-counterparties-mixed-response.json' ) ?: '[]' );
+			}
+			if ( 'mixed_ip' === $this->confirmed_counterparties_mode ) {
+				$rows = pek_integration_fixture( 'confirmed-counterparties-mixed-response.json' );
+				$rows[1]['legalForm'] = 2;
+				$rows[1]['guid'] = '33333333-3333-4333-8333-333333333333';
+				$rows[1]['legal']['inn'] = '540000000000';
+				$rows[1]['legal']['kpp'] = null;
+				return array( 'status' => 200, 'body' => wp_json_encode( $rows, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'physical_only' === $this->confirmed_counterparties_mode ) {
+				return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/confirmed-counterparties-physical-only-response.json' ) ?: '[]' );
+			}
+			if ( 'unknown_legal_form' === $this->confirmed_counterparties_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'legalForm' => 4 ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'legal_form_string' === $this->confirmed_counterparties_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'legalForm' => '3' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'legal_form_bool' === $this->confirmed_counterparties_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( array( 'legalForm' => true ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'malformed_after_physical' === $this->confirmed_counterparties_mode ) {
+				$rows = pek_integration_fixture( 'confirmed-counterparties-mixed-response.json' );
+				$rows[1]['legal']['inn'] = array( 'PRIVATE_INN' );
+				return array( 'status' => 200, 'body' => wp_json_encode( $rows, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'physical_malformed_optional' === $this->confirmed_counterparties_mode ) {
+				$rows = pek_integration_fixture( 'confirmed-counterparties-mixed-response.json' );
+				$rows[0]['title'] = array( 'PRIVATE_TITLE' );
+				$rows[0]['guid'] = array( 'PRIVATE_GUID' );
+				$rows[0]['counterpartClientCard'] = array( 'PRIVATE_CARD' );
+				$rows[0]['documents'] = array( array( 'series' => 'PRIVATE_PASSPORT_SERIES', 'number' => 'PRIVATE_PASSPORT_NUMBER' ) );
+				$rows[0]['legal'] = array( 'inn' => 'PRIVATE_INN', 'kpp' => 'PRIVATE_KPP' );
+				return array( 'status' => 200, 'body' => wp_json_encode( $rows, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'no_match' === $this->confirmed_counterparties_mode ) {
+				$rows = pek_integration_fixture( 'confirmed-counterparties-response.json' );
+				$rows[0]['legal']['inn'] = '5400000001';
+				return array( 'status' => 200, 'body' => wp_json_encode( $rows, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'multiple_exact' === $this->confirmed_counterparties_mode ) {
+				$rows = pek_integration_fixture( 'confirmed-counterparties-response.json' );
+				$rows[] = $rows[0];
+				$rows[1]['guid'] = '44444444-4444-4444-8444-444444444444';
+				return array( 'status' => 200, 'body' => wp_json_encode( $rows, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'http_failure' === $this->confirmed_counterparties_mode ) {
+				return array( 'status' => 500, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'boom' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'logical_error' === $this->confirmed_counterparties_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Rejected', 'message' => 'Rejected' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
 			if ( 'card_mismatch' === $this->confirmed_counterparties_mode ) {
 				$rows = pek_integration_fixture( 'confirmed-counterparties-response.json' );
 				$rows[0]['counterpartClientCard'] = 'OTHER-CARD';
@@ -929,6 +997,74 @@ $settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER
 pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'INN identity change must clear counterpart verification.' );
 $settings->save_from_admin( $admin_base );
 $counterparts->verify_and_save();
+
+$http->confirmed_counterparties_mode = 'mixed_legal';
+$mixed_legal = $counterparts->verify_and_save();
+pek_integration_assert( true === $mixed_legal['success'] && 1 === (int) ( $mixed_legal['diagnostic']['physical_rows'] ?? 0 ) && 1 === (int) ( $mixed_legal['diagnostic']['legal_entity_rows'] ?? 0 ) && 1 === (int) ( $mixed_legal['diagnostic']['matched_rows'] ?? 0 ), 'Mixed physical + legal counterparty list must verify configured legal entity.' );
+pek_integration_assert( '22222222-2222-4222-8222-222222222222' === $settings->sender_counterpart_guid(), 'Mixed legal verification must persist matched legal GUID, not physical GUID.' );
+pek_integration_assert_no_private_markers( $mixed_legal, 'Mixed legal verification result' );
+pek_integration_assert_no_private_markers( $settings->sender_counterpart_snapshot(), 'Mixed legal snapshot' );
+pek_integration_assert_no_private_markers( $GLOBALS['wdc_pek_integration_options'], 'Mixed legal options' );
+
+$http->confirmed_counterparties_mode = 'physical_malformed_optional';
+$physical_malformed_optional = $counterparts->verify_and_save();
+pek_integration_assert( true === $physical_malformed_optional['success'], 'Malformed optional fields inside official physical row must not poison relevant legal matching.' );
+pek_integration_assert_no_private_markers( $physical_malformed_optional, 'Physical optional skip result' );
+pek_integration_assert_no_private_markers( $settings->sender_counterpart_snapshot(), 'Physical optional skip snapshot' );
+
+$settings->save_from_admin( array_merge( $admin_base, array( PekSettings::SENDER_LEGAL_FORM_KEY => 2, PekSettings::SENDER_INN_KEY => '540000000000', PekSettings::SENDER_KPP_KEY => '' ) ) );
+$http->confirmed_counterparties_mode = 'mixed_ip';
+$mixed_ip = $counterparts->verify_and_save();
+pek_integration_assert( true === $mixed_ip['success'] && 1 === (int) ( $mixed_ip['diagnostic']['physical_rows'] ?? 0 ) && 1 === (int) ( $mixed_ip['diagnostic']['entrepreneur_rows'] ?? 0 ), 'Mixed physical + IP counterparty list must verify configured IP.' );
+pek_integration_assert_no_private_markers( $mixed_ip, 'Mixed IP verification result' );
+$settings->save_from_admin( $admin_base );
+
+$http->confirmed_counterparties_mode = 'physical_only';
+$physical_only = $counterparts->verify_and_save();
+pek_integration_assert( false === $physical_only['success'] && 'counterpart_match' === (string) ( $physical_only['diagnostic']['stage'] ?? '' ) && 'no_match' === (string) ( $physical_only['diagnostic']['reason'] ?? '' ) && 1 === (int) ( $physical_only['diagnostic']['physical_rows'] ?? 0 ), 'Physical-only counterparty list must be no-match, not contract failure.' );
+pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Physical-only verification failure must clear old counterpart snapshot.' );
+pek_integration_assert_no_private_markers( $physical_only, 'Physical-only result' );
+pek_integration_assert_no_private_markers( $GLOBALS['wdc_pek_integration_options'], 'Physical-only options' );
+
+foreach ( array( 'unknown_legal_form' => 'unsupported_legal_form', 'legal_form_string' => 'legal_form_type', 'legal_form_bool' => 'legal_form_type', 'malformed_after_physical' => 'legal_inn_type' ) as $mode => $reason ) {
+	$http->confirmed_counterparties_mode = 'success';
+	$counterparts->verify_and_save();
+	$http->confirmed_counterparties_mode = $mode;
+	$result = $counterparts->verify_and_save();
+	pek_integration_assert( false === $result['success'] && 'counterpart_contract' === (string) ( $result['diagnostic']['stage'] ?? '' ) && $reason === (string) ( $result['diagnostic']['reason'] ?? '' ), 'Counterpart contract failure must expose safe reason for mode ' . $mode );
+	pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Counterpart contract failure must clear old snapshot for mode ' . $mode );
+	pek_integration_assert_no_private_markers( $result, 'Counterpart contract failure result ' . $mode );
+}
+
+foreach ( array( 'no_match' => 'no_match', 'multiple_exact' => 'multiple_matches' ) as $mode => $reason ) {
+	$http->confirmed_counterparties_mode = 'success';
+	$counterparts->verify_and_save();
+	$http->confirmed_counterparties_mode = $mode;
+	$result = $counterparts->verify_and_save();
+	pek_integration_assert( false === $result['success'] && 'counterpart_match' === (string) ( $result['diagnostic']['stage'] ?? '' ) && $reason === (string) ( $result['diagnostic']['reason'] ?? '' ), 'Counterpart matching failure must expose safe reason for mode ' . $mode );
+	pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Counterpart matching failure must clear old snapshot for mode ' . $mode );
+}
+
+$http->confirmed_counterparties_mode = 'success';
+$counterparts->verify_and_save();
+$http->token_mode = 'private_marker_malformed';
+$token_failure = ( new PekSenderCounterpartService( $api, new PekPrivateAccessTokenService( $api ), $settings, $credentials ) )->verify_and_save();
+pek_integration_assert( false === $token_failure['success'] && 'private_token' === (string) ( $token_failure['diagnostic']['stage'] ?? '' ) && str_contains( (string) $token_failure['message'], 'private token' ), 'Private token failure must have a distinct safe stage/message.' );
+pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Private token failure must clear old counterpart snapshot.' );
+pek_integration_assert_no_private_markers( $token_failure, 'Private token failure result' );
+$http->token_mode = 'success';
+
+foreach ( array( 'http_failure' => 'counterpart_api', 'logical_error' => 'counterpart_logical' ) as $mode => $stage ) {
+	$http->confirmed_counterparties_mode = 'success';
+	$counterparts->verify_and_save();
+	$http->confirmed_counterparties_mode = $mode;
+	$result = $counterparts->verify_and_save();
+	pek_integration_assert( false === $result['success'] && $stage === (string) ( $result['diagnostic']['stage'] ?? '' ), 'Counterpart API/logical failure must expose distinct stage for mode ' . $mode );
+	pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Counterpart API/logical failure must clear old snapshot for mode ' . $mode );
+}
+
+$http->confirmed_counterparties_mode = 'success';
+$counterparts->verify_and_save();
 $http->confirmed_counterparties_mode = 'card_mismatch';
 $settings_repository->set( PekSettings::CLIENT_CARD_KEY, 'OTHER-REQUESTED-CARD' );
 $card_mismatch = $counterparts->verify_and_save();
@@ -1004,6 +1140,7 @@ pek_integration_assert( false === $counterparts->verify_and_save()['success'], '
 pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Malformed API KPP must clear counterpart verification.' );
 $http->confirmed_counterparties_mode = 'success';
 $counterparts->verify_and_save();
+$GLOBALS['wdc_pek_integration_transients'] = array();
 pek_integration_assert( isset( $before_login_guid ), 'Counterpart account-binding setup must keep local variables live.' );
 
 $order = new PekIntegrationOrder( 1001 );
@@ -1042,6 +1179,15 @@ $legacy_phone_preview = $creation->safe_preview( $request );
 $legacy_phone_external_after = array( pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
 pek_integration_assert( array() !== $legacy_phone_preview['errors'] && str_contains( (string) ( $legacy_phone_preview['errors'][0] ?? '' ), 'телефон отправителя' ) && $legacy_phone_external_before === $legacy_phone_external_after, 'Legacy malformed sender phone must block preview before private/SMS/submit calls and must not be cleaned into validity.' );
 $settings_repository->set( PekSettings::SENDER_PHONE_KEY, $good_sender_phone );
+$http->confirmed_counterparties_mode = 'physical_only';
+$failed_refresh = $counterparts->verify_and_save();
+pek_integration_assert( false === $failed_refresh['success'] && '' === $settings->sender_counterpart_guid(), 'Failed counterpart refresh must clear snapshot before preview.' );
+$failed_refresh_external_before = array( pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+$failed_refresh_preview = $creation->safe_preview( $request );
+$failed_refresh_external_after = array( pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+pek_integration_assert( array() !== $failed_refresh_preview['errors'] && $failed_refresh_external_before === $failed_refresh_external_after, 'Builder after failed counterpart verification must stop before private connected-services API and submit.' );
+$http->confirmed_counterparties_mode = 'success';
+$counterparts->verify_and_save();
 $snapshot = $settings->sender_counterpart_snapshot();
 $snapshot['account_login_hash'] = str_repeat( '0', 64 );
 $settings->save_sender_counterpart( '11111111-2222-3333-4444-555555555555', $snapshot );
