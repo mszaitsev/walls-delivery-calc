@@ -39,6 +39,8 @@ $pek_js = file_get_contents( $root . '/assets/admin/shipments/extensions/pek.js'
 
 pek_modal_assert( str_contains( $plugin, 'PekShipmentModalExtension::class' ), 'PEK modal extension must be registered.' );
 pek_modal_assert( str_contains( $modal, 'data-wdc-pek-sender-warehouse-id' ), 'Modal must expose carrier-owned sender warehouse override field.' );
+pek_modal_assert( str_contains( $modal, 'pek_sender_warehouse_default_id' ) && str_contains( $modal, 'pek_sender_warehouse_override_id' ) && str_contains( $modal, 'pek_sender_warehouse_override_source' ), 'Modal must distinguish settings default sender warehouse from shipment-local override.' );
+pek_modal_assert( str_contains( $modal, 'data-wdc-pek-sender-warehouse-context' ) && str_contains( $modal, 'data-latitude' ) && str_contains( $modal, 'data-longitude' ), 'Modal must pass safe current sender warehouse context to the picker.' );
 pek_modal_assert( str_contains( $modal, 'recipient_type' ) && str_contains( $modal, 'physical' ), 'Modal must show physical recipient mode.' );
 pek_modal_assert( ! str_contains( strtolower( $modal ), 'passport' ) && ! str_contains( $modal, 'identityCard' ), 'Modal must not request passport/identityCard.' );
 pek_modal_assert( str_contains( $metabox, 'extensions/pek.js' ), 'PEK JS extension must be enqueued through extension chain.' );

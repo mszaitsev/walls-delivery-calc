@@ -11,11 +11,16 @@
       return;
     }
     var idField = root.querySelector('[data-wdc-pek-sender-warehouse-id]');
+    var sourceField = root.querySelector('[data-wdc-pek-sender-warehouse-source]');
+    var context = root.querySelector('[data-wdc-pek-sender-warehouse-context]');
     var title = root.querySelector('[data-wdc-pek-sender-warehouse-title]');
     var address = root.querySelector('[data-wdc-pek-sender-warehouse-address]');
     if (idField && warehouse.warehouseId) {
       idField.value = warehouse.warehouseId;
       idField.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (sourceField && warehouse.warehouseId) {
+      sourceField.value = 'shipment_modal_override';
     }
     if (title) {
       title.textContent = warehouse.title || warehouse.divisionName || warehouse.branchName || warehouse.warehouseId || '';
@@ -23,56 +28,79 @@
     if (address) {
       address.textContent = warehouse.address || '';
     }
+    if (context) {
+      context.setAttribute('data-warehouse-id', warehouse.warehouseId || '');
+      context.setAttribute('data-branch-title', warehouse.branchName || '');
+      context.setAttribute('data-division-title', warehouse.divisionName || warehouse.title || '');
+      context.setAttribute('data-address', warehouse.address || '');
+      context.setAttribute('data-latitude', warehouse.latitude || warehouse.lat || '');
+      context.setAttribute('data-longitude', warehouse.longitude || warehouse.lng || '');
+    }
     root.dispatchEvent(new CustomEvent('wdc:shipment-carrier-field-change', {
       bubbles: true,
       detail: { carrier: 'pek', field: 'sender_warehouse' }
     }));
   }
 
-  function senderWarehouseContext(form) {
+  function senderWarehouseContext(form, root) {
+    var holder = root && root.querySelector ? root.querySelector('[data-wdc-pek-sender-warehouse-context]') : null;
+    var data = holder ? holder.dataset : {};
+    var city = data.divisionTitle || data.branchTitle || '';
+    var address = data.address || '';
     return {
       carrierKey: 'pek',
       serviceKey: 'pek',
       pickupFamily: 'pek:sender_warehouse',
       countryCode: 'RU',
-      address: '',
-      purpose: 'sender_warehouse'
+      purpose: 'sender_warehouse',
+      city: city,
+      address: address,
+      lat: data.latitude || '',
+      lng: data.longitude || '',
+      warehouseId: data.warehouseId || ''
     };
+  }
+
+  function openSenderWarehousePicker(root, button) {
+    var picker = window.wdcShipmentPickupPicker;
+    var form = (button && button.closest && button.closest('form')) || (root && root.querySelector && root.querySelector('form')) || root || document;
+    if (!picker || typeof picker.open !== 'function') {
+      return true;
+    }
+    picker.open(form, {
+      sender: true,
+      title: 'Выбор склада самопривоза ПЭК',
+      entitySingular: 'склад',
+      entityPlural: 'Склады ПЭК',
+      confirmText: 'Выбрать этот склад',
+      selectText: 'Выберите склад',
+      emptyText: 'Склады ПЭК не найдены',
+      codeLabel: 'Warehouse ID',
+      context: senderWarehouseContext(form, root),
+      onChoose: function (point) {
+        updateWarehouseCard(root, {
+          warehouseId: point.warehouseId || point.point_code || point.code || '',
+          title: point.display_title || point.point_title || point.address || '',
+          branchName: point.branchName || point.branch_title || '',
+          divisionName: point.divisionName || point.division_title || '',
+          address: point.address || '',
+          latitude: point.latitude || point.lat || '',
+          longitude: point.longitude || point.lng || ''
+        });
+      }
+    });
+    return true;
   }
 
   register({
     carrierKey: 'pek',
-    onModalReady: function (context) {
-      var root = context && context.root ? context.root : document;
-      var button = root.querySelector('[data-wdc-pek-open-sender-warehouse-picker]');
+    handleClick: function (event) {
+      var button = event && event.target && event.target.closest ? event.target.closest('[data-wdc-pek-open-sender-warehouse-picker]') : null;
       if (!button) {
-        return;
+        return false;
       }
-      button.addEventListener('click', function () {
-        var picker = window.wdcShipmentPickupPicker;
-        var form = button.closest('form') || root.querySelector('form') || root;
-        if (!picker || typeof picker.open !== 'function') {
-          return;
-        }
-        picker.open(form, {
-          sender: true,
-          title: 'Выбор склада самопривоза ПЭК',
-          entitySingular: 'склад',
-          entityPlural: 'Склады ПЭК',
-          confirmText: 'Выбрать этот склад',
-          selectText: 'Выберите склад',
-          emptyText: 'Склады ПЭК не найдены',
-          codeLabel: 'Warehouse ID',
-          context: senderWarehouseContext(form),
-          onChoose: function (point) {
-            updateWarehouseCard(root, {
-              warehouseId: point.warehouseId || point.point_code || point.code || '',
-              title: point.display_title || point.point_title || point.address || '',
-              address: point.address || ''
-            });
-          }
-        });
-      });
+      event.preventDefault();
+      return openSenderWarehousePicker(button.closest('[data-wdc-shipment-modal]') || button.closest('form') || document, button);
     },
     onCarrierData: function (context) {
       if (!context || context.carrier !== 'pek') {

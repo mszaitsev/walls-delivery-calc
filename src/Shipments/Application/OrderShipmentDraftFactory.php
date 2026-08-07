@@ -161,7 +161,7 @@ final class OrderShipmentDraftFactory {
 		if ( PekSettings::CARRIER_KEY === $request->carrier_key ) {
 			return array(
 				'request' => $request->to_array(),
-				'services' => array(),
+				'services' => $this->pek_service_variants( $request ),
 				'postoffice_codes' => array(),
 				'modal_capabilities' => array(
 					'requires_tariff' => false,
@@ -751,6 +751,10 @@ final class OrderShipmentDraftFactory {
 	}
 
 	private function create_pek_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
+		$posted_delivery_type = sanitize_key( wp_unslash( $data['delivery_type'] ?? '' ) );
+		if ( '' !== $posted_delivery_type && $posted_delivery_type !== $base->delivery_type ) {
+			throw new \RuntimeException( 'Сценарий доставки ПЭК изменился. Обновите страницу заказа.' );
+		}
 		$places = array();
 		$place_rows = is_array( $data['places'] ?? null ) ? $data['places'] : array();
 		foreach ( $place_rows as $index => $row ) {
@@ -768,7 +772,25 @@ final class OrderShipmentDraftFactory {
 			);
 		}
 		$recipient_type = sanitize_key( wp_unslash( $data['recipient_type'] ?? 'physical' ) );
-		$sender_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_id'] ?? '' ) );
+		$override_source = sanitize_key( wp_unslash( $data['pek_sender_warehouse_override_source'] ?? '' ) );
+		$default_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_default_id'] ?? '' ) );
+		$sender_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_override_id'] ?? '' ) );
+		if ( '' === $sender_warehouse_id ) {
+			$legacy_sender_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_id'] ?? '' ) );
+			if ( '' !== $legacy_sender_warehouse_id && ( 'shipment_modal_override' === $override_source || $legacy_sender_warehouse_id !== $default_warehouse_id ) ) {
+				$sender_warehouse_id = $legacy_sender_warehouse_id;
+			}
+		}
+		$meta = array_merge(
+			$base->meta,
+			array(
+				'recipient_type' => 'physical' === $recipient_type ? 'physical' : 'unsupported',
+			)
+		);
+		if ( '' !== $sender_warehouse_id ) {
+			$meta['pek_sender_warehouse_id'] = $sender_warehouse_id;
+			$meta['pek_sender_warehouse_source'] = 'shipment_modal_override';
+		}
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
@@ -782,13 +804,7 @@ final class OrderShipmentDraftFactory {
 			true,
 			array(),
 			$base->recipient,
-			array_merge(
-				$base->meta,
-				array(
-					'recipient_type' => 'physical' === $recipient_type ? 'physical' : 'unsupported',
-					'pek_sender_warehouse_id' => $sender_warehouse_id,
-				)
-			)
+			$meta
 		);
 	}
 
@@ -1721,6 +1737,23 @@ final class OrderShipmentDraftFactory {
 				'title' => $courier_title,
 				'delivery_type' => DeliveryType::COURIER,
 				'tariffs' => $this->dpd_tariff_options( $request ),
+			),
+		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function pek_service_variants( ShipmentCreateRequest $request ): array {
+		$delivery_type = DeliveryType::COURIER === $request->delivery_type ? DeliveryType::COURIER : DeliveryType::PICKUP;
+
+		return array(
+			array(
+				'service_key' => PekSettings::SERVICE_KEY,
+				'group_id' => DeliveryType::COURIER === $delivery_type ? PekSettings::COURIER_RATE_ID : PekSettings::PICKUP_RATE_ID,
+				'title' => DeliveryType::COURIER === $delivery_type ? 'ПЭК курьером' : 'ПЭК до терминала',
+				'delivery_type' => $delivery_type,
+				'tariffs' => array(),
 			),
 		);
 	}

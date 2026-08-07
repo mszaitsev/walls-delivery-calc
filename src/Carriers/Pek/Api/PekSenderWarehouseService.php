@@ -112,29 +112,48 @@ final class PekSenderWarehouseService {
 		}
 	}
 
-	/** @return array{success:bool,message:string,snapshot:array<string,mixed>} */
+	/** @return array{success:bool,message:string,snapshot:array<string,mixed>,diagnostic:array<string,mixed>} */
 	public function validate_snapshot( string $warehouse_id, ?PickupCargoConstraints $constraints = null ): array {
 		$warehouse_id = trim( $warehouse_id );
+		$diagnostic = $this->validation_diagnostic( 'empty_warehouse_id' );
 		if ( '' === $warehouse_id ) {
-			return array( 'success' => false, 'message' => 'Не выбран склад самопривоза ПЭК.', 'snapshot' => array() );
+			return array( 'success' => false, 'message' => 'Не выбран склад самопривоза ПЭК.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 		}
 		try {
 			$branches = $this->api->branches_all_for_warehouse( $warehouse_id );
 			$item = $this->find_warehouse_in_branches_all( $branches, $warehouse_id );
-			if ( array() === $item || ! $this->supports_ltl_pickup( $item ) ) {
-				return array( 'success' => false, 'message' => 'ПЭК не подтвердил выбранный warehouse ID как склад приёма для LTL.', 'snapshot' => array() );
+			$diagnostic = $this->diagnostic_from_item( $item );
+			if ( array() === $item ) {
+				$diagnostic['reason'] = 'warehouse_not_found';
+				return array( 'success' => false, 'message' => 'ПЭК не подтвердил warehouse ID склада самопривоза.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+			}
+			$ltl = $this->ltl_pickup_status( $item );
+			$diagnostic['ltl_type_present'] = $ltl['ltl_type_present'];
+			$diagnostic['acceptance_operation_present'] = $ltl['acceptance_operation_present'];
+			if ( ! $ltl['success'] ) {
+				$diagnostic['reason'] = $ltl['reason'];
+				return array( 'success' => false, 'message' => 'Выбранный склад ПЭК не принимает LTL-грузы.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 			}
 			$availability = $this->availability_status( $item );
 			if ( ! $availability['success'] ) {
-				return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => array() );
+				$diagnostic['reason'] = '' !== $availability['code'] ? $availability['code'] : 'availability_mismatch';
+				$diagnostic['availability_match'] = false;
+				return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => array(), 'diagnostic' => $diagnostic );
 			}
 			if ( $constraints instanceof PickupCargoConstraints && ! $this->fits_constraints( $item, $constraints ) ) {
-				return array( 'success' => false, 'message' => 'Склад ПЭК не принимает текущие габариты или количество мест.', 'snapshot' => array() );
+				$diagnostic['reason'] = 'constraints_mismatch';
+				$diagnostic['constraints_match'] = false;
+				return array( 'success' => false, 'message' => 'Склад ПЭК не принимает текущие габариты или количество мест.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 			}
 
-			return array( 'success' => true, 'message' => 'Склад ПЭК подтверждён.', 'snapshot' => $this->snapshot( $item ) );
-		} catch ( PekApiException ) {
-			return array( 'success' => false, 'message' => 'Не удалось подтвердить склад ПЭК.', 'snapshot' => array() );
+			$diagnostic['reason'] = '';
+			return array( 'success' => true, 'message' => 'Склад ПЭК подтверждён.', 'snapshot' => $this->snapshot( $item ), 'diagnostic' => $diagnostic );
+		} catch ( PekApiException $exception ) {
+			$context = $exception->context();
+			$diagnostic = $this->validation_diagnostic( is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'api_error' );
+			$diagnostic['http_status'] = $context['http_status'] ?? $this->api->last_response_meta()['http_status'];
+
+			return array( 'success' => false, 'message' => 'Не удалось повторно проверить склад самопривоза ПЭК.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 		}
 	}
 
@@ -180,6 +199,9 @@ final class PekSenderWarehouseService {
 			'endOfCostCalculationAvailability' => $row['endOfCostCalculationAvailability'] ?? null,
 			'departmentClosingDate' => $row['departmentClosingDate'] ?? null,
 			'kindsOfTransportation' => is_array( $row['kindsOfTransportation'] ?? null ) ? $row['kindsOfTransportation'] : array(),
+			'divisionCapabilitiesPresent' => true === ( $row['divisionCapabilitiesPresent'] ?? false ),
+			'warehouseCapabilitiesPresent' => true === ( $row['warehouseCapabilitiesPresent'] ?? false ),
+			'effectiveCapabilitySource' => in_array( (string) ( $row['effectiveCapabilitySource'] ?? '' ), array( 'division', 'warehouse', 'none' ), true ) ? (string) $row['effectiveCapabilitySource'] : 'none',
 			'types' => is_array( $row['types'] ?? null ) ? $row['types'] : array(),
 		);
 	}
@@ -232,7 +254,17 @@ final class PekSenderWarehouseService {
 		if ( ! is_array( $branch ) || ! is_array( $division ) || ! is_array( $warehouse ) ) {
 			return array();
 		}
+		$division_has_capabilities = array_key_exists( 'kindsOfTransportation', $division );
 		$warehouse_has_capabilities = array_key_exists( 'kindsOfTransportation', $warehouse );
+		$effective_capabilities = array();
+		$effective_capability_source = 'none';
+		if ( $division_has_capabilities ) {
+			$effective_capabilities = is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array();
+			$effective_capability_source = 'division';
+		} elseif ( $warehouse_has_capabilities ) {
+			$effective_capabilities = is_array( $warehouse['kindsOfTransportation'] ?? null ) ? $warehouse['kindsOfTransportation'] : array();
+			$effective_capability_source = 'warehouse';
+		}
 
 		return $this->normalize_department(
 			array_merge(
@@ -247,7 +279,10 @@ final class PekSenderWarehouseService {
 					'address' => (string) ( trim( (string) ( $warehouse['addressDivision'] ?? '' ) ) !== '' ? $warehouse['addressDivision'] : ( $warehouse['address'] ?? '' ) ),
 					'coordinates' => is_array( $warehouse['coordinatesobj'] ?? null ) ? $warehouse['coordinatesobj'] : array(),
 					'branchTimezone' => $branch['timezone'] ?? null,
-					'kindsOfTransportation' => $warehouse_has_capabilities ? ( is_array( $warehouse['kindsOfTransportation'] ?? null ) ? $warehouse['kindsOfTransportation'] : array() ) : ( is_array( $division['kindsOfTransportation'] ?? null ) ? $division['kindsOfTransportation'] : array() ),
+					'kindsOfTransportation' => $effective_capabilities,
+					'divisionCapabilitiesPresent' => $division_has_capabilities,
+					'warehouseCapabilitiesPresent' => $warehouse_has_capabilities,
+					'effectiveCapabilitySource' => $effective_capability_source,
 				)
 			),
 			'branches_all',
@@ -322,24 +357,47 @@ final class PekSenderWarehouseService {
 
 	/** @param array<string,mixed> $item */
 	private function supports_ltl_pickup( array $item ): bool {
+		return $this->ltl_pickup_status( $item )['success'];
+	}
+
+	/** @param array<string,mixed> $item @return array{success:bool,reason:string,ltl_type_present:bool,acceptance_operation_present:bool} */
+	private function ltl_pickup_status( array $item ): array {
 		if ( '' === (string) ( $item['warehouseId'] ?? '' ) ) {
-			return false;
+			return array( 'success' => false, 'reason' => 'warehouse_id_missing', 'ltl_type_present' => false, 'acceptance_operation_present' => false );
 		}
-		$types = array_map( 'intval', is_array( $item['types'] ?? null ) ? $item['types'] : array() );
+		$types = array();
+		foreach ( is_array( $item['types'] ?? null ) ? $item['types'] : array() as $type ) {
+			if ( ! is_int( $type ) ) {
+				return array( 'success' => false, 'reason' => 'warehouse_type_contract', 'ltl_type_present' => false, 'acceptance_operation_present' => false );
+			}
+			$types[] = $type;
+		}
 		$type_ok = array() === $types || in_array( PekSettings::LTL_PRODUCT_TYPE, $types, true );
 		$kinds = is_array( $item['kindsOfTransportation'] ?? null ) ? $item['kindsOfTransportation'] : array();
 		foreach ( $kinds as $kind ) {
-			if ( ! is_array( $kind ) || PekSettings::LTL_PRODUCT_TYPE !== (int) ( $kind['type'] ?? 0 ) ) {
+			if ( ! is_array( $kind ) || array_is_list( $kind ) || ! array_key_exists( 'type', $kind ) || ! is_int( $kind['type'] ) ) {
+				return array( 'success' => false, 'reason' => 'capability_contract', 'ltl_type_present' => false, 'acceptance_operation_present' => false );
+			}
+			if ( PekSettings::LTL_PRODUCT_TYPE !== $kind['type'] ) {
 				continue;
 			}
-			foreach ( is_array( $kind['operations'] ?? null ) ? $kind['operations'] : array() as $operation ) {
-				if ( $this->is_cargo_acceptance_operation( (string) $operation ) ) {
-					return $type_ok;
+			$operations = $kind['operations'] ?? null;
+			if ( ! is_array( $operations ) || ! array_is_list( $operations ) ) {
+				return array( 'success' => false, 'reason' => 'capability_contract', 'ltl_type_present' => true, 'acceptance_operation_present' => false );
+			}
+			foreach ( $operations as $operation ) {
+				if ( ! is_string( $operation ) ) {
+					return array( 'success' => false, 'reason' => 'capability_contract', 'ltl_type_present' => true, 'acceptance_operation_present' => false );
+				}
+				if ( $this->is_cargo_acceptance_operation( $operation ) ) {
+					return array( 'success' => $type_ok, 'reason' => $type_ok ? '' : 'warehouse_type_mismatch', 'ltl_type_present' => true, 'acceptance_operation_present' => true );
 				}
 			}
+
+			return array( 'success' => false, 'reason' => 'acceptance_operation_missing', 'ltl_type_present' => true, 'acceptance_operation_present' => false );
 		}
 
-		return false;
+		return array( 'success' => false, 'reason' => 'ltl_type_missing', 'ltl_type_present' => false, 'acceptance_operation_present' => false );
 	}
 
 	private function is_cargo_acceptance_operation( string $operation ): bool {
@@ -367,6 +425,40 @@ final class PekSenderWarehouseService {
 		}
 
 		return true;
+	}
+
+	/** @return array<string,mixed> */
+	private function validation_diagnostic( string $reason ): array {
+		return array(
+			'stage' => 'sender_warehouse_validation',
+			'reason' => $reason,
+			'endpoint' => '/branches/all/',
+			'http_status' => '',
+			'warehouse_found' => false,
+			'division_capabilities_present' => false,
+			'warehouse_capabilities_present' => false,
+			'effective_capability_source' => 'none',
+			'ltl_type_present' => false,
+			'acceptance_operation_present' => false,
+			'constraints_match' => true,
+			'availability_match' => true,
+		);
+	}
+
+	/** @param array<string,mixed> $item @return array<string,mixed> */
+	private function diagnostic_from_item( array $item ): array {
+		$diagnostic = $this->validation_diagnostic( '' );
+		if ( array() === $item ) {
+			return $diagnostic;
+		}
+		$diagnostic['http_status'] = $this->api->last_response_meta()['http_status'];
+		$diagnostic['warehouse_found'] = true;
+		$diagnostic['division_capabilities_present'] = true === ( $item['divisionCapabilitiesPresent'] ?? false );
+		$diagnostic['warehouse_capabilities_present'] = true === ( $item['warehouseCapabilitiesPresent'] ?? false );
+		$source = (string) ( $item['effectiveCapabilitySource'] ?? 'none' );
+		$diagnostic['effective_capability_source'] = in_array( $source, array( 'division', 'warehouse', 'none' ), true ) ? $source : 'none';
+
+		return $diagnostic;
 	}
 
 	/** @param array<string,mixed> $item @return array{success:bool,code:string,message:string} */

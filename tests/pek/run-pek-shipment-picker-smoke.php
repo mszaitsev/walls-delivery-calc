@@ -17,8 +17,11 @@ pek_picker_assert( str_contains( $generic, 'window.wdcShipmentPickupPicker' ), '
 pek_picker_assert( str_contains( $generic, 'open: function (form, options)' ), 'Generic shipment picker API must expose open(form, options).' );
 pek_picker_assert( ! str_contains( $generic, "carrier === 'pek'" ) && ! str_contains( $generic, 'carrier === "pek"' ), 'Generic picker must not contain a PEK carrier branch.' );
 pek_picker_assert( str_contains( $pek, 'window.wdcShipmentPickupPicker' ) && str_contains( $pek, "typeof picker.open !== 'function'" ) && str_contains( $pek, 'picker.open(form' ), 'PEK extension must consume the generic picker API.' );
+pek_picker_assert( str_contains( $pek, 'handleClick: function (event)' ) && str_contains( $pek, 'data-wdc-pek-open-sender-warehouse-picker' ), 'PEK sender warehouse picker must be opened through the carrier handleClick hook.' );
+pek_picker_assert( ! str_contains( $pek, 'addEventListener(\'click\'' ) && ! str_contains( $pek, 'addEventListener("click"' ), 'PEK sender warehouse picker must not depend exclusively on onModalReady click listeners.' );
 pek_picker_assert( str_contains( $pek, "purpose: 'sender_warehouse'" ) || str_contains( $pek, 'purpose: "sender_warehouse"' ), 'PEK picker request must mark sender warehouse purpose.' );
 pek_picker_assert( str_contains( $pek, "carrierKey: 'pek'" ) || str_contains( $pek, 'carrierKey: "pek"' ), 'PEK picker context must include carrier key.' );
+pek_picker_assert( str_contains( $pek, 'data-wdc-pek-sender-warehouse-context' ) && str_contains( $pek, 'data.latitude' ) && str_contains( $pek, 'data.longitude' ), 'PEK picker context must carry current sender warehouse address and coordinates.' );
 pek_picker_assert( str_contains( $generic, 'entitySingular' ) && str_contains( $generic, 'emptyText' ) && str_contains( $generic, 'codeLabel' ), 'Generic picker must accept carrier-owned wording options.' );
 pek_picker_assert( str_contains( $pek, "entitySingular: 'склад'" ) && str_contains( $pek, "confirmText: 'Выбрать этот склад'" ) && str_contains( $pek, "emptyText: 'Склады ПЭК не найдены'" ) && str_contains( $pek, "codeLabel: 'Warehouse ID'" ), 'PEK sender warehouse picker must use warehouse wording.' );
 pek_picker_assert( str_contains( $pek, 'wdc:shipment-carrier-field-change' ), 'PEK picker selection must emit generic shipment carrier field-change event.' );

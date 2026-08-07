@@ -39,6 +39,7 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 		return array(
 			'default_sender_warehouse' => $warehouse,
 			'current_sender_warehouse_id' => (string) ( $meta['pek_sender_warehouse_id'] ?? $warehouse['warehouseId'] ?? '' ),
+			'current_sender_warehouse_source' => (string) ( $meta['pek_sender_warehouse_source'] ?? '' ),
 			'receiver_warehouse_id' => (string) ( $meta['pek_receiver_warehouse_id'] ?? $meta['pickup_point_code'] ?? '' ),
 			'receiver_branch_id' => (string) ( $meta['pek_receiver_branch_id'] ?? '' ),
 			'destination_location_id' => (int) ( $meta['pek_destination_location_id'] ?? 0 ),
@@ -59,13 +60,30 @@ final class PekShipmentModalExtension implements CarrierShipmentModalExtensionIn
 	public function render_fields( object $order, array $draft, array $context ): void {
 		unset( $order, $draft );
 		$warehouse = is_array( $context['default_sender_warehouse'] ?? null ) ? $context['default_sender_warehouse'] : array();
+		$coordinates = is_array( $warehouse['coordinates'] ?? null ) ? $warehouse['coordinates'] : array();
+		$current_id = (string) ( $context['current_sender_warehouse_id'] ?? '' );
+		$default_id = (string) ( $warehouse['warehouseId'] ?? '' );
+		$current_source = (string) ( $context['current_sender_warehouse_source'] ?? '' );
+		$override_id = 'shipment_modal_override' === $current_source ? $current_id : '';
 		?>
 		<p><strong><?php echo esc_html__( 'Получатель', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html__( 'физическое лицо, выдача по СМС', 'walls-delivery-calc' ); ?></p>
 		<input type="hidden" name="recipient_type" value="physical">
-		<input type="hidden" name="pek_sender_warehouse_id" value="<?php echo esc_attr( (string) ( $context['current_sender_warehouse_id'] ?? '' ) ); ?>" data-wdc-pek-sender-warehouse-id>
-		<p><strong><?php echo esc_html__( 'Склад самопривоза ПЭК', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pek-sender-warehouse-title><?php echo esc_html( (string) ( $warehouse['divisionName'] ?? $warehouse['branchName'] ?? '-' ) ); ?></span></p>
-		<p class="description" data-wdc-pek-sender-warehouse-address><?php echo esc_html( (string) ( $warehouse['address'] ?? '' ) ); ?></p>
-		<p><button type="button" class="button" data-wdc-pek-open-sender-warehouse-picker><?php echo esc_html__( 'Выбрать другой склад ПЭК', 'walls-delivery-calc' ); ?></button></p>
+		<input type="hidden" name="pek_sender_warehouse_default_id" value="<?php echo esc_attr( $default_id ); ?>" data-wdc-pek-sender-warehouse-default-id>
+		<input type="hidden" name="pek_sender_warehouse_override_id" value="<?php echo esc_attr( $override_id ); ?>" data-wdc-pek-sender-warehouse-id>
+		<input type="hidden" name="pek_sender_warehouse_override_source" value="<?php echo esc_attr( '' !== $override_id ? 'shipment_modal_override' : '' ); ?>" data-wdc-pek-sender-warehouse-source>
+		<div
+			data-wdc-pek-sender-warehouse-context
+			data-warehouse-id="<?php echo esc_attr( $current_id ); ?>"
+			data-branch-title="<?php echo esc_attr( (string) ( $warehouse['branchName'] ?? '' ) ); ?>"
+			data-division-title="<?php echo esc_attr( (string) ( $warehouse['divisionName'] ?? '' ) ); ?>"
+			data-address="<?php echo esc_attr( (string) ( $warehouse['address'] ?? '' ) ); ?>"
+			data-latitude="<?php echo esc_attr( (string) ( $coordinates['latitude'] ?? '' ) ); ?>"
+			data-longitude="<?php echo esc_attr( (string) ( $coordinates['longitude'] ?? '' ) ); ?>"
+		>
+			<p><strong><?php echo esc_html__( 'Склад самопривоза ПЭК', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pek-sender-warehouse-title><?php echo esc_html( (string) ( $warehouse['divisionName'] ?? $warehouse['branchName'] ?? '-' ) ); ?></span></p>
+			<p class="description" data-wdc-pek-sender-warehouse-address><?php echo esc_html( (string) ( $warehouse['address'] ?? '' ) ); ?></p>
+			<p><button type="button" class="button" data-wdc-pek-open-sender-warehouse-picker><?php echo esc_html__( 'Выбрать другой склад ПЭК', 'walls-delivery-calc' ); ?></button></p>
+		</div>
 		<p class="description"><?php echo esc_html__( 'Страхование и выдача по СМС обязательны; объявленная стоимость берётся из товарных строк заказа.', 'walls-delivery-calc' ); ?></p>
 		<?php
 	}

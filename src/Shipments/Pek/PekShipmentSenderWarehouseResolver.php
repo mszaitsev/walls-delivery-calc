@@ -25,7 +25,7 @@ final class PekShipmentSenderWarehouseResolver {
 			$result = $this->warehouses->validate_snapshot( $override, $this->constraints( $request ) );
 			$snapshot = is_array( $result['snapshot'] ?? null ) ? $result['snapshot'] : array();
 			if ( empty( $result['success'] ) || array() === $snapshot ) {
-				throw new \RuntimeException( 'ПЭК не подтвердил выбранный склад самопривоза.' );
+				throw new \RuntimeException( $this->validation_message( $result, 'ПЭК не подтвердил выбранный склад самопривоза.' ) );
 			}
 			$snapshot['source'] = 'shipment_modal_override';
 
@@ -36,13 +36,14 @@ final class PekShipmentSenderWarehouseResolver {
 		if ( array() === $snapshot ) {
 			throw new \RuntimeException( 'В настройках ПЭК не выбран склад самопривоза отправителя.' );
 		}
+		$default_source = (string) ( $snapshot['source'] ?? 'settings_default' );
 		$result = $this->warehouses->validate_snapshot( (string) ( $snapshot['warehouseId'] ?? '' ), $this->constraints( $request ) );
 		$fresh = is_array( $result['snapshot'] ?? null ) ? $result['snapshot'] : array();
 		if ( empty( $result['success'] ) || array() === $fresh ) {
-			throw new \RuntimeException( 'ПЭК не подтвердил склад самопривоза из настроек.' );
+			throw new \RuntimeException( $this->validation_message( $result, 'ПЭК не подтвердил склад самопривоза из настроек.' ) );
 		}
 		$snapshot = $fresh;
-		$snapshot['source'] = (string) ( $snapshot['source'] ?? 'settings_default' );
+		$snapshot['source'] = '' !== $default_source ? $default_source : 'settings_default';
 
 		return $this->assert_limits( $snapshot, $request );
 	}
@@ -67,6 +68,13 @@ final class PekShipmentSenderWarehouseResolver {
 		$this->limit( $limits['maxCount'] ?? null, count( $request->places ), 'Количество грузомест превышает лимит склада ПЭК.' );
 
 		return $warehouse;
+	}
+
+	/** @param array<string,mixed> $result */
+	private function validation_message( array $result, string $fallback ): string {
+		$message = trim( (string) ( $result['message'] ?? '' ) );
+
+		return '' !== $message ? $message : $fallback;
 	}
 
 	private function limit( mixed $limit, float|int $value, string $message ): void {
