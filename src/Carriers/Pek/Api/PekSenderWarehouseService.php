@@ -23,11 +23,15 @@ final class PekSenderWarehouseService {
 		if ( '' === $address ) {
 			return array( 'success' => false, 'message' => 'Введите адрес для поиска склада ПЭК.', 'items' => array(), 'requested' => array() );
 		}
-		$response = $this->api->nearest_departments( $address );
-		$items = array_merge(
-			$this->normalize_department_list( is_array( $response['freeDepartments'] ?? null ) ? $response['freeDepartments'] : array(), 'free' ),
-			$this->normalize_department_list( is_array( $response['paidDepartments'] ?? null ) ? $response['paidDepartments'] : array(), 'paid' )
+		$payload = $this->constraints_payload( $constraints );
+		$response = $this->api->nearest_departments(
+			$address,
+			$payload['weight'],
+			$payload['volume'],
+			$payload['maxDimension'],
+			$payload['maxWeightPerPlace']
 		);
+		$items = $this->normalize_department_list( is_array( $response['freeDepartments'] ?? null ) ? $response['freeDepartments'] : array(), 'free' );
 		if ( $constraints instanceof PickupCargoConstraints ) {
 			$items = array_values( array_filter( $items, fn( array $item ): bool => $this->fits_constraints( $item, $constraints ) ) );
 		}
@@ -41,6 +45,7 @@ final class PekSenderWarehouseService {
 				'type' => PekSettings::LTL_PRODUCT_TYPE,
 				'searchRadius' => $this->settings->warehouse_search_radius(),
 				'limit' => $this->settings->warehouse_search_limit(),
+				'constraintsFingerprint' => $this->constraints_fingerprint( $constraints ),
 			),
 			'checked_at' => $this->now(),
 		);
@@ -97,21 +102,9 @@ final class PekSenderWarehouseService {
 			if ( $cached['success'] ) {
 				return $cached;
 			}
-			$lookup = $this->lookup_warehouse_in_branches_all( $warehouse_id );
-			$item = $lookup['item'];
-			if ( array() === $item || ! $this->supports_ltl_pickup( $item ) ) {
-				$this->settings->save_sender_warehouse( $previous );
-				return array( 'success' => false, 'message' => 'ПЭК не подтвердил выбранный warehouse ID как склад приёма для LTL.', 'snapshot' => $previous );
-			}
-			$availability = $this->availability_status( $item );
-			if ( ! $availability['success'] ) {
-				$this->settings->save_sender_warehouse( $previous );
-				return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => $previous );
-			}
-			$snapshot = $this->snapshot( $item );
-			$this->settings->save_sender_warehouse( $snapshot );
+			$this->settings->save_sender_warehouse( $previous );
 
-			return array( 'success' => true, 'message' => 'Склад самопривоза ПЭК подтверждён и сохранён.', 'snapshot' => $snapshot );
+			return array( 'success' => false, 'message' => $cached['message'], 'snapshot' => $previous );
 		} catch ( PekApiException $exception ) {
 			$this->settings->save_sender_warehouse( $previous );
 
@@ -120,49 +113,174 @@ final class PekSenderWarehouseService {
 	}
 
 	/** @return array{success:bool,message:string,snapshot:array<string,mixed>,diagnostic:array<string,mixed>} */
-	public function validate_snapshot( string $warehouse_id, ?PickupCargoConstraints $constraints = null ): array {
+	public function validate_snapshot( string $warehouse_id, ?PickupCargoConstraints $constraints = null, string $trusted_address = '' ): array {
 		$raw_warehouse_id = $warehouse_id;
 		$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
-		$diagnostic = $this->validation_diagnostic( '' === trim( $raw_warehouse_id ) ? 'empty_warehouse_id' : 'invalid_warehouse_id' );
+		$diagnostic = $this->validation_diagnostic( '' === trim( $raw_warehouse_id ) ? 'empty_warehouse_id' : 'invalid_warehouse_id', 'nearest_fresh_revalidation', $warehouse_id, $trusted_address, $constraints );
 		if ( '' === $warehouse_id ) {
 			return array( 'success' => false, 'message' => 'Не выбран склад самопривоза ПЭК.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 		}
+		$cached = $this->validate_cached_selection( $warehouse_id, $constraints );
+		if ( null !== $cached ) {
+			if ( ! empty( $cached['success'] ) || '' === trim( $trusted_address ) ) {
+				return $cached;
+			}
+		}
+		if ( '' === trim( $trusted_address ) ) {
+			$diagnostic['reason'] = 'stale_modal_selection';
+
+			return array( 'success' => false, 'message' => 'Выбранный склад ПЭК нужно подтвердить повторно. Выберите его ещё раз.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+		}
+
+		return $this->validate_for_shipment( $warehouse_id, $trusted_address, $constraints );
+	}
+
+	/** @return array{success:bool,message:string,snapshot:array<string,mixed>,diagnostic:array<string,mixed>} */
+	public function validate_for_shipment( string $warehouse_id, string $address, ?PickupCargoConstraints $constraints = null ): array {
+		$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
+		$address = trim( $address );
+		$diagnostic = $this->validation_diagnostic( '' === $warehouse_id ? 'invalid_warehouse_id' : '', 'nearest_fresh_revalidation', $warehouse_id, $address, $constraints );
+		if ( '' === $warehouse_id ) {
+			return array( 'success' => false, 'message' => 'Не выбран склад самопривоза ПЭК.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+		}
+		if ( '' === $address ) {
+			$diagnostic['reason'] = 'missing_trusted_address';
+
+			return array( 'success' => false, 'message' => 'Не удалось повторно подтвердить выбранный склад ПЭК. Выберите склад ещё раз.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+		}
+
 		try {
-			$lookup = $this->lookup_warehouse_in_branches_all( $warehouse_id );
-			$item = $lookup['item'];
-			$diagnostic = $this->diagnostic_from_lookup( $lookup, $warehouse_id );
-			if ( array() === $item ) {
-				$diagnostic['reason'] = 'warehouse_not_found';
-				return array( 'success' => false, 'message' => 'ПЭК не подтвердил warehouse ID склада самопривоза.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+			$result = $this->nearest_exact_match( $warehouse_id, $address, $constraints, $this->settings->warehouse_search_radius(), $this->settings->warehouse_search_limit() );
+			if ( null === $result['item'] && ( $this->settings->warehouse_search_radius() < 500 || $this->settings->warehouse_search_limit() < 50 ) ) {
+				$result = $this->nearest_exact_match( $warehouse_id, $address, $constraints, 500, 50 );
 			}
-			$ltl = $this->ltl_pickup_status( $item );
-			$diagnostic['ltl_type_present'] = $ltl['ltl_type_present'];
-			$diagnostic['acceptance_operation_present'] = $ltl['acceptance_operation_present'];
-			if ( ! $ltl['success'] ) {
-				$diagnostic['reason'] = $ltl['reason'];
-				return array( 'success' => false, 'message' => 'Выбранный склад ПЭК не принимает LTL-грузы.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
-			}
-			$availability = $this->availability_status( $item );
-			if ( ! $availability['success'] ) {
-				$diagnostic['reason'] = '' !== $availability['code'] ? $availability['code'] : 'availability_mismatch';
-				$diagnostic['availability_match'] = false;
-				return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => array(), 'diagnostic' => $diagnostic );
-			}
-			if ( $constraints instanceof PickupCargoConstraints && ! $this->fits_constraints( $item, $constraints ) ) {
-				$diagnostic['reason'] = 'constraints_mismatch';
-				$diagnostic['constraints_match'] = false;
-				return array( 'success' => false, 'message' => 'Склад ПЭК не принимает текущие габариты или количество мест.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+			$diagnostic = $result['diagnostic'];
+			if ( null === $result['item'] ) {
+				$diagnostic['reason'] = 'nearest_exact_not_found';
+
+				return array( 'success' => false, 'message' => 'Сохранённый склад ПЭК больше не подтверждается как доступный для приёма текущего груза.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 			}
 
-			$diagnostic['reason'] = '';
-			return array( 'success' => true, 'message' => 'Склад ПЭК подтверждён.', 'snapshot' => $this->snapshot( $item ), 'diagnostic' => $diagnostic );
+			return $this->validate_nearest_item( $result['item'], $constraints, $diagnostic, 'Склад ПЭК подтверждён.' );
 		} catch ( PekApiException $exception ) {
 			$context = $exception->context();
-			$diagnostic = $this->validation_diagnostic( is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'api_error' );
+			$diagnostic = $this->validation_diagnostic( is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'api_error', 'nearest_fresh_revalidation', $warehouse_id, $address, $constraints );
 			$diagnostic['http_status'] = $context['http_status'] ?? $this->api->last_response_meta()['http_status'];
 
 			return array( 'success' => false, 'message' => 'Не удалось повторно проверить склад самопривоза ПЭК.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 		}
+	}
+
+	/** @return ?array{success:bool,message:string,snapshot:array<string,mixed>,diagnostic:array<string,mixed>} */
+	private function validate_cached_selection( string $warehouse_id, ?PickupCargoConstraints $constraints ): ?array {
+		$search = $this->search_cache->current_for_current_user();
+		if ( array() === $search ) {
+			return null;
+		}
+		$requested = is_array( $search['requested'] ?? null ) ? $search['requested'] : array();
+		if ( 2 !== (int) ( $requested['departmentOperation'] ?? 0 ) || PekSettings::LTL_PRODUCT_TYPE !== (int) ( $requested['type'] ?? 0 ) ) {
+			return null;
+		}
+		if ( $this->constraints_fingerprint( $constraints ) !== (string) ( $requested['constraintsFingerprint'] ?? '' ) ) {
+			return null;
+		}
+		$diagnostic = $this->validation_diagnostic( '', 'nearest_cached_selection', $warehouse_id, (string) ( $requested['address'] ?? '' ), $constraints );
+		$items = is_array( $search['items'] ?? null ) ? $search['items'] : array();
+		$matches = $this->matching_nearest_items( $items, $warehouse_id );
+		$diagnostic['free_count'] = count( $items );
+		$diagnostic['exact_match_count'] = count( $matches );
+		if ( 1 !== count( $matches ) ) {
+			$diagnostic['reason'] = 0 === count( $matches ) ? 'cached_selection_not_found' : 'cached_selection_ambiguous';
+
+			return array( 'success' => false, 'message' => 'Выбранный склад ПЭК нужно подтвердить повторно. Выберите его ещё раз.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+		}
+
+		return $this->validate_nearest_item( $matches[0], $constraints, $diagnostic, 'Склад ПЭК подтверждён.' );
+	}
+
+	/** @return array{item:?array<string,mixed>,diagnostic:array<string,mixed>} */
+	private function nearest_exact_match( string $warehouse_id, string $address, ?PickupCargoConstraints $constraints, int $radius, int $limit ): array {
+		$payload = $this->constraints_payload( $constraints );
+		$response = $this->api->nearest_departments(
+			$address,
+			$payload['weight'],
+			$payload['volume'],
+			$payload['maxDimension'],
+			$payload['maxWeightPerPlace'],
+			$radius,
+			$limit
+		);
+		$free_items = $this->normalize_department_list( is_array( $response['freeDepartments'] ?? null ) ? $response['freeDepartments'] : array(), 'free' );
+		$paid_items = $this->normalize_department_list( is_array( $response['paidDepartments'] ?? null ) ? $response['paidDepartments'] : array(), 'paid' );
+		$matches = $this->matching_nearest_items( $free_items, $warehouse_id );
+		$diagnostic = $this->validation_diagnostic( '', 'nearest_fresh_revalidation', $warehouse_id, $address, $constraints );
+		$diagnostic['http_status'] = $this->api->last_response_meta()['http_status'];
+		$diagnostic['free_count'] = count( $free_items );
+		$diagnostic['paid_count'] = count( $paid_items );
+		$diagnostic['exact_match_count'] = count( $matches );
+
+		return array( 'item' => 1 === count( $matches ) ? $matches[0] : null, 'diagnostic' => $diagnostic );
+	}
+
+	/** @param array<string,mixed> $item @param array<string,mixed> $diagnostic @return array{success:bool,message:string,snapshot:array<string,mixed>,diagnostic:array<string,mixed>} */
+	private function validate_nearest_item( array $item, ?PickupCargoConstraints $constraints, array $diagnostic, string $success_message ): array {
+		$availability = $this->availability_status( $item );
+		if ( ! $availability['success'] ) {
+			$diagnostic['reason'] = '' !== $availability['code'] ? $availability['code'] : 'availability_mismatch';
+			$diagnostic['availability_match'] = false;
+
+			return array( 'success' => false, 'message' => $availability['message'], 'snapshot' => array(), 'diagnostic' => $diagnostic );
+		}
+		if ( $constraints instanceof PickupCargoConstraints && ! $this->fits_constraints( $item, $constraints ) ) {
+			$diagnostic['reason'] = 'constraints_mismatch';
+			$diagnostic['constraints_match'] = false;
+
+			return array( 'success' => false, 'message' => 'Склад ПЭК не принимает текущие габариты или количество мест.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+		}
+		$snapshot = $this->snapshot( $item );
+		$snapshot['source'] = (string) ( $diagnostic['source'] ?? '' );
+		$diagnostic['reason'] = '';
+		$diagnostic['warehouse_found'] = true;
+		$diagnostic['matched_id_hash'] = '' !== (string) ( $snapshot['warehouseId'] ?? '' ) ? hash( 'sha256', (string) $snapshot['warehouseId'] ) : '';
+		$diagnostic['availability_match'] = true;
+		$diagnostic['constraints_match'] = true;
+
+		return array( 'success' => true, 'message' => $success_message, 'snapshot' => $snapshot, 'diagnostic' => $diagnostic );
+	}
+
+	/** @param array<int,mixed> $items @return array<int,array<string,mixed>> */
+	private function matching_nearest_items( array $items, string $warehouse_id ): array {
+		$matches = array();
+		foreach ( $items as $item ) {
+			if ( is_array( $item ) && self::normalize_warehouse_id( $item['warehouseId'] ?? '' ) === $warehouse_id ) {
+				$matches[] = $item;
+			}
+		}
+
+		return $matches;
+	}
+
+	/** @return array{weight:?float,volume:?float,maxDimension:?float,maxWeightPerPlace:?float,placesCount:int} */
+	private function constraints_payload( ?PickupCargoConstraints $constraints ): array {
+		if ( ! $constraints instanceof PickupCargoConstraints ) {
+			return array( 'weight' => null, 'volume' => null, 'maxDimension' => null, 'maxWeightPerPlace' => null, 'placesCount' => 0 );
+		}
+
+		return array(
+			'weight' => $constraints->weight_g > 0 ? $constraints->weight_g / 1000 : null,
+			'volume' => $constraints->volume_cm3 > 0 ? $constraints->volume_cm3 / 1000000 : null,
+			'maxDimension' => $constraints->max_dimension_cm > 0 ? $constraints->max_dimension_cm / 100 : null,
+			'maxWeightPerPlace' => $constraints->max_place_weight_g > 0 ? $constraints->max_place_weight_g / 1000 : null,
+			'placesCount' => max( 0, $constraints->places_count ),
+		);
+	}
+
+	private function constraints_fingerprint( ?PickupCargoConstraints $constraints ): string {
+		$payload = $this->constraints_payload( $constraints );
+		$payload['departmentOperation'] = 2;
+		$payload['type'] = PekSettings::LTL_PRODUCT_TYPE;
+
+		return hash( 'sha256', wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION ) ?: '{}' );
 	}
 
 	/** @param array<int,array<string,mixed>> $rows @return array<int,array<string,mixed>> */
@@ -455,15 +573,29 @@ final class PekSenderWarehouseService {
 	}
 
 	/** @return array<string,mixed> */
-	private function validation_diagnostic( string $reason ): array {
+	private function validation_diagnostic( string $reason, string $source = 'nearest_fresh_revalidation', string $warehouse_id = '', string $address = '', ?PickupCargoConstraints $constraints = null ): array {
+		$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
+		$source = in_array( $source, array( 'nearest_cached_selection', 'nearest_fresh_revalidation' ), true ) ? $source : 'nearest_fresh_revalidation';
+
 		return array(
 			'stage' => 'sender_warehouse_validation',
+			'source' => $source,
 			'reason' => $reason,
-			'endpoint' => '/branches/all/',
+			'endpoint' => '/branches/nearestdepartments/',
 			'http_status' => '',
-			'lookup_source' => 'filtered',
-			'requested_id_present' => false,
-			'requested_id_hash' => '',
+			'warehouse_id_present' => '' !== $warehouse_id,
+			'warehouse_id_hash' => '' !== $warehouse_id ? hash( 'sha256', $warehouse_id ) : '',
+			'requested_id_present' => '' !== $warehouse_id,
+			'requested_id_hash' => '' !== $warehouse_id ? hash( 'sha256', $warehouse_id ) : '',
+			'search_address_present' => '' !== trim( $address ),
+			'search_address_hash' => '' !== trim( $address ) ? hash( 'sha256', trim( $address ) ) : '',
+			'free_count' => 0,
+			'paid_count' => 0,
+			'exact_match_count' => 0,
+			'constraints_fingerprint' => $this->constraints_fingerprint( $constraints ),
+			'constraints_match' => true,
+			'availability_match' => true,
+			'lookup_source' => $source,
 			'branches_checked' => 0,
 			'divisions_checked' => 0,
 			'warehouses_checked' => 0,
@@ -474,8 +606,6 @@ final class PekSenderWarehouseService {
 			'effective_capability_source' => 'none',
 			'ltl_type_present' => false,
 			'acceptance_operation_present' => false,
-			'constraints_match' => true,
-			'availability_match' => true,
 		);
 	}
 
@@ -521,6 +651,7 @@ final class PekSenderWarehouseService {
 		$item = $lookup['item'];
 		$match = $lookup['match'];
 		$diagnostic = $this->diagnostic_from_item( $item );
+		$diagnostic['endpoint'] = '/branches/all/';
 		$diagnostic['lookup_source'] = in_array( $lookup['lookup_source'], array( 'filtered', 'unfiltered_fallback' ), true ) ? $lookup['lookup_source'] : 'filtered';
 		$diagnostic['http_status'] = $lookup['http_status'];
 		$diagnostic['requested_id_present'] = '' !== $warehouse_id;

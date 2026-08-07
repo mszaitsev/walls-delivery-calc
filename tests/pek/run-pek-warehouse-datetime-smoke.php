@@ -187,7 +187,11 @@ function pek_dt_service( array $responses, ?PekDatetimeFakeHttp &$http = null, ?
 }
 
 function pek_dt_select_from_branches( string $warehouse_id, mixed $branch_timezone, array $fields = array(), ?PekSettings &$settings = null ): array {
-	$service = pek_dt_service( array( pek_dt_json_response( pek_dt_branches_all( $warehouse_id, $branch_timezone, $fields ) ) ), $http, $settings, $cache );
+	if ( '__missing__' !== $branch_timezone ) {
+		$fields = array_merge( array( 'branchTimezone' => $branch_timezone ), $fields );
+	}
+	$service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( $warehouse_id, null, $fields ) ), 'paidDepartments' => array() ) ) ), $http, $settings, $cache );
+	$service->search( 'Самара' );
 
 	return $service->validate_and_select( $warehouse_id );
 }
@@ -314,7 +318,7 @@ $paid_service = pek_dt_service(
 	$paid_cache
 );
 $paid_service->search( 'Самара' );
-pek_dt_assert( ( $paid_cache->current_for_current_user()['items'][0]['branchTimezone'] ?? '' ) === 'UTC+05:30' && ( $paid_cache->current_for_current_user()['items'][0]['source'] ?? '' ) === 'paid', 'PEK paidDepartments timeZone must use the same normalizer and preserve paid source.' );
+pek_dt_assert( array() === ( $paid_cache->current_for_current_user()['items'] ?? array() ), 'PEK sender warehouse search must ignore paidDepartments for sender self-delivery.' );
 
 foreach ( array( '00:00:00' => 'UTC+00:00', '03:00:00' => 'UTC+03:00', '04:30:00' => 'UTC+04:30', '14:00:00' => 'UTC+14:00' ) as $source_timezone => $canonical_timezone ) {
 	$timezone_service = pek_dt_service( array( pek_dt_json_response( array( 'freeDepartments' => array( pek_dt_nearest_item( pek_dt_uuid( 'valid-tz-' . str_replace( ':', '-', $source_timezone ) ), $source_timezone ) ), 'paidDepartments' => array() ) ) ), $timezone_http, $timezone_settings, $timezone_cache );
@@ -335,7 +339,6 @@ pek_dt_assert( $missing_tz_service->validate_and_select( pek_dt_uuid( 'missing-t
 
 $unresolved_cached_service = pek_dt_service(
 	array(
-		pek_dt_json_response( pek_dt_branches_all( pek_dt_uuid( 'cached-unresolved-nearest-tz' ), 'UTC+04:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T10:00:00' ) ) ),
 	),
 	$unresolved_cached_http,
 	$unresolved_cached_settings,
@@ -349,7 +352,7 @@ $unresolved_cached_cache->save_for_current_user(
 	)
 );
 $unresolved_result = $unresolved_cached_service->validate_and_select( pek_dt_uuid( 'cached-unresolved-nearest-tz' ) );
-pek_dt_assert( $unresolved_result['success'] && count( $unresolved_cached_http->requests ) === 1 && $unresolved_cached_settings->sender_warehouse()['branchTimezone'] === 'UTC+04:00', 'PEK cached timezone-less date without canonical branchTimezone must fall back to branches/all.' );
+pek_dt_assert( ! $unresolved_result['success'] && count( $unresolved_cached_http->requests ) === 0, 'PEK cached timezone-less date without canonical branchTimezone must fail closed without branches/all rescue.' );
 
 $settings->save_sender_warehouse( array( 'warehouseId' => 'previous-cache', 'branchName' => 'Previous cache' ) );
 $cache->save_for_current_user(
@@ -373,7 +376,7 @@ $cache->save_for_current_user(
 $result = $service->validate_and_select( pek_dt_uuid( 'cache-invalid-date' ) );
 pek_dt_assert( ! $result['success'] && $settings->sender_warehouse()['warehouseId'] === 'previous-invalid-cache', 'PEK cached invalid date must not authorize warehouse selection.' );
 
-$fallback_service = pek_dt_service( array( pek_dt_json_response( pek_dt_branches_all( pek_dt_uuid( 'cache-unresolved' ), 'UTC+03:00', array( 'endOfAvailabilityBeforeClosing' => '2026-08-02T09:00:00' ) ) ) ), $fallback_http, $fallback_settings, $fallback_cache );
+$fallback_service = pek_dt_service( array(), $fallback_http, $fallback_settings, $fallback_cache );
 $fallback_cache->save_for_current_user(
 	array(
 		'success' => true,
@@ -382,7 +385,7 @@ $fallback_cache->save_for_current_user(
 	)
 );
 $result = $fallback_service->validate_and_select( pek_dt_uuid( 'cache-unresolved' ) );
-pek_dt_assert( $result['success'] && count( $fallback_http->requests ) === 1 && $fallback_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/all/' && $fallback_settings->sender_warehouse()['branchTimezone'] === 'UTC+03:00', 'PEK unresolved cached timezone/date must trigger fresh branches/all validation.' );
+pek_dt_assert( ! $result['success'] && count( $fallback_http->requests ) === 0, 'PEK unresolved cached timezone/date must not trigger branches/all validation.' );
 
 $snapshot_repository = new SettingsRepository();
 $snapshot_settings = new PekSettings( $snapshot_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );

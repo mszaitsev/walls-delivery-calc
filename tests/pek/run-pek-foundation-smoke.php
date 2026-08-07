@@ -390,52 +390,56 @@ $branches_all = array(
 		),
 	),
 );
-$warehouse_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
+$nearest_foundation = array(
+	'freeDepartments' => array(
+		array(
+			'warehouseId' => strtoupper( $foundation_wh_1 ),
+			'branchId' => 'br-1',
+			'branchName' => 'Новосибирск',
+			'divisionName' => 'Склад Левый',
+			'departmentTypeId' => 7,
+			'departmentType' => 'Отделение компании',
+			'address' => 'full address',
+			'coordinates' => array( 'latitude' => '55.1', 'longitude' => '82.9' ),
+			'maxWeight' => 100,
+			'maxVolume' => 2,
+			'maxWeightOnePlace' => 50,
+			'maxDimension' => 3,
+			'branchTimezone' => 'UTC+00:00',
+			'endOfAvailabilityBeforeClosing' => '2026-08-03T00:00:00',
+			'endOfCostCalculationAvailability' => '2026-08-03',
+			'departmentClosingDate' => '2026-08-04T00:00:00+00:00',
+		),
+	),
+	'paidDepartments' => array(),
+);
+$warehouse_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $nearest_foundation ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
+$warehouse_service->search( 'Россия, Новосибирск' );
 $selected = $warehouse_service->validate_and_select( strtoupper( $foundation_wh_1 ) );
 $snapshot = $settings->sender_warehouse();
-pek_assert( $selected['success'] && $snapshot['branchName'] === 'Новосибирск' && $snapshot['departmentTypeId'] === 7 && $snapshot['address'] === 'full address' && $snapshot['coordinates']['latitude'] === '55.1' && $snapshot['limits']['maxWeightOnePlace'] === 50 && $snapshot['branchTimezone'] === 'UTC+00:00' && $snapshot['source'] === 'branches_all', 'PEK branches/all official nested shape must normalize branch title, division type, address, coordinates, limits, branch timezone and source.' );
+pek_assert( $selected['success'] && $snapshot['branchName'] === 'Новосибирск' && $snapshot['departmentTypeId'] === 7 && $snapshot['address'] === 'full address' && $snapshot['coordinates']['latitude'] === '55.1' && $snapshot['limits']['maxWeightOnePlace'] === 50 && $snapshot['branchTimezone'] === 'UTC+00:00' && $snapshot['source'] === 'free', 'PEK nearestdepartments official sender shape must normalize branch title, division type, address, coordinates, limits, branch timezone and source.' );
 pek_assert( ( $snapshot['availability']['endOfAvailabilityBeforeClosing'] ?? '' ) === '2026-08-03T00:00:00' && ( $snapshot['availability']['endOfCostCalculationAvailability'] ?? '' ) === '2026-08-03' && ( $snapshot['availability']['departmentClosingDate'] ?? '' ) === '2026-08-04T00:00:00+00:00', 'PEK sender warehouse snapshot must store compact availability/closing dates.' );
 $previous = $snapshot;
-foreach ( array(
-	'issue_only' => array( array( 'type' => 3, 'operations' => array( 'Выдача грузов' ) ) ),
-	'wrong_type' => array( array( 'type' => 1, 'operations' => array( 'Прием грузов' ) ) ),
-	'empty_kinds' => array(),
-) as $name => $kinds ) {
-	$bad = $branches_all;
-	$bad_id = substr_replace( $foundation_wh_1, substr( hash( 'sha256', $name ), 0, 4 ), 0, 4 );
-	$bad['branches'][0]['divisions'][0]['warehouses'][0]['id'] = $bad_id;
-	$bad['branches'][0]['divisions'][0]['warehouses'][0]['kindsOfTransportation'] = $kinds;
-	$service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $bad ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
-	$result = $service->validate_and_select( $bad_id );
-	pek_assert( ! $result['success'] && $settings->sender_warehouse() === $previous, 'PEK branches/all must reject ' . $name . ' and preserve previous selection.' );
-}
-$operation_variants = array( 'ПРИЕМ ГРУЗОВ', 'прием   грузов', 'Приём грузов' );
-foreach ( $operation_variants as $index => $operation ) {
-	$variant = $branches_all;
-	$variant_id = substr_replace( $foundation_wh_1, sprintf( '%04d', $index + 1 ), 9, 4 );
-	$variant['branches'][0]['divisions'][0]['warehouses'][0]['id'] = $variant_id;
-	$variant['branches'][0]['divisions'][0]['warehouses'][0]['kindsOfTransportation'] = array( array( 'type' => 3, 'operations' => array( $operation ) ) );
-	$service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $variant ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
-	pek_assert( $service->validate_and_select( strtoupper( $variant_id ) )['success'], 'PEK operation matcher must accept Unicode variant: ' . $operation );
-}
 foreach ( array(
 	'past_order_availability' => array( 'endOfAvailabilityBeforeClosing', '2026-08-01T00:00:00' ),
 	'past_cost_availability' => array( 'endOfCostCalculationAvailability', '2026-08-01T00:00:00' ),
 	'past_closing' => array( 'departmentClosingDate', '2026-08-01' ),
 	'invalid_date' => array( 'endOfAvailabilityBeforeClosing', '01 августа 2026' ),
 ) as $name => $case ) {
-	$bad_date = $branches_all;
+	$bad_date = $nearest_foundation;
 	$bad_date_id = substr_replace( $foundation_wh_1, substr( hash( 'sha256', 'date-' . $name ), 0, 4 ), 14, 4 );
-	$bad_date['branches'][0]['divisions'][0]['warehouses'][0]['id'] = $bad_date_id;
-	$bad_date['branches'][0]['divisions'][0]['warehouses'][0][ $case[0] ] = $case[1];
+	$bad_date['freeDepartments'][0]['warehouseId'] = $bad_date_id;
+	$bad_date['freeDepartments'][0][ $case[0] ] = $case[1];
 	$service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $bad_date ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
+	$service->search( 'Россия, Новосибирск' );
 	$result = $service->validate_and_select( $bad_date_id );
-	pek_assert( ! $result['success'] && $settings->sender_warehouse() !== array() && $settings->sender_warehouse()['warehouseId'] !== $bad_date_id, 'PEK branches/all must reject unavailable warehouse date case ' . $name . ' and preserve previous selection.' );
+	pek_assert( ! $result['success'] && $settings->sender_warehouse() !== array() && $settings->sender_warehouse()['warehouseId'] !== $bad_date_id, 'PEK nearestdepartments must reject unavailable warehouse date case ' . $name . ' and preserve previous selection.' );
 }
-$absent_dates = $branches_all;
-$absent_dates['branches'][0]['divisions'][0]['warehouses'][0]['id'] = $foundation_paid_wh;
-unset( $absent_dates['branches'][0]['divisions'][0]['warehouses'][0]['endOfAvailabilityBeforeClosing'], $absent_dates['branches'][0]['divisions'][0]['warehouses'][0]['endOfCostCalculationAvailability'], $absent_dates['branches'][0]['divisions'][0]['warehouses'][0]['departmentClosingDate'] );
+$absent_dates = $nearest_foundation;
+$absent_dates['freeDepartments'][0]['warehouseId'] = $foundation_paid_wh;
+unset( $absent_dates['freeDepartments'][0]['endOfAvailabilityBeforeClosing'], $absent_dates['freeDepartments'][0]['endOfCostCalculationAvailability'], $absent_dates['freeDepartments'][0]['departmentClosingDate'] );
 $service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $absent_dates ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
+$service->search( 'Россия, Новосибирск' );
 pek_assert( $service->validate_and_select( $foundation_paid_wh )['success'], 'PEK absent closing fields must not reject otherwise valid warehouse.' );
 $current_previous = $settings->sender_warehouse();
 $unknown = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, new PekSenderWarehouseSearchCache() );
@@ -586,7 +590,7 @@ $paid_payload = array(
 $paid_cache = new PekSenderWarehouseSearchCache();
 $paid_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $paid_payload ) ) ), new PekRequestBudget( $settings ) ), $settings, $paid_cache );
 $paid_service->search( 'Россия, Томск' );
-pek_assert( ( $paid_cache->current_for_current_user()['items'][0]['source'] ?? '' ) === 'paid', 'PEK paidDepartments search result must preserve paid source.' );
+pek_assert( array() === ( $paid_cache->current_for_current_user()['items'] ?? array() ), 'PEK sender warehouse search must not expose paidDepartments for sender self-delivery.' );
 $search_service->search( 'Россия, Новосибирск' );
 pek_assert( array() !== $cache->current_for_current_user(), 'PEK successful warehouse search must store a current-user cache.' );
 $empty_search = $search_service->search( '' );
@@ -603,7 +607,7 @@ try {
 pek_assert( array() === $cache->current_for_current_user(), 'PEK failed API warehouse search must clear old current-user cache.' );
 pek_assert( ! $failed_search_service->select_from_cached_search( $foundation_cache_wh )['success'], 'PEK old warehouse ID must not be selectable from cache after failed search.' );
 $fallback = $failed_search_service->validate_and_select( $foundation_cache_wh );
-pek_assert( ! $fallback['success'] && count( $failed_search_http->requests ) === 3 && $failed_search_http->requests[1]['url'] === PekSettings::BASE_URL . '/branches/all/' && $failed_search_http->requests[2]['url'] === PekSettings::BASE_URL . '/branches/all/' && $settings->sender_warehouse() === $previous_selected, 'PEK old warehouse ID after failed search must require filtered plus bounded unfiltered branches/all validation and preserve previous warehouse on fallback failure.' );
+pek_assert( ! $fallback['success'] && count( $failed_search_http->requests ) === 1 && $settings->sender_warehouse() === $previous_selected, 'PEK old warehouse ID after failed search must not be rescued through branches/all and must preserve previous warehouse.' );
 $GLOBALS['pek_current_user_id'] = 2;
 $other_user_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, $cache );
 pek_assert( ! $other_user_service->select_from_cached_search( $foundation_cache_wh )['success'], 'PEK user B must not use user A search cache.' );
@@ -612,10 +616,10 @@ $GLOBALS['pek_now'] += 901;
 $expired_http = new PekFakeHttp( array( pek_json_response( $branches_all ) ) );
 $expired_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, $expired_http, new PekRequestBudget( $settings ) ), $settings, $cache );
 $expired_service->validate_and_select( $foundation_wh_1 );
-pek_assert( count( $expired_http->requests ) === 1 && $expired_http->requests[0]['url'] === PekSettings::BASE_URL . '/branches/all/', 'PEK expired/missing cache must fall back to branches/all validation.' );
+pek_assert( count( $expired_http->requests ) === 0, 'PEK expired/missing cache must not fall back to branches/all validation.' );
 $settings_repository->set( 'pek_last_warehouse_search', $search );
 $GLOBALS['pek_transients'] = array();
-$old_setting_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( array( 'branches' => array() ) ) ) ), new PekRequestBudget( $settings ) ), $settings, $cache );
+$old_setting_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array() ), new PekRequestBudget( $settings ) ), $settings, $cache );
 pek_assert( ! $old_setting_service->validate_and_select( $foundation_cache_wh )['success'], 'PEK persistent SettingsRepository search must not authorize old warehouse selection.' );
 
 $notice_store = new PekAdminNoticeStore();

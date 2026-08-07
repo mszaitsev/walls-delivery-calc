@@ -259,6 +259,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 	public string $token_mode = 'success';
 	public string $status_mode = 'expanded';
 	public string $branches_all_mode = 'success';
+	public string $sender_nearest_mode = 'success';
 
 	private function requested_cargo_code( array $args ): string {
 		$body = json_decode( (string) ( $args['body'] ?? '' ), true );
@@ -364,16 +365,24 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 		if ( str_contains( $url, '/branches/nearestdepartments/' ) ) {
 			$body = json_decode( (string) ( $args['body'] ?? '' ), true );
 			$address = is_array( $body ) ? (string) ( $body['address'] ?? '' ) : '';
-			$warehouse_id = str_contains( $address, 'Новосибирск' ) ? PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER : PEK_INTEGRATION_RECEIVER_WAREHOUSE;
+			$is_sender = str_contains( $address, 'Новосибирск' );
+			$warehouse_id = $is_sender ? PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER : PEK_INTEGRATION_RECEIVER_WAREHOUSE;
+			if ( $is_sender && str_contains( $address, 'Большая' ) ) {
+				$warehouse_id = PEK_INTEGRATION_SENDER_WAREHOUSE_B;
+			}
+			if ( $is_sender && 'missing_id' === $this->sender_nearest_mode ) {
+				$warehouse_id = PEK_INTEGRATION_MISSING_WAREHOUSE;
+			}
 			$branch_id = str_contains( $address, 'Новосибирск' ) ? 'BR-S' : 'BR-R';
 			$branch_title = str_contains( $address, 'Новосибирск' ) ? 'Новосибирск' : 'Москва';
-			$division_name = str_contains( $address, 'Новосибирск' ) ? 'Склад A' : 'Склад получателя';
-			$department_address = str_contains( $address, 'Новосибирск' ) ? 'Россия, Новосибирск, Складская, дом 1' : 'Россия, Московская область, Видное, Терминальная, дом 2';
+			$division_name = $warehouse_id === PEK_INTEGRATION_SENDER_WAREHOUSE_B ? 'Склад B' : ( str_contains( $address, 'Новосибирск' ) ? 'Склад A' : 'Склад получателя' );
+			$department_address = str_contains( $address, 'Новосибирск' ) ? ( $warehouse_id === PEK_INTEGRATION_SENDER_WAREHOUSE_B ? 'Россия, Новосибирск, улица Большая, 280' : 'Россия, Новосибирск, Складская, дом 1' ) : 'Россия, Московская область, Видное, Терминальная, дом 2';
+			$max_weight = ( $is_sender && 'constraints_exceeded' === $this->sender_nearest_mode ) ? 0.1 : 1000;
 			return array(
 				'status' => 200,
 				'body' => wp_json_encode(
 					array(
-						'freeDepartments' => array(
+						'free_only' === $this->sender_nearest_mode && $is_sender ? 'paidDepartments' : 'freeDepartments' => array(
 							array(
 								'warehouseId' => $warehouse_id,
 								'branchId' => $branch_id,
@@ -384,14 +393,14 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 								'departmentTypeId' => 1,
 								'departmentType' => 'Склад',
 								'coordinates' => array( 'latitude' => '55.5', 'longitude' => '37.7' ),
-								'maxWeight' => 1000,
+								'maxWeight' => $max_weight,
 								'maxVolume' => 100,
 								'maxDimension' => 10,
 								'maxWeightOnePlace' => 1000,
 								'maxCount' => 100,
 							),
 						),
-						'paidDepartments' => array(),
+						'free_only' === $this->sender_nearest_mode && $is_sender ? 'freeDepartments' : 'paidDepartments' => array(),
 					),
 					JSON_UNESCAPED_UNICODE
 				),
@@ -1274,33 +1283,27 @@ $admin_default_request = $drafts->create_request_from_admin_data( $order, array(
 pek_integration_assert( ! array_key_exists( 'pek_sender_warehouse_id', $admin_default_request->meta ), 'Initial modal must not post settings default as shipment_modal_override.' );
 $admin_override_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A, 'pek_sender_warehouse_override_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_B ) );
 pek_integration_assert( PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $admin_override_request->meta['pek_sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $admin_override_request->meta['pek_sender_warehouse_source'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ), 'Explicit modal sender warehouse override must stay local and leave settings default unchanged.' );
-$warehouse_constraints = new PickupCargoConstraints( 2500, 4000, 20, 2500, 1 );
-$http->branches_all_mode = 'success';
+$warehouse_constraints = new PickupCargoConstraints( 3000, 4000, 20, 3000, 1 );
 $branches_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
-$warehouse_valid = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER, $warehouse_constraints );
-pek_integration_assert( true === $warehouse_valid['success'] && 'filtered' === (string) ( $warehouse_valid['diagnostic']['lookup_source'] ?? '' ) && 1 === pek_integration_count_calls( $http, '/branches/all/' ) - $branches_calls_before && 'division' === (string) ( $warehouse_valid['diagnostic']['effective_capability_source'] ?? '' ) && true === (bool) ( $warehouse_valid['diagnostic']['division_capabilities_present'] ?? false ) && false === (bool) ( $warehouse_valid['diagnostic']['warehouse_capabilities_present'] ?? true ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $warehouse_valid['snapshot']['warehouseId'] ?? '' ), 'Saved sender warehouse must normalize UUID case, use filtered lookup once, and accept division operations when warehouse kinds array is empty.' );
+$warehouse_valid = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER, $warehouse_constraints, 'Россия, Новосибирск, Складская, дом 1' );
+pek_integration_assert( true === $warehouse_valid['success'] && 'nearest_fresh_revalidation' === (string) ( $warehouse_valid['diagnostic']['source'] ?? '' ) && 0 === pek_integration_count_calls( $http, '/branches/all/' ) - $branches_calls_before && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $warehouse_valid['snapshot']['warehouseId'] ?? '' ), 'Saved sender warehouse must normalize UUID case and revalidate through nearestdepartments without branches/all.' );
 $hash = hash( 'sha256', PEK_INTEGRATION_SENDER_WAREHOUSE_A );
-pek_integration_assert( ( $warehouse_valid['diagnostic']['requested_id_hash'] ?? '' ) === $hash && ( $warehouse_valid['diagnostic']['matched_id_hash'] ?? '' ) === $hash && (int) ( $warehouse_valid['diagnostic']['warehouses_checked'] ?? 0 ) > 0, 'Sender warehouse validation diagnostic must expose safe ID hashes and lookup counters.' );
+pek_integration_assert( ( $warehouse_valid['diagnostic']['warehouse_id_hash'] ?? '' ) === $hash && ( $warehouse_valid['diagnostic']['matched_id_hash'] ?? '' ) === $hash && (int) ( $warehouse_valid['diagnostic']['free_count'] ?? 0 ) > 0 && 1 === (int) ( $warehouse_valid['diagnostic']['exact_match_count'] ?? 0 ), 'Sender nearest validation diagnostic must expose safe ID hashes and nearest counters.' );
 $invalid_id_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
 $invalid_id = $sender_warehouse_service->validate_snapshot( 'WH-A', $warehouse_constraints );
-pek_integration_assert( false === $invalid_id['success'] && $invalid_id_calls_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Invalid non-UUID sender warehouse ID must fail before branches/all.' );
-$http->branches_all_mode = 'filtered_empty_then_unfiltered_success';
-$fallback_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
-$fallback_valid = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( true === $fallback_valid['success'] && 'unfiltered_fallback' === (string) ( $fallback_valid['diagnostic']['lookup_source'] ?? '' ) && 2 === pek_integration_count_calls( $http, '/branches/all/' ) - $fallback_calls_before, 'Filtered branches/all empty result may use exactly one unfiltered fallback and still match the exact UUID.' );
-$http->branches_all_mode = 'filtered_empty_then_unfiltered_missing';
-$fallback_missing_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
-$fallback_missing = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( false === $fallback_missing['success'] && 'warehouse_not_found' === (string) ( $fallback_missing['diagnostic']['reason'] ?? '' ) && 2 === pek_integration_count_calls( $http, '/branches/all/' ) - $fallback_missing_calls_before, 'Filtered plus unfiltered missing warehouse must fail closed after two branches/all calls.' );
-$http->branches_all_mode = 'warehouse_capability';
-$warehouse_capability = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( true === $warehouse_capability['success'] && 'warehouse' === (string) ( $warehouse_capability['diagnostic']['effective_capability_source'] ?? '' ), 'Non-empty warehouse-level kindsOfTransportation must be supported as documented compatibility source.' );
-$http->branches_all_mode = 'multiple_type3_rows';
-$multiple_type3 = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( true === $multiple_type3['success'] && true === (bool) ( $multiple_type3['diagnostic']['acceptance_operation_present'] ?? false ), 'Multiple type=3 capability rows must be fully scanned until an acceptance operation is found.' );
-$http->branches_all_mode = 'success';
+pek_integration_assert( false === $invalid_id['success'] && $invalid_id_calls_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Invalid non-UUID sender warehouse ID must fail before any warehouse lookup.' );
+$http->sender_nearest_mode = 'missing_id';
+$nearest_missing = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints, 'Россия, Новосибирск, Складская, дом 1' );
+pek_integration_assert( false === $nearest_missing['success'] && 'nearest_exact_not_found' === (string) ( $nearest_missing['diagnostic']['reason'] ?? '' ) && 0 === pek_integration_count_calls( $http, '/branches/all/' ) - $branches_calls_before, 'Saved sender warehouse missing from fresh nearestdepartments must fail closed without branches/all rescue.' );
+$http->sender_nearest_mode = 'constraints_exceeded';
+$warehouse_constraints_fail = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints, 'Россия, Новосибирск, Складская, дом 1' );
+pek_integration_assert( false === $warehouse_constraints_fail['success'] && false === (bool) ( $warehouse_constraints_fail['diagnostic']['constraints_match'] ?? true ), 'Sender warehouse constraints mismatch must be diagnosable after nearest revalidation.' );
+$http->sender_nearest_mode = 'free_only';
+$paid_sender_search = $sender_warehouse_service->search( 'Россия, Новосибирск', $warehouse_constraints );
+pek_integration_assert( $paid_sender_search['success'] && array() === $paid_sender_search['items'], 'Sender self-delivery search must not expose paidDepartments as sender warehouses.' );
+$http->sender_nearest_mode = 'success';
 $search_before = pek_integration_count_calls( $http, '/branches/nearestdepartments/' );
-$sender_search = $sender_warehouse_service->search( 'Россия, Новосибирск' );
+$sender_search = $sender_warehouse_service->search( 'Россия, Новосибирск', $warehouse_constraints );
 pek_integration_assert( $sender_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $sender_search['items'][0]['warehouseId'] ?? '' ) && 1 === pek_integration_count_calls( $http, '/branches/nearestdepartments/' ) - $search_before, 'Sender warehouse search must normalize nearestdepartments warehouseId into canonical UUID.' );
 $selected_from_search = $sender_warehouse_service->select_from_cached_search( PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER );
 pek_integration_assert( $selected_from_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $selected_from_search['snapshot']['warehouseId'] ?? '' ), 'Cached sender warehouse selection must match uppercase nearestdepartments UUID case-insensitively and persist canonical ID.' );
@@ -1314,24 +1317,15 @@ $settings->save_sender_warehouse(
 	)
 );
 $default_preview_submit_before = count( $http->submit_bodies );
+$default_preview_branches_before = pek_integration_count_calls( $http, '/branches/all/' );
 $default_preview = $creation->safe_preview( $admin_default_request );
-pek_integration_assert( array() === $default_preview['errors'] && in_array( (string) ( $default_preview['body']['sender_warehouse_source'] ?? '' ), array( 'default', 'settings_default' ), true ) && $default_preview_submit_before === count( $http->submit_bodies ), 'Initial preview must use settings default sender warehouse without submit.' );
+pek_integration_assert( array() === $default_preview['errors'] && in_array( (string) ( $default_preview['body']['sender_warehouse_source'] ?? '' ), array( 'default', 'settings_default' ), true ) && $default_preview_submit_before === count( $http->submit_bodies ) && $default_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Initial preview must use settings default sender warehouse through nearestdepartments without submit or branches/all.' );
+$alternate_search = $sender_warehouse_service->search( 'Россия, Новосибирск, улица Большая, 280', $warehouse_constraints );
+pek_integration_assert( $alternate_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $alternate_search['items'][0]['warehouseId'] ?? '' ), 'Alternate sender warehouse picker search must cache the selected warehouse with current constraints.' );
 $override_preview_submit_before = count( $http->submit_bodies );
+$override_preview_branches_before = pek_integration_count_calls( $http, '/branches/all/' );
 $override_preview = $creation->safe_preview( $admin_override_request );
-pek_integration_assert( array() === $override_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $override_preview['body']['sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $override_preview['body']['sender_warehouse_source'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ) && $override_preview_submit_before === count( $http->submit_bodies ), 'Explicit sender warehouse override must affect only current shipment preview.' );
-$http->branches_all_mode = 'missing_id';
-$warehouse_missing = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( false === $warehouse_missing['success'] && str_contains( $warehouse_missing['message'], 'warehouse ID' ) && false === (bool) ( $warehouse_missing['diagnostic']['warehouse_found'] ?? true ), 'Missing sender warehouse ID must fail with safe diagnostic.' );
-$http->branches_all_mode = 'no_ltl_type';
-$warehouse_no_ltl = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( false === $warehouse_no_ltl['success'] && 'ltl_type_missing' === (string) ( $warehouse_no_ltl['diagnostic']['reason'] ?? '' ), 'Sender warehouse without LTL type must fail safely.' );
-$http->branches_all_mode = 'no_acceptance';
-$warehouse_no_acceptance = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( false === $warehouse_no_acceptance['success'] && 'acceptance_operation_missing' === (string) ( $warehouse_no_acceptance['diagnostic']['reason'] ?? '' ), 'Sender warehouse without cargo acceptance operation must fail safely.' );
-$http->branches_all_mode = 'constraints_exceeded';
-$warehouse_constraints_fail = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints );
-pek_integration_assert( false === $warehouse_constraints_fail['success'] && false === (bool) ( $warehouse_constraints_fail['diagnostic']['constraints_match'] ?? true ), 'Sender warehouse constraints mismatch must be diagnosable.' );
-$http->branches_all_mode = 'success';
+pek_integration_assert( array() === $override_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $override_preview['body']['sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $override_preview['body']['sender_warehouse_source'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ) && $override_preview_submit_before === count( $http->submit_bodies ) && $override_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Explicit sender warehouse override must use cached nearest selection and affect only current shipment preview.' );
 $good_sender_phone = $settings->sender_phone();
 $settings_repository->set( PekSettings::SENDER_PHONE_KEY, '+7abc9991234567' );
 $legacy_phone_external_before = array( pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
@@ -1369,7 +1363,7 @@ $connected_before_location_mismatch = count( array_filter( $http->calls, static 
 $submit_before_location_mismatch = count( $http->submit_bodies );
 $location_mismatch_preview = $creation->safe_preview( $location_mismatch_request );
 $connected_after_location_mismatch = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/counterparts/connecteddiscountsservicesagreements/' ) ) );
-pek_integration_assert( array() !== $location_mismatch_preview['errors'] && str_contains( (string) ( $location_mismatch_preview['errors'][0] ?? '' ), 'Повторно рассчитайте доставку ПЭК' ), 'Location mismatch must fail with public recalculation message.' );
+pek_integration_assert( array() !== $location_mismatch_preview['errors'] && str_contains( (string) ( $location_mismatch_preview['errors'][0] ?? '' ), 'Повторно рассчитайте доставку ПЭК' ), 'Location mismatch must fail with public recalculation message: ' . (string) ( $location_mismatch_preview['errors'][0] ?? '' ) );
 pek_integration_assert( $connected_before_location_mismatch === $connected_after_location_mismatch && $submit_before_location_mismatch === count( $http->submit_bodies ), 'Location mismatch must stop before SMS/private services and preregistration submit.' );
 
 $city_level_order = new PekIntegrationOrder( 1093 );

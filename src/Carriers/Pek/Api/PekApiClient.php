@@ -41,7 +41,7 @@ final class PekApiClient {
 	}
 
 	/** @return array<string,mixed> */
-	public function nearest_departments( string $address, ?float $weight = null, ?float $volume = null, ?float $max_dimension = null, ?float $max_weight_per_place = null ): array {
+	public function nearest_departments( string $address, ?float $weight = null, ?float $volume = null, ?float $max_dimension = null, ?float $max_weight_per_place = null, ?int $search_radius = null, ?int $limit = null ): array {
 		$payload = array(
 			'address' => trim( $address ),
 			'coordinates' => null,
@@ -51,8 +51,8 @@ final class PekApiClient {
 			'maxWeightPerPlace' => $max_weight_per_place,
 			'departmentOperation' => 2,
 			'type' => PekSettings::LTL_PRODUCT_TYPE,
-			'searchRadius' => $this->settings->warehouse_search_radius(),
-			'limit' => $this->settings->warehouse_search_limit(),
+			'searchRadius' => null !== $search_radius ? max( 1, min( 500, $search_radius ) ) : $this->settings->warehouse_search_radius(),
+			'limit' => null !== $limit ? max( 1, min( 50, $limit ) ) : $this->settings->warehouse_search_limit(),
 		);
 
 		$result = $this->call( 'POST', '/branches/nearestdepartments/', $payload );

@@ -460,7 +460,7 @@ final class PekSettings {
 	private function sanitize_warehouse_source( mixed $value ): string {
 		$value = trim( (string) $value );
 
-		return in_array( $value, array( 'free', 'paid', 'branches_all' ), true ) ? $value : '';
+		return in_array( $value, array( 'free', 'paid', 'branches_all', 'nearest_cached_selection', 'nearest_fresh_revalidation' ), true ) ? $value : '';
 	}
 
 	private function sanitize_key( string $value ): string {

@@ -20,7 +20,8 @@ final class PekShipmentSenderWarehouseResolver {
 
 	/** @return array<string,mixed> */
 	public function resolve( ShipmentCreateRequest $request ): array {
-		$override = trim( (string) ( $request->meta['pek_sender_warehouse_id'] ?? $request->meta['sender_warehouse_id'] ?? '' ) );
+		$source = trim( (string) ( $request->meta['pek_sender_warehouse_source'] ?? '' ) );
+		$override = 'shipment_modal_override' === $source ? trim( (string) ( $request->meta['pek_sender_warehouse_id'] ?? $request->meta['sender_warehouse_id'] ?? '' ) ) : '';
 		if ( '' !== $override ) {
 			$result = $this->warehouses->validate_snapshot( $override, $this->constraints( $request ) );
 			$snapshot = is_array( $result['snapshot'] ?? null ) ? $result['snapshot'] : array();
@@ -37,7 +38,7 @@ final class PekShipmentSenderWarehouseResolver {
 			throw new \RuntimeException( 'В настройках ПЭК не выбран склад самопривоза отправителя.' );
 		}
 		$default_source = (string) ( $snapshot['source'] ?? 'settings_default' );
-		$result = $this->warehouses->validate_snapshot( (string) ( $snapshot['warehouseId'] ?? '' ), $this->constraints( $request ) );
+		$result = $this->warehouses->validate_snapshot( (string) ( $snapshot['warehouseId'] ?? '' ), $this->constraints( $request ), (string) ( $snapshot['address'] ?? '' ) );
 		$fresh = is_array( $result['snapshot'] ?? null ) ? $result['snapshot'] : array();
 		if ( empty( $result['success'] ) || array() === $fresh ) {
 			throw new \RuntimeException( $this->validation_message( $result, 'ПЭК не подтвердил склад самопривоза из настроек.' ) );
