@@ -239,6 +239,7 @@ final class PekShipmentCourierAddressResolver {
 			'courier_city_fias_id' => $use_dadata_locality_ids ? $this->meta_string( $order, '_' . $scope . '_dadata_city_fias_id' ) : '',
 			'courier_settlement_fias_id' => $use_dadata_locality_ids ? $this->meta_string( $order, '_' . $scope . '_dadata_settlement_fias_id' ) : '',
 			'courier_selected_location_fias_id' => $this->meta_string( $order, '_wdc_platform_location_fias_id' ),
+			'courier_order_city_fias_id' => $this->meta_string( $order, '_wdc_platform_city_fias_id' ),
 		) : array();
 
 		$evidence = array(

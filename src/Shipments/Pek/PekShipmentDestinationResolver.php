@@ -148,10 +148,27 @@ final class PekShipmentDestinationResolver {
 
 		$evidence = is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array();
 		$selected_fias = $this->canonical_guid( $evidence['courier_selected_location_fias_id'] ?? null );
-		if ( '' === $selected_fias ) {
+		if ( '' !== $this->scalar_string( $evidence['courier_selected_location_fias_id'] ?? null ) && '' === $selected_fias ) {
 			throw new \RuntimeException( self::LOCATION_IDENTITY_MESSAGE );
 		}
-		$location = $this->canonical_locations->find_by_fias_id( $selected_fias );
+		if ( '' !== $selected_fias ) {
+			$location = $this->canonical_locations->find_by_fias_id( $selected_fias );
+			if ( ! $location instanceof Location || ! $location->active || null === $location->id || (int) $location->id <= 0 || 'RU' !== strtoupper( trim( $location->country_code ) ) ) {
+				throw new \RuntimeException( self::LOCATION_IDENTITY_MESSAGE );
+			}
+
+			return array(
+				'location' => $location,
+				'location_id' => (int) $location->id,
+				'source' => 'selected_location_fias_fallback',
+			);
+		}
+
+		$order_city_fias = $this->canonical_guid( $evidence['courier_order_city_fias_id'] ?? null );
+		if ( '' === $order_city_fias ) {
+			throw new \RuntimeException( self::LOCATION_IDENTITY_MESSAGE );
+		}
+		$location = $this->canonical_locations->find_by_fias_id( $order_city_fias );
 		if ( ! $location instanceof Location || ! $location->active || null === $location->id || (int) $location->id <= 0 || 'RU' !== strtoupper( trim( $location->country_code ) ) ) {
 			throw new \RuntimeException( self::LOCATION_IDENTITY_MESSAGE );
 		}
@@ -159,7 +176,7 @@ final class PekShipmentDestinationResolver {
 		return array(
 			'location' => $location,
 			'location_id' => (int) $location->id,
-			'source' => 'selected_location_fias_fallback',
+			'source' => 'order_city_fias_fallback',
 		);
 	}
 
@@ -338,6 +355,14 @@ final class PekShipmentDestinationResolver {
 		}
 
 		return $value;
+	}
+
+	private function scalar_string( mixed $value ): string {
+		if ( ! is_scalar( $value ) ) {
+			return '';
+		}
+
+		return trim( (string) $value );
 	}
 
 	private function lower( string $value ): string {

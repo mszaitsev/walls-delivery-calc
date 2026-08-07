@@ -994,6 +994,21 @@ $GLOBALS['wpdb']->locations = array(
 		'latitude' => '',
 		'longitude' => '',
 	),
+	array(
+		'id' => 82,
+		'country_code' => 'RU',
+		'region_name' => 'Санкт-Петербург',
+		'region_type' => 'г',
+		'city_name' => 'Санкт-Петербург',
+		'city_type' => 'г',
+		'city_fias_id' => 'c2deb16a-0330-4f05-821f-1d09c93331e6',
+		'fias_id' => 'c2deb16a-0330-4f05-821f-1d09c93331e6',
+		'settlement_name' => 'Санкт-Петербург',
+		'display_name' => 'Санкт-Петербург live-style FIAS',
+		'active' => 1,
+		'latitude' => '',
+		'longitude' => '',
+	),
 );
 $GLOBALS['wpdb']->pek_location_mappings = array();
 $GLOBALS['wpdb']->pek_terminals = array();
@@ -1586,16 +1601,47 @@ $live_fias_fallback_order->set_shipping_fields( array( 'state' => 'Москва'
 $live_fias_fallback_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
 $live_fias_fallback_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
 $live_fias_fallback_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
-$live_fias_fallback_order->update_meta_data( '_wdc_platform_location_fias_id', '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' );
+$live_fias_fallback_order->update_meta_data( '_wdc_platform_city_fias_id', '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' );
 $live_fias_fallback_order->update_meta_data( '_wdc_platform_rate_meta', array( 'destination_fingerprint' => 'country=RU|location_id=81' ) );
 $live_fias_fallback_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array(), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
 $live_fias_fallback_request = $drafts->create_request_from_order( $live_fias_fallback_order );
 pek_integration_assert( 0 === (int) ( $live_fias_fallback_request->meta['pek_destination_location_id'] ?? 0 ), 'Live-style pre-0.134.18 courier order must reproduce missing numeric destination location ID.' );
+$live_fias_evidence = is_array( $live_fias_fallback_request->meta['pek_courier_address_evidence'] ?? null ) ? $live_fias_fallback_request->meta['pek_courier_address_evidence'] : array();
+pek_integration_assert( '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' === (string) ( $live_fias_evidence['courier_order_city_fias_id'] ?? '' ) && '' === (string) ( $live_fias_evidence['courier_selected_location_fias_id'] ?? '' ), 'Historical courier evidence must carry generic order city FIAS without selected-location FIAS.' );
 $live_fias_findzone_before = pek_integration_count_calls( $http, '/branches/findzonebyaddress/' );
 $live_fias_submit_before = count( $http->submit_bodies );
 $live_fias_fallback_preview = $creation->safe_preview( $live_fias_fallback_request );
-pek_integration_assert( array() === $live_fias_fallback_preview['errors'] && $live_fias_findzone_before + 1 === pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ) && $live_fias_submit_before === count( $http->submit_bodies ), 'Existing live-style courier order must recover destination identity from persisted selected-location FIAS and reach findzonebyaddress without submit.' );
-pek_integration_assert( 81 === (int) ( $live_fias_fallback_preview['body']['courier_location_id'] ?? 0 ) && true === (bool) ( $live_fias_fallback_preview['body']['courier_location_match'] ?? false ) && 'selected_location_fias_fallback' === (string) ( $live_fias_fallback_preview['body']['courier_location_identity_source'] ?? '' ) && 'fresh_address_zone' === (string) ( $live_fias_fallback_preview['body']['courier_branch_source'] ?? '' ), 'Live-style FIAS fallback preview must expose safe identity source and fresh address-zone branch evidence.' );
+pek_integration_assert( array() === $live_fias_fallback_preview['errors'] && $live_fias_findzone_before + 1 === pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ) && $live_fias_submit_before === count( $http->submit_bodies ), 'Existing live-style courier order must recover destination identity from persisted generic city FIAS and reach findzonebyaddress without submit.' );
+pek_integration_assert( 81 === (int) ( $live_fias_fallback_preview['body']['courier_location_id'] ?? 0 ) && true === (bool) ( $live_fias_fallback_preview['body']['courier_location_match'] ?? false ) && 'order_city_fias_fallback' === (string) ( $live_fias_fallback_preview['body']['courier_location_identity_source'] ?? '' ) && 'fresh_address_zone' === (string) ( $live_fias_fallback_preview['body']['courier_branch_source'] ?? '' ), 'Live-style city FIAS fallback preview must expose safe identity source and fresh address-zone branch evidence.' );
+pek_integration_assert( ! empty( $live_fias_fallback_preview['body']['courier_order_city_fias_present'] ) && '' !== (string) ( $live_fias_fallback_preview['body']['courier_order_city_fias_hash'] ?? '' ) && ! array_key_exists( 'courier_order_city_fias_id', $live_fias_fallback_preview['body'] ), 'Safe preview must expose order city FIAS presence/hash without raw FIAS.' );
+
+$selected_fias_wins_order = new PekIntegrationOrder( 1108 );
+$GLOBALS['wdc_pek_integration_orders'][1108] = $selected_fias_wins_order;
+$selected_fias_wins_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'Ходынский б-р, дом 13', 'address_2' => 'кв. 1' ) );
+$selected_fias_wins_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$selected_fias_wins_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$selected_fias_wins_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$selected_fias_wins_order->update_meta_data( '_wdc_platform_location_fias_id', '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' );
+$selected_fias_wins_order->update_meta_data( '_wdc_platform_city_fias_id', '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' );
+$selected_fias_wins_order->update_meta_data( '_wdc_platform_rate_meta', array( 'destination_fingerprint' => 'country=RU|location_id=81' ) );
+$selected_fias_wins_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array(), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$selected_fias_wins_preview = $creation->safe_preview( $drafts->create_request_from_order( $selected_fias_wins_order ) );
+pek_integration_assert( array() === $selected_fias_wins_preview['errors'] && 'selected_location_fias_fallback' === (string) ( $selected_fias_wins_preview['body']['courier_location_identity_source'] ?? '' ), 'Explicit selected-location FIAS must win over generic order city FIAS when both resolve to the same Location.' );
+
+$contradictory_fias_order = new PekIntegrationOrder( 1109 );
+$GLOBALS['wdc_pek_integration_orders'][1109] = $contradictory_fias_order;
+$contradictory_fias_order->set_shipping_fields( array( 'state' => 'Москва', 'city' => 'Москва', 'address_1' => 'Ходынский б-р, дом 13', 'address_2' => 'кв. 1' ) );
+$contradictory_fias_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$contradictory_fias_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$contradictory_fias_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$contradictory_fias_order->update_meta_data( '_wdc_platform_location_fias_id', 'c2deb16a-0330-4f05-821f-1d09c93331e6' );
+$contradictory_fias_order->update_meta_data( '_wdc_platform_city_fias_id', '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' );
+$contradictory_fias_order->update_meta_data( '_wdc_platform_rate_meta', array( 'destination_fingerprint' => 'country=RU|location_id=81' ) );
+$contradictory_fias_order->update_meta_data( '_wdc_delivery_calculation_data', array( 'carrier_key' => PekSettings::CARRIER_KEY, 'delivery_type' => DeliveryType::COURIER, 'destination' => array(), 'package' => array( 'products_weight_g' => 2500, 'packaging_weight_g' => 500, 'final_weight_g' => 3000, 'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ) ) ) );
+$contradictory_external_before = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+$contradictory_fias_preview = $creation->safe_preview( $drafts->create_request_from_order( $contradictory_fias_order ) );
+$contradictory_external_after = array( pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ), pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+pek_integration_assert( array() !== $contradictory_fias_preview['errors'] && $contradictory_external_before === $contradictory_external_after, 'Contradictory selected-location FIAS must fail closed before PEK API and must not be hidden by order city FIAS fallback.' );
 
 $before_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 $before_courier_findzone = pek_integration_count_calls( $http, '/branches/findzonebyaddress/' );
@@ -1883,6 +1929,8 @@ pek_integration_assert( false === $attached['pending_creation_in_carrier'], 'Man
 pek_integration_assert( 12345 === $attached['actual_cost_kopecks'], 'Manual attach must merge actual cost from PEK status services.sum.' );
 pek_integration_assert_plain_data( $attached );
 
+$GLOBALS['wdc_pek_integration_transients'] = array();
+$http->status_mode = 'expanded';
 $http->statuses = array( 'Прибыл' );
 $courier_status = $status_service->fetch( 'PEK-777', DeliveryType::COURIER );
 pek_integration_assert( 'in_transit' === $courier_status['universal_status_code'], 'Courier status "Прибыл" must remain in_transit.' );
