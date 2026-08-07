@@ -260,6 +260,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 	public string $status_mode = 'expanded';
 	public string $branches_all_mode = 'success';
 	public string $sender_nearest_mode = 'success';
+	public string $findzone_address_mode = 'exact';
 
 	private function requested_cargo_code( array $args ): string {
 		$body = json_decode( (string) ( $args['body'] ?? '' ), true );
@@ -501,22 +502,36 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			);
 		}
 		if ( str_contains( $url, '/branches/findzonebyaddress/' ) ) {
+			if ( 'empty' === $this->findzone_address_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array(), JSON_UNESCAPED_UNICODE ) );
+			}
+			$precision = 'near' === $this->findzone_address_mode ? 'near' : 'exact';
+			if ( 'bad' === $this->findzone_address_mode ) {
+				$precision = 'bad';
+			}
+			if ( 'missing_precision' === $this->findzone_address_mode ) {
+				$precision = '';
+			}
+			$country = 'country_mismatch' === $this->findzone_address_mode ? 'KZ' : 'RU';
+			$geodata = array(
+				'Address' => array(
+					'formatted' => 'Россия, г Москва, Ходынский б-р, дом 13, кв. 1',
+					'country_code' => $country,
+				),
+			);
+			if ( '' !== $precision ) {
+				$geodata['precision'] = $precision;
+			}
 			return array(
 				'status' => 200,
 				'body' => wp_json_encode(
 					array(
-						'zoneId' => 'ZONE-R',
+						'zoneId' => 'fake-zone',
 						'zoneName' => 'Москва',
-						'branchUID' => 'BR-R',
+						'branchUID' => 'fake-moscow-branch',
 						'branchTitle' => 'Москва',
-						'mainWarehouseId' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
-						'GeoData' => array(
-							'precision' => 'exact',
-							'Address' => array(
-								'formatted' => 'Россия, Московская область, Видное',
-								'country_code' => 'RU',
-							),
-						),
+						'mainWarehouseId' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+						'GeoData' => $geodata,
 					),
 					JSON_UNESCAPED_UNICODE
 				),
@@ -1281,7 +1296,15 @@ try {
 }
 $admin_default_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A ) );
 pek_integration_assert( ! array_key_exists( 'pek_sender_warehouse_id', $admin_default_request->meta ), 'Initial modal must not post settings default as shipment_modal_override.' );
-$admin_override_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A, 'pek_sender_warehouse_override_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_B ) );
+$admin_stale_id_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A, 'pek_sender_warehouse_override_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_B ) );
+pek_integration_assert( ! array_key_exists( 'pek_sender_warehouse_id', $admin_stale_id_request->meta ), 'Sender warehouse override ID without explicit source must be ignored as stale browser state.' );
+try {
+	$drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_override_source' => 'shipment_modal_override', 'pek_sender_warehouse_override_id' => 'not-a-uuid' ) );
+	pek_integration_assert( false, 'Incomplete PEK sender warehouse override pair must fail closed.' );
+} catch ( RuntimeException $expected ) {
+	pek_integration_assert( str_contains( $expected->getMessage(), 'Выберите склад ещё раз' ), 'Incomplete PEK sender warehouse override pair must use public-safe message.' );
+}
+$admin_override_request = $drafts->create_request_from_admin_data( $order, array( 'delivery_type' => DeliveryType::COURIER, 'pek_sender_warehouse_default_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_A, 'pek_sender_warehouse_override_source' => 'shipment_modal_override', 'pek_sender_warehouse_override_id' => PEK_INTEGRATION_SENDER_WAREHOUSE_B ) );
 pek_integration_assert( PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $admin_override_request->meta['pek_sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $admin_override_request->meta['pek_sender_warehouse_source'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ), 'Explicit modal sender warehouse override must stay local and leave settings default unchanged.' );
 $warehouse_constraints = new PickupCargoConstraints( 3000, 4000, 20, 3000, 1 );
 $branches_calls_before = pek_integration_count_calls( $http, '/branches/all/' );
@@ -1319,13 +1342,13 @@ $settings->save_sender_warehouse(
 $default_preview_submit_before = count( $http->submit_bodies );
 $default_preview_branches_before = pek_integration_count_calls( $http, '/branches/all/' );
 $default_preview = $creation->safe_preview( $admin_default_request );
-pek_integration_assert( array() === $default_preview['errors'] && in_array( (string) ( $default_preview['body']['sender_warehouse_source'] ?? '' ), array( 'default', 'settings_default' ), true ) && $default_preview_submit_before === count( $http->submit_bodies ) && $default_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Initial preview must use settings default sender warehouse through nearestdepartments without submit or branches/all.' );
+pek_integration_assert( array() === $default_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $default_preview['body']['sender_warehouse_id'] ?? '' ) && in_array( (string) ( $default_preview['body']['sender_warehouse_source'] ?? '' ), array( 'default', 'settings_default' ), true ) && $default_preview_submit_before === count( $http->submit_bodies ) && $default_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Initial preview must use settings default sender warehouse through nearestdepartments without submit or branches/all.' );
 $alternate_search = $sender_warehouse_service->search( 'Россия, Новосибирск, улица Большая, 280', $warehouse_constraints );
 pek_integration_assert( $alternate_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $alternate_search['items'][0]['warehouseId'] ?? '' ), 'Alternate sender warehouse picker search must cache the selected warehouse with current constraints.' );
 $override_preview_submit_before = count( $http->submit_bodies );
 $override_preview_branches_before = pek_integration_count_calls( $http, '/branches/all/' );
 $override_preview = $creation->safe_preview( $admin_override_request );
-pek_integration_assert( array() === $override_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $override_preview['body']['sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $override_preview['body']['sender_warehouse_source'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ) && $override_preview_submit_before === count( $http->submit_bodies ) && $override_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Explicit sender warehouse override must use cached nearest selection and affect only current shipment preview.' );
+pek_integration_assert( array() === $override_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $override_preview['body']['sender_warehouse_id'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A !== (string) ( $override_preview['body']['sender_warehouse_id'] ?? '' ) && 'shipment_modal_override' === (string) ( $override_preview['body']['sender_warehouse_source'] ?? '' ) && (string) ( $default_preview['body']['correlation_hash'] ?? '' ) !== (string) ( $override_preview['body']['correlation_hash'] ?? '' ) && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $settings->sender_warehouse()['warehouseId'] ?? '' ) && $override_preview_submit_before === count( $http->submit_bodies ) && $override_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Explicit sender warehouse override must use cached nearest selection, change correlation, and affect only current shipment preview.' );
 $good_sender_phone = $settings->sender_phone();
 $settings_repository->set( PekSettings::SENDER_PHONE_KEY, '+7abc9991234567' );
 $legacy_phone_external_before = array( pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
@@ -1543,13 +1566,34 @@ $after_different_settlement_external = array( pek_integration_count_calls( $http
 pek_integration_assert( array() !== $different_settlement_fallback_preview['errors'] && $before_different_settlement_external === $after_different_settlement_external, 'Different settlement name fallback must fail before PEK calls.' );
 
 $before_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
+$before_courier_findzone = pek_integration_count_calls( $http, '/branches/findzonebyaddress/' );
+$before_courier_coordinates = pek_integration_count_calls( $http, '/branches/findzonebycoordinates/' );
 $preview = $creation->safe_preview( $request );
 $after_preview_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 pek_integration_assert( $before_submit === $after_preview_submit, 'Safe preview must not submit PEK preregistration.' );
 pek_integration_assert( 'POST' === $preview['method'] && '/preregistration/submit/' === $preview['path'] && array() === $preview['errors'], 'Safe preview must return canonical PEK envelope: ' . wp_json_encode( $preview, JSON_UNESCAPED_UNICODE ) );
 pek_integration_assert( 'shipping_dadata' === (string) ( $preview['body']['courier_address_source'] ?? '' ) && ! empty( $preview['body']['courier_region_present'] ) && ! empty( $preview['body']['courier_house_present'] ) && '' !== (string) ( $preview['body']['courier_address_hash'] ?? '' ), 'Safe preview must expose courier address evidence without raw address.' );
-pek_integration_assert( 77 === (int) ( $preview['body']['courier_location_id'] ?? 0 ) && true === (bool) ( $preview['body']['courier_location_match'] ?? false ) && 'canonical_location_repository' === (string) ( $preview['body']['courier_location_identity_source'] ?? '' ) && 'fresh_location_mapping' === (string) ( $preview['body']['courier_branch_source'] ?? '' ), 'Safe preview must expose courier location/branch binding evidence.' );
+pek_integration_assert( $before_courier_findzone + 1 === pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ) && $before_courier_coordinates === pek_integration_count_calls( $http, '/branches/findzonebycoordinates/' ), 'Courier Shipment Framework preview must use findzonebyaddress for the actual address and not canonical coordinates.' );
+$courier_findzone_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/branches/findzonebyaddress/' ) ) );
+$courier_findzone_body = json_decode( (string) ( $courier_findzone_calls[ count( $courier_findzone_calls ) - 1 ]['args']['body'] ?? '' ), true );
+pek_integration_assert( is_array( $courier_findzone_body ) && (string) ( $courier_findzone_body['address'] ?? '' ) === $request->recipient_address->raw_address, 'Courier findzonebyaddress must receive the trusted full recipient address.' );
+$sms_geography_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/branches/checknocalcservices/' ) ) );
+$sms_geography_body = json_decode( (string) ( $sms_geography_calls[ count( $sms_geography_calls ) - 1 ]['args']['body'] ?? '' ), true );
+pek_integration_assert( is_array( $sms_geography_body ) && 'fake-moscow-branch' === (string) ( $sms_geography_body['branchReceiverId'] ?? '' ), 'SMS geography must use receiver branch from fresh actual-address findzone response.' );
+pek_integration_assert( 77 === (int) ( $preview['body']['courier_location_id'] ?? 0 ) && true === (bool) ( $preview['body']['courier_location_match'] ?? false ) && 'canonical_location_repository' === (string) ( $preview['body']['courier_location_identity_source'] ?? '' ) && 'fresh_address_zone' === (string) ( $preview['body']['courier_branch_source'] ?? '' ), 'Safe preview must expose courier location identity and fresh actual-address branch binding evidence.' );
+pek_integration_assert( 'exact' === (string) ( $preview['body']['courier_address_precision'] ?? '' ) && ! empty( $preview['body']['courier_zone_present'] ) && ! empty( $preview['body']['courier_main_warehouse_present'] ) && ! empty( $preview['body']['courier_pek_formatted_address_present'] ) && '' !== (string) ( $preview['body']['courier_pek_formatted_address_hash'] ?? '' ), 'Courier safe preview must expose non-PII findzonebyaddress evidence.' );
 pek_integration_assert( 'city' === (string) ( $preview['body']['courier_location_level'] ?? '' ) && true === (bool) ( $preview['body']['courier_parent_city_match'] ?? false ) && ! array_key_exists( 'courier_city_fias_id', $preview['body'] ), 'Safe preview must expose only safe location match evidence without raw FIAS IDs.' );
+$http->findzone_address_mode = 'near';
+$near_preview = $creation->safe_preview( $request );
+pek_integration_assert( array() === $near_preview['errors'] && array() !== $near_preview['warnings'] && 'near' === (string) ( $near_preview['body']['courier_address_precision'] ?? '' ), 'Near courier findzone precision must allow preview with a public warning.' );
+foreach ( array( 'bad', 'missing_precision', 'empty', 'country_mismatch' ) as $findzone_mode ) {
+	$http->findzone_address_mode = $findzone_mode;
+	$downstream_before = array( pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+	$bad_preview = $creation->safe_preview( $request );
+	$downstream_after = array( pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), count( $http->submit_bodies ) );
+	pek_integration_assert( array() !== $bad_preview['errors'] && $downstream_before === $downstream_after, 'Bad/malformed courier findzone must fail before SMS/private/submit: ' . $findzone_mode );
+}
+$http->findzone_address_mode = 'exact';
 $create_result = $creation->create( $order, $request );
 $submit_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 pek_integration_assert( true === $create_result->success, 'Production chain create must succeed through fake PEK submit.' );

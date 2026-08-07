@@ -89,6 +89,39 @@ final class PekLocationResolver {
 		return $mapping;
 	}
 
+	/** @return array<string,mixed> */
+	public function resolve_delivery_address_for_shipment( string $address, string $expected_country_code = 'RU' ): array {
+		$address = trim( $address );
+		if ( '' === $address ) {
+			throw new PekApiException(
+				'Не указан адрес курьерской доставки ПЭК.',
+				array(
+					'endpoint' => '/branches/findzonebyaddress/',
+					'method' => 'POST',
+					'error_code' => 'pek_empty_shipment_delivery_address',
+					'failure_stage' => 'shipment_destination_contract',
+				)
+			);
+		}
+		$location = Location::from_array(
+			array(
+				'id' => 0,
+				'country_code' => strtoupper( trim( $expected_country_code ) ),
+				'region_code' => 'shipment',
+				'fias_id' => 'shipment-address',
+				'gar_id' => '1',
+				'city_name' => $address,
+				'display_name' => $address,
+			)
+		);
+		$fingerprint = hash( 'sha256', $address );
+		$mapping = $this->normalize_response( $location, $fingerprint, 'address', $this->api->find_zone_by_address( $address ) );
+		$mapping['cache_hit'] = false;
+		$mapping['shipment_address_hash'] = $fingerprint;
+
+		return $mapping;
+	}
+
 	public function fingerprint( Location $location ): string {
 		$inputs = $this->addresses->fingerprint_inputs( $location );
 		$inputs['pek_mapping_contract_version'] = self::MAPPING_CONTRACT_VERSION;

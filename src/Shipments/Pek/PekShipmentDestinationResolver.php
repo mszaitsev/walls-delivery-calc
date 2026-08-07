@@ -88,32 +88,46 @@ final class PekShipmentDestinationResolver {
 			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
 		}
 		$location_evidence = $this->assert_location_matches_request( $location_id, $request );
-		$mapping = $this->locations->resolve_for_shipment( $location_id );
+		$mapping = $this->locations->resolve_delivery_address_for_shipment( $request->recipient_address->raw_address, 'RU' );
 		$branch_id = trim( (string) ( $mapping['branch_id'] ?? '' ) );
 		$country = strtoupper( trim( (string) ( $mapping['country_code'] ?? 'RU' ) ) );
 		$state = (string) ( $mapping['mapping_state'] ?? '' );
-		if ( 'RU' !== $country || '' === $branch_id || ! in_array( $state, array( 'resolved', 'near' ), true ) ) {
+		$zone_id = trim( (string) ( $mapping['zone_id'] ?? '' ) );
+		$main_warehouse_id = trim( (string) ( $mapping['main_warehouse_id'] ?? '' ) );
+		$precision = strtolower( trim( (string) ( $mapping['precision'] ?? '' ) ) );
+		if ( 'RU' !== $country || 'unsupported' === $state || 'bad' === $precision ) {
+			throw new \RuntimeException( 'ПЭК не подтвердил адрес курьерской доставки. Проверьте улицу и номер дома.' );
+		}
+		if ( '' === $branch_id || '' === $zone_id || '' === $main_warehouse_id || ! in_array( $state, array( 'resolved', 'near' ), true ) || ! in_array( $precision, array( 'exact', 'near' ), true ) ) {
 			throw new \RuntimeException( 'Не удалось подтвердить филиал назначения ПЭК.' );
 		}
 		$saved_branch = trim( (string) ( $request->meta['pek_receiver_branch_id'] ?? $request->meta['pek_destination_branch_id'] ?? '' ) );
+		$formatted = trim( (string) ( $mapping['normalized_address'] ?? '' ) );
+		$warnings = 'near' === $precision ? array( 'ПЭК распознал адрес приблизительно. Перед созданием заявки проверьте адрес получателя.' ) : array();
 
 		return array(
 			'mode' => DeliveryType::COURIER,
 			'warehouse_id' => '',
 			'branch_id' => $branch_id,
+			'main_warehouse_id' => $main_warehouse_id,
+			'zone_id' => $zone_id,
 			'title' => '',
 			'address' => $request->recipient_address->raw_address,
-			'source' => 'fresh_location_mapping',
+			'source' => 'fresh_address_zone',
 			'location_id' => $location_id,
 			'location_match' => true,
 			'location_identity_source' => $location_evidence['source'],
 			'location_level' => $location_evidence['level'],
 			'parent_city_match' => $location_evidence['parent_city_match'],
 			'settlement_match' => $location_evidence['settlement_match'],
-			'provider_destination_fingerprint' => (string) ( $mapping['address_fingerprint'] ?? $request->meta['provider_destination_fingerprint'] ?? '' ),
+			'provider_destination_fingerprint' => (string) ( $mapping['shipment_address_hash'] ?? $mapping['address_fingerprint'] ?? $request->meta['provider_destination_fingerprint'] ?? '' ),
 			'saved_branch_id' => $saved_branch,
 			'branch_mismatch' => '' !== $saved_branch && $saved_branch !== $branch_id,
-			'branch_source' => 'fresh_location_mapping',
+			'branch_source' => 'fresh_address_zone',
+			'address_precision' => $precision,
+			'formatted_address_present' => '' !== $formatted,
+			'formatted_address_hash' => '' !== $formatted ? hash( 'sha256', $formatted ) : '',
+			'warnings' => $warnings,
 		);
 	}
 

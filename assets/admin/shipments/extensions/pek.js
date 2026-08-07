@@ -15,12 +15,14 @@
     var context = root.querySelector('[data-wdc-pek-sender-warehouse-context]');
     var title = root.querySelector('[data-wdc-pek-sender-warehouse-title]');
     var address = root.querySelector('[data-wdc-pek-sender-warehouse-address]');
-    if (idField && warehouse.warehouseId) {
-      idField.value = warehouse.warehouseId;
-      idField.dispatchEvent(new Event('change', { bubbles: true }));
+    if (!isCanonicalWarehouseId(warehouse.warehouseId || '')) {
+      return;
     }
-    if (sourceField && warehouse.warehouseId) {
+    if (sourceField) {
       sourceField.value = 'shipment_modal_override';
+    }
+    if (idField) {
+      idField.value = String(warehouse.warehouseId).trim().toLowerCase();
     }
     if (title) {
       title.textContent = warehouse.title || warehouse.divisionName || warehouse.branchName || warehouse.warehouseId || '';
@@ -36,10 +38,9 @@
       context.setAttribute('data-latitude', warehouse.latitude || warehouse.lat || '');
       context.setAttribute('data-longitude', warehouse.longitude || warehouse.lng || '');
     }
-    root.dispatchEvent(new CustomEvent('wdc:shipment-carrier-field-change', {
-      bubbles: true,
-      detail: { carrier: 'pek', field: 'sender_warehouse' }
-    }));
+    if (idField) {
+      idField.dispatchEvent(new Event('change', { bubbles: true }));
+    }
   }
 
   function senderWarehouseContext(form, root) {

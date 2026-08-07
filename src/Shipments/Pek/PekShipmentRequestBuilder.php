@@ -88,6 +88,7 @@ final class PekShipmentRequestBuilder {
 			'shipment_mode' => $request->delivery_type,
 			'recipient_type' => 'physical',
 			'sealing_requested' => $sealing,
+			'warnings' => is_array( $destination['warnings'] ?? null ) ? $destination['warnings'] : array(),
 			'courier_address_evidence' => is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array(),
 		);
 
@@ -256,6 +257,11 @@ final class PekShipmentRequestBuilder {
 			'courier_parent_city_match' => ! empty( $destination['parent_city_match'] ),
 			'courier_settlement_match' => ! empty( $destination['settlement_match'] ),
 			'courier_branch_source' => (string) ( $destination['branch_source'] ?? $destination['source'] ?? '' ),
+			'courier_address_precision' => (string) ( $destination['address_precision'] ?? '' ),
+			'courier_zone_present' => '' !== (string) ( $destination['zone_id'] ?? '' ),
+			'courier_main_warehouse_present' => '' !== (string) ( $destination['main_warehouse_id'] ?? '' ),
+			'courier_pek_formatted_address_present' => ! empty( $destination['formatted_address_present'] ),
+			'courier_pek_formatted_address_hash' => (string) ( $destination['formatted_address_hash'] ?? '' ),
 			'courier_region_fias_present' => ! empty( $courier_evidence['courier_region_fias_id_present'] ),
 			'courier_city_fias_present' => ! empty( $courier_evidence['courier_city_fias_id_present'] ),
 			'courier_settlement_fias_present' => ! empty( $courier_evidence['courier_settlement_fias_id_present'] ),

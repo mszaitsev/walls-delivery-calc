@@ -775,11 +775,14 @@ final class OrderShipmentDraftFactory {
 		$override_source = sanitize_key( wp_unslash( $data['pek_sender_warehouse_override_source'] ?? '' ) );
 		$default_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_default_id'] ?? '' ) );
 		$sender_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_override_id'] ?? '' ) );
-		if ( '' === $sender_warehouse_id ) {
-			$legacy_sender_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_id'] ?? '' ) );
-			if ( '' !== $legacy_sender_warehouse_id && ( 'shipment_modal_override' === $override_source || $legacy_sender_warehouse_id !== $default_warehouse_id ) ) {
-				$sender_warehouse_id = $legacy_sender_warehouse_id;
+		unset( $default_warehouse_id );
+		if ( 'shipment_modal_override' === $override_source ) {
+			$sender_warehouse_id = $this->pek_warehouse_uuid( $sender_warehouse_id );
+			if ( '' === $sender_warehouse_id ) {
+				throw new \RuntimeException( 'Выбранный склад самопривоза ПЭК потерял актуальность. Выберите склад ещё раз.' );
 			}
+		} else {
+			$sender_warehouse_id = '';
 		}
 		$meta = array_merge(
 			$base->meta,
@@ -806,6 +809,12 @@ final class OrderShipmentDraftFactory {
 			$base->recipient,
 			$meta
 		);
+	}
+
+	private function pek_warehouse_uuid( string $value ): string {
+		$value = strtolower( trim( $value ) );
+
+		return 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $value ) ? $value : '';
 	}
 
 	/** @return array{address:Address,evidence:array<string,mixed>} */
