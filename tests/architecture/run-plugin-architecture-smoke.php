@@ -906,6 +906,20 @@ plugin_architecture_assert( $registered, 'Plugin architecture smoke must be regi
 $jet_key = 'jet_' . 'logistic';
 $shipment_creation_source = (string) file_get_contents( plugin_architecture_path( 'src/Shipments/Application/ShipmentCreationService.php' ) );
 plugin_architecture_assert( ! str_contains( $shipment_creation_source, $jet_key ) && ! str_contains( $shipment_creation_source, 'JetLogistic' ), 'Jet Logistic must not add carrier persistence or create-flow branching to ShipmentCreationService.' );
+$attempt_service_source = plugin_architecture_source( 'src/Shipments/Application/ShipmentCreationAttemptService.php' );
+$pek_correlation_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentCorrelationResolver.php' );
+$pek_request_builder_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentRequestBuilder.php' );
+$pek_adapter_source = plugin_architecture_source( 'src/Shipments/Pek/PekShipmentAdapter.php' );
+$plugin_attempt_source = plugin_architecture_source( 'src/Core/Plugin.php' );
+plugin_architecture_assert( str_contains( $attempt_service_source, 'final class ShipmentCreationAttemptService' ) && str_contains( $attempt_service_source, "_wdc_shipment_creation_attempts" ) && str_contains( $attempt_service_source, 'reserve_for_request' ), 'Creation attempt owner must be a generic Shipment Framework service.' );
+plugin_architecture_assert( str_contains( $plugin_attempt_source, 'ShipmentCreationAttemptService::class' ) && str_contains( $plugin_attempt_source, '$this->container->get( ShipmentCreationAttemptService::class )' ), 'Plugin DI must inject the generic creation attempt service into ShipmentCreationService.' );
+plugin_architecture_assert( ! str_contains( $shipment_creation_source, "PekSettings::CARRIER_KEY" ) && ! str_contains( $shipment_creation_source, "'pek'" ), 'ShipmentCreationService must not branch on PEK for attempt lifecycle.' );
+plugin_architecture_assert( ! str_contains( $pek_correlation_source, 'random_bytes' ) && ! str_contains( $pek_correlation_source, 'wp_generate_uuid4' ) && ! str_contains( $pek_correlation_source, 'microtime' ) && ! str_contains( $pek_correlation_source, 'time()' ), 'PekShipmentCorrelationResolver must not generate random attempt IDs.' );
+plugin_architecture_assert( ! str_contains( $pek_request_builder_source, 'random_bytes' ) && ! str_contains( $pek_request_builder_source, 'wp_generate_uuid4' ) && ! str_contains( $pek_request_builder_source, 'creation_attempt_id =' ), 'PekShipmentRequestBuilder must not allocate creation attempts.' );
+plugin_architecture_assert( str_contains( $pek_adapter_source, 'pek_creation_attempt_missing' ) && str_contains( $pek_adapter_source, 'valid_creation_attempt_id' ) && strpos( $pek_adapter_source, 'pek_creation_attempt_missing' ) < strpos( $pek_adapter_source, 'preregistration_submit' ), 'PEK mutation create must require generic creation_attempt_id before submit.' );
+$calculation_source_for_attempt = plugin_architecture_source( 'src/Orders/Application/DeliveryCalculationDataBuilder.php' );
+$rate_runtime_source_for_attempt = plugin_architecture_source( 'src/Carriers/Runtime/PekCarrier.php' );
+plugin_architecture_assert( ! str_contains( $calculation_source_for_attempt, 'creation_attempt_id' ) && ! str_contains( $rate_runtime_source_for_attempt, 'creation_attempt_id' ), 'Creation attempt ID must not be delivery calculation or checkout rate metadata.' );
 $generic_shipment_sources = array();
 foreach ( array( 'src/Shipments/Application', 'src/Shipments/Admin', 'src/Shipments/Storage', 'src/Shipments/Documents', 'src/Shipments/Modal' ) as $path ) {
 	foreach ( plugin_architecture_php_files( $path ) as $file ) {

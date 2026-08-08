@@ -65,6 +65,8 @@ final class PekManualAttachContextResolver {
 			'sms_release_effective_limit_kopecks' => (int) ( $existing_shipment['sms_release_effective_limit_kopecks'] ?? $sms['effective_limit_kopecks'] ?? 0 ),
 			'request_snapshot' => is_array( $existing_shipment['request_snapshot'] ?? null ) ? $existing_shipment['request_snapshot'] : array(),
 			'request_summary' => $summary,
+			'creation_attempt_id' => (string) ( $existing_shipment['creation_attempt_id'] ?? '' ),
+			'creation_attempt_generation' => (int) ( $existing_shipment['creation_attempt_generation'] ?? 0 ),
 			'pek_correlation' => (string) ( $existing_shipment['pek_correlation'] ?? $summary['correlation'] ?? '' ),
 			'original_created_at' => (string) ( $existing_shipment['created_at'] ?? '' ),
 		);

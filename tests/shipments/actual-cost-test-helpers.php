@@ -20,6 +20,6 @@ function shipment_test_actual_cost_service( OrderShipmentRepository $repository 
  * @param array<int,mixed> $adapters
  * @param array<int,mixed> $mappers
  */
-function shipment_test_creation_service( OrderShipmentRepository $repository, array $adapters, array $mappers = array(), mixed $registry = null, mixed $logger = null ): ShipmentCreationService {
-	return new ShipmentCreationService( $repository, $adapters, shipment_test_actual_cost_service( $repository ), $logger, $registry, $mappers );
+function shipment_test_creation_service( OrderShipmentRepository $repository, array $adapters, array $mappers = array(), mixed $registry = null, mixed $logger = null, mixed $attempts = null ): ShipmentCreationService {
+	return new ShipmentCreationService( $repository, $adapters, shipment_test_actual_cost_service( $repository ), $logger, $registry, $mappers, $attempts );
 }

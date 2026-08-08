@@ -77,7 +77,7 @@ final class ShipmentCreateAjaxController {
 			}
 			$request = $this->drafts->create_request_from_admin_data( $order, $data );
 			$this->validate_preview_request( $request );
-			$preview = $this->creation->safe_preview( $request );
+			$preview = $this->creation->safe_preview( $request, $order );
 			if ( ! empty( $preview['errors'] ) && is_array( $preview['errors'] ) && in_array( $request->carrier_key, array( DpdSettings::CARRIER_KEY, YandexDeliverySettings::CARRIER_KEY ), true ) ) {
 				throw new \InvalidArgumentException( $this->public_shipment_error_message( (string) reset( $preview['errors'] ) ) );
 			}

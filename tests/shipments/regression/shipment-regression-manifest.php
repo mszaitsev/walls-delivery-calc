@@ -9,6 +9,7 @@ return array(
 	'framework.modal-extensions' => array( 'path' => 'tests/shipments/run-shipment-modal-extensions-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.document-actions' => array( 'path' => 'tests/shipments/run-shipment-document-actions-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.persistence-mappers' => array( 'path' => 'tests/shipments/run-shipment-persistence-mappers-smoke.php', 'groups' => array( 'framework' ) ),
+	'framework.creation-attempt' => array( 'path' => 'tests/shipments/run-shipment-creation-attempt-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.actual-cost-service' => array( 'path' => 'tests/shipments/run-shipment-actual-cost-service-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.actual-cost-presentation' => array( 'path' => 'tests/shipments/run-shipment-actual-cost-presentation-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.cost-threshold-policy' => array( 'path' => 'tests/shipments/run-shipment-cost-threshold-policy-smoke.php', 'groups' => array( 'framework' ) ),

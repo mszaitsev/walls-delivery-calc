@@ -75,7 +75,7 @@ final class ShipmentPreviewAjaxController {
 			}
 			$request = $this->preview_request( $this->drafts->create_request_from_admin_data( $order, $data ) );
 			$this->validate_preview_request( $request );
-			$preview = $this->creation->safe_preview( $request );
+			$preview = $this->creation->safe_preview( $request, $order );
 			if ( YandexDeliverySettings::CARRIER_KEY === $request->carrier_key && ! empty( $preview['errors'] ) && is_array( $preview['errors'] ) ) {
 				throw new \InvalidArgumentException( $this->public_shipment_error_message( (string) reset( $preview['errors'] ) ) );
 			}

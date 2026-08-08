@@ -77,6 +77,11 @@ final class PekShipmentRequestBuilder {
 		);
 		$summary = array(
 			'correlation' => $correlation,
+			'creation_attempt_present' => '' !== trim( (string) ( $request->meta['creation_attempt_id'] ?? '' ) ),
+			'creation_attempt_generation' => (int) ( $request->meta['creation_attempt_generation'] ?? 0 ),
+			'creation_attempt_state' => (string) ( $request->meta['creation_attempt_state'] ?? '' ),
+			'creation_attempt_reused' => ! empty( $request->meta['creation_attempt_reused'] ),
+			'creation_attempt_new' => ! empty( $request->meta['creation_attempt_new'] ),
 			'sender_warehouse' => $sender,
 			'receiver_warehouse_id' => $receiver_warehouse_id,
 			'receiver_branch_id' => (string) ( $destination['branch_id'] ?? '' ),
@@ -232,6 +237,11 @@ final class PekShipmentRequestBuilder {
 			'orderType' => 0,
 			'type' => PekSettings::LTL_PRODUCT_TYPE,
 			'correlation_hash' => hash( 'sha256', (string) ( $summary['correlation'] ?? '' ) ),
+			'creation_attempt_present' => ! empty( $summary['creation_attempt_present'] ),
+			'creation_attempt_generation' => (int) ( $summary['creation_attempt_generation'] ?? 0 ),
+			'creation_attempt_state' => (string) ( $summary['creation_attempt_state'] ?? '' ),
+			'creation_attempt_reused' => ! empty( $summary['creation_attempt_reused'] ),
+			'creation_attempt_new' => ! empty( $summary['creation_attempt_new'] ),
 			'sender_warehouse_id' => (string) ( $sender['warehouseId'] ?? '' ),
 			'sender_warehouse_title' => (string) ( $sender['divisionName'] ?? $sender['branchName'] ?? '' ),
 			'sender_warehouse_source' => (string) ( $sender['source'] ?? '' ),

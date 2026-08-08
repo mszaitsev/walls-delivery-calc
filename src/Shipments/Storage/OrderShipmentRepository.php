@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Storage;
 
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
+
 defined( 'ABSPATH' ) || exit;
 
 final class OrderShipmentRepository {
@@ -66,6 +68,8 @@ final class OrderShipmentRepository {
 		}
 
 		$shipments = $this->all_for_order( $order );
+		$shipment = is_array( $shipments[ $carrier_key ] ?? null ) ? $shipments[ $carrier_key ] : array();
+		$this->mark_deleted_attempt_terminal( $order, $carrier_key, $shipment );
 		unset( $shipments[ $carrier_key ] );
 		$order->update_meta_data( self::META_KEY, $shipments );
 		$order->update_meta_data( self::LAST_ERROR_META_KEY, '' );
@@ -73,6 +77,57 @@ final class OrderShipmentRepository {
 		if ( function_exists( 'do_action' ) ) {
 			do_action( 'wdc_shipment_record_deleted', $order, $carrier_key );
 		}
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function mark_deleted_attempt_terminal( object $order, string $carrier_key, array $shipment ): void {
+		$attempt_id = $shipment['creation_attempt_id'] ?? null;
+		if ( ! is_string( $attempt_id ) || 1 !== preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $attempt_id ) ) {
+			return;
+		}
+		if ( ! method_exists( $order, 'get_meta' ) || ! method_exists( $order, 'update_meta_data' ) ) {
+			return;
+		}
+		$service_key = trim( (string) ( $shipment['service_key'] ?? $shipment['rate_id'] ?? '' ) );
+		if ( '' === $service_key ) {
+			return;
+		}
+		$scope = $this->scope_key( $carrier_key, $service_key );
+		$value = $order->get_meta( ShipmentCreationAttemptService::META_KEY, true );
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			$value = is_array( $decoded ) ? $decoded : array();
+		}
+		if ( ! is_array( $value ) ) {
+			return;
+		}
+		$record = is_array( $value[ $scope ] ?? null ) ? $value[ $scope ] : array();
+		if ( strtolower( $attempt_id ) !== strtolower( (string) ( $record['current_attempt_id'] ?? '' ) ) ) {
+			return;
+		}
+		$generation = $record['generation'] ?? null;
+		if ( ! is_int( $generation ) || $generation < 1 ) {
+			return;
+		}
+		$value[ $scope ] = array(
+			'current_attempt_id' => strtolower( $attempt_id ),
+			'generation' => $generation,
+			'state' => ShipmentCreationAttemptService::STATE_TERMINAL,
+			'updated_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
+		);
+		$order->update_meta_data( ShipmentCreationAttemptService::META_KEY, $value );
+	}
+
+	private function scope_key( string $carrier_key, string $service_key ): string {
+		$normalize = static function ( string $value ): string {
+			if ( function_exists( 'sanitize_key' ) ) {
+				return sanitize_key( $value );
+			}
+
+			return strtolower( preg_replace( '/[^a-z0-9_\-]/i', '', $value ) ?? '' );
+		};
+
+		return $normalize( $carrier_key ) . '|' . $normalize( $service_key );
 	}
 
 	/**

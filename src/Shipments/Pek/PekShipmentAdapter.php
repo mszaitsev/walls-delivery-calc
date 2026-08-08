@@ -63,6 +63,13 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function create_for_order( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
 		$built = null;
 		$submitted = false;
+		if ( ! $this->valid_creation_attempt_id( $request->meta['creation_attempt_id'] ?? null ) ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'pek_creation_attempt_missing',
+				error_message: 'Не удалось подготовить идентификатор попытки создания отправления. Обновите страницу заказа и повторите действие.'
+			);
+		}
 		try {
 			$built = $this->builder->prepare( $order, $request, true );
 			$response = $this->api->preregistration_submit( $built['payload'] );
@@ -238,6 +245,10 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		return in_array( (string) ( $context['error_code'] ?? '' ), array( 'pek_http_500', 'pek_http_non_2xx' ), true ) && $status >= 500;
 	}
 
+	private function valid_creation_attempt_id( mixed $value ): bool {
+		return is_string( $value ) && 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $value );
+	}
+
 	private function log( string $message, \Throwable $e ): void {
 		if ( $this->logger instanceof Logger ) {
 			$this->logger->warning( $message, array( 'error' => $e->getMessage(), 'carrier_key' => PekSettings::CARRIER_KEY ) );
@@ -258,6 +269,11 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 
 		return array(
 			'correlation' => (string) ( $summary['correlation'] ?? '' ),
+			'creation_attempt_present' => ! empty( $summary['creation_attempt_present'] ),
+			'creation_attempt_generation' => (int) ( $summary['creation_attempt_generation'] ?? 0 ),
+			'creation_attempt_state' => (string) ( $summary['creation_attempt_state'] ?? '' ),
+			'creation_attempt_reused' => ! empty( $summary['creation_attempt_reused'] ),
+			'creation_attempt_new' => ! empty( $summary['creation_attempt_new'] ),
 			'sender_warehouse' => array(
 				'warehouseId' => (string) ( $sender['warehouseId'] ?? '' ),
 				'divisionName' => (string) ( $sender['divisionName'] ?? '' ),

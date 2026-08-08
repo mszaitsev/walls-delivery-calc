@@ -132,6 +132,7 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
@@ -1053,7 +1054,21 @@ $adapter = new PekShipmentAdapter(
 	new PekShipmentCreateResponseParser(),
 	$actual_cost_resolver
 );
-$creation = new ShipmentCreationService( $repository, array( $adapter ), $actual_costs, null, null, array( new PekShipmentPersistenceMapper() ) );
+$attempt_uuid_sequence = array(
+	'11111111-1111-4111-8111-111111111111',
+	'22222222-2222-4222-8222-222222222222',
+	'33333333-3333-4333-8333-333333333333',
+	'44444444-4444-4444-8444-444444444444',
+	'55555555-5555-4555-8555-555555555555',
+);
+$attempts = new ShipmentCreationAttemptService(
+	$repository,
+	static function () use ( &$attempt_uuid_sequence ): string {
+		$id = array_shift( $attempt_uuid_sequence );
+		return is_string( $id ) ? $id : '99999999-9999-4999-8999-999999999999';
+	}
+);
+$creation = new ShipmentCreationService( $repository, array( $adapter ), $actual_costs, null, null, array( new PekShipmentPersistenceMapper() ), $attempts );
 pek_integration_assert( $creation instanceof ShipmentCreationService && $drafts instanceof OrderShipmentDraftFactory && $request_builder instanceof PekShipmentRequestBuilder, 'Integration smoke must construct real draft factory, request builder, adapter, creation service and mapper.' );
 
 $counterparts = new PekSenderCounterpartService( $api, new PekPrivateAccessTokenService( $api ), $settings, $credentials );
@@ -1646,10 +1661,11 @@ pek_integration_assert( array() !== $contradictory_fias_preview['errors'] && $co
 $before_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 $before_courier_findzone = pek_integration_count_calls( $http, '/branches/findzonebyaddress/' );
 $before_courier_coordinates = pek_integration_count_calls( $http, '/branches/findzonebycoordinates/' );
-$preview = $creation->safe_preview( $request );
+$preview = $creation->safe_preview( $request, $order );
 $after_preview_submit = count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 pek_integration_assert( $before_submit === $after_preview_submit, 'Safe preview must not submit PEK preregistration.' );
 pek_integration_assert( 'POST' === $preview['method'] && '/preregistration/submit/' === $preview['path'] && array() === $preview['errors'], 'Safe preview must return canonical PEK envelope: ' . wp_json_encode( $preview, JSON_UNESCAPED_UNICODE ) );
+pek_integration_assert( true === (bool) ( $preview['body']['creation_attempt_present'] ?? false ) && 1 === (int) ( $preview['body']['creation_attempt_generation'] ?? 0 ) && 'active' === (string) ( $preview['body']['creation_attempt_state'] ?? '' ), 'Explicit preview must reserve generic creation attempt A.' );
 pek_integration_assert( 'shipping_dadata' === (string) ( $preview['body']['courier_address_source'] ?? '' ) && ! empty( $preview['body']['courier_region_present'] ) && ! empty( $preview['body']['courier_house_present'] ) && '' !== (string) ( $preview['body']['courier_address_hash'] ?? '' ), 'Safe preview must expose courier address evidence without raw address.' );
 pek_integration_assert( $before_courier_findzone + 1 === pek_integration_count_calls( $http, '/branches/findzonebyaddress/' ) && $before_courier_coordinates === pek_integration_count_calls( $http, '/branches/findzonebycoordinates/' ), 'Courier Shipment Framework preview must use findzonebyaddress for the actual address and not canonical coordinates.' );
 $courier_findzone_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/branches/findzonebyaddress/' ) ) );
@@ -1676,9 +1692,12 @@ $create_result = $creation->create( $order, $request );
 $submit_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/preregistration/submit/' ) ) );
 pek_integration_assert( true === $create_result->success, 'Production chain create must succeed through fake PEK submit.' );
 pek_integration_assert( 1 === count( $submit_calls ), 'Fake preregistration submit must be called exactly once in success case.' );
+pek_integration_assert( (string) ( $preview['body']['correlation_hash'] ?? '' ) === hash( 'sha256', (string) ( $http->submit_bodies[0]['cargos'][0]['common']['customerCorrelation'] ?? '' ) ), 'PEK preview and create must use the same generic attempt and customerCorrelation.' );
 pek_integration_assert_same_payload( $http->submit_bodies[0] ?? array(), pek_integration_fixture( 'preregistration-submit-courier.json' ), 'Courier production chain' );
 $created = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 pek_integration_assert( '999940950644' === $created['tracking_number'] && '136' === $created['external_id'], 'Creation service and mapper must persist PEK identifiers.' );
+pek_integration_assert( is_string( $created['creation_attempt_id'] ?? null ) && preg_match( '/^[0-9a-f-]{36}$/', (string) $created['creation_attempt_id'] ) && 1 === (int) ( $created['creation_attempt_generation'] ?? 0 ), 'Successful PEK shipment must persist generic creation attempt A.' );
+$created_attempt_a = (string) $created['creation_attempt_id'];
 pek_integration_assert_plain_data( $created );
 
 $http->status_mode = 'expanded';
@@ -1806,6 +1825,9 @@ $uncertain_result = $creation->create( $uncertain_order, $uncertain_request );
 pek_integration_assert( false === $uncertain_result->success && 'pek_uncertain_submit' === $uncertain_result->error_code, 'HTTP 500 submit must create uncertain result.' );
 $uncertain_shipment = $repository->find_by_carrier( $uncertain_order, PekSettings::CARRIER_KEY );
 pek_integration_assert( ! empty( $uncertain_shipment['pending_creation_in_carrier'] ) && '' !== (string) ( $uncertain_shipment['pek_correlation'] ?? '' ), 'HTTP 500 uncertain result must persist pending correlation.' );
+pek_integration_assert( is_string( $uncertain_shipment['creation_attempt_id'] ?? null ) && preg_match( '/^[0-9a-f-]{36}$/', (string) $uncertain_shipment['creation_attempt_id'] ), 'HTTP 500 uncertain result must persist generic creation attempt A.' );
+$uncertain_attempt_record = $attempts->current_record_for_request( $uncertain_order, $uncertain_request );
+pek_integration_assert( 'pending' === (string) ( $uncertain_attempt_record['state'] ?? '' ) && (string) $uncertain_shipment['creation_attempt_id'] === (string) ( $uncertain_attempt_record['current_attempt_id'] ?? '' ), 'Uncertain pending must keep generic attempt in pending state.' );
 pek_integration_assert_plain_data( $uncertain_shipment );
 
 $malformed_order = new PekIntegrationOrder( 1003 );
@@ -1863,6 +1885,8 @@ $pending = array(
 	'universal_status_code' => 'pending_creation_in_carrier',
 	'pending_creation_in_carrier' => true,
 	'created_at' => '2026-08-06 12:00:00',
+	'creation_attempt_id' => $created_attempt_a,
+	'creation_attempt_generation' => 1,
 	'service_key' => PekSettings::SERVICE_KEY,
 	'service_title' => 'ПЭК',
 	'delivery_type' => DeliveryType::PICKUP,
@@ -1923,6 +1947,7 @@ pek_integration_assert( DeliveryType::PICKUP === $attached['delivery_type'], 'Ma
 pek_integration_assert( 1000 === (int) ( $attached['places'][0]['weight_g'] ?? 0 ) && 10 === (int) ( $attached['places'][0]['length_cm'] ?? 0 ), 'Manual attach must preserve pending places when order was edited or carrier changed.' );
 pek_integration_assert( 'ready_for_pickup' === $attached['universal_status_code'], 'Pickup status "Прибыл" must map to ready_for_pickup during reconciliation.' );
 pek_integration_assert( 'wdc-pek-correlation-1001' === $attached['pek_correlation'], 'Manual attach must preserve canonical correlation.' );
+pek_integration_assert( $created_attempt_a === (string) ( $attached['creation_attempt_id'] ?? '' ), 'Manual attach must preserve generic creation attempt from pending evidence.' );
 pek_integration_assert( '2026-08-06 12:00:00' === $attached['created_at'], 'Manual attach must preserve original created_at.' );
 pek_integration_assert( isset( $attached['reconciled_at'] ), 'Manual attach must add reconciled_at.' );
 pek_integration_assert( false === $attached['pending_creation_in_carrier'], 'Manual attach must clear active pending state.' );
