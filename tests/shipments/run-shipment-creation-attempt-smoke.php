@@ -113,10 +113,10 @@ final class AttemptSmokeMapper implements CarrierShipmentPersistenceMapperInterf
 	public function after_persist( object $order, array $shipment ): void { unset( $order, $shipment ); }
 }
 
-function attempt_smoke_request( int $order_id, string $rate_id = 'service-a', array $meta = array() ): ShipmentCreateRequest {
+function attempt_smoke_request( int $order_id, string $rate_id = 'service-a', array $meta = array(), string $carrier_key = 'attempt_carrier' ): ShipmentCreateRequest {
 	return new ShipmentCreateRequest(
 		$order_id,
-		'attempt_carrier',
+		$carrier_key,
 		DeliveryType::COURIER,
 		$rate_id,
 		new Address( 'RU', 'Россия', 'Москва', '', 'Москва', '', '101000', 'Тестовая', '1', '', 'Россия, Москва, Тестовая, дом 1' ),
@@ -130,6 +130,10 @@ function attempt_smoke_request( int $order_id, string $rate_id = 'service-a', ar
 	);
 }
 
+function attempt_smoke_valid_uuid( string $value ): bool {
+	return 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $value );
+}
+
 $repository = new OrderShipmentRepository();
 $uuids = array(
 	'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -140,12 +144,27 @@ $uuids = array(
 	'12121212-1212-4212-8212-121212121212',
 	'34343434-3434-4434-8434-343434343434',
 	'56565656-5656-4565-8565-565656565656',
+	'78787878-7878-4787-8787-787878787878',
+	'90909090-9090-4909-8909-909090909090',
+	'abababab-abab-4aba-8bab-abababababab',
+	'cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd',
+	'efefefef-efef-4efe-8fef-efefefefefef',
+	'11111111-2222-4333-8444-555555555555',
+	'22222222-3333-4444-8555-666666666666',
+	'33333333-4444-4555-8666-777777777777',
+	'44444444-5555-4666-8777-888888888888',
+	'55555555-6666-4777-8888-999999999999',
+	'66666666-7777-4888-8999-aaaaaaaaaaaa',
 );
+$attempt_now = 1000;
 $attempts = new ShipmentCreationAttemptService(
 	$repository,
 	static function () use ( &$uuids ): string {
 		$id = array_shift( $uuids );
 		return is_string( $id ) ? $id : 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+	},
+	static function () use ( &$attempt_now ): int {
+		return $attempt_now;
 	}
 );
 $adapter = new AttemptSmokeAdapter();
@@ -156,7 +175,7 @@ $request = attempt_smoke_request( 501 );
 attempt_smoke_assert( ! isset( $order->meta_snapshot()[ ShipmentCreationAttemptService::META_KEY ] ), 'Render/status without explicit preview must not allocate attempt.' );
 $preview_a = $service->safe_preview( $request, $order );
 $attempt_a = (string) ( $preview_a['body']['creation_attempt_id'] ?? '' );
-attempt_smoke_assert( 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' === $attempt_a && 1 === (int) ( $preview_a['body']['creation_attempt_generation'] ?? 0 ), 'First explicit preview must reserve attempt A generation 1.' );
+attempt_smoke_assert( attempt_smoke_valid_uuid( $attempt_a ) && 1 === (int) ( $preview_a['body']['creation_attempt_generation'] ?? 0 ), 'First explicit preview must reserve attempt A generation 1.' );
 $preview_a2 = $service->safe_preview( $request, $order );
 attempt_smoke_assert( $attempt_a === (string) ( $preview_a2['body']['creation_attempt_id'] ?? '' ), 'Repeated preview must reuse attempt A.' );
 
@@ -170,6 +189,8 @@ attempt_smoke_assert( $attempt_a !== (string) ( $different_preview['body']['crea
 
 $different_service_preview = $service->safe_preview( attempt_smoke_request( 501, 'service-b' ), $order );
 attempt_smoke_assert( $attempt_a !== (string) ( $different_service_preview['body']['creation_attempt_id'] ?? '' ), 'Different carrier/service scope must receive a different attempt namespace.' );
+$scope_records = $order->meta_snapshot()[ ShipmentCreationAttemptService::META_KEY ] ?? array();
+attempt_smoke_assert( is_array( $scope_records ) && isset( $scope_records['attempt_carrier|service-a'], $scope_records['attempt_carrier|service-b'] ), 'Attempt meta updates must preserve unrelated carrier/service scopes.' );
 
 $validation_order = new AttemptSmokeOrder( 503 );
 $validation_request = attempt_smoke_request( 503 );
@@ -188,6 +209,11 @@ attempt_smoke_assert( $created_result->success && $attempt_a === (string) ( $cre
 $create_calls_before_duplicate = $adapter->create_calls;
 $duplicate = $service->create( $order, $request );
 attempt_smoke_assert( ! $duplicate->success && 'shipment_already_created' === $duplicate->error_code && $create_calls_before_duplicate === $adapter->create_calls, 'Active shipment must block duplicate carrier mutation.' );
+$active_record = $attempts->current_record_for_request( $order, $request );
+attempt_smoke_assert( 'active' === (string) ( $active_record['state'] ?? '' ), 'Successful create must keep attempt active.' );
+$failed_cancel_preview = $service->safe_preview( $request, $order );
+attempt_smoke_assert( $attempt_a === (string) ( $failed_cancel_preview['body']['creation_attempt_id'] ?? '' ), 'Failed cancellation/no terminal transition must leave attempt A active.' );
+$attempts->mark_terminal_for_shipment( $order, 'attempt_carrier', $created, 'local_removed' );
 $repository->delete_for_carrier( $order, 'attempt_carrier' );
 $after_terminal_preview = $service->safe_preview( $request, $order );
 attempt_smoke_assert( $attempt_a !== (string) ( $after_terminal_preview['body']['creation_attempt_id'] ?? '' ), 'Local removal of external shipment must terminalize A and next create must get B.' );
@@ -199,6 +225,12 @@ $pending_result = $service->create( $pending_order, $pending_request );
 $pending = $repository->find_by_carrier( $pending_order, 'attempt_carrier' );
 $pending_record = $attempts->current_record_for_request( $pending_order, $pending_request );
 attempt_smoke_assert( ! $pending_result->success && ! empty( $pending['pending_creation_in_carrier'] ) && (string) ( $pending['creation_attempt_id'] ?? '' ) === (string) ( $pending_record['current_attempt_id'] ?? '' ) && 'pending' === (string) ( $pending_record['state'] ?? '' ), 'Uncertain pending must persist and mark attempt pending.' );
+$attempts->mark_active_for_shipment( $pending_order, 'attempt_carrier', $pending );
+$reconciled_record = $attempts->current_record_for_request( $pending_order, $pending_request );
+attempt_smoke_assert( (string) ( $pending['creation_attempt_id'] ?? '' ) === (string) ( $reconciled_record['current_attempt_id'] ?? '' ) && 'active' === (string) ( $reconciled_record['state'] ?? '' ), 'Manual reconciliation must transition pending A to active A.' );
+$pending_request_with_attempt = attempt_smoke_request( 504, 'service-a', array( 'creation_attempt_id' => (string) ( $pending['creation_attempt_id'] ?? '' ) ) );
+$attempts->mark_pending( $pending_order, $pending_request_with_attempt );
+$attempts->mark_terminal_for_shipment( $pending_order, 'attempt_carrier', $pending, 'pending_discarded' );
 $repository->delete_for_carrier( $pending_order, 'attempt_carrier' );
 $pending_after_remove = $service->safe_preview( $pending_request, $pending_order );
 attempt_smoke_assert( (string) ( $pending['creation_attempt_id'] ?? '' ) !== (string) ( $pending_after_remove['body']['creation_attempt_id'] ?? '' ), 'Removing uncertain pending must prevent old attempt reuse.' );
@@ -207,10 +239,34 @@ $locked_order = new AttemptSmokeOrder( 507 );
 $locked_request = attempt_smoke_request( 507 );
 $release_lock = $attempts->acquire_create_lock( $locked_order, $locked_request );
 attempt_smoke_assert( is_callable( $release_lock ), 'Test must acquire generic create lock.' );
+$same_carrier_other_service = $attempts->acquire_create_lock( $locked_order, attempt_smoke_request( 507, 'service-b' ) );
+attempt_smoke_assert( null === $same_carrier_other_service, 'Same order and carrier must share one create lock even with different service keys.' );
+$different_carrier_lock = $attempts->acquire_create_lock( $locked_order, attempt_smoke_request( 507, 'service-a', array(), 'other_carrier' ) );
+attempt_smoke_assert( is_callable( $different_carrier_lock ), 'Different carrier create locks must remain independent.' );
+$different_carrier_lock();
+$different_order_lock = $attempts->acquire_create_lock( new AttemptSmokeOrder( 508 ), $locked_request );
+attempt_smoke_assert( is_callable( $different_order_lock ), 'Different order create locks must remain independent.' );
+$different_order_lock();
 $locked_calls_before = $adapter->create_calls;
 $locked_result = $service->create( $locked_order, $locked_request );
 attempt_smoke_assert( ! $locked_result->success && 'shipment_create_in_progress' === $locked_result->error_code && $locked_calls_before === $adapter->create_calls, 'Generic create lock must prevent duplicate carrier mutation before adapter call.' );
 $release_lock();
+
+$stale_order = new AttemptSmokeOrder( 509 );
+$stale_request = attempt_smoke_request( 509 );
+$attempt_now = 2000;
+$release_a = $attempts->acquire_create_lock( $stale_order, $stale_request );
+attempt_smoke_assert( is_callable( $release_a ), 'Owner A must acquire lock for stale-owner regression.' );
+$attempt_now = 2401;
+$release_b = $attempts->acquire_create_lock( $stale_order, $stale_request );
+attempt_smoke_assert( is_callable( $release_b ), 'Owner B must take over expired lock.' );
+$release_a();
+$release_c_blocked = $attempts->acquire_create_lock( $stale_order, $stale_request );
+attempt_smoke_assert( null === $release_c_blocked, 'Stale owner A must not delete successor owner B lock.' );
+$release_b();
+$release_c = $attempts->acquire_create_lock( $stale_order, $stale_request );
+attempt_smoke_assert( is_callable( $release_c ), 'Owner C must acquire only after B releases its own lock.' );
+$release_c();
 
 $malformed_order = new AttemptSmokeOrder( 505 );
 $malformed_order->update_meta_data( ShipmentCreationAttemptService::META_KEY, array( 'attempt_carrier|service-a' => array( 'current_attempt_id' => 'not-a-uuid', 'generation' => 1, 'state' => 'active', 'updated_at' => '2026-08-08 10:00:00' ) ) );

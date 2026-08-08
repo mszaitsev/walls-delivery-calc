@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -19,7 +20,8 @@ final class PekShipmentService {
 		private PekShipmentButtonPolicy $buttons,
 		private ShipmentActualCostService $actual_costs,
 		private PekStatusMapping $mapping,
-		private PekManualAttachContextResolver $manual_contexts
+		private PekManualAttachContextResolver $manual_contexts,
+		private ?ShipmentCreationAttemptService $attempts = null
 	) {
 	}
 
@@ -83,10 +85,16 @@ final class PekShipmentService {
 				array( 'updated_at' => $this->now() )
 			);
 			unset( $shipment['failure_stage'] );
+			if ( '' === trim( (string) ( $shipment['creation_attempt_id'] ?? '' ) ) ) {
+				unset( $shipment['creation_attempt_id'], $shipment['creation_attempt_generation'] );
+			}
 			if ( is_array( $shipment['response_snapshot'] ?? null ) ) {
 				unset( $shipment['response_snapshot']['error_code'], $shipment['response_snapshot']['failure_stage'] );
 			}
 			$this->repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $shipment );
+			if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
+				$this->attempts->mark_active_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment );
+			}
 			if ( $actual instanceof ShipmentActualCost ) {
 				$shipment = $this->actual_costs->apply_carrier_cost( $order, PekSettings::CARRIER_KEY, $actual );
 			}
@@ -130,6 +138,7 @@ final class PekShipmentService {
 		$result = $this->api->order_cancellation( array( $code ) );
 		foreach ( $result as $row ) {
 			if ( $code === (string) ( $row['code'] ?? '' ) && true === ( $row['success'] ?? false ) ) {
+				$this->mark_terminal_before_delete( $order, $shipment, 'cancelled' );
 				$this->repository->delete_for_carrier( $order, PekSettings::CARRIER_KEY );
 				return array( 'success' => true, 'cancelled_and_removed' => true, 'message' => 'Заявка ПЭК отменена и удалена из заказа.' );
 			}
@@ -140,6 +149,8 @@ final class PekShipmentService {
 
 	/** @return array<string,mixed> */
 	public function remove_local( object $order ): array {
+		$shipment = $this->repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+		$this->mark_terminal_before_delete( $order, $shipment, 'local_removed' );
 		$this->repository->delete_for_carrier( $order, PekSettings::CARRIER_KEY );
 
 		return array( 'success' => true, 'message' => 'Отправление ПЭК удалено из заказа локально.', 'removed' => true );
@@ -177,5 +188,12 @@ final class PekShipmentService {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function mark_terminal_before_delete( object $order, array $shipment, string $reason ): void {
+		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
+			$this->attempts->mark_terminal_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment, $reason );
+		}
 	}
 }

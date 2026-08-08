@@ -14,46 +14,62 @@ final class ShipmentCreationAttemptService {
 	public const STATE_PENDING = 'pending';
 	public const STATE_TERMINAL = 'terminal';
 	public const STATE_ERROR_MESSAGE = 'Не удалось восстановить состояние попытки создания отправления. Обновите данные заказа перед повторной попыткой.';
+	private const LOCK_STATE_ERROR_MESSAGE = 'Не удалось восстановить блокировку создания отправления. Повторите действие позже.';
+	private const CREATE_LOCK_TTL_SECONDS = 300;
+	private const ATTEMPT_META_LOCK_TTL_SECONDS = 30;
 
 	/** @var callable():string */
 	private $uuid_factory;
+	/** @var callable():int */
+	private $time_factory;
 
 	/** @param callable():string|null $uuid_factory */
 	public function __construct(
 		private OrderShipmentRepository $repository,
-		?callable $uuid_factory = null
+		?callable $uuid_factory = null,
+		?callable $time_factory = null
 	) {
 		$this->uuid_factory = $uuid_factory ?? fn(): string => $this->generate_uuid_v4();
+		$this->time_factory = $time_factory ?? static fn(): int => time();
 	}
 
 	public function reserve_for_request( object $order, ShipmentCreateRequest $request ): ShipmentCreateRequest {
-		$existing_shipment = $this->repository->find_by_carrier( $order, $request->carrier_key );
-		if ( array() !== $existing_shipment && $this->repository->has_created_for_carrier( $order, $request->carrier_key ) && ! $this->valid_uuid( $existing_shipment['creation_attempt_id'] ?? null ) ) {
-			return $request;
+		$release = $this->acquire_attempt_meta_lock( $order );
+		if ( null === $release ) {
+			throw new \RuntimeException( self::LOCK_STATE_ERROR_MESSAGE );
 		}
 
-		$scope = $this->scope_key( $request->carrier_key, $this->service_key( $request ) );
-		$records = $this->records( $order );
-		$record = $records[ $scope ] ?? null;
-		$new = false;
-
-		if ( null === $record ) {
-			$record = $this->new_record( 1, self::STATE_ACTIVE );
-			$new = true;
-		} else {
-			$record = $this->normalize_record( $record );
-			if ( self::STATE_TERMINAL === $record['state'] ) {
-				$record = $this->new_record( $record['generation'] + 1, self::STATE_ACTIVE );
-				$new = true;
+		try {
+			$existing_shipment = $this->repository->find_by_carrier( $order, $request->carrier_key );
+			if ( array() !== $existing_shipment && $this->repository->has_created_for_carrier( $order, $request->carrier_key ) && ! $this->valid_uuid( $existing_shipment['creation_attempt_id'] ?? null ) ) {
+				return $request;
 			}
+
+			$scope = $this->scope_key( $request->carrier_key, $this->service_key( $request ) );
+			$records = $this->records( $order );
+			$record = $records[ $scope ] ?? null;
+			$new = false;
+
+			if ( null === $record ) {
+				$record = $this->new_record( 1, self::STATE_ACTIVE );
+				$new = true;
+			} else {
+				$record = $this->normalize_record( $record );
+				if ( self::STATE_TERMINAL === $record['state'] ) {
+					$record = $this->new_record( $record['generation'] + 1, self::STATE_ACTIVE );
+					$new = true;
+				}
+			}
+
+			$record['state'] = self::STATE_ACTIVE === $record['state'] ? self::STATE_ACTIVE : $record['state'];
+			$record['updated_at'] = $this->now();
+			$records[ $scope ] = $record;
+			$this->save_records( $order, $records );
+
+			return $this->with_attempt_meta( $request, $record, $new );
+		} finally {
+			$release();
 		}
-
-		$record['state'] = self::STATE_ACTIVE === $record['state'] ? self::STATE_ACTIVE : $record['state'];
-		$record['updated_at'] = $this->now();
-		$records[ $scope ] = $record;
-		$this->save_records( $order, $records );
-
-		return $this->with_attempt_meta( $request, $record, $new );
 	}
 
 	public function mark_pending( object $order, ShipmentCreateRequest $request ): void {
@@ -64,21 +80,23 @@ final class ShipmentCreationAttemptService {
 		$this->mark_state( $order, $request->carrier_key, $this->service_key( $request ), self::STATE_ACTIVE, $this->attempt_id_from_request( $request ) );
 	}
 
-	public function mark_terminal_for_shipment( object $order, string $carrier_key, array $shipment, string $reason = 'terminal' ): void {
-		unset( $reason );
-		$attempt_id = $shipment['creation_attempt_id'] ?? null;
-		if ( ! $this->valid_uuid( $attempt_id ) ) {
-			return;
-		}
-		$service_key = trim( (string) ( $shipment['service_key'] ?? '' ) );
-		if ( '' === $service_key ) {
-			$service_key = trim( (string) ( $shipment['rate_id'] ?? '' ) );
-		}
-		if ( '' === $service_key ) {
+	public function mark_active_for_shipment( object $order, string $carrier_key, array $shipment ): void {
+		$context = $this->transition_context_from_shipment( $shipment );
+		if ( array() === $context ) {
 			return;
 		}
 
-		$this->mark_state( $order, $carrier_key, $service_key, self::STATE_TERMINAL, (string) $attempt_id );
+		$this->mark_state( $order, $carrier_key, $context['service_key'], self::STATE_ACTIVE, $context['attempt_id'] );
+	}
+
+	public function mark_terminal_for_shipment( object $order, string $carrier_key, array $shipment, string $reason = 'terminal' ): void {
+		unset( $reason );
+		$context = $this->transition_context_from_shipment( $shipment );
+		if ( array() === $context ) {
+			return;
+		}
+
+		$this->mark_state( $order, $carrier_key, $context['service_key'], self::STATE_TERMINAL, $context['attempt_id'] );
 	}
 
 	public function validate_attempt_id( mixed $value ): bool {
@@ -88,48 +106,29 @@ final class ShipmentCreationAttemptService {
 	/** @return callable():void|null */
 	public function acquire_create_lock( object $order, ShipmentCreateRequest $request ): ?callable {
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : $request->order_id;
-		$key = 'wdc_shipment_create_lock_' . hash( 'sha256', $order_id . '|' . $this->scope_key( $request->carrier_key, $this->service_key( $request ) ) );
-		$token = $this->generate_uuid_v4();
-		$expires = time() + 300;
-		$value = array( 'token' => $token, 'expires' => $expires );
+		$key = $this->create_lock_key( $order_id, $request->carrier_key );
 
-		if ( function_exists( 'add_option' ) && function_exists( 'delete_option' ) ) {
-			if ( add_option( $key, $value, '', 'no' ) ) {
-				return static function () use ( $key ): void {
-					delete_option( $key );
-				};
-			}
-			if ( function_exists( 'get_option' ) ) {
-				$existing = get_option( $key, array() );
-				$existing_expires = is_array( $existing ) ? (int) ( $existing['expires'] ?? 0 ) : 0;
-				if ( $existing_expires > 0 && $existing_expires < time() ) {
-					delete_option( $key );
-					if ( add_option( $key, $value, '', 'no' ) ) {
-						return static function () use ( $key ): void {
-							delete_option( $key );
-						};
-					}
-				}
-			}
-
-			return null;
-		}
-
-		static $locks = array();
-		if ( isset( $locks[ $key ] ) && (int) $locks[ $key ] >= time() ) {
-			return null;
-		}
-		$locks[ $key ] = $expires;
-
-		return static function () use ( &$locks, $key ): void {
-			unset( $locks[ $key ] );
-		};
+		return $this->acquire_lock( $key, self::CREATE_LOCK_TTL_SECONDS );
 	}
 
 	/** @return array<string,mixed> */
 	public function current_record_for_request( object $order, ShipmentCreateRequest $request ): array {
 		$records = $this->records( $order );
 		$record = $records[ $this->scope_key( $request->carrier_key, $this->service_key( $request ) ) ] ?? null;
+		if ( null === $record ) {
+			return array();
+		}
+
+		return $this->normalize_record( $record );
+	}
+
+	public function current_record_for_shipment( object $order, string $carrier_key, array $shipment ): array {
+		$context = $this->transition_context_from_shipment( $shipment );
+		if ( array() === $context ) {
+			return array();
+		}
+		$records = $this->records( $order );
+		$record = $records[ $this->scope_key( $carrier_key, $context['service_key'] ) ] ?? null;
 		if ( null === $record ) {
 			return array();
 		}
@@ -216,26 +215,30 @@ final class ShipmentCreationAttemptService {
 		if ( ! $this->valid_uuid( $attempt_id ) ) {
 			throw new \RuntimeException( self::STATE_ERROR_MESSAGE );
 		}
-		$scope = $this->scope_key( $carrier_key, $service_key );
-		$records = $this->records( $order );
-		$record = $records[ $scope ] ?? null;
-		if ( null === $record ) {
-			$record = array(
-				'current_attempt_id' => strtolower( $attempt_id ),
-				'generation' => 1,
-				'state' => $state,
-				'updated_at' => $this->now(),
-			);
-		} else {
+		$release = $this->acquire_attempt_meta_lock( $order );
+		if ( null === $release ) {
+			throw new \RuntimeException( self::LOCK_STATE_ERROR_MESSAGE );
+		}
+
+		try {
+			$scope = $this->scope_key( $carrier_key, $service_key );
+			$records = $this->records( $order );
+			$record = $records[ $scope ] ?? null;
+			if ( null === $record ) {
+				throw new \RuntimeException( self::STATE_ERROR_MESSAGE );
+			}
 			$record = $this->normalize_record( $record );
 			if ( strtolower( $attempt_id ) !== $record['current_attempt_id'] ) {
 				throw new \RuntimeException( self::STATE_ERROR_MESSAGE );
 			}
+			$this->assert_transition_allowed( $record['state'], $state );
 			$record['state'] = $state;
 			$record['updated_at'] = $this->now();
+			$records[ $scope ] = $record;
+			$this->save_records( $order, $records );
+		} finally {
+			$release();
 		}
-		$records[ $scope ] = $record;
-		$this->save_records( $order, $records );
 	}
 
 	/** @param array<string,mixed> $record */
@@ -282,6 +285,146 @@ final class ShipmentCreationAttemptService {
 		return $this->sanitize_scope_part( $carrier_key ) . '|' . $this->sanitize_scope_part( $service_key );
 	}
 
+	private function create_lock_key( int $order_id, string $carrier_key ): string {
+		return 'wdc_shipment_create_lock_' . hash( 'sha256', $order_id . '|' . $this->sanitize_scope_part( $carrier_key ) );
+	}
+
+	private function attempt_meta_lock_key( object $order ): string {
+		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+		return 'wdc_shipment_attempt_meta_lock_' . hash( 'sha256', (string) $order_id );
+	}
+
+	/** @return callable():void|null */
+	private function acquire_attempt_meta_lock( object $order ): ?callable {
+		return $this->acquire_lock( $this->attempt_meta_lock_key( $order ), self::ATTEMPT_META_LOCK_TTL_SECONDS );
+	}
+
+	/** @return callable():void|null */
+	private function acquire_lock( string $key, int $ttl_seconds ): ?callable {
+		$token = $this->generate_uuid_v4();
+		$value = array(
+			'token' => $token,
+			'expires' => $this->unix_time() + $ttl_seconds,
+		);
+
+		if ( function_exists( 'add_option' ) && function_exists( 'get_option' ) ) {
+			if ( add_option( $key, $value, '', 'no' ) ) {
+				return function () use ( $key, $value ): void {
+					$this->release_owned_lock( $key, $value );
+				};
+			}
+
+			$existing = get_option( $key, array() );
+			if ( ! $this->valid_lock_value( $existing ) ) {
+				return null;
+			}
+			if ( (int) $existing['expires'] >= $this->unix_time() ) {
+				return null;
+			}
+			if ( ! $this->delete_owned_lock( $key, $existing ) ) {
+				return null;
+			}
+			if ( add_option( $key, $value, '', 'no' ) ) {
+				return function () use ( $key, $value ): void {
+					$this->release_owned_lock( $key, $value );
+				};
+			}
+
+			return null;
+		}
+
+		static $locks = array();
+		$existing = $locks[ $key ] ?? null;
+		if ( is_array( $existing ) && $this->valid_lock_value( $existing ) && (int) $existing['expires'] >= $this->unix_time() ) {
+			return null;
+		}
+		if ( null !== $existing && ( ! is_array( $existing ) || ! $this->valid_lock_value( $existing ) ) ) {
+			return null;
+		}
+		$locks[ $key ] = $value;
+
+		return function () use ( &$locks, $key, $value ): void {
+			if ( isset( $locks[ $key ] ) && $locks[ $key ] === $value ) {
+				unset( $locks[ $key ] );
+			}
+		};
+	}
+
+	/** @param array{token:string,expires:int} $value */
+	private function release_owned_lock( string $key, array $value ): void {
+		$this->delete_owned_lock( $key, $value );
+	}
+
+	/** @param array{token:string,expires:int} $value */
+	private function delete_owned_lock( string $key, array $value ): bool {
+		global $wpdb;
+		if ( is_object( $wpdb ) && isset( $wpdb->options ) && method_exists( $wpdb, 'prepare' ) && method_exists( $wpdb, 'query' ) ) {
+			$serialized = function_exists( 'maybe_serialize' ) ? maybe_serialize( $value ) : serialize( $value );
+			$sql = $wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s",
+				$key,
+				$serialized
+			);
+
+			return 1 === (int) $wpdb->query( $sql );
+		}
+		if ( function_exists( 'get_option' ) && function_exists( 'delete_option' ) ) {
+			$current = get_option( $key, array() );
+			if ( $current !== $value ) {
+				return false;
+			}
+
+			return (bool) delete_option( $key );
+		}
+
+		return false;
+	}
+
+	private function valid_lock_value( mixed $value ): bool {
+		return is_array( $value )
+			&& ! array_is_list( $value )
+			&& $this->valid_uuid( $value['token'] ?? null )
+			&& is_int( $value['expires'] ?? null )
+			&& (int) $value['expires'] > 0;
+	}
+
+	private function assert_transition_allowed( string $from, string $to ): void {
+		if ( $from === $to && in_array( $from, array( self::STATE_ACTIVE, self::STATE_PENDING, self::STATE_TERMINAL ), true ) ) {
+			return;
+		}
+		$allowed = array(
+			self::STATE_ACTIVE => array( self::STATE_PENDING, self::STATE_TERMINAL ),
+			self::STATE_PENDING => array( self::STATE_ACTIVE, self::STATE_TERMINAL ),
+			self::STATE_TERMINAL => array(),
+		);
+		if ( ! in_array( $to, $allowed[ $from ] ?? array(), true ) ) {
+			throw new \RuntimeException( self::STATE_ERROR_MESSAGE );
+		}
+	}
+
+	/** @return array{attempt_id:string,service_key:string}|array{} */
+	private function transition_context_from_shipment( array $shipment ): array {
+		if ( ! array_key_exists( 'creation_attempt_id', $shipment ) ) {
+			return array();
+		}
+		$attempt_id = $shipment['creation_attempt_id'];
+		if ( ! $this->valid_uuid( $attempt_id ) ) {
+			throw new \RuntimeException( self::STATE_ERROR_MESSAGE );
+		}
+		$service_key = trim( (string) ( $shipment['service_key'] ?? '' ) );
+		if ( '' === $service_key ) {
+			$service_key = trim( (string) ( $shipment['rate_id'] ?? '' ) );
+		}
+		if ( '' === $service_key ) {
+			throw new \RuntimeException( self::STATE_ERROR_MESSAGE );
+		}
+
+		return array(
+			'attempt_id' => strtolower( (string) $attempt_id ),
+			'service_key' => $service_key,
+		);
+	}
+
 	private function sanitize_scope_part( string $value ): string {
 		if ( function_exists( 'sanitize_key' ) ) {
 			return sanitize_key( $value );
@@ -311,5 +454,9 @@ final class ShipmentCreationAttemptService {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	private function unix_time(): int {
+		return (int) ( $this->time_factory )();
 	}
 }

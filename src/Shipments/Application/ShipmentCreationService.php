@@ -32,6 +32,14 @@ final class ShipmentCreationService {
 	 * @return array<string,mixed>
 	 */
 	public function safe_preview( ShipmentCreateRequest $request, ?object $order = null ): array {
+		if ( null !== $order && ! ( $this->attempts instanceof ShipmentCreationAttemptService ) ) {
+			return array(
+				'method' => '',
+				'path' => '',
+				'body' => array(),
+				'errors' => array( ShipmentCreationAttemptService::STATE_ERROR_MESSAGE ),
+			);
+		}
 		if ( $this->attempts instanceof ShipmentCreationAttemptService && null !== $order ) {
 			try {
 				$request = $this->attempts->reserve_for_request( $order, $request );
@@ -62,6 +70,13 @@ final class ShipmentCreationService {
 	}
 
 	public function create( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
+		if ( ! ( $this->attempts instanceof ShipmentCreationAttemptService ) ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_creation_attempt_dependency_missing',
+				error_message: ShipmentCreationAttemptService::STATE_ERROR_MESSAGE
+			);
+		}
 		$order_id = $this->order_id( $order );
 		if ( $order_id > 0 && $request->order_id !== $order_id ) {
 			$this->log_order_mismatch( $order_id, $request );
@@ -73,15 +88,13 @@ final class ShipmentCreationService {
 		}
 
 		$release_create_lock = null;
-		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
-			$release_create_lock = $this->attempts->acquire_create_lock( $order, $request );
-			if ( null === $release_create_lock ) {
-				return new ShipmentCreateResult(
-					false,
-					error_code: 'shipment_create_in_progress',
-					error_message: 'Создание отправления уже выполняется. Дождитесь завершения и обновите статус заказа.'
-				);
-			}
+		$release_create_lock = $this->attempts->acquire_create_lock( $order, $request );
+		if ( null === $release_create_lock ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_create_in_progress',
+				error_message: 'Создание отправления уже выполняется. Дождитесь завершения и обновите статус заказа.'
+			);
 		}
 
 		try {
@@ -111,16 +124,14 @@ final class ShipmentCreationService {
 			);
 		}
 
-		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
-			try {
-				$request = $this->attempts->reserve_for_request( $order, $request );
-			} catch ( \Throwable $e ) {
-				return new ShipmentCreateResult(
-					false,
-					error_code: 'shipment_creation_attempt_state_invalid',
-					error_message: $e->getMessage()
-				);
-			}
+		try {
+			$request = $this->attempts->reserve_for_request( $order, $request );
+		} catch ( \Throwable $e ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_creation_attempt_state_invalid',
+				error_message: $e->getMessage()
+			);
 		}
 
 		$preview = $this->safe_preview( $request );
@@ -132,7 +143,7 @@ final class ShipmentCreationService {
 				$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $failed_fields );
 				$shipment = $this->common_shipment_envelope( $request, $result, $preview, $failed_fields, $now );
 				$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
-				if ( $this->attempts instanceof ShipmentCreationAttemptService && ! empty( $shipment['pending_creation_in_carrier'] ) ) {
+				if ( ! empty( $shipment['pending_creation_in_carrier'] ) ) {
 					$this->attempts->mark_pending( $order, $request );
 				}
 				$shipment = $this->apply_actual_cost_candidate( $order, $request->carrier_key, $actual_cost_candidate, $shipment );
@@ -174,9 +185,7 @@ final class ShipmentCreationService {
 		$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $mapped_fields );
 		$shipment = $this->common_shipment_envelope( $request, $result, $preview, $mapped_fields, $now );
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
-		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
-			$this->attempts->mark_active( $order, $request );
-		}
+		$this->attempts->mark_active( $order, $request );
 		$shipment = $this->apply_actual_cost_candidate( $order, $request->carrier_key, $actual_cost_candidate, $shipment );
 		$mapper->after_persist( $order, $shipment );
 

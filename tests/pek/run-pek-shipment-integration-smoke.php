@@ -1015,7 +1015,6 @@ $GLOBALS['wpdb']->pek_location_mappings = array();
 $GLOBALS['wpdb']->pek_terminals = array();
 $drafts = new OrderShipmentDraftFactory( new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new ShipmentServiceSettings(), null, null, null, null, null, null, null, null, null, null, $settings, new PekShipmentCourierAddressResolver() );
 $manual_contexts = new PekManualAttachContextResolver( $drafts, $repository );
-$shipment_service = new PekShipmentService( $api, $status_service, $repository, $button_policy, $actual_costs, $mapping, $manual_contexts );
 $actual_cost_resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
 $destination_resolver = new PekShipmentDestinationResolver(
 	new PekPickupPointProvider(
@@ -1045,15 +1044,6 @@ $request_builder = new PekShipmentRequestBuilder(
 	$credentials,
 	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
 );
-$adapter = new PekShipmentAdapter(
-	$api,
-	$request_builder,
-	$status_service,
-	$shipment_service,
-	$button_policy,
-	new PekShipmentCreateResponseParser(),
-	$actual_cost_resolver
-);
 $attempt_uuid_sequence = array(
 	'11111111-1111-4111-8111-111111111111',
 	'22222222-2222-4222-8222-222222222222',
@@ -1067,6 +1057,16 @@ $attempts = new ShipmentCreationAttemptService(
 		$id = array_shift( $attempt_uuid_sequence );
 		return is_string( $id ) ? $id : '99999999-9999-4999-8999-999999999999';
 	}
+);
+$shipment_service = new PekShipmentService( $api, $status_service, $repository, $button_policy, $actual_costs, $mapping, $manual_contexts, $attempts );
+$adapter = new PekShipmentAdapter(
+	$api,
+	$request_builder,
+	$status_service,
+	$shipment_service,
+	$button_policy,
+	new PekShipmentCreateResponseParser(),
+	$actual_cost_resolver
 );
 $creation = new ShipmentCreationService( $repository, array( $adapter ), $actual_costs, null, null, array( new PekShipmentPersistenceMapper() ), $attempts );
 pek_integration_assert( $creation instanceof ShipmentCreationService && $drafts instanceof OrderShipmentDraftFactory && $request_builder instanceof PekShipmentRequestBuilder, 'Integration smoke must construct real draft factory, request builder, adapter, creation service and mapper.' );
@@ -1948,6 +1948,8 @@ pek_integration_assert( 1000 === (int) ( $attached['places'][0]['weight_g'] ?? 0
 pek_integration_assert( 'ready_for_pickup' === $attached['universal_status_code'], 'Pickup status "Прибыл" must map to ready_for_pickup during reconciliation.' );
 pek_integration_assert( 'wdc-pek-correlation-1001' === $attached['pek_correlation'], 'Manual attach must preserve canonical correlation.' );
 pek_integration_assert( $created_attempt_a === (string) ( $attached['creation_attempt_id'] ?? '' ), 'Manual attach must preserve generic creation attempt from pending evidence.' );
+$attached_attempt_record = $attempts->current_record_for_request( $order, $request );
+pek_integration_assert( $created_attempt_a === (string) ( $attached_attempt_record['current_attempt_id'] ?? '' ) && 'active' === (string) ( $attached_attempt_record['state'] ?? '' ), 'Manual attach must transition generic attempt state from pending to active.' );
 pek_integration_assert( '2026-08-06 12:00:00' === $attached['created_at'], 'Manual attach must preserve original created_at.' );
 pek_integration_assert( isset( $attached['reconciled_at'] ), 'Manual attach must add reconciled_at.' );
 pek_integration_assert( false === $attached['pending_creation_in_carrier'], 'Manual attach must clear active pending state.' );
