@@ -366,7 +366,12 @@ final class ShipmentCreationAttemptService {
 				$serialized
 			);
 
-			return 1 === (int) $wpdb->query( $sql );
+			$deleted = 1 === (int) $wpdb->query( $sql );
+			if ( $deleted ) {
+				$this->invalidate_option_cache_after_delete( $key );
+			}
+
+			return $deleted;
 		}
 		if ( function_exists( 'get_option' ) && function_exists( 'delete_option' ) ) {
 			$current = get_option( $key, array() );
@@ -378,6 +383,20 @@ final class ShipmentCreationAttemptService {
 		}
 
 		return false;
+	}
+
+	private function invalidate_option_cache_after_delete( string $key ): void {
+		if ( function_exists( 'wp_cache_delete' ) ) {
+			wp_cache_delete( $key, 'options' );
+		}
+		if ( function_exists( 'wp_cache_get' ) && function_exists( 'wp_cache_set' ) ) {
+			$notoptions = wp_cache_get( 'notoptions', 'options' );
+			if ( ! is_array( $notoptions ) ) {
+				$notoptions = array();
+			}
+			$notoptions[ $key ] = true;
+			wp_cache_set( 'notoptions', $notoptions, 'options' );
+		}
 	}
 
 	private function valid_lock_value( mixed $value ): bool {

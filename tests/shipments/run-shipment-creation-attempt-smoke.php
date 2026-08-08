@@ -22,6 +22,154 @@ if ( ! function_exists( 'do_action' ) ) {
 		unset( $hook, $args );
 	}
 }
+if ( ! function_exists( 'maybe_serialize' ) ) {
+	function maybe_serialize( mixed $value ): string {
+		if ( is_array( $value ) || is_object( $value ) ) {
+			return serialize( $value );
+		}
+
+		return (string) $value;
+	}
+}
+if ( ! function_exists( 'maybe_unserialize' ) ) {
+	function maybe_unserialize( mixed $value ): mixed {
+		if ( ! is_string( $value ) ) {
+			return $value;
+		}
+		$result = @unserialize( $value );
+
+		return false !== $result || 'b:0;' === $value ? $result : $value;
+	}
+}
+if ( ! isset( $GLOBALS['attempt_smoke_options_db'] ) ) {
+	$GLOBALS['attempt_smoke_options_db'] = array();
+}
+if ( ! isset( $GLOBALS['attempt_smoke_options_cache'] ) ) {
+	$GLOBALS['attempt_smoke_options_cache'] = array( 'options' => array(), 'notoptions' => array() );
+}
+function attempt_smoke_reset_wp_option_backend(): void {
+	$GLOBALS['attempt_smoke_options_db'] = array();
+	$GLOBALS['attempt_smoke_options_cache'] = array( 'options' => array(), 'notoptions' => array() );
+}
+if ( ! function_exists( 'wp_cache_get' ) ) {
+	function wp_cache_get( string $key, string $group = '' ): mixed {
+		$cache = $GLOBALS['attempt_smoke_options_cache'][ $group ] ?? array();
+
+		return array_key_exists( $key, $cache ) ? $cache[ $key ] : false;
+	}
+}
+if ( ! function_exists( 'wp_cache_set' ) ) {
+	function wp_cache_set( string $key, mixed $value, string $group = '' ): bool {
+		if ( ! isset( $GLOBALS['attempt_smoke_options_cache'][ $group ] ) || ! is_array( $GLOBALS['attempt_smoke_options_cache'][ $group ] ) ) {
+			$GLOBALS['attempt_smoke_options_cache'][ $group ] = array();
+		}
+		$GLOBALS['attempt_smoke_options_cache'][ $group ][ $key ] = $value;
+
+		return true;
+	}
+}
+if ( ! function_exists( 'wp_cache_delete' ) ) {
+	function wp_cache_delete( string $key, string $group = '' ): bool {
+		unset( $GLOBALS['attempt_smoke_options_cache'][ $group ][ $key ] );
+
+		return true;
+	}
+}
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, mixed $default = false ): mixed {
+		$notoptions = wp_cache_get( 'notoptions', 'options' );
+		if ( is_array( $notoptions ) && isset( $notoptions[ $option ] ) ) {
+			return $default;
+		}
+		$cached = wp_cache_get( $option, 'options' );
+		if ( false !== $cached ) {
+			return maybe_unserialize( $cached );
+		}
+		if ( array_key_exists( $option, $GLOBALS['attempt_smoke_options_db'] ) ) {
+			$serialized = $GLOBALS['attempt_smoke_options_db'][ $option ];
+			wp_cache_set( $option, $serialized, 'options' );
+
+			return maybe_unserialize( $serialized );
+		}
+		if ( ! is_array( $notoptions ) ) {
+			$notoptions = array();
+		}
+		$notoptions[ $option ] = true;
+		wp_cache_set( 'notoptions', $notoptions, 'options' );
+
+		return $default;
+	}
+}
+if ( ! function_exists( 'add_option' ) ) {
+	function add_option( string $option, mixed $value, string $deprecated = '', string $autoload = 'yes' ): bool {
+		unset( $deprecated, $autoload );
+		$notoptions = wp_cache_get( 'notoptions', 'options' );
+		if ( ! is_array( $notoptions ) || ! isset( $notoptions[ $option ] ) ) {
+			if ( false !== get_option( $option, false ) ) {
+				return false;
+			}
+		}
+		if ( array_key_exists( $option, $GLOBALS['attempt_smoke_options_db'] ) ) {
+			return false;
+		}
+		$serialized = maybe_serialize( $value );
+		$GLOBALS['attempt_smoke_options_db'][ $option ] = $serialized;
+		wp_cache_set( $option, $serialized, 'options' );
+		$notoptions = wp_cache_get( 'notoptions', 'options' );
+		if ( is_array( $notoptions ) && isset( $notoptions[ $option ] ) ) {
+			unset( $notoptions[ $option ] );
+			wp_cache_set( 'notoptions', $notoptions, 'options' );
+		}
+
+		return true;
+	}
+}
+if ( ! function_exists( 'delete_option' ) ) {
+	function delete_option( string $option ): bool {
+		if ( ! array_key_exists( $option, $GLOBALS['attempt_smoke_options_db'] ) ) {
+			return false;
+		}
+		unset( $GLOBALS['attempt_smoke_options_db'][ $option ] );
+		wp_cache_delete( $option, 'options' );
+		$notoptions = wp_cache_get( 'notoptions', 'options' );
+		if ( ! is_array( $notoptions ) ) {
+			$notoptions = array();
+		}
+		$notoptions[ $option ] = true;
+		wp_cache_set( 'notoptions', $notoptions, 'options' );
+
+		return true;
+	}
+}
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $options = 'wp_options';
+		/** @var array<int,mixed> */
+		private array $prepared_args = array();
+
+		public function prepare( string $query, mixed ...$args ): string {
+			$this->prepared_args = $args;
+
+			return $query;
+		}
+
+		public function query( string $query ): int {
+			if ( ! str_starts_with( $query, 'DELETE FROM ' ) || count( $this->prepared_args ) < 2 ) {
+				return 0;
+			}
+			$key = (string) $this->prepared_args[0];
+			$value = (string) $this->prepared_args[1];
+			if ( array_key_exists( $key, $GLOBALS['attempt_smoke_options_db'] ) && $GLOBALS['attempt_smoke_options_db'][ $key ] === $value ) {
+				unset( $GLOBALS['attempt_smoke_options_db'][ $key ] );
+
+				return 1;
+			}
+
+			return 0;
+		}
+	}
+}
+$GLOBALS['wpdb'] = new wpdb();
 
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -134,6 +282,8 @@ function attempt_smoke_valid_uuid( string $value ): bool {
 	return 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $value );
 }
 
+attempt_smoke_reset_wp_option_backend();
+
 $repository = new OrderShipmentRepository();
 $uuids = array(
 	'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -169,6 +319,33 @@ $attempts = new ShipmentCreationAttemptService(
 );
 $adapter = new AttemptSmokeAdapter();
 $service = new ShipmentCreationService( $repository, array( $adapter ), new ShipmentActualCostService( $repository ), null, null, array( new AttemptSmokeMapper() ), $attempts );
+
+$same_request_lock_order = new AttemptSmokeOrder( 490 );
+$same_request_lock = $attempts->acquire_create_lock( $same_request_lock_order, attempt_smoke_request( 490 ) );
+attempt_smoke_assert( is_callable( $same_request_lock ), 'Cache-aware backend must acquire first lock owner.' );
+$same_request_lock();
+$same_request_reacquire = $attempts->acquire_create_lock( $same_request_lock_order, attempt_smoke_request( 490 ) );
+attempt_smoke_assert( is_callable( $same_request_reacquire ), 'Same PHP request must reacquire a lock after owned SQL CAS release invalidates option cache.' );
+$same_request_reacquire();
+$persistent_cache_reacquire = $attempts->acquire_create_lock( $same_request_lock_order, attempt_smoke_request( 490 ) );
+attempt_smoke_assert( is_callable( $persistent_cache_reacquire ), 'Persistent object cache across logical requests must not keep a released lock busy.' );
+$persistent_cache_reacquire();
+
+$create_lock_key_method = new ReflectionMethod( ShipmentCreationAttemptService::class, 'create_lock_key' );
+$create_lock_key_method->setAccessible( true );
+$failed_cas_order = new AttemptSmokeOrder( 491 );
+$failed_cas_request = attempt_smoke_request( 491 );
+$failed_cas_release = $attempts->acquire_create_lock( $failed_cas_order, $failed_cas_request );
+attempt_smoke_assert( is_callable( $failed_cas_release ), 'Failed-CAS regression must start with owner A.' );
+$failed_cas_key = (string) $create_lock_key_method->invoke( $attempts, 491, 'attempt_carrier' );
+$successor_value = array( 'token' => '99999999-9999-4999-8999-999999999999', 'expires' => $attempt_now + 300 );
+$GLOBALS['attempt_smoke_options_db'][ $failed_cas_key ] = maybe_serialize( $successor_value );
+$failed_cas_release();
+attempt_smoke_assert( ( $GLOBALS['attempt_smoke_options_db'][ $failed_cas_key ] ?? '' ) === maybe_serialize( $successor_value ), 'Failed SQL CAS must not delete successor lock from DB.' );
+wp_cache_delete( $failed_cas_key, 'options' );
+$failed_cas_current = get_option( $failed_cas_key, array() );
+attempt_smoke_assert( $failed_cas_current === $successor_value, 'Failed SQL CAS must leave successor lock authoritative after cache refresh.' );
+attempt_smoke_reset_wp_option_backend();
 
 $order = new AttemptSmokeOrder( 501 );
 $request = attempt_smoke_request( 501 );
