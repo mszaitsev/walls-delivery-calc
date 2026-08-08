@@ -282,6 +282,12 @@ function attempt_smoke_valid_uuid( string $value ): bool {
 	return 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $value );
 }
 
+function attempt_smoke_notoptions_contains( string $key ): bool {
+	$notoptions = wp_cache_get( 'notoptions', 'options' );
+
+	return is_array( $notoptions ) && isset( $notoptions[ $key ] );
+}
+
 attempt_smoke_reset_wp_option_backend();
 
 $repository = new OrderShipmentRepository();
@@ -319,11 +325,14 @@ $attempts = new ShipmentCreationAttemptService(
 );
 $adapter = new AttemptSmokeAdapter();
 $service = new ShipmentCreationService( $repository, array( $adapter ), new ShipmentActualCostService( $repository ), null, null, array( new AttemptSmokeMapper() ), $attempts );
+$create_lock_key_method = new ReflectionMethod( ShipmentCreationAttemptService::class, 'create_lock_key' );
+$create_lock_key_method->setAccessible( true );
 
 $same_request_lock_order = new AttemptSmokeOrder( 490 );
 $same_request_lock = $attempts->acquire_create_lock( $same_request_lock_order, attempt_smoke_request( 490 ) );
 attempt_smoke_assert( is_callable( $same_request_lock ), 'Cache-aware backend must acquire first lock owner.' );
 $same_request_lock();
+attempt_smoke_assert( ! attempt_smoke_notoptions_contains( (string) $create_lock_key_method->invoke( $attempts, 490, 'attempt_carrier' ) ), 'Successful CAS release without successor must leave lock option cache unknown, not negatively cached.' );
 $same_request_reacquire = $attempts->acquire_create_lock( $same_request_lock_order, attempt_smoke_request( 490 ) );
 attempt_smoke_assert( is_callable( $same_request_reacquire ), 'Same PHP request must reacquire a lock after owned SQL CAS release invalidates option cache.' );
 $same_request_reacquire();
@@ -331,8 +340,6 @@ $persistent_cache_reacquire = $attempts->acquire_create_lock( $same_request_lock
 attempt_smoke_assert( is_callable( $persistent_cache_reacquire ), 'Persistent object cache across logical requests must not keep a released lock busy.' );
 $persistent_cache_reacquire();
 
-$create_lock_key_method = new ReflectionMethod( ShipmentCreationAttemptService::class, 'create_lock_key' );
-$create_lock_key_method->setAccessible( true );
 $failed_cas_order = new AttemptSmokeOrder( 491 );
 $failed_cas_request = attempt_smoke_request( 491 );
 $failed_cas_release = $attempts->acquire_create_lock( $failed_cas_order, $failed_cas_request );
@@ -345,6 +352,52 @@ attempt_smoke_assert( ( $GLOBALS['attempt_smoke_options_db'][ $failed_cas_key ] 
 wp_cache_delete( $failed_cas_key, 'options' );
 $failed_cas_current = get_option( $failed_cas_key, array() );
 attempt_smoke_assert( $failed_cas_current === $successor_value, 'Failed SQL CAS must leave successor lock authoritative after cache refresh.' );
+attempt_smoke_reset_wp_option_backend();
+
+$successor_injected = false;
+$interleaving_uuids = array(
+	'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+	'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+	'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa',
+);
+$interleaving_attempts = new ShipmentCreationAttemptService(
+	$repository,
+	static function () use ( &$interleaving_uuids ): string {
+		$id = array_shift( $interleaving_uuids );
+		return is_string( $id ) ? $id : 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb';
+	},
+	static function () use ( &$attempt_now ): int {
+		return $attempt_now;
+	},
+	static function ( string $key, array $value ) use ( &$successor_injected ): void {
+		unset( $value );
+		if ( $successor_injected ) {
+			return;
+		}
+		$successor_injected = true;
+		$successor = array( 'token' => '77777777-8888-4999-8aaa-bbbbbbbbbbbb', 'expires' => 1300 );
+		$GLOBALS['attempt_smoke_options_db'][ $key ] = maybe_serialize( $successor );
+		wp_cache_set( $key, maybe_serialize( $successor ), 'options' );
+		$notoptions = wp_cache_get( 'notoptions', 'options' );
+		if ( ! is_array( $notoptions ) ) {
+			$notoptions = array();
+		}
+		$notoptions[ $key ] = true;
+		wp_cache_set( 'notoptions', $notoptions, 'options' );
+	}
+);
+$interleaving_order = new AttemptSmokeOrder( 492 );
+$interleaving_request = attempt_smoke_request( 492 );
+$interleaving_key = (string) $create_lock_key_method->invoke( $interleaving_attempts, 492, 'attempt_carrier' );
+$interleaving_release_a = $interleaving_attempts->acquire_create_lock( $interleaving_order, $interleaving_request );
+attempt_smoke_assert( is_callable( $interleaving_release_a ), 'Successor interleaving test must acquire owner A.' );
+$interleaving_release_a();
+attempt_smoke_assert( isset( $GLOBALS['attempt_smoke_options_db'][ $interleaving_key ] ), 'Concurrent successor B must remain in DB after owner A CAS cleanup.' );
+attempt_smoke_assert( ! attempt_smoke_notoptions_contains( $interleaving_key ), 'Owner A CAS cleanup must not hide successor B with notoptions negative cache.' );
+$interleaving_visible = get_option( $interleaving_key, array() );
+attempt_smoke_assert( is_array( $interleaving_visible ) && '77777777-8888-4999-8aaa-bbbbbbbbbbbb' === (string) ( $interleaving_visible['token'] ?? '' ), 'get_option must observe successor B after conservative cache reconciliation.' );
+$interleaving_release_c_blocked = $interleaving_attempts->acquire_create_lock( $interleaving_order, $interleaving_request );
+attempt_smoke_assert( null === $interleaving_release_c_blocked, 'Owner C cannot acquire while successor B owns the DB lock.' );
 attempt_smoke_reset_wp_option_backend();
 
 $order = new AttemptSmokeOrder( 501 );

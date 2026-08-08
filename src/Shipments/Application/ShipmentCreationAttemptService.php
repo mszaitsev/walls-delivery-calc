@@ -22,15 +22,19 @@ final class ShipmentCreationAttemptService {
 	private $uuid_factory;
 	/** @var callable():int */
 	private $time_factory;
+	/** @var callable(string,array):void|null */
+	private $after_lock_cas_delete;
 
 	/** @param callable():string|null $uuid_factory */
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		?callable $uuid_factory = null,
-		?callable $time_factory = null
+		?callable $time_factory = null,
+		?callable $after_lock_cas_delete = null
 	) {
 		$this->uuid_factory = $uuid_factory ?? fn(): string => $this->generate_uuid_v4();
 		$this->time_factory = $time_factory ?? static fn(): int => time();
+		$this->after_lock_cas_delete = $after_lock_cas_delete;
 	}
 
 	public function reserve_for_request( object $order, ShipmentCreateRequest $request ): ShipmentCreateRequest {
@@ -368,7 +372,10 @@ final class ShipmentCreationAttemptService {
 
 			$deleted = 1 === (int) $wpdb->query( $sql );
 			if ( $deleted ) {
-				$this->invalidate_option_cache_after_delete( $key );
+				if ( null !== $this->after_lock_cas_delete ) {
+					( $this->after_lock_cas_delete )( $key, $value );
+				}
+				$this->invalidate_lock_option_cache_after_cas( $key );
 			}
 
 			return $deleted;
@@ -385,7 +392,7 @@ final class ShipmentCreationAttemptService {
 		return false;
 	}
 
-	private function invalidate_option_cache_after_delete( string $key ): void {
+	private function invalidate_lock_option_cache_after_cas( string $key ): void {
 		if ( function_exists( 'wp_cache_delete' ) ) {
 			wp_cache_delete( $key, 'options' );
 		}
@@ -394,7 +401,9 @@ final class ShipmentCreationAttemptService {
 			if ( ! is_array( $notoptions ) ) {
 				$notoptions = array();
 			}
-			$notoptions[ $key ] = true;
+			if ( isset( $notoptions[ $key ] ) ) {
+				unset( $notoptions[ $key ] );
+			}
 			wp_cache_set( 'notoptions', $notoptions, 'options' );
 		}
 	}

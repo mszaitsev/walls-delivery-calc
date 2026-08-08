@@ -1,6 +1,6 @@
 # Plugin Architecture
 
-Version: 0.135.2
+Version: 0.135.3
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 
@@ -21,7 +21,7 @@ The plugin is a WooCommerce delivery platform. Production ownership is split by 
 
 Generic layers may depend on domain contracts and registries. Carrier implementations depend on generic contracts. Generic Shipment Framework services must not depend on carrier implementations except in the composition root (`Plugin.php`) where concrete implementations are registered.
 
-Version 0.135.2 registers PEK Shipment Framework classes and the generic `ShipmentCreationAttemptService` only through the composition root. PEK classes include `PekShipmentAdapter`, `PekShipmentPersistenceMapper`, `PekShipmentModalExtension`, `PekShipmentDocumentProvider`, request/cargo/recipient builders, private-token and SMS availability services, sender warehouse and declared-value resolvers, manual attach context resolver, structured courier address resolver, shared RU phone normalizer, status mapping/service, button policy, and document service. Generic shipment creation, attempt reservation, create locking, metabox rendering, document download, status autosync, actual-cost storage, and lifecycle AJAX remain carrier-agnostic; terminal attempt transitions are invoked by application/carrier lifecycle services before storage deletion, and `OrderShipmentRepository` remains a storage boundary. The production create lock keeps direct SQL token-owned CAS plus WordPress options cache invalidation in the generic attempt service; the PEK sender warehouse picker uses the generic carrier hook rather than a PEK branch in generic JS.
+Version 0.135.3 registers PEK Shipment Framework classes and the generic `ShipmentCreationAttemptService` only through the composition root. PEK classes include `PekShipmentAdapter`, `PekShipmentPersistenceMapper`, `PekShipmentModalExtension`, `PekShipmentDocumentProvider`, request/cargo/recipient builders, private-token and SMS availability services, sender warehouse and declared-value resolvers, manual attach context resolver, structured courier address resolver, shared RU phone normalizer, status mapping/service, button policy, and document service. Generic shipment creation, attempt reservation, create locking, metabox rendering, document download, status autosync, actual-cost storage, and lifecycle AJAX remain carrier-agnostic; terminal attempt transitions are invoked by application/carrier lifecycle services before storage deletion, and `OrderShipmentRepository` remains a storage boundary. The production create lock keeps direct SQL token-owned CAS plus conservative WordPress options cache reconciliation in the generic attempt service: successful CAS clears the individual option cache and removes the lock key from `notoptions`, without publishing absence. The PEK sender warehouse picker uses the generic carrier hook rather than a PEK branch in generic JS.
 
 Jet Logistic follows the same boundary: `Plugin.php` wires its runtime carrier, geography/status repositories, admin pages, and shipment adapter. Jet is not registered in document providers, modal extensions, lifecycle continuation, or shipment creation persistence mappers because the carrier supports quote, manual attach, status update, local remove, and autosync only.
 
