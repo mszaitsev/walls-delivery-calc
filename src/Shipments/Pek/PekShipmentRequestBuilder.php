@@ -13,13 +13,18 @@ defined( 'ABSPATH' ) || exit;
 
 final class PekSmsReleaseValidationException extends \RuntimeException {
 	/** @param array<string,mixed> $diagnostic */
-	public function __construct( string $message, private array $diagnostic ) {
+	public function __construct( string $message, private array $diagnostic, private array $warnings = array() ) {
 		parent::__construct( $message );
 	}
 
 	/** @return array<string,mixed> */
 	public function diagnostic(): array {
 		return $this->diagnostic;
+	}
+
+	/** @return array<int,string> */
+	public function warnings(): array {
+		return array_values( array_filter( array_map( 'strval', $this->warnings ), static fn( string $value ): bool => '' !== trim( $value ) ) );
 	}
 }
 
@@ -63,11 +68,12 @@ final class PekShipmentRequestBuilder {
 		$sealing = $this->product_weights->sealing_required( $request );
 		$counterpart_guid = $this->settings->sender_counterpart_guid();
 		$this->assert_counterpart_current( $counterpart_guid );
+		$warnings = array_values( array_merge( is_array( $sender['warnings'] ?? null ) ? $sender['warnings'] : array(), is_array( $destination['warnings'] ?? null ) ? $destination['warnings'] : array() ) );
 		$sms = $live_sms_check
 			? $this->sms->check( $counterpart_guid, (string) ( $sender['branchId'] ?? '' ), (string) ( $destination['branch_id'] ?? '' ), $declared_kopecks )
 			: new PekSmsReleaseResult( true, $this->settings->sms_release_limit_rub() * 100, true, true );
 		if ( ! $sms->success ) {
-			throw new PekSmsReleaseValidationException( $sms->message, $sms->diagnostic );
+			throw new PekSmsReleaseValidationException( $sms->message, $sms->diagnostic, $warnings );
 		}
 		$common = array( 'orderType' => 0 );
 		$client_card = trim( $this->settings->client_card() );
@@ -105,7 +111,7 @@ final class PekShipmentRequestBuilder {
 			'shipment_mode' => $request->delivery_type,
 			'recipient_type' => 'physical',
 			'sealing_requested' => $sealing,
-			'warnings' => array_values( array_merge( is_array( $sender['warnings'] ?? null ) ? $sender['warnings'] : array(), is_array( $destination['warnings'] ?? null ) ? $destination['warnings'] : array() ) ),
+			'warnings' => $warnings,
 			'courier_address_evidence' => is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array(),
 		);
 
@@ -263,6 +269,10 @@ final class PekShipmentRequestBuilder {
 			'sender_warehouse_fallback_reason' => (string) ( $sender['fallback_reason'] ?? '' ),
 			'receiver_mode' => (string) ( $summary['shipment_mode'] ?? '' ),
 			'receiver_warehouse_id' => (string) ( $summary['receiver_warehouse_id'] ?? '' ),
+			'pickup_destination_source' => (string) ( $destination['source'] ?? '' ),
+			'pickup_destination_fresh_check' => ! array_key_exists( 'fresh_check', $destination ) || ! empty( $destination['fresh_check'] ),
+			'pickup_destination_fallback_used' => ! empty( $destination['fallback_used'] ),
+			'pickup_destination_fallback_reason' => (string) ( $destination['fallback_reason'] ?? '' ),
 			'courier_address_present' => '' === (string) ( $summary['receiver_warehouse_id'] ?? '' ),
 			'courier_address_source' => (string) ( $courier_evidence['courier_address_source'] ?? '' ),
 			'courier_region_present' => ! empty( $courier_evidence['courier_region_present'] ),

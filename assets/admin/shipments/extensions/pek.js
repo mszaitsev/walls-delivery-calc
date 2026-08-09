@@ -79,6 +79,16 @@
     return labels[String(stage || '')] || 'Неизвестный этап';
   }
 
+  function preparationStageLabel(stage) {
+    var labels = {
+      sender_warehouse: 'Проверка склада отправителя',
+      destination_pickup: 'Проверка терминала назначения',
+      destination_courier: 'Проверка адреса/филиала назначения',
+      counterpart: 'Проверка контрагента'
+    };
+    return labels[String(stage || '')] || 'Неизвестный этап';
+  }
+
   function dash(value) {
     if (value === null || value === undefined || value === '') {
       return '—';
@@ -179,6 +189,34 @@
     return true;
   }
 
+  function renderPreparationDiagnostic(context) {
+    if (!context || !context.form || !context.preview || !context.preview.body) {
+      return false;
+    }
+    var errors = context.form.querySelector('[data-wdc-shipment-errors]');
+    var diagnostic = context.preview.body.preparation_diagnostic;
+    if (!errors || !diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)) {
+      return false;
+    }
+    var section = document.createElement('div');
+    var heading = document.createElement('div');
+    var list = document.createElement('dl');
+    section.className = 'wdc-shipment-technical-diagnostic wdc-shipment-pek-preparation-diagnostic';
+    heading.className = 'wdc-shipment-technical-title';
+    heading.textContent = 'Подготовка заявки ПЭК';
+    section.appendChild(heading);
+    appendDiagnosticRow(list, 'Этап', preparationStageLabel(diagnostic.stage));
+    appendDiagnosticRow(list, 'Код ошибки', diagnostic.error_code || '');
+    appendDiagnosticRow(list, 'Endpoint', diagnosticEndpoint(diagnostic));
+    appendDiagnosticRow(list, 'HTTP status', diagnostic.http_status === null ? '' : diagnostic.http_status);
+    appendDiagnosticRow(list, 'Ошибка ПЭК', diagnostic.api_error_message || '');
+    section.appendChild(list);
+    appendFieldErrors(section, diagnostic.field_errors);
+    appendResponseShape(section, diagnostic.response_shape);
+    errors.appendChild(section);
+    return true;
+  }
+
   function openSenderWarehousePicker(root, button) {
     var picker = window.wdcShipmentPickupPicker;
     var form = (button && button.closest && button.closest('form')) || (root && root.querySelector && root.querySelector('form')) || root || document;
@@ -233,7 +271,8 @@
       updateWarehouseCard(context.root || document, context.senderWarehouse || context.warehouse);
     },
     afterPreviewUpdated: function (context) {
-      return renderSmsDiagnostic(context);
+      var rendered = renderPreparationDiagnostic(context);
+      return renderSmsDiagnostic(context) || rendered;
     }
   });
 }());

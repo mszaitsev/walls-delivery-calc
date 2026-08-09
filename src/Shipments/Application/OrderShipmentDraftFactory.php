@@ -679,6 +679,7 @@ final class OrderShipmentDraftFactory {
 		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
 		$api = is_array( $calculation['api'] ?? null ) ? $calculation['api'] : array();
 		$provider_query = is_array( $rate_meta['pickup_provider_query'] ?? null ) ? $rate_meta['pickup_provider_query'] : array();
+		$pek_pickup_snapshot = DeliveryType::PICKUP === $delivery_type ? $this->pek_selected_pickup_snapshot( $order, $pickup, $rate_meta, $provider_query, $api ) : array();
 		$point_code = $this->first_non_empty(
 			$pickup['point_code'] ?? '',
 			$pickup['code'] ?? '',
@@ -740,6 +741,7 @@ final class OrderShipmentDraftFactory {
 				'pek_destination_location_id' => $location_id,
 				'provider_destination_fingerprint' => (string) ( $rate_meta['provider_destination_fingerprint'] ?? $rate_meta['destination_fingerprint'] ?? $pickup['provider_destination_fingerprint'] ?? '' ),
 				'pickup_provider_query' => $provider_query,
+				'pek_pickup_selected_snapshot' => $pek_pickup_snapshot,
 				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $address : '',
 				'pek_courier_address_evidence' => DeliveryType::COURIER === $delivery_type && is_array( $courier['evidence'] ?? null ) ? $courier['evidence'] : array(),
 				'calculation_data' => $calculation,
@@ -1497,6 +1499,99 @@ final class OrderShipmentDraftFactory {
 	 * @return array<string,mixed>
 	 */
 	private function dpd_selected_pickup_snapshot( object $order ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( '_wdc_pickup_point_snapshot', true );
+		if ( is_string( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $pickup
+	 * @param array<string,mixed> $rate_meta
+	 * @param array<string,mixed> $provider_query
+	 * @param array<string,mixed> $api
+	 * @return array<string,mixed>
+	 */
+	private function pek_selected_pickup_snapshot( object $order, array $pickup, array $rate_meta, array $provider_query, array $api ): array {
+		$stored = $this->selected_pickup_snapshot( $order );
+		$snapshot = is_array( $stored['snapshot'] ?? null ) ? array_merge( $stored['snapshot'], $stored ) : $stored;
+		$point_code = $this->first_non_empty(
+			$snapshot['point_code'] ?? '',
+			$snapshot['point_id'] ?? '',
+			$pickup['point_code'] ?? '',
+			$pickup['code'] ?? '',
+			$rate_meta['point_code'] ?? '',
+			$rate_meta['pickup_point_code'] ?? '',
+			$this->meta_string( $order, '_wdc_platform_pickup_code' ),
+			$this->meta_string( $order, '_wdc_pickup_point_code' )
+		);
+		if ( '' === $point_code ) {
+			return array();
+		}
+		$fingerprint = $this->first_non_empty(
+			$snapshot['provider_destination_fingerprint'] ?? '',
+			$pickup['provider_destination_fingerprint'] ?? '',
+			$rate_meta['provider_destination_fingerprint'] ?? '',
+			$rate_meta['destination_fingerprint'] ?? '',
+			$provider_query['provider_destination_fingerprint'] ?? '',
+			$provider_query['destination_fingerprint'] ?? ''
+		);
+		$branch_id = $this->first_non_empty(
+			$snapshot['branchId'] ?? '',
+			$snapshot['branch_id'] ?? '',
+			$pickup['branchId'] ?? '',
+			$pickup['branch_id'] ?? '',
+			$pickup['raw_reference']['branchId'] ?? '',
+			$pickup['raw_reference']['branch_id'] ?? '',
+			$rate_meta['pek_receiver_branch_id'] ?? '',
+			$rate_meta['receiver_branch_id'] ?? '',
+			$api['receiver_branch_id'] ?? '',
+			$api['branchId'] ?? ''
+		);
+		$limits = array();
+		foreach ( array( 'maxWeight', 'maxVolume', 'maxDimension', 'maxWeightOnePlace', 'maxCount' ) as $key ) {
+			$value = $snapshot['limits'][ $key ] ?? $snapshot[ $key ] ?? null;
+			if ( is_int( $value ) || is_float( $value ) || ( is_string( $value ) && is_numeric( $value ) ) ) {
+				$limits[ $key ] = 0 + $value;
+			}
+		}
+
+		return array_filter(
+			array(
+				'carrier_key' => PekSettings::CARRIER_KEY,
+				'service_key' => PekSettings::SERVICE_KEY,
+				'pickup_family' => PekSettings::PICKUP_FAMILY,
+				'point_code' => $point_code,
+				'point_id' => $point_code,
+				'branchId' => $branch_id,
+				'branch_id' => $branch_id,
+				'source' => in_array( (string) ( $snapshot['source'] ?? '' ), array( 'free', 'paid' ), true ) ? (string) $snapshot['source'] : '',
+				'location_id' => (int) $this->first_non_empty( $snapshot['location_id'] ?? '', $pickup['location_id'] ?? '', $provider_query['location_id'] ?? '', $rate_meta['location_id'] ?? '' ),
+				'country_code' => strtoupper( trim( (string) $this->first_non_empty( $snapshot['country_code'] ?? '', $provider_query['country_code'] ?? 'RU' ) ) ),
+				'destination_fingerprint' => $fingerprint,
+				'provider_destination_fingerprint' => $fingerprint,
+				'validation_source' => (string) ( $snapshot['validation_source'] ?? '' ),
+				'selected_at' => (string) ( $snapshot['selected_at'] ?? '' ),
+				'point_title' => (string) ( $snapshot['point_title'] ?? $snapshot['card_title'] ?? '' ),
+				'point_address' => (string) ( $snapshot['point_address'] ?? $snapshot['address'] ?? $pickup['address'] ?? $pickup['point_address'] ?? '' ),
+				'address' => (string) ( $snapshot['address'] ?? $snapshot['point_address'] ?? $pickup['address'] ?? $pickup['point_address'] ?? '' ),
+				'limits' => $limits,
+				'availability' => is_array( $snapshot['availability'] ?? null ) ? $snapshot['availability'] : array(),
+			),
+			static fn( mixed $value ): bool => array() !== $value && '' !== $value && null !== $value
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function selected_pickup_snapshot( object $order ): array {
 		if ( ! method_exists( $order, 'get_meta' ) ) {
 			return array();
 		}

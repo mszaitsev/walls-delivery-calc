@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Pek;
 
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
@@ -20,6 +21,7 @@ defined( 'ABSPATH' ) || exit;
 final class PekShipmentDestinationResolver {
 	private const LOCATION_MISMATCH_MESSAGE = 'Адрес заказа изменился после расчёта доставки. Повторно рассчитайте доставку ПЭК для актуального города.';
 	private const LOCATION_IDENTITY_MESSAGE = 'Не удалось восстановить населённый пункт курьерской доставки ПЭК. Повторно рассчитайте доставку для заказа.';
+	private const PICKUP_FALLBACK_WARNING = 'Не удалось выполнить повторную онлайн-проверку выбранного терминала ПЭК. Используются данные терминала, подтверждённые при оформлении заказа.';
 
 	public function __construct(
 		private PekPickupPointProvider $pickup_points,
@@ -57,9 +59,17 @@ final class PekShipmentDestinationResolver {
 			$this->bounded_int( $query_data['radius_km'] ?? 50, 1, 500, 50 ),
 			$this->bounded_int( $query_data['limit'] ?? 50, 1, 100, 50 )
 		);
-		$point = $this->pickup_points->resolve_selection( new CarrierPickupPointSelectionQuery( $query, $code ) );
+		try {
+			$point = $this->pickup_points->resolve_selection( new CarrierPickupPointSelectionQuery( $query, $code ) );
+		} catch ( PekApiException $exception ) {
+			$fallback = $this->trusted_pickup_selection_fallback( $request, $query, $code, $exception );
+			if ( array() !== $fallback ) {
+				return $fallback;
+			}
+			throw $this->with_preparation_stage( $exception, 'destination_pickup' );
+		}
 		if ( null === $point || $point->code !== $code || ! $point->active ) {
-			throw new \RuntimeException( 'Терминал ПЭК не прошёл свежую проверку.' );
+			throw new \RuntimeException( 'Выбранный терминал ПЭК больше не доступен. Повторно рассчитайте доставку для заказа.' );
 		}
 		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
 		$branch_id = trim( (string) ( $raw['branchId'] ?? $raw['branch_id'] ?? '' ) );
@@ -76,6 +86,9 @@ final class PekShipmentDestinationResolver {
 			'source' => (string) ( $raw['source'] ?? 'fresh_provider' ),
 			'location_id' => $query->location_id,
 			'provider_destination_fingerprint' => (string) ( $raw['provider_destination_fingerprint'] ?? $request->meta['provider_destination_fingerprint'] ?? '' ),
+			'fresh_check' => true,
+			'fallback_used' => false,
+			'fallback_reason' => '',
 		);
 	}
 
@@ -363,6 +376,131 @@ final class PekShipmentDestinationResolver {
 		}
 
 		return trim( (string) $value );
+	}
+
+	/** @return array<string,mixed> */
+	private function trusted_pickup_selection_fallback( ShipmentCreateRequest $request, CarrierPickupPointQuery $query, string $code, PekApiException $exception ): array {
+		if ( ! $this->pickup_fallback_eligible( $exception ) ) {
+			return array();
+		}
+		$snapshot = is_array( $request->meta['pek_pickup_selected_snapshot'] ?? null ) ? $request->meta['pek_pickup_selected_snapshot'] : array();
+		if ( array() === $snapshot ) {
+			return array();
+		}
+		$warehouse_id = $this->canonical_guid( $snapshot['point_code'] ?? $snapshot['warehouse_id'] ?? $snapshot['warehouseId'] ?? '' );
+		$expected_id = $this->canonical_guid( $code );
+		if ( '' === $warehouse_id || '' === $expected_id || $warehouse_id !== $expected_id ) {
+			return array();
+		}
+		if ( PekSettings::CARRIER_KEY !== (string) ( $snapshot['carrier_key'] ?? '' ) || PekSettings::SERVICE_KEY !== (string) ( $snapshot['service_key'] ?? '' ) || PekSettings::PICKUP_FAMILY !== (string) ( $snapshot['pickup_family'] ?? '' ) ) {
+			return array();
+		}
+		if ( 'RU' !== strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) ) ) {
+			return array();
+		}
+		$location_id = (int) ( $snapshot['location_id'] ?? 0 );
+		if ( $location_id <= 0 || $location_id !== (int) $query->location_id ) {
+			return array();
+		}
+		$fingerprint = trim( (string) ( $snapshot['provider_destination_fingerprint'] ?? '' ) );
+		$request_fingerprint = trim( (string) ( $request->meta['provider_destination_fingerprint'] ?? '' ) );
+		$query_fingerprint = trim( (string) ( $request->meta['pickup_provider_query']['provider_destination_fingerprint'] ?? $request->meta['pickup_provider_query']['destination_fingerprint'] ?? '' ) );
+		if ( '' === $fingerprint || '' === $request_fingerprint || $fingerprint !== $request_fingerprint || ( '' !== $query_fingerprint && $fingerprint !== $query_fingerprint ) ) {
+			return array();
+		}
+		if ( 'provider_resolve_selection' !== (string) ( $snapshot['validation_source'] ?? '' ) || ! $this->strict_timestamp( $snapshot['selected_at'] ?? null ) ) {
+			return array();
+		}
+		$source = (string) ( $snapshot['source'] ?? '' );
+		if ( ! in_array( $source, array( 'free', 'paid' ), true ) ) {
+			return array();
+		}
+		$branch_id = trim( (string) ( $snapshot['branchId'] ?? $snapshot['branch_id'] ?? '' ) );
+		if ( '' === $branch_id || ! $this->pickup_snapshot_limits_pass( $snapshot, $query ) || $this->pickup_snapshot_unavailable( $snapshot ) ) {
+			return array();
+		}
+		$context = $exception->context();
+		$reason = is_string( $context['error_code'] ?? null ) && '' !== trim( $context['error_code'] ) ? trim( $context['error_code'] ) : 'pek_terminal_recheck_unavailable';
+
+		return array(
+			'mode' => DeliveryType::PICKUP,
+			'warehouse_id' => $warehouse_id,
+			'branch_id' => $branch_id,
+			'title' => (string) ( $snapshot['point_title'] ?? $snapshot['card_title'] ?? '' ),
+			'address' => (string) ( $snapshot['point_address'] ?? $snapshot['address'] ?? '' ),
+			'source' => 'persisted_checkout_selection_access_fallback',
+			'location_id' => $location_id,
+			'provider_destination_fingerprint' => $fingerprint,
+			'fresh_check' => false,
+			'fallback_used' => true,
+			'fallback_reason' => $reason,
+			'warnings' => array( self::PICKUP_FALLBACK_WARNING ),
+		);
+	}
+
+	private function pickup_fallback_eligible( PekApiException $exception ): bool {
+		$context = $exception->context();
+		$status = (int) ( $context['http_status'] ?? 0 );
+		if ( 403 === $status || $status >= 500 ) {
+			return true;
+		}
+
+		return in_array( (string) ( $context['error_code'] ?? '' ), array( 'pek_http_403', 'pek_transport_error', 'pek_http_500' ), true );
+	}
+
+	private function strict_timestamp( mixed $value ): bool {
+		if ( ! is_string( $value ) || '' === trim( $value ) ) {
+			return false;
+		}
+		$date = \DateTimeImmutable::createFromFormat( \DateTimeInterface::ATOM, $value );
+		$errors = \DateTimeImmutable::getLastErrors();
+
+		return $date instanceof \DateTimeImmutable && ( false === $errors || ( 0 === $errors['warning_count'] && 0 === $errors['error_count'] ) ) && $date->format( \DateTimeInterface::ATOM ) === $value;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function pickup_snapshot_limits_pass( array $snapshot, CarrierPickupPointQuery $query ): bool {
+		$limits = is_array( $snapshot['limits'] ?? null ) ? $snapshot['limits'] : $snapshot;
+		$checks = array(
+			'maxWeight' => $query->cargo->weight_g / 1000,
+			'maxVolume' => $query->cargo->volume_cm3 / 1000000,
+			'maxDimension' => $query->cargo->max_dimension_cm / 100,
+			'maxWeightOnePlace' => $query->cargo->max_place_weight_g / 1000,
+			'maxCount' => $query->cargo->places_count,
+		);
+		foreach ( $checks as $key => $actual ) {
+			if ( ! array_key_exists( $key, $limits ) || null === $limits[ $key ] || '' === $limits[ $key ] ) {
+				continue;
+			}
+			if ( ! is_numeric( $limits[ $key ] ) ) {
+				return false;
+			}
+			$limit = (float) $limits[ $key ];
+			if ( $limit > 0 && $actual > $limit ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function pickup_snapshot_unavailable( array $snapshot ): bool {
+		$availability = is_array( $snapshot['availability'] ?? null ) ? $snapshot['availability'] : array();
+		foreach ( array( 'available', 'is_available', 'active' ) as $key ) {
+			if ( array_key_exists( $key, $availability ) && false === filter_var( $availability[ $key ], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function with_preparation_stage( PekApiException $exception, string $stage ): PekApiException {
+		$context = $exception->context();
+		$context['preparation_stage'] = $stage;
+
+		return new PekApiException( $exception->getMessage(), $context, $exception->getCode(), $exception );
 	}
 
 	private function lower( string $value ): string {

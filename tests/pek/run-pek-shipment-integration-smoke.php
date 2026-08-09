@@ -109,6 +109,7 @@ if ( ! function_exists( 'wc_get_order' ) ) {
 }
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseSearchCache;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
@@ -282,6 +283,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 	public string $status_mode = 'expanded';
 	public string $branches_all_mode = 'success';
 	public string $sender_nearest_mode = 'success';
+	public string $destination_nearest_mode = 'success';
 	public string $findzone_address_mode = 'exact';
 
 	private function requested_cargo_code( array $args ): string {
@@ -395,7 +397,13 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			if ( $is_sender && 'http403' === $this->sender_nearest_mode ) {
 				return array( 'status' => 403, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Forbidden', 'message' => 'Access denied' ) ), JSON_UNESCAPED_UNICODE ) );
 			}
+			if ( ! $is_sender && 'http403' === $this->destination_nearest_mode ) {
+				return array( 'status' => 403, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Forbidden destination', 'message' => 'Access denied destination' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
 			$warehouse_id = $is_sender ? PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER : PEK_INTEGRATION_RECEIVER_WAREHOUSE;
+			if ( ! $is_sender && 'missing_id' === $this->destination_nearest_mode ) {
+				$warehouse_id = PEK_INTEGRATION_MISSING_WAREHOUSE;
+			}
 			if ( $is_sender && str_contains( $address, 'Большая' ) ) {
 				$warehouse_id = PEK_INTEGRATION_SENDER_WAREHOUSE_B;
 			}
@@ -1977,12 +1985,46 @@ $pickup_order->update_meta_data(
 	'_wdc_platform_rate_meta',
 	array(
 		'point_code' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
+		'pek_receiver_branch_id' => 'BR-R',
 		'provider_destination_fingerprint' => 'pickup-fingerprint',
 		'pickup_provider_query' => array(
 			'location_id' => 77,
 			'address' => 'Россия, Московская область, Видное',
+			'provider_destination_fingerprint' => 'pickup-fingerprint',
 			'destination_fingerprint' => 'pickup-fingerprint',
 		),
+	)
+);
+$pickup_order->update_meta_data(
+	'_wdc_pickup_point_snapshot',
+	wp_json_encode(
+		array(
+			'carrier_key' => PekSettings::CARRIER_KEY,
+			'service_key' => PekSettings::SERVICE_KEY,
+			'pickup_family' => PekSettings::PICKUP_FAMILY,
+			'point_code' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
+			'point_id' => PEK_INTEGRATION_RECEIVER_WAREHOUSE,
+			'point_title' => 'Собственный пункт выдачи ПЭК',
+			'point_address' => 'Россия, Московская область, Видное, Терминальная, дом 2',
+			'address' => 'Россия, Московская область, Видное, Терминальная, дом 2',
+			'country_code' => 'RU',
+			'location_id' => 77,
+			'branchId' => 'BR-R',
+			'branch_id' => 'BR-R',
+			'source' => 'free',
+			'destination_fingerprint' => 'pickup-fingerprint',
+			'provider_destination_fingerprint' => 'pickup-fingerprint',
+			'validation_source' => 'provider_resolve_selection',
+			'selected_at' => '2026-08-06T12:00:00+00:00',
+			'limits' => array(
+				'maxWeight' => 1000,
+				'maxVolume' => 100,
+				'maxDimension' => 10,
+				'maxWeightOnePlace' => 1000,
+				'maxCount' => 100,
+			),
+		),
+		JSON_UNESCAPED_UNICODE
 	)
 );
 $pickup_before_submit = count( $http->submit_bodies );
@@ -2018,14 +2060,112 @@ foreach (
 }
 $pickup_preview = $creation->safe_preview( $pickup_request );
 pek_integration_assert( count( $http->submit_bodies ) === $pickup_before_submit, 'Pickup safe preview must not submit PEK preregistration.' );
-pek_integration_assert( DeliveryType::PICKUP === $pickup_request->delivery_type && PEK_INTEGRATION_RECEIVER_WAREHOUSE === (string) ( $pickup_preview['body']['receiver_warehouse_id'] ?? '' ), 'Pickup draft/preview must carry selected receiver warehouse.' );
+pek_integration_assert( DeliveryType::PICKUP === $pickup_request->delivery_type && PEK_INTEGRATION_RECEIVER_WAREHOUSE === (string) ( $pickup_preview['body']['receiver_warehouse_id'] ?? '' ) && false === (bool) ( $pickup_preview['body']['pickup_destination_fallback_used'] ?? true ), 'Pickup draft/preview must carry selected receiver warehouse from fresh selection.' );
 $pickup_result = $creation->create( $pickup_order, $pickup_request );
-pek_integration_assert( true === $pickup_result->success, 'Pickup production chain create must succeed through fake PEK submit.' );
+pek_integration_assert( true === $pickup_result->success, 'Pickup production chain create must succeed through fake PEK submit: ' . wp_json_encode( $pickup_result->to_array(), JSON_UNESCAPED_UNICODE ) );
 pek_integration_assert( count( $http->submit_bodies ) === $pickup_before_submit + 1, 'Pickup fake submit must be called exactly once.' );
 pek_integration_assert_same_payload( $http->submit_bodies[ $pickup_before_submit ] ?? array(), pek_integration_fixture( 'preregistration-submit-pickup.json' ), 'Pickup production chain' );
 $pickup_created = $repository->find_by_carrier( $pickup_order, PekSettings::CARRIER_KEY );
 pek_integration_assert( PEK_INTEGRATION_RECEIVER_WAREHOUSE === $pickup_created['pek_receiver_warehouse_id'] && 'BR-R' === $pickup_created['pek_receiver_branch_id'], 'Pickup fresh point code and branch must persist.' );
 pek_integration_assert_plain_data( $pickup_created );
+
+$http->destination_nearest_mode = 'http403';
+$http->sender_nearest_mode = 'http403';
+$settings->save_sender_warehouse(
+	array(
+		'warehouseId' => PEK_INTEGRATION_SENDER_WAREHOUSE_A,
+		'branchId' => 'BR-S',
+		'branchName' => 'Новосибирск',
+		'divisionName' => 'Склад A',
+		'departmentTypeId' => 1,
+		'departmentType' => 'Склад',
+		'address' => 'Россия, Новосибирск, Складская, дом 1',
+		'coordinates' => array( 'latitude' => '55.0', 'longitude' => '82.9' ),
+		'source' => 'free',
+		'branchTimezone' => 'UTC+07:00',
+		'limits' => array(
+			'maxWeight' => 1000,
+			'maxVolume' => 100,
+			'maxDimension' => 10,
+			'maxWeightOnePlace' => 1000,
+			'maxCount' => 100,
+		),
+		'availability' => array(),
+		'checked_at' => '2026-08-06 12:00:00',
+	)
+);
+$pre_sms_no_snapshot = $pickup_request->to_array();
+unset( $pre_sms_no_snapshot['meta']['pek_pickup_selected_snapshot'] );
+$pre_sms_calls_before = array(
+	pek_integration_count_calls( $http, '/branches/checknocalcservices/' ),
+	pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ),
+	pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ),
+	count( $http->submit_bodies ),
+);
+$pre_sms_preview = $creation->safe_preview( ShipmentCreateRequest::from_array( $pre_sms_no_snapshot ) );
+$pre_sms_calls_after = array(
+	pek_integration_count_calls( $http, '/branches/checknocalcservices/' ),
+	pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ),
+	pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ),
+	count( $http->submit_bodies ),
+);
+pek_integration_assert( 'destination_pickup' === (string) ( $pre_sms_preview['body']['preparation_diagnostic']['stage'] ?? '' ) && 'pek_http_403' === (string) ( $pre_sms_preview['body']['preparation_diagnostic']['error_code'] ?? '' ) && '/branches/nearestdepartments/' === (string) ( $pre_sms_preview['body']['preparation_diagnostic']['endpoint'] ?? '' ) && 403 === (int) ( $pre_sms_preview['body']['preparation_diagnostic']['http_status'] ?? 0 ), 'Pickup destination HTTP 403 without trusted snapshot must expose pre-SMS preparation diagnostic.' );
+pek_integration_assert( $pre_sms_calls_before === $pre_sms_calls_after, 'Pickup destination preparation failure must stop before SMS/private services and submit.' );
+
+$fallback_submit_before = count( $http->submit_bodies );
+$fallback_preview = $creation->safe_preview( $pickup_request );
+$fallback_sms_calls = array_values( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], '/branches/checknocalcservices/' ) ) );
+$fallback_sms_body = json_decode( (string) ( $fallback_sms_calls[ count( $fallback_sms_calls ) - 1 ]['args']['body'] ?? '' ), true );
+pek_integration_assert( array() === $fallback_preview['errors'], 'Trusted pickup fallback preview must not add blocking errors.' );
+pek_integration_assert( true === (bool) ( $fallback_preview['body']['pickup_destination_fallback_used'] ?? false ) && false === (bool) ( $fallback_preview['body']['pickup_destination_fresh_check'] ?? true ) && 'persisted_checkout_selection_access_fallback' === (string) ( $fallback_preview['body']['pickup_destination_source'] ?? '' ) && 'pek_http_403' === (string) ( $fallback_preview['body']['pickup_destination_fallback_reason'] ?? '' ), 'Trusted pickup fallback preview must expose safe fallback evidence.' );
+pek_integration_assert( in_array( 'Не удалось выполнить повторную онлайн-проверку выбранного терминала ПЭК. Используются данные терминала, подтверждённые при оформлении заказа.', $fallback_preview['warnings'], true ), 'Trusted pickup fallback must add a safe warning.' );
+pek_integration_assert( $fallback_submit_before === count( $http->submit_bodies ) && is_array( $fallback_sms_body ) && 'BR-R' === (string) ( $fallback_sms_body['branchReceiverId'] ?? '' ), 'Trusted persisted pickup destination may fallback on nearestdepartments HTTP 403 and continue to SMS with persisted branch: sms=' . wp_json_encode( $fallback_sms_body, JSON_UNESCAPED_UNICODE ) );
+
+$http->connected_services_mode = 'geography_http403';
+$fallback_sms_failure_builder = new PekShipmentRequestBuilder(
+	$settings,
+	new PekShipmentDeclaredValueResolver(),
+	new PekShipmentSenderWarehouseResolver( $settings, $sender_warehouse_service ),
+	new PekShipmentCargoBuilder( $settings ),
+	new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() ),
+	new PekShipmentCorrelationResolver(),
+	pek_integration_sms_service( $api, $settings, $credentials ),
+	$destination_resolver,
+	new PekShipmentProductWeightResolver( $settings ),
+	$credentials,
+	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
+);
+$fallback_sms_preview = ( new PekShipmentAdapter( $api, $fallback_sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver ) )->build_safe_payload_preview( $pickup_request );
+pek_integration_assert( 'sms_geography' === (string) ( $fallback_sms_preview['body']['sms_diagnostic']['stage'] ?? '' ) && '/branches/checknocalcservices/' === (string) ( $fallback_sms_preview['body']['sms_diagnostic']['endpoint'] ?? '' ) && 403 === (int) ( $fallback_sms_preview['body']['sms_diagnostic']['http_status'] ?? 0 ) && in_array( 'Не удалось выполнить повторную онлайн-проверку выбранного терминала ПЭК. Используются данные терминала, подтверждённые при оформлении заказа.', $fallback_sms_preview['warnings'], true ), 'After trusted pickup fallback, SMS geography HTTP 403 must become the staged SMS diagnostic: ' . wp_json_encode( $fallback_sms_preview, JSON_UNESCAPED_UNICODE ) );
+$http->connected_services_mode = 'success';
+
+$mismatch_request_data = $pickup_request->to_array();
+$mismatch_request_data['meta']['pek_pickup_selected_snapshot']['point_code'] = PEK_INTEGRATION_SENDER_WAREHOUSE_A;
+$mismatch_before = pek_integration_count_calls( $http, '/branches/checknocalcservices/' );
+$mismatch_preview = $creation->safe_preview( ShipmentCreateRequest::from_array( $mismatch_request_data ) );
+pek_integration_assert( 'destination_pickup' === (string) ( $mismatch_preview['body']['preparation_diagnostic']['stage'] ?? '' ) && $mismatch_before === pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), 'Persisted pickup A must not fallback when selected warehouse identity differs.' );
+
+$changed_destination_data = $pickup_request->to_array();
+$changed_destination_data['meta']['pek_pickup_selected_snapshot']['provider_destination_fingerprint'] = 'old-fingerprint';
+$changed_preview = $creation->safe_preview( ShipmentCreateRequest::from_array( $changed_destination_data ) );
+pek_integration_assert( 'destination_pickup' === (string) ( $changed_preview['body']['preparation_diagnostic']['stage'] ?? '' ), 'Persisted pickup selection must not fallback after destination fingerprint mismatch.' );
+
+$missing_branch_data = $pickup_request->to_array();
+$missing_branch_data['meta']['pek_pickup_selected_snapshot']['branchId'] = '';
+$missing_branch_data['meta']['pek_pickup_selected_snapshot']['branch_id'] = '';
+try {
+	$destination_resolver->resolve( ShipmentCreateRequest::from_array( $missing_branch_data ) );
+	pek_integration_assert( false, 'Persisted pickup selection without trusted branch identity must fail before SMS.' );
+} catch ( PekApiException $expected ) {
+	pek_integration_assert( 'destination_pickup' === (string) ( $expected->context()['preparation_stage'] ?? '' ), 'Persisted pickup selection without trusted branch identity must fail at destination_pickup.' );
+}
+
+$http->destination_nearest_mode = 'missing_id';
+$fresh_negative_before = pek_integration_count_calls( $http, '/branches/checknocalcservices/' );
+$fresh_negative_preview = $creation->safe_preview( $pickup_request );
+pek_integration_assert( array() === (array) ( $fresh_negative_preview['body']['preparation_diagnostic'] ?? array() ) && ! empty( $fresh_negative_preview['errors'] ) && false === (bool) ( $fresh_negative_preview['body']['pickup_destination_fallback_used'] ?? false ) && $fresh_negative_before === pek_integration_count_calls( $http, '/branches/checknocalcservices/' ), 'Fresh HTTP 200 terminal negative must fail closed without persisted fallback and before SMS.' );
+$http->destination_nearest_mode = 'success';
+$http->sender_nearest_mode = 'success';
 
 $duplicate = $creation->create( $order, $request );
 pek_integration_assert( false === $duplicate->success && 'shipment_already_created' === $duplicate->error_code, 'Created PEK shipment must block duplicate automatic create.' );
@@ -2037,9 +2177,35 @@ $uncertain_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType:
 $uncertain_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
 $uncertain_order->update_meta_data( '_wdc_delivery_calculation_data', $order->get_meta( '_wdc_delivery_calculation_data', true ) );
 $uncertain_request = $drafts->create_request_from_order( $uncertain_order );
+delete_transient( 'wdc_pek_request_budget_' . gmdate( 'YmdHi' ) );
+$http->sender_nearest_mode = 'http403';
+$sender_warehouse_service->clear_last_search_for_current_user();
+$settings->save_sender_warehouse(
+	array(
+		'warehouseId' => PEK_INTEGRATION_SENDER_WAREHOUSE_A,
+		'branchId' => 'BR-S',
+		'branchName' => 'Новосибирск',
+		'divisionName' => 'Склад A',
+		'departmentTypeId' => 1,
+		'departmentType' => 'Склад',
+		'address' => 'Россия, Новосибирск, Складская, дом 1',
+		'coordinates' => array( 'latitude' => '55.0', 'longitude' => '82.9' ),
+		'source' => 'free',
+		'branchTimezone' => 'UTC+07:00',
+		'limits' => array(
+			'maxWeight' => 1000,
+			'maxVolume' => 100,
+			'maxDimension' => 10,
+			'maxWeightOnePlace' => 1000,
+			'maxCount' => 100,
+		),
+		'availability' => array(),
+		'checked_at' => '2026-08-06 12:00:00',
+	)
+);
 $http->submit_mode = 'http500';
 $uncertain_result = $creation->create( $uncertain_order, $uncertain_request );
-pek_integration_assert( false === $uncertain_result->success && 'pek_uncertain_submit' === $uncertain_result->error_code, 'HTTP 500 submit must create uncertain result.' );
+pek_integration_assert( false === $uncertain_result->success && 'pek_uncertain_submit' === $uncertain_result->error_code, 'HTTP 500 submit must create uncertain result: ' . wp_json_encode( $uncertain_result->to_array(), JSON_UNESCAPED_UNICODE ) );
 $uncertain_shipment = $repository->find_by_carrier( $uncertain_order, PekSettings::CARRIER_KEY );
 pek_integration_assert( ! empty( $uncertain_shipment['pending_creation_in_carrier'] ) && '' !== (string) ( $uncertain_shipment['pek_correlation'] ?? '' ), 'HTTP 500 uncertain result must persist pending correlation.' );
 pek_integration_assert( is_string( $uncertain_shipment['creation_attempt_id'] ?? null ) && preg_match( '/^[0-9a-f-]{36}$/', (string) $uncertain_shipment['creation_attempt_id'] ), 'HTTP 500 uncertain result must persist generic creation attempt A.' );

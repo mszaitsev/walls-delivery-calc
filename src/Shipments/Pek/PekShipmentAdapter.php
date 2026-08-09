@@ -47,6 +47,14 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 				'path' => '/preregistration/submit/',
 				'body' => array( 'sms_release_requested' => true, 'sms_release_confirmed' => false, 'sms_diagnostic' => $e->diagnostic() ),
 				'errors' => array( $this->safe_error_message( $e ) ),
+				'warnings' => $e->warnings(),
+			);
+		} catch ( PekApiException $e ) {
+			return array(
+				'method' => 'POST',
+				'path' => '/preregistration/submit/',
+				'body' => array( 'preparation_diagnostic' => $this->safe_preparation_diagnostic( $e, $request ) ),
+				'errors' => array( $this->safe_error_message( $e ) ),
 				'warnings' => array(),
 			);
 		} catch ( \Throwable $e ) {
@@ -269,6 +277,49 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			: 'Не удалось подготовить заявку ПЭК.';
 	}
 
+	private function safe_preparation_diagnostic( PekApiException $exception, ShipmentCreateRequest $request ): array {
+		$context = $exception->context();
+		$sensitive_values = $this->sensitive_values_from_request( $request );
+		$stage = $this->preparation_stage( $context );
+
+		return array(
+			'stage' => $stage,
+			'failure_stage' => is_string( $context['failure_stage'] ?? null ) ? $context['failure_stage'] : '',
+			'endpoint' => is_string( $context['endpoint'] ?? null ) ? $context['endpoint'] : '',
+			'method' => is_string( $context['method'] ?? null ) ? strtoupper( $context['method'] ) : '',
+			'http_status' => $context['http_status'] ?? '',
+			'error_code' => is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'pek_preparation_failed',
+			'api_error_message' => $this->safe_api_error_message( $exception->getMessage(), $sensitive_values ),
+			'field_errors' => $this->safe_field_errors( $context['field_errors'] ?? array(), $sensitive_values ),
+			'response_shape' => is_array( $context['response_shape'] ?? null ) ? $context['response_shape'] : array(),
+		);
+	}
+
+	/** @param array<string,mixed> $context */
+	private function preparation_stage( array $context ): string {
+		$stage = is_string( $context['preparation_stage'] ?? null ) ? $context['preparation_stage'] : '';
+		$allowed = array( 'sender_warehouse', 'destination_pickup', 'destination_courier', 'counterpart' );
+		if ( in_array( $stage, $allowed, true ) ) {
+			return $stage;
+		}
+		$failure_stage = (string) ( $context['failure_stage'] ?? '' );
+		$endpoint = (string) ( $context['endpoint'] ?? '' );
+		if ( str_contains( $failure_stage, 'sender_warehouse' ) ) {
+			return 'sender_warehouse';
+		}
+		if ( str_contains( $failure_stage, 'destination_terminal' ) || '/branches/nearestdepartments/' === $endpoint ) {
+			return 'destination_pickup';
+		}
+		if ( str_contains( $failure_stage, 'destination_' ) || '/branches/findzonebyaddress/' === $endpoint ) {
+			return 'destination_courier';
+		}
+		if ( str_contains( $failure_stage, 'counterpart' ) ) {
+			return 'counterpart';
+		}
+
+		return '';
+	}
+
 	/** @param array<string,mixed> $context @param array<string,mixed> $built @return array<string,mixed> */
 	private function safe_create_failure_reference( array $context, PekApiException $exception, array $built, string $stage ): array {
 		$sensitive_values = $this->sensitive_values_from_built_request( $built );
@@ -303,6 +354,18 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		$payload = is_array( $built['payload'] ?? null ) ? $built['payload'] : array();
 		$values = array();
 		$this->collect_sensitive_payload_values( $payload, $values );
+
+		return array_values( array_unique( array_filter( $values, static fn( string $value ): bool => strlen( $value ) >= 3 ) ) );
+	}
+
+	/** @return array<int,string> */
+	private function sensitive_values_from_request( ShipmentCreateRequest $request ): array {
+		$values = array();
+		foreach ( array( 'name', 'phone', 'email' ) as $key ) {
+			if ( is_scalar( $request->recipient[ $key ] ?? null ) ) {
+				$values[] = trim( (string) $request->recipient[ $key ] );
+			}
+		}
 
 		return array_values( array_unique( array_filter( $values, static fn( string $value ): bool => strlen( $value ) >= 3 ) ) );
 	}
