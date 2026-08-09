@@ -7,6 +7,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekRequestBudget;
 use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
@@ -124,10 +125,13 @@ final class PekCheckoutFakeHttp implements PekHttpClientInterface {
 final class PekCheckoutFakeProvider implements CarrierPickupPointProviderInterface {
 	public array $queries = array();
 	/** @param array<int,PickupPoint> $points */
-	public function __construct( private array $points ) {}
+	public function __construct( private array $points, private array $last_report = array(), private ?PekApiException $exception = null ) {}
 	public function carrier_key(): string { return PekSettings::CARRIER_KEY; }
 	public function search( CarrierPickupPointQuery $query ): array {
 		$this->queries[] = $query;
+		if ( $this->exception instanceof PekApiException ) {
+			throw $this->exception;
+		}
 		return $this->points;
 	}
 	public function resolve_selection( CarrierPickupPointSelectionQuery $query ): ?PickupPoint {
@@ -139,6 +143,7 @@ final class PekCheckoutFakeProvider implements CarrierPickupPointProviderInterfa
 
 		return null;
 	}
+	public function last_report(): array { return $this->last_report; }
 }
 
 if ( ! class_exists( 'wpdb' ) ) {
@@ -255,7 +260,7 @@ function pek_checkout_point( string $code, string $source = 'free', string $divi
 	);
 }
 
-function pek_checkout_boot( array $responses, array $points ): array {
+function pek_checkout_boot( array $responses, array $points, ?CarrierPickupPointProviderInterface $provider = null ): array {
 	$GLOBALS['pek_checkout_options'] = array();
 	$GLOBALS['pek_checkout_transients'] = array();
 	$GLOBALS['pek_checkout_wc_logger'] = new PekCheckoutFakeWooLogger();
@@ -272,7 +277,7 @@ function pek_checkout_boot( array $responses, array $points ): array {
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
 	$address_builder = new PekAddressBuilder();
 	$resolver = new PekLocationResolver( new LocationRepository( $wpdb ), $address_builder, new PekLocationMappingRepository( $wpdb ), $api, $settings );
-	$provider = new PekCheckoutFakeProvider( $points );
+	$provider = $provider ?? new PekCheckoutFakeProvider( $points );
 	$providers = new CarrierPickupPointProviderRegistry( array( $provider ) );
 	$planned = new PekQuotePlannedDateTimeResolver( $settings );
 	$formatter = new PekCheckoutPickupPointFormatter();
@@ -550,6 +555,68 @@ list( $courier_only, $courier_only_http ) = pek_checkout_boot(
 $courier_only_quote = $courier_only->quote( pek_checkout_request() );
 pek_checkout_assert( $courier_only_quote->success && 1 === count( $courier_only_quote->rates ) && PekSettings::COURIER_RATE_ID === $courier_only_quote->rates[0]->rate_id, 'Pickup point absence must not suppress courier PEK rate.' );
 pek_checkout_assert( 153912 === (int) ( $courier_only_quote->rates[0]->meta['location_id'] ?? 0 ) && '' !== (string) ( $courier_only_quote->rates[0]->meta['destination_fingerprint'] ?? '' ), 'PEK courier rate_meta must persist trusted destination location identity for future shipment preview.' );
+
+$terminal_403_report = array(
+	'success' => false,
+	'error_code' => 'pek_http_403',
+	'failure_stage' => 'destination_terminal_http',
+	'endpoint' => '/branches/nearestdepartments/',
+	'method' => 'POST',
+	'http_status' => 403,
+	'api_error_message' => 'ПЭК отклонил доступ к методу.',
+	'cache_hit' => false,
+	'api_source' => 'api',
+);
+$terminal_403_provider = new PekCheckoutFakeProvider(
+	array(),
+	$terminal_403_report,
+	new PekApiException( 'ПЭК отклонил доступ к методу.', $terminal_403_report )
+);
+list( $terminal_403_carrier, $terminal_403_http ) = pek_checkout_boot(
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 2000.00 ) ),
+	array(),
+	$terminal_403_provider
+);
+$terminal_403_quote = $terminal_403_carrier->quote( pek_checkout_request() );
+$terminal_403_pickup = null;
+$terminal_403_courier = null;
+foreach ( $terminal_403_quote->rates as $rate ) {
+	if ( PekSettings::PICKUP_RATE_ID === $rate->rate_id ) {
+		$terminal_403_pickup = $rate;
+	}
+	if ( PekSettings::COURIER_RATE_ID === $rate->rate_id ) {
+		$terminal_403_courier = $rate;
+	}
+}
+$terminal_403_diag = is_array( $terminal_403_quote->raw_reference['modes']['pickup'] ?? null ) ? $terminal_403_quote->raw_reference['modes']['pickup'] : array();
+$terminal_403_logs = $GLOBALS['pek_checkout_wc_logger']->entries;
+pek_checkout_assert( null === $terminal_403_pickup && $terminal_403_courier instanceof DeliveryRate && $terminal_403_quote->success, 'PEK terminal provider 403 must remove pickup only and leave courier quote available.' );
+pek_checkout_assert( 'pek_http_403' === (string) ( $terminal_403_diag['error_code'] ?? '' ) && '/branches/nearestdepartments/' === (string) ( $terminal_403_diag['endpoint'] ?? '' ) && 'POST' === (string) ( $terminal_403_diag['method'] ?? '' ) && 403 === (int) ( $terminal_403_diag['http_status'] ?? 0 ) && false === (bool) ( $terminal_403_diag['cache_hit'] ?? true ) && 'api' === (string) ( $terminal_403_diag['api_source'] ?? '' ), 'PEK pickup checkout diagnostic must preserve terminal API 403 endpoint/status/source instead of collapsing to no terminals.' );
+pek_checkout_assert( 'ПЭК отклонил доступ к методу.' === (string) ( $terminal_403_diag['api_error_message'] ?? '' ), 'PEK pickup checkout diagnostic must carry sanitized API error message.' );
+pek_checkout_assert( array() !== $terminal_403_logs && 'pek_http_403' === (string) ( $terminal_403_logs[0]['context']['error_code'] ?? '' ) && '/branches/nearestdepartments/' === (string) ( $terminal_403_logs[0]['context']['endpoint'] ?? '' ) && 403 === (int) ( $terminal_403_logs[0]['context']['http_status'] ?? 0 ) && 153912 === (int) ( $terminal_403_logs[0]['context']['location_id'] ?? 0 ), 'PEK pickup checkout log must preserve safe terminal API diagnostic context.' );
+pek_checkout_assert( count( pek_checkout_calc_payloads( $terminal_403_http ) ) === 1 && true === (bool) ( pek_checkout_calc_payloads( $terminal_403_http )[0]['isDelivery'] ?? false ), 'PEK terminal provider 403 must not trigger pickup calculator payload.' );
+
+$empty_200_provider = new PekCheckoutFakeProvider(
+	array(),
+	array(
+		'success' => true,
+		'error_code' => '',
+		'failure_stage' => '',
+		'endpoint' => '/branches/nearestdepartments/',
+		'method' => 'POST',
+		'http_status' => 200,
+		'cache_hit' => false,
+		'api_source' => 'api',
+	)
+);
+list( $empty_200_carrier ) = pek_checkout_boot(
+	array( pek_checkout_zone_response(), pek_checkout_calc_response( 2000.00 ) ),
+	array(),
+	$empty_200_provider
+);
+$empty_200_quote = $empty_200_carrier->quote( pek_checkout_request() );
+$empty_200_diag = is_array( $empty_200_quote->raw_reference['modes']['pickup'] ?? null ) ? $empty_200_quote->raw_reference['modes']['pickup'] : array();
+pek_checkout_assert( 'pek_checkout_pickup_points_missing' === (string) ( $empty_200_diag['error_code'] ?? '' ) && '/branches/nearestdepartments/' === (string) ( $empty_200_diag['endpoint'] ?? '' ) && 200 === (int) ( $empty_200_diag['http_status'] ?? 0 ), 'PEK terminal HTTP 200 empty list must remain a no-terminals diagnostic, not an API access failure.' );
 
 list( $full_address_carrier, $full_address_http ) = pek_checkout_boot(
 	array( pek_checkout_zone_response(), pek_checkout_calc_response( 1000.00 ), pek_checkout_calc_response( 2000.00 ) ),

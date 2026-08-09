@@ -66,6 +66,119 @@
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(value || '').trim().toLowerCase());
   }
 
+  function smsStageLabel(stage) {
+    var labels = {
+      sms_geography: 'Проверка доступности услуги по направлению',
+      sms_private_token: 'Получение приватного токена',
+      sms_connected_services: 'Проверка подключённых услуг контрагента',
+      sms_service_contract: 'Проверка ответа об услуге СМС',
+      sms_limit_contract: 'Проверка лимита выдачи по СМС',
+      sms_business_unavailable: 'Услуга недоступна по условиям ПЭК',
+      completed: 'Проверка выполнена'
+    };
+    return labels[String(stage || '')] || 'Неизвестный этап';
+  }
+
+  function dash(value) {
+    if (value === null || value === undefined || value === '') {
+      return '—';
+    }
+    return String(value);
+  }
+
+  function diagnosticEndpoint(diagnostic) {
+    var method = String(diagnostic.method || '').trim();
+    var endpoint = String(diagnostic.endpoint || '').trim();
+    if (!method && !endpoint) {
+      return '—';
+    }
+    return (method ? method + ' ' : '') + (endpoint || '—');
+  }
+
+  function appendDiagnosticRow(list, label, value) {
+    var term = document.createElement('dt');
+    var description = document.createElement('dd');
+    term.textContent = label;
+    description.textContent = dash(value);
+    list.appendChild(term);
+    list.appendChild(description);
+  }
+
+  function appendFieldErrors(section, fieldErrors) {
+    if (!Array.isArray(fieldErrors) || !fieldErrors.length) {
+      return;
+    }
+    var title = document.createElement('div');
+    var list = document.createElement('ul');
+    title.className = 'wdc-shipment-technical-title';
+    title.textContent = 'Ошибки полей ПЭК';
+    fieldErrors.forEach(function (item) {
+      if (!item || typeof item !== 'object') {
+        return;
+      }
+      var messages = Array.isArray(item.messages) ? item.messages : [];
+      if (!messages.length) {
+        return;
+      }
+      var row = document.createElement('li');
+      row.textContent = dash(item.field) + ': ' + messages.map(dash).join('; ');
+      list.appendChild(row);
+    });
+    if (list.childNodes.length) {
+      section.appendChild(title);
+      section.appendChild(list);
+    }
+  }
+
+  function appendResponseShape(section, responseShape) {
+    if (!responseShape || typeof responseShape !== 'object' || Array.isArray(responseShape)) {
+      return;
+    }
+    var keys = Object.keys(responseShape);
+    if (!keys.length) {
+      return;
+    }
+    var title = document.createElement('div');
+    var pre = document.createElement('pre');
+    title.className = 'wdc-shipment-technical-title';
+    title.textContent = 'Response shape';
+    pre.textContent = JSON.stringify(responseShape, null, 2);
+    section.appendChild(title);
+    section.appendChild(pre);
+  }
+
+  function renderSmsDiagnostic(context) {
+    if (!context || !context.form || !context.preview || !context.preview.body) {
+      return false;
+    }
+    var errors = context.form.querySelector('[data-wdc-shipment-errors]');
+    var diagnostic = context.preview.body.sms_diagnostic;
+    if (!errors || !diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)) {
+      return false;
+    }
+    var status = String(diagnostic.status || '');
+    if (status !== 'error' && status !== 'unavailable') {
+      return false;
+    }
+    var section = document.createElement('div');
+    var heading = document.createElement('div');
+    var list = document.createElement('dl');
+    section.className = 'wdc-shipment-technical-diagnostic wdc-shipment-pek-sms-diagnostic';
+    heading.className = 'wdc-shipment-technical-title';
+    heading.textContent = 'Проверка выдачи по СМС';
+    section.appendChild(heading);
+    appendDiagnosticRow(list, 'Этап', smsStageLabel(diagnostic.stage));
+    appendDiagnosticRow(list, 'Код ошибки', diagnostic.error_code || '');
+    appendDiagnosticRow(list, 'Endpoint', diagnosticEndpoint(diagnostic));
+    appendDiagnosticRow(list, 'HTTP status', diagnostic.http_status === null ? '' : diagnostic.http_status);
+    appendDiagnosticRow(list, 'Ошибка ПЭК', diagnostic.api_error_message || '');
+    section.appendChild(list);
+    appendFieldErrors(section, diagnostic.field_errors);
+    appendResponseShape(section, diagnostic.response_shape);
+    errors.appendChild(section);
+    return true;
+  }
+
   function openSenderWarehousePicker(root, button) {
     var picker = window.wdcShipmentPickupPicker;
     var form = (button && button.closest && button.closest('form')) || (root && root.querySelector && root.querySelector('form')) || root || document;
@@ -118,6 +231,9 @@
         return;
       }
       updateWarehouseCard(context.root || document, context.senderWarehouse || context.warehouse);
+    },
+    afterPreviewUpdated: function (context) {
+      return renderSmsDiagnostic(context);
     }
   });
 }());

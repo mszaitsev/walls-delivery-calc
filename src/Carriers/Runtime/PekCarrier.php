@@ -192,6 +192,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			$error = is_array( $context['pickup_options_error'] ?? null )
 				? $context['pickup_options_error']
 				: array( 'success' => false, 'error_code' => 'pek_checkout_pickup_options_missing' );
+			$this->log_pickup_options_error( $context, $error );
 			return array( 'rate' => null, 'diagnostic' => $error );
 		}
 
@@ -267,6 +268,25 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 					'http_status' => $recovery_result->http_status,
 				),
 			),
+		);
+	}
+
+	/** @param array<string,mixed> $context */
+	private function log_pickup_options_error( array $context, array $error ): void {
+		$this->logger->warning(
+			'PEK checkout pickup preliminary options unavailable.',
+			array(
+				'carrier' => self::KEY,
+				'mode' => PekQuoteOptions::MODE_PICKUP,
+				'error_code' => (string) ( $error['error_code'] ?? 'pek_checkout_pickup_options_missing' ),
+				'failure_stage' => (string) ( $error['failure_stage'] ?? 'checkout_context' ),
+				'endpoint' => (string) ( $error['endpoint'] ?? '' ),
+				'method' => (string) ( $error['method'] ?? '' ),
+				'http_status' => $error['http_status'] ?? '',
+				'location_id' => (int) ( $context['location_id'] ?? 0 ),
+				'cache_hit' => ! empty( $error['cache_hit'] ),
+				'api_source' => (string) ( $error['api_source'] ?? '' ),
+			)
 		);
 	}
 

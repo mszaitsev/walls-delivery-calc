@@ -35,4 +35,9 @@ final class PekPickupPointProvider implements CarrierPickupPointProviderInterfac
 
 		return $this->terminals->resolve_selection( $query->query, $query->point_code );
 	}
+
+	/** @return array<string,mixed> */
+	public function last_report(): array {
+		return $this->terminals->last_report();
+	}
 }

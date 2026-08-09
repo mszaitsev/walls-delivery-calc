@@ -25,13 +25,14 @@
         if (preview) {
           preview.textContent = JSON.stringify(visiblePreviewPayload(payload.data.preview || {}), null, 2);
         }
+        const previewPayload = payload.data.preview || {};
+        const previewErrors = previewPayload && Array.isArray(previewPayload.errors)
+          ? previewPayload.errors
+          : [];
+        const previewWarnings = previewPayload && Array.isArray(previewPayload.warnings)
+          ? previewPayload.warnings
+          : [];
         if (errors) {
-          const previewErrors = payload.data.preview && Array.isArray(payload.data.preview.errors)
-            ? payload.data.preview.errors
-            : [];
-          const previewWarnings = payload.data.preview && Array.isArray(payload.data.preview.warnings)
-            ? payload.data.preview.warnings
-            : [];
           errors.textContent = previewErrors.length ? previewErrors.join('; ') : previewWarnings.join('; ');
           form.dataset.wdcPreviewLoaded = '1';
           form.dataset.wdcPreviewHasErrors = previewErrors.length ? '1' : '0';
@@ -46,6 +47,12 @@
           form.dataset.wdcPreviewLoaded = '1';
           form.dataset.wdcPreviewHasErrors = '0';
         }
+        dispatchShipmentCarrierHook('afterPreviewUpdated', {
+          form: form,
+          preview: previewPayload,
+          errors: previewErrors,
+          warnings: previewWarnings
+        });
         updateCreateAvailability(form);
       })
       .catch((error) => {

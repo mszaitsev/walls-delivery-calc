@@ -58,11 +58,7 @@ final class PekCheckoutQuoteContextResolver {
 		try {
 			$pickup_preliminary_options = $this->preliminary_pickup_options( $planned, $query, $mapping, $fingerprint );
 		} catch ( PekApiException $exception ) {
-			$pickup_preliminary_error = array(
-				'success' => false,
-				'error_code' => (string) ( $exception->context()['error_code'] ?? 'pek_checkout_pickup_options_missing' ),
-				'failure_stage' => (string) ( $exception->context()['failure_stage'] ?? 'checkout_context' ),
-			);
+			$pickup_preliminary_error = $this->pickup_options_error_from_exception( $exception );
 		}
 		if ( is_array( $selection ) && '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
 			$pickup_options = $this->selected_pickup_options( $planned, $selection );
@@ -183,9 +179,25 @@ final class PekCheckoutQuoteContextResolver {
 	/** @return array<string,mixed> */
 	private function preliminary_pickup_options( string $planned, CarrierPickupPointQuery $query, array $mapping, string $fingerprint ): array {
 		$provider = $this->pickup_providers->get( PekSettings::CARRIER_KEY );
-		$points = null !== $provider ? $provider->search( $query ) : array();
+		try {
+			$points = null !== $provider ? $provider->search( $query ) : array();
+		} catch ( PekApiException $exception ) {
+			throw new PekApiException(
+				$exception->getMessage(),
+				array_merge( $exception->context(), $this->pickup_provider_context( $provider ) )
+			);
+		}
 		if ( array() === $points ) {
-			throw new PekApiException( 'Подходящие терминалы ПЭК не найдены.', array( 'error_code' => 'pek_checkout_pickup_points_missing', 'failure_stage' => 'checkout_context' ) );
+			throw new PekApiException(
+				'Подходящие терминалы ПЭК не найдены.',
+				array_merge(
+					$this->pickup_provider_context( $provider ),
+					array(
+						'error_code' => 'pek_checkout_pickup_points_missing',
+						'failure_stage' => 'checkout_context',
+					)
+				)
+			);
 		}
 		$main = trim( (string) ( $mapping['main_warehouse_id'] ?? '' ) );
 		$chosen = null;
@@ -301,5 +313,93 @@ final class PekCheckoutQuoteContextResolver {
 		}
 		$raw = trim( $destination->raw_address );
 		return strlen( $raw ) >= 12 ? $raw : '';
+	}
+
+	/** @return array<string,mixed> */
+	private function pickup_options_error_from_exception( PekApiException $exception ): array {
+		$context = $exception->context();
+		$error = array(
+			'success' => false,
+			'error_code' => $this->safe_token( (string) ( $context['error_code'] ?? 'pek_checkout_pickup_options_missing' ) ),
+			'failure_stage' => $this->safe_token( (string) ( $context['failure_stage'] ?? 'checkout_context' ) ),
+		);
+		foreach ( array( 'endpoint', 'method', 'http_status', 'api_error_message', 'cache_hit', 'api_source', 'response_shape', 'field_errors' ) as $key ) {
+			if ( array_key_exists( $key, $context ) ) {
+				$error[ $key ] = $context[ $key ];
+			}
+		}
+
+		return $this->safe_pickup_diagnostic( $error );
+	}
+
+	/** @return array<string,mixed> */
+	private function pickup_provider_context( mixed $provider ): array {
+		if ( ! is_object( $provider ) || ! method_exists( $provider, 'last_report' ) ) {
+			return array();
+		}
+		$report = $provider->last_report();
+		return is_array( $report ) ? $this->safe_pickup_diagnostic( $report ) : array();
+	}
+
+	/** @param array<string,mixed> $diagnostic @return array<string,mixed> */
+	private function safe_pickup_diagnostic( array $diagnostic ): array {
+		$result = array();
+		foreach ( array( 'success', 'cache_hit' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostic ) ) {
+				$result[ $key ] = (bool) $diagnostic[ $key ];
+			}
+		}
+		foreach ( array( 'error_code', 'failure_stage', 'api_source' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostic ) ) {
+				$result[ $key ] = $this->safe_token( (string) $diagnostic[ $key ] );
+			}
+		}
+		if ( array_key_exists( 'method', $diagnostic ) ) {
+			$method = strtoupper( trim( (string) $diagnostic['method'] ) );
+			$result['method'] = in_array( $method, array( 'GET', 'POST' ), true ) ? $method : '';
+		}
+		if ( array_key_exists( 'endpoint', $diagnostic ) ) {
+			$result['endpoint'] = $this->safe_endpoint( (string) $diagnostic['endpoint'] );
+		}
+		if ( array_key_exists( 'http_status', $diagnostic ) ) {
+			$result['http_status'] = is_numeric( $diagnostic['http_status'] ) ? max( 0, min( 599, (int) $diagnostic['http_status'] ) ) : '';
+		}
+		if ( array_key_exists( 'api_error_message', $diagnostic ) ) {
+			$result['api_error_message'] = $this->safe_message( (string) $diagnostic['api_error_message'] );
+		}
+		if ( is_array( $diagnostic['response_shape'] ?? null ) ) {
+			$result['response_shape'] = $diagnostic['response_shape'];
+		}
+		if ( is_array( $diagnostic['field_errors'] ?? null ) ) {
+			$result['field_errors'] = $diagnostic['field_errors'];
+		}
+
+		return $result;
+	}
+
+	private function safe_token( string $value ): string {
+		$value = strtolower( trim( $value ) );
+		return 1 === preg_match( '/^[a-z0-9_:-]{0,100}$/', $value ) ? $value : '';
+	}
+
+	private function safe_endpoint( string $value ): string {
+		$value = trim( $value );
+		return 1 === preg_match( '#^/[a-z0-9/_-]{1,180}$#i', $value ) ? $value : '';
+	}
+
+	private function safe_message( string $value ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $value ) ?? $value;
+		$value = preg_replace( '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/iu', '[redacted]', $value ) ?? $value;
+		$value = preg_replace( '/(?<!\w)\+?7[\s().-]*\d[\d\s().-]{8,}\d(?!\w)/u', '[redacted]', $value ) ?? $value;
+		$value = trim( $value );
+		if ( function_exists( 'mb_substr' ) ) {
+			$value = mb_substr( $value, 0, 500 );
+		} else {
+			$value = substr( $value, 0, 500 );
+		}
+
+		return trim( $value );
 	}
 }
