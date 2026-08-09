@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -19,7 +20,8 @@ final class PekShipmentStatusService {
 		private PekStatusMapping $mapping,
 		private OrderShipmentRepository $repository,
 		private ShipmentActualCostService $actual_costs,
-		private PekShipmentStatusResponseNormalizer $normalizer
+		private PekShipmentStatusResponseNormalizer $normalizer,
+		private ?ShipmentCreationAttemptService $attempts = null
 	) {
 	}
 
@@ -36,6 +38,22 @@ final class PekShipmentStatusService {
 		$clear_status_id = array_key_exists( 'pek_cargo_status_id', $status ) && null === $status['pek_cargo_status_id'];
 		if ( $clear_status_id ) {
 			unset( $status['pek_cargo_status_id'] );
+		}
+		if ( DeliveryStatus::CANCELLED === (string) ( $status['universal_status_code'] ?? '' ) ) {
+			$this->mark_terminal_before_delete( $order, $shipment, 'cancelled' );
+			$this->repository->delete_for_carrier( $order, PekSettings::CARRIER_KEY );
+
+			return array(
+				'success' => true,
+				'message' => 'Статус ПЭК обновлён. Отменённое отправление удалено из заказа.',
+				'shipment' => array(),
+				'status' => $status,
+				'terminal' => true,
+				'removed' => true,
+				'cancelled_and_removed' => true,
+				'terminal_reason' => 'cancelled',
+				'terminal_source' => 'status_update',
+			);
 		}
 		$shipment = array_merge( $shipment, $status, array( 'updated_at' => $this->now() ) );
 		if ( $clear_status_id ) {
@@ -86,6 +104,13 @@ final class PekShipmentStatusService {
 		$status = (int) ( $context['http_status'] ?? $context['status'] ?? 0 );
 
 		return in_array( $status, array( 403, 404 ), true );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function mark_terminal_before_delete( object $order, array $shipment, string $reason ): void {
+		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
+			$this->attempts->mark_terminal_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment, $reason );
+		}
 	}
 
 	private function now(): string {
