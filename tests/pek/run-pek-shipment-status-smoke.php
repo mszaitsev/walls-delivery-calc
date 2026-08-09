@@ -92,6 +92,14 @@ $fresh_sentinel_normalized = $normalizer->normalize( $fresh_sentinel, 'PEK-777',
 pek_status_assert( 'Ожидается передача груза от отправителя' === $fresh_sentinel_normalized['status_title'], 'Fresh PEK cargoStatusId=-1 sentinel must not discard valid cargoStatus title.' );
 pek_status_assert( array_key_exists( 'pek_cargo_status_id', $fresh_sentinel_normalized ) && null === $fresh_sentinel_normalized['pek_cargo_status_id'], 'Fresh PEK cargoStatusId=-1 sentinel must signal canonical status ID omission.' );
 
+$cancelled_sentinel = $valid;
+$cancelled_sentinel['cargos'][0]['info']['cargoStatus'] = 'Аннулировано до приемки груза';
+$cancelled_sentinel['cargos'][0]['info']['cargoStatusId'] = '-1';
+$cancelled_sentinel_normalized = $normalizer->normalize( $cancelled_sentinel, 'PEK-777', '2026-08-06 12:30:00' );
+pek_status_assert( 'Аннулировано до приемки груза' === $cancelled_sentinel_normalized['status_title'], 'Cancelled PEK cargoStatusId="-1" sentinel must not discard valid cargoStatus title.' );
+pek_status_assert( array_key_exists( 'pek_cargo_status_id', $cancelled_sentinel_normalized ) && null === $cancelled_sentinel_normalized['pek_cargo_status_id'], 'Cancelled PEK cargoStatusId="-1" sentinel must signal canonical status ID omission.' );
+pek_status_assert( DeliveryStatus::CANCELLED === $mapping->map( $cancelled_sentinel_normalized['status_title'] ), 'Cancelled PEK status with string sentinel must map to universal CANCELLED.' );
+
 $minimal = $valid;
 unset( $minimal['cargos'][0]['receiver'], $minimal['cargos'][0]['services'], $minimal['cargos'][0]['cargo']['cargoBarCode'], $minimal['cargos'][0]['cargo']['positionBarCodes'], $minimal['cargos'][0]['info']['cargoStatusId'], $minimal['cargos'][0]['info']['takeOnStockDateTime'] );
 $minimal_normalized = $normalizer->normalize( $minimal, 'PEK-777', '2026-08-06 12:30:00' );
@@ -125,7 +133,8 @@ $malformed_cases = array(
 	'cargoStatusId bool' => array( 'info' => array( 'cargoStatusId' => false ) ),
 	'cargoStatusId float' => array( 'info' => array( 'cargoStatusId' => 42.5 ) ),
 	'cargoStatusId negative' => array( 'info' => array( 'cargoStatusId' => -2 ) ),
-	'cargoStatusId string sentinel' => array( 'info' => array( 'cargoStatusId' => '-1' ) ),
+	'cargoStatusId negative string' => array( 'info' => array( 'cargoStatusId' => '-2' ) ),
+	'cargoStatusId padded string sentinel' => array( 'info' => array( 'cargoStatusId' => ' -1 ' ) ),
 	'cargo barcode array' => array( 'cargo' => array( 'cargoBarCode' => array() ) ),
 	'mixed position barcode list' => array( 'cargo' => array( 'positionBarCodes' => array( 'POS-1', array() ) ) ),
 	'actual cost negative' => array( 'services' => array( 'sum' => '-1.00' ) ),

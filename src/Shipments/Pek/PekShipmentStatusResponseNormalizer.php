@@ -126,7 +126,7 @@ final class PekShipmentStatusResponseNormalizer {
 		if ( null === $value || '' === $value ) {
 			return null;
 		}
-		if ( -1 === $value ) {
+		if ( -1 === $value || '-1' === $value ) {
 			return null;
 		}
 		if ( is_int( $value ) && $value > 0 ) {
@@ -136,7 +136,19 @@ final class PekShipmentStatusResponseNormalizer {
 			return trim( $value );
 		}
 
-			throw new \RuntimeException( 'ПЭК вернул некорректное поле статуса: ' . $field . '.' );
+		throw $this->invalid_status_field( $field, $value );
+	}
+
+	private function invalid_status_field( string $field, mixed $value ): PekShipmentStatusNormalizationException {
+		$diagnostic = array(
+			'field' => $field,
+			'value_type' => get_debug_type( $value ),
+		);
+		if ( ( is_int( $value ) || is_string( $value ) ) && strlen( (string) $value ) <= 32 ) {
+			$diagnostic['value'] = (string) $value;
+		}
+
+		return new PekShipmentStatusNormalizationException( 'ПЭК вернул некорректное поле статуса: ' . $field . '.', $diagnostic );
 	}
 
 	private function optional_bool( mixed $value, string $field ): bool {
@@ -234,5 +246,17 @@ final class PekShipmentStatusResponseNormalizer {
 		}
 
 		return new ShipmentActualCost( $kopecks, 'RUB', 'carrier', 'pek_cargos_status_services_sum', $checked_at );
+	}
+}
+
+final class PekShipmentStatusNormalizationException extends \RuntimeException {
+	/** @param array<string,mixed> $diagnostic */
+	public function __construct( string $message, private array $diagnostic ) {
+		parent::__construct( $message );
+	}
+
+	/** @return array<string,mixed> */
+	public function diagnostic(): array {
+		return $this->diagnostic;
 	}
 }

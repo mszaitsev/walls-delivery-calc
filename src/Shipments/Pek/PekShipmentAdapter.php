@@ -287,14 +287,18 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 
 	private function log_status_update_failure( \Throwable $e ): void {
 		if ( $this->logger instanceof Logger ) {
+			$context = array(
+				'carrier_key' => PekSettings::CARRIER_KEY,
+				'stage' => 'status_normalization',
+				'error_code' => 'pek_status_update_failed',
+				'reason' => $this->safe_status_reason( $e->getMessage() ),
+			);
+			if ( $e instanceof PekShipmentStatusNormalizationException ) {
+				$context = array_merge( $context, $e->diagnostic() );
+			}
 			$this->logger->warning(
 				'PEK shipment status update failed.',
-				array(
-					'carrier_key' => PekSettings::CARRIER_KEY,
-					'stage' => 'status_normalization',
-					'error_code' => 'pek_status_update_failed',
-					'reason' => $this->safe_status_reason( $e->getMessage() ),
-				)
+				$context
 			);
 		}
 	}

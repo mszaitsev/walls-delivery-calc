@@ -128,6 +128,7 @@ use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -294,6 +295,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 	public string $confirmed_counterparties_mode = 'success';
 	public string $token_mode = 'success';
 	public string $status_mode = 'expanded';
+	public string $cancellation_mode = 'success';
 	public string $branches_all_mode = 'success';
 	public string $sender_nearest_mode = 'success';
 	public string $destination_nearest_mode = 'success';
@@ -341,6 +343,22 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			$status = array_shift( $this->statuses );
 			$status = is_string( $status ) ? $status : 'Прибыл';
 			$code = $this->requested_cargo_code( $args );
+			if ( '__malformed__' === $status ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode(
+						array(
+							'cargos' => array(
+								array(
+									'cargo' => array( 'code' => $code ),
+									'info' => array( 'cargoStatus' => array( 'bad' ) ),
+								),
+							),
+						),
+						JSON_UNESCAPED_UNICODE
+					),
+				);
+			}
 			if ( 'malformed_status' === $this->status_mode ) {
 				return array(
 					'status' => 200,
@@ -360,6 +378,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			$sms_flag = 'expanded_false' === $this->status_mode ? false : true;
 			$status_id = match ( $this->status_mode ) {
 				'status_id_sentinel' => -1,
+				'status_id_string_sentinel' => '-1',
 				'status_id_negative' => -2,
 				default => '42',
 			};
@@ -791,9 +810,21 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 		}
 		if ( str_contains( $url, '/order/cancellation/' ) ) {
 			$this->cancellations[] = array( 'method' => $method, 'args' => $args );
+			if ( 'false' === $this->cancellation_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode( array( array( 'code' => 'PEK-777', 'success' => false, 'description' => 'Не аннулировано' ) ), JSON_UNESCAPED_UNICODE ),
+				);
+			}
+			if ( 'ambiguous' === $this->cancellation_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode( array( array( 'code' => 'PEK-777', 'success' => 'true', 'description' => 'Предварительное оформление аннулировано' ) ), JSON_UNESCAPED_UNICODE ),
+				);
+			}
 			return array(
 				'status' => 200,
-				'body' => wp_json_encode( array( array( 'code' => 'PEK-777', 'success' => true ) ), JSON_UNESCAPED_UNICODE ),
+				'body' => wp_json_encode( array( array( 'code' => 'PEK-777', 'success' => true, 'description' => 'Предварительное оформление аннулировано' ) ), JSON_UNESCAPED_UNICODE ),
 			);
 		}
 		if ( str_contains( $url, '/preregistration/submit/' ) ) {
@@ -2000,6 +2031,13 @@ $sentinel_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_
 pek_integration_assert( true === $sentinel_status_result['success'] && 'Ожидается передача груза от отправителя' === (string) ( $sentinel_shipment['pek_cargo_status'] ?? '' ), 'Live PEK cargoStatusId=-1 sentinel must not block a valid expanded status update.' );
 pek_integration_assert( ! array_key_exists( 'pek_cargo_status_id', $sentinel_shipment ), 'Live PEK cargoStatusId=-1 sentinel must remove and not persist canonical status ID.' );
 
+$http->status_mode = 'status_id_string_sentinel';
+$http->statuses = array( 'Аннулировано до приемки груза' );
+$cancelled_string_status_result = $status_service->update( $order );
+$cancelled_string_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $cancelled_string_status_result['success'] && 'Аннулировано до приемки груза' === (string) ( $cancelled_string_shipment['pek_cargo_status'] ?? '' ) && DeliveryStatus::CANCELLED === (string) ( $cancelled_string_shipment['universal_status_code'] ?? '' ), 'Cancelled PEK cargoStatusId="-1" sentinel must update status as universal CANCELLED.' );
+pek_integration_assert( ! array_key_exists( 'pek_cargo_status_id', $cancelled_string_shipment ), 'Cancelled PEK cargoStatusId="-1" sentinel must remove and not persist canonical status ID.' );
+
 $before_negative_status = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 $http->status_mode = 'status_id_negative';
 $http->statuses = array( 'Прибыл' );
@@ -2456,10 +2494,58 @@ $repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $accepted );
 pek_integration_assert( false === $shipment_service->cancel_in_carrier( $order )['success'], 'Accepted status must fail cancellation locally.' );
 pek_integration_assert( $before_cancel_calls === count( $http->cancellations ), 'Accepted status must make zero cancellation API calls.' );
 
+$repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, array_merge( $open, array( 'creation_attempt_generation' => 2, 'creation_attempt_id' => (string) ( $after_cancel_preview['body']['creation_attempt_id'] ?? '' ) ) ) );
+$http->cancellation_mode = 'false';
+$http->status_mode = 'expanded';
+$http->statuses = array( 'Оформлен', 'Ожидается передача груза от отправителя' );
+$before_false_cancel_calls = count( $http->cancellations );
+$before_false_status_calls = pek_integration_count_calls( $http, '/cargos/status/' );
+$false_cancel_result = $shipment_service->cancel_in_carrier( $order );
+pek_integration_assert( false === (bool) ( $false_cancel_result['success'] ?? true ) && 'ПЭК не подтвердил отмену заявки.' === (string) ( $false_cancel_result['message'] ?? '' ), 'Explicit PEK cancellation false with non-cancelled fresh status must remain failed.' );
+pek_integration_assert( $before_false_cancel_calls + 1 === count( $http->cancellations ) && $before_false_status_calls + 2 === pek_integration_count_calls( $http, '/cargos/status/' ), 'Explicit false cancellation must call mutation once and read fresh status once after precheck.' );
+pek_integration_assert( array() !== $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY ) && 'active' === (string) ( $attempts->current_record_for_request( $order, $request )['state'] ?? '' ), 'Explicit false cancellation must keep shipment and active attempt.' );
+
 $repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $open );
+$http->cancellation_mode = 'ambiguous';
+$http->status_mode = 'expanded';
+$http->statuses = array( 'Оформлен', '__malformed__' );
+$before_uncertain_cancel_calls = count( $http->cancellations );
+$uncertain_cancel_result = $shipment_service->cancel_in_carrier( $order );
+pek_integration_assert( false === (bool) ( $uncertain_cancel_result['success'] ?? true ) && true === (bool) ( $uncertain_cancel_result['cancellation_uncertain'] ?? false ), 'Ambiguous cancellation response plus unavailable reconciliation must be returned as uncertain.' );
+pek_integration_assert( $before_uncertain_cancel_calls + 1 === count( $http->cancellations ), 'Ambiguous cancellation must not retry mutation when reconciliation fails.' );
+pek_integration_assert( array() !== $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY ) && 'active' === (string) ( $attempts->current_record_for_request( $order, $request )['state'] ?? '' ), 'Uncertain cancellation must keep shipment and active attempt.' );
+
+$repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $open );
+$http->cancellation_mode = 'ambiguous';
+$http->status_mode = 'status_id_string_sentinel';
+$http->statuses = array( 'Оформлен', 'Аннулировано до приемки груза' );
+$before_reconcile_cancel_calls = count( $http->cancellations );
+$before_reconcile_status_calls = pek_integration_count_calls( $http, '/cargos/status/' );
+$reconciled_cancel_result = $shipment_service->cancel_in_carrier( $order );
+pek_integration_assert( true === (bool) ( $reconciled_cancel_result['success'] ?? false ) && 'fresh_status_reconciliation' === (string) ( $reconciled_cancel_result['cancellation_confirmation_source'] ?? '' ), 'Ambiguous cancellation response must reconcile success from fresh CANCELLED status.' );
+pek_integration_assert( $before_reconcile_cancel_calls + 1 === count( $http->cancellations ) && $before_reconcile_status_calls + 2 === pek_integration_count_calls( $http, '/cargos/status/' ), 'False-negative cancellation reproduction must mutate once and read status once after mutation.' );
+pek_integration_assert( array() === $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY ) && 'terminal' === (string) ( $attempts->current_record_for_request( $order, $request )['state'] ?? '' ), 'Reconciled cancellation must delete shipment and terminalize the attempt.' );
+$after_cancel_request = $attempts->reserve_for_request( $order, $request );
+pek_integration_assert( 2 === (int) ( $after_cancel_request->meta['creation_attempt_generation'] ?? 0 ) && true === (bool) ( $after_cancel_request->meta['creation_attempt_new'] ?? false ) && (string) ( $after_cancel_request->meta['creation_attempt_id'] ?? '' ) !== $created_attempt_a, 'Next fake create after proven cancellation must reserve generation 2.' );
+
+$repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, array_merge( $open, array( 'creation_attempt_generation' => 2, 'creation_attempt_id' => (string) ( $after_cancel_request->meta['creation_attempt_id'] ?? '' ) ) ) );
+$http->cancellation_mode = 'success';
+$http->status_mode = 'expanded';
 $http->statuses = array( 'Оформлен' );
-pek_integration_assert( true === $shipment_service->cancel_in_carrier( $order )['success'], 'Fresh pre-acceptance status must allow cancellation.' );
-pek_integration_assert( $before_cancel_calls + 1 === count( $http->cancellations ), 'Pre-acceptance cancellation must call PEK exactly once.' );
+$before_success_cancel_calls = count( $http->cancellations );
+$success_cancel_result = $shipment_service->cancel_in_carrier( $order );
+pek_integration_assert( true === (bool) ( $success_cancel_result['success'] ?? false ) && 'response' === (string) ( $success_cancel_result['cancellation_confirmation_source'] ?? '' ), 'Official success cancellation response must succeed without post-mutation reconciliation.' );
+pek_integration_assert( $before_success_cancel_calls + 1 === count( $http->cancellations ), 'Explicit success cancellation must call PEK exactly once.' );
+
+$repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, array_merge( $open, array( 'creation_attempt_generation' => 2, 'creation_attempt_id' => (string) ( $after_cancel_request->meta['creation_attempt_id'] ?? '' ) ) ) );
+$http->statuses = array( 'Оформлен' );
+$http->cancellation_mode = 'success';
+$before_already_cancelled_calls = count( $http->cancellations );
+$http->status_mode = 'status_id_string_sentinel';
+$http->statuses = array( 'Аннулировано до приемки груза' );
+$already_cancelled_result = $shipment_service->cancel_in_carrier( $order );
+pek_integration_assert( true === (bool) ( $already_cancelled_result['success'] ?? false ) && 'fresh_status_precheck' === (string) ( $already_cancelled_result['cancellation_confirmation_source'] ?? '' ), 'Already-cancelled precheck must reconcile local shipment without invoking cancellation API.' );
+pek_integration_assert( $before_already_cancelled_calls === count( $http->cancellations ), 'Already-cancelled precheck must make zero cancellation API calls.' );
 
 $addresses = new PekShipmentCourierAddressResolver();
 $recipient_builder = new PekShipmentRecipientBuilder( $addresses, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );

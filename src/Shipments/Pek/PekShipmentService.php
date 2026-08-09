@@ -128,6 +128,16 @@ final class PekShipmentService {
 		}
 		$fresh_shipment = array_merge( $shipment, $fresh );
 		$external_status = (string) ( $fresh_shipment['pek_cargo_status'] ?? $fresh_shipment['status_title'] ?? '' );
+		if ( $this->is_cancelled_status( $external_status, (string) ( $shipment['delivery_type'] ?? '' ) ) ) {
+			$this->mark_terminal_before_delete( $order, $shipment, 'cancelled' );
+			$this->repository->delete_for_carrier( $order, PekSettings::CARRIER_KEY );
+			return array(
+				'success' => true,
+				'cancelled_and_removed' => true,
+				'message' => 'Заявка ПЭК уже отменена и удалена из заказа.',
+				'cancellation_confirmation_source' => 'fresh_status_precheck',
+			);
+		}
 		if (
 			'' !== trim( (string) ( $fresh_shipment['pek_take_on_stock_datetime'] ?? '' ) )
 			|| ! $this->mapping->is_pre_acceptance_status( $external_status )
@@ -136,15 +146,30 @@ final class PekShipmentService {
 			return array( 'success' => false, 'message' => 'Принятый груз ПЭК не отменяется через API.' );
 		}
 		$result = $this->api->order_cancellation( array( $code ) );
-		foreach ( $result as $row ) {
-			if ( $code === (string) ( $row['code'] ?? '' ) && true === ( $row['success'] ?? false ) ) {
-				$this->mark_terminal_before_delete( $order, $shipment, 'cancelled' );
-				$this->repository->delete_for_carrier( $order, PekSettings::CARRIER_KEY );
-				return array( 'success' => true, 'cancelled_and_removed' => true, 'message' => 'Заявка ПЭК отменена и удалена из заказа.' );
-			}
+		$confirmation = $this->cancellation_confirmation( $result, $code );
+		if ( ! empty( $confirmation['success'] ) ) {
+			return $this->complete_confirmed_cancellation( $order, $shipment, 'response', $confirmation );
+		}
+		try {
+			$reconciled = $this->statuses->fetch( $code, (string) ( $shipment['delivery_type'] ?? '' ) );
+		} catch ( \Throwable ) {
+			return array(
+				'success' => false,
+				'message' => 'Не удалось однозначно подтвердить результат отмены заявки ПЭК. Проверьте статус заявки перед повторным действием.',
+				'cancellation_uncertain' => true,
+				'diagnostic' => array_merge( $confirmation, array( 'confirmation_source' => 'none' ) ),
+			);
+		}
+		$reconciled_status = (string) ( $reconciled['pek_cargo_status'] ?? $reconciled['status_title'] ?? '' );
+		if ( $this->is_cancelled_status( $reconciled_status, (string) ( $shipment['delivery_type'] ?? '' ) ) ) {
+			return $this->complete_confirmed_cancellation( $order, $shipment, 'fresh_status_reconciliation', $confirmation );
 		}
 
-		return array( 'success' => false, 'message' => 'ПЭК не подтвердил отмену заявки.' );
+		return array(
+			'success' => false,
+			'message' => 'ПЭК не подтвердил отмену заявки.',
+			'diagnostic' => array_merge( $confirmation, array( 'confirmation_source' => 'none' ) ),
+		);
 	}
 
 	/** @return array<string,mixed> */
@@ -195,5 +220,64 @@ final class PekShipmentService {
 		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
 			$this->attempts->mark_terminal_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment, $reason );
 		}
+	}
+
+	private function is_cancelled_status( string $status, string $delivery_type ): bool {
+		return \WallsShop\WDC\Domain\Status\DeliveryStatus::CANCELLED === $this->mapping->map( $status, $delivery_type );
+	}
+
+	/** @param array<int,array<string,mixed>> $rows @return array<string,mixed> */
+	private function cancellation_confirmation( array $rows, string $code ): array {
+		$diagnostic = array(
+			'stage' => 'shipment_cancellation',
+			'response_row_count' => count( $rows ),
+			'matching_row_found' => false,
+			'success_present' => false,
+			'success_type' => 'missing',
+			'success_value' => null,
+			'description_present' => false,
+			'confirmation_source' => 'none',
+			'success' => false,
+		);
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || array_is_list( $row ) ) {
+				continue;
+			}
+			$row_code = $row['code'] ?? null;
+			if ( ! is_string( $row_code ) || trim( $row_code ) !== $code ) {
+				continue;
+			}
+			$diagnostic['matching_row_found'] = true;
+			$diagnostic['description_present'] = array_key_exists( 'description', $row ) && is_string( $row['description'] ) && '' !== trim( $row['description'] );
+			if ( array_key_exists( 'success', $row ) ) {
+				$diagnostic['success_present'] = true;
+				$diagnostic['success_type'] = get_debug_type( $row['success'] );
+				if ( is_bool( $row['success'] ) ) {
+					$diagnostic['success_value'] = $row['success'];
+					if ( true === $row['success'] && 1 === count( $rows ) ) {
+						$diagnostic['confirmation_source'] = 'response';
+						$diagnostic['success'] = true;
+					}
+				}
+			}
+
+			break;
+		}
+
+		return $diagnostic;
+	}
+
+	/** @param array<string,mixed> $shipment @param array<string,mixed> $diagnostic @return array<string,mixed> */
+	private function complete_confirmed_cancellation( object $order, array $shipment, string $source, array $diagnostic ): array {
+		$this->mark_terminal_before_delete( $order, $shipment, 'cancelled' );
+		$this->repository->delete_for_carrier( $order, PekSettings::CARRIER_KEY );
+
+		return array(
+			'success' => true,
+			'cancelled_and_removed' => true,
+			'message' => 'Заявка ПЭК отменена и удалена из заказа.',
+			'cancellation_confirmation_source' => $source,
+			'diagnostic' => array_merge( $diagnostic, array( 'confirmation_source' => $source ) ),
+		);
 	}
 }
