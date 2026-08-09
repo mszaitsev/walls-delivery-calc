@@ -303,7 +303,6 @@ function initializeShipmentAdmin() {
           }
           const text = getPresentation(box);
           updateShipmentButtons(box, shipmentButtonStateFromStatus(statusPayload));
-          showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           if (handleShipmentLifecycleResult({
             form: form,
             payload: payload,
@@ -321,6 +320,8 @@ function initializeShipmentAdmin() {
             } else {
               requestShipmentStatus(updateButton, { auto: true });
             }
+          } else {
+            showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           }
         })
         .catch((error) => {

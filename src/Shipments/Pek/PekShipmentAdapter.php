@@ -180,7 +180,21 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	/** @return array<string,mixed> */
 	public function update_status( object $order, string $shipment_key = '' ): array {
 		unset( $shipment_key );
-		return $this->statuses->update( $order );
+		try {
+			return $this->statuses->update( $order );
+		} catch ( \RuntimeException | \InvalidArgumentException $e ) {
+			$this->log_status_update_failure( $e );
+			return array(
+				'success' => false,
+				'message' => 'Не удалось обновить статус ПЭК.',
+				'error_code' => 'pek_status_update_failed',
+				'diagnostic' => array(
+					'carrier_key' => PekSettings::CARRIER_KEY,
+					'stage' => 'status_normalization',
+					'reason' => $this->safe_status_reason( $e->getMessage() ),
+				),
+			);
+		}
 	}
 
 	/** @param array<string,mixed> $payload @return array<string,mixed> */
@@ -269,6 +283,27 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		if ( $this->logger instanceof Logger ) {
 			$this->logger->warning( $message, array( 'error' => $e->getMessage(), 'carrier_key' => PekSettings::CARRIER_KEY ) );
 		}
+	}
+
+	private function log_status_update_failure( \Throwable $e ): void {
+		if ( $this->logger instanceof Logger ) {
+			$this->logger->warning(
+				'PEK shipment status update failed.',
+				array(
+					'carrier_key' => PekSettings::CARRIER_KEY,
+					'stage' => 'status_normalization',
+					'error_code' => 'pek_status_update_failed',
+					'reason' => $this->safe_status_reason( $e->getMessage() ),
+				)
+			);
+		}
+	}
+
+	private function safe_status_reason( string $message ): string {
+		$message = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $message ) ?? '';
+		$message = trim( preg_replace( '/\s+/u', ' ', $message ) ?? '' );
+
+		return '' !== $message ? substr( $message, 0, 200 ) : 'status_update_failed';
 	}
 
 	private function safe_error_message( \Throwable $e ): string {

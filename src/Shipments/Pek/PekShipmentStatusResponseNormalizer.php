@@ -25,7 +25,14 @@ final class PekShipmentStatusResponseNormalizer {
 			'pek_cargo_status' => $status,
 			'tracking_checked_at' => $checked_at,
 		);
-		$this->add_if_present( $result, 'pek_cargo_status_id', $info, 'cargoStatusId', fn( mixed $value ): string => $this->optional_status_id( $value, 'cargoStatusId' ) );
+		if ( array_key_exists( 'cargoStatusId', $info ) ) {
+			$status_id = $this->optional_status_id( $info['cargoStatusId'], 'cargoStatusId' );
+			if ( null !== $status_id ) {
+				$result['pek_cargo_status_id'] = $status_id;
+			} else {
+				$result['pek_cargo_status_id'] = null;
+			}
+		}
 		foreach ( array(
 			'takeOnStockDateTime' => 'pek_take_on_stock_datetime',
 			'arrivalDateTime' => 'pek_arrival_datetime',
@@ -115,9 +122,12 @@ final class PekShipmentStatusResponseNormalizer {
 		return trim( $value );
 	}
 
-	private function optional_status_id( mixed $value, string $field ): string {
+	private function optional_status_id( mixed $value, string $field ): ?string {
 		if ( null === $value || '' === $value ) {
-			return '';
+			return null;
+		}
+		if ( -1 === $value ) {
+			return null;
 		}
 		if ( is_int( $value ) && $value > 0 ) {
 			return (string) $value;

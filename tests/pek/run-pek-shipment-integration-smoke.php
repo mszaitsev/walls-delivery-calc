@@ -358,6 +358,11 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 				);
 			}
 			$sms_flag = 'expanded_false' === $this->status_mode ? false : true;
+			$status_id = match ( $this->status_mode ) {
+				'status_id_sentinel' => -1,
+				'status_id_negative' => -2,
+				default => '42',
+			};
 			return array(
 				'status' => 200,
 				'body' => wp_json_encode(
@@ -371,7 +376,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 								),
 								'info' => array(
 									'cargoStatus' => $status,
-									'cargoStatusId' => '42',
+									'cargoStatusId' => $status_id,
 									'takeOnStockDateTime' => 'Принят к перевозке' === $status ? '2026-08-06 12:00:00' : '',
 								),
 								'receiver' => array(
@@ -1932,15 +1937,40 @@ $submit_calls = array_values( array_filter( $http->calls, static fn( array $call
 pek_integration_assert( true === $create_result->success, 'Production chain create must succeed through fake PEK submit.' );
 pek_integration_assert( 1 === count( $submit_calls ), 'Fake preregistration submit must be called exactly once in success case.' );
 pek_integration_assert( (string) ( $preview['body']['correlation_hash'] ?? '' ) === hash( 'sha256', (string) ( $http->submit_bodies[0]['cargos'][0]['common']['customerCorrelation'] ?? '' ) ), 'PEK preview and create must use the same generic attempt and customerCorrelation.' );
+pek_integration_assert( false === (bool) ( $preview['body']['planned_date_sent'] ?? true ) && ! array_key_exists( 'plannedDate', is_array( $http->submit_bodies[0]['common'] ?? null ) ? $http->submit_bodies[0]['common'] : array() ), 'PEK preregistration must not send plannedDate until a reviewed planned-date policy exists.' );
 pek_integration_assert_same_payload( $http->submit_bodies[0] ?? array(), pek_integration_fixture( 'preregistration-submit-courier.json' ), 'Courier production chain' );
 $courier_services = is_array( $http->submit_bodies[0]['cargos'][0]['services'] ?? null ) ? $http->submit_bodies[0]['cargos'][0]['services'] : array();
 pek_integration_assert_required_service_blocks( $courier_services, 'Courier' );
 pek_integration_assert( true === ( $courier_services['delivery']['enabled'] ?? null ) && 1 === (int) ( $courier_services['delivery']['payer']['type'] ?? 0 ), 'Courier delivery service must be enabled with payer.type=1.' );
+$courier_receiver = is_array( $http->submit_bodies[0]['cargos'][0]['receiver'] ?? null ) ? $http->submit_bodies[0]['cargos'][0]['receiver'] : array();
+pek_integration_assert( 1 === count( is_array( $courier_receiver['personPhones'] ?? null ) ? $courier_receiver['personPhones'] : array() ) && '+79991234567' === (string) ( $courier_receiver['personPhones'][0]['phone'] ?? '' ), 'Actual PEK outbound receiver must contain exactly one documented +7 personPhones entry.' );
+pek_integration_assert( ! isset( $courier_receiver['phone'], $courier_receiver['mobile'] ), 'Actual PEK outbound receiver must not duplicate receiver phone in scalar aliases.' );
 $created = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 pek_integration_assert( '999940950644' === $created['tracking_number'] && '136' === $created['external_id'], 'Creation service and mapper must persist PEK identifiers.' );
 pek_integration_assert( is_string( $created['creation_attempt_id'] ?? null ) && preg_match( '/^[0-9a-f-]{36}$/', (string) $created['creation_attempt_id'] ) && 1 === (int) ( $created['creation_attempt_generation'] ?? 0 ), 'Successful PEK shipment must persist generic creation attempt A.' );
 $created_attempt_a = (string) $created['creation_attempt_id'];
 pek_integration_assert_plain_data( $created );
+
+$live_phone_order = new PekIntegrationOrder( 1010 );
+$GLOBALS['wdc_pek_integration_orders'][1010] = $live_phone_order;
+$live_phone_order->set_shipping_fields( array( 'phone' => '+79139134904' ) );
+$live_phone_order->set_billing_fields( array( 'phone' => '+79139134904' ) );
+$live_phone_order->update_meta_data( '_shipping_dadata_status', 'house_selected' );
+$live_phone_order->update_meta_data( '_shipping_dadata_region_with_type', 'Московская область' );
+$live_phone_order->update_meta_data( '_shipping_dadata_city_with_type', 'г Видное' );
+$live_phone_order->update_meta_data( '_shipping_dadata_street_with_type', 'улица Советская' );
+$live_phone_order->update_meta_data( '_shipping_dadata_house', '10' );
+$live_phone_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$live_phone_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
+$live_phone_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
+$live_phone_order->update_meta_data( '_wdc_delivery_calculation_data', $order->get_meta( '_wdc_delivery_calculation_data', true ) );
+$live_phone_request = $drafts->create_request_from_order( $live_phone_order );
+delete_transient( 'wdc_pek_request_budget_' . gmdate( 'YmdHi' ) );
+$live_phone_submit_index = count( $http->submit_bodies );
+$live_phone_result = $creation->create( $live_phone_order, $live_phone_request );
+$live_phone_receiver = is_array( $http->submit_bodies[ $live_phone_submit_index ]['cargos'][0]['receiver'] ?? null ) ? $http->submit_bodies[ $live_phone_submit_index ]['cargos'][0]['receiver'] : array();
+pek_integration_assert( true === $live_phone_result->success && 1 === count( is_array( $live_phone_receiver['personPhones'] ?? null ) ? $live_phone_receiver['personPhones'] : array() ) && '+79139134904' === (string) ( $live_phone_receiver['personPhones'][0]['phone'] ?? '' ), 'Live receiver phone +79139134904 must be sent once as documented +7 personPhones entry.' );
+pek_integration_assert( ! isset( $live_phone_receiver['phone'], $live_phone_receiver['mobile'] ), 'Live receiver phone must not be duplicated in receiver scalar aliases.' );
 
 $http->status_mode = 'expanded';
 $http->statuses = array( 'Прибыл' );
@@ -1962,6 +1992,20 @@ $http->statuses = array( 'Прибыл' );
 $false_status_result = $status_service->update( $order );
 $false_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 pek_integration_assert( true === $false_status_result['success'] && false === (bool) ( $false_shipment['pek_receiving_by_sms_code'] ?? true ), 'Explicit false from expanded status must replace previous true.' );
+
+$http->status_mode = 'status_id_sentinel';
+$http->statuses = array( 'Ожидается передача груза от отправителя' );
+$sentinel_status_result = $status_service->update( $order );
+$sentinel_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $sentinel_status_result['success'] && 'Ожидается передача груза от отправителя' === (string) ( $sentinel_shipment['pek_cargo_status'] ?? '' ), 'Live PEK cargoStatusId=-1 sentinel must not block a valid expanded status update.' );
+pek_integration_assert( ! array_key_exists( 'pek_cargo_status_id', $sentinel_shipment ), 'Live PEK cargoStatusId=-1 sentinel must remove and not persist canonical status ID.' );
+
+$before_negative_status = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+$http->status_mode = 'status_id_negative';
+$http->statuses = array( 'Прибыл' );
+$negative_status_result = $adapter->update_status( $order );
+pek_integration_assert( false === (bool) ( $negative_status_result['success'] ?? true ) && 'Не удалось обновить статус ПЭК.' === (string) ( $negative_status_result['message'] ?? '' ) && 'status_normalization' === (string) ( $negative_status_result['diagnostic']['stage'] ?? '' ), 'Invalid negative PEK cargoStatusId must become a controlled adapter status error, not an uncaught failure.' );
+pek_integration_assert( $before_negative_status === $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY ), 'Invalid negative PEK cargoStatusId must not change persisted shipment state.' );
 
 $before_malformed_status = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 $http->status_mode = 'malformed_status';
@@ -2075,14 +2119,19 @@ foreach (
 		pek_integration_assert( str_contains( $expected->getMessage(), 'координаты' ), 'Malformed pickup coordinate failure must be public-safe: ' . $coordinate_case );
 	}
 }
-$pickup_preview = $creation->safe_preview( $pickup_request );
+$pickup_preview = $creation->safe_preview( $pickup_request, $pickup_order );
 pek_integration_assert( count( $http->submit_bodies ) === $pickup_before_submit, 'Pickup safe preview must not submit PEK preregistration.' );
 pek_integration_assert( DeliveryType::PICKUP === $pickup_request->delivery_type && PEK_INTEGRATION_RECEIVER_WAREHOUSE === (string) ( $pickup_preview['body']['receiver_warehouse_id'] ?? '' ) && false === (bool) ( $pickup_preview['body']['pickup_destination_fallback_used'] ?? true ), 'Pickup draft/preview must carry selected receiver warehouse from fresh selection.' );
 $pickup_result = $creation->create( $pickup_order, $pickup_request );
 pek_integration_assert( true === $pickup_result->success, 'Pickup production chain create must succeed through fake PEK submit: ' . wp_json_encode( $pickup_result->to_array(), JSON_UNESCAPED_UNICODE ) );
 pek_integration_assert( count( $http->submit_bodies ) === $pickup_before_submit + 1, 'Pickup fake submit must be called exactly once.' );
-pek_integration_assert_same_payload( $http->submit_bodies[ $pickup_before_submit ] ?? array(), pek_integration_fixture( 'preregistration-submit-pickup.json' ), 'Pickup production chain' );
-$pickup_services_payload = is_array( $http->submit_bodies[ $pickup_before_submit ]['cargos'][0]['services'] ?? null ) ? $http->submit_bodies[ $pickup_before_submit ]['cargos'][0]['services'] : array();
+$pickup_submit_body = $http->submit_bodies[ $pickup_before_submit ] ?? array();
+$pickup_correlation = (string) ( $pickup_submit_body['cargos'][0]['common']['customerCorrelation'] ?? '' );
+pek_integration_assert( '' !== $pickup_correlation && (string) ( $pickup_preview['body']['correlation_hash'] ?? '' ) === hash( 'sha256', $pickup_correlation ), 'Pickup preview and create must use the same generic attempt and customerCorrelation.' );
+$expected_pickup_payload = pek_integration_fixture( 'preregistration-submit-pickup.json' );
+$expected_pickup_payload['cargos'][0]['common']['customerCorrelation'] = $pickup_correlation;
+pek_integration_assert_same_payload( $pickup_submit_body, $expected_pickup_payload, 'Pickup production chain' );
+$pickup_services_payload = is_array( $pickup_submit_body['cargos'][0]['services'] ?? null ) ? $pickup_submit_body['cargos'][0]['services'] : array();
 pek_integration_assert_required_service_blocks( $pickup_services_payload, 'Pickup' );
 pek_integration_assert( array( 'enabled' => false ) === ( $pickup_services_payload['delivery'] ?? null ), 'Pickup delivery service must be explicit disabled object without payer.' );
 $pickup_created = $repository->find_by_carrier( $pickup_order, PekSettings::CARRIER_KEY );
@@ -2281,6 +2330,14 @@ foreach ( array( '+79991234567', 'receiver@example.test', 'CARD-123', 'raw_respo
 }
 $logical_attempt_after_rejection = $attempts->current_record_for_request( $logical_order, $logical_request );
 pek_integration_assert( 1 === (int) ( $logical_attempt_after_rejection['generation'] ?? 0 ) && 'active' === (string) ( $logical_attempt_after_rejection['state'] ?? '' ), 'Deterministic PEK rejection must keep generation 1 active for corrected retry.' );
+pek_integration_assert( 'pek_logical_error' === (string) ( $repository->last_error( $logical_order )['error_code'] ?? '' ), 'Deterministic PEK rejection must be tracked as the current create error before corrected retry.' );
+$http->submit_mode = 'success';
+delete_transient( 'wdc_pek_request_budget_' . gmdate( 'YmdHi' ) );
+$logical_success = $creation->create( $logical_order, $logical_request );
+$logical_success_shipment = $repository->find_by_carrier( $logical_order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $logical_success->success && array() !== $logical_success_shipment, 'Corrected PEK create after deterministic rejection must succeed on the same explicit attempt.' );
+pek_integration_assert( array() === $repository->last_error( $logical_order ), 'Successful create must supersede the previous deterministic create rejection as active UI state.' );
+pek_integration_assert( (string) ( $logical_attempt_after_rejection['current_attempt_id'] ?? '' ) === (string) ( $logical_success_shipment['creation_attempt_id'] ?? '' ) && 1 === (int) ( $logical_success_shipment['creation_attempt_generation'] ?? 0 ), 'Corrected PEK create must reuse generation 1 after deterministic rejection.' );
 
 $http400_order = new PekIntegrationOrder( 1006 );
 $GLOBALS['wdc_pek_integration_orders'][1006] = $http400_order;

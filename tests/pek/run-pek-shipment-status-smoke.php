@@ -75,9 +75,22 @@ $valid = array(
 );
 $normalized = $normalizer->normalize( $valid, 'PEK-777', '2026-08-06 12:30:00' );
 pek_status_assert( 'Прибыл' === $normalized['status_title'], 'Typed status normalizer must accept valid expanded status.' );
+pek_status_assert( '42' === (string) ( $normalized['pek_cargo_status_id'] ?? '' ), 'Typed status normalizer must preserve positive digit-string cargoStatusId.' );
 pek_status_assert( $normalized['actual_cost_candidate'] instanceof ShipmentActualCost, 'Typed status normalizer must build actual-cost candidate for strict services.sum.' );
 pek_status_assert( true === $normalized['pek_receiving_by_sms_code'], 'Explicit true receiver flag must be preserved.' );
 pek_status_assert( false === $normalized['pek_receiving_by_document'], 'Explicit false receiver flag must be preserved.' );
+
+$positive_int = $valid;
+$positive_int['cargos'][0]['info']['cargoStatusId'] = 8;
+$positive_int_normalized = $normalizer->normalize( $positive_int, 'PEK-777', '2026-08-06 12:30:00' );
+pek_status_assert( '8' === (string) ( $positive_int_normalized['pek_cargo_status_id'] ?? '' ), 'Typed status normalizer must preserve positive integer cargoStatusId.' );
+
+$fresh_sentinel = $valid;
+$fresh_sentinel['cargos'][0]['info']['cargoStatus'] = 'Ожидается передача груза от отправителя';
+$fresh_sentinel['cargos'][0]['info']['cargoStatusId'] = -1;
+$fresh_sentinel_normalized = $normalizer->normalize( $fresh_sentinel, 'PEK-777', '2026-08-06 12:30:00' );
+pek_status_assert( 'Ожидается передача груза от отправителя' === $fresh_sentinel_normalized['status_title'], 'Fresh PEK cargoStatusId=-1 sentinel must not discard valid cargoStatus title.' );
+pek_status_assert( array_key_exists( 'pek_cargo_status_id', $fresh_sentinel_normalized ) && null === $fresh_sentinel_normalized['pek_cargo_status_id'], 'Fresh PEK cargoStatusId=-1 sentinel must signal canonical status ID omission.' );
 
 $minimal = $valid;
 unset( $minimal['cargos'][0]['receiver'], $minimal['cargos'][0]['services'], $minimal['cargos'][0]['cargo']['cargoBarCode'], $minimal['cargos'][0]['cargo']['positionBarCodes'], $minimal['cargos'][0]['info']['cargoStatusId'], $minimal['cargos'][0]['info']['takeOnStockDateTime'] );
@@ -111,6 +124,8 @@ $malformed_cases = array(
 	'date bool' => array( 'info' => array( 'takeOnStockDateTime' => true ) ),
 	'cargoStatusId bool' => array( 'info' => array( 'cargoStatusId' => false ) ),
 	'cargoStatusId float' => array( 'info' => array( 'cargoStatusId' => 42.5 ) ),
+	'cargoStatusId negative' => array( 'info' => array( 'cargoStatusId' => -2 ) ),
+	'cargoStatusId string sentinel' => array( 'info' => array( 'cargoStatusId' => '-1' ) ),
 	'cargo barcode array' => array( 'cargo' => array( 'cargoBarCode' => array() ) ),
 	'mixed position barcode list' => array( 'cargo' => array( 'positionBarCodes' => array( 'POS-1', array() ) ) ),
 	'actual cost negative' => array( 'services' => array( 'sum' => '-1.00' ) ),

@@ -33,7 +33,14 @@ final class PekShipmentStatusService {
 		$status = $this->fetch( $code, (string) ( $shipment['delivery_type'] ?? $shipment['shipment_mode'] ?? '' ) );
 		$candidate = $status['actual_cost_candidate'] ?? null;
 		unset( $status['actual_cost_candidate'] );
+		$clear_status_id = array_key_exists( 'pek_cargo_status_id', $status ) && null === $status['pek_cargo_status_id'];
+		if ( $clear_status_id ) {
+			unset( $status['pek_cargo_status_id'] );
+		}
 		$shipment = array_merge( $shipment, $status, array( 'updated_at' => $this->now() ) );
+		if ( $clear_status_id ) {
+			unset( $shipment['pek_cargo_status_id'] );
+		}
 		$this->repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $shipment );
 		if ( $candidate instanceof ShipmentActualCost ) {
 			$shipment = $this->actual_costs->apply_carrier_cost( $order, PekSettings::CARRIER_KEY, $candidate );

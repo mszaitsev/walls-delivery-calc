@@ -316,6 +316,7 @@ final class PekShipmentRequestBuilder {
 			'aggregate_volume_m3' => $cargo['aggregate_volume_m3'] ?? null,
 			'insurance_enabled' => true,
 			'insurance_value_kopecks' => (int) ( $summary['declared_value_kopecks'] ?? 0 ),
+			'planned_date_sent' => false,
 			'sms_release_requested' => true,
 			'sms_release_confirmed' => ! empty( $sms['success'] ),
 			'sms_effective_limit_kopecks' => (int) ( $sms['effective_limit_kopecks'] ?? 0 ),

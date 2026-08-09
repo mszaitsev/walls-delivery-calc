@@ -19,8 +19,10 @@ if ( ! function_exists( 'update_option' ) ) {
 }
 
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
@@ -188,9 +190,17 @@ $light_request = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, Deliver
 $heavy_request = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 5000, 20, 20, 20, Money::from_kopecks( 0 ), $items_heavy ) ), Money::from_kopecks( 0 ) );
 pek_shipment_create_assert( 2500 === $weight_resolver->product_weight_g( $light_request ) && $weight_resolver->sealing_required( $light_request ), 'Product weight fallback must sum all items and enable sealing below threshold.' );
 pek_shipment_create_assert( 3200 === $weight_resolver->product_weight_g( $heavy_request ) && ! $weight_resolver->sealing_required( $heavy_request ), 'Product weight fallback must sum all items and disable sealing at/above threshold.' );
+$surcharge_policy = new PekLightCargoSurchargePolicy( $settings );
+$money_zero = Money::from_kopecks( 0 );
+$package_2999 = new Package( array(), $money_zero, $money_zero, 2999, 999, 3998, 20, 20, 20, 8000, 'cart' );
+$package_3000 = new Package( array(), $money_zero, $money_zero, 3000, 999, 3999, 20, 20, 20, 8000, 'cart' );
+$request_2999 = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 3998, 20, 20, 20, Money::from_kopecks( 0 ), array() ) ), Money::from_kopecks( 0 ), meta: array( 'calculation_data' => array( 'package' => array( 'products_weight_g' => 2999 ) ) ) );
+$request_3000 = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 3999, 20, 20, 20, Money::from_kopecks( 0 ), array() ) ), Money::from_kopecks( 0 ), meta: array( 'calculation_data' => array( 'package' => array( 'products_weight_g' => 3000 ) ) ) );
+pek_shipment_create_assert( $surcharge_policy->evaluate( $package_2999 )->eligible && $weight_resolver->sealing_required( $request_2999 ), '2999g product weight must make checkout light-cargo surcharge eligible and shipment sealing required.' );
+pek_shipment_create_assert( ! $surcharge_policy->evaluate( $package_3000 )->eligible && ! $weight_resolver->sealing_required( $request_3000 ), '3000g product weight must disable checkout light-cargo surcharge eligibility and shipment sealing.' );
 
 $receiver_order = new class {
-	public function get_shipping_phone(): string { return '89100000000'; }
+	public function get_shipping_phone(): string { return '+79139134904'; }
 	public function get_billing_phone(): string { return ''; }
 	public function get_shipping_last_name(): string { return 'Петров'; }
 	public function get_shipping_first_name(): string { return 'Петр'; }
@@ -202,11 +212,12 @@ $receiver_order = new class {
 	public function get_meta( string $key, bool $single = true ): string { unset( $key, $single ); return ''; }
 };
 $receiver = ( new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() ) )->build_physical_recipient( $receiver_order, $request, 'receiver-warehouse-guid' );
-pek_shipment_create_assert( 'Петров Петр' === $receiver['title'] && 'Петров Петр' === $receiver['person'] && '+79100000000' === $receiver['personPhones'][0]['phone'], 'Receiver builder must produce title/person and one normalized phone.' );
+pek_shipment_create_assert( 'Петров Петр' === $receiver['title'] && 'Петров Петр' === $receiver['person'] && '+79139134904' === $receiver['personPhones'][0]['phone'], 'Receiver builder must produce title/person and one documented +7 phone.' );
 pek_shipment_create_assert( 3 === (int) ( $receiver['legalForm'] ?? 0 ), 'Receiver builder must send physical legalForm=3.' );
 pek_shipment_create_assert( 'Петр' === (string) ( $receiver['individual']['firstName'] ?? '' ) && 'Петров' === (string) ( $receiver['individual']['lastName'] ?? '' ), 'Receiver builder must send firstName and lastName inside individual.' );
 pek_shipment_create_assert( 1 === count( is_array( $receiver['personPhones'] ?? null ) ? $receiver['personPhones'] : array() ), 'Receiver builder must send exactly one personPhones row.' );
 pek_shipment_create_assert( 'receiver-warehouse-guid' === (string) ( $receiver['warehouseId'] ?? '' ), 'Pickup receiver builder must send selected receiver warehouseId.' );
+pek_shipment_create_assert( ! isset( $receiver['phone'], $receiver['mobile'] ), 'Receiver builder must not duplicate receiver phone in scalar aliases.' );
 pek_shipment_create_assert( ! isset( $receiver['identityCard'] ), 'SMS release receiver must not send identityCard.' );
 
 $parser = new PekShipmentCreateResponseParser();
