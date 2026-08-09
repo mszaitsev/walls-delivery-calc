@@ -41,6 +41,14 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		try {
 			$built = $this->builder->prepare( $this->order_from_request( $request ), $request, true );
 			return array( 'method' => 'POST', 'path' => '/preregistration/submit/', 'body' => $built['preview'], 'errors' => array(), 'warnings' => is_array( $built['summary']['warnings'] ?? null ) ? $built['summary']['warnings'] : array() );
+		} catch ( PekSmsReleaseValidationException $e ) {
+			return array(
+				'method' => 'POST',
+				'path' => '/preregistration/submit/',
+				'body' => array( 'sms_release_requested' => true, 'sms_release_confirmed' => false, 'sms_diagnostic' => $e->diagnostic() ),
+				'errors' => array( $this->safe_error_message( $e ) ),
+				'warnings' => array(),
+			);
 		} catch ( \Throwable $e ) {
 			return array( 'method' => 'POST', 'path' => '/preregistration/submit/', 'body' => array(), 'errors' => array( $this->safe_error_message( $e ) ), 'warnings' => array() );
 		}

@@ -82,6 +82,8 @@ final class PekQuoteMessageSanitizer {
 		foreach ( $this->exact_sensitive_values( $login, $api_key ) as $value ) {
 			$message = str_replace( $value, '[redacted]', $message );
 		}
+		$message = preg_replace( '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/iu', '[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/(?<!\w)\+?7[\s().-]*\d[\d\s().-]{8,}\d(?!\w)/u', '[redacted]', $message ) ?? $message;
 
 		return $message;
 	}
@@ -107,12 +109,20 @@ final class PekQuoteMessageSanitizer {
 		if ( 1 === preg_match( '/^\d{9,}$/', $kpp ) ) {
 			$values[] = $kpp;
 		}
+		$phone = trim( $this->settings->sender_phone() );
+		if ( strlen( preg_replace( '/\D+/', '', $phone ) ?? '' ) >= 10 ) {
+			$values[] = $phone;
+		}
+		$email = trim( $this->settings->sender_email() );
+		if ( strlen( $email ) >= 5 ) {
+			$values[] = $email;
+		}
 
 		return array_values( array_unique( array_filter( $values, static fn( string $value ): bool => '' !== $value ) ) );
 	}
 
 	private function redact_key_value_fragments( string $message ): string {
-		$key = '(?:api_key|apikey|api-key|token|password|authorization|login|client_card|clientcard|counterpartClientCard|inn|kpp)';
+		$key = '(?:api_key|apikey|api-key|token|password|authorization|login|client_card|clientcard|counterpartClientCard|inn|kpp|phone|email)';
 		$message = preg_replace( '/([?&])' . $key . '=[^&\s]+/i', '$1[redacted]=[redacted]', $message ) ?? $message;
 		$message = preg_replace( '/["\']?' . $key . '["\']?\s*[:=]\s*["\'][^"\']*["\']/i', '[redacted]', $message ) ?? $message;
 		$message = preg_replace( '/\b' . $key . '\b\s*[:=]\s*[^,\s;&]+/i', '[redacted]', $message ) ?? $message;

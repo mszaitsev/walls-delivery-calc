@@ -123,6 +123,7 @@ use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -158,6 +159,7 @@ use WallsShop\WDC\Shipments\Pek\PekShipmentService;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusService;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusResponseNormalizer;
 use WallsShop\WDC\Shipments\Pek\PekSmsReleaseAvailabilityService;
+use WallsShop\WDC\Shipments\Pek\PekSmsReleaseResult;
 use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
 use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
@@ -216,6 +218,25 @@ function pek_integration_assert_same_payload( array $actual, array $expected, st
 
 function pek_integration_count_calls( PekIntegrationFakeHttp $http, string $needle ): int {
 	return count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], $needle ) ) );
+}
+
+function pek_integration_sms_service( PekApiClient $api, PekSettings $settings, PekCredentials $credentials ): PekSmsReleaseAvailabilityService {
+	return new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings, new PekQuoteMessageSanitizer( $credentials, $settings ) );
+}
+
+function pek_integration_assert_sms_diagnostic( PekSmsReleaseResult $result, string $stage, string $error_code, string $label ): void {
+	$diagnostic = $result->diagnostic;
+	pek_integration_assert( ! $result->success, $label . ' must fail SMS check.' );
+	pek_integration_assert( $stage === (string) ( $diagnostic['stage'] ?? '' ), $label . ' must expose SMS stage ' . $stage . '.' );
+	if ( '' !== $error_code ) {
+		pek_integration_assert( $error_code === (string) ( $diagnostic['error_code'] ?? '' ), $label . ' must expose SMS error code ' . $error_code . '.' );
+	}
+	pek_integration_assert_no_private_markers( $diagnostic, $label . ' SMS diagnostic' );
+	$json = wp_json_encode( $diagnostic, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+	$json = is_string( $json ) ? $json : '';
+	foreach ( array( 'fake-private-token', 'fake-api-key', 'fake-login', 'CLIENT-CARD', '5400000000', '540001001', '+79100000000', 'sender@example.test', 'receiver@example.test' ) as $marker ) {
+		pek_integration_assert( ! str_contains( $json, $marker ), $label . ' SMS diagnostic must not contain sensitive marker ' . $marker );
+	}
 }
 
 const PEK_INTEGRATION_SENDER_WAREHOUSE_A = '85974fc8-d0b8-11e5-9833-00155d668909';
@@ -353,6 +374,9 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			);
 		}
 		if ( str_contains( $url, '/auth/createtokentoaccessprivatedata/' ) ) {
+			if ( 'http403' === $this->token_mode ) {
+				return array( 'status' => 403, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Forbidden token PRIVATE_TOKEN fake-api-key fake-login CLIENT-CARD 5400000000 540001001 +79100000000 sender@example.test' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
 			if ( 'http500' === $this->token_mode ) {
 				return array( 'status' => 500, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'boom' ) ), JSON_UNESCAPED_UNICODE ) );
 			}
@@ -614,6 +638,44 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/confirmed-counterparties-response.json' ) ?: '[]' );
 		}
 		if ( str_contains( $url, '/counterparts/connecteddiscountsservicesagreements/' ) ) {
+			if ( 'connected_http403' === $this->connected_services_mode ) {
+				return array( 'status' => 403, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Forbidden connected PRIVATE_TOKEN fake-api-key fake-login CLIENT-CARD 5400000000 540001001 +79100000000 receiver@example.test' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'connected_logical' === $this->connected_services_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode(
+						array(
+							'error' => array(
+								'title' => 'Connected rejected',
+								'message' => 'token fake-private-token fake-api-key',
+								'fields' => array(
+									array( 'Key' => 'counterpartGUID', 'Value' => array( 'fake-private-token fake-login sender@example.test' ) ),
+								),
+							),
+						),
+						JSON_UNESCAPED_UNICODE
+					),
+				);
+			}
+			if ( 'connected_malformed_root' === $this->connected_services_mode ) {
+				return array( 'status' => 200, 'body' => wp_json_encode( array( 'bad' ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'no_ltl_type' === $this->connected_services_mode ) {
+				$data = pek_integration_fixture( 'connected-services-response.json' );
+				$data['availableTypesOfDelivery'] = array( 1 );
+				return array( 'status' => 200, 'body' => wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'sms_absent' === $this->connected_services_mode ) {
+				$data = pek_integration_fixture( 'connected-services-response.json' );
+				$data['specialConditionsWithParams'][0]['specialCondition']['UID'] = '00000000-0000-0000-0000-000000000000';
+				return array( 'status' => 200, 'body' => wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'duplicate_sms_uid' === $this->connected_services_mode ) {
+				$data = pek_integration_fixture( 'connected-services-response.json' );
+				$data['specialConditionsWithParams'][] = $data['specialConditionsWithParams'][0];
+				return array( 'status' => 200, 'body' => wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) );
+			}
 			if ( 'available_string' === $this->connected_services_mode ) {
 				$data = pek_integration_fixture( 'connected-services-response.json' );
 				$data['availableTypesOfDelivery'] = array( '3' );
@@ -622,6 +684,16 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			if ( 'duplicate_cod' === $this->connected_services_mode ) {
 				$data = pek_integration_fixture( 'connected-services-response.json' );
 				$data['specialConditionsWithParams'][0]['params'][] = array( 'key' => 'CODMaxSum', 'type' => 'Money', 'values' => 100000.00 );
+				return array( 'status' => 200, 'body' => wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'missing_cod' === $this->connected_services_mode ) {
+				$data = pek_integration_fixture( 'connected-services-response.json' );
+				$data['specialConditionsWithParams'][0]['params'] = array_slice( $data['specialConditionsWithParams'][0]['params'], 1 );
+				return array( 'status' => 200, 'body' => wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'cod_wrong_type' === $this->connected_services_mode ) {
+				$data = pek_integration_fixture( 'connected-services-response.json' );
+				$data['specialConditionsWithParams'][0]['params'][0]['values'] = array( '100000.00' );
 				return array( 'status' => 200, 'body' => wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) );
 			}
 			if ( 'cod_20000000' === $this->connected_services_mode ) {
@@ -647,6 +719,21 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			return array( 'status' => 200, 'body' => file_get_contents( dirname( __DIR__ ) . '/pek/fixtures/connected-services-response.json' ) ?: '{}' );
 		}
 		if ( str_contains( $url, '/branches/checknocalcservices/' ) ) {
+			if ( 'geography_http403' === $this->connected_services_mode ) {
+				return array( 'status' => 403, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Forbidden geography fake-api-key PRIVATE_TOKEN' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'geography_http500' === $this->connected_services_mode ) {
+				return array( 'status' => 500, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'geo boom' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
+			if ( 'geography_transport' === $this->connected_services_mode ) {
+				return array( 'error' => true, 'message' => 'transport fake-api-key PRIVATE_TOKEN' );
+			}
+			if ( 'geography_no_sms' === $this->connected_services_mode ) {
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode( array( array( 'specialCondition' => array( 'UID' => '00000000-0000-0000-0000-000000000000' ) ) ), JSON_UNESCAPED_UNICODE ),
+				);
+			}
 			if ( 'geography_malformed' === $this->connected_services_mode ) {
 				return array(
 					'status' => 200,
@@ -1057,7 +1144,7 @@ $request_builder = new PekShipmentRequestBuilder(
 	new PekShipmentCargoBuilder( $settings ),
 	new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() ),
 	new PekShipmentCorrelationResolver(),
-	new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ),
+	pek_integration_sms_service( $api, $settings, $credentials ),
 	$destination_resolver,
 	new PekShipmentProductWeightResolver( $settings ),
 	$credentials,
@@ -1095,52 +1182,115 @@ $verified = $counterparts->verify_and_save();
 pek_integration_assert( true === $verified['success'], 'Counterpart must be verified through fake private API before shipment builder.' );
 pek_integration_assert( '' !== (string) ( $settings->sender_counterpart_snapshot()['identity_hash'] ?? '' ), 'Verified counterpart snapshot must include identity_hash.' );
 
-$sms = new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings );
+$sms = pek_integration_sms_service( $api, $settings, $credentials );
 $settings_repository->set( PekSettings::SMS_RELEASE_LIMIT_RUB_KEY, 500000 );
 $sms_result = $sms->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( $sms_result->success && 10000000 === $sms_result->effective_limit_kopecks, 'Official scalar CODMaxSum must produce effective 100000 RUB SMS limit.' );
 $sms_over = $sms->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000001 );
 pek_integration_assert( ! $sms_over->success, 'Declared value above official scalar CODMaxSum must fail before submit.' );
 $http->connected_services_mode = 'available_string';
-$sms_string_type = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_string_type = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_string_type->success, 'availableTypesOfDelivery numeric strings must fail strict SMS validation.' );
 $http->connected_services_mode = 'duplicate_cod';
-$sms_duplicate_cod = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_duplicate_cod = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_duplicate_cod->success, 'Duplicate CODMaxSum params must fail closed.' );
 $http->connected_services_mode = 'cod_20000000';
 $settings_repository->set( PekSettings::SMS_RELEASE_LIMIT_RUB_KEY, 50000000 );
-$sms_exact_cache = new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings );
+$sms_exact_cache = pek_integration_sms_service( $api, $settings, $credentials );
 $sms_high_success = $sms_exact_cache->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 1500000000 );
 $sms_high_fail = $sms_exact_cache->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 2000000001 );
 pek_integration_assert( $sms_high_success->success && ! $sms_high_fail->success, 'SMS cache key must include exact declared value and must not merge values above the old cap.' );
 $settings_repository->set( PekSettings::SMS_RELEASE_LIMIT_RUB_KEY, 500000 );
 $http->connected_services_mode = 'malformed_sibling';
-$sms_malformed_sibling = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_malformed_sibling = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_malformed_sibling->success, 'Malformed sibling row in specialConditionsWithParams must fail the whole SMS check.' );
 $http->connected_services_mode = 'special_assoc';
-$sms_special_assoc = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_special_assoc = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_special_assoc->success, 'Associative specialConditionsWithParams root must fail strict SMS validation.' );
 $http->connected_services_mode = 'missing_uid';
-$sms_missing_uid = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_missing_uid = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_missing_uid->success, 'Missing SMS UID must fail strict SMS validation.' );
 $http->connected_services_mode = 'geography_malformed';
-$sms_bad_geography = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_bad_geography = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_bad_geography->success, 'Malformed checknocalcservices sibling after valid SMS row must fail strict geography validation.' );
 $http->connected_services_mode = 'geography_missing_uid';
-$sms_missing_geography_uid = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_missing_geography_uid = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_missing_geography_uid->success, 'Geography row without UID must fail strict validation.' );
 $http->connected_services_mode = 'geography_duplicate';
-$sms_duplicate_geography = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_duplicate_geography = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $sms_duplicate_geography->success, 'Duplicate geography SMS UID rows must fail closed.' );
 $http->connected_services_mode = 'geography_unrelated';
-$sms_unrelated_geography = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$sms_unrelated_geography = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( $sms_unrelated_geography->success, 'Unrelated valid geography row plus exactly one SMS row must pass.' );
 $http->connected_services_mode = 'success';
 $http->token_mode = 'malformed';
 $submit_count_before_bad_token = count( $http->submit_bodies );
-$bad_token_sms = ( new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+$bad_token_sms = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
 pek_integration_assert( ! $bad_token_sms->success && $submit_count_before_bad_token === count( $http->submit_bodies ), 'Malformed private token must fail SMS path without submit.' );
+pek_integration_assert_sms_diagnostic( $bad_token_sms, 'sms_private_token', 'pek_unexpected_private_token', 'Malformed private token' );
 $http->token_mode = 'success';
+
+foreach ( array( 'geography_http403' => 'pek_http_403', 'geography_http500' => 'pek_http_500', 'geography_transport' => 'pek_transport_error' ) as $mode => $code ) {
+	$http->connected_services_mode = $mode;
+	$before_token_calls = pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' );
+	$before_connected_calls = pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' );
+	$before_submit = count( $http->submit_bodies );
+	$result = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+	pek_integration_assert_sms_diagnostic( $result, 'sms_geography', $code, 'SMS geography ' . $mode );
+	pek_integration_assert( $before_token_calls === pek_integration_count_calls( $http, '/auth/createtokentoaccessprivatedata/' ), 'SMS geography failure must not request private token for ' . $mode );
+	pek_integration_assert( $before_connected_calls === pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), 'SMS geography failure must not request connected services for ' . $mode );
+	pek_integration_assert( $before_submit === count( $http->submit_bodies ), 'SMS geography failure must not submit for ' . $mode );
+}
+
+$http->connected_services_mode = 'success';
+$http->token_mode = 'http403';
+$before_connected_calls = pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' );
+$before_submit = count( $http->submit_bodies );
+$token_403 = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+pek_integration_assert_sms_diagnostic( $token_403, 'sms_private_token', 'pek_http_403', 'Private token 403' );
+pek_integration_assert( $before_connected_calls === pek_integration_count_calls( $http, '/counterparts/connecteddiscountsservicesagreements/' ), 'Private token failure must not request connected services.' );
+pek_integration_assert( $before_submit === count( $http->submit_bodies ), 'Private token failure must not submit.' );
+$http->token_mode = 'success';
+
+foreach ( array( 'connected_http403' => 'pek_http_403', 'connected_logical' => 'pek_logical_error', 'connected_malformed_root' => 'pek_unexpected_connected_services' ) as $mode => $code ) {
+	$http->connected_services_mode = $mode;
+	$before_submit = count( $http->submit_bodies );
+	$result = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+	pek_integration_assert_sms_diagnostic( $result, 'sms_connected_services', $code, 'Connected services ' . $mode );
+	pek_integration_assert( $before_submit === count( $http->submit_bodies ), 'Connected services failure must not submit for ' . $mode );
+	if ( 'connected_logical' === $mode ) {
+		pek_integration_assert( array() !== ( $result->diagnostic['field_errors'] ?? array() ), 'Connected logical error must preserve safe field errors.' );
+		pek_integration_assert( array() !== ( $result->diagnostic['response_shape'] ?? array() ), 'Connected logical error must preserve response shape.' );
+	}
+}
+
+foreach ( array(
+	'available_string' => array( 'sms_service_contract', 'pek_sms_available_types_malformed' ),
+	'duplicate_sms_uid' => array( 'sms_service_contract', 'pek_sms_service_duplicate' ),
+	'malformed_sibling' => array( 'sms_service_contract', 'pek_sms_special_conditions_malformed' ),
+	'special_assoc' => array( 'sms_service_contract', 'pek_sms_special_conditions_malformed' ),
+	'missing_uid' => array( 'sms_service_contract', 'pek_sms_special_conditions_malformed' ),
+	'missing_cod' => array( 'sms_limit_contract', 'pek_sms_cod_limit_missing' ),
+	'duplicate_cod' => array( 'sms_limit_contract', 'pek_sms_cod_limit_duplicate' ),
+	'cod_wrong_type' => array( 'sms_limit_contract', 'pek_sms_param_values_malformed' ),
+) as $mode => $expected ) {
+	$http->connected_services_mode = $mode;
+	$result = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+	pek_integration_assert_sms_diagnostic( $result, $expected[0], $expected[1], 'SMS contract ' . $mode );
+}
+
+foreach ( array( 'geography_no_sms' => 'sms_geography_not_available', 'no_ltl_type' => 'sms_ltl_type_not_available', 'sms_absent' => 'pek_sms_service_absent' ) as $mode => $code ) {
+	$http->connected_services_mode = $mode;
+	$result = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000000 );
+	pek_integration_assert_sms_diagnostic( $result, 'sms_business_unavailable', $code, 'SMS business unavailable ' . $mode );
+}
+
+$http->connected_services_mode = 'success';
+$business_over_limit = ( pek_integration_sms_service( $api, $settings, $credentials ) )->check( '11111111-2222-3333-4444-555555555555', 'BR-S', 'BR-R', 10000001 );
+pek_integration_assert_sms_diagnostic( $business_over_limit, 'sms_business_unavailable', 'declared_value_exceeds_sms_limit', 'Declared value over SMS limit' );
+pek_integration_assert( 10000001 === (int) ( $business_over_limit->diagnostic['declared_value_kopecks'] ?? 0 ) && 10000000 === (int) ( $business_over_limit->diagnostic['effective_limit_kopecks'] ?? 0 ), 'Declared value diagnostic must expose safe kopeck values.' );
+$http->connected_services_mode = 'success';
+delete_transient( 'wdc_pek_request_budget_' . gmdate( 'YmdHi' ) );
 
 $admin_base = array(
 	PekSettings::REQUEST_TIMEOUT_KEY => 15,
@@ -1236,7 +1386,7 @@ foreach ( array( 'http_failure' => 'counterpart_api', 'logical_error' => 'counte
 	$counterparts->verify_and_save();
 	$http->confirmed_counterparties_mode = $mode;
 	$result = $counterparts->verify_and_save();
-	pek_integration_assert( false === $result['success'] && $stage === (string) ( $result['diagnostic']['stage'] ?? '' ), 'Counterpart API/logical failure must expose distinct stage for mode ' . $mode );
+	pek_integration_assert( false === $result['success'] && $stage === (string) ( $result['diagnostic']['stage'] ?? '' ), 'Counterpart API/logical failure must expose distinct stage for mode ' . $mode . ': ' . ( wp_json_encode( $result['diagnostic'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '' ) );
 	pek_integration_assert( '' === $settings->sender_counterpart_guid() && array() === $settings->sender_counterpart_snapshot(), 'Counterpart API/logical failure must clear old snapshot for mode ' . $mode );
 }
 
@@ -1723,6 +1873,27 @@ pek_integration_assert( is_array( $sms_geography_body ) && 'fake-moscow-branch' 
 pek_integration_assert( 77 === (int) ( $preview['body']['courier_location_id'] ?? 0 ) && true === (bool) ( $preview['body']['courier_location_match'] ?? false ) && 'request_location_id' === (string) ( $preview['body']['courier_location_identity_source'] ?? '' ) && 'fresh_address_zone' === (string) ( $preview['body']['courier_branch_source'] ?? '' ), 'Safe preview must expose courier location identity and fresh actual-address branch binding evidence.' );
 pek_integration_assert( 'exact' === (string) ( $preview['body']['courier_address_precision'] ?? '' ) && ! empty( $preview['body']['courier_zone_present'] ) && ! empty( $preview['body']['courier_main_warehouse_present'] ) && ! empty( $preview['body']['courier_pek_formatted_address_present'] ) && '' !== (string) ( $preview['body']['courier_pek_formatted_address_hash'] ?? '' ), 'Courier safe preview must expose non-PII findzonebyaddress evidence.' );
 pek_integration_assert( 'city' === (string) ( $preview['body']['courier_location_level'] ?? '' ) && true === (bool) ( $preview['body']['courier_parent_city_match'] ?? false ) && ! array_key_exists( 'courier_city_fias_id', $preview['body'] ), 'Safe preview must expose only safe location match evidence without raw FIAS IDs.' );
+$http->connected_services_mode = 'geography_http403';
+$sms_preview_submit_before = count( $http->submit_bodies );
+$sms_failure_builder = new PekShipmentRequestBuilder(
+	$settings,
+	new PekShipmentDeclaredValueResolver(),
+	new PekShipmentSenderWarehouseResolver( $settings, $sender_warehouse_service ),
+	new PekShipmentCargoBuilder( $settings ),
+	new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() ),
+	new PekShipmentCorrelationResolver(),
+	pek_integration_sms_service( $api, $settings, $credentials ),
+	$destination_resolver,
+	new PekShipmentProductWeightResolver( $settings ),
+	$credentials,
+	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
+);
+$sms_failure_preview = ( new PekShipmentAdapter( $api, $sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver ) )->build_safe_payload_preview( $request );
+pek_integration_assert( array() !== $sms_failure_preview['errors'] && str_contains( (string) ( $sms_failure_preview['errors'][0] ?? '' ), 'СМС' ), 'SMS preview failure must remain blocking with public SMS message: ' . ( wp_json_encode( $sms_failure_preview, JSON_UNESCAPED_UNICODE ) ?: '' ) );
+pek_integration_assert( 'sms_geography' === (string) ( $sms_failure_preview['body']['sms_diagnostic']['stage'] ?? '' ) && 'pek_http_403' === (string) ( $sms_failure_preview['body']['sms_diagnostic']['error_code'] ?? '' ) && 403 === (int) ( $sms_failure_preview['body']['sms_diagnostic']['http_status'] ?? 0 ), 'SMS preview failure must expose safe staged diagnostic.' );
+pek_integration_assert_no_private_markers( $sms_failure_preview['body']['sms_diagnostic'] ?? array(), 'SMS preview diagnostic' );
+pek_integration_assert( $sms_preview_submit_before === count( $http->submit_bodies ), 'SMS preview failure must not call preregistration submit.' );
+$http->connected_services_mode = 'success';
 $http->findzone_address_mode = 'near';
 $near_preview = $creation->safe_preview( $request );
 pek_integration_assert( array() === $near_preview['errors'] && array() !== $near_preview['warnings'] && 'near' === (string) ( $near_preview['body']['courier_address_precision'] ?? '' ), 'Near courier findzone precision must allow preview with a public warning.' );

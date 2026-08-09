@@ -11,6 +11,18 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 
 defined( 'ABSPATH' ) || exit;
 
+final class PekSmsReleaseValidationException extends \RuntimeException {
+	/** @param array<string,mixed> $diagnostic */
+	public function __construct( string $message, private array $diagnostic ) {
+		parent::__construct( $message );
+	}
+
+	/** @return array<string,mixed> */
+	public function diagnostic(): array {
+		return $this->diagnostic;
+	}
+}
+
 final class PekShipmentRequestBuilder {
 	private PekRuPhoneNormalizer $phones;
 
@@ -55,7 +67,7 @@ final class PekShipmentRequestBuilder {
 			? $this->sms->check( $counterpart_guid, (string) ( $sender['branchId'] ?? '' ), (string) ( $destination['branch_id'] ?? '' ), $declared_kopecks )
 			: new PekSmsReleaseResult( true, $this->settings->sms_release_limit_rub() * 100, true, true );
 		if ( ! $sms->success ) {
-			throw new \RuntimeException( $sms->message );
+			throw new PekSmsReleaseValidationException( $sms->message, $sms->diagnostic );
 		}
 		$common = array( 'orderType' => 0 );
 		$client_card = trim( $this->settings->client_card() );
@@ -294,6 +306,7 @@ final class PekShipmentRequestBuilder {
 			'sms_release_requested' => true,
 			'sms_release_confirmed' => ! empty( $sms['success'] ),
 			'sms_effective_limit_kopecks' => (int) ( $sms['effective_limit_kopecks'] ?? 0 ),
+			'sms_diagnostic' => is_array( $sms['diagnostic'] ?? null ) ? $sms['diagnostic'] : array(),
 			'payers' => array_filter(
 				array(
 					'transporting' => 1,
