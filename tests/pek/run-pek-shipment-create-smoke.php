@@ -57,6 +57,19 @@ function pek_assert_no_key_recursive( array $data, string $forbidden ): void {
 	}
 }
 
+function pek_assert_common_services_contract( array $services ): void {
+	pek_shipment_create_assert( isset( $services['transporting']['payer']['type'] ) && 1 === (int) $services['transporting']['payer']['type'], 'Transporting must keep payer.type=1 and no enabled flag.' );
+	pek_shipment_create_assert( ! isset( $services['transporting']['enabled'] ), 'Mandatory transporting service must not send enabled flag.' );
+	pek_shipment_create_assert( array( 'enabled' => false ) === $services['hardPacking'], 'hardPacking must be explicit disabled PEK service state.' );
+	pek_shipment_create_assert( array( 'enabled' => false ) === $services['strapping'], 'strapping must be explicit disabled PEK service state.' );
+	pek_shipment_create_assert( array( 'enabled' => false ) === $services['documentsReturning'], 'documentsReturning must be explicit disabled PEK service state.' );
+	pek_shipment_create_assert( isset( $services['insurance']['enabled'], $services['insurance']['payer']['type'], $services['insurance']['cost'] ) && true === $services['insurance']['enabled'] && 1 === (int) $services['insurance']['payer']['type'], 'Insurance must stay enabled with payer.type=1 and cost.' );
+	foreach ( array( 'hardPacking', 'strapping', 'documentsReturning' ) as $disabled ) {
+		pek_shipment_create_assert( ! isset( $services[ $disabled ]['payer'] ), $disabled . ' disabled service must not carry payer.' );
+	}
+	pek_shipment_create_assert( ! isset( $services['smsRelease'], $services['storing'] ), 'Unrelated PEK service fields must not be sent.' );
+}
+
 $pickup = pek_json_fixture( 'preregistration-submit-pickup.json' );
 $courier = pek_json_fixture( 'preregistration-submit-courier.json' );
 $response = pek_json_fixture( 'preregistration-submit-response.json' );
@@ -70,20 +83,25 @@ foreach ( array( $pickup, $courier ) as $payload ) {
 	pek_shipment_create_assert( 3 === $cargo['common']['type'], 'Cargo common type must be LTL 3.' );
 	pek_shipment_create_assert( isset( $cargo['common']['cargoPlaceList'] ), 'cargoPlaceList must live in cargos[].common.' );
 	pek_assert_no_key_recursive( $payload, 'declaredCost' );
-	pek_shipment_create_assert( ! isset( $cargo['services']['transporting']['enabled'] ), 'Mandatory transporting service must not send enabled flag.' );
+	pek_assert_common_services_contract( $cargo['services'] );
 	pek_shipment_create_assert( isset( $cargo['receiver']['title'], $cargo['receiver']['person'] ), 'Physical receiver must include title and person.' );
 	foreach ( $cargo['services'] as $service ) {
-		pek_shipment_create_assert( is_array( $service['payer'] ?? null ) && 1 === (int) $service['payer']['type'], 'Every enabled service must use payer.type=1.' );
+		if ( true === ( $service['enabled'] ?? true ) ) {
+			pek_shipment_create_assert( is_array( $service['payer'] ?? null ) && 1 === (int) $service['payer']['type'], 'Every enabled service must use payer.type=1.' );
+		}
 	}
-	pek_shipment_create_assert( ! isset( $cargo['services']['smsRelease'] ), 'Invented smsRelease service field must not be sent.' );
 	pek_shipment_create_assert( ! isset( $cargo['receiver']['phone'], $cargo['receiver']['individual']['name'], $cargo['receiver']['identityCard'] ), 'Receiver must use physical/SMS shape without passport aliases.' );
 	pek_assert_no_key_recursive( $payload, 'position' );
-	pek_assert_no_key_recursive( $payload, 'hardPacking' );
 	pek_assert_no_key_recursive( $payload, 'bag' );
+	pek_assert_no_key_recursive( $payload, 'smallBag' );
+	pek_assert_no_key_recursive( $payload, 'packageType' );
+	pek_assert_no_key_recursive( $payload, 'packagingType' );
 }
 
-pek_shipment_create_assert( isset( $pickup['cargos'][0]['receiver']['warehouseId'] ) && ! isset( $pickup['cargos'][0]['services']['delivery'] ), 'Pickup must use receiver warehouse and no delivery service.' );
+pek_shipment_create_assert( isset( $pickup['cargos'][0]['receiver']['warehouseId'] ) && array( 'enabled' => false ) === $pickup['cargos'][0]['services']['delivery'], 'Pickup must use receiver warehouse and explicit disabled delivery service.' );
+pek_shipment_create_assert( ! isset( $pickup['cargos'][0]['services']['delivery']['payer'] ), 'Pickup disabled delivery must not carry payer.' );
 pek_shipment_create_assert( isset( $courier['cargos'][0]['receiver']['addressStock'], $courier['cargos'][0]['services']['delivery'] ) && ! isset( $courier['cargos'][0]['receiver']['warehouseId'] ), 'Courier must use addressStock and delivery service.' );
+pek_shipment_create_assert( true === $courier['cargos'][0]['services']['delivery']['enabled'] && 1 === (int) $courier['cargos'][0]['services']['delivery']['payer']['type'], 'Courier delivery must be enabled with payer.type=1.' );
 pek_shipment_create_assert( isset( $response['documentId'], $response['cargos'][0]['cargoCode'], $response['cargos'][0]['positions'][0]['barcode'] ), 'Create response fixture must use preregistration identifiers.' );
 
 $settings = new PekSettings( new SettingsRepository(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );

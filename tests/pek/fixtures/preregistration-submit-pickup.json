@@ -62,12 +62,24 @@
             "type": 1
           }
         },
+        "hardPacking": {
+          "enabled": false
+        },
         "insurance": {
           "enabled": true,
           "payer": {
             "type": 1
           },
           "cost": 100000
+        },
+        "strapping": {
+          "enabled": false
+        },
+        "documentsReturning": {
+          "enabled": false
+        },
+        "delivery": {
+          "enabled": false
         },
         "sealing": {
           "enabled": true,

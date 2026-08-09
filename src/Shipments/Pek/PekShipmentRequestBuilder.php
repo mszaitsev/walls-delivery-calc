@@ -185,11 +185,14 @@ final class PekShipmentRequestBuilder {
 	private function services( ShipmentCreateRequest $request, int $declared_kopecks, bool $sealing ): array {
 		$services = array(
 			'transporting' => array( 'payer' => array( 'type' => 1 ) ),
+			'hardPacking' => array( 'enabled' => false ),
 			'insurance' => array( 'enabled' => true, 'payer' => array( 'type' => 1 ), 'cost' => $this->kopecks_to_rub_number( $declared_kopecks ) ),
+			'strapping' => array( 'enabled' => false ),
+			'documentsReturning' => array( 'enabled' => false ),
+			'delivery' => DeliveryType::COURIER === $request->delivery_type
+				? array( 'enabled' => true, 'payer' => array( 'type' => 1 ) )
+				: array( 'enabled' => false ),
 		);
-		if ( DeliveryType::COURIER === $request->delivery_type ) {
-			$services['delivery'] = array( 'enabled' => true, 'payer' => array( 'type' => 1 ) );
-		}
 		if ( $sealing ) {
 			$services['sealing'] = array( 'enabled' => true, 'payer' => array( 'type' => 1 ) );
 		}

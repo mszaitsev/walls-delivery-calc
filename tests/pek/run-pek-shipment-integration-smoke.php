@@ -221,6 +221,19 @@ function pek_integration_count_calls( PekIntegrationFakeHttp $http, string $need
 	return count( array_filter( $http->calls, static fn( array $call ): bool => str_contains( $call['url'], $needle ) ) );
 }
 
+/** @param array<string,mixed> $services */
+function pek_integration_assert_required_service_blocks( array $services, string $mode ): void {
+	pek_integration_assert( isset( $services['transporting']['payer']['type'] ) && 1 === (int) $services['transporting']['payer']['type'] && ! isset( $services['transporting']['enabled'] ), $mode . ' transporting must keep payer.type=1 without enabled flag.' );
+	pek_integration_assert( array( 'enabled' => false ) === ( $services['hardPacking'] ?? null ), $mode . ' hardPacking must be explicit disabled object.' );
+	pek_integration_assert( array( 'enabled' => false ) === ( $services['strapping'] ?? null ), $mode . ' strapping must be explicit disabled object.' );
+	pek_integration_assert( array( 'enabled' => false ) === ( $services['documentsReturning'] ?? null ), $mode . ' documentsReturning must be explicit disabled object.' );
+	pek_integration_assert( isset( $services['insurance']['enabled'], $services['insurance']['payer']['type'], $services['insurance']['cost'] ) && true === $services['insurance']['enabled'] && 1 === (int) $services['insurance']['payer']['type'], $mode . ' insurance must remain enabled with payer.type=1 and cost.' );
+	foreach ( array( 'hardPacking', 'strapping', 'documentsReturning' ) as $disabled ) {
+		pek_integration_assert( ! isset( $services[ $disabled ]['payer'] ), $mode . ' disabled ' . $disabled . ' must not carry payer.' );
+	}
+	pek_integration_assert( ! isset( $services['storing'], $services['bag'], $services['smallBag'], $services['packageType'], $services['packagingType'] ), $mode . ' must not send unrelated storing/bag fields.' );
+}
+
 function pek_integration_sms_service( PekApiClient $api, PekSettings $settings, PekCredentials $credentials ): PekSmsReleaseAvailabilityService {
 	return new PekSmsReleaseAvailabilityService( $api, new PekPrivateAccessTokenService( $api ), $settings, new PekQuoteMessageSanitizer( $credentials, $settings ) );
 }
@@ -796,9 +809,10 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 								'title' => 'Validation',
 								'message' => 'Invalid request for +79991234567 receiver@example.test CARD-123',
 								'fields' => array(
-									array( 'Key' => 'cargos[0].receiver.personPhones', 'Value' => array( 'Phone +79991234567 is rejected.' ) ),
-									array( 'Key' => 'cargos[0].receiver.email', 'Value' => array( 'Email receiver@example.test is rejected.' ) ),
-									array( 'Key' => 'sender.counterpartClientCard', 'Value' => array( 'Card CARD-123 is rejected.' ) ),
+									array( 'Key' => 'cargos[0].services.hardPacking', 'Value' => array( 'Пожалуйста, заполните поле' ) ),
+									array( 'Key' => 'cargos[0].services.strapping', 'Value' => array( 'Пожалуйста, заполните поле' ) ),
+									array( 'Key' => 'cargos[0].services.documentsReturning', 'Value' => array( 'Пожалуйста, заполните поле' ) ),
+									array( 'Key' => 'cargos[0].services.delivery', 'Value' => array( 'Пожалуйста, заполните поле' ) ),
 								),
 							),
 						),
@@ -1919,6 +1933,9 @@ pek_integration_assert( true === $create_result->success, 'Production chain crea
 pek_integration_assert( 1 === count( $submit_calls ), 'Fake preregistration submit must be called exactly once in success case.' );
 pek_integration_assert( (string) ( $preview['body']['correlation_hash'] ?? '' ) === hash( 'sha256', (string) ( $http->submit_bodies[0]['cargos'][0]['common']['customerCorrelation'] ?? '' ) ), 'PEK preview and create must use the same generic attempt and customerCorrelation.' );
 pek_integration_assert_same_payload( $http->submit_bodies[0] ?? array(), pek_integration_fixture( 'preregistration-submit-courier.json' ), 'Courier production chain' );
+$courier_services = is_array( $http->submit_bodies[0]['cargos'][0]['services'] ?? null ) ? $http->submit_bodies[0]['cargos'][0]['services'] : array();
+pek_integration_assert_required_service_blocks( $courier_services, 'Courier' );
+pek_integration_assert( true === ( $courier_services['delivery']['enabled'] ?? null ) && 1 === (int) ( $courier_services['delivery']['payer']['type'] ?? 0 ), 'Courier delivery service must be enabled with payer.type=1.' );
 $created = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 pek_integration_assert( '999940950644' === $created['tracking_number'] && '136' === $created['external_id'], 'Creation service and mapper must persist PEK identifiers.' );
 pek_integration_assert( is_string( $created['creation_attempt_id'] ?? null ) && preg_match( '/^[0-9a-f-]{36}$/', (string) $created['creation_attempt_id'] ) && 1 === (int) ( $created['creation_attempt_generation'] ?? 0 ), 'Successful PEK shipment must persist generic creation attempt A.' );
@@ -2065,6 +2082,9 @@ $pickup_result = $creation->create( $pickup_order, $pickup_request );
 pek_integration_assert( true === $pickup_result->success, 'Pickup production chain create must succeed through fake PEK submit: ' . wp_json_encode( $pickup_result->to_array(), JSON_UNESCAPED_UNICODE ) );
 pek_integration_assert( count( $http->submit_bodies ) === $pickup_before_submit + 1, 'Pickup fake submit must be called exactly once.' );
 pek_integration_assert_same_payload( $http->submit_bodies[ $pickup_before_submit ] ?? array(), pek_integration_fixture( 'preregistration-submit-pickup.json' ), 'Pickup production chain' );
+$pickup_services_payload = is_array( $http->submit_bodies[ $pickup_before_submit ]['cargos'][0]['services'] ?? null ) ? $http->submit_bodies[ $pickup_before_submit ]['cargos'][0]['services'] : array();
+pek_integration_assert_required_service_blocks( $pickup_services_payload, 'Pickup' );
+pek_integration_assert( array( 'enabled' => false ) === ( $pickup_services_payload['delivery'] ?? null ), 'Pickup delivery service must be explicit disabled object without payer.' );
 $pickup_created = $repository->find_by_carrier( $pickup_order, PekSettings::CARRIER_KEY );
 pek_integration_assert( PEK_INTEGRATION_RECEIVER_WAREHOUSE === $pickup_created['pek_receiver_warehouse_id'] && 'BR-R' === $pickup_created['pek_receiver_branch_id'], 'Pickup fresh point code and branch must persist.' );
 pek_integration_assert_plain_data( $pickup_created );
@@ -2249,8 +2269,11 @@ $logical_diag = is_array( $logical_result->raw_reference['diagnostic'] ?? null )
 pek_integration_assert( 'pek_logical_error' === (string) ( $logical_result->error_code ?? '' ) && 'shipment_create_logical' === (string) ( $logical_diag['failure_stage'] ?? '' ), 'Structured logical rejection must stay definite and expose shipment_create_logical stage.' );
 pek_integration_assert( '/preregistration/submit/' === (string) ( $logical_diag['endpoint'] ?? '' ) && 200 === (int) ( $logical_diag['http_status'] ?? 0 ), 'Structured logical rejection diagnostic must include endpoint and HTTP status.' );
 pek_integration_assert( str_contains( (string) ( $logical_diag['api_error_message'] ?? '' ), 'Validation' ) && str_contains( (string) ( $logical_diag['api_error_message'] ?? '' ), '[redacted]' ), 'Structured logical rejection diagnostic must include redacted PEK API error message.' );
-pek_integration_assert( is_array( $logical_diag['field_errors'] ?? null ) && 3 === count( $logical_diag['field_errors'] ), 'Structured logical rejection diagnostic must include normalized field errors.' );
-pek_integration_assert( 'object' === (string) ( $logical_diag['response_shape']['root_type'] ?? '' ) && true === (bool) ( $logical_diag['response_shape']['error_present'] ?? false ) && 3 === (int) ( $logical_diag['response_shape']['fields_count'] ?? 0 ), 'Structured logical rejection diagnostic must include safe response shape with error fields count.' );
+pek_integration_assert( is_array( $logical_diag['field_errors'] ?? null ) && 4 === count( $logical_diag['field_errors'] ), 'Structured logical rejection diagnostic must include normalized service field errors.' );
+foreach ( array( 'cargos[0].services.hardPacking', 'cargos[0].services.strapping', 'cargos[0].services.documentsReturning', 'cargos[0].services.delivery' ) as $service_field ) {
+	pek_integration_assert( str_contains( wp_json_encode( $logical_diag['field_errors'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ?: '', $service_field ), 'Structured logical rejection diagnostic must preserve service field: ' . $service_field );
+}
+pek_integration_assert( 'object' === (string) ( $logical_diag['response_shape']['root_type'] ?? '' ) && true === (bool) ( $logical_diag['response_shape']['error_present'] ?? false ) && 4 === (int) ( $logical_diag['response_shape']['fields_count'] ?? 0 ), 'Structured logical rejection diagnostic must include safe response shape with service error fields count.' );
 $logical_diag_json = wp_json_encode( $logical_diag, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 $logical_diag_json = is_string( $logical_diag_json ) ? $logical_diag_json : '';
 foreach ( array( '+79991234567', 'receiver@example.test', 'CARD-123', 'raw_response', 'raw_request', 'identityCard' ) as $forbidden_marker ) {
