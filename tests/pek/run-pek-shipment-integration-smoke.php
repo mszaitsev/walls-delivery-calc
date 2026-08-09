@@ -379,6 +379,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			$status_id = match ( $this->status_mode ) {
 				'status_id_sentinel' => -1,
 				'status_id_string_sentinel' => '-1',
+				'status_id_cancelled_sentinel' => 'Аннулировано до приемки груза' === $status ? -3 : '42',
 				'status_id_negative' => -2,
 				default => '42',
 			};
@@ -2038,6 +2039,14 @@ $cancelled_string_shipment = $repository->find_by_carrier( $order, PekSettings::
 pek_integration_assert( true === $cancelled_string_status_result['success'] && 'Аннулировано до приемки груза' === (string) ( $cancelled_string_shipment['pek_cargo_status'] ?? '' ) && DeliveryStatus::CANCELLED === (string) ( $cancelled_string_shipment['universal_status_code'] ?? '' ), 'Cancelled PEK cargoStatusId="-1" sentinel must update status as universal CANCELLED.' );
 pek_integration_assert( ! array_key_exists( 'pek_cargo_status_id', $cancelled_string_shipment ), 'Cancelled PEK cargoStatusId="-1" sentinel must remove and not persist canonical status ID.' );
 
+$repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, array_merge( $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY ), array( 'pek_cargo_status_id' => '8' ) ) );
+$http->status_mode = 'status_id_cancelled_sentinel';
+$http->statuses = array( 'Аннулировано до приемки груза' );
+$cancelled_negative_status_result = $status_service->update( $order );
+$cancelled_negative_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $cancelled_negative_status_result['success'] && 'Аннулировано до приемки груза' === (string) ( $cancelled_negative_shipment['pek_cargo_status'] ?? '' ) && DeliveryStatus::CANCELLED === (string) ( $cancelled_negative_shipment['universal_status_code'] ?? '' ), 'Cancelled PEK cargoStatusId=-3 sentinel must update status as universal CANCELLED.' );
+pek_integration_assert( ! array_key_exists( 'pek_cargo_status_id', $cancelled_negative_shipment ), 'Cancelled PEK cargoStatusId=-3 sentinel must clear stale positive status ID and must not persist -3/null.' );
+
 $before_negative_status = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 $http->status_mode = 'status_id_negative';
 $http->statuses = array( 'Прибыл' );
@@ -2517,7 +2526,7 @@ pek_integration_assert( array() !== $repository->find_by_carrier( $order, PekSet
 
 $repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $open );
 $http->cancellation_mode = 'ambiguous';
-$http->status_mode = 'status_id_string_sentinel';
+$http->status_mode = 'status_id_cancelled_sentinel';
 $http->statuses = array( 'Оформлен', 'Аннулировано до приемки груза' );
 $before_reconcile_cancel_calls = count( $http->cancellations );
 $before_reconcile_status_calls = pek_integration_count_calls( $http, '/cargos/status/' );
@@ -2541,7 +2550,7 @@ $repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, array_merge( $o
 $http->statuses = array( 'Оформлен' );
 $http->cancellation_mode = 'success';
 $before_already_cancelled_calls = count( $http->cancellations );
-$http->status_mode = 'status_id_string_sentinel';
+$http->status_mode = 'status_id_cancelled_sentinel';
 $http->statuses = array( 'Аннулировано до приемки груза' );
 $already_cancelled_result = $shipment_service->cancel_in_carrier( $order );
 pek_integration_assert( true === (bool) ( $already_cancelled_result['success'] ?? false ) && 'fresh_status_precheck' === (string) ( $already_cancelled_result['cancellation_confirmation_source'] ?? '' ), 'Already-cancelled precheck must reconcile local shipment without invoking cancellation API.' );

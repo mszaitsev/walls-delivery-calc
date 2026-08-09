@@ -26,7 +26,7 @@ final class PekShipmentStatusResponseNormalizer {
 			'tracking_checked_at' => $checked_at,
 		);
 		if ( array_key_exists( 'cargoStatusId', $info ) ) {
-			$status_id = $this->optional_status_id( $info['cargoStatusId'], 'cargoStatusId' );
+			$status_id = $this->optional_status_id( $info['cargoStatusId'], 'cargoStatusId', $status );
 			if ( null !== $status_id ) {
 				$result['pek_cargo_status_id'] = $status_id;
 			} else {
@@ -122,11 +122,14 @@ final class PekShipmentStatusResponseNormalizer {
 		return trim( $value );
 	}
 
-	private function optional_status_id( mixed $value, string $field ): ?string {
+	private function optional_status_id( mixed $value, string $field, string $cargo_status ): ?string {
 		if ( null === $value || '' === $value ) {
 			return null;
 		}
 		if ( -1 === $value || '-1' === $value ) {
+			return null;
+		}
+		if ( -3 === $value && $this->is_cancelled_before_acceptance_status( $cargo_status ) ) {
 			return null;
 		}
 		if ( is_int( $value ) && $value > 0 ) {
@@ -149,6 +152,27 @@ final class PekShipmentStatusResponseNormalizer {
 		}
 
 		return new PekShipmentStatusNormalizationException( 'ПЭК вернул некорректное поле статуса: ' . $field . '.', $diagnostic );
+	}
+
+	private function is_cancelled_before_acceptance_status( string $status ): bool {
+		$status = str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $status );
+		$status = function_exists( 'mb_strtolower' ) ? mb_strtolower( $status, 'UTF-8' ) : $this->lower_utf8_without_mbstring( $status );
+		$status = preg_replace( '/[^\p{L}\p{N}]+/u', ' ', $status ) ?? $status;
+		$status = preg_replace( '/\s+/u', ' ', $status ) ?? $status;
+
+		return 'аннулировано до приемки груза' === trim( $status );
+	}
+
+	private function lower_utf8_without_mbstring( string $value ): string {
+		return strtr(
+			strtolower( $value ),
+			array(
+				'А' => 'а', 'Б' => 'б', 'В' => 'в', 'Г' => 'г', 'Д' => 'д', 'Е' => 'е', 'Ж' => 'ж', 'З' => 'з',
+				'И' => 'и', 'Й' => 'й', 'К' => 'к', 'Л' => 'л', 'М' => 'м', 'Н' => 'н', 'О' => 'о', 'П' => 'п',
+				'Р' => 'р', 'С' => 'с', 'Т' => 'т', 'У' => 'у', 'Ф' => 'ф', 'Х' => 'х', 'Ц' => 'ц', 'Ч' => 'ч',
+				'Ш' => 'ш', 'Щ' => 'щ', 'Ъ' => 'ъ', 'Ы' => 'ы', 'Ь' => 'ь', 'Э' => 'э', 'Ю' => 'ю', 'Я' => 'я',
+			)
+		);
 	}
 
 	private function optional_bool( mixed $value, string $field ): bool {
