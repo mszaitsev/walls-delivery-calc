@@ -232,7 +232,16 @@ function pek_integration_assert_required_service_blocks( array $services, string
 	foreach ( array( 'hardPacking', 'strapping', 'documentsReturning' ) as $disabled ) {
 		pek_integration_assert( ! isset( $services[ $disabled ]['payer'] ), $mode . ' disabled ' . $disabled . ' must not carry payer.' );
 	}
-	pek_integration_assert( ! isset( $services['storing'], $services['bag'], $services['smallBag'], $services['packageType'], $services['packagingType'] ), $mode . ' must not send unrelated storing/bag fields.' );
+	pek_integration_assert( array_key_exists( 'sealing', $services ), $mode . ' sealing service object must always be present.' );
+	pek_integration_assert( ! isset( $services['storing'], $services['bag'], $services['smallBag'], $services['package'], $services['packageType'], $services['packagingType'], $services['isHP'], $services['sealingPositionsCount'] ), $mode . ' must not send unrelated storing/bag fields.' );
+}
+
+function pek_integration_assert_sealing_enabled( array $services, string $mode ): void {
+	pek_integration_assert( true === ( $services['sealing']['enabled'] ?? null ) && 1 === (int) ( $services['sealing']['payer']['type'] ?? 0 ), $mode . ' must send sealing.enabled=true with payer.type=1.' );
+}
+
+function pek_integration_assert_sealing_disabled( array $services, string $mode ): void {
+	pek_integration_assert( array( 'enabled' => false ) === ( $services['sealing'] ?? null ), $mode . ' must send sealing.enabled=false without payer.' );
 }
 
 function pek_integration_sms_service( PekApiClient $api, PekSettings $settings, PekCredentials $credentials ): PekSmsReleaseAvailabilityService {
@@ -1094,6 +1103,9 @@ $attempt_uuid_sequence = array(
 	'55555555-5555-4555-8555-555555555555',
 	'66666666-6666-4666-8666-666666666666',
 	'77777777-7777-4777-8777-777777777777',
+	'88888888-8888-4888-8888-888888888888',
+	'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+	'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
 );
 $attempts = new ShipmentCreationAttemptService(
 	$repository,
@@ -1975,6 +1987,7 @@ pek_integration_assert( false === (bool) ( $preview['body']['planned_date_sent']
 pek_integration_assert_same_payload( $http->submit_bodies[0] ?? array(), pek_integration_fixture( 'preregistration-submit-courier.json' ), 'Courier production chain' );
 $courier_services = is_array( $http->submit_bodies[0]['cargos'][0]['services'] ?? null ) ? $http->submit_bodies[0]['cargos'][0]['services'] : array();
 pek_integration_assert_required_service_blocks( $courier_services, 'Courier' );
+pek_integration_assert_sealing_enabled( $courier_services, 'Light courier production chain' );
 pek_integration_assert( true === ( $courier_services['delivery']['enabled'] ?? null ) && 1 === (int) ( $courier_services['delivery']['payer']['type'] ?? 0 ), 'Courier delivery service must be enabled with payer.type=1.' );
 $courier_receiver = is_array( $http->submit_bodies[0]['cargos'][0]['receiver'] ?? null ) ? $http->submit_bodies[0]['cargos'][0]['receiver'] : array();
 pek_integration_assert( 1 === count( is_array( $courier_receiver['personPhones'] ?? null ) ? $courier_receiver['personPhones'] : array() ) && '+79991234567' === (string) ( $courier_receiver['personPhones'][0]['phone'] ?? '' ), 'Actual PEK outbound receiver must contain exactly one documented +7 personPhones entry.' );
@@ -1997,14 +2010,26 @@ $live_phone_order->update_meta_data( '_shipping_dadata_house', '10' );
 $live_phone_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
 $live_phone_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::COURIER );
 $live_phone_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_RATE_ID );
-$live_phone_order->update_meta_data( '_wdc_delivery_calculation_data', $order->get_meta( '_wdc_delivery_calculation_data', true ) );
+$live_phone_calculation = $order->get_meta( '_wdc_delivery_calculation_data', true );
+$live_phone_calculation = is_array( $live_phone_calculation ) ? $live_phone_calculation : array();
+$live_phone_calculation['package'] = array(
+	'products_weight_g' => 8800,
+	'packaging_weight_g' => 500,
+	'final_weight_g' => 9300,
+	'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ),
+);
+$live_phone_order->update_meta_data( '_wdc_delivery_calculation_data', $live_phone_calculation );
 $live_phone_request = $drafts->create_request_from_order( $live_phone_order );
 delete_transient( 'wdc_pek_request_budget_' . gmdate( 'YmdHi' ) );
 $live_phone_submit_index = count( $http->submit_bodies );
 $live_phone_result = $creation->create( $live_phone_order, $live_phone_request );
 $live_phone_receiver = is_array( $http->submit_bodies[ $live_phone_submit_index ]['cargos'][0]['receiver'] ?? null ) ? $http->submit_bodies[ $live_phone_submit_index ]['cargos'][0]['receiver'] : array();
+$live_phone_services = is_array( $http->submit_bodies[ $live_phone_submit_index ]['cargos'][0]['services'] ?? null ) ? $http->submit_bodies[ $live_phone_submit_index ]['cargos'][0]['services'] : array();
 pek_integration_assert( true === $live_phone_result->success && 1 === count( is_array( $live_phone_receiver['personPhones'] ?? null ) ? $live_phone_receiver['personPhones'] : array() ) && '+79139134904' === (string) ( $live_phone_receiver['personPhones'][0]['phone'] ?? '' ), 'Live receiver phone +79139134904 must be sent once as documented +7 personPhones entry.' );
 pek_integration_assert( ! isset( $live_phone_receiver['phone'], $live_phone_receiver['mobile'] ), 'Live receiver phone must not be duplicated in receiver scalar aliases.' );
+pek_integration_assert_required_service_blocks( $live_phone_services, 'Heavy courier live-style production chain' );
+pek_integration_assert_sealing_disabled( $live_phone_services, 'Heavy courier live-style production chain' );
+pek_integration_assert( true === ( $live_phone_services['delivery']['enabled'] ?? null ) && 1 === (int) ( $live_phone_services['delivery']['payer']['type'] ?? 0 ), 'Heavy courier delivery must remain enabled with payer.type=1.' );
 
 $http->status_mode = 'expanded';
 $http->statuses = array( 'Прибыл' );
@@ -2207,10 +2232,37 @@ $expected_pickup_payload['cargos'][0]['common']['customerCorrelation'] = $pickup
 pek_integration_assert_same_payload( $pickup_submit_body, $expected_pickup_payload, 'Pickup production chain' );
 $pickup_services_payload = is_array( $pickup_submit_body['cargos'][0]['services'] ?? null ) ? $pickup_submit_body['cargos'][0]['services'] : array();
 pek_integration_assert_required_service_blocks( $pickup_services_payload, 'Pickup' );
+pek_integration_assert_sealing_enabled( $pickup_services_payload, 'Light pickup production chain' );
 pek_integration_assert( array( 'enabled' => false ) === ( $pickup_services_payload['delivery'] ?? null ), 'Pickup delivery service must be explicit disabled object without payer.' );
 $pickup_created = $repository->find_by_carrier( $pickup_order, PekSettings::CARRIER_KEY );
 pek_integration_assert( PEK_INTEGRATION_RECEIVER_WAREHOUSE === $pickup_created['pek_receiver_warehouse_id'] && 'BR-R' === $pickup_created['pek_receiver_branch_id'], 'Pickup fresh point code and branch must persist.' );
 pek_integration_assert_plain_data( $pickup_created );
+
+$heavy_pickup_order = new PekIntegrationOrder( 1012 );
+$GLOBALS['wdc_pek_integration_orders'][1012] = $heavy_pickup_order;
+$heavy_pickup_order->update_meta_data( '_wdc_platform_carrier_key', PekSettings::CARRIER_KEY );
+$heavy_pickup_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::PICKUP );
+$heavy_pickup_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::PICKUP_RATE_ID );
+$heavy_pickup_calculation = $pickup_order->get_meta( '_wdc_delivery_calculation_data', true );
+$heavy_pickup_calculation = is_array( $heavy_pickup_calculation ) ? $heavy_pickup_calculation : array();
+$heavy_pickup_calculation['package'] = array(
+	'products_weight_g' => 8800,
+	'packaging_weight_g' => 500,
+	'final_weight_g' => 9300,
+	'dimensions_cm' => array( 'length' => 20, 'width' => 20, 'height' => 10 ),
+);
+$heavy_pickup_order->update_meta_data( '_wdc_delivery_calculation_data', $heavy_pickup_calculation );
+$heavy_pickup_order->update_meta_data( '_wdc_platform_rate_meta', $pickup_order->get_meta( '_wdc_platform_rate_meta', true ) );
+$heavy_pickup_order->update_meta_data( '_wdc_pickup_point_snapshot', $pickup_order->get_meta( '_wdc_pickup_point_snapshot', true ) );
+$heavy_pickup_request = $drafts->create_request_from_order( $heavy_pickup_order );
+delete_transient( 'wdc_pek_request_budget_' . gmdate( 'YmdHi' ) );
+$heavy_pickup_submit_index = count( $http->submit_bodies );
+$heavy_pickup_result = $creation->create( $heavy_pickup_order, $heavy_pickup_request );
+$heavy_pickup_services = is_array( $http->submit_bodies[ $heavy_pickup_submit_index ]['cargos'][0]['services'] ?? null ) ? $http->submit_bodies[ $heavy_pickup_submit_index ]['cargos'][0]['services'] : array();
+pek_integration_assert( true === $heavy_pickup_result->success, 'Heavy pickup production chain create must succeed through fake PEK submit.' );
+pek_integration_assert_required_service_blocks( $heavy_pickup_services, 'Heavy pickup production chain' );
+pek_integration_assert_sealing_disabled( $heavy_pickup_services, 'Heavy pickup production chain' );
+pek_integration_assert( array( 'enabled' => false ) === ( $heavy_pickup_services['delivery'] ?? null ), 'Heavy pickup delivery must remain explicit disabled object without payer.' );
 
 $http->destination_nearest_mode = 'http403';
 $http->sender_nearest_mode = 'http403';

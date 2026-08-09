@@ -192,10 +192,10 @@ final class PekShipmentRequestBuilder {
 			'delivery' => DeliveryType::COURIER === $request->delivery_type
 				? array( 'enabled' => true, 'payer' => array( 'type' => 1 ) )
 				: array( 'enabled' => false ),
+			'sealing' => $sealing
+				? array( 'enabled' => true, 'payer' => array( 'type' => 1 ) )
+				: array( 'enabled' => false ),
 		);
-		if ( $sealing ) {
-			$services['sealing'] = array( 'enabled' => true, 'payer' => array( 'type' => 1 ) );
-		}
 
 		return $services;
 	}

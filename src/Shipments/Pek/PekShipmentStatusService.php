@@ -21,7 +21,7 @@ final class PekShipmentStatusService {
 		private OrderShipmentRepository $repository,
 		private ShipmentActualCostService $actual_costs,
 		private PekShipmentStatusResponseNormalizer $normalizer,
-		private ?ShipmentCreationAttemptService $attempts = null
+		private ShipmentCreationAttemptService $attempts
 	) {
 	}
 
@@ -108,9 +108,7 @@ final class PekShipmentStatusService {
 
 	/** @param array<string,mixed> $shipment */
 	private function mark_terminal_before_delete( object $order, array $shipment, string $reason ): void {
-		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
-			$this->attempts->mark_terminal_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment, $reason );
-		}
+		$this->attempts->mark_terminal_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment, $reason );
 	}
 
 	private function now(): string {

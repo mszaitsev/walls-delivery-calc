@@ -69,7 +69,16 @@ function pek_assert_common_services_contract( array $services ): void {
 	foreach ( array( 'hardPacking', 'strapping', 'documentsReturning' ) as $disabled ) {
 		pek_shipment_create_assert( ! isset( $services[ $disabled ]['payer'] ), $disabled . ' disabled service must not carry payer.' );
 	}
-	pek_shipment_create_assert( ! isset( $services['smsRelease'], $services['storing'] ), 'Unrelated PEK service fields must not be sent.' );
+	pek_shipment_create_assert( array_key_exists( 'sealing', $services ), 'Sealing service object must always be present.' );
+	pek_shipment_create_assert( ! isset( $services['smsRelease'], $services['storing'], $services['bag'], $services['smallBag'], $services['package'], $services['packageType'], $services['packagingType'], $services['isHP'], $services['sealingPositionsCount'] ), 'Unrelated PEK service fields must not be sent.' );
+}
+
+function pek_assert_sealing_enabled( array $services, string $label ): void {
+	pek_shipment_create_assert( true === ( $services['sealing']['enabled'] ?? null ) && 1 === (int) ( $services['sealing']['payer']['type'] ?? 0 ), $label . ' must send sealing.enabled=true with payer.type=1.' );
+}
+
+function pek_assert_sealing_disabled( array $services, string $label ): void {
+	pek_shipment_create_assert( array( 'enabled' => false ) === ( $services['sealing'] ?? null ), $label . ' must send sealing.enabled=false and no payer.' );
 }
 
 $pickup = pek_json_fixture( 'preregistration-submit-pickup.json' );
@@ -102,8 +111,10 @@ foreach ( array( $pickup, $courier ) as $payload ) {
 
 pek_shipment_create_assert( isset( $pickup['cargos'][0]['receiver']['warehouseId'] ) && array( 'enabled' => false ) === $pickup['cargos'][0]['services']['delivery'], 'Pickup must use receiver warehouse and explicit disabled delivery service.' );
 pek_shipment_create_assert( ! isset( $pickup['cargos'][0]['services']['delivery']['payer'] ), 'Pickup disabled delivery must not carry payer.' );
+pek_assert_sealing_enabled( $pickup['cargos'][0]['services'], 'Light pickup fixture' );
 pek_shipment_create_assert( isset( $courier['cargos'][0]['receiver']['addressStock'], $courier['cargos'][0]['services']['delivery'] ) && ! isset( $courier['cargos'][0]['receiver']['warehouseId'] ), 'Courier must use addressStock and delivery service.' );
 pek_shipment_create_assert( true === $courier['cargos'][0]['services']['delivery']['enabled'] && 1 === (int) $courier['cargos'][0]['services']['delivery']['payer']['type'], 'Courier delivery must be enabled with payer.type=1.' );
+pek_assert_sealing_enabled( $courier['cargos'][0]['services'], 'Light courier fixture' );
 pek_shipment_create_assert( isset( $response['documentId'], $response['cargos'][0]['cargoCode'], $response['cargos'][0]['positions'][0]['barcode'] ), 'Create response fixture must use preregistration identifiers.' );
 
 $settings = new PekSettings( new SettingsRepository(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
@@ -196,8 +207,10 @@ $package_2999 = new Package( array(), $money_zero, $money_zero, 2999, 999, 3998,
 $package_3000 = new Package( array(), $money_zero, $money_zero, 3000, 999, 3999, 20, 20, 20, 8000, 'cart' );
 $request_2999 = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 3998, 20, 20, 20, Money::from_kopecks( 0 ), array() ) ), Money::from_kopecks( 0 ), meta: array( 'calculation_data' => array( 'package' => array( 'products_weight_g' => 2999 ) ) ) );
 $request_3000 = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 3999, 20, 20, 20, Money::from_kopecks( 0 ), array() ) ), Money::from_kopecks( 0 ), meta: array( 'calculation_data' => array( 'package' => array( 'products_weight_g' => 3000 ) ) ) );
+$request_3001 = new ShipmentCreateRequest( 1, PekSettings::CARRIER_KEY, DeliveryType::PICKUP, 'pek:pickup', new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва' ), null, array( new ShipmentPlace( 1, 4000, 20, 20, 20, Money::from_kopecks( 0 ), array() ) ), Money::from_kopecks( 0 ), meta: array( 'calculation_data' => array( 'package' => array( 'products_weight_g' => 3001 ) ) ) );
 pek_shipment_create_assert( $surcharge_policy->evaluate( $package_2999 )->eligible && $weight_resolver->sealing_required( $request_2999 ), '2999g product weight must make checkout light-cargo surcharge eligible and shipment sealing required.' );
 pek_shipment_create_assert( ! $surcharge_policy->evaluate( $package_3000 )->eligible && ! $weight_resolver->sealing_required( $request_3000 ), '3000g product weight must disable checkout light-cargo surcharge eligibility and shipment sealing.' );
+pek_shipment_create_assert( ! $weight_resolver->sealing_required( $request_3001 ), '3001g product weight must keep shipment sealing disabled.' );
 
 $receiver_order = new class {
 	public function get_shipping_phone(): string { return '+79139134904'; }
@@ -251,6 +264,7 @@ pek_shipment_create_assert( str_contains( $adapter_source, "'method' => 'POST'" 
 pek_shipment_create_assert( str_contains( $adapter_source, '$submitted' ) && str_contains( $adapter_source, "error_code: 'pek_uncertain_submit'" ) && str_contains( $adapter_source, 'safe_summary' ), 'Post-submit parser failures must become uncertain with safe summary.' );
 pek_shipment_create_assert( str_contains( $adapter_source, 'safe_create_failure_reference' ) && str_contains( $adapter_source, "'api_error_message'" ) && str_contains( $adapter_source, "'field_errors'" ) && str_contains( $adapter_source, "'response_shape'" ) && ! str_contains( $adapter_source, "'raw_response'" ), 'PEK create deterministic rejection must expose safe diagnostics without raw response.' );
 pek_shipment_create_assert( ! str_contains( $adapter_source, 'order_stub' ), 'Adapter direct create must not call undefined order_stub.' );
+pek_shipment_create_assert( str_contains( file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentRequestBuilder.php' ) ?: '', "'sealing' => \$sealing" ), 'PEK request builder must serialize sealing through an explicit enabled/disabled service object.' );
 pek_shipment_create_assert( strpos( $status_source, 'unset( $status[\'actual_cost_candidate\'] );' ) < strpos( $status_source, 'save_for_carrier' ), 'Status service must unset actual cost candidate before persistence.' );
 pek_shipment_create_assert( PekShipmentAdapter::class !== '', 'PEK adapter class must be autoloadable.' );
 
