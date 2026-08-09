@@ -276,7 +276,9 @@ function initializeShipmentAdmin() {
         .then(parseShipmentJsonResponse)
         .then((payload) => {
           if (!payload || !payload.success) {
-            throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось создать отправление.');
+            const controlled = new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось создать отправление.');
+            controlled.payload = payload;
+            throw controlled;
           }
           const box = create.closest('[data-wdc-shipments-metabox]');
           const modal = create.closest('[data-wdc-shipment-modal]');
@@ -322,6 +324,11 @@ function initializeShipmentAdmin() {
           }
         })
         .catch((error) => {
+          const payload = error && error.payload && error.payload.data ? error.payload.data : null;
+          const preview = form.querySelector('[data-wdc-shipment-preview]');
+          if (preview && payload && payload.diagnostic) {
+            preview.textContent = JSON.stringify(Object.assign({}, payload.preview || {}, { create_diagnostic: payload.diagnostic }), null, 2);
+          }
           if (errors) errors.textContent = error.message;
           showShipmentToast(findShipmentForm(create), error.message, 'error');
   });

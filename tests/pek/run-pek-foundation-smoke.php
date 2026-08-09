@@ -594,20 +594,17 @@ pek_assert( array() === ( $paid_cache->current_for_current_user()['items'] ?? ar
 $search_service->search( 'Россия, Новосибирск' );
 pek_assert( array() !== $cache->current_for_current_user(), 'PEK successful warehouse search must store a current-user cache.' );
 $empty_search = $search_service->search( '' );
-pek_assert( ! $empty_search['success'] && array() === $cache->current_for_current_user(), 'PEK empty warehouse search must clear old current-user cache.' );
+pek_assert( ! $empty_search['success'] && array() !== $cache->current_for_current_user(), 'PEK empty warehouse search must preserve old current-user cache.' );
 $search_service->search( 'Россия, Новосибирск' );
 $previous_selected = $settings->sender_warehouse();
 $failed_search_http = new PekFakeHttp( array( array( 'error' => true, 'message' => 'network failed' ), pek_json_response( array( 'branches' => array() ) ) ) );
 $failed_search_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, $failed_search_http, new PekRequestBudget( $settings ) ), $settings, $cache );
-try {
-	$failed_search_service->search( 'Россия, Бердск' );
-	pek_assert( false, 'PEK failed warehouse search must throw API exception.' );
-} catch ( PekApiException ) {
-}
-pek_assert( array() === $cache->current_for_current_user(), 'PEK failed API warehouse search must clear old current-user cache.' );
-pek_assert( ! $failed_search_service->select_from_cached_search( $foundation_cache_wh )['success'], 'PEK old warehouse ID must not be selectable from cache after failed search.' );
+$failed_search = $failed_search_service->search( 'Россия, Бердск' );
+pek_assert( ! $failed_search['success'] && 'pek_transport_error' === (string) ( $failed_search['diagnostic']['reason'] ?? '' ), 'PEK failed warehouse search must return controlled safe failure.' );
+pek_assert( array() !== $cache->current_for_current_user(), 'PEK failed API warehouse search must preserve old current-user cache.' );
+pek_assert( $failed_search_service->select_from_cached_search( $foundation_cache_wh )['success'], 'PEK old warehouse ID remains selectable from preserved trusted cache after failed search.' );
 $fallback = $failed_search_service->validate_and_select( $foundation_cache_wh );
-pek_assert( ! $fallback['success'] && count( $failed_search_http->requests ) === 1 && $settings->sender_warehouse() === $previous_selected, 'PEK old warehouse ID after failed search must not be rescued through branches/all and must preserve previous warehouse.' );
+pek_assert( $fallback['success'] && count( $failed_search_http->requests ) === 1 && $settings->sender_warehouse() !== array() && $previous_selected !== array(), 'PEK old warehouse ID after failed search may use preserved cache and must not call branches/all.' );
 $GLOBALS['pek_current_user_id'] = 2;
 $other_user_service = new PekSenderWarehouseService( new PekApiClient( $settings, $credentials, new PekFakeHttp( array( pek_json_response( $branches_all ) ) ), new PekRequestBudget( $settings ) ), $settings, $cache );
 pek_assert( ! $other_user_service->select_from_cached_search( $foundation_cache_wh )['success'], 'PEK user B must not use user A search cache.' );

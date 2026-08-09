@@ -93,7 +93,7 @@ final class PekShipmentRequestBuilder {
 			'shipment_mode' => $request->delivery_type,
 			'recipient_type' => 'physical',
 			'sealing_requested' => $sealing,
-			'warnings' => is_array( $destination['warnings'] ?? null ) ? $destination['warnings'] : array(),
+			'warnings' => array_values( array_merge( is_array( $sender['warnings'] ?? null ) ? $sender['warnings'] : array(), is_array( $destination['warnings'] ?? null ) ? $destination['warnings'] : array() ) ),
 			'courier_address_evidence' => is_array( $request->meta['pek_courier_address_evidence'] ?? null ) ? $request->meta['pek_courier_address_evidence'] : array(),
 		);
 
@@ -245,6 +245,10 @@ final class PekShipmentRequestBuilder {
 			'sender_warehouse_id' => (string) ( $sender['warehouseId'] ?? '' ),
 			'sender_warehouse_title' => (string) ( $sender['divisionName'] ?? $sender['branchName'] ?? '' ),
 			'sender_warehouse_source' => (string) ( $sender['source'] ?? '' ),
+			'sender_warehouse_validation_source' => (string) ( $sender['validation_source'] ?? $sender['source'] ?? '' ),
+			'sender_warehouse_fresh_check' => ! array_key_exists( 'fresh_check', $sender ) || ! empty( $sender['fresh_check'] ),
+			'sender_warehouse_fallback_used' => ! empty( $sender['fallback_used'] ),
+			'sender_warehouse_fallback_reason' => (string) ( $sender['fallback_reason'] ?? '' ),
 			'receiver_mode' => (string) ( $summary['shipment_mode'] ?? '' ),
 			'receiver_warehouse_id' => (string) ( $summary['receiver_warehouse_id'] ?? '' ),
 			'courier_address_present' => '' === (string) ( $summary['receiver_warehouse_id'] ?? '' ),

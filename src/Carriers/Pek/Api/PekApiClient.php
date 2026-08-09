@@ -692,6 +692,19 @@ final class PekApiClient {
 			'root_type' => 'object',
 			'root_keys' => $keys,
 		);
+		$error_present = array_key_exists( 'error', $value );
+		$shape['error_present'] = $error_present;
+		$shape['error_type'] = $error_present ? $this->shape_type( $value['error'] ) : 'missing';
+		if ( $error_present && is_array( $value['error'] ) && ! array_is_list( $value['error'] ) ) {
+			$error = $value['error'];
+			$shape['error_keys'] = array_slice( array_map( static fn( mixed $key ): string => substr( preg_replace( '/[\x00-\x1F\x7F]+/u', '', (string) $key ) ?? '', 0, 64 ), array_keys( $error ) ), 0, 30 );
+			$fields_present = array_key_exists( 'fields', $error );
+			$shape['fields_present'] = $fields_present;
+			$shape['fields_type'] = $fields_present ? $this->shape_type( $error['fields'] ) : 'missing';
+			if ( $fields_present && is_array( $error['fields'] ) ) {
+				$shape['fields_count'] = count( $error['fields'] );
+			}
+		}
 		foreach ( array( 'freeDepartments' => 'free_departments', 'paidDepartments' => 'paid_departments' ) as $source_key => $prefix ) {
 			$present = array_key_exists( $source_key, $value );
 			$shape[ $prefix . '_present' ] = $present;

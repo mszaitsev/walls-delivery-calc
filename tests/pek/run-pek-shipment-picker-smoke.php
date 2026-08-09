@@ -12,6 +12,7 @@ function pek_picker_assert( bool $condition, string $message ): void {
 
 $generic = file_get_contents( $root . '/assets/admin/shipments/shipment-picker.js' ) ?: '';
 $pek     = file_get_contents( $root . '/assets/admin/shipments/extensions/pek.js' ) ?: '';
+$ajax    = file_get_contents( $root . '/src/Shipments/Admin/Ajax/ShipmentAddressAjaxController.php' ) ?: '';
 
 pek_picker_assert( str_contains( $generic, 'window.wdcShipmentPickupPicker' ), 'Generic shipment picker must expose a carrier-agnostic API.' );
 pek_picker_assert( str_contains( $generic, 'open: function (form, options)' ), 'Generic shipment picker API must expose open(form, options).' );
@@ -27,6 +28,7 @@ pek_picker_assert( str_contains( $generic, 'entitySingular' ) && str_contains( $
 pek_picker_assert( str_contains( $pek, "entitySingular: 'склад'" ) && str_contains( $pek, "confirmText: 'Выбрать этот склад'" ) && str_contains( $pek, "emptyText: 'Склады ПЭК не найдены'" ) && str_contains( $pek, "codeLabel: 'Warehouse ID'" ), 'PEK sender warehouse picker must use warehouse wording.' );
 pek_picker_assert( str_contains( $pek, 'isCanonicalWarehouseId' ) && str_contains( $pek, 'ПЭК не вернул корректный warehouse ID для выбранного склада.' ) && ! str_contains( $pek, 'point.warehouseId || point.point_code || point.code' ), 'PEK sender warehouse picker must require a canonical warehouseId instead of falling back to point_code/code.' );
 pek_picker_assert( substr_count( $pek, "dispatchEvent(new Event('change'" ) === 1 && strpos( $pek, "sourceField.value = 'shipment_modal_override';" ) < strpos( $pek, 'idField.value = String(warehouse.warehouseId)' ) && strpos( $pek, 'idField.value = String(warehouse.warehouseId)' ) < strpos( $pek, "dispatchEvent(new Event('change'" ), 'PEK picker selection must update override source/id atomically before one preview-triggering change event.' );
+pek_picker_assert( str_contains( $ajax, '$result = $this->pek_sender_warehouses->search' ) && str_contains( $ajax, "empty( \$result['success'] )" ) && str_contains( $ajax, 'safe_pek_sender_warehouse_diagnostic' ) && str_contains( $ajax, 'wp_send_json_error' ), 'PEK sender warehouse picker AJAX must convert search failures into controlled safe JSON errors.' );
 pek_picker_assert( ! str_contains( $pek, 'wdc:shipment-pickup-search-open' ), 'PEK extension must not dispatch the old unhandled picker event.' );
 
 echo "PEK shipment picker smoke passed.\n";

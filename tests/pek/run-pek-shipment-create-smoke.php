@@ -185,6 +185,11 @@ $receiver_order = new class {
 };
 $receiver = ( new PekShipmentRecipientBuilder( new PekShipmentCourierAddressResolver(), new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() ) )->build_physical_recipient( $receiver_order, $request, 'receiver-warehouse-guid' );
 pek_shipment_create_assert( 'Петров Петр' === $receiver['title'] && 'Петров Петр' === $receiver['person'] && '+79100000000' === $receiver['personPhones'][0]['phone'], 'Receiver builder must produce title/person and one normalized phone.' );
+pek_shipment_create_assert( 3 === (int) ( $receiver['legalForm'] ?? 0 ), 'Receiver builder must send physical legalForm=3.' );
+pek_shipment_create_assert( 'Петр' === (string) ( $receiver['individual']['firstName'] ?? '' ) && 'Петров' === (string) ( $receiver['individual']['lastName'] ?? '' ), 'Receiver builder must send firstName and lastName inside individual.' );
+pek_shipment_create_assert( 1 === count( is_array( $receiver['personPhones'] ?? null ) ? $receiver['personPhones'] : array() ), 'Receiver builder must send exactly one personPhones row.' );
+pek_shipment_create_assert( 'receiver-warehouse-guid' === (string) ( $receiver['warehouseId'] ?? '' ), 'Pickup receiver builder must send selected receiver warehouseId.' );
+pek_shipment_create_assert( ! isset( $receiver['identityCard'] ), 'SMS release receiver must not send identityCard.' );
 
 $parser = new PekShipmentCreateResponseParser();
 $parsed = $parser->parse( $response );
@@ -215,6 +220,7 @@ $missing_order_result = $adapter_without_constructor->create( new ShipmentCreate
 pek_shipment_create_assert( $missing_order_result instanceof ShipmentCreateResult && ! $missing_order_result->success && 'pek_order_not_found' === $missing_order_result->error_code, 'Direct adapter create must return failed result when Woo order is missing, not fatal.' );
 pek_shipment_create_assert( str_contains( $adapter_source, "'method' => 'POST'" ) && str_contains( $adapter_source, "'path' => '/preregistration/submit/'" ) && str_contains( $adapter_source, "'body' => \$built['preview']" ), 'Preview must return canonical framework envelope.' );
 pek_shipment_create_assert( str_contains( $adapter_source, '$submitted' ) && str_contains( $adapter_source, "error_code: 'pek_uncertain_submit'" ) && str_contains( $adapter_source, 'safe_summary' ), 'Post-submit parser failures must become uncertain with safe summary.' );
+pek_shipment_create_assert( str_contains( $adapter_source, 'safe_create_failure_reference' ) && str_contains( $adapter_source, "'api_error_message'" ) && str_contains( $adapter_source, "'field_errors'" ) && str_contains( $adapter_source, "'response_shape'" ) && ! str_contains( $adapter_source, "'raw_response'" ), 'PEK create deterministic rejection must expose safe diagnostics without raw response.' );
 pek_shipment_create_assert( ! str_contains( $adapter_source, 'order_stub' ), 'Adapter direct create must not call undefined order_stub.' );
 pek_shipment_create_assert( strpos( $status_source, 'unset( $status[\'actual_cost_candidate\'] );' ) < strpos( $status_source, 'save_for_carrier' ), 'Status service must unset actual cost candidate before persistence.' );
 pek_shipment_create_assert( PekShipmentAdapter::class !== '', 'PEK adapter class must be autoloadable.' );

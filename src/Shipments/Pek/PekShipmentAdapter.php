@@ -90,7 +90,7 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 				false,
 				error_code: $uncertain ? 'pek_uncertain_submit' : (string) ( $context['error_code'] ?? 'pek_create_failed' ),
 				error_message: $uncertain ? 'Результат создания заявки ПЭК не определён. Проверьте кабинет ПЭК перед повтором.' : 'ПЭК отклонил создание заявки.',
-				raw_reference: array( 'failure_stage' => $stage, 'endpoint' => $context['endpoint'] ?? '/preregistration/submit/', 'method' => 'POST', 'http_status' => $context['http_status'] ?? '', 'correlation' => is_array( $built ) ? (string) ( $built['summary']['correlation'] ?? '' ) : '', 'summary' => is_array( $built ) ? $this->safe_summary( $built['summary'] ) : array() )
+				raw_reference: $this->safe_create_failure_reference( $context, $e, is_array( $built ) ? $built : array(), $stage )
 			);
 		} catch ( \Throwable $e ) {
 			$this->log( 'PEK shipment create failed.', $e );
@@ -259,6 +259,184 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		return $e instanceof \RuntimeException || $e instanceof \InvalidArgumentException
 			? $e->getMessage()
 			: 'Не удалось подготовить заявку ПЭК.';
+	}
+
+	/** @param array<string,mixed> $context @param array<string,mixed> $built @return array<string,mixed> */
+	private function safe_create_failure_reference( array $context, PekApiException $exception, array $built, string $stage ): array {
+		$sensitive_values = $this->sensitive_values_from_built_request( $built );
+		$reference = array(
+			'failure_stage' => $stage,
+			'endpoint' => is_string( $context['endpoint'] ?? null ) ? $context['endpoint'] : '/preregistration/submit/',
+			'method' => 'POST',
+			'http_status' => $context['http_status'] ?? '',
+			'error_code' => is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'pek_create_failed',
+			'api_error_message' => $this->safe_api_error_message( $exception->getMessage(), $sensitive_values ),
+			'field_errors' => $this->safe_field_errors( $context['field_errors'] ?? array(), $sensitive_values ),
+			'response_shape' => is_array( $context['response_shape'] ?? null ) ? $context['response_shape'] : array(),
+			'correlation' => (string) ( $built['summary']['correlation'] ?? '' ),
+			'summary' => is_array( $built['summary'] ?? null ) ? $this->safe_summary( $built['summary'] ) : array(),
+		);
+		$reference['diagnostic'] = array(
+			'failure_stage' => $reference['failure_stage'],
+			'endpoint' => $reference['endpoint'],
+			'method' => $reference['method'],
+			'http_status' => $reference['http_status'],
+			'error_code' => $reference['error_code'],
+			'api_error_message' => $reference['api_error_message'],
+			'field_errors' => $reference['field_errors'],
+			'response_shape' => $reference['response_shape'],
+		);
+
+		return $reference;
+	}
+
+	/** @param array<string,mixed> $built @return array<int,string> */
+	private function sensitive_values_from_built_request( array $built ): array {
+		$payload = is_array( $built['payload'] ?? null ) ? $built['payload'] : array();
+		$values = array();
+		$this->collect_sensitive_payload_values( $payload, $values );
+
+		return array_values( array_unique( array_filter( $values, static fn( string $value ): bool => strlen( $value ) >= 3 ) ) );
+	}
+
+	/** @param array<string|int,mixed> $value @param array<int,string> $values */
+	private function collect_sensitive_payload_values( array $value, array &$values ): void {
+		$sensitive_keys = array(
+			'counterpartClientCard',
+			'email',
+			'firstName',
+			'individual',
+			'inn',
+			'kpp',
+			'lastName',
+			'person',
+			'personPhones',
+			'phone',
+			'sender',
+			'title',
+		);
+		foreach ( $value as $key => $child ) {
+			$key_string = (string) $key;
+			$is_sensitive = in_array( $key_string, $sensitive_keys, true );
+			if ( is_scalar( $child ) && $is_sensitive ) {
+				$values[] = trim( (string) $child );
+			}
+			if ( is_array( $child ) ) {
+				if ( $is_sensitive ) {
+					$this->collect_all_scalar_values( $child, $values );
+				} else {
+					$this->collect_sensitive_payload_values( $child, $values );
+				}
+			}
+		}
+	}
+
+	/** @param array<string|int,mixed> $value @param array<int,string> $values */
+	private function collect_all_scalar_values( array $value, array &$values ): void {
+		foreach ( $value as $child ) {
+			if ( is_scalar( $child ) ) {
+				$values[] = trim( (string) $child );
+			} elseif ( is_array( $child ) ) {
+				$this->collect_all_scalar_values( $child, $values );
+			}
+		}
+	}
+
+	/** @param array<int,string> $sensitive_values */
+	private function safe_api_error_message( string $message, array $sensitive_values ): string {
+		return $this->safe_diagnostic_text( $message, 500, 'ПЭК вернул ошибку без безопасного описания.', $sensitive_values );
+	}
+
+	/** @param array<int,string> $sensitive_values @return array<int,array{field:string,messages:array<int,string>}> */
+	private function safe_field_errors( mixed $value, array $sensitive_values ): array {
+		if ( ! is_array( $value ) || ! array_is_list( $value ) ) {
+			return array();
+		}
+		$result = array();
+		$index_by_field = array();
+		$total_messages = 0;
+		foreach ( $value as $item ) {
+			if ( ! is_array( $item ) || array_is_list( $item ) || ! is_string( $item['field'] ?? null ) ) {
+				continue;
+			}
+			$field = $this->safe_diagnostic_text( $item['field'], 100, 'unknown_field', $sensitive_values );
+			$messages = $this->safe_field_messages( $item['messages'] ?? null, $sensitive_values );
+			if ( array() === $messages ) {
+				continue;
+			}
+			if ( ! array_key_exists( $field, $index_by_field ) ) {
+				if ( count( $result ) >= 20 ) {
+					break;
+				}
+				$index_by_field[ $field ] = count( $result );
+				$result[] = array( 'field' => $field, 'messages' => array() );
+			}
+			$index = $index_by_field[ $field ];
+			foreach ( $messages as $message ) {
+				if ( $total_messages >= 50 ) {
+					break 2;
+				}
+				if ( count( $result[ $index ]['messages'] ) >= 5 || in_array( $message, $result[ $index ]['messages'], true ) ) {
+					continue;
+				}
+				$result[ $index ]['messages'][] = $message;
+				++$total_messages;
+			}
+		}
+
+		return $result;
+	}
+
+	/** @param array<int,string> $sensitive_values @return array<int,string> */
+	private function safe_field_messages( mixed $value, array $sensitive_values ): array {
+		if ( ! is_array( $value ) || ! array_is_list( $value ) ) {
+			return array();
+		}
+		$messages = array();
+		foreach ( $value as $message ) {
+			if ( ! is_string( $message ) ) {
+				continue;
+			}
+			$message = $this->safe_diagnostic_text( $message, 500, 'ПЭК вернул ошибку поля без безопасного описания.', $sensitive_values );
+			if ( ! in_array( $message, $messages, true ) ) {
+				$messages[] = $message;
+			}
+			if ( count( $messages ) >= 5 ) {
+				break;
+			}
+		}
+
+		return $messages;
+	}
+
+	/** @param array<int,string> $sensitive_values */
+	private function safe_diagnostic_text( string $message, int $max_length, string $fallback, array $sensitive_values ): string {
+		$message = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $message ) ?? $message;
+		$message = preg_replace( '/\s+/u', ' ', $message ) ?? $message;
+		foreach ( $sensitive_values as $secret ) {
+			if ( '' !== $secret ) {
+				$message = str_replace( $secret, '[redacted]', $message );
+			}
+		}
+		$message = preg_replace( '/Basic\s+[A-Za-z0-9+\/=]+/i', 'Basic [redacted]', $message ) ?? $message;
+		$message = preg_replace( '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/iu', '[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/(?<!\w)\+?7[\s().-]*\d[\d\s().-]{8,}\d(?!\w)/u', '[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/\b(?:CARD|CLIENTCARD|CLIENT_CARD|КАРТ[АЫ]?)[-_: ]*[A-Z0-9-]{3,}\b/iu', '[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/([?&])(?:api_key|apikey|token|password|authorization|login|phone|email|inn|kpp|card)=[^&\s]+/i', '$1[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/\b(?:api_key|apikey|token|password|authorization|login|phone|email|inn|kpp|card)\s*[:=]\s*["\']?[^"\'\s,;&]+/iu', '[redacted]', $message ) ?? $message;
+		$message = preg_replace( '/"access_token"\s*:\s*"[^"]+"/i', '"access_token":"[redacted]"', $message ) ?? $message;
+		$message = preg_replace( '/"token_type"\s*:\s*"[^"]+"/i', '"token_type":"[redacted]"', $message ) ?? $message;
+		$message = trim( $message );
+		if ( '' === $message ) {
+			return $fallback;
+		}
+		if ( function_exists( 'mb_substr' ) ) {
+			$message = mb_substr( $message, 0, $max_length );
+		} else {
+			$message = substr( $message, 0, $max_length );
+		}
+
+		return '' !== trim( $message ) ? trim( $message ) : $fallback;
 	}
 
 	/** @param array<string,mixed> $summary @return array<string,mixed> */

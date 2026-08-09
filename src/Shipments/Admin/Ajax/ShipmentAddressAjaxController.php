@@ -131,6 +131,15 @@ final class ShipmentAddressAjaxController {
 		}
 		if ( PekSettings::CARRIER_KEY === $carrier_key && 'sender_warehouse' === $purpose && $this->pek_sender_warehouses instanceof PekSenderWarehouseService ) {
 			$result = $this->pek_sender_warehouses->search( $query, $this->pek_sender_warehouse_constraints() );
+			if ( empty( $result['success'] ) ) {
+				wp_send_json_error(
+					array(
+						'message' => (string) ( $result['message'] ?? 'Не удалось получить список складов ПЭК. Повторите попытку позже.' ),
+						'diagnostic' => $this->safe_pek_sender_warehouse_diagnostic( $result['diagnostic'] ?? null ),
+					),
+					502
+				);
+			}
 			$items = array_slice( is_array( $result['items'] ?? null ) ? $result['items'] : array(), 0, $limit );
 			wp_send_json_success(
 				array(
@@ -266,8 +275,9 @@ final class ShipmentAddressAjaxController {
 					$location_context['postal_code'] = '' !== trim( (string) $location_context['postal_code'] ) ? $location_context['postal_code'] : $shipping_postcode;
 					$location_context['postcode'] = '' !== trim( (string) $location_context['postcode'] ) ? $location_context['postcode'] : $shipping_postcode;
 					$location_context['display_name'] = '' !== trim( (string) $location_context['display_name'] ) ? $location_context['display_name'] : $shipping_address;
-				}
-			}
+		}
+	}
+
 			$rows = $repository->find_rows_by_location_context(
 				$location_context,
 				array( 'limit' => $limit )
@@ -281,6 +291,21 @@ final class ShipmentAddressAjaxController {
 				'points' => array_map( array( $this, 'pickup_point_ajax_row' ), $rows ),
 			)
 		);
+	}
+
+	/** @return array<string,mixed> */
+	private function safe_pek_sender_warehouse_diagnostic( mixed $value ): array {
+		if ( ! is_array( $value ) || array_is_list( $value ) ) {
+			return array();
+		}
+		$result = array();
+		foreach ( array( 'error_code' => 'reason', 'failure_stage' => 'failure_stage', 'endpoint' => 'endpoint', 'http_status' => 'http_status' ) as $out_key => $source_key ) {
+			if ( array_key_exists( $source_key, $value ) ) {
+				$result[ $out_key ] = $value[ $source_key ];
+			}
+		}
+
+		return $result;
 	}
 
 	private function normalize_yandex_courier_address( object $order, string $original_address ): array {

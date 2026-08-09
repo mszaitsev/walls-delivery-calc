@@ -16,21 +16,34 @@ final class PekSenderWarehouseService {
 	) {
 	}
 
-	/** @return array{success:bool,message:string,items:array<int,array<string,mixed>>,requested:array<string,mixed>} */
+	public const FALLBACK_WARNING = 'Не удалось выполнить повторную онлайн-проверку склада ПЭК. Используются ранее подтверждённые данные склада.';
+
+	/** @return array{success:bool,message:string,items:array<int,array<string,mixed>>,requested:array<string,mixed>,diagnostic?:array<string,mixed>} */
 	public function search( string $address, ?PickupCargoConstraints $constraints = null ): array {
-		$this->clear_last_search_for_current_user();
 		$address = trim( $address );
 		if ( '' === $address ) {
 			return array( 'success' => false, 'message' => 'Введите адрес для поиска склада ПЭК.', 'items' => array(), 'requested' => array() );
 		}
 		$payload = $this->constraints_payload( $constraints );
-		$response = $this->api->nearest_departments(
-			$address,
-			$payload['weight'],
-			$payload['volume'],
-			$payload['maxDimension'],
-			$payload['maxWeightPerPlace']
-		);
+		try {
+			$response = $this->api->nearest_departments(
+				$address,
+				$payload['weight'],
+				$payload['volume'],
+				$payload['maxDimension'],
+				$payload['maxWeightPerPlace']
+			);
+		} catch ( PekApiException $exception ) {
+			$diagnostic = $this->diagnostic_from_exception( $exception, $address, $constraints );
+
+			return array(
+				'success' => false,
+				'message' => 'Не удалось получить список складов ПЭК. Повторите попытку позже.',
+				'items' => array(),
+				'requested' => array(),
+				'diagnostic' => $diagnostic,
+			);
+		}
 		$items = $this->normalize_department_list( is_array( $response['freeDepartments'] ?? null ) ? $response['freeDepartments'] : array(), 'free' );
 		if ( $constraints instanceof PickupCargoConstraints ) {
 			$items = array_values( array_filter( $items, fn( array $item ): bool => $this->fits_constraints( $item, $constraints ) ) );
@@ -164,8 +177,15 @@ final class PekSenderWarehouseService {
 			return $this->validate_nearest_item( $result['item'], $constraints, $diagnostic, 'Склад ПЭК подтверждён.' );
 		} catch ( PekApiException $exception ) {
 			$context = $exception->context();
-			$diagnostic = $this->validation_diagnostic( is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'api_error', 'nearest_fresh_revalidation', $warehouse_id, $address, $constraints );
+			$error_code = is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'api_error';
+			$diagnostic = $this->validation_diagnostic( $error_code, 'nearest_fresh_revalidation', $warehouse_id, $address, $constraints );
 			$diagnostic['http_status'] = $context['http_status'] ?? $this->api->last_response_meta()['http_status'];
+			if ( $this->fallback_allowed_for_exception( $exception ) ) {
+				$fallback = $this->validate_persisted_snapshot_fallback( $warehouse_id, $constraints, $diagnostic );
+				if ( null !== $fallback ) {
+					return $fallback;
+				}
+			}
 
 			return array( 'success' => false, 'message' => 'Не удалось повторно проверить склад самопривоза ПЭК.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
 		}
@@ -246,6 +266,84 @@ final class PekSenderWarehouseService {
 		$diagnostic['constraints_match'] = true;
 
 		return array( 'success' => true, 'message' => $success_message, 'snapshot' => $snapshot, 'diagnostic' => $diagnostic );
+	}
+
+	/** @param array<string,mixed> $remote_diagnostic @return ?array{success:bool,message:string,snapshot:array<string,mixed>,diagnostic:array<string,mixed>} */
+	private function validate_persisted_snapshot_fallback( string $warehouse_id, ?PickupCargoConstraints $constraints, array $remote_diagnostic ): ?array {
+		$stored = $this->settings->sender_warehouse();
+		$item = $this->item_from_persisted_snapshot( $stored );
+		$diagnostic = $remote_diagnostic;
+		$diagnostic['fallback_used'] = false;
+		$diagnostic['fresh_check'] = false;
+		$diagnostic['fallback_reason'] = (string) ( $remote_diagnostic['reason'] ?? '' );
+		if ( array() === $item ) {
+			return null;
+		}
+		if ( self::normalize_warehouse_id( $item['warehouseId'] ?? '' ) !== $warehouse_id ) {
+			$diagnostic['reason'] = 'persisted_snapshot_id_mismatch';
+			return array( 'success' => false, 'message' => 'Не удалось повторно подтвердить выбранный склад ПЭК. Выберите склад ещё раз.', 'snapshot' => array(), 'diagnostic' => $diagnostic );
+		}
+		$result = $this->validate_nearest_item( $item, $constraints, $diagnostic, 'Склад ПЭК подтверждён по ранее сохранённым данным.' );
+		if ( empty( $result['success'] ) ) {
+			$result['diagnostic']['fallback_used'] = false;
+			$result['diagnostic']['fresh_check'] = false;
+			$result['diagnostic']['fallback_reason'] = (string) ( $remote_diagnostic['reason'] ?? '' );
+
+			return $result;
+		}
+		$result['snapshot']['source'] = 'persisted_snapshot_access_fallback';
+		$result['snapshot']['validation_source'] = 'persisted_snapshot_access_fallback';
+		$result['snapshot']['fresh_check'] = false;
+		$result['snapshot']['fallback_used'] = true;
+		$result['snapshot']['fallback_reason'] = (string) ( $remote_diagnostic['reason'] ?? '' );
+		$result['snapshot']['warnings'] = array( self::FALLBACK_WARNING );
+		if ( is_string( $stored['checked_at'] ?? null ) ) {
+			$result['snapshot']['checked_at'] = (string) $stored['checked_at'];
+		}
+		$result['diagnostic']['source'] = 'persisted_snapshot_access_fallback';
+		$result['diagnostic']['lookup_source'] = 'persisted_snapshot_access_fallback';
+		$result['diagnostic']['fallback_used'] = true;
+		$result['diagnostic']['fresh_check'] = false;
+		$result['diagnostic']['fallback_reason'] = (string) ( $remote_diagnostic['reason'] ?? '' );
+		$result['diagnostic']['warehouse_found'] = true;
+
+		return $result;
+	}
+
+	/** @param array<string,mixed> $snapshot @return array<string,mixed> */
+	private function item_from_persisted_snapshot( array $snapshot ): array {
+		$warehouse_id = self::normalize_warehouse_id( $snapshot['warehouseId'] ?? '' );
+		$source = (string) ( $snapshot['source'] ?? '' );
+		if ( '' === $warehouse_id || ! in_array( $source, array( 'free', 'nearest_cached_selection', 'nearest_fresh_revalidation' ), true ) ) {
+			return array();
+		}
+		if ( '' === trim( (string) ( $snapshot['branchId'] ?? '' ) ) || '' === trim( (string) ( $snapshot['checked_at'] ?? '' ) ) ) {
+			return array();
+		}
+		$limits = is_array( $snapshot['limits'] ?? null ) ? $snapshot['limits'] : array();
+		$availability = is_array( $snapshot['availability'] ?? null ) ? $snapshot['availability'] : array();
+
+		return array(
+			'warehouseId' => $warehouse_id,
+			'branchId' => (string) ( $snapshot['branchId'] ?? '' ),
+			'branchName' => (string) ( $snapshot['branchName'] ?? '' ),
+			'divisionName' => (string) ( $snapshot['divisionName'] ?? '' ),
+			'departmentTypeId' => (int) ( $snapshot['departmentTypeId'] ?? 0 ),
+			'departmentType' => (string) ( $snapshot['departmentType'] ?? '' ),
+			'address' => (string) ( $snapshot['address'] ?? '' ),
+			'coordinates' => is_array( $snapshot['coordinates'] ?? null ) ? $snapshot['coordinates'] : array(),
+			'priority' => 0,
+			'source' => 'free',
+			'maxWeight' => $limits['maxWeight'] ?? null,
+			'maxVolume' => $limits['maxVolume'] ?? null,
+			'maxDimension' => $limits['maxDimension'] ?? null,
+			'maxWeightOnePlace' => $limits['maxWeightOnePlace'] ?? null,
+			'maxCount' => $limits['maxCount'] ?? null,
+			'branchTimezone' => $snapshot['branchTimezone'] ?? null,
+			'endOfAvailabilityBeforeClosing' => $availability['endOfAvailabilityBeforeClosing'] ?? null,
+			'endOfCostCalculationAvailability' => $availability['endOfCostCalculationAvailability'] ?? null,
+			'departmentClosingDate' => $availability['departmentClosingDate'] ?? null,
+		);
 	}
 
 	/** @param array<int,mixed> $items @return array<int,array<string,mixed>> */
@@ -575,7 +673,7 @@ final class PekSenderWarehouseService {
 	/** @return array<string,mixed> */
 	private function validation_diagnostic( string $reason, string $source = 'nearest_fresh_revalidation', string $warehouse_id = '', string $address = '', ?PickupCargoConstraints $constraints = null ): array {
 		$warehouse_id = self::normalize_warehouse_id( $warehouse_id );
-		$source = in_array( $source, array( 'nearest_cached_selection', 'nearest_fresh_revalidation' ), true ) ? $source : 'nearest_fresh_revalidation';
+		$source = in_array( $source, array( 'nearest_cached_selection', 'nearest_fresh_revalidation', 'persisted_snapshot_access_fallback' ), true ) ? $source : 'nearest_fresh_revalidation';
 
 		return array(
 			'stage' => 'sender_warehouse_validation',
@@ -606,7 +704,33 @@ final class PekSenderWarehouseService {
 			'effective_capability_source' => 'none',
 			'ltl_type_present' => false,
 			'acceptance_operation_present' => false,
+			'fresh_check' => 'persisted_snapshot_access_fallback' !== $source,
+			'fallback_used' => false,
+			'fallback_reason' => '',
 		);
+	}
+
+	private function fallback_allowed_for_exception( PekApiException $exception ): bool {
+		$context = $exception->context();
+		$code = is_string( $context['error_code'] ?? null ) ? $context['error_code'] : '';
+		$status = is_numeric( $context['http_status'] ?? null ) ? (int) $context['http_status'] : 0;
+		if ( in_array( $code, array( 'pek_http_403', 'pek_transport_error', 'pek_http_500' ), true ) ) {
+			return true;
+		}
+
+		return $status >= 500;
+	}
+
+	/** @return array<string,mixed> */
+	private function diagnostic_from_exception( PekApiException $exception, string $address, ?PickupCargoConstraints $constraints ): array {
+		$context = $exception->context();
+		$error_code = is_string( $context['error_code'] ?? null ) ? $context['error_code'] : 'api_error';
+		$diagnostic = $this->validation_diagnostic( $error_code, 'nearest_fresh_revalidation', '', $address, $constraints );
+		$diagnostic['failure_stage'] = is_string( $context['failure_stage'] ?? null ) ? $context['failure_stage'] : '';
+		$diagnostic['endpoint'] = is_string( $context['endpoint'] ?? null ) ? $context['endpoint'] : '/branches/nearestdepartments/';
+		$diagnostic['http_status'] = $context['http_status'] ?? $this->api->last_response_meta()['http_status'];
+
+		return $diagnostic;
 	}
 
 	/** @param array<string,mixed> $item @return array<string,mixed> */

@@ -368,6 +368,9 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 			$body = json_decode( (string) ( $args['body'] ?? '' ), true );
 			$address = is_array( $body ) ? (string) ( $body['address'] ?? '' ) : '';
 			$is_sender = str_contains( $address, 'Новосибирск' );
+			if ( $is_sender && 'http403' === $this->sender_nearest_mode ) {
+				return array( 'status' => 403, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Forbidden', 'message' => 'Access denied' ) ), JSON_UNESCAPED_UNICODE ) );
+			}
 			$warehouse_id = $is_sender ? PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER : PEK_INTEGRATION_RECEIVER_WAREHOUSE;
 			if ( $is_sender && str_contains( $address, 'Большая' ) ) {
 				$warehouse_id = PEK_INTEGRATION_SENDER_WAREHOUSE_B;
@@ -690,7 +693,23 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 				return array( 'status' => 400, 'body' => wp_json_encode( array( 'title' => 'Validation', 'message' => 'Invalid request' ), JSON_UNESCAPED_UNICODE ) );
 			}
 			if ( 'logical200' === $this->submit_mode ) {
-				return array( 'status' => 200, 'body' => wp_json_encode( array( 'error' => array( 'title' => 'Validation', 'message' => 'Invalid request', 'fields' => array() ) ), JSON_UNESCAPED_UNICODE ) );
+				return array(
+					'status' => 200,
+					'body' => wp_json_encode(
+						array(
+							'error' => array(
+								'title' => 'Validation',
+								'message' => 'Invalid request for +79991234567 receiver@example.test CARD-123',
+								'fields' => array(
+									array( 'Key' => 'cargos[0].receiver.personPhones', 'Value' => array( 'Phone +79991234567 is rejected.' ) ),
+									array( 'Key' => 'cargos[0].receiver.email', 'Value' => array( 'Email receiver@example.test is rejected.' ) ),
+									array( 'Key' => 'sender.counterpartClientCard', 'Value' => array( 'Card CARD-123 is rejected.' ) ),
+								),
+							),
+						),
+						JSON_UNESCAPED_UNICODE
+					),
+				);
 			}
 			if ( 'malformed' === $this->submit_mode ) {
 				return array( 'status' => 200, 'body' => wp_json_encode( array( 'documentId' => 136, 'cargos' => array( array( 'cargoCode' => array() ) ) ), JSON_UNESCAPED_UNICODE ) );
@@ -1375,20 +1394,47 @@ $sender_search = $sender_warehouse_service->search( 'Россия, Новоси�
 pek_integration_assert( $sender_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $sender_search['items'][0]['warehouseId'] ?? '' ) && 1 === pek_integration_count_calls( $http, '/branches/nearestdepartments/' ) - $search_before, 'Sender warehouse search must normalize nearestdepartments warehouseId into canonical UUID.' );
 $selected_from_search = $sender_warehouse_service->select_from_cached_search( PEK_INTEGRATION_SENDER_WAREHOUSE_A_UPPER );
 pek_integration_assert( $selected_from_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $selected_from_search['snapshot']['warehouseId'] ?? '' ), 'Cached sender warehouse selection must match uppercase nearestdepartments UUID case-insensitively and persist canonical ID.' );
-$settings->save_sender_warehouse(
-	array(
-		'warehouseId' => PEK_INTEGRATION_SENDER_WAREHOUSE_A,
-		'branchId' => 'BR-S',
-		'title' => 'Склад A',
-		'address' => 'Россия, Новосибирск, Складская, дом 1',
-		'source' => 'default',
-	)
-);
+$trusted_sender_snapshot = $settings->sender_warehouse();
+$http->sender_nearest_mode = 'http403';
+$cache_before_403 = $sender_warehouse_service->last_search_for_current_user();
+$failed_sender_search = $sender_warehouse_service->search( 'Россия, Новосибирск, улица Большая, 280', $warehouse_constraints );
+$cache_after_403 = $sender_warehouse_service->last_search_for_current_user();
+pek_integration_assert( empty( $failed_sender_search['success'] ) && 'Не удалось получить список складов ПЭК. Повторите попытку позже.' === (string) ( $failed_sender_search['message'] ?? '' ) && 'pek_http_403' === (string) ( $failed_sender_search['diagnostic']['reason'] ?? '' ), 'Sender warehouse search HTTP 403 must return controlled safe failure.' );
+pek_integration_assert( PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $cache_after_403['items'][0]['warehouseId'] ?? '' ) && $cache_before_403 === $cache_after_403, 'Sender warehouse search must preserve previous trusted cache on HTTP 403.' );
+$sender_warehouse_service->clear_last_search_for_current_user();
+$fallback_valid = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints, 'Россия, Новосибирск, Складская, дом 1' );
+pek_integration_assert( true === $fallback_valid['success'] && 'persisted_snapshot_access_fallback' === (string) ( $fallback_valid['diagnostic']['source'] ?? '' ) && true === (bool) ( $fallback_valid['diagnostic']['fallback_used'] ?? false ) && false === (bool) ( $fallback_valid['diagnostic']['fresh_check'] ?? true ) && 'pek_http_403' === (string) ( $fallback_valid['diagnostic']['fallback_reason'] ?? '' ), 'Trusted persisted sender warehouse snapshot may fallback on nearestdepartments HTTP 403.' );
+$settings->save_sender_warehouse( array() );
+$fallback_missing_snapshot = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints, 'Россия, Новосибирск, Складская, дом 1' );
+pek_integration_assert( false === $fallback_missing_snapshot['success'] && 'pek_http_403' === (string) ( $fallback_missing_snapshot['diagnostic']['reason'] ?? '' ), 'Nearestdepartments HTTP 403 without trusted persisted snapshot must fail closed.' );
+$settings->save_sender_warehouse( $trusted_sender_snapshot );
+$fallback_id_mismatch = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_B, $warehouse_constraints, 'Россия, Новосибирск, улица Большая, 280' );
+pek_integration_assert( false === $fallback_id_mismatch['success'] && 'persisted_snapshot_id_mismatch' === (string) ( $fallback_id_mismatch['diagnostic']['reason'] ?? '' ), 'Nearestdepartments HTTP 403 must not fallback from persisted A to requested B.' );
+$limited_snapshot = $trusted_sender_snapshot;
+$limited_snapshot['limits']['maxWeight'] = 0.1;
+$settings->save_sender_warehouse( $limited_snapshot );
+$fallback_constraints_fail = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints, 'Россия, Новосибирск, Складская, дом 1' );
+pek_integration_assert( false === $fallback_constraints_fail['success'] && false === (bool) ( $fallback_constraints_fail['diagnostic']['constraints_match'] ?? true ), 'Persisted snapshot fallback must still enforce local cargo limits.' );
+$closed_snapshot = $trusted_sender_snapshot;
+$closed_snapshot['branchTimezone'] = 'UTC+07:00';
+$closed_snapshot['availability']['departmentClosingDate'] = '2000-01-01';
+$settings->save_sender_warehouse( $closed_snapshot );
+$fallback_closed_fail = $sender_warehouse_service->validate_snapshot( PEK_INTEGRATION_SENDER_WAREHOUSE_A, $warehouse_constraints, 'Россия, Новосибирск, Складская, дом 1' );
+pek_integration_assert( false === $fallback_closed_fail['success'] && false === (bool) ( $fallback_closed_fail['diagnostic']['availability_match'] ?? true ), 'Persisted snapshot fallback must fail closed when stored availability says closed/unavailable.' );
+$settings->save_sender_warehouse( $trusted_sender_snapshot );
 $default_preview_submit_before = count( $http->submit_bodies );
 $default_preview_branches_before = pek_integration_count_calls( $http, '/branches/all/' );
 $default_preview = $creation->safe_preview( $admin_default_request );
-pek_integration_assert( array() === $default_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $default_preview['body']['sender_warehouse_id'] ?? '' ) && in_array( (string) ( $default_preview['body']['sender_warehouse_source'] ?? '' ), array( 'default', 'settings_default' ), true ) && $default_preview_submit_before === count( $http->submit_bodies ) && $default_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Initial preview must use settings default sender warehouse through nearestdepartments without submit or branches/all.' );
-$alternate_search = $sender_warehouse_service->search( 'Россия, Новосибирск, улица Большая, 280', $warehouse_constraints );
+pek_integration_assert( array() === $default_preview['errors'] && PEK_INTEGRATION_SENDER_WAREHOUSE_A === (string) ( $default_preview['body']['sender_warehouse_id'] ?? '' ) && 'persisted_snapshot_access_fallback' === (string) ( $default_preview['body']['sender_warehouse_validation_source'] ?? '' ) && true === (bool) ( $default_preview['body']['sender_warehouse_fallback_used'] ?? false ) && false === (bool) ( $default_preview['body']['sender_warehouse_fresh_check'] ?? true ) && 'pek_http_403' === (string) ( $default_preview['body']['sender_warehouse_fallback_reason'] ?? '' ) && array() === $default_preview['errors'] && in_array( PekSenderWarehouseService::FALLBACK_WARNING, $default_preview['warnings'], true ) && $default_preview_submit_before === count( $http->submit_bodies ) && $default_preview_branches_before === pek_integration_count_calls( $http, '/branches/all/' ), 'Initial preview may use trusted persisted sender warehouse fallback on nearestdepartments HTTP 403 without submit or branches/all.' );
+$http->sender_nearest_mode = 'success';
+$replacement_search = $sender_warehouse_service->search( 'Россия, Новосибирск, улица Большая, 280', $warehouse_constraints );
+pek_integration_assert( $replacement_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $sender_warehouse_service->last_search_for_current_user()['items'][0]['warehouseId'] ?? '' ), 'Successful sender warehouse search must replace the preserved stale cache.' );
+$default_preview_json = wp_json_encode( $default_preview, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+$default_preview_json = is_string( $default_preview_json ) ? $default_preview_json : '';
+foreach ( array( 'personPhones', 'individual', '+79991234567', 'receiver@example.test', 'identityCard' ) as $forbidden_preview_marker ) {
+	pek_integration_assert( ! str_contains( $default_preview_json, $forbidden_preview_marker ), 'PEK safe preview must not expose receiver PII marker: ' . $forbidden_preview_marker );
+}
+$alternate_search = $replacement_search;
 pek_integration_assert( $alternate_search['success'] && PEK_INTEGRATION_SENDER_WAREHOUSE_B === (string) ( $alternate_search['items'][0]['warehouseId'] ?? '' ), 'Alternate sender warehouse picker search must cache the selected warehouse with current constraints.' );
 $override_preview_submit_before = count( $http->submit_bodies );
 $override_preview_branches_before = pek_integration_count_calls( $http, '/branches/all/' );
@@ -1859,8 +1905,22 @@ $logical_order->update_meta_data( '_wdc_platform_rate_id', PekSettings::COURIER_
 $logical_order->update_meta_data( '_wdc_delivery_calculation_data', $order->get_meta( '_wdc_delivery_calculation_data', true ) );
 $logical_request = $drafts->create_request_from_order( $logical_order );
 $http->submit_mode = 'logical200';
+delete_transient( 'wdc_pek_request_budget_' . gmdate( 'YmdHi' ) );
 $logical_result = $creation->create( $logical_order, $logical_request );
 pek_integration_assert( false === $logical_result->success && array() === $repository->find_by_carrier( $logical_order, PekSettings::CARRIER_KEY ), 'Structured HTTP 200 logical rejection must not persist pending shipment.' );
+$logical_diag = is_array( $logical_result->raw_reference['diagnostic'] ?? null ) ? $logical_result->raw_reference['diagnostic'] : array();
+pek_integration_assert( 'pek_logical_error' === (string) ( $logical_result->error_code ?? '' ) && 'shipment_create_logical' === (string) ( $logical_diag['failure_stage'] ?? '' ), 'Structured logical rejection must stay definite and expose shipment_create_logical stage.' );
+pek_integration_assert( '/preregistration/submit/' === (string) ( $logical_diag['endpoint'] ?? '' ) && 200 === (int) ( $logical_diag['http_status'] ?? 0 ), 'Structured logical rejection diagnostic must include endpoint and HTTP status.' );
+pek_integration_assert( str_contains( (string) ( $logical_diag['api_error_message'] ?? '' ), 'Validation' ) && str_contains( (string) ( $logical_diag['api_error_message'] ?? '' ), '[redacted]' ), 'Structured logical rejection diagnostic must include redacted PEK API error message.' );
+pek_integration_assert( is_array( $logical_diag['field_errors'] ?? null ) && 3 === count( $logical_diag['field_errors'] ), 'Structured logical rejection diagnostic must include normalized field errors.' );
+pek_integration_assert( 'object' === (string) ( $logical_diag['response_shape']['root_type'] ?? '' ) && true === (bool) ( $logical_diag['response_shape']['error_present'] ?? false ) && 3 === (int) ( $logical_diag['response_shape']['fields_count'] ?? 0 ), 'Structured logical rejection diagnostic must include safe response shape with error fields count.' );
+$logical_diag_json = wp_json_encode( $logical_diag, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+$logical_diag_json = is_string( $logical_diag_json ) ? $logical_diag_json : '';
+foreach ( array( '+79991234567', 'receiver@example.test', 'CARD-123', 'raw_response', 'raw_request', 'identityCard' ) as $forbidden_marker ) {
+	pek_integration_assert( ! str_contains( $logical_diag_json, $forbidden_marker ), 'Structured logical rejection diagnostic must not leak marker: ' . $forbidden_marker );
+}
+$logical_attempt_after_rejection = $attempts->current_record_for_request( $logical_order, $logical_request );
+pek_integration_assert( 1 === (int) ( $logical_attempt_after_rejection['generation'] ?? 0 ) && 'active' === (string) ( $logical_attempt_after_rejection['state'] ?? '' ), 'Deterministic PEK rejection must keep generation 1 active for corrected retry.' );
 
 $http400_order = new PekIntegrationOrder( 1006 );
 $GLOBALS['wdc_pek_integration_orders'][1006] = $http400_order;
