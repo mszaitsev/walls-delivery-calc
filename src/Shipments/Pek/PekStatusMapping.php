@@ -123,6 +123,30 @@ final class PekStatusMapping {
 		return 'аннулировано до приемки груза' === self::normalize_status( $status );
 	}
 
+	public function is_accepted_status( string $status ): bool {
+		$key = $this->mapping_key_for_status( $status );
+
+		return '' !== $key
+			&& ! $this->is_pre_acceptance_status( $status )
+			&& ! $this->is_cancelled_status( $status );
+	}
+
+	public function is_terminal_status( string $status ): bool {
+		return in_array(
+			$this->mapping_key_for_status( $status ),
+			array(
+				'аннулировано до приемки груза',
+				'выдан получателю',
+				'доставлен получателю',
+				self::ISSUED_PLACES_PATTERN_KEY,
+				'возвращен отправителю',
+				'утилизирован',
+				'изъят на таможне',
+			),
+			true
+		);
+	}
+
 	public function map( string $status, string $delivery_type = DeliveryType::PICKUP ): string {
 		$key = $this->mapping_key_for_status( $status );
 		if ( '' === $key ) {

@@ -16,26 +16,28 @@ final class PekShipmentButtonPolicy {
 		if ( array() === $shipment ) {
 			return array( 'create' => true, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => false );
 		}
-		$status = (string) ( $shipment['universal_status_code'] ?? '' );
-		if ( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $status || ! empty( $shipment['pending_creation_in_carrier'] ) ) {
+		$pending_status = (string) ( $shipment['universal_status_code'] ?? '' );
+		if ( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $pending_status || ! empty( $shipment['pending_creation_in_carrier'] ) ) {
 			return array( 'create' => false, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => true );
 		}
-		$accepted = '' !== (string) ( $shipment['pek_take_on_stock_datetime'] ?? '' )
-			|| in_array( $status, array( DeliveryStatus::IN_TRANSIT, DeliveryStatus::READY_FOR_PICKUP, DeliveryStatus::HANDED_TO_COURIER, DeliveryStatus::DELIVERED, DeliveryStatus::RETURNING_TO_SENDER, DeliveryStatus::RETURNED_TO_SENDER ), true );
+		$take_on_stock_datetime = trim( (string) ( $shipment['pek_take_on_stock_datetime'] ?? '' ) );
 		$external_status = trim( (string) ( $shipment['pek_cargo_status'] ?? $shipment['status_title'] ?? '' ) );
-		$terminal = in_array( $status, DeliveryStatus::terminal(), true );
+		$accepted = '' !== $take_on_stock_datetime
+			|| ( '' !== $external_status && $this->mapping->is_accepted_status( $external_status ) );
+		$terminal = '' !== $external_status && $this->mapping->is_terminal_status( $external_status );
 		$can_cancel = '' !== $this->cargo_code( $shipment )
-			&& '' === trim( (string) ( $shipment['pek_take_on_stock_datetime'] ?? '' ) )
+			&& '' === $take_on_stock_datetime
 			&& '' !== $external_status
 			&& ! $terminal
 			&& empty( $shipment['manual_attach'] )
+			&& ! $accepted
 			&& $this->mapping->is_pre_acceptance_status( $external_status );
 
 		return array(
 			'create' => false,
 			'manual_attach' => false,
 			'update' => true,
-			'cancel' => $can_cancel && ! $accepted,
+			'cancel' => $can_cancel,
 			'remove' => $accepted || $terminal || ! empty( $shipment['manual_attach'] ),
 		);
 	}
