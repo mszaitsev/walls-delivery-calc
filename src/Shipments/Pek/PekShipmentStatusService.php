@@ -39,7 +39,8 @@ final class PekShipmentStatusService {
 		if ( $clear_status_id ) {
 			unset( $status['pek_cargo_status_id'] );
 		}
-		if ( DeliveryStatus::CANCELLED === (string) ( $status['universal_status_code'] ?? '' ) ) {
+		$external_status = (string) ( $status['pek_cargo_status'] ?? $status['status_title'] ?? '' );
+		if ( $this->mapping->is_cancelled_status( $external_status ) ) {
 			$this->mark_terminal_before_delete( $order, $shipment, 'cancelled' );
 			$this->repository->delete_for_carrier( $order, PekSettings::CARRIER_KEY );
 

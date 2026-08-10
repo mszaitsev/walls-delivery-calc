@@ -21,7 +21,7 @@ final class PekShipmentService {
 		private ShipmentActualCostService $actual_costs,
 		private PekStatusMapping $mapping,
 		private PekManualAttachContextResolver $manual_contexts,
-		private ?ShipmentCreationAttemptService $attempts = null
+		private ShipmentCreationAttemptService $attempts
 	) {
 	}
 
@@ -217,13 +217,13 @@ final class PekShipmentService {
 
 	/** @param array<string,mixed> $shipment */
 	private function mark_terminal_before_delete( object $order, array $shipment, string $reason ): void {
-		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
-			$this->attempts->mark_terminal_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment, $reason );
-		}
+		$this->attempts->mark_terminal_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment, $reason );
 	}
 
 	private function is_cancelled_status( string $status, string $delivery_type ): bool {
-		return \WallsShop\WDC\Domain\Status\DeliveryStatus::CANCELLED === $this->mapping->map( $status, $delivery_type );
+		unset( $delivery_type );
+
+		return $this->mapping->is_cancelled_status( $status );
 	}
 
 	/** @param array<int,array<string,mixed>> $rows @return array<string,mixed> */

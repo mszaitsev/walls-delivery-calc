@@ -1095,7 +1095,7 @@ $settings->save_sender_warehouse(
 );
 $repository = new OrderShipmentRepository();
 $actual_costs = new ShipmentActualCostService( $repository );
-$mapping = new PekStatusMapping();
+$mapping = new PekStatusMapping( $settings_repository );
 $attempt_uuid_sequence = array(
 	'11111111-1111-4111-8111-111111111111',
 	'22222222-2222-4222-8222-222222222222',
@@ -2091,13 +2091,18 @@ $status_cleanup_shipment = array_merge(
 	)
 );
 $repository->save_for_carrier( $status_cleanup_order, PekSettings::CARRIER_KEY, $status_cleanup_shipment );
+$cancelled_override = PekStatusMapping::default_mapping();
+$cancelled_override['аннулировано до приемки груза']['pickup'] = DeliveryStatus::UNKNOWN;
+$cancelled_override['аннулировано до приемки груза']['courier'] = DeliveryStatus::UNKNOWN;
+$mapping->save_mapping( $cancelled_override );
 $http->status_mode = 'status_id_cancelled_sentinel';
 $http->statuses = array( 'Аннулировано до приемки груза' );
 $before_status_cleanup_cancellations = count( $http->cancellations );
 $before_status_cleanup_status_calls = pek_integration_count_calls( $http, '/cargos/status/' );
 $cancelled_negative_status_result = $status_service->update( $status_cleanup_order );
 $status_cleanup_record = $attempts->current_record_for_request( $status_cleanup_order, $request );
-pek_integration_assert( true === $cancelled_negative_status_result['success'] && true === (bool) ( $cancelled_negative_status_result['removed'] ?? false ) && true === (bool) ( $cancelled_negative_status_result['terminal'] ?? false ) && 'cancelled' === (string) ( $cancelled_negative_status_result['terminal_reason'] ?? '' ), 'Cancelled PEK cargoStatusId=-3 status update must return terminal removal evidence.' );
+pek_integration_assert( true === $cancelled_negative_status_result['success'] && true === (bool) ( $cancelled_negative_status_result['removed'] ?? false ) && true === (bool) ( $cancelled_negative_status_result['terminal'] ?? false ) && 'cancelled' === (string) ( $cancelled_negative_status_result['terminal_reason'] ?? '' ), 'Cancelled PEK cargoStatusId=-3 status update must return terminal removal evidence even when admin maps it to UNKNOWN.' );
+pek_integration_assert( DeliveryStatus::UNKNOWN === (string) ( $cancelled_negative_status_result['status']['universal_status_code'] ?? '' ), 'Editable PEK mapping must still control universal status projection.' );
 pek_integration_assert( $before_status_cleanup_status_calls + 1 === pek_integration_count_calls( $http, '/cargos/status/' ) && $before_status_cleanup_cancellations === count( $http->cancellations ), 'Cancelled status update cleanup must read status once and must not call cancellation mutation.' );
 pek_integration_assert( array() === $repository->find_by_carrier( $status_cleanup_order, PekSettings::CARRIER_KEY ), 'Cancelled status update must remove active PEK shipment from repository.' );
 pek_integration_assert( $status_cleanup_attempt_id === (string) ( $status_cleanup_record['current_attempt_id'] ?? '' ) && 'terminal' === (string) ( $status_cleanup_record['state'] ?? '' ), 'Cancelled status update must terminalize existing creation attempt before deletion.' );
@@ -2106,6 +2111,7 @@ pek_integration_assert( 2 === (int) ( $after_status_cleanup_request->meta['creat
 $status_cleanup_correlation_a = ( new PekShipmentCorrelationResolver() )->resolve( $status_cleanup_attempt, PEK_INTEGRATION_SENDER_WAREHOUSE_A, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 $status_cleanup_correlation_b = ( new PekShipmentCorrelationResolver() )->resolve( $after_status_cleanup_request, PEK_INTEGRATION_SENDER_WAREHOUSE_A, PEK_INTEGRATION_RECEIVER_WAREHOUSE );
 pek_integration_assert( $status_cleanup_correlation_a !== $status_cleanup_correlation_b, 'Next fake create after status-discovered cancellation must receive a new PEK correlation.' );
+$mapping->save_mapping( PekStatusMapping::default_mapping() );
 
 $before_negative_status = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 $http->status_mode = 'status_id_negative';

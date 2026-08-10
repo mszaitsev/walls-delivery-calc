@@ -74,6 +74,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminNoticeStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\Pek\Admin\PekStatusAdminPage;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
@@ -490,7 +491,7 @@ final class Plugin {
 		$this->container->register( PekShipmentRecipientBuilder::class, fn(): PekShipmentRecipientBuilder => new PekShipmentRecipientBuilder( $this->container->get( PekShipmentCourierAddressResolver::class ), $this->container->get( PekRuPhoneNormalizer::class ) ) );
 		$this->container->register( PekShipmentCorrelationResolver::class, fn(): PekShipmentCorrelationResolver => new PekShipmentCorrelationResolver() );
 		$this->container->register( PekShipmentRequestBuilder::class, fn(): PekShipmentRequestBuilder => new PekShipmentRequestBuilder( $this->container->get( PekSettings::class ), $this->container->get( PekShipmentDeclaredValueResolver::class ), $this->container->get( PekShipmentSenderWarehouseResolver::class ), $this->container->get( PekShipmentCargoBuilder::class ), $this->container->get( PekShipmentRecipientBuilder::class ), $this->container->get( PekShipmentCorrelationResolver::class ), $this->container->get( PekSmsReleaseAvailabilityService::class ), $this->container->get( PekShipmentDestinationResolver::class ), $this->container->get( PekShipmentProductWeightResolver::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekRuPhoneNormalizer::class ) ) );
-		$this->container->register( PekStatusMapping::class, fn(): PekStatusMapping => new PekStatusMapping() );
+		$this->container->register( PekStatusMapping::class, fn(): PekStatusMapping => new PekStatusMapping( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( PekShipmentStatusResponseNormalizer::class, fn(): PekShipmentStatusResponseNormalizer => new PekShipmentStatusResponseNormalizer() );
 		$this->container->register( PekShipmentStatusService::class, fn(): PekShipmentStatusService => new PekShipmentStatusService( $this->container->get( PekApiClient::class ), $this->container->get( PekStatusMapping::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentActualCostService::class ), $this->container->get( PekShipmentStatusResponseNormalizer::class ), $this->container->get( ShipmentCreationAttemptService::class ) ) );
 		$this->container->register( PekShipmentButtonPolicy::class, fn(): PekShipmentButtonPolicy => new PekShipmentButtonPolicy( $this->container->get( PekStatusMapping::class ) ) );
@@ -917,6 +918,7 @@ final class Plugin {
 		$this->container->register( JetLogisticGeographyAdminPage::class, fn(): JetLogisticGeographyAdminPage => new JetLogisticGeographyAdminPage( $this->container->get( JetLogisticGeographyImportService::class ), $this->container->get( JetLogisticCitiesCsvClient::class ), $this->container->get( JetLogisticGeographyOverrideRepository::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCountrySyncService::class ), $this->container->get( LocationRepository::class ), $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticCredentials::class ) ) );
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ) ) );
 		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ), $this->container->get( PekDestinationPickupDiagnosticService::class ), $this->container->get( PekDestinationPickupDiagnosticStore::class ), $this->container->get( PekQuoteDiagnosticService::class ), $this->container->get( PekQuoteDiagnosticStore::class ), $this->container->get( DeliveryQuoteCacheManager::class ), $this->container->get( PekSenderCounterpartService::class ) ) );
+		$this->container->register( PekStatusAdminPage::class, fn(): PekStatusAdminPage => new PekStatusAdminPage( $this->container->get( PekStatusMapping::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(
@@ -978,6 +980,7 @@ final class Plugin {
 				$this->container->get( JetLogisticGeographyAdminPage::class ),
 				$this->container->get( JetLogisticStatusAdminPage::class ),
 				$this->container->get( PekAdminPage::class ),
+				$this->container->get( PekStatusAdminPage::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );

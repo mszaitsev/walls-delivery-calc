@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekStatusAdminPage;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -39,11 +40,13 @@ use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Shipments\Pek\PekPrivateAccessTokenService;
 use WallsShop\WDC\Shipments\Pek\PekSenderCounterpartService;
+use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 
 function pek_route_assert( bool $condition, string $message ): void {
@@ -155,7 +158,8 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 		new PekSenderCounterpartService( $api, new PekPrivateAccessTokenService( $api ), $settings, $credentials )
 	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
-	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin ) as $property => $value ) {
+	$pek_statuses = new PekStatusAdminPage( new PekStatusMapping( $settings_repository ) );
+	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin, 'pek_statuses' => $pek_statuses ) as $property => $value ) {
 		$ref = new ReflectionProperty( DeliveryServicesAdminPage::class, $property );
 		$ref->setAccessible( true );
 		$ref->setValue( $page, $value );
@@ -218,6 +222,28 @@ pek_route_assert( ( $cache->current_for_current_user()['items'][0]['warehouseId'
 
 $redirect = pek_route_run_action( $page, 'select_pek_sender_warehouse', array( 'pek_sender_warehouse_id' => strtoupper( $route_warehouse_id ) ) );
 pek_route_assert( $settings->sender_warehouse()['warehouseId'] === $route_warehouse_id && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'select_pek_sender_warehouse must reach PekAdminPage and redirect to PEK tab.' );
+
+$redirect = pek_route_run_action(
+	$page,
+	'save_pek_statuses',
+	array(
+		PekStatusMapping::MAPPING_KEY => array(
+			'прибыл' => array(
+				'pickup' => DeliveryStatus::IN_TRANSIT,
+				'courier' => DeliveryStatus::HANDED_TO_COURIER,
+			),
+			PekStatusMapping::ISSUED_PLACES_PATTERN_KEY => array(
+				'pickup' => DeliveryStatus::IN_TRANSIT,
+				'courier' => 'invalid_status',
+			),
+		),
+	)
+);
+$saved_mapping = ( new PekStatusMapping( $settings_repository ) )->mapping();
+pek_route_assert( str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_statuses' ), 'save_pek_statuses must redirect back to the PEK statuses tab.' );
+pek_route_assert( DeliveryStatus::IN_TRANSIT === $saved_mapping['прибыл']['pickup'] && DeliveryStatus::HANDED_TO_COURIER === $saved_mapping['прибыл']['courier'], 'save_pek_statuses must persist independent pickup/courier mappings.' );
+pek_route_assert( DeliveryStatus::IN_TRANSIT === $saved_mapping[ PekStatusMapping::ISSUED_PLACES_PATTERN_KEY ]['pickup'] && DeliveryStatus::DELIVERED === $saved_mapping[ PekStatusMapping::ISSUED_PLACES_PATTERN_KEY ]['courier'], 'save_pek_statuses must sanitize invalid values back to defaults.' );
+
 $notice_store = new PekAdminNoticeStore();
 $GLOBALS['pek_route_current_user_id'] = 8;
 pek_route_assert( array() === $notice_store->consume_for_current_user(), 'PEK notice must be scoped away from another admin user.' );

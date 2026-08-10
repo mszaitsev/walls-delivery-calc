@@ -7,6 +7,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusNormalizationException;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusResponseNormalizer;
@@ -18,18 +19,42 @@ function pek_status_assert( bool $condition, string $message ): void {
 	}
 }
 
-$mapping = new PekStatusMapping();
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, mixed $default = false ): mixed {
+		return $GLOBALS['wdc_pek_status_options'][ $key ] ?? $default;
+	}
+}
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, mixed $value, bool $autoload = true ): bool {
+		unset( $autoload );
+		$GLOBALS['wdc_pek_status_options'][ $key ] = $value;
+		return true;
+	}
+}
+
+$GLOBALS['wdc_pek_status_options'] = array();
+$settings_repository = new SettingsRepository();
+$mapping = new PekStatusMapping( $settings_repository );
 $cases = array(
 	'Аннулировано до приемки груза' => DeliveryStatus::CANCELLED,
+	'Заявка на забор зарегистрирована' => DeliveryStatus::CREATED_IN_CARRIER,
 	'Ожидается передача груза от отправителя' => DeliveryStatus::CREATED_IN_CARRIER,
+	'Оформлен' => DeliveryStatus::CREATED_IN_CARRIER,
+	'Принят к перевозке' => DeliveryStatus::CREATED_IN_CARRIER,
+	'Принят на ПВЗ' => DeliveryStatus::CREATED_IN_CARRIER,
+	'В пути' => DeliveryStatus::IN_TRANSIT,
 	'В пути на терминал' => DeliveryStatus::IN_TRANSIT,
 	'Прибыл частично' => DeliveryStatus::IN_TRANSIT,
+	'Разгружается. Ожидайте оповещения' => DeliveryStatus::IN_TRANSIT,
 	'Выполняется адресная доставка' => DeliveryStatus::HANDED_TO_COURIER,
 	'Выдан получателю' => DeliveryStatus::DELIVERED,
+	'Доставлен получателю' => DeliveryStatus::DELIVERED,
 	'Выдан ( мест 1 из 1 )' => DeliveryStatus::DELIVERED,
 	'Отправлен на возврат' => DeliveryStatus::RETURNING_TO_SENDER,
+	'Возврат груза отправителю' => DeliveryStatus::RETURNING_TO_SENDER,
 	'Возвращен отправителю' => DeliveryStatus::RETURNED_TO_SENDER,
 	'Утилизирован' => DeliveryStatus::REJECTED,
+	'Изъят на таможне' => DeliveryStatus::REJECTED,
 	'Новый странный статус' => DeliveryStatus::UNKNOWN,
 );
 foreach ( $cases as $external => $expected ) {
@@ -39,6 +64,27 @@ pek_status_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping->map( 'Приб
 pek_status_assert( DeliveryStatus::IN_TRANSIT === $mapping->map( 'Прибыл', DeliveryType::COURIER ), 'Arrived courier must remain in_transit.' );
 pek_status_assert( DeliveryStatus::IN_TRANSIT === $mapping->map( 'РАЗГРУЖАЕТСЯ. ОЖИДАЙТЕ ОПОВЕЩЕНИЯ', DeliveryType::PICKUP ), 'Uppercase Cyrillic status must normalize without mbstring dependency.' );
 pek_status_assert( DeliveryStatus::RETURNED_TO_SENDER === $mapping->map( 'ВОЗВРАЩЁН ОТПРАВИТЕЛЮ', DeliveryType::PICKUP ), 'Ё/Е status normalization must be stable.' );
+pek_status_assert( count( PekStatusMapping::statuses() ) === count( PekStatusMapping::default_mapping() ), 'Every PEK status catalog entry must have a default mapping.' );
+pek_status_assert( isset( PekStatusMapping::statuses()[ PekStatusMapping::ISSUED_PLACES_PATTERN_KEY ] ), 'Issued-places pattern must be represented in the PEK status catalog.' );
+
+$custom = PekStatusMapping::default_mapping();
+$custom['прибыл']['pickup'] = DeliveryStatus::IN_TRANSIT;
+$custom['прибыл']['courier'] = DeliveryStatus::HANDED_TO_COURIER;
+$custom[ PekStatusMapping::ISSUED_PLACES_PATTERN_KEY ]['pickup'] = DeliveryStatus::IN_TRANSIT;
+$custom[ PekStatusMapping::ISSUED_PLACES_PATTERN_KEY ]['courier'] = DeliveryStatus::IN_TRANSIT;
+$custom['аннулировано до приемки груза']['pickup'] = DeliveryStatus::UNKNOWN;
+$custom['аннулировано до приемки груза']['courier'] = DeliveryStatus::UNKNOWN;
+$custom['в пути']['pickup'] = DeliveryStatus::CREATED_IN_CARRIER;
+$custom['в пути']['courier'] = DeliveryStatus::CREATED_IN_CARRIER;
+$mapping->save_mapping( $custom );
+pek_status_assert( DeliveryStatus::IN_TRANSIT === $mapping->map( 'Прибыл', DeliveryType::PICKUP ) && DeliveryStatus::HANDED_TO_COURIER === $mapping->map( 'Прибыл', DeliveryType::COURIER ), 'PEK pickup/courier mappings must be independently configurable.' );
+pek_status_assert( DeliveryStatus::IN_TRANSIT === $mapping->map( 'Выдан мест 2 из 3', DeliveryType::PICKUP ), 'Issued-places pattern must use the stored configurable mapping.' );
+pek_status_assert( DeliveryStatus::UNKNOWN === $mapping->map( 'Аннулировано до приемки груза', DeliveryType::PICKUP ), 'Admin mapping may change universal cancelled presentation.' );
+pek_status_assert( $mapping->is_cancelled_status( 'Аннулировано до приемки груза' ), 'Immutable PEK cancellation predicate must not depend on universal mapping.' );
+pek_status_assert( DeliveryStatus::CREATED_IN_CARRIER === $mapping->map( 'В пути', DeliveryType::PICKUP ) && ! $mapping->is_pre_acceptance_status( 'В пути' ), 'Immutable PEK pre-acceptance predicate must not depend on universal mapping.' );
+$sanitized = $mapping->sanitize_mapping( array( 'прибыл' => array( 'pickup' => 'not_a_status', 'courier' => DeliveryStatus::DELIVERED ) ) );
+pek_status_assert( DeliveryStatus::READY_FOR_PICKUP === $sanitized['прибыл']['pickup'] && DeliveryStatus::DELIVERED === $sanitized['прибыл']['courier'], 'Invalid PEK status admin values must fall back to defaults while valid values survive.' );
+$mapping->save_mapping( PekStatusMapping::default_mapping() );
 
 $service = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentStatusService.php' ) ?: '';
 $normalizer_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentStatusResponseNormalizer.php' ) ?: '';

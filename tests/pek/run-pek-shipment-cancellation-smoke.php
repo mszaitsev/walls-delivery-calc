@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Pek\PekShipmentButtonPolicy;
 use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 
@@ -15,6 +16,19 @@ $root = dirname( __DIR__, 2 );
 defined( 'ABSPATH' ) || define( 'ABSPATH', $root . DIRECTORY_SEPARATOR );
 require_once $root . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', $root . '/src' ) )->register();
+
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, mixed $default = false ): mixed {
+		return $GLOBALS['wdc_pek_cancel_options'][ $key ] ?? $default;
+	}
+}
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, mixed $value, bool $autoload = true ): bool {
+		unset( $autoload );
+		$GLOBALS['wdc_pek_cancel_options'][ $key ] = $value;
+		return true;
+	}
+}
 
 $service = file_get_contents( $root . '/src/Shipments/Pek/PekShipmentService.php' ) ?: '';
 $api = file_get_contents( $root . '/src/Carriers/Pek/Api/PekApiClient.php' ) ?: '';
@@ -35,11 +49,18 @@ pek_cancel_assert( str_contains( $service, 'is_pre_acceptance_status' ), 'Cancel
 pek_cancel_assert( str_contains( $service, 'delete_for_carrier' ), 'Successful cancellation must remove local shipment.' );
 pek_cancel_assert( ! str_contains( strtolower( $all_php ), 'cancelandreturncargo' ), 'Return API must not be present.' );
 
-$mapping = new PekStatusMapping();
+$GLOBALS['wdc_pek_cancel_options'] = array();
+$mapping = new PekStatusMapping( new SettingsRepository() );
 pek_cancel_assert( $mapping->is_pre_acceptance_status( 'Оформлен' ), 'Оформлен must be pre-acceptance cancelable candidate.' );
 pek_cancel_assert( ! $mapping->is_pre_acceptance_status( 'UNKNOWN' ), 'UNKNOWN must not be pre-acceptance.' );
 pek_cancel_assert( ! $mapping->is_pre_acceptance_status( 'Принят к перевозке' ), 'Accepted cargo must not be pre-acceptance.' );
 pek_cancel_assert( ! $mapping->is_pre_acceptance_status( 'Принят на ПВЗ' ), 'PVZ accepted cargo must not be pre-acceptance.' );
+$override = PekStatusMapping::default_mapping();
+$override['в пути']['pickup'] = DeliveryStatus::CREATED_IN_CARRIER;
+$override['аннулировано до приемки груза']['pickup'] = DeliveryStatus::UNKNOWN;
+$mapping->save_mapping( $override );
+pek_cancel_assert( DeliveryStatus::CREATED_IN_CARRIER === $mapping->map( 'В пути' ) && ! $mapping->is_pre_acceptance_status( 'В пути' ), 'Editable PEK mapping must not make in-transit cargo pre-acceptance cancellable.' );
+pek_cancel_assert( DeliveryStatus::UNKNOWN === $mapping->map( 'Аннулировано до приемки груза' ) && $mapping->is_cancelled_status( 'Аннулировано до приемки груза' ), 'Editable PEK mapping must not change immutable cancellation truth.' );
 
 $buttons = new PekShipmentButtonPolicy( $mapping );
 $pending = $buttons->resolve( array( 'universal_status_code' => DeliveryStatus::PENDING_CREATION_IN_CARRIER, 'pending_creation_in_carrier' => true ) );
