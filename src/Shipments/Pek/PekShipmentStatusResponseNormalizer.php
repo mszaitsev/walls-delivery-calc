@@ -194,7 +194,7 @@ final class PekShipmentStatusResponseNormalizer {
 			throw $this->invalid_status_date( $field, $value );
 		}
 		$value = trim( $value );
-		foreach ( array( 'Y-m-d\\TH:i:s', 'Y-m-d\\TH:i:sP', 'Y-m-d\\TH:i:s.uP', 'Y-m-d H:i:s' ) as $format ) {
+		foreach ( $this->status_date_formats( $field ) as $format ) {
 			$parsed = \DateTimeImmutable::createFromFormat( '!' . $format, $value );
 			$errors = \DateTimeImmutable::getLastErrors();
 			$valid = $parsed instanceof \DateTimeImmutable
@@ -206,6 +206,16 @@ final class PekShipmentStatusResponseNormalizer {
 		}
 
 		throw $this->invalid_status_date( $field, $value );
+	}
+
+	/** @return array<int,string> */
+	private function status_date_formats( string $field ): array {
+		$formats = array( 'Y-m-d\\TH:i:s', 'Y-m-d\\TH:i:sP', 'Y-m-d\\TH:i:s.uP', 'Y-m-d H:i:s' );
+		if ( 'deliveryPlanDate' === $field ) {
+			$formats[] = 'Y-m-d\\TH:i:s.v';
+		}
+
+		return $formats;
 	}
 
 	private function invalid_status_date( string $field, mixed $value ): PekShipmentStatusNormalizationException {

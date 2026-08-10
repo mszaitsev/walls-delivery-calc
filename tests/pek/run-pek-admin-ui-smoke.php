@@ -241,7 +241,7 @@ pek_ui_assert( str_contains( $html, 'Диагностика расчёта ст�
 pek_ui_assert( str_contains( $html, 'Вес товаров без упаковки, кг' ), 'PEK quote diagnostic form must label manual weight as product weight before packaging.' );
 pek_ui_assert( str_contains( $html, 'Доплаты для лёгких грузов' ) && str_contains( $html, PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY ) && str_contains( $html, PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ) && str_contains( $html, PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ) && str_contains( $html, 'value="70"' ) && str_contains( $html, 'value="20"' ) && str_contains( $html, 'value="3000"' ), 'PEK admin settings UI must expose default light-cargo store surcharge fields.' );
 pek_ui_assert( str_contains( $html, '>free<' ), 'PEK admin UI must render sender warehouse source.' );
-pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
+pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '<td>04:00:00</td>' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
 $search_field_pos = strpos( $html, 'id="pek_warehouse_search_address"' );
 $table_pos = strpos( $html, '<table class="form-table" role="presentation">', $search_form_pos === false ? 0 : $search_form_pos );

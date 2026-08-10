@@ -407,6 +407,7 @@ final class PekIntegrationFakeHttp implements PekHttpClientInterface {
 									'cargoStatus' => $status,
 									'cargoStatusId' => $status_id,
 									'takeOnStockDateTime' => 'Принят к перевозке' === $status ? '2026-08-06 12:00:00' : '',
+									'deliveryPlanDate' => 'delivery_plan_millis' === $this->status_mode ? '2026-08-19T22:23:16.833' : '',
 								),
 								'receiver' => array(
 									'receivingBySMSCode' => $sms_flag,
@@ -2051,6 +2052,13 @@ $http->statuses = array( 'Прибыл' );
 $false_status_result = $status_service->update( $order );
 $false_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
 pek_integration_assert( true === $false_status_result['success'] && false === (bool) ( $false_shipment['pek_receiving_by_sms_code'] ?? true ), 'Explicit false from expanded status must replace previous true.' );
+
+$http->status_mode = 'delivery_plan_millis';
+$http->statuses = array( 'Ожидается передача груза от отправителя' );
+$delivery_plan_status_result = $status_service->update( $order );
+$delivery_plan_shipment = $repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+pek_integration_assert( true === $delivery_plan_status_result['success'] && 'expanded' === (string) ( $delivery_plan_shipment['pek_status_source'] ?? '' ), 'Live PEK deliveryPlanDate milliseconds must keep expanded status authoritative.' );
+pek_integration_assert( '2026-08-19T22:23:16.833' === (string) ( $delivery_plan_shipment['pek_delivery_plan_date'] ?? '' ), 'Live PEK deliveryPlanDate milliseconds must persist the original source string.' );
 
 $http->status_mode = 'status_id_sentinel';
 $http->statuses = array( 'Ожидается передача груза от отправителя' );

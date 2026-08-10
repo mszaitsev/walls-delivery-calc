@@ -124,6 +124,10 @@ foreach ( array( 'pek_receiving_by_sms_code', 'pek_receiving_by_document', 'actu
 
 foreach ( array(
 	'official deliveryPlanDate example' => array( 'deliveryPlanDate', 'pek_delivery_plan_date', '2021-08-19T00:00:00' ),
+	'live deliveryPlanDate milliseconds' => array( 'deliveryPlanDate', 'pek_delivery_plan_date', '2026-08-19T22:23:16.833' ),
+	'deliveryPlanDate milliseconds zero' => array( 'deliveryPlanDate', 'pek_delivery_plan_date', '2026-01-01T00:00:00.000' ),
+	'deliveryPlanDate milliseconds one' => array( 'deliveryPlanDate', 'pek_delivery_plan_date', '2026-01-01T00:00:00.001' ),
+	'deliveryPlanDate milliseconds max' => array( 'deliveryPlanDate', 'pek_delivery_plan_date', '2026-12-31T23:59:59.999' ),
 	'iso local' => '2026-08-06T12:30:00',
 	'iso offset' => '2026-08-06T12:30:00+03:00',
 	'mysql compatibility' => '2026-08-06 12:30:00',
@@ -204,6 +208,39 @@ foreach ( $malformed_cases as $label => $patch ) {
 		pek_status_assert( false, 'Malformed status must fail: ' . $label );
 	} catch ( RuntimeException ) {
 		pek_status_assert( true, 'Malformed status rejected: ' . $label );
+	}
+}
+
+foreach ( array(
+	'deliveryPlanDate one fractional digit' => '2026-08-19T22:23:16.8',
+	'deliveryPlanDate two fractional digits' => '2026-08-19T22:23:16.83',
+	'deliveryPlanDate four fractional digits' => '2026-08-19T22:23:16.8333',
+	'deliveryPlanDate microseconds without timezone' => '2026-08-19T22:23:16.833333',
+	'deliveryPlanDate invalid day' => '2026-02-30T22:23:16.833',
+	'deliveryPlanDate invalid month' => '2026-13-19T22:23:16.833',
+	'deliveryPlanDate invalid hour' => '2026-08-19T25:23:16.833',
+	'deliveryPlanDate invalid minute' => '2026-08-19T22:60:16.833',
+	'deliveryPlanDate invalid second' => '2026-08-19T22:23:60.833',
+	'deliveryPlanDate slash date' => '2026/08/19T22:23:16.833',
+) as $label => $date ) {
+	$row = $valid['cargos'][0];
+	$row['info']['deliveryPlanDate'] = $date;
+	try {
+		$normalizer->normalize( array( 'cargos' => array( $row ) ), 'PEK-777', '2026-08-06 12:30:00' );
+		pek_status_assert( false, 'Malformed deliveryPlanDate must fail: ' . $label );
+	} catch ( PekShipmentStatusNormalizationException ) {
+		pek_status_assert( true, 'Malformed deliveryPlanDate rejected: ' . $label );
+	}
+}
+
+foreach ( array( 'takeOnStockDateTime', 'arrivalDateTime', 'receivedByClientDateTime' ) as $date_field ) {
+	$row = $valid['cargos'][0];
+	$row['info'][ $date_field ] = '2026-08-19T22:23:16.833';
+	try {
+		$normalizer->normalize( array( 'cargos' => array( $row ) ), 'PEK-777', '2026-08-06 12:30:00' );
+		pek_status_assert( false, 'Millisecond compatibility must remain deliveryPlanDate-specific: ' . $date_field );
+	} catch ( PekShipmentStatusNormalizationException $e ) {
+		pek_status_assert( $date_field === (string) ( $e->diagnostic()['field'] ?? '' ), 'Rejected millisecond date diagnostic must preserve field: ' . $date_field );
 	}
 }
 foreach ( array(
