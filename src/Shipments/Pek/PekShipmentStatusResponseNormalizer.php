@@ -191,7 +191,7 @@ final class PekShipmentStatusResponseNormalizer {
 			return '';
 		}
 		if ( ! is_string( $value ) ) {
-			throw new \RuntimeException( 'ПЭК вернул некорректную дату статуса: ' . $field . '.' );
+			throw $this->invalid_status_date( $field, $value );
 		}
 		$value = trim( $value );
 		foreach ( array( 'Y-m-d\\TH:i:s', 'Y-m-d\\TH:i:sP', 'Y-m-d\\TH:i:s.uP', 'Y-m-d H:i:s' ) as $format ) {
@@ -205,7 +205,19 @@ final class PekShipmentStatusResponseNormalizer {
 			}
 		}
 
-		throw new \RuntimeException( 'ПЭК вернул некорректную дату статуса: ' . $field . '.' );
+		throw $this->invalid_status_date( $field, $value );
+	}
+
+	private function invalid_status_date( string $field, mixed $value ): PekShipmentStatusNormalizationException {
+		$diagnostic = array(
+			'field' => $field,
+			'value_type' => get_debug_type( $value ),
+		);
+		if ( is_int( $value ) || ( is_string( $value ) && strlen( $value ) <= 128 ) ) {
+			$diagnostic['value'] = (string) $value;
+		}
+
+		return new PekShipmentStatusNormalizationException( 'ПЭК вернул некорректную дату статуса: ' . $field . '.', $diagnostic );
 	}
 
 	/** @return array<int,string> */

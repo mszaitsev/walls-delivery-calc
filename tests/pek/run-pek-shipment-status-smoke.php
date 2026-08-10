@@ -8,6 +8,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
+use WallsShop\WDC\Shipments\Pek\PekShipmentStatusNormalizationException;
 use WallsShop\WDC\Shipments\Pek\PekShipmentStatusResponseNormalizer;
 use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 
@@ -122,14 +123,47 @@ foreach ( array( 'pek_receiving_by_sms_code', 'pek_receiving_by_document', 'actu
 }
 
 foreach ( array(
+	'official deliveryPlanDate example' => array( 'deliveryPlanDate', 'pek_delivery_plan_date', '2021-08-19T00:00:00' ),
 	'iso local' => '2026-08-06T12:30:00',
 	'iso offset' => '2026-08-06T12:30:00+03:00',
 	'mysql compatibility' => '2026-08-06 12:30:00',
-) as $label => $date ) {
+) as $label => $date_case ) {
 	$row = $valid['cargos'][0];
-	$row['info']['arrivalDateTime'] = $date;
+	$field = 'arrivalDateTime';
+	$target = 'pek_arrival_datetime';
+	$date = $date_case;
+	if ( is_array( $date_case ) ) {
+		$field = $date_case[0];
+		$target = $date_case[1];
+		$date = $date_case[2];
+	}
+	$row['info'][ $field ] = $date;
 	$date_normalized = $normalizer->normalize( array( 'cargos' => array( $row ) ), 'PEK-777', '2026-08-06 12:30:00' );
-	pek_status_assert( $date === $date_normalized['pek_arrival_datetime'], 'Valid PEK date must round-trip: ' . $label );
+	pek_status_assert( $date === $date_normalized[ $target ], 'Valid PEK date must round-trip: ' . $label );
+}
+
+$invalid_delivery_plan = $valid;
+$invalid_delivery_plan['cargos'][0]['info']['deliveryPlanDate'] = 'tomorrow';
+try {
+	$normalizer->normalize( $invalid_delivery_plan, 'PEK-777', '2026-08-06 12:30:00' );
+	pek_status_assert( false, 'Invalid deliveryPlanDate must fail with a safe diagnostic.' );
+} catch ( PekShipmentStatusNormalizationException $e ) {
+	$diagnostic = $e->diagnostic();
+	pek_status_assert( 'deliveryPlanDate' === (string) ( $diagnostic['field'] ?? '' ), 'Invalid deliveryPlanDate diagnostic must expose the field.' );
+	pek_status_assert( 'string' === (string) ( $diagnostic['value_type'] ?? '' ), 'Invalid deliveryPlanDate diagnostic must expose string value_type.' );
+	pek_status_assert( 'tomorrow' === (string) ( $diagnostic['value'] ?? '' ), 'Invalid deliveryPlanDate diagnostic must expose bounded scalar value.' );
+}
+
+$invalid_delivery_plan_array = $valid;
+$invalid_delivery_plan_array['cargos'][0]['info']['deliveryPlanDate'] = array( '2026-08-10' );
+try {
+	$normalizer->normalize( $invalid_delivery_plan_array, 'PEK-777', '2026-08-06 12:30:00' );
+	pek_status_assert( false, 'Array deliveryPlanDate must fail with a safe diagnostic.' );
+} catch ( PekShipmentStatusNormalizationException $e ) {
+	$diagnostic = $e->diagnostic();
+	pek_status_assert( 'deliveryPlanDate' === (string) ( $diagnostic['field'] ?? '' ), 'Array deliveryPlanDate diagnostic must expose the field.' );
+	pek_status_assert( 'array' === (string) ( $diagnostic['value_type'] ?? '' ), 'Array deliveryPlanDate diagnostic must expose array value_type.' );
+	pek_status_assert( ! array_key_exists( 'value', $diagnostic ), 'Array deliveryPlanDate diagnostic must not expose raw array content.' );
 }
 
 $malformed_cases = array(
