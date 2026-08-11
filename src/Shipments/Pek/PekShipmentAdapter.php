@@ -178,6 +178,7 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			$policy = array( 'create' => false, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => false );
 		}
 		$actual = $this->actual_cost_resolver->presentation_payload( $shipment, $order );
+		$carrier_status = trim( (string) ( $shipment['pek_cargo_status'] ?? $shipment['status_title'] ?? '' ) );
 
 		return array_merge(
 			array(
@@ -185,8 +186,9 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 				'has_shipment' => array() !== $shipment,
 				'can_create' => ! empty( $policy['create'] ),
 				'can_attach_manual' => ! empty( $policy['manual_attach'] ),
-				'external_status' => (string) ( $shipment['pek_cargo_status'] ?? $shipment['status_title'] ?? '' ),
+				'external_status' => $carrier_status,
 				'external_status_id' => (string) ( $shipment['pek_cargo_status_id'] ?? '' ),
+				'carrier_status_title' => $carrier_status,
 				'status_title' => (string) ( $shipment['status_title'] ?? '' ),
 				'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
 				'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),

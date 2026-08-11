@@ -2575,6 +2575,59 @@ pek_integration_assert( false === $attached['pending_creation_in_carrier'], 'Man
 pek_integration_assert( 12345 === $attached['actual_cost_kopecks'], 'Manual attach must merge actual cost from PEK status services.sum.' );
 pek_integration_assert_plain_data( $attached );
 
+$attached_payload = $adapter->status_payload( $order, $attached );
+pek_integration_assert( 'Прибыл' === (string) ( $attached_payload['carrier_status_title'] ?? '' ), 'Initial generic status payload must expose raw PEK carrier status.' );
+pek_integration_assert( 'Прибыл' === (string) ( $attached_payload['external_status'] ?? '' ), 'PEK external_status must use the same raw carrier status source.' );
+pek_integration_assert( DeliveryStatus::label( DeliveryStatus::READY_FOR_PICKUP ) === (string) ( $attached_payload['universal_status_label'] ?? '' ), 'Universal shipment status must remain independently mapped.' );
+
+$foreign_manual_payload = $adapter->status_payload(
+	$order,
+	array_merge(
+		$attached,
+		array(
+			'receiver_country_code' => 'KZ',
+			'manual_attach' => true,
+			'pek_cargo_status' => 'В пути',
+			'status_title' => 'В пути',
+			'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ),
+		)
+	)
+);
+pek_integration_assert( 'KZ' === (string) ( $foreign_manual_payload['receiver_country_code'] ?? '' ), 'Foreign manual status payload must keep receiver country.' );
+pek_integration_assert( 'В пути' === (string) ( $foreign_manual_payload['carrier_status_title'] ?? '' ), 'Foreign manual PEK shipment must expose raw carrier status title.' );
+pek_integration_assert( 'В пути' === (string) ( $foreign_manual_payload['external_status'] ?? '' ), 'Foreign manual PEK external_status must mirror raw carrier status title.' );
+pek_integration_assert( DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $foreign_manual_payload['universal_status_label'] ?? '' ), 'Configurable universal mapping must not alter raw PEK carrier status presentation.' );
+
+$ru_payload = $adapter->status_payload(
+	$order,
+	array_merge(
+		$attached,
+		array(
+			'receiver_country_code' => 'RU',
+			'pek_cargo_status' => 'Оформлен',
+			'status_title' => 'Оформлен',
+			'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ),
+		)
+	)
+);
+pek_integration_assert( 'Оформлен' === (string) ( $ru_payload['carrier_status_title'] ?? '' ), 'RU PEK shipment must expose raw carrier status title.' );
+
+$empty_status_payload = $adapter->status_payload(
+	$order,
+	array_merge(
+		$attached,
+		array(
+			'pek_cargo_status' => '',
+			'status_title' => '',
+			'universal_status_code' => '',
+			'universal_status_label' => '',
+		)
+	)
+);
+pek_integration_assert( '' === (string) ( $empty_status_payload['carrier_status_title'] ?? 'missing' ), 'Empty PEK raw status must remain empty for generic "-" presentation.' );
+
 $GLOBALS['wdc_pek_integration_transients'] = array();
 $http->status_mode = 'expanded';
 $http->statuses = array( 'Прибыл' );
