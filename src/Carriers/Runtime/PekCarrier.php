@@ -69,9 +69,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			return $this->empty_quote(
 				$request,
 				(string) ( $exception->context()['error_code'] ?? 'pek_checkout_context_unavailable' ),
-				array(
-					'failure_stage' => (string) ( $exception->context()['failure_stage'] ?? 'checkout_context' ),
-				)
+				$this->safe_checkout_exception_context( $exception )
 			);
 		}
 
@@ -417,5 +415,34 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		$this->logger->warning( 'PEK checkout quote returned empty.', array_merge( array( 'carrier' => self::KEY, 'reason' => $reason ), $diagnostics ) );
 
 		return new DeliveryQuote( self::KEY . ':' . sha1( $reason . '|' . $request->calculation_date ), self::KEY, $request->destination, $request->package, array(), false, $reason, 'Расчёт ПЭК временно недоступен.', false, 'api', array_merge( array( 'fallback_reason' => $reason ), $diagnostics ) );
+	}
+
+	/** @return array<string,mixed> */
+	private function safe_checkout_exception_context( PekApiException $exception ): array {
+		$context = $exception->context();
+		$result = array( 'failure_stage' => (string) ( $context['failure_stage'] ?? 'checkout_context' ) );
+		foreach ( array( 'location_id', 'country_code', 'mapping_state', 'resolution_method', 'precision' ) as $key ) {
+			if ( is_scalar( $context[ $key ] ?? null ) ) {
+				$result[ $key ] = $context[ $key ];
+			}
+		}
+		foreach ( array( 'cache_hit', 'stale_fallback' ) as $key ) {
+			if ( array_key_exists( $key, $context ) ) {
+				$result[ $key ] = ! empty( $context[ $key ] );
+			}
+		}
+		if ( is_array( $context['mapping_diagnostic'] ?? null ) ) {
+			$diagnostic = array();
+			foreach ( array( 'code', 'message', 'expected_country', 'actual_country', 'precision', 'state' ) as $key ) {
+				if ( is_scalar( $context['mapping_diagnostic'][ $key ] ?? null ) ) {
+					$diagnostic[ $key ] = (string) $context['mapping_diagnostic'][ $key ];
+				}
+			}
+			if ( array() !== $diagnostic ) {
+				$result['mapping_diagnostic'] = $diagnostic;
+			}
+		}
+
+		return $result;
 	}
 }

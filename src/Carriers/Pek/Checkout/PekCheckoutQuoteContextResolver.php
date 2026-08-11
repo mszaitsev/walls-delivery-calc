@@ -48,7 +48,18 @@ final class PekCheckoutQuoteContextResolver {
 		}
 		$mapping = $this->location_resolver->resolve( $location_id );
 		if ( ! in_array( (string) ( $mapping['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true ) ) {
-			throw new PekApiException( 'ПЭК не подтвердил направление доставки.', array( 'error_code' => 'pek_checkout_location_unresolved', 'failure_stage' => 'checkout_context' ) );
+			throw new PekApiException(
+				'ПЭК не подтвердил направление доставки.',
+				array_merge(
+					array(
+						'error_code' => 'pek_checkout_location_unresolved',
+						'failure_stage' => 'checkout_context',
+						'location_id' => $location_id,
+						'country_code' => $receiver_country,
+					),
+					$this->safe_mapping_diagnostic( $mapping )
+				)
+			);
 		}
 		$fingerprint = $this->destination_fingerprint( $location, $mapping );
 		$query = $this->pickup_query( $request, $location, $mapping, $fingerprint );
@@ -168,6 +179,41 @@ final class PekCheckoutQuoteContextResolver {
 
 	private function looks_like_provider_fingerprint( string $value ): bool {
 		return 64 === strlen( $value ) && ctype_xdigit( $value );
+	}
+
+	/** @param array<string,mixed> $mapping @return array<string,mixed> */
+	private function safe_mapping_diagnostic( array $mapping ): array {
+		$diagnostic = array();
+		$raw = trim( (string) ( $mapping['safe_diagnostic_json'] ?? '' ) );
+		if ( '' !== $raw ) {
+			$decoded = json_decode( $raw, true );
+			if ( is_array( $decoded ) && ! array_is_list( $decoded ) ) {
+				foreach ( array( 'code', 'message', 'expected_country', 'actual_country', 'precision', 'state' ) as $key ) {
+					if ( is_scalar( $decoded[ $key ] ?? null ) ) {
+						$value = $this->safe_diagnostic_text( (string) $decoded[ $key ] );
+						if ( '' !== $value ) {
+							$diagnostic[ $key ] = $value;
+						}
+					}
+				}
+			}
+		}
+
+		return array(
+			'mapping_state' => (string) ( $mapping['mapping_state'] ?? '' ),
+			'resolution_method' => (string) ( $mapping['resolution_method'] ?? '' ),
+			'precision' => (string) ( $mapping['precision'] ?? '' ),
+			'cache_hit' => ! empty( $mapping['cache_hit'] ),
+			'stale_fallback' => ! empty( $mapping['stale_fallback'] ),
+			'mapping_diagnostic' => $diagnostic,
+		);
+	}
+
+	private function safe_diagnostic_text( string $value ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? '';
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? '' );
+
+		return substr( $value, 0, 160 );
 	}
 
 	/** @param array<string,mixed> $selection @return array<string,mixed> */
