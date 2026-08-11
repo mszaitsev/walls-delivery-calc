@@ -94,12 +94,15 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			array() === $rates ? 'Расчёт ПЭК временно недоступен.' : '',
 			false,
 			'api',
-			array(
-				'modes' => $outcomes,
-				'country_code' => strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ),
-				'direction_supported' => true,
-				'location_id' => (int) ( $context['location_id'] ?? 0 ),
-				'destination_fingerprint' => (string) ( $context['destination_fingerprint'] ?? '' ),
+			array_merge(
+				array(
+					'modes' => $outcomes,
+					'country_code' => strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ),
+					'direction_supported' => true,
+					'location_id' => (int) ( $context['location_id'] ?? 0 ),
+					'destination_fingerprint' => (string) ( $context['destination_fingerprint'] ?? '' ),
+				),
+				$this->safe_location_mapping_context( $context )
 			)
 		);
 	}
@@ -408,6 +411,38 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			'settings' => $this->quote_cache_context( $request ),
 			'outcomes' => array_keys( array_filter( $outcomes, static fn( array $outcome ): bool => ! empty( $outcome['success'] ) ) ),
 		), JSON_UNESCAPED_UNICODE ) ?: '' );
+	}
+
+	/** @param array<string,mixed> $context @return array<string,mixed> */
+	private function safe_location_mapping_context( array $context ): array {
+		$diagnostic = is_array( $context['location_mapping_diagnostic'] ?? null ) ? $context['location_mapping_diagnostic'] : array();
+		if ( array() === $diagnostic ) {
+			return array();
+		}
+		$result = array();
+		foreach ( array( 'mapping_state', 'resolution_method', 'precision' ) as $key ) {
+			if ( is_scalar( $diagnostic[ $key ] ?? null ) ) {
+				$result[ 'location_' . $key ] = (string) $diagnostic[ $key ];
+			}
+		}
+		foreach ( array( 'cache_hit', 'stale_fallback' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostic ) ) {
+				$result[ 'location_mapping_' . $key ] = ! empty( $diagnostic[ $key ] );
+			}
+		}
+		if ( is_array( $diagnostic['mapping_diagnostic'] ?? null ) ) {
+			$mapping_diagnostic = array();
+			foreach ( array( 'code', 'message', 'expected_country', 'actual_country', 'precision', 'state' ) as $key ) {
+				if ( is_scalar( $diagnostic['mapping_diagnostic'][ $key ] ?? null ) ) {
+					$mapping_diagnostic[ $key ] = (string) $diagnostic['mapping_diagnostic'][ $key ];
+				}
+			}
+			if ( array() !== $mapping_diagnostic ) {
+				$result['location_mapping_diagnostic'] = $mapping_diagnostic;
+			}
+		}
+
+		return $result;
 	}
 
 	/** @param array<string,mixed> $diagnostics */
