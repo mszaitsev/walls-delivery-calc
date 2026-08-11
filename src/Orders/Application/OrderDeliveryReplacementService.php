@@ -873,7 +873,7 @@ final class OrderDeliveryReplacementService {
 		if (
 			PekSettings::CARRIER_KEY !== (string) ( $snapshot['carrier_key'] ?? '' )
 			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
-			|| 'RU' !== strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) )
+			|| ! in_array( strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) ), PekSettings::PLANNED_COUNTRIES, true )
 			|| (int) ( $snapshot['location_id'] ?? 0 ) <= 0
 		) {
 			return array();

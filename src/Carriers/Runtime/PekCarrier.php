@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
@@ -34,9 +35,13 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		private PekCheckoutQuoteContextResolver $context_resolver,
 		private PekQuoteService $quotes,
 		private PekQuotePlannedDateTimeResolver $planned_datetime,
-		private Logger $logger
+		private Logger $logger,
+		?PekCountryPolicy $countries = null
 	) {
+		$this->countries = $countries ?? new PekCountryPolicy();
 	}
+
+	private PekCountryPolicy $countries;
 
 	public function get_identity(): CarrierIdentity {
 		return new CarrierIdentity( self::KEY, PekSettings::TITLE, 'api', $this->credentials->is_complete() );
@@ -49,12 +54,12 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			supports_status_sync: false,
 			supports_courier_delivery: true,
 			supports_pickup_delivery: true,
-			supports_international: false
+			supports_international: true
 		);
 	}
 
 	public function supports_country( string $countryCode ): bool {
-		return 'RU' === strtoupper( trim( $countryCode ) ) && $this->credentials->is_complete();
+		return $this->countries->supports_receiver_country( $countryCode ) && $this->credentials->is_complete();
 	}
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {
@@ -96,6 +101,8 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			'api',
 			array(
 				'modes' => $outcomes,
+				'country_code' => strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ),
+				'direction_supported' => true,
 				'location_id' => (int) ( $context['location_id'] ?? 0 ),
 				'destination_fingerprint' => (string) ( $context['destination_fingerprint'] ?? '' ),
 			)
@@ -119,6 +126,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 
 		return array(
 			'pek_selected_terminal_code' => (string) ( $selection['point_code'] ?? '' ),
+			'pek_destination_country' => strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ),
 			'pek_selection_provider_destination_fingerprint' => (string) ( $selection['provider_destination_fingerprint'] ?? $selection_snapshot['provider_destination_fingerprint'] ?? '' ),
 			'pek_selection_destination_fingerprint' => (string) ( $selection['destination_fingerprint'] ?? $selection_snapshot['destination_fingerprint'] ?? '' ),
 			'pek_courier_address_scope' => '' !== $full_address ? 'full_address' : 'location',

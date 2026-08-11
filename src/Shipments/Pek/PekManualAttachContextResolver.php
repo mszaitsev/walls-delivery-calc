@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -13,9 +14,13 @@ defined( 'ABSPATH' ) || exit;
 final class PekManualAttachContextResolver {
 	public function __construct(
 		private OrderShipmentDraftFactory $drafts,
-		private OrderShipmentRepository $repository
+		private OrderShipmentRepository $repository,
+		?PekCountryPolicy $countries = null
 	) {
+		$this->countries = $countries ?? new PekCountryPolicy();
 	}
+
+	private PekCountryPolicy $countries;
 
 	/** @param array<string,mixed> $existing_shipment @return array<string,mixed> */
 	public function resolve( object $order, array $existing_shipment = array() ): array {
@@ -41,9 +46,16 @@ final class PekManualAttachContextResolver {
 		if ( '' === $delivery_type ) {
 			throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
 		}
+		$receiver_country = $this->receiver_country( $order, $existing_shipment, is_object( $request ) ? $request : null );
+		if ( ! $this->countries->allows_manual_attach( $receiver_country ) ) {
+			throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+		}
+		$is_international = $this->countries->is_international_receiver( $receiver_country );
 
 		return array(
 			'order_id' => $order_id,
+			'sender_country_code' => $this->countries->sender_country(),
+			'receiver_country_code' => $receiver_country,
 			'service_key' => (string) ( $existing_shipment['service_key'] ?? PekSettings::SERVICE_KEY ),
 			'service_title' => (string) ( $existing_shipment['service_title'] ?? PekSettings::TITLE ),
 			'delivery_type' => $delivery_type,
@@ -60,9 +72,9 @@ final class PekManualAttachContextResolver {
 			'recipient_type' => (string) ( $existing_shipment['recipient_type'] ?? 'physical' ),
 			'declared_value_kopecks' => (int) ( $existing_shipment['declared_value_kopecks'] ?? $summary['declared_value_kopecks'] ?? 0 ),
 			'sealing_requested' => ! empty( $existing_shipment['sealing_requested'] ) || ! empty( $summary['sealing_requested'] ),
-			'sms_release_requested' => ! empty( $existing_shipment['sms_release_requested'] ),
-			'sms_release_confirmed' => ! empty( $existing_shipment['sms_release_confirmed'] ) || ! empty( $sms['success'] ),
-			'sms_release_effective_limit_kopecks' => (int) ( $existing_shipment['sms_release_effective_limit_kopecks'] ?? $sms['effective_limit_kopecks'] ?? 0 ),
+			'sms_release_requested' => $is_international ? false : ! empty( $existing_shipment['sms_release_requested'] ),
+			'sms_release_confirmed' => $is_international ? false : ( ! empty( $existing_shipment['sms_release_confirmed'] ) || ! empty( $sms['success'] ) ),
+			'sms_release_effective_limit_kopecks' => $is_international ? 0 : (int) ( $existing_shipment['sms_release_effective_limit_kopecks'] ?? $sms['effective_limit_kopecks'] ?? 0 ),
 			'request_snapshot' => is_array( $existing_shipment['request_snapshot'] ?? null ) ? $existing_shipment['request_snapshot'] : array(),
 			'request_summary' => $summary,
 			'creation_attempt_id' => (string) ( $existing_shipment['creation_attempt_id'] ?? '' ),
@@ -70,6 +82,18 @@ final class PekManualAttachContextResolver {
 			'pek_correlation' => (string) ( $existing_shipment['pek_correlation'] ?? $summary['correlation'] ?? '' ),
 			'original_created_at' => (string) ( $existing_shipment['created_at'] ?? '' ),
 		);
+	}
+
+	private function receiver_country( object $order, array $existing_shipment, ?object $request ): string {
+		$country = strtoupper( trim( (string) ( $existing_shipment['receiver_country_code'] ?? $existing_shipment['recipient_country_code'] ?? '' ) ) );
+		if ( '' === $country && null !== $request ) {
+			$country = strtoupper( trim( (string) ( $request->meta['receiver_country_code'] ?? $request->recipient_address->country_code ?? '' ) ) );
+		}
+		if ( '' === $country && method_exists( $order, 'get_shipping_country' ) ) {
+			$country = strtoupper( trim( (string) $order->get_shipping_country() ) );
+		}
+
+		return '' !== $country ? $country : 'RU';
 	}
 
 	/** @param array<int,mixed> $places @return array<int,array<string,mixed>> */

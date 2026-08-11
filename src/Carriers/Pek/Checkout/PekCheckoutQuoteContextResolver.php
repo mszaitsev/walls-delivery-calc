@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Carriers\Pek\Checkout;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
@@ -29,9 +30,13 @@ final class PekCheckoutQuoteContextResolver {
 		private PekAddressBuilder $address_builder,
 		private CarrierPickupPointProviderRegistry $pickup_providers,
 		private PekQuotePlannedDateTimeResolver $planned_datetime,
-		private PekCheckoutPickupPointFormatter $formatter
+		private PekCheckoutPickupPointFormatter $formatter,
+		?PekCountryPolicy $countries = null
 	) {
+		$this->countries = $countries ?? new PekCountryPolicy();
 	}
+
+	private PekCountryPolicy $countries;
 
 	/** @return array<string,mixed> */
 	public function resolve( QuoteRequest $request ): array {
@@ -40,8 +45,9 @@ final class PekCheckoutQuoteContextResolver {
 		if ( ! $location instanceof Location || ! $location->active ) {
 			throw new PekApiException( 'Для расчёта ПЭК выберите населённый пункт.', array( 'error_code' => 'pek_checkout_location_missing', 'failure_stage' => 'checkout_context' ) );
 		}
-		if ( 'RU' !== strtoupper( trim( $request->country_code ?: $location->country_code ) ) || 'RU' !== strtoupper( trim( $location->country_code ) ) ) {
-			throw new PekApiException( 'ПЭК checkout runtime поддерживает только RU.', array( 'error_code' => 'pek_checkout_country_not_supported', 'failure_stage' => 'checkout_context' ) );
+		$receiver_country = strtoupper( trim( $request->country_code ?: $location->country_code ) );
+		if ( ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $receiver_country ) || $receiver_country !== strtoupper( trim( $location->country_code ) ) ) {
+			throw new PekApiException( 'ПЭК не поддерживает выбранное направление.', array( 'error_code' => 'pek_checkout_country_not_supported', 'failure_stage' => 'checkout_context', 'country_code' => $receiver_country, 'direction_supported' => false ) );
 		}
 		$mapping = $this->location_resolver->resolve( $location_id );
 		if ( ! in_array( (string) ( $mapping['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true ) ) {
@@ -69,6 +75,7 @@ final class PekCheckoutQuoteContextResolver {
 
 		return array(
 			'location' => $location,
+			'country_code' => $receiver_country,
 			'location_id' => $location_id,
 			'location_mapping' => $mapping,
 			'destination_fingerprint' => $fingerprint,
@@ -138,7 +145,7 @@ final class PekCheckoutQuoteContextResolver {
 		$query = new CarrierPickupPointQuery(
 			PekSettings::CARRIER_KEY,
 			(int) ( $snapshot['location_id'] ?? 0 ),
-			(string) ( $snapshot['country_code'] ?? 'RU' ),
+			(string) ( $snapshot['country_code'] ?? '' ),
 			'',
 			is_numeric( $snapshot['latitude'] ?? null ) ? (float) $snapshot['latitude'] : null,
 			is_numeric( $snapshot['longitude'] ?? null ) ? (float) $snapshot['longitude'] : null,
@@ -268,7 +275,7 @@ final class PekCheckoutQuoteContextResolver {
 		return new CarrierPickupPointQuery(
 			PekSettings::CARRIER_KEY,
 			(int) $location->id,
-			'RU',
+			strtoupper( trim( $location->country_code ) ),
 			(string) ( $mapping['normalized_address'] ?? $this->address_builder->build( $location ) ),
 			is_numeric( $mapping['latitude'] ?? null ) ? (float) $mapping['latitude'] : null,
 			is_numeric( $mapping['longitude'] ?? null ) ? (float) $mapping['longitude'] : null,
@@ -303,7 +310,7 @@ final class PekCheckoutQuoteContextResolver {
 		$house = trim( $destination->house );
 		if ( '' !== $street && '' !== $house ) {
 			return trim( implode( ', ', array_filter( array(
-				'Россия',
+				$this->country_name( $destination->country_code ),
 				$destination->region_name,
 				$destination->city ?: $destination->settlement,
 				$street,
@@ -313,6 +320,16 @@ final class PekCheckoutQuoteContextResolver {
 		}
 		$raw = trim( $destination->raw_address );
 		return strlen( $raw ) >= 12 ? $raw : '';
+	}
+
+	private function country_name( string $country_code ): string {
+		return array(
+			'RU' => 'Россия',
+			'AM' => 'Армения',
+			'BY' => 'Беларусь',
+			'KG' => 'Кыргызстан',
+			'KZ' => 'Казахстан',
+		)[ strtoupper( trim( $country_code ) ) ] ?? strtoupper( trim( $country_code ) );
 	}
 
 	/** @return array<string,mixed> */

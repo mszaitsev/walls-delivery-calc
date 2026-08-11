@@ -43,6 +43,8 @@ final class PekShipmentService {
 					'service_key' => (string) $context['service_key'],
 					'service_title' => (string) $context['service_title'],
 					'order_id' => (int) $context['order_id'],
+					'sender_country_code' => (string) $context['sender_country_code'],
+					'receiver_country_code' => (string) $context['receiver_country_code'],
 					'creation_attempt_id' => (string) $context['creation_attempt_id'],
 					'creation_attempt_generation' => (int) $context['creation_attempt_generation'],
 					'delivery_type' => (string) $context['delivery_type'],

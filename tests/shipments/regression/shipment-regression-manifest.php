@@ -68,6 +68,7 @@ return array(
 	'pek.geography' => array( 'path' => 'tests/pek/run-pek-geography-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.pickup-provider' => array( 'path' => 'tests/pek/run-pek-pickup-provider-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.quote-foundation' => array( 'path' => 'tests/pek/run-pek-quote-foundation-smoke.php', 'groups' => array( 'pek' ) ),
+	'pek.international-runtime' => array( 'path' => 'tests/pek/run-pek-international-runtime-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.checkout-runtime' => array( 'path' => 'tests/pek/run-pek-checkout-runtime-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.shipment-create' => array( 'path' => 'tests/pek/run-pek-shipment-create-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.shipment-status' => array( 'path' => 'tests/pek/run-pek-shipment-status-smoke.php', 'groups' => array( 'pek' ) ),

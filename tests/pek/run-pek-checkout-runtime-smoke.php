@@ -341,8 +341,8 @@ list( $carrier, $http, $provider ) = pek_checkout_boot(
 $identity = $carrier->get_identity();
 pek_checkout_assert( 'pek' === $identity->key && 'ПЭК' === $identity->name && $identity->enabled, 'PekCarrier identity must be enabled when credentials are complete.' );
 $capabilities = $carrier->get_capabilities();
-pek_checkout_assert( $capabilities->supports_quotes && $capabilities->supports_pickup_delivery && $capabilities->supports_courier_delivery && ! $capabilities->supports_status_sync && ! $capabilities->supports_international, 'PekCarrier capabilities must match checkout runtime scope.' );
-pek_checkout_assert( $carrier->supports_country( 'RU' ) && ! $carrier->supports_country( 'KZ' ), 'PekCarrier checkout runtime must be RU-only.' );
+pek_checkout_assert( $capabilities->supports_quotes && $capabilities->supports_pickup_delivery && $capabilities->supports_courier_delivery && ! $capabilities->supports_status_sync && $capabilities->supports_international, 'PekCarrier capabilities must match checkout runtime scope.' );
+pek_checkout_assert( $carrier->supports_country( 'RU' ) && $carrier->supports_country( 'KZ' ) && ! $carrier->supports_country( 'UZ' ), 'PekCarrier checkout runtime must support fixed PEK receiver countries only.' );
 
 $quote = $carrier->quote( pek_checkout_request() );
 pek_checkout_assert( $quote->success && 2 === count( $quote->rates ), 'One PEK quote call must return pickup and courier rates when both modes succeed.' );
