@@ -16,12 +16,9 @@ final class PekQuoteRequestBuilder {
 	public function __construct(
 		private PekSettings $settings,
 		private PekQuoteCargoBuilder $cargo_builder,
-		?PekCountryPolicy $countries = null
+		private PekCountryPolicy $countries
 	) {
-		$this->countries = $countries ?? new PekCountryPolicy();
 	}
-
-	private PekCountryPolicy $countries;
 
 	/** @return array<string,mixed> */
 	public function build( QuoteRequest $request, PekQuoteOptions $options ): array {

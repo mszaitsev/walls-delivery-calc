@@ -144,7 +144,7 @@ function pek_quote_boot( array $responses, array $sensitive = array(), bool $wit
 	$repository->set( PekSettings::SENDER_WAREHOUSE_KEY, array( 'warehouseId' => 'sender-wh', 'source' => 'free', 'branchTimezone' => 'UTC' ) );
 	$http = new PekQuoteFakeHttp( $responses );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
-	$builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
+	$builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder(), new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 	$service = new PekQuoteService( $credentials, $api, $builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), $with_logger ? new Logger() : null );
 
 	return array( $settings, $http, $builder, $service );

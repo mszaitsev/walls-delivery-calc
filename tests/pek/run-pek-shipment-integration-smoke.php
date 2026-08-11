@@ -1116,7 +1116,8 @@ $attempts = new ShipmentCreationAttemptService(
 	}
 );
 $status_service = new PekShipmentStatusService( $api, $mapping, $repository, $actual_costs, new PekShipmentStatusResponseNormalizer(), $attempts );
-$button_policy = new PekShipmentButtonPolicy( $mapping );
+$country_policy = new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy();
+$button_policy = new PekShipmentButtonPolicy( $mapping, $country_policy );
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
 	array(
@@ -1208,7 +1209,7 @@ $GLOBALS['wpdb']->locations = array(
 $GLOBALS['wpdb']->pek_location_mappings = array();
 $GLOBALS['wpdb']->pek_terminals = array();
 $drafts = new OrderShipmentDraftFactory( new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new ShipmentServiceSettings(), null, null, null, null, null, null, null, null, null, null, $settings, new PekShipmentCourierAddressResolver() );
-$manual_contexts = new PekManualAttachContextResolver( $drafts, $repository );
+$manual_contexts = new PekManualAttachContextResolver( $drafts, $repository, $country_policy );
 $actual_cost_resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
 $destination_resolver = new PekShipmentDestinationResolver(
 	new PekPickupPointProvider(
@@ -1238,7 +1239,7 @@ $request_builder = new PekShipmentRequestBuilder(
 	$credentials,
 	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
 );
-$shipment_service = new PekShipmentService( $api, $status_service, $repository, $button_policy, $actual_costs, $mapping, $manual_contexts, $attempts );
+$shipment_service = new PekShipmentService( $api, $status_service, $repository, $button_policy, $actual_costs, $mapping, $manual_contexts, $country_policy, $attempts );
 $adapter = new PekShipmentAdapter(
 	$api,
 	$request_builder,
@@ -1246,7 +1247,8 @@ $adapter = new PekShipmentAdapter(
 	$shipment_service,
 	$button_policy,
 	new PekShipmentCreateResponseParser(),
-	$actual_cost_resolver
+	$actual_cost_resolver,
+	$country_policy
 );
 $creation = new ShipmentCreationService( $repository, array( $adapter ), $actual_costs, null, null, array( new PekShipmentPersistenceMapper() ), $attempts );
 pek_integration_assert( $creation instanceof ShipmentCreationService && $drafts instanceof OrderShipmentDraftFactory && $request_builder instanceof PekShipmentRequestBuilder, 'Integration smoke must construct real draft factory, request builder, adapter, creation service and mapper.' );
@@ -1962,7 +1964,7 @@ $sms_failure_builder = new PekShipmentRequestBuilder(
 	$credentials,
 	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
 );
-$sms_failure_preview = ( new PekShipmentAdapter( $api, $sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver ) )->build_safe_payload_preview( $request );
+$sms_failure_preview = ( new PekShipmentAdapter( $api, $sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver, $country_policy ) )->build_safe_payload_preview( $request );
 pek_integration_assert( array() !== $sms_failure_preview['errors'] && str_contains( (string) ( $sms_failure_preview['errors'][0] ?? '' ), 'СМС' ), 'SMS preview failure must remain blocking with public SMS message: ' . ( wp_json_encode( $sms_failure_preview, JSON_UNESCAPED_UNICODE ) ?: '' ) );
 pek_integration_assert( 'sms_geography' === (string) ( $sms_failure_preview['body']['sms_diagnostic']['stage'] ?? '' ) && 'pek_http_403' === (string) ( $sms_failure_preview['body']['sms_diagnostic']['error_code'] ?? '' ) && 403 === (int) ( $sms_failure_preview['body']['sms_diagnostic']['http_status'] ?? 0 ), 'SMS preview failure must expose safe staged diagnostic.' );
 pek_integration_assert_no_private_markers( $sms_failure_preview['body']['sms_diagnostic'] ?? array(), 'SMS preview diagnostic' );
@@ -2344,7 +2346,7 @@ $fallback_sms_failure_builder = new PekShipmentRequestBuilder(
 	$credentials,
 	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
 );
-$fallback_sms_preview = ( new PekShipmentAdapter( $api, $fallback_sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver ) )->build_safe_payload_preview( $pickup_request );
+$fallback_sms_preview = ( new PekShipmentAdapter( $api, $fallback_sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver, $country_policy ) )->build_safe_payload_preview( $pickup_request );
 pek_integration_assert( 'sms_geography' === (string) ( $fallback_sms_preview['body']['sms_diagnostic']['stage'] ?? '' ) && '/branches/checknocalcservices/' === (string) ( $fallback_sms_preview['body']['sms_diagnostic']['endpoint'] ?? '' ) && 403 === (int) ( $fallback_sms_preview['body']['sms_diagnostic']['http_status'] ?? 0 ) && in_array( 'Не удалось выполнить повторную онлайн-проверку выбранного терминала ПЭК. Используются данные терминала, подтверждённые при оформлении заказа.', $fallback_sms_preview['warnings'], true ), 'After trusted pickup fallback, SMS geography HTTP 403 must become the staged SMS diagnostic: ' . wp_json_encode( $fallback_sms_preview, JSON_UNESCAPED_UNICODE ) );
 $http->connected_services_mode = 'success';
 

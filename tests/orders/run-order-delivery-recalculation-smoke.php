@@ -596,7 +596,8 @@ function wdc_recalc_pek_quote_context( CarrierPickupPointProviderRegistry $regis
 		new PekAddressBuilder(),
 		$registry,
 		new PekQuotePlannedDateTimeResolver( $settings ),
-		$formatter
+		$formatter,
+		new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy()
 	);
 }
 

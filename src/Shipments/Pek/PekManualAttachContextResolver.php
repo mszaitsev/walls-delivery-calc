@@ -15,12 +15,9 @@ final class PekManualAttachContextResolver {
 	public function __construct(
 		private OrderShipmentDraftFactory $drafts,
 		private OrderShipmentRepository $repository,
-		?PekCountryPolicy $countries = null
+		private PekCountryPolicy $countries
 	) {
-		$this->countries = $countries ?? new PekCountryPolicy();
 	}
-
-	private PekCountryPolicy $countries;
 
 	/** @param array<string,mixed> $existing_shipment @return array<string,mixed> */
 	public function resolve( object $order, array $existing_shipment = array() ): array {
@@ -85,15 +82,85 @@ final class PekManualAttachContextResolver {
 	}
 
 	private function receiver_country( object $order, array $existing_shipment, ?object $request ): string {
-		$country = strtoupper( trim( (string) ( $existing_shipment['receiver_country_code'] ?? $existing_shipment['recipient_country_code'] ?? '' ) ) );
-		if ( '' === $country && null !== $request ) {
-			$country = strtoupper( trim( (string) ( $request->meta['receiver_country_code'] ?? $request->recipient_address->country_code ?? '' ) ) );
+		$country = $this->trusted_country( $existing_shipment['receiver_country_code'] ?? $existing_shipment['recipient_country_code'] ?? null );
+		if ( '' === $country && null !== $request && is_array( $request->meta ?? null ) ) {
+			$country = $this->trusted_country( $request->meta['receiver_country_code'] ?? null );
+		}
+		if ( '' === $country && null !== $request && is_object( $request->recipient_address ?? null ) ) {
+			$country = $this->trusted_country( $request->recipient_address->country_code ?? null );
 		}
 		if ( '' === $country && method_exists( $order, 'get_shipping_country' ) ) {
-			$country = strtoupper( trim( (string) $order->get_shipping_country() ) );
+			$country = $this->trusted_country( $order->get_shipping_country() );
+		}
+		if ( '' === $country && $this->has_legacy_ru_evidence( $existing_shipment, $request ) ) {
+			$country = $this->countries->sender_country();
+		}
+		if ( '' === $country ) {
+			throw new \RuntimeException( 'Не удалось подтвердить страну получателя ПЭК для ручного прикрепления.' );
+		}
+		if ( ! $this->countries->allows_manual_attach( $country ) ) {
+			throw new \RuntimeException( 'ПЭК не поддерживает ручное прикрепление для страны получателя.' );
 		}
 
-		return '' !== $country ? $country : 'RU';
+		return $country;
+	}
+
+	private function trusted_country( mixed $value ): string {
+		$country = strtoupper( trim( (string) $value ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
+	}
+
+	/** @param array<string,mixed> $existing_shipment */
+	private function has_legacy_ru_evidence( array $existing_shipment, ?object $request ): bool {
+		foreach ( $this->legacy_country_candidates( $existing_shipment, $request ) as $candidate ) {
+			if ( $this->countries->sender_country() === $this->trusted_country( $candidate ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** @param array<string,mixed> $existing_shipment @return array<int,mixed> */
+	private function legacy_country_candidates( array $existing_shipment, ?object $request ): array {
+		$candidates = array();
+		foreach ( array(
+			array( 'calculation_data', 'country_code' ),
+			array( 'calculation_data', 'destination', 'country_code' ),
+			array( 'delivery_calculation', 'country_code' ),
+			array( 'delivery_calculation', 'destination', 'country_code' ),
+			array( 'request_snapshot', 'meta', 'receiver_country_code' ),
+			array( 'request_snapshot', 'recipient_address', 'country_code' ),
+			array( 'request_summary', 'receiver_country_code' ),
+		) as $path ) {
+			$candidates[] = $this->nested_value( $existing_shipment, $path );
+		}
+		if ( null !== $request && is_array( $request->meta ?? null ) ) {
+			foreach ( array(
+				array( 'calculation_data', 'country_code' ),
+				array( 'calculation_data', 'destination', 'country_code' ),
+				array( 'delivery_calculation', 'country_code' ),
+				array( 'delivery_calculation', 'destination', 'country_code' ),
+			) as $path ) {
+				$candidates[] = $this->nested_value( $request->meta, $path );
+			}
+		}
+
+		return $candidates;
+	}
+
+	/** @param array<string,mixed> $source @param array<int,string> $path */
+	private function nested_value( array $source, array $path ): mixed {
+		$value = $source;
+		foreach ( $path as $key ) {
+			if ( ! is_array( $value ) || ! array_key_exists( $key, $value ) ) {
+				return null;
+			}
+			$value = $value[ $key ];
+		}
+
+		return $value;
 	}
 
 	/** @param array<int,mixed> $places @return array<int,array<string,mixed>> */

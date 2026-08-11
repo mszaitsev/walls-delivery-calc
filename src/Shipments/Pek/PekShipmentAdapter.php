@@ -25,13 +25,10 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		private PekShipmentButtonPolicy $buttons,
 		private PekShipmentCreateResponseParser $create_responses,
 		private ShipmentActualCostResolver $actual_cost_resolver,
-		private ?Logger $logger = null,
-		?PekCountryPolicy $countries = null
+		private PekCountryPolicy $countries,
+		private ?Logger $logger = null
 	) {
-		$this->countries = $countries ?? new PekCountryPolicy();
 	}
-
-	private PekCountryPolicy $countries;
 
 	public function carrier_key(): string {
 		return PekSettings::CARRIER_KEY;
@@ -280,7 +277,7 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 			$country = strtoupper( trim( (string) $order->get_shipping_country() ) );
 		}
 
-		return '' !== $country ? $country : 'RU';
+		return '' !== $country ? $country : '';
 	}
 
 	private function international_manual_message(): string {

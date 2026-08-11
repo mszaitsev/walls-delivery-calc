@@ -62,7 +62,7 @@ $mapping->save_mapping( $override );
 pek_cancel_assert( DeliveryStatus::CREATED_IN_CARRIER === $mapping->map( 'В пути' ) && ! $mapping->is_pre_acceptance_status( 'В пути' ), 'Editable PEK mapping must not make in-transit cargo pre-acceptance cancellable.' );
 pek_cancel_assert( DeliveryStatus::UNKNOWN === $mapping->map( 'Аннулировано до приемки груза' ) && $mapping->is_cancelled_status( 'Аннулировано до приемки груза' ), 'Editable PEK mapping must not change immutable cancellation truth.' );
 
-$buttons = new PekShipmentButtonPolicy( $mapping );
+$buttons = new PekShipmentButtonPolicy( $mapping, new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 $pending = $buttons->resolve( array( 'universal_status_code' => DeliveryStatus::PENDING_CREATION_IN_CARRIER, 'pending_creation_in_carrier' => true ) );
 pek_cancel_assert( false === $pending['create'] && true === $pending['manual_attach'] && false === $pending['update'] && false === $pending['cancel'] && true === $pending['remove'], 'Pending PEK shipment must allow manual reconciliation and local remove only.' );
 
@@ -82,7 +82,7 @@ $button_override = PekStatusMapping::default_mapping();
 $button_override['оформлен']['pickup'] = DeliveryStatus::IN_TRANSIT;
 $mapping->save_mapping( $button_override );
 $mapped_open = $mapping->map( 'Оформлен' );
-$buttons = new PekShipmentButtonPolicy( $mapping );
+$buttons = new PekShipmentButtonPolicy( $mapping, new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 $open_as_in_transit = $buttons->resolve( $button_shipment( 'Оформлен', $mapped_open ) );
 pek_cancel_assert( DeliveryStatus::IN_TRANSIT === $mapped_open && $mapping->is_pre_acceptance_status( 'Оформлен' ) && true === $open_as_in_transit['cancel'] && false === $open_as_in_transit['remove'], 'Editable Оформлен -> in_transit must not disable PEK pre-acceptance cancellation or make local remove visible.' );
 
@@ -90,7 +90,7 @@ $button_override = PekStatusMapping::default_mapping();
 $button_override['оформлен']['pickup'] = DeliveryStatus::CANCELLED;
 $mapping->save_mapping( $button_override );
 $mapped_open_cancelled = $mapping->map( 'Оформлен' );
-$buttons = new PekShipmentButtonPolicy( $mapping );
+$buttons = new PekShipmentButtonPolicy( $mapping, new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 $open_as_cancelled = $buttons->resolve( $button_shipment( 'Оформлен', $mapped_open_cancelled ) );
 pek_cancel_assert( DeliveryStatus::CANCELLED === $mapped_open_cancelled && ! $mapping->is_cancelled_status( 'Оформлен' ) && true === $open_as_cancelled['cancel'] && false === $open_as_cancelled['remove'], 'Editable Оформлен -> cancelled must not make PEK carrier truth cancelled or terminal for button policy.' );
 
@@ -98,7 +98,7 @@ $button_override = PekStatusMapping::default_mapping();
 $button_override['в пути']['pickup'] = DeliveryStatus::CREATED_IN_CARRIER;
 $mapping->save_mapping( $button_override );
 $mapped_in_transit_created = $mapping->map( 'В пути' );
-$buttons = new PekShipmentButtonPolicy( $mapping );
+$buttons = new PekShipmentButtonPolicy( $mapping, new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 $in_transit_as_created = $buttons->resolve( $button_shipment( 'В пути', $mapped_in_transit_created ) );
 pek_cancel_assert( DeliveryStatus::CREATED_IN_CARRIER === $mapped_in_transit_created && ! $mapping->is_pre_acceptance_status( 'В пути' ) && false === $in_transit_as_created['cancel'] && true === $in_transit_as_created['remove'], 'Editable В пути -> created_in_carrier must not make accepted PEK cargo cancellable or hide local remove.' );
 
@@ -106,7 +106,7 @@ $button_override = PekStatusMapping::default_mapping();
 $button_override['аннулировано до приемки груза']['pickup'] = DeliveryStatus::IN_TRANSIT;
 $mapping->save_mapping( $button_override );
 $mapped_cancelled_as_in_transit = $mapping->map( 'Аннулировано до приемки груза' );
-$buttons = new PekShipmentButtonPolicy( $mapping );
+$buttons = new PekShipmentButtonPolicy( $mapping, new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 $cancelled_as_in_transit = $buttons->resolve( $button_shipment( 'Аннулировано до приемки груза', $mapped_cancelled_as_in_transit ) );
 pek_cancel_assert( DeliveryStatus::IN_TRANSIT === $mapped_cancelled_as_in_transit && $mapping->is_cancelled_status( 'Аннулировано до приемки груза' ) && false === $cancelled_as_in_transit['cancel'] && true === $cancelled_as_in_transit['remove'], 'Editable Аннулировано -> in_transit must not hide immutable carrier terminal truth from button policy.' );
 

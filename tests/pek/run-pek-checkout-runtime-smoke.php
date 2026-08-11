@@ -281,9 +281,10 @@ function pek_checkout_boot( array $responses, array $points, ?CarrierPickupPoint
 	$providers = new CarrierPickupPointProviderRegistry( array( $provider ) );
 	$planned = new PekQuotePlannedDateTimeResolver( $settings );
 	$formatter = new PekCheckoutPickupPointFormatter();
-	$context = new PekCheckoutQuoteContextResolver( $settings, new LocationRepository( $wpdb ), $resolver, $address_builder, $providers, $planned, $formatter );
-	$quote_service = new PekQuoteService( $credentials, $api, new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() ), new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
-	$carrier = new PekCarrier( $settings, $credentials, $context, $quote_service, $planned, new Logger() );
+	$countries = new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy();
+	$context = new PekCheckoutQuoteContextResolver( $settings, new LocationRepository( $wpdb ), $resolver, $address_builder, $providers, $planned, $formatter, $countries );
+	$quote_service = new PekQuoteService( $credentials, $api, new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder(), $countries ), new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
+	$carrier = new PekCarrier( $settings, $credentials, $context, $quote_service, $planned, new Logger(), $countries );
 
 	return array( $carrier, $http, $provider );
 }

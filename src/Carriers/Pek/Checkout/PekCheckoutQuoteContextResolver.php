@@ -31,12 +31,9 @@ final class PekCheckoutQuoteContextResolver {
 		private CarrierPickupPointProviderRegistry $pickup_providers,
 		private PekQuotePlannedDateTimeResolver $planned_datetime,
 		private PekCheckoutPickupPointFormatter $formatter,
-		?PekCountryPolicy $countries = null
+		private PekCountryPolicy $countries
 	) {
-		$this->countries = $countries ?? new PekCountryPolicy();
 	}
-
-	private PekCountryPolicy $countries;
 
 	/** @return array<string,mixed> */
 	public function resolve( QuoteRequest $request ): array {

@@ -36,12 +36,9 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		private PekQuoteService $quotes,
 		private PekQuotePlannedDateTimeResolver $planned_datetime,
 		private Logger $logger,
-		?PekCountryPolicy $countries = null
+		private PekCountryPolicy $countries
 	) {
-		$this->countries = $countries ?? new PekCountryPolicy();
 	}
-
-	private PekCountryPolicy $countries;
 
 	public function get_identity(): CarrierIdentity {
 		return new CarrierIdentity( self::KEY, PekSettings::TITLE, 'api', $this->credentials->is_complete() );

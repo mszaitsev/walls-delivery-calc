@@ -9,11 +9,11 @@ use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentButtonPolicy {
-	public function __construct( private PekStatusMapping $mapping, ?PekCountryPolicy $countries = null ) {
-		$this->countries = $countries ?? new PekCountryPolicy();
+	public function __construct(
+		private PekStatusMapping $mapping,
+		private PekCountryPolicy $countries
+	) {
 	}
-
-	private PekCountryPolicy $countries;
 
 	/** @param array<string,mixed> $shipment @return array<string,bool> */
 	public function resolve( array $shipment ): array {
