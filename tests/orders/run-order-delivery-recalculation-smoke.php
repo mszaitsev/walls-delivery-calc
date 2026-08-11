@@ -1312,28 +1312,16 @@ $kz_http = new WdcRecalcPekPreviewHttpClient(
 $kz_service = wdc_recalc_pek_preview_service( $kz_http, $kz_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
 $kz_preview = $kz_service->preview( wdc_recalc_pek_kz_order() );
 $kz_rates = array_column( $kz_preview['rates'] ?? array(), null, 'id' );
-$kz_diag = $kz_preview['diagnostic']['pek'] ?? array();
 recalc_smoke_assert( true === ( $kz_preview['success'] ?? false ), 'KZ PEK admin preview without override must succeed.' );
 recalc_smoke_assert( 'KZ' === ( $kz_preview['request']['country_code'] ?? '' ), 'KZ PEK admin preview must map QuoteRequest country from saved order.' );
 recalc_smoke_assert( 'KZ' === ( $kz_preview['request']['destination']['country_code'] ?? '' ), 'KZ PEK admin preview destination must keep KZ country.' );
 recalc_smoke_assert( 162695 === (int) ( $kz_preview['request']['customer_context']['location_id'] ?? 0 ), 'KZ PEK admin preview must map saved canonical location_id.' );
 recalc_smoke_assert( 'KZ' === ( $kz_preview['request']['customer_context']['selected_location_country'] ?? '' ), 'KZ PEK admin preview customer context must expose selected_location_country.' );
-recalc_smoke_assert( isset( $kz_rates[ PekSettings::PICKUP_RATE_ID ] ), 'KZ PEK admin preview must include pickup rate through fake PEK quote path: ' . ( wp_json_encode( $kz_diag ) ?: '' ) );
+recalc_smoke_assert( isset( $kz_rates[ PekSettings::PICKUP_RATE_ID ] ), 'KZ PEK admin preview must include pickup rate through fake PEK quote path.' );
 recalc_smoke_assert( isset( $kz_rates[ PekSettings::COURIER_RATE_ID ] ), 'KZ PEK admin preview must include courier rate through fake PEK quote path.' );
-recalc_smoke_assert( 'KZ' === ( $kz_diag['request_country_code'] ?? '' ), 'KZ PEK diagnostic must expose mapped request country.' );
-recalc_smoke_assert( 162695 === (int) ( $kz_diag['request_location_id'] ?? 0 ), 'KZ PEK diagnostic must expose mapped location_id.' );
-recalc_smoke_assert( true === ( $kz_diag['request_destination_city_present'] ?? null ), 'KZ PEK diagnostic must expose destination city presence.' );
-recalc_smoke_assert( true === ( $kz_diag['request_destination_postcode_present'] ?? null ), 'KZ PEK diagnostic must expose destination postcode presence.' );
-recalc_smoke_assert( false === ( $kz_diag['location_override'] ?? null ), 'KZ PEK diagnostic must distinguish no selected_location override.' );
-recalc_smoke_assert( true === ( $kz_diag['pek_service_found'] ?? null ) && true === ( $kz_diag['pek_service_active'] ?? null ), 'KZ PEK diagnostic must expose active PEK service.' );
-recalc_smoke_assert( 'selected_countries' === ( $kz_diag['pek_service_availability_mode'] ?? '' ) && true === ( $kz_diag['pek_service_country_enabled'] ?? null ), 'KZ PEK diagnostic must expose selected-country availability.' );
-recalc_smoke_assert( true === ( $kz_diag['pek_service_entry_created'] ?? null ) && true === ( $kz_diag['pek_carrier_quote_attempted'] ?? null ), 'KZ PEK diagnostic must prove service entry and quote attempt.' );
-recalc_smoke_assert( false === ( $kz_diag['pek_quote_cache_hit'] ?? null ) && 0 === (int) ( $kz_diag['quote_cache_hits'] ?? -1 ), 'KZ PEK diagnostic must expose quote cache miss for the fake preview.' );
-recalc_smoke_assert( 2 === (int) ( $kz_diag['pek_rates_count'] ?? 0 ), 'KZ PEK diagnostic must expose PEK rates count.' );
 recalc_smoke_assert( 1 === wdc_recalc_pek_preview_endpoint_count( $kz_http, '/branches/findzonebyaddress/' ), 'KZ PEK preview must call fake geography once.' );
 recalc_smoke_assert( 1 === wdc_recalc_pek_preview_endpoint_count( $kz_http, '/branches/nearestdepartments/' ), 'KZ PEK preview must call fake nearestdepartments once.' );
 recalc_smoke_assert( 2 === wdc_recalc_pek_preview_endpoint_count( $kz_http, '/calculator/calculateprice/' ), 'KZ PEK preview must call fake calculator for pickup and courier.' );
-recalc_smoke_assert( ! str_contains( wp_json_encode( $kz_diag ) ?: '', 'raw formatted address must not be exposed' ), 'KZ PEK diagnostic must not expose raw PEK address evidence.' );
 
 $kz_override_db = new WdcRecalcDeliveryServiceDb();
 $kz_override_db->locations = array( wdc_recalc_pek_kz_location_row() );
@@ -1347,12 +1335,11 @@ $kz_override_http = new WdcRecalcPekPreviewHttpClient(
 );
 $kz_override_service = wdc_recalc_pek_preview_service( $kz_override_http, $kz_override_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
 $kz_override_preview = $kz_override_service->preview( wdc_recalc_pek_kz_order(), wdc_recalc_pek_kz_selected_location() );
-$kz_override_diag = $kz_override_preview['diagnostic']['pek'] ?? array();
 $kz_override_rates = array_column( $kz_override_preview['rates'] ?? array(), null, 'id' );
 recalc_smoke_assert( 'KZ' === ( $kz_override_preview['request']['country_code'] ?? '' ) && 'KZ' === ( $kz_override_preview['request']['destination']['country_code'] ?? '' ), 'KZ PEK admin preview with selected_location override must keep KZ request country.' );
 recalc_smoke_assert( 162695 === (int) ( $kz_override_preview['request']['customer_context']['location_id'] ?? 0 ) && 162695 === (int) ( $kz_override_preview['request']['customer_context']['selected_location_id'] ?? 0 ), 'KZ PEK admin preview with override must map KZ location identity.' );
-recalc_smoke_assert( true === ( $kz_override_diag['location_override'] ?? null ) && 'KZ' === ( $kz_override_diag['selected_location_country'] ?? '' ) && 162695 === (int) ( $kz_override_diag['selected_location_id'] ?? 0 ), 'KZ PEK diagnostic must expose selected_location override country and id.' );
-recalc_smoke_assert( isset( $kz_override_rates[ PekSettings::PICKUP_RATE_ID ] ) && isset( $kz_override_rates[ PekSettings::COURIER_RATE_ID ] ), 'KZ PEK admin preview with override must include pickup and courier rates: ' . ( wp_json_encode( $kz_override_diag ) ?: '' ) );
+recalc_smoke_assert( true === ( $kz_override_preview['request']['customer_context']['location_override'] ?? null ) && 'KZ' === ( $kz_override_preview['request']['customer_context']['selected_location_country'] ?? '' ), 'KZ PEK admin preview with override must mark selected KZ location context.' );
+recalc_smoke_assert( isset( $kz_override_rates[ PekSettings::PICKUP_RATE_ID ] ) && isset( $kz_override_rates[ PekSettings::COURIER_RATE_ID ] ), 'KZ PEK admin preview with override must include pickup and courier rates.' );
 
 $kz_lifecycle_db = new WdcRecalcDeliveryServiceDb();
 $kz_lifecycle_db->locations = array( wdc_recalc_pek_kz_location_row() );
@@ -1391,21 +1378,16 @@ $kz_lifecycle_http = new WdcRecalcPekPreviewHttpClient(
 $kz_lifecycle_service = wdc_recalc_pek_preview_service( $kz_lifecycle_http, $kz_lifecycle_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
 $kz_lifecycle_preview = $kz_lifecycle_service->preview( $new_kz_order, $new_kz_selected_location );
 $kz_lifecycle_rates = array_column( $kz_lifecycle_preview['rates'] ?? array(), null, 'id' );
-$kz_lifecycle_diag = $kz_lifecycle_preview['diagnostic']['pek'] ?? array();
 recalc_smoke_assert( 'KZ' === ( $kz_lifecycle_preview['request']['country_code'] ?? '' ) && 162695 === (int) ( $kz_lifecycle_preview['request']['customer_context']['location_id'] ?? 0 ), 'Persisted new KZ order admin preview must map KZ country and location_id.' );
-recalc_smoke_assert( true === ( $kz_lifecycle_diag['location_override'] ?? null ) && 'KZ' === ( $kz_lifecycle_diag['selected_location_country'] ?? '' ) && 162695 === (int) ( $kz_lifecycle_diag['selected_location_id'] ?? 0 ), 'Persisted new KZ order admin diagnostic must expose selected KZ location identity.' );
-recalc_smoke_assert( true === ( $kz_lifecycle_diag['pek_service_country_enabled'] ?? null ) && true === ( $kz_lifecycle_diag['pek_service_entry_created'] ?? null ) && true === ( $kz_lifecycle_diag['pek_carrier_quote_attempted'] ?? null ), 'Persisted new KZ order admin diagnostic must prove PEK service and quote path.' );
-recalc_smoke_assert( isset( $kz_lifecycle_rates[ PekSettings::PICKUP_RATE_ID ], $kz_lifecycle_rates[ PekSettings::COURIER_RATE_ID ] ) && (int) ( $kz_lifecycle_diag['pek_rates_count'] ?? 0 ) > 0, 'Persisted new KZ order admin recalculation must return PEK rates.' );
-recalc_smoke_assert( 'pek_checkout_location_missing' !== (string) ( $kz_lifecycle_diag['pek_carrier_error_code'] ?? '' ), 'Persisted new KZ order admin recalculation must not fail with missing PEK checkout location.' );
+recalc_smoke_assert( true === ( $kz_lifecycle_preview['request']['customer_context']['location_override'] ?? null ) && 'KZ' === ( $kz_lifecycle_preview['request']['customer_context']['selected_location_country'] ?? '' ) && 162695 === (int) ( $kz_lifecycle_preview['request']['customer_context']['selected_location_id'] ?? 0 ), 'Persisted new KZ order admin preview must expose selected KZ location identity.' );
+recalc_smoke_assert( isset( $kz_lifecycle_rates[ PekSettings::PICKUP_RATE_ID ], $kz_lifecycle_rates[ PekSettings::COURIER_RATE_ID ] ), 'Persisted new KZ order admin recalculation must return PEK rates.' );
 
 $kz_filtered_db = new WdcRecalcDeliveryServiceDb();
 $kz_filtered_db->locations = array( wdc_recalc_pek_kz_location_row() );
 $kz_filtered_http = new WdcRecalcPekPreviewHttpClient( array() );
 $kz_filtered_service = wdc_recalc_pek_preview_service( $kz_filtered_http, $kz_filtered_db, array( 'RU' ) );
 $kz_filtered_preview = $kz_filtered_service->preview( wdc_recalc_pek_kz_order() );
-$kz_filtered_diag = $kz_filtered_preview['diagnostic']['pek'] ?? array();
-recalc_smoke_assert( true === ( $kz_filtered_diag['pek_service_found'] ?? null ) && false === ( $kz_filtered_diag['pek_service_country_enabled'] ?? null ), 'KZ PEK diagnostic must expose country filter rejection.' );
-recalc_smoke_assert( false === ( $kz_filtered_diag['pek_service_entry_created'] ?? null ) && false === ( $kz_filtered_diag['pek_carrier_quote_attempted'] ?? null ), 'KZ PEK country-filter diagnostic must prove quote was not attempted.' );
+recalc_smoke_assert( ! isset( array_column( $kz_filtered_preview['rates'] ?? array(), null, 'carrier_key' )[ PekSettings::CARRIER_KEY ] ), 'KZ PEK country-filter rejection must return no PEK rates.' );
 recalc_smoke_assert( 0 === count( $kz_filtered_http->requests ), 'KZ PEK country-filter rejection must not call fake PEK HTTP.' );
 
 $kz_failure_db = new WdcRecalcDeliveryServiceDb();
@@ -1413,9 +1395,8 @@ $kz_failure_db->locations = array( wdc_recalc_pek_kz_location_row() );
 $kz_failure_http = new WdcRecalcPekPreviewHttpClient( array( array( 'status' => 500, 'body' => array( 'message' => 'temporary fake failure' ) ) ) );
 $kz_failure_service = wdc_recalc_pek_preview_service( $kz_failure_http, $kz_failure_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
 $kz_failure_preview = $kz_failure_service->preview( wdc_recalc_pek_kz_order() );
-$kz_failure_diag = $kz_failure_preview['diagnostic']['pek'] ?? array();
-recalc_smoke_assert( true === ( $kz_failure_diag['pek_carrier_quote_attempted'] ?? null ) && 0 === (int) ( $kz_failure_diag['pek_rates_count'] ?? -1 ), 'KZ PEK diagnostic must show attempted quote with zero rates on fake failure.' );
-recalc_smoke_assert( '' !== (string) ( $kz_failure_diag['pek_carrier_error_code'] ?? $kz_failure_diag['pek_carrier_reason'] ?? '' ), 'KZ PEK diagnostic must expose a safe PEK failure reason.' );
+recalc_smoke_assert( ! isset( array_column( $kz_failure_preview['rates'] ?? array(), null, 'carrier_key' )[ PekSettings::CARRIER_KEY ] ), 'KZ PEK fake failure must return no PEK rates.' );
+recalc_smoke_assert( 1 === count( $kz_failure_http->requests ), 'KZ PEK fake failure must attempt PEK once through local fake HTTP.' );
 
 $kz_empty_db = new WdcRecalcDeliveryServiceDb();
 $kz_empty_db->locations = array( wdc_recalc_pek_kz_location_row() );
@@ -1428,8 +1409,7 @@ $kz_empty_http = new WdcRecalcPekPreviewHttpClient(
 );
 $kz_empty_service = wdc_recalc_pek_preview_service( $kz_empty_http, $kz_empty_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
 $kz_empty_preview = $kz_empty_service->preview( wdc_recalc_pek_kz_order() );
-$kz_empty_diag = $kz_empty_preview['diagnostic']['pek'] ?? array();
-recalc_smoke_assert( true === ( $kz_empty_diag['pek_carrier_quote_attempted'] ?? null ) && 0 === (int) ( $kz_empty_diag['pek_rates_count'] ?? -1 ), 'KZ PEK diagnostic must distinguish attempted PEK empty quote.' );
+recalc_smoke_assert( ! isset( array_column( $kz_empty_preview['rates'] ?? array(), null, 'carrier_key' )[ PekSettings::CARRIER_KEY ] ), 'KZ PEK empty provider/calculator response must return no PEK rates.' );
 
 $rate_ids = array_column( $preview['rates'], 'id' );
 recalc_smoke_assert( in_array( 'demo:pickup', $rate_ids, true ), 'Preview must include rates from every available carrier/service path.' );

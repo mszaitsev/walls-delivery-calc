@@ -12,15 +12,13 @@ final class CheckoutCalculationResult {
 	 * @param array<int,DeliveryRate> $rates
 	 * @param array<int,array<string,mixed>> $audit
 	 * @param array<string,string> $carrier_errors
-	 * @param array<string,mixed> $diagnostic
 	 */
 	public function __construct(
 		public readonly array $rates,
 		public readonly bool $fallback_used,
 		public readonly int $cache_hits,
 		public readonly array $audit,
-		public readonly array $carrier_errors,
-		public readonly array $diagnostic = array()
+		public readonly array $carrier_errors
 	) {
 	}
 }

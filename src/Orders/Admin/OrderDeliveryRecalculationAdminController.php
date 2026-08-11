@@ -138,7 +138,6 @@ final class OrderDeliveryRecalculationAdminController {
 				'rates'   => $result['rates'],
 				'request' => $result['request'],
 				'location' => $result['location'],
-				'diagnostic' => is_array( $result['diagnostic'] ?? null ) ? $result['diagnostic'] : array(),
 			)
 		);
 	}
