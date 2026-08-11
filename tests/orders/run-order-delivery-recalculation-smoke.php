@@ -1153,6 +1153,80 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'funct
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function pickupPointPresentationComment' ) && str_contains( $pickup_js, 'wdc-pickup-popup__title-comment' ) && str_contains( $pickup_js, 'wdc-pickup-list__title-comment' ), 'JS must render Yandex presentation_comment in popup and side card using checkout presentation classes.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'const requiresRateRefresh = true === point.requires_rate_refresh' ) && str_contains( $pickup_js, 'selectedPickupPoint: point' ) && str_contains( $pickup_js, "restorePekPickup: 'pek' === carrier" ), 'Selecting a PEK pickup point with requires_rate_refresh must request a fresh server preview.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function restorePekPickupPreview' ) && str_contains( $pickup_js, '[data-wdc-order-delivery-rate][data-carrier-key="pek"][data-delivery-type="pickup"]' ) && str_contains( $pickup_js, 'selectedPickupPoints.set( box, point );' ), 'Refreshed PEK pickup preview must restore the selected PEK rate and terminal after DOM replacement.' );
+recalc_smoke_run_node( <<<'JS'
+const fs = require('fs');
+const assert = require('assert');
+const source = fs.readFileSync('assets/admin/order-delivery-recalculation.js', 'utf8');
+
+function extractFunction(name) {
+	const needle = 'function ' + name;
+	const start = source.indexOf(needle);
+	assert.notStrictEqual(start, -1, name + ' must exist in production JS.');
+	const braceStart = source.indexOf('{', start);
+	let depth = 0;
+	for (let index = braceStart; index < source.length; index += 1) {
+		const char = source[index];
+		if (char === '{') { depth += 1; }
+		if (char === '}') {
+			depth -= 1;
+			if (depth === 0) {
+				return source.slice(start, index + 1);
+			}
+		}
+	}
+	throw new Error('Cannot extract ' + name);
+}
+
+function meaningfulText(value) { return String(value || '').trim(); }
+function firstMeaningfulText() {
+	for (const value of arguments) {
+		const text = meaningfulText(value);
+		if (text) { return text; }
+	}
+	return '';
+}
+
+eval(extractFunction('booleanValue'));
+eval(extractFunction('normalizePickupPoint'));
+
+function refreshDecision(point, rate) {
+	const carrier = String(point.carrier_key || point.carrier || rate.carrier_key || '');
+	return true === point.requires_rate_refresh || 'true' === String(point.requires_rate_refresh || '') || ['dpd', 'yandex_delivery'].indexOf(carrier) !== -1;
+}
+
+const rawPek = {
+	carrier_key: 'pek',
+	service_key: 'pek',
+	pickup_family: 'pek:pickup',
+	point_code: 'PEK-UUID',
+	requires_rate_refresh: true,
+	snapshot: {
+		carrier_key: 'pek',
+		service_key: 'pek',
+		pickup_family: 'pek:pickup',
+		point_code: 'PEK-UUID',
+		provider_destination_fingerprint: 'a'.repeat(64)
+	}
+};
+const normalizedPek = normalizePickupPoint(rawPek);
+assert.strictEqual(normalizedPek.requires_rate_refresh, true, 'PEK requires_rate_refresh must survive normalizePickupPoint as boolean true.');
+assert.strictEqual(refreshDecision(normalizedPek, {carrier_key: 'pek'}), true, 'Normalized PEK point must enter preview refresh branch.');
+
+for (const value of [false, 'false', '0', 0, undefined]) {
+	const normalized = normalizePickupPoint({carrier_key: 'pek', point_code: 'PEK-UUID', requires_rate_refresh: value});
+	assert.strictEqual(normalized.requires_rate_refresh, false, 'False refresh marker must stay false for ' + String(value));
+}
+for (const value of [true, 1, '1', 'true']) {
+	const normalized = normalizePickupPoint({carrier_key: 'pek', point_code: 'PEK-UUID', requires_rate_refresh: value});
+	assert.strictEqual(normalized.requires_rate_refresh, true, 'True refresh marker must become true for ' + String(value));
+}
+assert.strictEqual(normalizePickupPoint({carrier_key: 'pek', point_code: 'PEK-UUID', snapshot: {requires_rate_refresh: true}}).requires_rate_refresh, true, 'Snapshot refresh marker must be used as fallback.');
+assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'russian_post_domestic', point_code: 'RP-1'}), {carrier_key: 'russian_post_domestic'}), false, 'Russian Post pickup must not refresh without marker.');
+assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'cdek', point_code: 'CDEK-1'}), {carrier_key: 'cdek'}), false, 'CDEK pickup must not refresh without marker.');
+assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'dpd', point_code: 'DPD-1'}), {carrier_key: 'dpd'}), true, 'DPD compatibility refresh must remain.');
+assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'yandex_delivery', point_code: 'YA-1'}), {carrier_key: 'yandex_delivery'}), true, 'Yandex compatibility refresh must remain.');
+JS
+, 'Runtime JS smoke must preserve PEK requires_rate_refresh through normalization and refresh decision.' );
 $heading_pos = is_string( $pickup_js ) ? strpos( $pickup_js, 'class="wdc-order-delivery-pickup-picker__heading"><strong>\' + title + \'</strong>\' + commentHtml' ) : false;
 $address_pos = is_string( $pickup_js ) ? strpos( $pickup_js, '</span><span>\' + escapeHtml( pickupPointLabel( point ) ) + \'</span>' ) : false;
 recalc_smoke_assert( false !== $heading_pos && false !== $address_pos && $heading_pos < $address_pos, 'Pickup side card must render presentation_comment in a vertical heading container before the address.' );

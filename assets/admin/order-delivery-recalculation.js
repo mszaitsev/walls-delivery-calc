@@ -1201,6 +1201,13 @@
 		updateSaveButton( box );
 	}
 
+	function booleanValue( value ) {
+		if ( true === value || 1 === value ) { return true; }
+		if ( false === value || 0 === value || value === null || value === undefined ) { return false; }
+		const normalized = String( value ).trim().toLowerCase();
+		return '1' === normalized || 'true' === normalized;
+	}
+
 	function normalizePickupPoint( point ) {
 		point = point || {};
 		const lat = point.lat !== null && point.lat !== undefined ? parseFloat( point.lat ) : null;
@@ -1209,6 +1216,10 @@
 		const terminalCode = String( point.terminal_code || point.terminalCode || point.delivery_point || '' );
 		const pointCode = String( point.point_code || terminalCode || '' );
 		const address = String( point.point_address || point.address || point.full_address || '' );
+		const snapshot = point.snapshot || {};
+		const requiresRateRefresh = Object.prototype.hasOwnProperty.call( point, 'requires_rate_refresh' )
+			? booleanValue( point.requires_rate_refresh )
+			: booleanValue( snapshot.requires_rate_refresh );
 		return {
 			id: String( point.id || pointCode || postcode || address || '' ),
 			carrier_key: String( point.carrier_key || point.carrier || '' ),
@@ -1249,7 +1260,8 @@
 			cdek_note: String( point.cdek_note || '' ),
 			dpd_source: String( point.dpd_source || point.source || '' ),
 			operator_id: String( point.operator_id || '' ),
-			snapshot: point.snapshot || {},
+			requires_rate_refresh: requiresRateRefresh,
+			snapshot: snapshot,
 			point_raw: point
 		};
 	}
