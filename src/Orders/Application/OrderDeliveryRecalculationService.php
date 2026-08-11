@@ -31,11 +31,12 @@ final class OrderDeliveryRecalculationService {
 	public function preview( object $order, ?array $selected_location = null, array $selected_pickup_point = array() ): array {
 		$request = $this->mapper->map( $order, $selected_location, $selected_pickup_point );
 		$result  = $this->orchestrator->calculate( $request, array(), RateSorter::CHEAPEST, true );
+		$rates = $this->normalize_rates( $result->rates );
 
 		return array(
 			'success' => true,
 			'message' => '',
-			'rates'   => $this->normalize_rates( $result->rates ),
+			'rates'   => $rates,
 			'request' => $request->to_array(),
 			'location' => $this->location_payload_from_request( $request->to_array() ),
 		);

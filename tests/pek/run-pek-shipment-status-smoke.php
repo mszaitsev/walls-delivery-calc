@@ -88,6 +88,9 @@ $mapping->save_mapping( PekStatusMapping::default_mapping() );
 
 $service = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentStatusService.php' ) ?: '';
 $normalizer_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentStatusResponseNormalizer.php' ) ?: '';
+$adapter_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Pek/PekShipmentAdapter.php' ) ?: '';
+$metabox_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' ) ?: '';
+$ajax_payload_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/Ajax/ShipmentAdminCarrierUiPayloadBuilder.php' ) ?: '';
 pek_status_assert( str_contains( $service, 'cargo_status' ), 'Expanded /cargos/status/ must be primary.' );
 pek_status_assert( str_contains( $service, 'cargo_basic_status' ), 'Basic status fallback must exist.' );
 pek_status_assert( str_contains( $normalizer_source, 'pek_cargos_status_services_sum' ), 'Actual cost must use services.sum source detail.' );
@@ -97,6 +100,9 @@ pek_status_assert( str_contains( $normalizer_source, 'createFromFormat' ) && str
 pek_status_assert( str_contains( $normalizer_source, 'add_if_present' ) && str_contains( $normalizer_source, 'array_key_exists' ), 'Optional status fields must be presence-aware.' );
 pek_status_assert( str_contains( $normalizer_source, "1 !== count( \$response['cargos'] )" ), 'Status response must require exactly one cargo row.' );
 pek_status_assert( str_contains( $service, 'PekShipmentStatusResponseNormalizer $normalizer' ), 'Status normalizer must be a required DI dependency.' );
+pek_status_assert( str_contains( $adapter_source, '$carrier_status = trim( (string) ( $shipment[\'pek_cargo_status\'] ?? $shipment[\'status_title\'] ?? \'\' ) );' ) && str_contains( $adapter_source, "'carrier_status_title' => \$carrier_status" ) && str_contains( $adapter_source, "'external_status' => \$carrier_status" ), 'PEK adapter must project raw PEK status into the generic carrier_status_title contract.' );
+pek_status_assert( str_contains( $metabox_source, "\$status['carrier_status_title'] ?? ''" ), 'Initial shipment metabox render must read generic carrier_status_title.' );
+pek_status_assert( str_contains( $ajax_payload_source, 'status_payload( $order, $shipment )' ), 'AJAX carrier UI payload must use adapter status_payload contract.' );
 
 $normalizer = new PekShipmentStatusResponseNormalizer();
 $valid = array(

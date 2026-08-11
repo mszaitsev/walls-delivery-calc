@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
@@ -34,7 +35,8 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		private PekCheckoutQuoteContextResolver $context_resolver,
 		private PekQuoteService $quotes,
 		private PekQuotePlannedDateTimeResolver $planned_datetime,
-		private Logger $logger
+		private Logger $logger,
+		private PekCountryPolicy $countries
 	) {
 	}
 
@@ -49,12 +51,12 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			supports_status_sync: false,
 			supports_courier_delivery: true,
 			supports_pickup_delivery: true,
-			supports_international: false
+			supports_international: true
 		);
 	}
 
 	public function supports_country( string $countryCode ): bool {
-		return 'RU' === strtoupper( trim( $countryCode ) ) && $this->credentials->is_complete();
+		return $this->countries->supports_receiver_country( $countryCode ) && $this->credentials->is_complete();
 	}
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {
@@ -67,9 +69,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			return $this->empty_quote(
 				$request,
 				(string) ( $exception->context()['error_code'] ?? 'pek_checkout_context_unavailable' ),
-				array(
-					'failure_stage' => (string) ( $exception->context()['failure_stage'] ?? 'checkout_context' ),
-				)
+				$this->safe_checkout_exception_context( $exception )
 			);
 		}
 
@@ -94,10 +94,15 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			array() === $rates ? 'Расчёт ПЭК временно недоступен.' : '',
 			false,
 			'api',
-			array(
-				'modes' => $outcomes,
-				'location_id' => (int) ( $context['location_id'] ?? 0 ),
-				'destination_fingerprint' => (string) ( $context['destination_fingerprint'] ?? '' ),
+			array_merge(
+				array(
+					'modes' => $outcomes,
+					'country_code' => strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ),
+					'direction_supported' => true,
+					'location_id' => (int) ( $context['location_id'] ?? 0 ),
+					'destination_fingerprint' => (string) ( $context['destination_fingerprint'] ?? '' ),
+				),
+				$this->safe_location_mapping_context( $context )
 			)
 		);
 	}
@@ -119,6 +124,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 
 		return array(
 			'pek_selected_terminal_code' => (string) ( $selection['point_code'] ?? '' ),
+			'pek_destination_country' => strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ),
 			'pek_selection_provider_destination_fingerprint' => (string) ( $selection['provider_destination_fingerprint'] ?? $selection_snapshot['provider_destination_fingerprint'] ?? '' ),
 			'pek_selection_destination_fingerprint' => (string) ( $selection['destination_fingerprint'] ?? $selection_snapshot['destination_fingerprint'] ?? '' ),
 			'pek_courier_address_scope' => '' !== $full_address ? 'full_address' : 'location',
@@ -407,10 +413,71 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 		), JSON_UNESCAPED_UNICODE ) ?: '' );
 	}
 
+	/** @param array<string,mixed> $context @return array<string,mixed> */
+	private function safe_location_mapping_context( array $context ): array {
+		$diagnostic = is_array( $context['location_mapping_diagnostic'] ?? null ) ? $context['location_mapping_diagnostic'] : array();
+		if ( array() === $diagnostic ) {
+			return array();
+		}
+		$result = array();
+		foreach ( array( 'mapping_state', 'resolution_method', 'precision' ) as $key ) {
+			if ( is_scalar( $diagnostic[ $key ] ?? null ) ) {
+				$result[ 'location_' . $key ] = (string) $diagnostic[ $key ];
+			}
+		}
+		foreach ( array( 'cache_hit', 'stale_fallback' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostic ) ) {
+				$result[ 'location_mapping_' . $key ] = ! empty( $diagnostic[ $key ] );
+			}
+		}
+		if ( is_array( $diagnostic['mapping_diagnostic'] ?? null ) ) {
+			$mapping_diagnostic = array();
+			foreach ( array( 'code', 'message', 'expected_country', 'actual_country', 'precision', 'state' ) as $key ) {
+				if ( is_scalar( $diagnostic['mapping_diagnostic'][ $key ] ?? null ) ) {
+					$mapping_diagnostic[ $key ] = (string) $diagnostic['mapping_diagnostic'][ $key ];
+				}
+			}
+			if ( array() !== $mapping_diagnostic ) {
+				$result['location_mapping_diagnostic'] = $mapping_diagnostic;
+			}
+		}
+
+		return $result;
+	}
+
 	/** @param array<string,mixed> $diagnostics */
 	private function empty_quote( QuoteRequest $request, string $reason, array $diagnostics ): DeliveryQuote {
 		$this->logger->warning( 'PEK checkout quote returned empty.', array_merge( array( 'carrier' => self::KEY, 'reason' => $reason ), $diagnostics ) );
 
 		return new DeliveryQuote( self::KEY . ':' . sha1( $reason . '|' . $request->calculation_date ), self::KEY, $request->destination, $request->package, array(), false, $reason, 'Расчёт ПЭК временно недоступен.', false, 'api', array_merge( array( 'fallback_reason' => $reason ), $diagnostics ) );
+	}
+
+	/** @return array<string,mixed> */
+	private function safe_checkout_exception_context( PekApiException $exception ): array {
+		$context = $exception->context();
+		$result = array( 'failure_stage' => (string) ( $context['failure_stage'] ?? 'checkout_context' ) );
+		foreach ( array( 'location_id', 'country_code', 'mapping_state', 'resolution_method', 'precision' ) as $key ) {
+			if ( is_scalar( $context[ $key ] ?? null ) ) {
+				$result[ $key ] = $context[ $key ];
+			}
+		}
+		foreach ( array( 'cache_hit', 'stale_fallback' ) as $key ) {
+			if ( array_key_exists( $key, $context ) ) {
+				$result[ $key ] = ! empty( $context[ $key ] );
+			}
+		}
+		if ( is_array( $context['mapping_diagnostic'] ?? null ) ) {
+			$diagnostic = array();
+			foreach ( array( 'code', 'message', 'expected_country', 'actual_country', 'precision', 'state' ) as $key ) {
+				if ( is_scalar( $context['mapping_diagnostic'][ $key ] ?? null ) ) {
+					$diagnostic[ $key ] = (string) $context['mapping_diagnostic'][ $key ];
+				}
+			}
+			if ( array() !== $diagnostic ) {
+				$result['mapping_diagnostic'] = $diagnostic;
+			}
+		}
+
+		return $result;
 	}
 }

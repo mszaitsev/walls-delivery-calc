@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Carriers\Pek\Checkout;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteOptions;
@@ -29,7 +30,8 @@ final class PekCheckoutQuoteContextResolver {
 		private PekAddressBuilder $address_builder,
 		private CarrierPickupPointProviderRegistry $pickup_providers,
 		private PekQuotePlannedDateTimeResolver $planned_datetime,
-		private PekCheckoutPickupPointFormatter $formatter
+		private PekCheckoutPickupPointFormatter $formatter,
+		private PekCountryPolicy $countries
 	) {
 	}
 
@@ -40,13 +42,11 @@ final class PekCheckoutQuoteContextResolver {
 		if ( ! $location instanceof Location || ! $location->active ) {
 			throw new PekApiException( 'Для расчёта ПЭК выберите населённый пункт.', array( 'error_code' => 'pek_checkout_location_missing', 'failure_stage' => 'checkout_context' ) );
 		}
-		if ( 'RU' !== strtoupper( trim( $request->country_code ?: $location->country_code ) ) || 'RU' !== strtoupper( trim( $location->country_code ) ) ) {
-			throw new PekApiException( 'ПЭК checkout runtime поддерживает только RU.', array( 'error_code' => 'pek_checkout_country_not_supported', 'failure_stage' => 'checkout_context' ) );
+		$receiver_country = strtoupper( trim( $request->country_code ?: $location->country_code ) );
+		if ( ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $receiver_country ) || $receiver_country !== strtoupper( trim( $location->country_code ) ) ) {
+			throw new PekApiException( 'ПЭК не поддерживает выбранное направление.', array( 'error_code' => 'pek_checkout_country_not_supported', 'failure_stage' => 'checkout_context', 'country_code' => $receiver_country, 'direction_supported' => false ) );
 		}
 		$mapping = $this->location_resolver->resolve( $location_id );
-		if ( ! in_array( (string) ( $mapping['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true ) ) {
-			throw new PekApiException( 'ПЭК не подтвердил направление доставки.', array( 'error_code' => 'pek_checkout_location_unresolved', 'failure_stage' => 'checkout_context' ) );
-		}
 		$fingerprint = $this->destination_fingerprint( $location, $mapping );
 		$query = $this->pickup_query( $request, $location, $mapping, $fingerprint );
 		$selection = $this->trusted_selection( $request, $fingerprint );
@@ -69,8 +69,10 @@ final class PekCheckoutQuoteContextResolver {
 
 		return array(
 			'location' => $location,
+			'country_code' => $receiver_country,
 			'location_id' => $location_id,
 			'location_mapping' => $mapping,
+			'location_mapping_diagnostic' => $this->safe_mapping_diagnostic( $mapping ),
 			'destination_fingerprint' => $fingerprint,
 			'pickup_query' => $query,
 			'pickup_provider_query' => $this->safe_query_snapshot( $query, $fingerprint ),
@@ -134,14 +136,37 @@ final class PekCheckoutQuoteContextResolver {
 	}
 
 	public function query_from_snapshot( array $snapshot ): ?CarrierPickupPointQuery {
+		$location_id = (int) ( $snapshot['location_id'] ?? 0 );
+		if ( $location_id <= 0 ) {
+			return null;
+		}
+		$location = $this->locations->find_by_id( $location_id );
+		if ( ! $location instanceof Location || ! $location->active ) {
+			return null;
+		}
+		$country_code = strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) );
+		$canonical_country = strtoupper( trim( $location->country_code ) );
+		if (
+			'' === $country_code
+			|| $country_code !== $canonical_country
+			|| ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $country_code )
+		) {
+			return null;
+		}
+		if ( ! $this->valid_snapshot_coordinates( $snapshot ) ) {
+			return null;
+		}
 		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
+		$coordinates = $location->has_coordinates()
+			? array( 'latitude' => $location->latitude, 'longitude' => $location->longitude )
+			: array( 'latitude' => null, 'longitude' => null );
 		$query = new CarrierPickupPointQuery(
 			PekSettings::CARRIER_KEY,
-			(int) ( $snapshot['location_id'] ?? 0 ),
-			(string) ( $snapshot['country_code'] ?? 'RU' ),
-			'',
-			is_numeric( $snapshot['latitude'] ?? null ) ? (float) $snapshot['latitude'] : null,
-			is_numeric( $snapshot['longitude'] ?? null ) ? (float) $snapshot['longitude'] : null,
+			$location_id,
+			$country_code,
+			$this->address_builder->build( $location ),
+			$coordinates['latitude'],
+			$coordinates['longitude'],
 			new PickupCargoConstraints(
 				(int) ( $cargo['weight_g'] ?? 0 ),
 				(int) ( $cargo['volume_cm3'] ?? 0 ),
@@ -158,12 +183,68 @@ final class PekCheckoutQuoteContextResolver {
 	}
 
 	/** @param array<string,mixed> $snapshot */
+	private function valid_snapshot_coordinates( array $snapshot ): bool {
+		$latitude = $snapshot['latitude'] ?? null;
+		$longitude = $snapshot['longitude'] ?? null;
+		if ( null === $latitude && null === $longitude ) {
+			return true;
+		}
+		if ( null === $latitude || null === $longitude || ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return false;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+
+		return is_finite( $latitude )
+			&& is_finite( $longitude )
+			&& $latitude >= -90
+			&& $latitude <= 90
+			&& $longitude >= -180
+			&& $longitude <= 180;
+	}
+
+	/** @param array<string,mixed> $snapshot */
 	public function destination_fingerprint_from_snapshot( array $snapshot ): string {
 		return (string) ( $snapshot['destination_fingerprint'] ?? '' );
 	}
 
 	private function looks_like_provider_fingerprint( string $value ): bool {
 		return 64 === strlen( $value ) && ctype_xdigit( $value );
+	}
+
+	/** @param array<string,mixed> $mapping @return array<string,mixed> */
+	private function safe_mapping_diagnostic( array $mapping ): array {
+		$diagnostic = array();
+		$raw = trim( (string) ( $mapping['safe_diagnostic_json'] ?? '' ) );
+		if ( '' !== $raw ) {
+			$decoded = json_decode( $raw, true );
+			if ( is_array( $decoded ) && ! array_is_list( $decoded ) ) {
+				foreach ( array( 'code', 'message', 'expected_country', 'actual_country', 'precision', 'state' ) as $key ) {
+					if ( is_scalar( $decoded[ $key ] ?? null ) ) {
+						$value = $this->safe_diagnostic_text( (string) $decoded[ $key ] );
+						if ( '' !== $value ) {
+							$diagnostic[ $key ] = $value;
+						}
+					}
+				}
+			}
+		}
+
+		return array(
+			'mapping_state' => (string) ( $mapping['mapping_state'] ?? '' ),
+			'resolution_method' => (string) ( $mapping['resolution_method'] ?? '' ),
+			'precision' => (string) ( $mapping['precision'] ?? '' ),
+			'cache_hit' => ! empty( $mapping['cache_hit'] ),
+			'stale_fallback' => ! empty( $mapping['stale_fallback'] ),
+			'mapping_diagnostic' => $diagnostic,
+		);
+	}
+
+	private function safe_diagnostic_text( string $value ): string {
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', $value ) ?? '';
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? '' );
+
+		return substr( $value, 0, 160 );
 	}
 
 	/** @param array<string,mixed> $selection @return array<string,mixed> */
@@ -199,7 +280,7 @@ final class PekCheckoutQuoteContextResolver {
 				)
 			);
 		}
-		$main = trim( (string) ( $mapping['main_warehouse_id'] ?? '' ) );
+		$main = $this->usable_mapping_for_quote( $mapping ) ? trim( (string) ( $mapping['main_warehouse_id'] ?? '' ) ) : '';
 		$chosen = null;
 		if ( '' !== $main ) {
 			foreach ( $points as $point ) {
@@ -238,15 +319,11 @@ final class PekCheckoutQuoteContextResolver {
 				'address_fingerprint' => hash( 'sha256', $full ),
 			);
 		}
-		$address = trim( (string) ( $mapping['normalized_address'] ?? '' ) );
-		if ( '' === $address ) {
-			$address = $this->address_builder->build( $location );
-		}
-		$lat = is_numeric( $mapping['latitude'] ?? null ) ? (float) $mapping['latitude'] : null;
-		$lng = is_numeric( $mapping['longitude'] ?? null ) ? (float) $mapping['longitude'] : null;
+		$address = $this->quote_address( $location, $mapping );
+		$coordinates = $this->quote_coordinates( $location, $mapping );
 
 		return array(
-			'options' => new PekQuoteOptions( PekQuoteOptions::MODE_COURIER, $planned, '', $address, $lat, $lng ),
+			'options' => new PekQuoteOptions( PekQuoteOptions::MODE_COURIER, $planned, '', $address, $coordinates['latitude'], $coordinates['longitude'] ),
 			'scope' => 'location',
 			'address_fingerprint' => hash( 'sha256', $address ),
 		);
@@ -265,13 +342,14 @@ final class PekCheckoutQuoteContextResolver {
 
 	private function pickup_query( QuoteRequest $request, Location $location, array $mapping, string $fingerprint ): CarrierPickupPointQuery {
 		unset( $fingerprint );
+		$coordinates = $this->quote_coordinates( $location, $mapping );
 		return new CarrierPickupPointQuery(
 			PekSettings::CARRIER_KEY,
 			(int) $location->id,
-			'RU',
-			(string) ( $mapping['normalized_address'] ?? $this->address_builder->build( $location ) ),
-			is_numeric( $mapping['latitude'] ?? null ) ? (float) $mapping['latitude'] : null,
-			is_numeric( $mapping['longitude'] ?? null ) ? (float) $mapping['longitude'] : null,
+			strtoupper( trim( $location->country_code ) ),
+			$this->quote_address( $location, $mapping ),
+			$coordinates['latitude'],
+			$coordinates['longitude'],
 			$this->cargo_constraints( $request->package ),
 			CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
 			$this->settings->pek_destination_terminal_search_radius(),
@@ -285,6 +363,39 @@ final class PekCheckoutQuoteContextResolver {
 		$max_dimension = max( 0, (int) ( $package->length_cm ?? 0 ), (int) ( $package->width_cm ?? 0 ), (int) ( $package->height_cm ?? 0 ) );
 
 		return new PickupCargoConstraints( $weight, $volume, $max_dimension, $weight, 1 );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function usable_mapping_for_quote( array $mapping ): bool {
+		return in_array( (string) ( $mapping['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function quote_address( Location $location, array $mapping ): string {
+		if ( $this->usable_mapping_for_quote( $mapping ) ) {
+			$address = trim( (string) ( $mapping['normalized_address'] ?? '' ) );
+			if ( '' !== $address ) {
+				return $address;
+			}
+		}
+
+		return $this->address_builder->build( $location );
+	}
+
+	/** @param array<string,mixed> $mapping @return array{latitude:?float,longitude:?float} */
+	private function quote_coordinates( Location $location, array $mapping ): array {
+		if (
+			$this->usable_mapping_for_quote( $mapping )
+			&& is_numeric( $mapping['latitude'] ?? null )
+			&& is_numeric( $mapping['longitude'] ?? null )
+		) {
+			return array( 'latitude' => (float) $mapping['latitude'], 'longitude' => (float) $mapping['longitude'] );
+		}
+		if ( $location->has_coordinates() ) {
+			return array( 'latitude' => $location->latitude, 'longitude' => $location->longitude );
+		}
+
+		return array( 'latitude' => null, 'longitude' => null );
 	}
 
 	private function destination_fingerprint( Location $location, array $mapping ): string {
@@ -303,7 +414,7 @@ final class PekCheckoutQuoteContextResolver {
 		$house = trim( $destination->house );
 		if ( '' !== $street && '' !== $house ) {
 			return trim( implode( ', ', array_filter( array(
-				'Россия',
+				$this->country_name( $destination->country_code ),
 				$destination->region_name,
 				$destination->city ?: $destination->settlement,
 				$street,
@@ -313,6 +424,16 @@ final class PekCheckoutQuoteContextResolver {
 		}
 		$raw = trim( $destination->raw_address );
 		return strlen( $raw ) >= 12 ? $raw : '';
+	}
+
+	private function country_name( string $country_code ): string {
+		return array(
+			'RU' => 'Россия',
+			'AM' => 'Армения',
+			'BY' => 'Беларусь',
+			'KG' => 'Кыргызстан',
+			'KZ' => 'Казахстан',
+		)[ strtoupper( trim( $country_code ) ) ] ?? strtoupper( trim( $country_code ) );
 	}
 
 	/** @return array<string,mixed> */

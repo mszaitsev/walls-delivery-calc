@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
@@ -21,6 +22,7 @@ final class PekShipmentService {
 		private ShipmentActualCostService $actual_costs,
 		private PekStatusMapping $mapping,
 		private PekManualAttachContextResolver $manual_contexts,
+		private PekCountryPolicy $countries,
 		private ShipmentCreationAttemptService $attempts
 	) {
 	}
@@ -43,6 +45,8 @@ final class PekShipmentService {
 					'service_key' => (string) $context['service_key'],
 					'service_title' => (string) $context['service_title'],
 					'order_id' => (int) $context['order_id'],
+					'sender_country_code' => (string) $context['sender_country_code'],
+					'receiver_country_code' => (string) $context['receiver_country_code'],
 					'creation_attempt_id' => (string) $context['creation_attempt_id'],
 					'creation_attempt_generation' => (int) $context['creation_attempt_generation'],
 					'delivery_type' => (string) $context['delivery_type'],
@@ -92,9 +96,7 @@ final class PekShipmentService {
 				unset( $shipment['response_snapshot']['error_code'], $shipment['response_snapshot']['failure_stage'] );
 			}
 			$this->repository->save_for_carrier( $order, PekSettings::CARRIER_KEY, $shipment );
-			if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
-				$this->attempts->mark_active_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment );
-			}
+			$this->attempts->mark_active_for_shipment( $order, PekSettings::CARRIER_KEY, $shipment );
 			if ( $actual instanceof ShipmentActualCost ) {
 				$shipment = $this->actual_costs->apply_carrier_cost( $order, PekSettings::CARRIER_KEY, $actual );
 			}
@@ -111,6 +113,13 @@ final class PekShipmentService {
 	/** @return array<string,mixed> */
 	public function cancel_in_carrier( object $order ): array {
 		$shipment = $this->repository->find_by_carrier( $order, PekSettings::CARRIER_KEY );
+		$receiver_country = $this->receiver_country_for_cancellation( $shipment );
+		if ( '' === $receiver_country || ! $this->countries->allows_manual_attach( $receiver_country ) ) {
+			return array( 'success' => false, 'message' => 'Не удалось подтвердить страну получателя ПЭК для отмены.' );
+		}
+		if ( ! $this->countries->allows_automatic_shipment_create( $this->countries->sender_country(), $receiver_country ) ) {
+			return array( 'success' => false, 'message' => 'Международные отправления ПЭК отменяются вручную в кабинете ПЭК.' );
+		}
 		$code = $this->tracking_identifier( $shipment );
 		if ( '' === $code ) {
 			return array( 'success' => false, 'message' => 'Не указан код груза ПЭК.' );
@@ -184,6 +193,24 @@ final class PekShipmentService {
 	/** @param array<string,mixed> $shipment */
 	private function tracking_identifier( array $shipment ): string {
 		return trim( (string) ( $shipment['pek_cargo_code'] ?? $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function receiver_country_for_cancellation( array $shipment ): string {
+		foreach ( array(
+			$shipment['receiver_country_code'] ?? null,
+			$shipment['recipient_country_code'] ?? null,
+			$shipment['request_summary']['receiver_country_code'] ?? null,
+			$shipment['request_snapshot']['meta']['receiver_country_code'] ?? null,
+			$shipment['request_snapshot']['recipient_address']['country_code'] ?? null,
+		) as $candidate ) {
+			$country = strtoupper( trim( (string) $candidate ) );
+			if ( preg_match( '/^[A-Z]{2}$/', $country ) ) {
+				return $country;
+			}
+		}
+
+		return '';
 	}
 
 	/** @param array<string,mixed> $shipment */

@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Carriers\Pek\Quote;
 use DateTimeImmutable;
 use DateTimeZone;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 
@@ -14,14 +15,16 @@ defined( 'ABSPATH' ) || exit;
 final class PekQuoteRequestBuilder {
 	public function __construct(
 		private PekSettings $settings,
-		private PekQuoteCargoBuilder $cargo_builder
+		private PekQuoteCargoBuilder $cargo_builder,
+		private PekCountryPolicy $countries
 	) {
 	}
 
 	/** @return array<string,mixed> */
 	public function build( QuoteRequest $request, PekQuoteOptions $options ): array {
-		if ( 'RU' !== strtoupper( trim( $request->country_code ) ) ) {
-			throw new PekApiException( 'Расчёт ПЭК на этом этапе поддерживает только RU → RU.', array( 'error_code' => 'pek_quote_country_not_supported', 'failure_stage' => 'quote_calculator_contract' ) );
+		$receiver_country = strtoupper( trim( $request->country_code ?: $request->destination->country_code ) );
+		if ( ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $receiver_country ) ) {
+			throw new PekApiException( 'Расчёт ПЭК не поддерживает выбранное направление.', array( 'error_code' => 'pek_quote_country_not_supported', 'failure_stage' => 'quote_calculator_contract', 'country_code' => $receiver_country, 'direction_supported' => false ) );
 		}
 
 		$sender = $this->sender_warehouse();

@@ -68,18 +68,10 @@ final class PekTerminalService {
 			);
 			throw $exception;
 		}
-		if ( 'unsupported' === (string) ( $mapping['mapping_state'] ?? '' ) ) {
-			$this->last_report = array(
-				'success' => false,
-				'error_code' => 'pek_destination_location_unsupported',
-				'failure_stage' => 'location_resolution',
-				'mapping' => $mapping,
-				'message' => 'PEK location is unsupported.',
-			);
-			return array();
-		}
 		$mapping_country = strtoupper( trim( (string) ( $mapping['country_code'] ?? '' ) ) );
-		if ( $query->normalized_country_code() !== $mapping_country ) {
+		$query_country = $query->normalized_country_code();
+		$mapping_usable_state = $this->usable_mapping_for_terminal_search( $mapping );
+		if ( $mapping_usable_state && $query_country !== $mapping_country ) {
 			$this->last_report = array(
 				'success' => false,
 				'error_code' => 'pek_destination_country_mismatch',
@@ -89,23 +81,36 @@ final class PekTerminalService {
 			);
 			return array();
 		}
+		$mapping_usable = $mapping_usable_state && $query_country === $mapping_country;
+		$terminal_mapping = array_merge(
+			$mapping,
+			array(
+				'country_code' => $query_country,
+				'terminal_search_authority' => $mapping_usable ? 'mapping' : 'canonical_query',
+			)
+		);
 		$converted = $this->converter->convert( $query->cargo );
-		$has_destination_coordinates = $this->has_usable_mapping_coordinates( $mapping );
-		$address = trim( (string) ( $mapping['normalized_address'] ?? '' ) );
+		$has_destination_coordinates = $mapping_usable && $this->has_usable_mapping_coordinates( $mapping );
+		$address = $mapping_usable ? trim( (string) ( $mapping['normalized_address'] ?? '' ) ) : '';
+		if ( '' === $address ) {
+			$address = trim( $query->fallback_address );
+		}
 		if ( '' === $address ) {
 			$this->last_report = array(
 				'success' => false,
 				'error_code' => 'pek_destination_address_missing',
 				'failure_stage' => 'destination_terminal_request',
-				'mapping' => $mapping,
+				'mapping' => $terminal_mapping,
 				'message' => 'PEK destination mapping has no usable destination address.',
 			);
 			return array();
 		}
+		$latitude = $mapping_usable ? ( $has_destination_coordinates ? (float) $mapping['latitude'] : null ) : $query->latitude;
+		$longitude = $mapping_usable ? ( $has_destination_coordinates ? (float) $mapping['longitude'] : null ) : $query->longitude;
 		$request = new PekDestinationTerminalRequest(
 			$address,
-			$has_destination_coordinates ? (float) $mapping['latitude'] : null,
-			$has_destination_coordinates ? (float) $mapping['longitude'] : null,
+			$latitude,
+			$longitude,
 			$converted['weight_kg'],
 			$converted['volume_m3'],
 			$converted['max_dimension_m'],
@@ -115,11 +120,11 @@ final class PekTerminalService {
 			max( 1, min( 100, $query->limit ) )
 		);
 		$request_payload = $request->to_payload();
-		$fingerprint = $this->cache->fingerprint( array( 'endpoint' => '/branches/nearestdepartments/', 'method' => 'POST', 'mapping' => $mapping['address_fingerprint'] ?? '', 'country_code' => $mapping_country, 'payload' => $request_payload ) );
+		$fingerprint = $this->cache->fingerprint( array( 'endpoint' => '/branches/nearestdepartments/', 'method' => 'POST', 'mapping' => $mapping['address_fingerprint'] ?? '', 'country_code' => $query_country, 'payload' => $request_payload ) );
 		if ( $use_cache ) {
 			$cached = $this->cache->get( $fingerprint );
 			if ( $cached['hit'] ) {
-				$this->last_report = array_merge( $cached['metadata'], array( 'success' => true, 'error_code' => '', 'api_source' => 'cache', 'cache_hit' => true, 'mapping' => $mapping, 'total_returned' => count( $cached['points'] ) ) );
+				$this->last_report = array_merge( $cached['metadata'], array( 'success' => true, 'error_code' => '', 'api_source' => 'cache', 'cache_hit' => true, 'mapping' => $terminal_mapping, 'total_returned' => count( $cached['points'] ) ) );
 				return $cached['points'];
 			}
 		}
@@ -129,7 +134,7 @@ final class PekTerminalService {
 			'api_source' => 'api',
 			'cache_hit' => false,
 			'query_fingerprint' => $fingerprint,
-			'mapping' => $mapping,
+			'mapping' => $terminal_mapping,
 			'total_returned' => 0,
 			'free_count' => 0,
 			'paid_count' => 0,
@@ -145,7 +150,7 @@ final class PekTerminalService {
 		);
 		try {
 			$response = $this->api->destination_nearest_departments( $request );
-			$result = $this->normalize_response( $response, $query, $mapping );
+			$result = $this->normalize_response( $response, $query, $terminal_mapping );
 		} catch ( PekApiException $exception ) {
 			$context = $exception->context();
 			$this->last_report = array_merge(
@@ -175,7 +180,7 @@ final class PekTerminalService {
 			'api_source' => 'api',
 			'cache_hit' => false,
 			'query_fingerprint' => $fingerprint,
-			'mapping' => $mapping,
+			'mapping' => $terminal_mapping,
 			'total_returned' => count( $result['points'] ),
 			'free_count' => $result['free_count'],
 			'paid_count' => $result['paid_count'],
@@ -277,6 +282,11 @@ final class PekTerminalService {
 		}
 
 		return array_merge( array( 'points' => $points, 'terminal_rows' => $terminal_rows ), $report );
+	}
+
+	/** @param array<string,mixed> $mapping */
+	private function usable_mapping_for_terminal_search( array $mapping ): bool {
+		return in_array( (string) ( $mapping['mapping_state'] ?? '' ), array( 'resolved', 'near' ), true );
 	}
 
 	/** @return array<string,int> */

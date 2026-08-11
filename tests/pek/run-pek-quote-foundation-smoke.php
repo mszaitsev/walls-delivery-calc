@@ -144,7 +144,7 @@ function pek_quote_boot( array $responses, array $sensitive = array(), bool $wit
 	$repository->set( PekSettings::SENDER_WAREHOUSE_KEY, array( 'warehouseId' => 'sender-wh', 'source' => 'free', 'branchTimezone' => 'UTC' ) );
 	$http = new PekQuoteFakeHttp( $responses );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
-	$builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
+	$builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder(), new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 	$service = new PekQuoteService( $credentials, $api, $builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), $with_logger ? new Logger() : null );
 
 	return array( $settings, $http, $builder, $service );
@@ -280,9 +280,9 @@ pek_quote_assert( 'Россия, Москва, улица Большая Луб�
 pek_quote_assert( 0.01 === $courier_payload['cargos'][0]['weight'] && 0.01 === $courier_payload['cargos'][0]['volume'] && 0.25 === $courier_payload['cargos'][0]['maxSize'], 'PEK volume/maxSize path must round upward to hundredths.' );
 
 list( $settings3, $http3, $builder3, $service3 ) = pek_quote_boot( array() );
-$bad_country = new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы', raw_address: 'Алматы' ), pek_quote_request()->package, '', Money::from_rubles( 1 ), '2026-08-04' );
+$bad_country = new QuoteRequest( 'UZ', new Address( country_code: 'UZ', city: 'Ташкент', raw_address: 'Узбекистан, Ташкент' ), pek_quote_request()->package, '', Money::from_rubles( 1 ), '2026-08-04' );
 $country_result = $service3->calculate( $bad_country, $pickup );
-pek_quote_assert( ! $country_result->success && 'pek_quote_country_not_supported' === $country_result->error_code && array() === $http3->requests, 'Non-RU PEK quote must fail closed before API call.' );
+pek_quote_assert( ! $country_result->success && 'pek_quote_country_not_supported' === $country_result->error_code && array() === $http3->requests, 'Unsupported PEK quote direction must fail closed before API call.' );
 
 list( $settings_root, $http_root, $builder_root, $service_root ) = pek_quote_boot( array( pek_quote_response( array( 'hasError' => true, 'errorMessage' => 'Ошибка расчёта' ) ) ) );
 $root_error = $service_root->calculate( pek_quote_request(), $pickup );

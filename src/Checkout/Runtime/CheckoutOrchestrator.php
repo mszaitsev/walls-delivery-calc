@@ -185,7 +185,8 @@ final class CheckoutOrchestrator {
 		}
 
 		foreach ( $services as $service ) {
-			if ( ! $this->service_manager->service_available_for_country( $service, $country_code ) ) {
+			$country_enabled = $this->service_manager->service_available_for_country( $service, $country_code );
+			if ( ! $country_enabled ) {
 				continue;
 			}
 			$carrier = $this->service_registry->carrier_for( $service );

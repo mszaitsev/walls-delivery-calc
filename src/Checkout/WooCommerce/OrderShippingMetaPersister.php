@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder;
 
 defined( 'ABSPATH' ) || exit;
@@ -18,7 +19,8 @@ final class OrderShippingMetaPersister {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
 		private DeliveryDateFormatter $date_formatter,
-		private DeliveryCalculationDataBuilder $calculation_data_builder
+		private DeliveryCalculationDataBuilder $calculation_data_builder,
+		private ?LocationRepository $locations = null
 	) {
 	}
 
@@ -87,6 +89,10 @@ final class OrderShippingMetaPersister {
 		}
 
 		$map = array_merge( $map, $dadata_meta, $this->compatible_dadata_meta( $data ), $location_meta );
+		$trusted_location_id = $this->trusted_location_id_for_rate( $rate, $data );
+		if ( $trusted_location_id > 0 ) {
+			$map['_wdc_platform_location_id'] = $trusted_location_id;
+		}
 
 		$pickup = $this->pickup_selection_for_rate( $rate );
 		if (
@@ -258,10 +264,11 @@ final class OrderShippingMetaPersister {
 			array(
 				'country_code'      => (string) ( $country['country_code'] ?? '' ),
 				'country_name'      => (string) ( $country['country_name'] ?? '' ),
+				'location_id'       => $this->positive_int( $order_meta['_wdc_platform_location_id'] ?? null ),
 				'city_display_name' => (string) ( $order_meta['_wdc_platform_city_display_name'] ?? '' ),
 				'fias_id'           => (string) ( $order_meta['_wdc_platform_fias_id'] ?? $order_meta['_wdc_platform_city_fias_id'] ?? '' ),
 			),
-			static fn ( mixed $value ): bool => '' !== $value
+			static fn ( mixed $value ): bool => '' !== $value && 0 !== $value
 		);
 	}
 
@@ -607,17 +614,20 @@ final class OrderShippingMetaPersister {
 	 * @return array<string,mixed>
 	 */
 	private function location_meta_from_checkout_data( array $data ): array {
+		if ( ! $this->local_location_country_supported( $data ) ) {
+			return array();
+		}
 		$fias_id = $this->checkout_string( $data, 'wdc_platform_location_fias_id' );
 		if ( '' === $fias_id ) {
 			return array();
 		}
-		if ( ! $this->local_location_country_supported( $data ) ) {
-			return array();
-		}
 
-		return array(
-			'_wdc_platform_location_fias_id'     => $fias_id,
-			'_wdc_platform_location_display_name' => $this->checkout_string( $data, 'wdc_platform_location_display_name' ),
+		return array_filter(
+			array(
+				'_wdc_platform_location_fias_id'  => $fias_id,
+				'_wdc_platform_location_display_name' => $this->checkout_string( $data, 'wdc_platform_location_display_name' ),
+			),
+			static fn( mixed $value ): bool => '' !== $value && 0 !== $value
 		);
 	}
 
@@ -757,6 +767,75 @@ final class OrderShippingMetaPersister {
 		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
 
 		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( $value );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $checkout_data
+	 */
+	private function trusted_location_id_for_rate( array $rate, array $checkout_data ): int {
+		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		$session_id = $this->positive_int_from_context( $this->session_manager->city_context() );
+		$rate_id = $this->positive_int( $rate_meta['location_id'] ?? null );
+
+		if ( $session_id > 0 && $rate_id > 0 && $session_id !== $rate_id ) {
+			return 0;
+		}
+
+		$location_id = $session_id > 0 ? $session_id : $rate_id;
+		if ( 0 === $location_id ) {
+			return 0;
+		}
+
+		$country_code = $this->trusted_destination_country_code( $rate_meta, $checkout_data );
+		if ( '' !== $country_code && ! $this->location_matches_destination_country( $location_id, $country_code ) ) {
+			return 0;
+		}
+
+		return $location_id;
+	}
+
+	/** @param array<string,mixed> $context */
+	private function positive_int_from_context( array $context ): int {
+		foreach ( array( 'location_id', 'selected_location_id', 'id' ) as $key ) {
+			$value = $this->positive_int( $context[ $key ] ?? null );
+			if ( $value > 0 ) {
+				return $value;
+			}
+		}
+
+		return 0;
+	}
+
+	private function positive_int( mixed $value ): int {
+		return is_numeric( $value ) && (int) $value > 0 ? (int) $value : 0;
+	}
+
+	/** @param array<string,mixed> $rate_meta @param array<string,mixed> $checkout_data */
+	private function trusted_destination_country_code( array $rate_meta, array $checkout_data ): string {
+		$country = is_array( $rate_meta['country_mapping'] ?? null ) ? (string) ( $rate_meta['country_mapping']['country_code'] ?? '' ) : '';
+		if ( '' === trim( $country ) ) {
+			$city_context = $this->session_manager->city_context();
+			$country = (string) ( $city_context['country_code'] ?? '' );
+		}
+		if ( '' === trim( $country ) ) {
+			$country = $this->checkout_country_code( $checkout_data );
+		}
+		$country = strtoupper( trim( $country ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
+	}
+
+	private function location_matches_destination_country( int $location_id, string $country_code ): bool {
+		if ( ! $this->locations instanceof LocationRepository ) {
+			return true;
+		}
+		$location = $this->locations->find_by_id( $location_id );
+		if ( null === $location || ! $location->active || (int) $location->id !== $location_id ) {
+			return false;
+		}
+
+		return strtoupper( trim( $location->country_code ) ) === $country_code;
 	}
 
 	/**

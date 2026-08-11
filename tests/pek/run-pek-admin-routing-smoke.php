@@ -142,7 +142,7 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $GLOBALS['wpdb'] ), $settings );
 	$pickup_provider = new PekPickupPointProvider( $terminal_service );
 	$pickup_registry = new CarrierPickupPointProviderRegistry( array( $pickup_provider ) );
-	$quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder() );
+	$quote_builder = new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder(), new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy() );
 	$quote_service = new PekQuoteService( $credentials, $api, $quote_builder, new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ) );
 	$pek_admin = new PekAdminPage(
 		$settings,

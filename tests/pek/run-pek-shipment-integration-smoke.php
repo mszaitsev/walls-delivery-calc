@@ -1116,7 +1116,8 @@ $attempts = new ShipmentCreationAttemptService(
 	}
 );
 $status_service = new PekShipmentStatusService( $api, $mapping, $repository, $actual_costs, new PekShipmentStatusResponseNormalizer(), $attempts );
-$button_policy = new PekShipmentButtonPolicy( $mapping );
+$country_policy = new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy();
+$button_policy = new PekShipmentButtonPolicy( $mapping, $country_policy );
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
 	array(
@@ -1208,7 +1209,7 @@ $GLOBALS['wpdb']->locations = array(
 $GLOBALS['wpdb']->pek_location_mappings = array();
 $GLOBALS['wpdb']->pek_terminals = array();
 $drafts = new OrderShipmentDraftFactory( new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new ShipmentServiceSettings(), null, null, null, null, null, null, null, null, null, null, $settings, new PekShipmentCourierAddressResolver() );
-$manual_contexts = new PekManualAttachContextResolver( $drafts, $repository );
+$manual_contexts = new PekManualAttachContextResolver( $drafts, $repository, $country_policy );
 $actual_cost_resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
 $destination_resolver = new PekShipmentDestinationResolver(
 	new PekPickupPointProvider(
@@ -1238,7 +1239,7 @@ $request_builder = new PekShipmentRequestBuilder(
 	$credentials,
 	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
 );
-$shipment_service = new PekShipmentService( $api, $status_service, $repository, $button_policy, $actual_costs, $mapping, $manual_contexts, $attempts );
+$shipment_service = new PekShipmentService( $api, $status_service, $repository, $button_policy, $actual_costs, $mapping, $manual_contexts, $country_policy, $attempts );
 $adapter = new PekShipmentAdapter(
 	$api,
 	$request_builder,
@@ -1246,7 +1247,8 @@ $adapter = new PekShipmentAdapter(
 	$shipment_service,
 	$button_policy,
 	new PekShipmentCreateResponseParser(),
-	$actual_cost_resolver
+	$actual_cost_resolver,
+	$country_policy
 );
 $creation = new ShipmentCreationService( $repository, array( $adapter ), $actual_costs, null, null, array( new PekShipmentPersistenceMapper() ), $attempts );
 pek_integration_assert( $creation instanceof ShipmentCreationService && $drafts instanceof OrderShipmentDraftFactory && $request_builder instanceof PekShipmentRequestBuilder, 'Integration smoke must construct real draft factory, request builder, adapter, creation service and mapper.' );
@@ -1962,7 +1964,7 @@ $sms_failure_builder = new PekShipmentRequestBuilder(
 	$credentials,
 	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
 );
-$sms_failure_preview = ( new PekShipmentAdapter( $api, $sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver ) )->build_safe_payload_preview( $request );
+$sms_failure_preview = ( new PekShipmentAdapter( $api, $sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver, $country_policy ) )->build_safe_payload_preview( $request );
 pek_integration_assert( array() !== $sms_failure_preview['errors'] && str_contains( (string) ( $sms_failure_preview['errors'][0] ?? '' ), 'СМС' ), 'SMS preview failure must remain blocking with public SMS message: ' . ( wp_json_encode( $sms_failure_preview, JSON_UNESCAPED_UNICODE ) ?: '' ) );
 pek_integration_assert( 'sms_geography' === (string) ( $sms_failure_preview['body']['sms_diagnostic']['stage'] ?? '' ) && 'pek_http_403' === (string) ( $sms_failure_preview['body']['sms_diagnostic']['error_code'] ?? '' ) && 403 === (int) ( $sms_failure_preview['body']['sms_diagnostic']['http_status'] ?? 0 ), 'SMS preview failure must expose safe staged diagnostic.' );
 pek_integration_assert_no_private_markers( $sms_failure_preview['body']['sms_diagnostic'] ?? array(), 'SMS preview diagnostic' );
@@ -2344,7 +2346,7 @@ $fallback_sms_failure_builder = new PekShipmentRequestBuilder(
 	$credentials,
 	new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer()
 );
-$fallback_sms_preview = ( new PekShipmentAdapter( $api, $fallback_sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver ) )->build_safe_payload_preview( $pickup_request );
+$fallback_sms_preview = ( new PekShipmentAdapter( $api, $fallback_sms_failure_builder, $status_service, $shipment_service, $button_policy, new PekShipmentCreateResponseParser(), $actual_cost_resolver, $country_policy ) )->build_safe_payload_preview( $pickup_request );
 pek_integration_assert( 'sms_geography' === (string) ( $fallback_sms_preview['body']['sms_diagnostic']['stage'] ?? '' ) && '/branches/checknocalcservices/' === (string) ( $fallback_sms_preview['body']['sms_diagnostic']['endpoint'] ?? '' ) && 403 === (int) ( $fallback_sms_preview['body']['sms_diagnostic']['http_status'] ?? 0 ) && in_array( 'Не удалось выполнить повторную онлайн-проверку выбранного терминала ПЭК. Используются данные терминала, подтверждённые при оформлении заказа.', $fallback_sms_preview['warnings'], true ), 'After trusted pickup fallback, SMS geography HTTP 403 must become the staged SMS diagnostic: ' . wp_json_encode( $fallback_sms_preview, JSON_UNESCAPED_UNICODE ) );
 $http->connected_services_mode = 'success';
 
@@ -2572,6 +2574,59 @@ pek_integration_assert( isset( $attached['reconciled_at'] ), 'Manual attach must
 pek_integration_assert( false === $attached['pending_creation_in_carrier'], 'Manual attach must clear active pending state.' );
 pek_integration_assert( 12345 === $attached['actual_cost_kopecks'], 'Manual attach must merge actual cost from PEK status services.sum.' );
 pek_integration_assert_plain_data( $attached );
+
+$attached_payload = $adapter->status_payload( $order, $attached );
+pek_integration_assert( 'Прибыл' === (string) ( $attached_payload['carrier_status_title'] ?? '' ), 'Initial generic status payload must expose raw PEK carrier status.' );
+pek_integration_assert( 'Прибыл' === (string) ( $attached_payload['external_status'] ?? '' ), 'PEK external_status must use the same raw carrier status source.' );
+pek_integration_assert( DeliveryStatus::label( DeliveryStatus::READY_FOR_PICKUP ) === (string) ( $attached_payload['universal_status_label'] ?? '' ), 'Universal shipment status must remain independently mapped.' );
+
+$foreign_manual_payload = $adapter->status_payload(
+	$order,
+	array_merge(
+		$attached,
+		array(
+			'receiver_country_code' => 'KZ',
+			'manual_attach' => true,
+			'pek_cargo_status' => 'В пути',
+			'status_title' => 'В пути',
+			'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ),
+		)
+	)
+);
+pek_integration_assert( 'KZ' === (string) ( $foreign_manual_payload['receiver_country_code'] ?? '' ), 'Foreign manual status payload must keep receiver country.' );
+pek_integration_assert( 'В пути' === (string) ( $foreign_manual_payload['carrier_status_title'] ?? '' ), 'Foreign manual PEK shipment must expose raw carrier status title.' );
+pek_integration_assert( 'В пути' === (string) ( $foreign_manual_payload['external_status'] ?? '' ), 'Foreign manual PEK external_status must mirror raw carrier status title.' );
+pek_integration_assert( DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $foreign_manual_payload['universal_status_label'] ?? '' ), 'Configurable universal mapping must not alter raw PEK carrier status presentation.' );
+
+$ru_payload = $adapter->status_payload(
+	$order,
+	array_merge(
+		$attached,
+		array(
+			'receiver_country_code' => 'RU',
+			'pek_cargo_status' => 'Оформлен',
+			'status_title' => 'Оформлен',
+			'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ),
+		)
+	)
+);
+pek_integration_assert( 'Оформлен' === (string) ( $ru_payload['carrier_status_title'] ?? '' ), 'RU PEK shipment must expose raw carrier status title.' );
+
+$empty_status_payload = $adapter->status_payload(
+	$order,
+	array_merge(
+		$attached,
+		array(
+			'pek_cargo_status' => '',
+			'status_title' => '',
+			'universal_status_code' => '',
+			'universal_status_label' => '',
+		)
+	)
+);
+pek_integration_assert( '' === (string) ( $empty_status_payload['carrier_status_title'] ?? 'missing' ), 'Empty PEK raw status must remain empty for generic "-" presentation.' );
 
 $GLOBALS['wdc_pek_integration_transients'] = array();
 $http->status_mode = 'expanded';

@@ -4,11 +4,15 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PekShipmentButtonPolicy {
-	public function __construct( private PekStatusMapping $mapping ) {
+	public function __construct(
+		private PekStatusMapping $mapping,
+		private PekCountryPolicy $countries
+	) {
 	}
 
 	/** @param array<string,mixed> $shipment @return array<string,bool> */
@@ -16,6 +20,7 @@ final class PekShipmentButtonPolicy {
 		if ( array() === $shipment ) {
 			return array( 'create' => true, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => false );
 		}
+		$receiver_country = strtoupper( trim( (string) ( $shipment['receiver_country_code'] ?? $shipment['recipient_country_code'] ?? '' ) ) );
 		$pending_status = (string) ( $shipment['universal_status_code'] ?? '' );
 		if ( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $pending_status || ! empty( $shipment['pending_creation_in_carrier'] ) ) {
 			return array( 'create' => false, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => true );
@@ -25,7 +30,8 @@ final class PekShipmentButtonPolicy {
 		$accepted = '' !== $take_on_stock_datetime
 			|| ( '' !== $external_status && $this->mapping->is_accepted_status( $external_status ) );
 		$terminal = '' !== $external_status && $this->mapping->is_terminal_status( $external_status );
-		$can_cancel = '' !== $this->cargo_code( $shipment )
+		$can_cancel = ( '' === $receiver_country || $this->countries->allows_automatic_shipment_create( $this->countries->sender_country(), $receiver_country ) )
+			&& '' !== $this->cargo_code( $shipment )
 			&& '' === $take_on_stock_datetime
 			&& '' !== $external_status
 			&& ! $terminal

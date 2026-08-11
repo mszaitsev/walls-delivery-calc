@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -13,7 +14,8 @@ defined( 'ABSPATH' ) || exit;
 final class PekManualAttachContextResolver {
 	public function __construct(
 		private OrderShipmentDraftFactory $drafts,
-		private OrderShipmentRepository $repository
+		private OrderShipmentRepository $repository,
+		private PekCountryPolicy $countries
 	) {
 	}
 
@@ -41,9 +43,16 @@ final class PekManualAttachContextResolver {
 		if ( '' === $delivery_type ) {
 			throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
 		}
+		$receiver_country = $this->receiver_country( $order, $existing_shipment, is_object( $request ) ? $request : null );
+		if ( ! $this->countries->allows_manual_attach( $receiver_country ) ) {
+			throw new \RuntimeException( 'Не удалось восстановить данные отправления ПЭК для ручного прикрепления.' );
+		}
+		$is_international = $this->countries->is_international_receiver( $receiver_country );
 
 		return array(
 			'order_id' => $order_id,
+			'sender_country_code' => $this->countries->sender_country(),
+			'receiver_country_code' => $receiver_country,
 			'service_key' => (string) ( $existing_shipment['service_key'] ?? PekSettings::SERVICE_KEY ),
 			'service_title' => (string) ( $existing_shipment['service_title'] ?? PekSettings::TITLE ),
 			'delivery_type' => $delivery_type,
@@ -60,9 +69,9 @@ final class PekManualAttachContextResolver {
 			'recipient_type' => (string) ( $existing_shipment['recipient_type'] ?? 'physical' ),
 			'declared_value_kopecks' => (int) ( $existing_shipment['declared_value_kopecks'] ?? $summary['declared_value_kopecks'] ?? 0 ),
 			'sealing_requested' => ! empty( $existing_shipment['sealing_requested'] ) || ! empty( $summary['sealing_requested'] ),
-			'sms_release_requested' => ! empty( $existing_shipment['sms_release_requested'] ),
-			'sms_release_confirmed' => ! empty( $existing_shipment['sms_release_confirmed'] ) || ! empty( $sms['success'] ),
-			'sms_release_effective_limit_kopecks' => (int) ( $existing_shipment['sms_release_effective_limit_kopecks'] ?? $sms['effective_limit_kopecks'] ?? 0 ),
+			'sms_release_requested' => $is_international ? false : ! empty( $existing_shipment['sms_release_requested'] ),
+			'sms_release_confirmed' => $is_international ? false : ( ! empty( $existing_shipment['sms_release_confirmed'] ) || ! empty( $sms['success'] ) ),
+			'sms_release_effective_limit_kopecks' => $is_international ? 0 : (int) ( $existing_shipment['sms_release_effective_limit_kopecks'] ?? $sms['effective_limit_kopecks'] ?? 0 ),
 			'request_snapshot' => is_array( $existing_shipment['request_snapshot'] ?? null ) ? $existing_shipment['request_snapshot'] : array(),
 			'request_summary' => $summary,
 			'creation_attempt_id' => (string) ( $existing_shipment['creation_attempt_id'] ?? '' ),
@@ -70,6 +79,88 @@ final class PekManualAttachContextResolver {
 			'pek_correlation' => (string) ( $existing_shipment['pek_correlation'] ?? $summary['correlation'] ?? '' ),
 			'original_created_at' => (string) ( $existing_shipment['created_at'] ?? '' ),
 		);
+	}
+
+	private function receiver_country( object $order, array $existing_shipment, ?object $request ): string {
+		$country = $this->trusted_country( $existing_shipment['receiver_country_code'] ?? $existing_shipment['recipient_country_code'] ?? null );
+		if ( '' === $country && null !== $request && is_array( $request->meta ?? null ) ) {
+			$country = $this->trusted_country( $request->meta['receiver_country_code'] ?? null );
+		}
+		if ( '' === $country && null !== $request && is_object( $request->recipient_address ?? null ) ) {
+			$country = $this->trusted_country( $request->recipient_address->country_code ?? null );
+		}
+		if ( '' === $country && method_exists( $order, 'get_shipping_country' ) ) {
+			$country = $this->trusted_country( $order->get_shipping_country() );
+		}
+		if ( '' === $country && $this->has_legacy_ru_evidence( $existing_shipment, $request ) ) {
+			$country = $this->countries->sender_country();
+		}
+		if ( '' === $country ) {
+			throw new \RuntimeException( 'Не удалось подтвердить страну получателя ПЭК для ручного прикрепления.' );
+		}
+		if ( ! $this->countries->allows_manual_attach( $country ) ) {
+			throw new \RuntimeException( 'ПЭК не поддерживает ручное прикрепление для страны получателя.' );
+		}
+
+		return $country;
+	}
+
+	private function trusted_country( mixed $value ): string {
+		$country = strtoupper( trim( (string) $value ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
+	}
+
+	/** @param array<string,mixed> $existing_shipment */
+	private function has_legacy_ru_evidence( array $existing_shipment, ?object $request ): bool {
+		foreach ( $this->legacy_country_candidates( $existing_shipment, $request ) as $candidate ) {
+			if ( $this->countries->sender_country() === $this->trusted_country( $candidate ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** @param array<string,mixed> $existing_shipment @return array<int,mixed> */
+	private function legacy_country_candidates( array $existing_shipment, ?object $request ): array {
+		$candidates = array();
+		foreach ( array(
+			array( 'calculation_data', 'country_code' ),
+			array( 'calculation_data', 'destination', 'country_code' ),
+			array( 'delivery_calculation', 'country_code' ),
+			array( 'delivery_calculation', 'destination', 'country_code' ),
+			array( 'request_snapshot', 'meta', 'receiver_country_code' ),
+			array( 'request_snapshot', 'recipient_address', 'country_code' ),
+			array( 'request_summary', 'receiver_country_code' ),
+		) as $path ) {
+			$candidates[] = $this->nested_value( $existing_shipment, $path );
+		}
+		if ( null !== $request && is_array( $request->meta ?? null ) ) {
+			foreach ( array(
+				array( 'calculation_data', 'country_code' ),
+				array( 'calculation_data', 'destination', 'country_code' ),
+				array( 'delivery_calculation', 'country_code' ),
+				array( 'delivery_calculation', 'destination', 'country_code' ),
+			) as $path ) {
+				$candidates[] = $this->nested_value( $request->meta, $path );
+			}
+		}
+
+		return $candidates;
+	}
+
+	/** @param array<string,mixed> $source @param array<int,string> $path */
+	private function nested_value( array $source, array $path ): mixed {
+		$value = $source;
+		foreach ( $path as $key ) {
+			if ( ! is_array( $value ) || ! array_key_exists( $key, $value ) ) {
+				return null;
+			}
+			$value = $value[ $key ];
+		}
+
+		return $value;
 	}
 
 	/** @param array<int,mixed> $places @return array<int,array<string,mixed>> */

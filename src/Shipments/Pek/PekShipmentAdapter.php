@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Shipments\Pek;
 
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
@@ -24,6 +25,7 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		private PekShipmentButtonPolicy $buttons,
 		private PekShipmentCreateResponseParser $create_responses,
 		private ShipmentActualCostResolver $actual_cost_resolver,
+		private PekCountryPolicy $countries,
 		private ?Logger $logger = null
 	) {
 	}
@@ -38,6 +40,19 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 
 	/** @return array<string,mixed> */
 	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array {
+		if ( ! $this->allows_automatic_create( $request ) ) {
+			return array(
+				'method' => '',
+				'path' => '',
+				'body' => array(
+					'automatic_create_available' => false,
+					'manual_attach_available' => true,
+					'message' => $this->international_manual_message(),
+				),
+				'errors' => array( $this->international_manual_message() ),
+				'warnings' => array(),
+			);
+		}
 		try {
 			$built = $this->builder->prepare( $this->order_from_request( $request ), $request, true );
 			return array( 'method' => 'POST', 'path' => '/preregistration/submit/', 'body' => $built['preview'], 'errors' => array(), 'warnings' => is_array( $built['summary']['warnings'] ?? null ) ? $built['summary']['warnings'] : array() );
@@ -79,6 +94,13 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	public function create_for_order( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
 		$built = null;
 		$submitted = false;
+		if ( ! $this->allows_automatic_create( $request ) ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'pek_international_auto_create_disabled',
+				error_message: $this->international_manual_message()
+			);
+		}
 		if ( ! $this->valid_creation_attempt_id( $request->meta['creation_attempt_id'] ?? null ) ) {
 			return new ShipmentCreateResult(
 				false,
@@ -151,7 +173,12 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 	/** @param array<string,mixed> $shipment @return array<string,mixed> */
 	public function status_payload( object $order, array $shipment ): array {
 		$policy = $this->buttons->resolve( $shipment );
+		$receiver_country = $this->receiver_country_from_order_or_shipment( $order, $shipment );
+		if ( array() === $shipment && $this->countries->is_international_receiver( $receiver_country ) ) {
+			$policy = array( 'create' => false, 'manual_attach' => true, 'update' => false, 'cancel' => false, 'remove' => false );
+		}
 		$actual = $this->actual_cost_resolver->presentation_payload( $shipment, $order );
+		$carrier_status = trim( (string) ( $shipment['pek_cargo_status'] ?? $shipment['status_title'] ?? '' ) );
 
 		return array_merge(
 			array(
@@ -159,8 +186,9 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 				'has_shipment' => array() !== $shipment,
 				'can_create' => ! empty( $policy['create'] ),
 				'can_attach_manual' => ! empty( $policy['manual_attach'] ),
-				'external_status' => (string) ( $shipment['pek_cargo_status'] ?? $shipment['status_title'] ?? '' ),
+				'external_status' => $carrier_status,
 				'external_status_id' => (string) ( $shipment['pek_cargo_status_id'] ?? '' ),
+				'carrier_status_title' => $carrier_status,
 				'status_title' => (string) ( $shipment['status_title'] ?? '' ),
 				'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
 				'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),
@@ -171,6 +199,8 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 				'sms_release_requested' => ! empty( $shipment['sms_release_requested'] ),
 				'sms_release_confirmed' => ! empty( $shipment['sms_release_confirmed'] ),
 				'destination_mode' => (string) ( $shipment['shipment_mode'] ?? $shipment['delivery_type'] ?? '' ),
+				'receiver_country_code' => $receiver_country,
+				'international_manual_attach_message' => $this->countries->is_international_receiver( $receiver_country ) ? $this->international_manual_message() : '',
 				'tracking_checked_at' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
 			),
 			$actual
@@ -234,6 +264,26 @@ final class PekShipmentAdapter implements CarrierShipmentAdapterInterface {
 		}
 
 		return $order;
+	}
+
+	private function allows_automatic_create( ShipmentCreateRequest $request ): bool {
+		return $this->countries->allows_automatic_shipment_create(
+			(string) ( $request->meta['sender_country_code'] ?? $this->countries->sender_country() ),
+			(string) ( $request->meta['receiver_country_code'] ?? $request->recipient_address->country_code )
+		);
+	}
+
+	private function receiver_country_from_order_or_shipment( object $order, array $shipment ): string {
+		$country = strtoupper( trim( (string) ( $shipment['receiver_country_code'] ?? $shipment['recipient_country_code'] ?? '' ) ) );
+		if ( '' === $country && method_exists( $order, 'get_shipping_country' ) ) {
+			$country = strtoupper( trim( (string) $order->get_shipping_country() ) );
+		}
+
+		return '' !== $country ? $country : '';
+	}
+
+	private function international_manual_message(): string {
+		return 'Международное отправление ПЭК оформляется вручную в личном кабинете ПЭК. После оформления укажите номер груза для автоматического отслеживания статуса и фактической стоимости.';
 	}
 
 	/** @param array<string,mixed> $shipment */

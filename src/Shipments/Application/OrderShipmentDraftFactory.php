@@ -657,6 +657,8 @@ final class OrderShipmentDraftFactory {
 		$calculation = $this->calculation_data( $order );
 		$rate_meta = $this->rate_meta_data( $order );
 		$delivery_type = $this->delivery_type_from_order( $order );
+		$receiver_country = strtoupper( trim( method_exists( $order, 'get_shipping_country' ) ? (string) $order->get_shipping_country() : 'RU' ) );
+		$receiver_country = '' !== $receiver_country ? $receiver_country : 'RU';
 		$items = $this->order_items( $order );
 		$dimensions = is_array( $calculation['package']['dimensions_cm'] ?? null ) ? $calculation['package']['dimensions_cm'] : array();
 		$product_weight = (int) ( $calculation['package']['products_weight_g'] ?? 0 );
@@ -704,14 +706,16 @@ final class OrderShipmentDraftFactory {
 			DeliveryType::PICKUP === $delivery_type ? ( $provider_query['location_id'] ?? '' ) : ''
 		);
 		$address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : (string) ( $pickup['address'] ?? $pickup['point_address'] ?? '' );
-		$courier = DeliveryType::COURIER === $delivery_type ? $this->pek_courier_address_with_evidence_from_order( $order ) : array( 'address' => null, 'evidence' => array() );
+		$courier = DeliveryType::COURIER === $delivery_type && 'RU' === $receiver_country
+			? $this->pek_courier_address_with_evidence_from_order( $order )
+			: array( 'address' => null, 'evidence' => array() );
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
 			carrier_key: PekSettings::CARRIER_KEY,
 			delivery_type: $delivery_type,
 			rate_id: PekSettings::SERVICE_KEY . ':' . $delivery_type,
-			recipient_address: DeliveryType::COURIER === $delivery_type && $courier['address'] instanceof Address ? $courier['address'] : $this->recipient_address( $order, $delivery_type, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
+			recipient_address: DeliveryType::COURIER === $delivery_type && $courier['address'] instanceof Address ? $courier['address'] : $this->recipient_address( $order, $delivery_type, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => $receiver_country ) ),
 			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $point_code ? new PickupPointSelection( PekSettings::CARRIER_KEY, PekSettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
 			places: array( $place ),
 			declared_value: Money::from_kopecks( 0 ),
@@ -726,6 +730,8 @@ final class OrderShipmentDraftFactory {
 				'carrier_key' => PekSettings::CARRIER_KEY,
 				'service_key' => PekSettings::SERVICE_KEY,
 				'delivery_type' => $delivery_type,
+				'receiver_country_code' => $receiver_country,
+				'sender_country_code' => 'RU',
 				'service_title' => PekSettings::TITLE,
 				'order_num' => $this->order_number( $order ),
 				'pickup_family' => PekSettings::SERVICE_KEY . ':pickup',
