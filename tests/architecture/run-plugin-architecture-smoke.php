@@ -774,6 +774,10 @@ foreach ( array(
 	'new YandexDeliveryCheckoutPickupPointFormatter',
 	'new RussianPostPickupPointTypeSettings',
 	'new DpdPickupPointScheduleFormatter',
+	'new CarrierPickupPointProviderRegistry',
+	'new PekCheckoutQuoteContextResolver',
+	'new PekCheckoutPickupPointFormatter',
+	'new PekApiClient',
 ) as $forbidden_controller_new ) {
 	plugin_architecture_assert( ! str_contains( $order_recalculation_controller, $forbidden_controller_new ), 'Order delivery recalculation controller must not self-construct dependency: ' . $forbidden_controller_new );
 }
@@ -781,6 +785,14 @@ foreach ( array(
 $calculation_builder_source = plugin_architecture_source( 'src/Orders/Application/DeliveryCalculationDataBuilder.php' );
 $checkout_persister_source = plugin_architecture_source( 'src/Checkout/WooCommerce/OrderShippingMetaPersister.php' );
 $replacement_service_source = plugin_architecture_source( 'src/Orders/Application/OrderDeliveryReplacementService.php' );
+$order_recalculation_js = plugin_architecture_source( 'assets/admin/order-delivery-recalculation.js' );
+plugin_architecture_assert( str_contains( $order_recalculation_controller, 'private CarrierPickupPointProviderRegistry $pickup_providers' ) && str_contains( $order_recalculation_controller, 'private PekCheckoutQuoteContextResolver $pek_quote_context' ) && str_contains( $order_recalculation_controller, 'private PekCheckoutPickupPointFormatter $pek_formatter' ), 'Order recalculation controller must receive PEK pickup provider dependencies through DI.' );
+plugin_architecture_assert( str_contains( $order_recalculation_controller, 'PekSettings::CARRIER_KEY === $carrier' ) && str_contains( $order_recalculation_controller, 'pek_pickup_points' ) && str_contains( $order_recalculation_controller, 'query_from_snapshot' ) && str_contains( $order_recalculation_controller, '$provider->search( $query )' ), 'PEK order-admin pickup search must use the registry-backed provider and existing query snapshot.' );
+$pek_branch_pos = strpos( $order_recalculation_controller, 'PekSettings::CARRIER_KEY === $carrier' );
+$rp_fallback_pos = strpos( $order_recalculation_controller, '$rows = $this->pickup_rows_for_location' );
+plugin_architecture_assert( false !== $pek_branch_pos && false !== $rp_fallback_pos && $pek_branch_pos < $rp_fallback_pos, 'PEK pickup search must be routed before the Russian Post fallback.' );
+plugin_architecture_assert( str_contains( $replacement_service_source, 'canonical_pek_pickup_for_save' ) && str_contains( $replacement_service_source, 'CarrierPickupPointSelectionQuery' ) && str_contains( $replacement_service_source, 'resolve_selection' ) && str_contains( $replacement_service_source, 'PekCheckoutPickupPointFormatter' ), 'PEK order-admin save must fresh-resolve and format canonical pickup selection through provider registry.' );
+plugin_architecture_assert( str_contains( $order_recalculation_js, 'requiresRateRefresh' ) && str_contains( $order_recalculation_js, "restorePekPickup: 'pek' === carrier" ) && str_contains( $order_recalculation_js, 'function restorePekPickupPreview' ), 'Order recalculation JS must refresh and restore PEK pickup selection after terminal choice.' );
 plugin_architecture_assert( str_contains( $calculation_builder_source, 'function lead_time_audit_lines' ), 'DeliveryCalculationDataBuilder must own lead-time audit formatting.' );
 plugin_architecture_assert( ! str_contains( $checkout_persister_source, 'function lead_time_audit_lines' ) && ! str_contains( $replacement_service_source, 'function lead_time_audit_lines' ), 'Checkout/admin persistence services must not duplicate lead-time audit formatting.' );
 plugin_architecture_assert( str_contains( $calculation_builder_source, 'private RuleFormulaFormatter $rule_formula_formatter' ), 'DeliveryCalculationDataBuilder must receive RuleFormulaFormatter through constructor DI.' );

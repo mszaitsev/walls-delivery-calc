@@ -7,15 +7,22 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
+use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
@@ -43,6 +50,9 @@ final class OrderDeliveryRecalculationAdminController {
 		private SettingsRepository $settings,
 		private RussianPostPickupPointTypeSettings $pickup_point_type_settings,
 		private DpdPickupPointScheduleFormatter $dpd_schedule_formatter,
+		private CarrierPickupPointProviderRegistry $pickup_providers,
+		private PekCheckoutQuoteContextResolver $pek_quote_context,
+		private PekCheckoutPickupPointFormatter $pek_formatter,
 		private string $plugin_url = '',
 		private string $version = '1',
 		private ?CdekDeliveryPointService $cdek_points = null,
@@ -156,7 +166,8 @@ final class OrderDeliveryRecalculationAdminController {
 		$query = $this->request_string( 'query' );
 		$mode = 'location' === $this->request_string( 'mode' ) ? 'location' : 'search';
 		$limit = max( 1, min( 'location' === $mode ? 2000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 2000 : 50 ) ) ) );
-		if ( DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
+		$carrier = (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' );
+		if ( DpdSettings::CARRIER_KEY === $carrier ) {
 			$rows = $this->dpd_pickup_points( $location, $query, $mode, $limit );
 			wp_send_json_success(
 				array(
@@ -164,7 +175,7 @@ final class OrderDeliveryRecalculationAdminController {
 				)
 			);
 		}
-		if ( YandexDeliverySettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
+		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
 			if ( $this->positive_location_id( $location ) <= 0 ) {
 				$resolved_location = $this->service->resolved_location_payload( $order, array() === $location ? null : $location );
 				if ( $this->positive_location_id( $resolved_location ) <= 0 && array() !== $location ) {
@@ -174,13 +185,21 @@ final class OrderDeliveryRecalculationAdminController {
 			}
 			wp_send_json_success( array( 'points' => $this->yandex_pickup_points( $location, $query, $mode ) ) );
 		}
-		if ( 'cdek' === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
+		if ( 'cdek' === $carrier ) {
 			$rows = $this->cdek_pickup_points( $location, $query, $mode, $limit );
 			wp_send_json_success(
 				array(
 					'points' => array_map( array( $this, 'pickup_point_payload' ), $rows ),
 				)
 			);
+		}
+		if ( PekSettings::CARRIER_KEY === $carrier ) {
+			try {
+				$points = $this->pek_pickup_points( $order, $rate, $location );
+			} catch ( PekApiException|\RuntimeException $exception ) {
+				wp_send_json_error( array( 'message' => $this->safe_message( $exception->getMessage() ) ), 400 );
+			}
+			wp_send_json_success( array( 'points' => $points ) );
 		}
 		$postcode = preg_replace( '/\D+/', '', (string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ) ) ?? '';
 		if ( 'location' === $mode ) {
@@ -451,6 +470,11 @@ final class OrderDeliveryRecalculationAdminController {
 		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( $value );
 	}
 
+	private function safe_message( string $message ): string {
+		$message = trim( function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( $message ) : strip_tags( $message ) );
+		return '' !== $message ? $message : __( 'Не удалось загрузить пункты ПЭК. Пересчитайте доставку и попробуйте ещё раз.', 'walls-delivery-calc' );
+	}
+
 	/**
 	 * @param array<string,mixed> $location
 	 */
@@ -673,6 +697,92 @@ final class OrderDeliveryRecalculationAdminController {
 		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
 
 		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $location
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function pek_pickup_points( object $order, array $rate, array $location ): array {
+		$query = $this->pek_pickup_query_from_rate( $order, $rate, $location );
+		$provider = $this->pickup_providers->get( PekSettings::CARRIER_KEY );
+		if ( null === $provider ) {
+			throw new \RuntimeException( 'Пункты выдачи ПЭК временно недоступны.' );
+		}
+		$fingerprint = $this->pek_provider_fingerprint( $this->pek_pickup_query_snapshot( $rate ) );
+
+		return array_map(
+			fn( $point ): array => $this->pek_formatter->format( $point, $fingerprint, $query->location_id, $query->country_code ),
+			$provider->search( $query )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $location
+	 */
+	private function pek_pickup_query_from_rate( object $order, array $rate, array $location ): CarrierPickupPointQuery {
+		if (
+			DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' )
+			|| empty( $rate['requires_pickup_point'] )
+		) {
+			throw new \RuntimeException( 'Для ПЭК выберите pickup-вариант доставки и пересчитайте доставку.' );
+		}
+		$snapshot = $this->pek_pickup_query_snapshot( $rate );
+		if (
+			PekSettings::CARRIER_KEY !== (string) ( $snapshot['carrier_key'] ?? '' )
+			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
+			|| 'RU' !== strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) )
+		) {
+			throw new \RuntimeException( 'Контекст пунктов ПЭК устарел. Пересчитайте доставку.' );
+		}
+		$snapshot_location_id = (int) ( $snapshot['location_id'] ?? 0 );
+		$current_location_id = $this->current_location_id_for_pickup( $order, $location );
+		if ( $snapshot_location_id <= 0 || $current_location_id <= 0 || $snapshot_location_id !== $current_location_id ) {
+			throw new \RuntimeException( 'Населенный пункт изменился. Пересчитайте доставку перед выбором пункта ПЭК.' );
+		}
+		if ( ! $this->looks_like_sha256( $this->pek_provider_fingerprint( $snapshot ) ) ) {
+			throw new \RuntimeException( 'Контекст пунктов ПЭК устарел. Пересчитайте доставку.' );
+		}
+		$query = $this->pek_quote_context->query_from_snapshot( $snapshot );
+		if ( null === $query ) {
+			throw new \RuntimeException( 'Контекст пунктов ПЭК устарел. Пересчитайте доставку.' );
+		}
+
+		return $query;
+	}
+
+	/** @param array<string,mixed> $rate @return array<string,mixed> */
+	private function pek_pickup_query_snapshot( array $rate ): array {
+		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+		if ( array() === $snapshot ) {
+			throw new \RuntimeException( 'Контекст пунктов ПЭК отсутствует. Пересчитайте доставку.' );
+		}
+
+		return $snapshot;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function pek_provider_fingerprint( array $snapshot ): string {
+		$fingerprint = (string) ( $snapshot['provider_destination_fingerprint'] ?? '' );
+		return '' !== $fingerprint ? $fingerprint : (string) ( $snapshot['destination_fingerprint'] ?? '' );
+	}
+
+	/** @param array<string,mixed> $location */
+	private function current_location_id_for_pickup( object $order, array $location ): int {
+		$location_id = $this->positive_location_id( $location );
+		if ( $location_id > 0 ) {
+			return $location_id;
+		}
+		$resolved = $this->service->resolved_location_payload( $order, array() === $location ? null : $location );
+
+		return is_array( $resolved ) ? $this->positive_location_id( $resolved ) : 0;
+	}
+
+	private function looks_like_sha256( string $value ): bool {
+		return 64 === strlen( $value ) && ctype_xdigit( $value );
 	}
 
 	/**
