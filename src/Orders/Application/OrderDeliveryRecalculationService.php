@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -26,18 +27,22 @@ final class OrderDeliveryRecalculationService {
 	/**
 	 * @param array<string,mixed>|null $selected_location
 	 * @param array<string,mixed> $selected_pickup_point
-	 * @return array{success:bool,message:string,rates:array<int,array<string,mixed>>,request:array<string,mixed>,location:array<string,mixed>}
+	 * @return array{success:bool,message:string,rates:array<int,array<string,mixed>>,request:array<string,mixed>,location:array<string,mixed>,diagnostic:array<string,mixed>}
 	 */
 	public function preview( object $order, ?array $selected_location = null, array $selected_pickup_point = array() ): array {
 		$request = $this->mapper->map( $order, $selected_location, $selected_pickup_point );
 		$result  = $this->orchestrator->calculate( $request, array(), RateSorter::CHEAPEST, true );
+		$rates = $this->normalize_rates( $result->rates );
 
 		return array(
 			'success' => true,
 			'message' => '',
-			'rates'   => $this->normalize_rates( $result->rates ),
+			'rates'   => $rates,
 			'request' => $request->to_array(),
 			'location' => $this->location_payload_from_request( $request->to_array() ),
+			'diagnostic' => array(
+				'pek' => $this->pek_diagnostic( $request->to_array(), $selected_location, $rates, $result->diagnostic, $result->carrier_errors, $result->cache_hits ),
+			),
 		);
 	}
 
@@ -162,6 +167,76 @@ final class OrderDeliveryRecalculationService {
 			'tariff_variants'       => array(),
 			'rate_meta'             => $rate->meta,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $request
+	 * @param array<string,mixed>|null $selected_location
+	 * @param array<int,array<string,mixed>> $rates
+	 * @param array<string,mixed> $calculation_diagnostic
+	 * @param array<string,string> $carrier_errors
+	 * @return array<string,mixed>
+	 */
+	private function pek_diagnostic( array $request, ?array $selected_location, array $rates, array $calculation_diagnostic, array $carrier_errors, int $cache_hits ): array {
+		$destination = is_array( $request['destination'] ?? null ) ? $request['destination'] : array();
+		$context = is_array( $request['customer_context'] ?? null ) ? $request['customer_context'] : array();
+		$country = strtoupper( trim( (string) ( $request['country_code'] ?? $destination['country_code'] ?? '' ) ) );
+		$service_scan = $this->pek_service_scan( $calculation_diagnostic );
+		$quote = $this->pek_quote_diagnostic( $calculation_diagnostic );
+
+		return array_filter(
+			array(
+				'request_country_code' => $country,
+				'request_location_id' => $this->first_positive_int( array( $context['selected_location_id'] ?? null, $context['location_id'] ?? null, $destination['location_id'] ?? null ) ),
+				'request_destination_city_present' => '' !== trim( (string) ( $destination['city'] ?? $destination['settlement'] ?? '' ) ),
+				'request_destination_postcode_present' => '' !== trim( (string) ( $destination['postcode'] ?? '' ) ),
+				'location_override' => ! empty( $context['location_override'] ),
+				'selected_location_country' => is_array( $selected_location ) ? strtoupper( trim( (string) ( $selected_location['country_code'] ?? $selected_location['country'] ?? '' ) ) ) : '',
+				'selected_location_id' => is_array( $selected_location ) ? $this->first_positive_int( array( $selected_location['id'] ?? null, $selected_location['location_id'] ?? null, $selected_location['selected_location_id'] ?? null ) ) : 0,
+				'pek_service_found' => array() !== $service_scan,
+				'pek_service_active' => (bool) ( $service_scan['enabled'] ?? false ),
+				'pek_service_availability_mode' => (string) ( $service_scan['availability_mode'] ?? '' ),
+				'pek_service_country_enabled' => (bool) ( $service_scan['country_enabled'] ?? false ),
+				'pek_service_entry_created' => (bool) ( $service_scan['entry_created'] ?? false ),
+				'pek_carrier_quote_attempted' => (bool) ( $quote['attempted'] ?? false ),
+				'pek_quote_cache_hit' => (bool) ( $quote['cache_hit'] ?? false ),
+				'quote_cache_hits' => $cache_hits,
+				'pek_rates_count' => $this->rates_count_for_carrier( $rates, PekSettings::CARRIER_KEY ),
+				'pek_carrier_error_code' => (string) ( $quote['error_code'] ?? '' ),
+				'pek_carrier_reason' => (string) ( $quote['fallback_reason'] ?? $carrier_errors[ PekSettings::CARRIER_KEY ] ?? '' ),
+				'failure_stage' => (string) ( $quote['failure_stage'] ?? '' ),
+			),
+			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	/** @param array<string,mixed> $diagnostic @return array<string,mixed> */
+	private function pek_service_scan( array $diagnostic ): array {
+		$scan = is_array( $diagnostic['service_scan'] ?? null ) ? $diagnostic['service_scan'] : array();
+		foreach ( $scan as $entry ) {
+			if ( is_array( $entry ) && PekSettings::CARRIER_KEY === (string) ( $entry['carrier_key'] ?? '' ) && PekSettings::SERVICE_KEY === (string) ( $entry['service_key'] ?? '' ) ) {
+				return $entry;
+			}
+		}
+
+		return array();
+	}
+
+	/** @param array<string,mixed> $diagnostic @return array<string,mixed> */
+	private function pek_quote_diagnostic( array $diagnostic ): array {
+		$quotes = is_array( $diagnostic['carrier_quotes'] ?? null ) ? $diagnostic['carrier_quotes'] : array();
+		foreach ( $quotes as $entry ) {
+			if ( is_array( $entry ) && PekSettings::CARRIER_KEY === (string) ( $entry['carrier_key'] ?? '' ) ) {
+				return $entry;
+			}
+		}
+
+		return array();
+	}
+
+	/** @param array<int,array<string,mixed>> $rates */
+	private function rates_count_for_carrier( array $rates, string $carrier_key ): int {
+		return count( array_filter( $rates, static fn( array $rate ): bool => $carrier_key === (string) ( $rate['carrier_key'] ?? '' ) ) );
 	}
 
 	/**

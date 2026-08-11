@@ -12,8 +12,20 @@ use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekDestinationTerminalSearchCache;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekPickupPointProvider;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalRepository;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekTerminalService;
+use WallsShop\WDC\Carriers\Pek\Quote\PekLightCargoSurchargePolicy;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteCargoBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteMessageSanitizer;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuotePlannedDateTimeResolver;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
+use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
+use WallsShop\WDC\Carriers\Runtime\PekCarrier;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
@@ -42,6 +54,11 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
@@ -54,6 +71,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
@@ -73,9 +91,12 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
+use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {}
@@ -88,6 +109,7 @@ $GLOBALS['wdc_recalc_current_can'] = true;
 $GLOBALS['wdc_recalc_nonce_ok'] = true;
 $GLOBALS['wdc_recalc_orders'] = array();
 $GLOBALS['wdc_recalc_options'] = array();
+$GLOBALS['wdc_recalc_transients'] = array();
 
 final class WdcRecalcAjaxResponse extends RuntimeException {
 	public function __construct(
@@ -152,6 +174,9 @@ function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_recalc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_recalc_options'][ $option ] = $value; return true; }
+function get_transient( string $key ): mixed { return $GLOBALS['wdc_recalc_transients'][ $key ]['value'] ?? false; }
+function set_transient( string $key, mixed $value, int $ttl = 0 ): bool { $GLOBALS['wdc_recalc_transients'][ $key ] = array( 'value' => $value, 'ttl' => $ttl ); return true; }
+function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_recalc_transients'][ $key ] ); return true; }
 function wp_json_encode( mixed $value ): string|false { return json_encode( $value, JSON_UNESCAPED_UNICODE ); }
 function wp_date( string $format ): string { return gmdate( $format ); }
 
@@ -165,11 +190,80 @@ final class WdcRecalcLocationDb extends wpdb {
 	public array $yandex_delivery_pickup_points_v2 = array();
 }
 
+final class WdcRecalcDeliveryServiceDb extends wpdb {
+	public string $prefix = 'wp_';
+	/** @var array<int,array<string,mixed>> */
+	public array $locations = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $russian_post_pickup_rows = array();
+	public array $yandex_location_mapping_v2 = array();
+	public array $yandex_delivery_pickup_points_v2 = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $delivery_services = array();
+	/** @var array<int,string[]> */
+	public array $delivery_service_countries = array();
+	public array $pek_location_mappings = array();
+	public array $pek_terminals = array();
+
+	public function prepare( string $query, mixed ...$args ): string {
+		foreach ( $args as $arg ) {
+			$query = preg_replace( '/%[ds]/', (string) $arg, $query, 1 ) ?? $query;
+		}
+
+		return $query;
+	}
+
+	public function get_results( string $query, string $output = '' ): array {
+		unset( $output );
+		if ( str_contains( $query, 'wdc_delivery_services' ) ) {
+			return array_values( array_filter( $this->delivery_services, static fn( array $row ): bool => empty( $row['deleted'] ) ) );
+		}
+
+		return array();
+	}
+
+	public function get_col( string $query ): array {
+		if ( str_contains( $query, 'wdc_delivery_service_countries' ) && preg_match( '/service_id\\s*=\\s*(\\d+)/', $query, $match ) ) {
+			return $this->delivery_service_countries[ (int) $match[1] ] ?? array();
+		}
+
+		return array();
+	}
+
+	public function get_row( string $query, string $output = '' ): ?array {
+		unset( $output );
+		if ( str_contains( $query, 'wdc_delivery_services' ) && str_contains( $query, 'service_key' ) ) {
+			foreach ( $this->delivery_services as $row ) {
+				if ( str_contains( $query, (string) ( $row['service_key'] ?? '' ) ) && empty( $row['deleted'] ) ) {
+					return $row;
+				}
+			}
+		}
+
+		return null;
+	}
+}
+
 final class WdcRecalcPekHttpClient implements PekHttpClientInterface {
 	/** @param array<string,mixed> $args */
 	public function request( string $method, string $url, array $args ): array {
 		unset( $method, $url, $args );
 		throw new RuntimeException( 'PEK HTTP must not be called by order recalculation smoke.' );
+	}
+}
+
+final class WdcRecalcPekPreviewHttpClient implements PekHttpClientInterface {
+	public array $requests = array();
+	public function __construct( public array $responses ) {}
+	public function request( string $method, string $url, array $args ): array {
+		$body = json_decode( (string) ( $args['body'] ?? '{}' ), true );
+		$this->requests[] = array( 'method' => strtoupper( $method ), 'url' => $url, 'body' => is_array( $body ) ? $body : array() );
+		$response = array_shift( $this->responses ) ?? array();
+		if ( is_array( $response ) && array_key_exists( 'status', $response ) && array_key_exists( 'body', $response ) ) {
+			return array( 'status' => (int) $response['status'], 'body' => wp_json_encode( $response['body'] ) ?: '{}' );
+		}
+
+		return array( 'status' => 200, 'body' => wp_json_encode( $response ) ?: '{}' );
 	}
 }
 
@@ -603,6 +697,209 @@ function wdc_recalc_pek_quote_context( CarrierPickupPointProviderRegistry $regis
 	);
 }
 
+function wdc_recalc_pek_zone_response( string $country_code = 'KZ', string $precision = 'bad' ): array {
+	return array(
+		'zoneId' => 'kz-zone',
+		'zoneName' => 'KZ Zone',
+		'branchUID' => 'kz-branch',
+		'branchTitle' => 'Алматы',
+		'mainWarehouseId' => 'kz-main-wh',
+		'GeoData' => array(
+			'precision' => $precision,
+			'Address' => array( 'formatted' => 'raw formatted address must not be exposed', 'country_code' => $country_code ),
+		),
+	);
+}
+
+function wdc_recalc_pek_nearest_response( string $warehouse_id = 'kz-preview-terminal' ): array {
+	return array(
+		'freeDepartments' => array(
+			array(
+				'warehouseId' => $warehouse_id,
+				'branchId' => 'kz-branch',
+				'branchName' => 'Алматы',
+				'divisionName' => 'Алматы Центр',
+				'departmentTypeId' => 0,
+				'departmentType' => 'Отделение компании',
+				'address' => 'Казахстан, Алматы, ул. Абая, 1',
+				'coordinates' => array( 'latitude' => 43.238293, 'longitude' => 76.945465 ),
+				'timeZone' => '05:00:00',
+				'priority' => 1,
+				'maxWeight' => 0,
+				'maxVolume' => 0,
+				'maxDimension' => 0,
+				'maxWeightOnePlace' => 0,
+				'maxCount' => 0,
+			),
+		),
+		'paidDepartments' => array(),
+	);
+}
+
+function wdc_recalc_pek_calc_response( float $cost, int $days = 4 ): array {
+	return array(
+		'hasError' => false,
+		'currencyCode' => '643',
+		'branchSenderUID' => 'sender-branch',
+		'branchSender' => 'Новосибирск',
+		'branchReceiverUID' => 'kz-branch',
+		'branchReceiver' => 'Алматы',
+		'transfers' => array(
+			array(
+				'type' => 3,
+				'hasError' => false,
+				'costTotal' => $cost,
+				'estDeliveryTime' => $days,
+				'services' => array(
+					array( 'serviceType' => 'Перевозка', 'senderCity' => 'Новосибирск', 'cost' => $cost, 'info' => 'Автоперевозка', 'services' => null ),
+				),
+			),
+		),
+	);
+}
+
+function wdc_recalc_pek_calc_reject_response(): array {
+	return array( 'hasError' => true, 'currencyCode' => '643', 'transfers' => array() );
+}
+
+function wdc_recalc_pek_preview_endpoint_count( WdcRecalcPekPreviewHttpClient $http, string $fragment ): int {
+	$count = 0;
+	foreach ( $http->requests as $request ) {
+		if ( str_contains( (string) ( $request['url'] ?? '' ), $fragment ) ) {
+			$count++;
+		}
+	}
+
+	return $count;
+}
+
+function wdc_recalc_pek_kz_order(): WdcRecalcOrder {
+	$order = new WdcRecalcOrder(
+		162695,
+		array(
+			new WdcRecalcOrderItem( new WdcRecalcProduct( 'SKU-KZ', 'Товар KZ', 0.5, 10, 20, 30 ), 2, 5000, 'Товар KZ' ),
+		)
+	);
+	$order->set_shipping_country( 'KZ' );
+	$order->set_shipping_state( 'Алматы' );
+	$order->set_shipping_city( 'Алматы' );
+	$order->set_shipping_postcode( '050000' );
+	$order->set_shipping_address_1( 'ул. Абая' );
+	$order->set_shipping_address_2( '10' );
+	$order->meta['_wdc_platform_location_id'] = 162695;
+	$order->meta['_wdc_platform_city_display_name'] = 'Алматы';
+	$order->meta['_wdc_platform_city_postcode'] = '050000';
+	$order->meta['_wdc_delivery_calculation_data'] = array(
+		'destination' => array(
+			'country_code' => 'KZ',
+			'location_id' => 162695,
+			'selected_location_id' => 162695,
+			'city_display_name' => 'Алматы',
+			'region_name' => 'Алматы',
+			'postcode' => '050000',
+		),
+		'carrier_key' => PekSettings::CARRIER_KEY,
+		'service_key' => PekSettings::SERVICE_KEY,
+		'delivery_type' => DeliveryType::PICKUP,
+	);
+
+	return $order;
+}
+
+function wdc_recalc_pek_kz_location_row(): array {
+	return wdc_recalc_location_row(
+		162695,
+		array(
+			'fias_id' => '',
+			'city_fias_id' => '',
+			'gar_id' => '',
+			'gar_object_id' => 0,
+			'country_code' => 'KZ',
+			'region_name' => 'Алматы',
+			'region_type' => '',
+			'region_code' => '',
+			'city_name' => 'Алматы',
+			'city_type' => '',
+			'place_name' => 'Алматы',
+			'place_type' => '',
+			'settlement_name' => '',
+			'settlement_type' => '',
+			'display_name' => 'Алматы',
+			'postal_code' => '050000',
+			'latitude' => '',
+			'longitude' => '',
+		)
+	);
+}
+
+function wdc_recalc_pek_kz_selected_location(): array {
+	return array(
+		'id' => 162695,
+		'location_id' => 162695,
+		'display_name' => 'Алматы',
+		'city_value' => 'Алматы',
+		'region_name' => 'Алматы',
+		'postal_code' => '050000',
+		'country_code' => 'KZ',
+	);
+}
+
+function wdc_recalc_pek_preview_service( WdcRecalcPekPreviewHttpClient $http, WdcRecalcDeliveryServiceDb $db, array $countries ): OrderDeliveryRecalculationService {
+	$GLOBALS['wdc_recalc_transients'] = array();
+	defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'pek-order-recalc-test-key' );
+	$settings_repo = new SettingsRepository();
+	$settings = new PekSettings( $settings_repo, new PekRuPhoneNormalizer() );
+	$credentials = new PekCredentials( $settings_repo, new EncryptionService() );
+	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'recalc-login', 'pek_api_key' => 'recalc-secret' ) );
+	$settings->save_from_admin( array( PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::CLIENT_CARD_KEY => 'card-secret' ) );
+	$settings_repo->set( PekSettings::SENDER_WAREHOUSE_KEY, array( 'warehouseId' => 'sender-wh', 'source' => 'free', 'branchTimezone' => 'UTC' ) );
+	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
+	$address_builder = new PekAddressBuilder();
+	$location_repo = new LocationRepository( $db );
+	$location_resolver = new PekLocationResolver( $location_repo, $address_builder, new PekLocationMappingRepository( $db ), $api, $settings );
+	$terminal_service = new PekTerminalService( $location_resolver, $api, new PekCargoConstraintsConverter(), new PekDestinationTerminalSearchCache(), new PekTerminalRepository( $db ), $settings );
+	$pickup_registry = new CarrierPickupPointProviderRegistry( array( new PekPickupPointProvider( $terminal_service ) ) );
+	$planned = new PekQuotePlannedDateTimeResolver( $settings );
+	$countries_policy = new \WallsShop\WDC\Carriers\Pek\PekCountryPolicy();
+	$context = new PekCheckoutQuoteContextResolver( $settings, $location_repo, $location_resolver, $address_builder, $pickup_registry, $planned, new PekCheckoutPickupPointFormatter(), $countries_policy );
+	$quote_service = new PekQuoteService( $credentials, $api, new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder(), $countries_policy ), new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
+	$carrier = new PekCarrier( $settings, $credentials, $context, $quote_service, $planned, new Logger(), $countries_policy );
+	$carrier_registry = new CarrierRegistry();
+	$carrier_registry->register( $carrier );
+	$db->delivery_services = array(
+		array(
+			'id' => 501,
+			'service_key' => PekSettings::SERVICE_KEY,
+			'carrier_key' => PekSettings::CARRIER_KEY,
+			'service_type' => DeliveryService::TYPE_API,
+			'title' => 'ПЭК',
+			'enabled' => 1,
+			'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+			'deleted' => 0,
+			'sort_order' => 10,
+		),
+	);
+	$db->delivery_service_countries = array( 501 => $countries );
+	$service_repo = new DeliveryServiceRepository( $db );
+	$country_repo = new DeliveryServiceCountryRepository( $db );
+	$manager = new DeliveryServiceManager( $service_repo, $country_repo, new RuleRepository( $db ), ( new ReflectionClass( RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor() );
+	$GLOBALS['wpdb'] = $db;
+	$orchestrator = new CheckoutOrchestrator(
+		$carrier_registry,
+		new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+		new RateSorter(),
+		new FallbackRateFactory(),
+		new CarrierExecutionGuard( new CheckoutLogger() ),
+		new CheckoutLogger(),
+		wdc_recalc_lead_time_normalizer( 0 ),
+		null,
+		new DeliveryServiceRegistry( $service_repo, $carrier_registry ),
+		$manager
+	);
+
+	return new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper( $location_repo ), $orchestrator, new OrderShipmentRepository() );
+}
+
 function wdc_recalc_replacement( ?CarrierPickupPointProviderRegistry $registry = null, ?PekCheckoutQuoteContextResolver $pek_context = null, ?PekCheckoutPickupPointFormatter $pek_formatter = null ): OrderDeliveryReplacementService {
 	$registry = $registry ?? new CarrierPickupPointProviderRegistry();
 	$pek_formatter = $pek_formatter ?? new PekCheckoutPickupPointFormatter();
@@ -952,6 +1249,94 @@ $omsk_preview = $service->preview(
 	)
 );
 recalc_smoke_assert( 'Омская область, г Омск' === ( $omsk_preview['location']['label'] ?? '' ), 'Preview location label must use display_name without duplicating region.' );
+
+$kz_db = new WdcRecalcDeliveryServiceDb();
+$kz_db->locations = array( wdc_recalc_pek_kz_location_row() );
+$kz_http = new WdcRecalcPekPreviewHttpClient(
+	array(
+		wdc_recalc_pek_zone_response( 'KZ', 'bad' ),
+		wdc_recalc_pek_nearest_response( 'kz-preview-terminal' ),
+		wdc_recalc_pek_calc_response( 1500.0, 5 ),
+		wdc_recalc_pek_calc_response( 2500.0, 4 ),
+	)
+);
+$kz_service = wdc_recalc_pek_preview_service( $kz_http, $kz_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
+$kz_preview = $kz_service->preview( wdc_recalc_pek_kz_order() );
+$kz_rates = array_column( $kz_preview['rates'] ?? array(), null, 'id' );
+$kz_diag = $kz_preview['diagnostic']['pek'] ?? array();
+recalc_smoke_assert( true === ( $kz_preview['success'] ?? false ), 'KZ PEK admin preview without override must succeed.' );
+recalc_smoke_assert( 'KZ' === ( $kz_preview['request']['country_code'] ?? '' ), 'KZ PEK admin preview must map QuoteRequest country from saved order.' );
+recalc_smoke_assert( 'KZ' === ( $kz_preview['request']['destination']['country_code'] ?? '' ), 'KZ PEK admin preview destination must keep KZ country.' );
+recalc_smoke_assert( 162695 === (int) ( $kz_preview['request']['customer_context']['location_id'] ?? 0 ), 'KZ PEK admin preview must map saved canonical location_id.' );
+recalc_smoke_assert( 'KZ' === ( $kz_preview['request']['customer_context']['selected_location_country'] ?? '' ), 'KZ PEK admin preview customer context must expose selected_location_country.' );
+recalc_smoke_assert( isset( $kz_rates[ PekSettings::PICKUP_RATE_ID ] ), 'KZ PEK admin preview must include pickup rate through fake PEK quote path: ' . ( wp_json_encode( $kz_diag ) ?: '' ) );
+recalc_smoke_assert( isset( $kz_rates[ PekSettings::COURIER_RATE_ID ] ), 'KZ PEK admin preview must include courier rate through fake PEK quote path.' );
+recalc_smoke_assert( 'KZ' === ( $kz_diag['request_country_code'] ?? '' ), 'KZ PEK diagnostic must expose mapped request country.' );
+recalc_smoke_assert( 162695 === (int) ( $kz_diag['request_location_id'] ?? 0 ), 'KZ PEK diagnostic must expose mapped location_id.' );
+recalc_smoke_assert( true === ( $kz_diag['request_destination_city_present'] ?? null ), 'KZ PEK diagnostic must expose destination city presence.' );
+recalc_smoke_assert( true === ( $kz_diag['request_destination_postcode_present'] ?? null ), 'KZ PEK diagnostic must expose destination postcode presence.' );
+recalc_smoke_assert( false === ( $kz_diag['location_override'] ?? null ), 'KZ PEK diagnostic must distinguish no selected_location override.' );
+recalc_smoke_assert( true === ( $kz_diag['pek_service_found'] ?? null ) && true === ( $kz_diag['pek_service_active'] ?? null ), 'KZ PEK diagnostic must expose active PEK service.' );
+recalc_smoke_assert( 'selected_countries' === ( $kz_diag['pek_service_availability_mode'] ?? '' ) && true === ( $kz_diag['pek_service_country_enabled'] ?? null ), 'KZ PEK diagnostic must expose selected-country availability.' );
+recalc_smoke_assert( true === ( $kz_diag['pek_service_entry_created'] ?? null ) && true === ( $kz_diag['pek_carrier_quote_attempted'] ?? null ), 'KZ PEK diagnostic must prove service entry and quote attempt.' );
+recalc_smoke_assert( false === ( $kz_diag['pek_quote_cache_hit'] ?? null ) && 0 === (int) ( $kz_diag['quote_cache_hits'] ?? -1 ), 'KZ PEK diagnostic must expose quote cache miss for the fake preview.' );
+recalc_smoke_assert( 2 === (int) ( $kz_diag['pek_rates_count'] ?? 0 ), 'KZ PEK diagnostic must expose PEK rates count.' );
+recalc_smoke_assert( 1 === wdc_recalc_pek_preview_endpoint_count( $kz_http, '/branches/findzonebyaddress/' ), 'KZ PEK preview must call fake geography once.' );
+recalc_smoke_assert( 1 === wdc_recalc_pek_preview_endpoint_count( $kz_http, '/branches/nearestdepartments/' ), 'KZ PEK preview must call fake nearestdepartments once.' );
+recalc_smoke_assert( 2 === wdc_recalc_pek_preview_endpoint_count( $kz_http, '/calculator/calculateprice/' ), 'KZ PEK preview must call fake calculator for pickup and courier.' );
+recalc_smoke_assert( ! str_contains( wp_json_encode( $kz_diag ) ?: '', 'raw formatted address must not be exposed' ), 'KZ PEK diagnostic must not expose raw PEK address evidence.' );
+
+$kz_override_db = new WdcRecalcDeliveryServiceDb();
+$kz_override_db->locations = array( wdc_recalc_pek_kz_location_row() );
+$kz_override_http = new WdcRecalcPekPreviewHttpClient(
+	array(
+		wdc_recalc_pek_zone_response( 'KZ', 'bad' ),
+		wdc_recalc_pek_nearest_response( 'kz-preview-terminal' ),
+		wdc_recalc_pek_calc_response( 1500.0, 5 ),
+		wdc_recalc_pek_calc_response( 2500.0, 4 ),
+	)
+);
+$kz_override_service = wdc_recalc_pek_preview_service( $kz_override_http, $kz_override_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
+$kz_override_preview = $kz_override_service->preview( wdc_recalc_pek_kz_order(), wdc_recalc_pek_kz_selected_location() );
+$kz_override_diag = $kz_override_preview['diagnostic']['pek'] ?? array();
+$kz_override_rates = array_column( $kz_override_preview['rates'] ?? array(), null, 'id' );
+recalc_smoke_assert( 'KZ' === ( $kz_override_preview['request']['country_code'] ?? '' ) && 'KZ' === ( $kz_override_preview['request']['destination']['country_code'] ?? '' ), 'KZ PEK admin preview with selected_location override must keep KZ request country.' );
+recalc_smoke_assert( 162695 === (int) ( $kz_override_preview['request']['customer_context']['location_id'] ?? 0 ) && 162695 === (int) ( $kz_override_preview['request']['customer_context']['selected_location_id'] ?? 0 ), 'KZ PEK admin preview with override must map KZ location identity.' );
+recalc_smoke_assert( true === ( $kz_override_diag['location_override'] ?? null ) && 'KZ' === ( $kz_override_diag['selected_location_country'] ?? '' ) && 162695 === (int) ( $kz_override_diag['selected_location_id'] ?? 0 ), 'KZ PEK diagnostic must expose selected_location override country and id.' );
+recalc_smoke_assert( isset( $kz_override_rates[ PekSettings::PICKUP_RATE_ID ] ) && isset( $kz_override_rates[ PekSettings::COURIER_RATE_ID ] ), 'KZ PEK admin preview with override must include pickup and courier rates: ' . ( wp_json_encode( $kz_override_diag ) ?: '' ) );
+
+$kz_filtered_db = new WdcRecalcDeliveryServiceDb();
+$kz_filtered_db->locations = array( wdc_recalc_pek_kz_location_row() );
+$kz_filtered_http = new WdcRecalcPekPreviewHttpClient( array() );
+$kz_filtered_service = wdc_recalc_pek_preview_service( $kz_filtered_http, $kz_filtered_db, array( 'RU' ) );
+$kz_filtered_preview = $kz_filtered_service->preview( wdc_recalc_pek_kz_order() );
+$kz_filtered_diag = $kz_filtered_preview['diagnostic']['pek'] ?? array();
+recalc_smoke_assert( true === ( $kz_filtered_diag['pek_service_found'] ?? null ) && false === ( $kz_filtered_diag['pek_service_country_enabled'] ?? null ), 'KZ PEK diagnostic must expose country filter rejection.' );
+recalc_smoke_assert( false === ( $kz_filtered_diag['pek_service_entry_created'] ?? null ) && false === ( $kz_filtered_diag['pek_carrier_quote_attempted'] ?? null ), 'KZ PEK country-filter diagnostic must prove quote was not attempted.' );
+recalc_smoke_assert( 0 === count( $kz_filtered_http->requests ), 'KZ PEK country-filter rejection must not call fake PEK HTTP.' );
+
+$kz_failure_db = new WdcRecalcDeliveryServiceDb();
+$kz_failure_db->locations = array( wdc_recalc_pek_kz_location_row() );
+$kz_failure_http = new WdcRecalcPekPreviewHttpClient( array( array( 'status' => 500, 'body' => array( 'message' => 'temporary fake failure' ) ) ) );
+$kz_failure_service = wdc_recalc_pek_preview_service( $kz_failure_http, $kz_failure_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
+$kz_failure_preview = $kz_failure_service->preview( wdc_recalc_pek_kz_order() );
+$kz_failure_diag = $kz_failure_preview['diagnostic']['pek'] ?? array();
+recalc_smoke_assert( true === ( $kz_failure_diag['pek_carrier_quote_attempted'] ?? null ) && 0 === (int) ( $kz_failure_diag['pek_rates_count'] ?? -1 ), 'KZ PEK diagnostic must show attempted quote with zero rates on fake failure.' );
+recalc_smoke_assert( '' !== (string) ( $kz_failure_diag['pek_carrier_error_code'] ?? $kz_failure_diag['pek_carrier_reason'] ?? '' ), 'KZ PEK diagnostic must expose a safe PEK failure reason.' );
+
+$kz_empty_db = new WdcRecalcDeliveryServiceDb();
+$kz_empty_db->locations = array( wdc_recalc_pek_kz_location_row() );
+$kz_empty_http = new WdcRecalcPekPreviewHttpClient(
+	array(
+		wdc_recalc_pek_zone_response( 'KZ', 'bad' ),
+		array( 'freeDepartments' => array(), 'paidDepartments' => array() ),
+		wdc_recalc_pek_calc_reject_response(),
+	)
+);
+$kz_empty_service = wdc_recalc_pek_preview_service( $kz_empty_http, $kz_empty_db, array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
+$kz_empty_preview = $kz_empty_service->preview( wdc_recalc_pek_kz_order() );
+$kz_empty_diag = $kz_empty_preview['diagnostic']['pek'] ?? array();
+recalc_smoke_assert( true === ( $kz_empty_diag['pek_carrier_quote_attempted'] ?? null ) && 0 === (int) ( $kz_empty_diag['pek_rates_count'] ?? -1 ), 'KZ PEK diagnostic must distinguish attempted PEK empty quote.' );
 
 $rate_ids = array_column( $preview['rates'], 'id' );
 recalc_smoke_assert( in_array( 'demo:pickup', $rate_ids, true ), 'Preview must include rates from every available carrier/service path.' );

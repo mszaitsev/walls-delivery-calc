@@ -58,7 +58,8 @@ final class CheckoutOrchestrator {
 		$audit          = array();
 		$cache_hits     = 0;
 		$rates          = array();
-		$service_entries = $this->service_entries_for_country( $request->country_code );
+		$diagnostic     = array( 'service_scan' => array(), 'carrier_quotes' => array() );
+		$service_entries = $this->service_entries_for_country( $request->country_code, $diagnostic );
 
 		if ( null === $service_entries ) {
 			$carriers = $this->carrier_registry->for_country( $request->country_code );
@@ -79,6 +80,7 @@ final class CheckoutOrchestrator {
 			$quote         = null;
 			$service_request = $request;
 			$packaging_result = null;
+			$quote_cache_hit = false;
 			if ( $service instanceof DeliveryService && $this->packaging_calculator instanceof PackagingWeightCalculator ) {
 				$packaging_result = $this->packaging_calculator->apply_to_package( $request->package, $service );
 				$service_request = $this->request_with_package( $request, $packaging_result->package, $packaging_result );
@@ -92,11 +94,13 @@ final class CheckoutOrchestrator {
 				$quote = $this->quote_cache->get( $service_request, $carrier_key, $delivery_type, $service_key, $carrier_cache_context );
 				if ( $quote instanceof DeliveryQuote ) {
 					++$cache_hits;
+					$quote_cache_hit = true;
 					$this->logger->info( 'Quote cache hit.', array( 'carrier' => $carrier_key ) );
 				} else {
 					$this->logger->info( 'Quote cache miss.', array( 'carrier' => $carrier_key ) );
 				}
 			}
+			$quote_attempted = ! $quote instanceof DeliveryQuote;
 
 			if ( ! $quote instanceof DeliveryQuote ) {
 				$quote = $this->execution_guard->quote( $carrier, $service_request, $carrier_errors );
@@ -104,6 +108,7 @@ final class CheckoutOrchestrator {
 					$this->quote_cache->set( $service_request, $carrier_key, $quote, $delivery_type, $service_key, $carrier_cache_context );
 				}
 			}
+			$diagnostic['carrier_quotes'][] = $this->carrier_quote_diagnostic( $carrier_key, $service_key, $delivery_type, $quote_attempted, $quote_cache_hit, $quote );
 
 			foreach ( $quote->rates as $rate ) {
 				if ( ! $rate instanceof DeliveryRate ) {
@@ -163,7 +168,7 @@ final class CheckoutOrchestrator {
 		$final = $this->sorter->sort( $visible, $sort );
 		$this->logger->info( 'Checkout rates calculated.', array( 'rates_count' => count( $final ), 'fallback_used' => $fallback_used ) );
 
-		return new CheckoutCalculationResult( $final, $fallback_used, $cache_hits, $audit, $carrier_errors );
+		return new CheckoutCalculationResult( $final, $fallback_used, $cache_hits, $audit, $carrier_errors, $diagnostic );
 	}
 
 	private function should_cache_quote( DeliveryQuote $quote ): bool {
@@ -173,7 +178,7 @@ final class CheckoutOrchestrator {
 	/**
 	 * @return array<int,array{carrier:object,service:?DeliveryService,delivery_type?:string}>|null
 	 */
-	private function service_entries_for_country( string $country_code ): ?array {
+	private function service_entries_for_country( string $country_code, ?array &$diagnostic = null ): ?array {
 		if ( ! $this->service_registry instanceof DeliveryServiceRegistry || ! $this->service_manager instanceof DeliveryServiceManager ) {
 			return null;
 		}
@@ -185,11 +190,27 @@ final class CheckoutOrchestrator {
 		}
 
 		foreach ( $services as $service ) {
-			if ( ! $this->service_manager->service_available_for_country( $service, $country_code ) ) {
+			$country_enabled = $this->service_manager->service_available_for_country( $service, $country_code );
+			$scan_index = null;
+			if ( is_array( $diagnostic ) ) {
+				$diagnostic['service_scan'][] = array(
+					'carrier_key' => $service->carrier_key,
+					'service_key' => $service->service_key,
+					'enabled' => $service->enabled,
+					'availability_mode' => $service->availability_mode,
+					'country_enabled' => $country_enabled,
+					'entry_created' => false,
+				);
+				$scan_index = array_key_last( $diagnostic['service_scan'] );
+			}
+			if ( ! $country_enabled ) {
 				continue;
 			}
 			$carrier = $this->service_registry->carrier_for( $service );
 			if ( null !== $carrier ) {
+				if ( is_array( $diagnostic ) && null !== $scan_index ) {
+					$diagnostic['service_scan'][ $scan_index ]['entry_created'] = true;
+				}
 				if ( in_array( $service->service_key, array( RussianPostDomesticSettings::SERVICE_KEY, CdekCarrier::KEY, YandexDeliverySettings::SERVICE_KEY ), true ) ) {
 					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::PICKUP );
 					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::COURIER );
@@ -212,6 +233,27 @@ final class CheckoutOrchestrator {
 		}
 
 		return $entries;
+	}
+
+	private function carrier_quote_diagnostic( string $carrier_key, string $service_key, string $delivery_type, bool $attempted, bool $cache_hit, DeliveryQuote $quote ): array {
+		$diagnostic = array(
+			'carrier_key' => $carrier_key,
+			'service_key' => $service_key,
+			'delivery_type' => $delivery_type,
+			'attempted' => $attempted,
+			'cache_hit' => $cache_hit,
+			'success' => $quote->success,
+			'rates_count' => count( $quote->rates ),
+			'error_code' => (string) $quote->error_code,
+		);
+		$raw = is_array( $quote->raw_reference ) ? $quote->raw_reference : array();
+		foreach ( array( 'fallback_reason', 'failure_stage', 'location_mapping_state', 'location_resolution_method', 'location_precision' ) as $key ) {
+			if ( is_scalar( $raw[ $key ] ?? null ) ) {
+				$diagnostic[ $key ] = (string) $raw[ $key ];
+			}
+		}
+
+		return $diagnostic;
 	}
 
 	private function rate_for_service( DeliveryRate $rate, DeliveryService $service ): DeliveryRate {
