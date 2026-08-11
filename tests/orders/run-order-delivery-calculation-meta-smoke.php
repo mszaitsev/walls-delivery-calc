@@ -10,6 +10,7 @@ use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
@@ -26,6 +27,10 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 	class WC_Shipping_Method {}
 }
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {}
+}
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
@@ -56,6 +61,13 @@ function esc_html( mixed $text ): string { return htmlspecialchars( (string) $te
 function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
+function get_option( string $option, mixed $default = false ): mixed {
+	if ( 'wdc_location_country_codes' === $option ) {
+		return array( 'countries' => array( 'RU', 'AM', 'BY', 'KG', 'KZ' ) );
+	}
+
+	return $default;
+}
 
 function wdc_order_meta_real_rule_audit( float $base_price_rub = 3810.06 ): array {
 	$engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
@@ -132,6 +144,12 @@ final class WdcOrderMetaSmokeShippingItem {
 	}
 }
 
+final class WdcOrderMetaLocationDb extends wpdb {
+	public string $prefix = 'wp_';
+	/** @var array<int,array<string,mixed>> */
+	public array $locations = array();
+}
+
 function wdc_order_meta_rate( array $overrides = array() ): array {
 	$real_audit = wdc_order_meta_real_rule_audit();
 	$rate_meta = array_merge(
@@ -177,6 +195,60 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 			'fallback_used' => false,
 		),
 		$overrides
+	);
+}
+
+function wdc_order_meta_location_row( int $id, string $country_code, string $display_name, bool $active = true ): array {
+	return array(
+		'id' => $id,
+		'country_code' => $country_code,
+		'active' => $active ? 1 : 0,
+		'fias_id' => 'RU' === $country_code ? 'fias-' . $id : '',
+		'city_fias_id' => '',
+		'gar_id' => 'RU' === $country_code ? (string) ( 880000 + $id ) : '',
+		'gar_object_id' => 'RU' === $country_code ? 880000 + $id : 0,
+		'region_name' => $display_name,
+		'region_code' => '',
+		'city_name' => $display_name,
+		'city_type' => '',
+		'place_name' => $display_name,
+		'place_type' => '',
+		'settlement_name' => '',
+		'settlement_type' => '',
+		'display_name' => $display_name,
+		'postal_code' => '',
+	);
+}
+
+function wdc_order_meta_location_repository( array $rows ): LocationRepository {
+	$db = new WdcOrderMetaLocationDb();
+	$db->locations = $rows;
+
+	return new LocationRepository( $db );
+}
+
+function wdc_order_meta_persister_with_locations( CheckoutSessionManager $session, LocationRepository $locations ): OrderShippingMetaPersister {
+	return new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ), $locations );
+}
+
+function wdc_order_meta_pek_rate_for_location( int $location_id, string $country_code ): array {
+	return wdc_order_meta_rate(
+		array(
+			'carrier_key' => 'pek',
+			'rate_id' => 'pek:courier',
+			'delivery_type' => 'courier',
+			'service_key' => 'pek',
+			'service_title' => 'ПЭК',
+			'rate_meta' => array(
+				'location_id' => $location_id,
+				'destination_fingerprint' => 'country=' . $country_code . '|location_id=' . $location_id,
+				'country_mapping' => array(
+					'country_code' => $country_code,
+					'country_name' => $country_code,
+				),
+				'rules_audit' => array(),
+			),
+		)
 	);
 }
 
@@ -276,6 +348,68 @@ $city_fias_order = new WdcOrderMetaSmokeOrder();
 $city_fias_persister->persist( $city_fias_order, array() );
 order_meta_smoke_assert( '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' === (string) ( $city_fias_order->meta['_wdc_platform_city_fias_id'] ?? '' ), 'Generic order persister must preserve server-side city_context FIAS as _wdc_platform_city_fias_id.' );
 order_meta_smoke_assert( ! array_key_exists( '_wdc_platform_location_fias_id', $city_fias_order->meta ) && '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' === (string) ( $city_fias_order->meta['_wdc_platform_city_fias_id'] ?? '' ), 'Selected location FIAS may be absent without losing generic city FIAS persistence.' );
+
+$foreign_location_rows = array(
+	wdc_order_meta_location_row( 162695, 'KZ', 'Алматы' ),
+	wdc_order_meta_location_row( 262695, 'BY', 'Минск' ),
+	wdc_order_meta_location_row( 362695, 'AM', 'Ереван' ),
+	wdc_order_meta_location_row( 462695, 'KG', 'Бишкек' ),
+	wdc_order_meta_location_row( 153912, 'RU', 'Новосибирск' ),
+	wdc_order_meta_location_row( 762695, 'RU', 'Москва' ),
+	wdc_order_meta_location_row( 862695, 'KZ', 'Неактивный', false ),
+);
+$foreign_location_repository = wdc_order_meta_location_repository( $foreign_location_rows );
+foreach ( array( 'KZ' => 162695, 'BY' => 262695, 'AM' => 362695, 'KG' => 462695 ) as $country_code => $location_id ) {
+	$canonical_session = new CheckoutSessionManager();
+	$canonical_session->save_city_context( array( 'country_code' => $country_code, 'location_id' => $location_id, 'display_name' => $country_code ) );
+	$canonical_session->save_rates( array( 'pek:courier' => wdc_order_meta_pek_rate_for_location( $location_id, $country_code ) ) );
+	WC()->session->set( 'chosen_shipping_methods', array( 'pek:courier' ) );
+	$canonical_order = new WdcOrderMetaSmokeOrder();
+	wdc_order_meta_persister_with_locations( $canonical_session, $foreign_location_repository )->persist( $canonical_order, array() );
+	$canonical_calculation = $canonical_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+	order_meta_smoke_assert( $location_id === (int) ( $canonical_order->meta['_wdc_platform_location_id'] ?? 0 ), $country_code . ' new order must persist canonical WDC location_id without FIAS.' );
+	order_meta_smoke_assert( $location_id === (int) ( $canonical_calculation['destination']['location_id'] ?? 0 ) && $country_code === (string) ( $canonical_calculation['destination']['country_code'] ?? '' ), $country_code . ' calculation destination must persist country and location_id.' );
+	order_meta_smoke_assert( ! array_key_exists( '_wdc_platform_location_fias_id', $canonical_order->meta ), $country_code . ' canonical location persistence must not manufacture FIAS.' );
+}
+
+$ru_location_session = new CheckoutSessionManager();
+$ru_location_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 153912, 'display_name' => 'Новосибирск', 'fias_id' => 'fias-153912' ) );
+$ru_location_session->save_rates( array( 'pek:courier' => wdc_order_meta_pek_rate_for_location( 153912, 'RU' ) ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'pek:courier' ) );
+$ru_location_order = new WdcOrderMetaSmokeOrder();
+wdc_order_meta_persister_with_locations( $ru_location_session, $foreign_location_repository )->persist( $ru_location_order, array( 'billing_country' => 'RU', 'wdc_platform_location_fias_id' => 'fias-153912', 'wdc_platform_location_display_name' => 'Новосибирск' ) );
+$ru_location_calculation = $ru_location_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+order_meta_smoke_assert( 153912 === (int) ( $ru_location_order->meta['_wdc_platform_location_id'] ?? 0 ) && 'fias-153912' === (string) ( $ru_location_order->meta['_wdc_platform_location_fias_id'] ?? '' ), 'RU order must keep canonical location_id and existing FIAS metadata.' );
+order_meta_smoke_assert( 153912 === (int) ( $ru_location_calculation['destination']['location_id'] ?? 0 ), 'RU calculation destination must include location_id.' );
+
+$conflict_session = new CheckoutSessionManager();
+$conflict_session->save_city_context( array( 'country_code' => 'KZ', 'location_id' => 162695, 'display_name' => 'Алматы' ) );
+$conflict_session->save_rates( array( 'pek:courier' => wdc_order_meta_pek_rate_for_location( 262695, 'KZ' ) ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'pek:courier' ) );
+$conflict_order = new WdcOrderMetaSmokeOrder();
+wdc_order_meta_persister_with_locations( $conflict_session, $foreign_location_repository )->persist( $conflict_order, array() );
+$conflict_calculation = $conflict_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+order_meta_smoke_assert( ! array_key_exists( '_wdc_platform_location_id', $conflict_order->meta ) && ! isset( $conflict_calculation['destination']['location_id'] ), 'Conflicting trusted session/rate location IDs must not be persisted silently.' );
+
+$country_mismatch_session = new CheckoutSessionManager();
+$country_mismatch_session->save_city_context( array( 'country_code' => 'KZ', 'display_name' => 'Алматы' ) );
+$country_mismatch_session->save_rates( array( 'pek:courier' => wdc_order_meta_pek_rate_for_location( 762695, 'KZ' ) ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'pek:courier' ) );
+$country_mismatch_order = new WdcOrderMetaSmokeOrder();
+wdc_order_meta_persister_with_locations( $country_mismatch_session, $foreign_location_repository )->persist( $country_mismatch_order, array() );
+$country_mismatch_calculation = $country_mismatch_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+order_meta_smoke_assert( ! array_key_exists( '_wdc_platform_location_id', $country_mismatch_order->meta ) && ! isset( $country_mismatch_calculation['destination']['location_id'] ), 'Location ID resolving to another country must not be persisted.' );
+
+foreach ( array( 'missing' => 962695, 'inactive' => 862695 ) as $case_name => $location_id ) {
+	$invalid_session = new CheckoutSessionManager();
+	$invalid_session->save_city_context( array( 'country_code' => 'KZ', 'display_name' => 'Алматы' ) );
+	$invalid_session->save_rates( array( 'pek:courier' => wdc_order_meta_pek_rate_for_location( $location_id, 'KZ' ) ) );
+	WC()->session->set( 'chosen_shipping_methods', array( 'pek:courier' ) );
+	$invalid_order = new WdcOrderMetaSmokeOrder();
+	wdc_order_meta_persister_with_locations( $invalid_session, $foreign_location_repository )->persist( $invalid_order, array() );
+	$invalid_calculation = $invalid_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+	order_meta_smoke_assert( ! array_key_exists( '_wdc_platform_location_id', $invalid_order->meta ) && ! isset( $invalid_calculation['destination']['location_id'] ), 'Invalid canonical location must not be persisted: ' . $case_name );
+}
 
 $lead_time_rate = wdc_order_meta_rate(
 	array(
