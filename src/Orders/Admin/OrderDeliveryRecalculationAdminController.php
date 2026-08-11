@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiException;
 use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
@@ -53,6 +54,7 @@ final class OrderDeliveryRecalculationAdminController {
 		private CarrierPickupPointProviderRegistry $pickup_providers,
 		private PekCheckoutQuoteContextResolver $pek_quote_context,
 		private PekCheckoutPickupPointFormatter $pek_formatter,
+		private PekCountryPolicy $pek_countries,
 		private string $plugin_url = '',
 		private string $version = '1',
 		private ?CdekDeliveryPointService $cdek_points = null,
@@ -734,14 +736,21 @@ final class OrderDeliveryRecalculationAdminController {
 		if (
 			PekSettings::CARRIER_KEY !== (string) ( $snapshot['carrier_key'] ?? '' )
 			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
-			|| 'RU' !== strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) )
 		) {
+			throw new \RuntimeException( 'Контекст пунктов ПЭК устарел. Пересчитайте доставку.' );
+		}
+		$snapshot_country = strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) );
+		if ( ! $this->pek_countries->supports_calculation_direction( $this->pek_countries->sender_country(), $snapshot_country ) ) {
 			throw new \RuntimeException( 'Контекст пунктов ПЭК устарел. Пересчитайте доставку.' );
 		}
 		$snapshot_location_id = (int) ( $snapshot['location_id'] ?? 0 );
 		$current_location_id = $this->current_location_id_for_pickup( $order, $location );
 		if ( $snapshot_location_id <= 0 || $current_location_id <= 0 || $snapshot_location_id !== $current_location_id ) {
 			throw new \RuntimeException( 'Населенный пункт изменился. Пересчитайте доставку перед выбором пункта ПЭК.' );
+		}
+		$current_country = $this->current_country_code_for_pickup( $order, $location );
+		if ( '' === $current_country || $snapshot_country !== $current_country ) {
+			throw new \RuntimeException( 'Страна пункта ПЭК не соответствует текущему месту доставки. Пересчитайте доставку.' );
 		}
 		if ( ! $this->looks_like_sha256( $this->pek_provider_fingerprint( $snapshot ) ) ) {
 			throw new \RuntimeException( 'Контекст пунктов ПЭК устарел. Пересчитайте доставку.' );
@@ -780,6 +789,28 @@ final class OrderDeliveryRecalculationAdminController {
 		$resolved = $this->service->resolved_location_payload( $order, array() === $location ? null : $location );
 
 		return is_array( $resolved ) ? $this->positive_location_id( $resolved ) : 0;
+	}
+
+	/** @param array<string,mixed> $location */
+	private function current_country_code_for_pickup( object $order, array $location ): string {
+		$location_id = $this->positive_location_id( $location );
+		$country = $location_id > 0 ? $this->country_code_from_location_payload( $location ) : '';
+		if ( '' !== $country ) {
+			return $country;
+		}
+		$resolved = $this->service->resolved_location_payload( $order, array() === $location ? null : $location );
+		if ( is_array( $resolved ) && $this->positive_location_id( $resolved ) > 0 ) {
+			return $this->country_code_from_location_payload( $resolved );
+		}
+
+		return '';
+	}
+
+	/** @param array<string,mixed> $location */
+	private function country_code_from_location_payload( array $location ): string {
+		$country = strtoupper( trim( (string) ( $location['country_code'] ?? $location['country'] ?? '' ) ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country ) ? $country : '';
 	}
 
 	private function looks_like_sha256( string $value ): bool {

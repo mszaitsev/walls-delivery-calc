@@ -10,6 +10,7 @@ use WallsShop\WDC\Carriers\Pek\Geography\PekAddressBuilder;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationMappingRepository;
 use WallsShop\WDC\Carriers\Pek\Geography\PekLocationResolver;
 use WallsShop\WDC\Carriers\Pek\PekCredentials;
+use WallsShop\WDC\Carriers\Pek\PekCountryPolicy;
 use WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCargoConstraintsConverter;
@@ -1113,7 +1114,8 @@ function wdc_recalc_admin_controller(
 	?YandexLocationMappingV2Repository $yandex_location_mapping = null,
 	?CarrierPickupPointProviderRegistry $pickup_providers = null,
 	?PekCheckoutQuoteContextResolver $pek_context = null,
-	?PekCheckoutPickupPointFormatter $pek_formatter = null
+	?PekCheckoutPickupPointFormatter $pek_formatter = null,
+	?PekCountryPolicy $pek_countries = null
 ): OrderDeliveryRecalculationAdminController {
 	$settings = new SettingsRepository();
 	$pickup_providers = $pickup_providers ?? new CarrierPickupPointProviderRegistry();
@@ -1133,6 +1135,7 @@ function wdc_recalc_admin_controller(
 		$pickup_providers,
 		$pek_context ?? wdc_recalc_pek_quote_context( $pickup_providers, $pek_formatter ),
 		$pek_formatter,
+		$pek_countries ?? new PekCountryPolicy(),
 		'',
 		'1',
 		null,
@@ -1599,6 +1602,69 @@ try {
 	recalc_smoke_assert( 'Собственный пункт выдачи ПЭК' === (string) ( $points[0]['point_title'] ?? '' ) && 'PEK-FREE-UUID-0001' !== (string) ( $points[0]['point_title'] ?? '' ), 'PEK free terminal must use checkout presentation title and not expose UUID as title.' );
 	recalc_smoke_assert( 'Партнерский пункт выдачи ПЭК' === (string) ( $points[1]['point_title'] ?? '' ) && 'Возможна небольшая доплата за доставку в этот пункт' === (string) ( $points[1]['presentation_comment'] ?? '' ), 'PEK paid terminal must use checkout presentation title and partner warning.' );
 	recalc_smoke_assert( true === (bool) ( $points[0]['requires_rate_refresh'] ?? false ) && $pek_fingerprint === (string) ( $points[0]['provider_destination_fingerprint'] ?? '' ), 'PEK admin point payload must carry rate-refresh and provider destination fingerprint evidence.' );
+}
+$kz_admin_fingerprint = str_repeat( 'b', 64 );
+$kz_admin_snapshot = array_replace( $pek_query_snapshot, array( 'location_id' => 162695, 'country_code' => 'KZ', 'latitude' => null, 'longitude' => null, 'destination_fingerprint' => $kz_admin_fingerprint, 'provider_destination_fingerprint' => $kz_admin_fingerprint ) );
+$kz_admin_rate = array_replace( $pek_rate, array( 'cost' => 1500.0, 'rate_meta' => array( 'pickup_provider_query' => $kz_admin_snapshot ) ) );
+$kz_admin_location = wdc_recalc_pek_kz_selected_location();
+$kz_admin_provider = new WdcRecalcPekPickupProvider(
+	array(
+		new PickupPoint( PekSettings::CARRIER_KEY, 'KZ-PEK-FREE-0001', 'Казахстан, Алматы, ул. Абая, 1', 'Алматы', 'Алматы', '050000', 43.238293, 76.945465, 'terminal', '09:00-18:00', '', null, true, array( 'source' => 'free', 'division_name' => 'Алматы Центр' ) ),
+	)
+);
+$kz_admin_registry = new CarrierPickupPointProviderRegistry( array( $kz_admin_provider ) );
+$kz_admin_formatter = new PekCheckoutPickupPointFormatter();
+$kz_admin_context = wdc_recalc_pek_quote_context( $kz_admin_registry, $kz_admin_formatter, array( wdc_recalc_pek_kz_location_row() ) );
+$kz_admin_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement, null, null, $kz_admin_registry, $kz_admin_context, $kz_admin_formatter );
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $kz_admin_location ), 'selected_rate' => wp_json_encode( $kz_admin_rate ), 'mode' => 'location', 'query' => '', 'limit' => 2000 );
+try {
+	$kz_admin_controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'KZ PEK pickup endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$points = $response->data['points'] ?? array();
+	recalc_smoke_assert( $response->success && 1 === $kz_admin_provider->search_calls && 1 === count( $points ), 'KZ PEK admin pickup map must accept fresh international pickup context and return PEK points. message=' . (string) ( $response->data['message'] ?? '' ) );
+	recalc_smoke_assert( 'KZ' === (string) ( $kz_admin_provider->last_search_query?->country_code ?? '' ) && 162695 === (int) ( $kz_admin_provider->last_search_query?->location_id ?? 0 ), 'KZ PEK admin pickup map must pass KZ country and canonical location_id to provider query.' );
+	recalc_smoke_assert( PekSettings::CARRIER_KEY === (string) ( $points[0]['carrier_key'] ?? '' ) && PekSettings::PICKUP_FAMILY === (string) ( $points[0]['pickup_family'] ?? '' ) && $kz_admin_fingerprint === (string) ( $points[0]['provider_destination_fingerprint'] ?? '' ), 'KZ PEK admin point payload must retain carrier/family/fingerprint.' );
+}
+
+$pek_query_method = new ReflectionMethod( OrderDeliveryRecalculationAdminController::class, 'pek_pickup_query_from_rate' );
+$pek_query_method->setAccessible( true );
+$policy_rows = array(
+	wdc_recalc_location_row( 162695, array( 'country_code' => 'KZ', 'display_name' => 'Алматы', 'city_name' => 'Алматы', 'place_name' => 'Алматы', 'settlement_name' => '', 'fias_id' => '', 'gar_id' => '', 'gar_object_id' => 0, 'active' => 1 ) ),
+	wdc_recalc_location_row( 262695, array( 'country_code' => 'BY', 'display_name' => 'Минск', 'city_name' => 'Минск', 'place_name' => 'Минск', 'settlement_name' => '', 'fias_id' => '', 'gar_id' => '', 'gar_object_id' => 0, 'active' => 1 ) ),
+	wdc_recalc_location_row( 362695, array( 'country_code' => 'AM', 'display_name' => 'Ереван', 'city_name' => 'Ереван', 'place_name' => 'Ереван', 'settlement_name' => '', 'fias_id' => '', 'gar_id' => '', 'gar_object_id' => 0, 'active' => 1 ) ),
+	wdc_recalc_location_row( 462695, array( 'country_code' => 'KG', 'display_name' => 'Бишкек', 'city_name' => 'Бишкек', 'place_name' => 'Бишкек', 'settlement_name' => '', 'fias_id' => '', 'gar_id' => '', 'gar_object_id' => 0, 'active' => 1 ) ),
+	$pek_location_rows[0],
+);
+$policy_context = wdc_recalc_pek_quote_context( new CarrierPickupPointProviderRegistry(), new PekCheckoutPickupPointFormatter(), $policy_rows );
+$policy_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement, null, null, new CarrierPickupPointProviderRegistry(), $policy_context, new PekCheckoutPickupPointFormatter() );
+foreach ( array( 'BY' => 262695, 'AM' => 362695, 'KG' => 462695, 'RU' => 153912 ) as $index => $location_id ) {
+	$country_code = (string) $index;
+	$fingerprint = hash( 'sha256', 'admin-map-' . $country_code );
+	$snapshot = array_replace( $pek_query_snapshot, array( 'country_code' => $country_code, 'location_id' => $location_id, 'destination_fingerprint' => $fingerprint, 'provider_destination_fingerprint' => $fingerprint ) );
+	$rate = array_replace( $pek_rate, array( 'rate_meta' => array( 'pickup_provider_query' => $snapshot ) ) );
+	$location = array( 'id' => $location_id, 'location_id' => $location_id, 'country_code' => $country_code, 'display_name' => $country_code );
+	$query = $pek_query_method->invoke( $policy_controller, $order, $rate, $location );
+	recalc_smoke_assert( $query instanceof CarrierPickupPointQuery && $country_code === $query->country_code && $location_id === $query->location_id, $country_code . ' PEK admin pickup context must be accepted by PekCountryPolicy.' );
+}
+
+$negative_provider = new WdcRecalcPekPickupProvider( array() );
+$negative_registry = new CarrierPickupPointProviderRegistry( array( $negative_provider ) );
+$negative_context = wdc_recalc_pek_quote_context( $negative_registry, new PekCheckoutPickupPointFormatter(), array_merge( $policy_rows, array( wdc_recalc_location_row( 562695, array( 'country_code' => 'DE', 'display_name' => 'Berlin', 'city_name' => 'Berlin', 'place_name' => 'Berlin', 'active' => 1 ) ) ) ) );
+$negative_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement, null, null, $negative_registry, $negative_context, new PekCheckoutPickupPointFormatter() );
+$mismatch_rate = array_replace( $pek_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array_replace( $kz_admin_snapshot, array( 'country_code' => 'KZ', 'location_id' => 162695 ) ) ) ) );
+foreach ( array(
+	'country mismatch' => array( $mismatch_rate, array( 'id' => 162695, 'location_id' => 162695, 'country_code' => 'BY', 'display_name' => 'Минск' ), 'Страна' ),
+	'unsupported country' => array( array_replace( $pek_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array_replace( $kz_admin_snapshot, array( 'country_code' => 'DE', 'location_id' => 562695 ) ) ) ) ), array( 'id' => 562695, 'location_id' => 562695, 'country_code' => 'DE', 'display_name' => 'Berlin' ), 'устарел' ),
+	'invalid fingerprint' => array( array_replace( $pek_rate, array( 'rate_meta' => array( 'pickup_provider_query' => array_replace( $kz_admin_snapshot, array( 'provider_destination_fingerprint' => 'not-sha' ) ) ) ) ), $kz_admin_location, 'устарел' ),
+) as $case_name => $case ) {
+	try {
+		$pek_query_method->invoke( $negative_controller, $order, $case[0], $case[1] );
+		recalc_smoke_assert( false, 'PEK admin pickup context must fail closed for ' . $case_name . '.' );
+	} catch ( Throwable $exception ) {
+		$message = $exception->getMessage();
+		recalc_smoke_assert( str_contains( $message, (string) $case[2] ) && 0 === $negative_provider->search_calls, 'PEK admin pickup ' . $case_name . ' must fail before provider search.' );
+	}
 }
 $pek_bad_rate = $pek_rate;
 unset( $pek_bad_rate['rate_meta']['pickup_provider_query'] );
