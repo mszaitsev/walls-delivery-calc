@@ -513,6 +513,7 @@ shipment_status_smoke_assert( str_contains( $js_source, 'renderShipmentStatus' )
 shipment_status_smoke_assert( str_contains( $js_source, 'showShipmentToast' ) && str_contains( $js_source, '10000' ), 'Admin JS must show auto-hiding shipment toast.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'modal.hidden = true' ), 'Admin JS must close shipment modal after successful create.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'requestShipmentStatus(updateButton, { auto: true })' ), 'Admin JS must trigger automatic first status update after create.' );
+shipment_status_smoke_assert( strpos( $js_source, 'requestShipmentStatus(updateButton, { auto: true })' ) < strpos( $js_source, "showShipmentToast(box, payload.data.message || text.createdToast, 'success')" ), 'Admin JS must let the automatic first status update own the create/status toast when update is available.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'Статус пока не обновлен:' ), 'Admin JS must warn when automatic first status update fails.' );
 
 echo "Shipment status smoke test passed.\n";

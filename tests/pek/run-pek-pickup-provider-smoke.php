@@ -190,7 +190,7 @@ $wpdb->locations = array(
 );
 
 $settings_repo = new SettingsRepository();
-$settings = new PekSettings( $settings_repo );
+$settings = new PekSettings( $settings_repo, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $credentials = new PekCredentials( $settings_repo, new EncryptionService( 'test-key' ) );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret' ) );
 $http = new PekPickupFakeHttp();

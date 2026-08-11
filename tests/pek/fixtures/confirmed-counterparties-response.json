@@ -1,0 +1,13 @@
+[
+  {
+    "legalForm": 1,
+    "title": "ТЕСТОВЫЙ ОТПРАВИТЕЛЬ",
+    "guid": "11111111-2222-3333-4444-555555555555",
+    "counterpartClientCard": "CLIENT-CARD",
+    "documents": null,
+    "legal": {
+      "inn": "5400000000",
+      "kpp": "540001001"
+    }
+  }
+]

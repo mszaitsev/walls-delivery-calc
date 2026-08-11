@@ -1,0 +1,93 @@
+{
+  "common": {
+    "orderType": 0,
+    "counterpartClientCard": "CLIENT-CARD"
+  },
+  "sender": {
+    "legalForm": 1,
+    "fs": "ООО",
+    "title": "Тестовый отправитель",
+    "inn": "5400000000",
+    "countryOfRegistrationCode": "643",
+    "person": "Петров Петр",
+    "personPhones": [
+      {
+        "phone": "+73831234567"
+      }
+    ],
+    "warehouseId": "85974fc8-d0b8-11e5-9833-00155d668909",
+    "kpp": "540001001",
+    "email": "sender@example.test"
+  },
+  "cargos": [
+    {
+      "common": {
+        "type": 3,
+        "customerCorrelation": "wdc-17d0195f282145bbdc07af1ceb91dfad",
+        "orderNumber": "1004",
+        "positionsCount": 1,
+        "weight": 1.25,
+        "volume": 0.01,
+        "description": "Товары интернет-магазина",
+        "cargoPlaceList": [
+          {
+            "quantity": 1,
+            "weight": 1.25,
+            "length": 0.2,
+            "width": 0.2,
+            "height": 0.2,
+            "volume": 0.01
+          }
+        ]
+      },
+      "receiver": {
+        "legalForm": 3,
+        "title": "Иванов Иван",
+        "individual": {
+          "firstName": "Иван",
+          "lastName": "Иванов"
+        },
+        "person": "Иванов Иван",
+        "personPhones": [
+          {
+            "phone": "+79991234567"
+          }
+        ],
+        "email": "buyer@example.test",
+        "warehouseId": "77968d17-65bc-11e9-80cd-00155d4a0436"
+      },
+      "services": {
+        "transporting": {
+          "payer": {
+            "type": 1
+          }
+        },
+        "hardPacking": {
+          "enabled": false
+        },
+        "insurance": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          },
+          "cost": 100000
+        },
+        "strapping": {
+          "enabled": false
+        },
+        "documentsReturning": {
+          "enabled": false
+        },
+        "delivery": {
+          "enabled": false
+        },
+        "sealing": {
+          "enabled": true,
+          "payer": {
+            "type": 1
+          }
+        }
+      }
+    }
+  ]
+}

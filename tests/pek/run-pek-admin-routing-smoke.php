@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekStatusAdminPage;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -39,9 +40,13 @@ use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Shipments\Pek\PekPrivateAccessTokenService;
+use WallsShop\WDC\Shipments\Pek\PekSenderCounterpartService;
+use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 
 function pek_route_assert( bool $condition, string $message ): void {
@@ -128,7 +133,7 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 	$GLOBALS['wpdb'] = new wpdb();
 	$services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 	$service = $services->ensure_pek_service();
-	$settings = new PekSettings( $settings_repository );
+	$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 	$credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 	$credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'login', 'pek_api_key' => 'secret-key' ) );
 	$api = new PekApiClient( $settings, $credentials, $http, new PekRequestBudget( $settings ) );
@@ -148,10 +153,13 @@ function pek_route_page( PekRouteFakeHttp $http, SettingsRepository $settings_re
 		new PekDestinationPickupDiagnosticService( $pickup_registry, $location_repository, $terminal_service, $settings, $credentials ),
 		new PekDestinationPickupDiagnosticStore(),
 		new PekQuoteDiagnosticService( $location_repository, $location_resolver, new PekAddressBuilder(), $settings, $pickup_registry, $quote_service, new PekQuotePlannedDateTimeResolver( $settings ) ),
-		new PekQuoteDiagnosticStore()
+		new PekQuoteDiagnosticStore(),
+		null,
+		new PekSenderCounterpartService( $api, new PekPrivateAccessTokenService( $api ), $settings, $credentials )
 	);
 	$page = ( new ReflectionClass( DeliveryServicesAdminPage::class ) )->newInstanceWithoutConstructor();
-	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin ) as $property => $value ) {
+	$pek_statuses = new PekStatusAdminPage( new PekStatusMapping( $settings_repository ) );
+	foreach ( array( 'services' => $services, 'pek_admin' => $pek_admin, 'pek_statuses' => $pek_statuses ) as $property => $value ) {
 		$ref = new ReflectionProperty( DeliveryServicesAdminPage::class, $property );
 		$ref->setAccessible( true );
 		$ref->setValue( $page, $value );
@@ -187,17 +195,18 @@ define( 'APP_ENCRYPTION_KEY', 'pek-route-test-key' );
 
 $settings_repository = new SettingsRepository();
 $cache = new PekSenderWarehouseSearchCache();
+$route_warehouse_id = '85974fc8-d0b8-11e5-9833-00155d668909';
 $http = new PekRouteFakeHttp( array(
 	pek_route_json( array( array( 'type' => 3 ) ) ),
 	pek_route_json( array( array( 'shortName' => 'RU', 'codeByClassifier' => '643' ) ) ),
 	pek_route_json( array( array( 'name' => 'ООО' ) ) ),
-	pek_route_json( array( 'freeDepartments' => array( array( 'warehouseId' => 'wh-route', 'branchId' => 'br', 'branchName' => 'Branch', 'divisionName' => 'Division', 'address' => 'Address' ) ), 'paidDepartments' => array() ) ),
+	pek_route_json( array( 'freeDepartments' => array( array( 'warehouseId' => strtoupper( $route_warehouse_id ), 'branchId' => 'br', 'branchName' => 'Branch', 'divisionName' => 'Division', 'address' => 'Address' ) ), 'paidDepartments' => array() ) ),
 ) );
 $page = pek_route_page( $http, $settings_repository, $cache );
-$settings = new PekSettings( $settings_repository );
+$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 
 $cache->save_for_current_user( array( 'success' => true, 'message' => 'old', 'items' => array( array( 'warehouseId' => 'old-wh' ) ), 'requested' => array( 'departmentOperation' => 2, 'type' => 3 ) ) );
-$redirect = pek_route_run_action( $page, 'save_pek_settings', array( PekSettings::LOGIN_KEY => 'login', PekSettings::REQUEST_TIMEOUT_KEY => '22', PekSettings::SENDER_FULL_NAME_KEY => 'ООО Test' ) );
+$redirect = pek_route_run_action( $page, 'save_pek_settings', array( PekSettings::LOGIN_KEY => 'login', PekSettings::REQUEST_TIMEOUT_KEY => '22', PekSettings::SENDER_LEGAL_FORM_KEY => '1', PekSettings::SENDER_FULL_NAME_KEY => 'ООО Test', PekSettings::SENDER_INN_KEY => '5400000000', PekSettings::SENDER_KPP_KEY => '540001001', PekSettings::SENDER_PHONE_KEY => '+79991234567', PekSettings::SENDER_EMAIL_KEY => 'sender@example.test' ) );
 pek_route_assert( $settings->request_timeout() === 22 && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'save_pek_settings must reach PekAdminPage and redirect to PEK tab.' );
 pek_route_assert( array() === $cache->current_for_current_user(), 'save_pek_settings must clear current-user PEK warehouse search cache.' );
 pek_route_assert( array() === $settings_repository->get_array( 'pek_admin_notice', array() ), 'PEK admin notices must not be persisted in SettingsRepository.' );
@@ -209,16 +218,55 @@ pek_route_assert( array_column( array_slice( $http->requests, 0, 3 ), 'method' )
 pek_route_assert( str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'check_pek_connection must redirect to PEK tab.' );
 
 $redirect = pek_route_run_action( $page, 'search_pek_sender_warehouse', array( 'pek_warehouse_search_address' => 'Новосибирск' ) );
-pek_route_assert( ( $cache->current_for_current_user()['items'][0]['warehouseId'] ?? '' ) === 'wh-route' && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'search_pek_sender_warehouse must reach PekAdminPage, save user cache, and redirect to PEK tab.' );
+pek_route_assert( ( $cache->current_for_current_user()['items'][0]['warehouseId'] ?? '' ) === $route_warehouse_id && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'search_pek_sender_warehouse must reach PekAdminPage, save user cache, and redirect to PEK tab.' );
 
-$redirect = pek_route_run_action( $page, 'select_pek_sender_warehouse', array( 'pek_sender_warehouse_id' => 'wh-route' ) );
-pek_route_assert( $settings->sender_warehouse()['warehouseId'] === 'wh-route' && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'select_pek_sender_warehouse must reach PekAdminPage and redirect to PEK tab.' );
+$redirect = pek_route_run_action( $page, 'select_pek_sender_warehouse', array( 'pek_sender_warehouse_id' => strtoupper( $route_warehouse_id ) ) );
+pek_route_assert( $settings->sender_warehouse()['warehouseId'] === $route_warehouse_id && str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_settings' ), 'select_pek_sender_warehouse must reach PekAdminPage and redirect to PEK tab.' );
+
+$redirect = pek_route_run_action(
+	$page,
+	'save_pek_statuses',
+	array(
+		PekStatusMapping::MAPPING_KEY => array(
+			'прибыл' => array(
+				'pickup' => DeliveryStatus::IN_TRANSIT,
+				'courier' => DeliveryStatus::HANDED_TO_COURIER,
+			),
+			PekStatusMapping::ISSUED_PLACES_PATTERN_KEY => array(
+				'pickup' => DeliveryStatus::IN_TRANSIT,
+				'courier' => 'invalid_status',
+			),
+		),
+	)
+);
+$saved_mapping = ( new PekStatusMapping( $settings_repository ) )->mapping();
+pek_route_assert( str_contains( $redirect, 'service=pek' ) && str_contains( $redirect, 'tab=pek_statuses' ), 'save_pek_statuses must redirect back to the PEK statuses tab.' );
+pek_route_assert( DeliveryStatus::IN_TRANSIT === $saved_mapping['прибыл']['pickup'] && DeliveryStatus::HANDED_TO_COURIER === $saved_mapping['прибыл']['courier'], 'save_pek_statuses must persist independent pickup/courier mappings.' );
+pek_route_assert( DeliveryStatus::IN_TRANSIT === $saved_mapping[ PekStatusMapping::ISSUED_PLACES_PATTERN_KEY ]['pickup'] && DeliveryStatus::DELIVERED === $saved_mapping[ PekStatusMapping::ISSUED_PLACES_PATTERN_KEY ]['courier'], 'save_pek_statuses must sanitize invalid values back to defaults.' );
+
 $notice_store = new PekAdminNoticeStore();
 $GLOBALS['pek_route_current_user_id'] = 8;
 pek_route_assert( array() === $notice_store->consume_for_current_user(), 'PEK notice must be scoped away from another admin user.' );
 $GLOBALS['pek_route_current_user_id'] = 7;
 $notice = $notice_store->consume_for_current_user();
 pek_route_assert( array() !== $notice && array() === $notice_store->consume_for_current_user() && $notice_store->ttl_seconds() <= 120, 'PEK notice must be one-shot and TTL must be <= 120 seconds.' );
+
+$verify_settings_repository = new SettingsRepository();
+$verify_http = new PekRouteFakeHttp(
+	array(
+		pek_route_json( array( 'access_token' => 'fake-private-token', 'token_type' => 'Bearer', 'expires_in_unix' => '1893456000' ) ),
+		pek_route_json( array( array( 'legalForm' => 4, 'title' => 'PRIVATE_TITLE', 'guid' => 'PRIVATE_GUID', 'documents' => array( array( 'number' => 'PRIVATE_PASSPORT_NUMBER' ) ) ) ) ),
+	)
+);
+$verify_page = pek_route_page( $verify_http, $verify_settings_repository, new PekSenderWarehouseSearchCache() );
+$verify_settings = new PekSettings( $verify_settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
+$verify_settings->save_sender_counterpart( '11111111-2222-3333-4444-555555555555', array( 'guid' => '11111111-2222-3333-4444-555555555555' ) );
+pek_route_run_action( $verify_page, 'verify_pek_sender_counterpart' );
+$verify_notice = ( new PekAdminNoticeStore() )->consume_for_current_user();
+$verify_notice_json = json_encode( $verify_notice, JSON_UNESCAPED_UNICODE ) ?: '';
+pek_route_assert( str_contains( $verify_notice_json, 'counterpart_contract' ) && str_contains( $verify_notice_json, 'unsupported_legal_form' ) && str_contains( $verify_notice_json, 'строка: 0' ), 'Counterpart admin notice must render only safe diagnostic stage/reason/row.' );
+pek_route_assert( ! str_contains( $verify_notice_json, 'PRIVATE_TITLE' ) && ! str_contains( $verify_notice_json, 'PRIVATE_GUID' ) && ! str_contains( $verify_notice_json, 'PRIVATE_PASSPORT_NUMBER' ), 'Counterpart admin notice must not render PII/raw response values.' );
+pek_route_assert( '' === $verify_settings->sender_counterpart_guid() && array() === $verify_settings->sender_counterpart_snapshot(), 'Counterpart admin failed verification must clear old snapshot.' );
 
 $before = $settings->request_timeout();
 $_POST = array(

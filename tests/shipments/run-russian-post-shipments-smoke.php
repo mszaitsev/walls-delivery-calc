@@ -638,7 +638,7 @@ $persisted_service = shipment_test_creation_service( new OrderShipmentRepository
 $persisted_result = $persisted_service->create( $persisted_order, $request );
 $persisted_shipments = $persisted_order->get_meta( OrderShipmentRepository::META_KEY, true );
 $persisted_shipment = is_array( $persisted_shipments ) ? ( $persisted_shipments[ RussianPostDomesticSettings::CARRIER_KEY ] ?? array() ) : array();
-shipments_smoke_assert( $persisted_result->success && 1 === $persisted_order->save_count, 'Successful shipment create must save shipment state.' );
+shipments_smoke_assert( $persisted_result->success && $persisted_order->save_count >= 1 && ! empty( $persisted_shipment ), 'Successful shipment create must save shipment state.' );
 shipments_smoke_assert( '80080822636218' === (string) ( $persisted_shipment['barcode'] ?? '' ) && '80080822636218' === (string) ( $persisted_shipment['tracking_number'] ?? '' ), 'Successful shipment create must save barcode as the main tracking identifier.' );
 shipments_smoke_assert( 2285075494 === (int) ( $persisted_shipment['backlog_order_id'] ?? 0 ), 'Successful shipment create must save result-id as backlog_order_id.' );
 shipments_smoke_assert( ! isset( $persisted_shipment['response_snapshot']['orders'][0]['result-id'] ) && ! isset( $persisted_shipment['response_snapshot']['orders'][0]['result_id'] ), 'Successful shipment response snapshot must not keep result-id when backlog_order_id is saved separately.' );
@@ -903,7 +903,8 @@ $selected_adapter = new ShipmentsSmokeAdapter();
 $selected_creation_service = shipment_test_creation_service( new OrderShipmentRepository(), array( $selected_adapter ), array( new RussianPostShipmentPersistenceMapper() ) );
 $selected_preview = $selected_creation_service->safe_preview( $selected_request );
 shipments_smoke_assert( '630099-new' === (string) ( $selected_preview['delivery-point-index'] ?? '' ) && $selected_adapter->preview_request instanceof ShipmentCreateRequest, 'Preview after admin pickup selection must receive selected pickup draft.' );
-$selected_result = $selected_creation_service->create( $shipment_order, $selected_request );
+$selected_persisted_order = new ShipmentsSmokePersistedOrder( 9001, $shipment_order->meta_snapshot() );
+$selected_result = $selected_creation_service->create( $selected_persisted_order, $selected_request );
 shipments_smoke_assert( $selected_result->success && $selected_adapter->created_request instanceof ShipmentCreateRequest && '630099-new' === $selected_adapter->created_request->pickup_point?->point_code, 'Shipment creation must receive selected pickup draft.' );
 shipments_smoke_assert( $before_meta === $shipment_order->meta_snapshot(), 'Admin pickup selection must not mutate WooCommerce order meta.' );
 

@@ -1,5 +1,5 @@
-Folder PATH listing
-Volume serial number is 000000DC A0AC:74BD
+﻿Folder PATH listing
+Volume serial number is 000000DD A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -37,6 +37,7 @@ C:.
 |   |       \---extensions
 |   |               cdek.js
 |   |               dpd.js
+|   |               pek.js
 |   |               russian-post.js
 |   |               yandex.js
 |   |
@@ -306,6 +307,7 @@ C:.
 |   |   |
 |   |   +---Pek
 |   |   |   |   PekCredentials.php
+|   |   |   |   PekRuPhoneNormalizer.php
 |   |   |   |   PekSettings.php
 |   |   |   |
 |   |   |   +---Admin
@@ -315,6 +317,7 @@ C:.
 |   |   |   |       PekDestinationPickupDiagnosticStore.php
 |   |   |   |       PekQuoteDiagnosticService.php
 |   |   |   |       PekQuoteDiagnosticStore.php
+|   |   |   |       PekStatusAdminPage.php
 |   |   |   |
 |   |   |   +---Api
 |   |   |   |       PekApiClient.php
@@ -338,14 +341,14 @@ C:.
 |   |   |   |       PekSchemaIntegrityService.php
 |   |   |   |
 |   |   |   +---Pickup
-|   |   |           PekCargoConstraintsConverter.php
-|   |   |           PekCheckoutPickupPointFormatter.php
-|   |   |           PekDestinationTerminalRequest.php
-|   |   |           PekDestinationTerminalSearchCache.php
-|   |   |           PekPickupPointProvider.php
-|   |   |           PekTerminalRepository.php
-|   |   |           PekTerminalService.php
-|   |   |
+|   |   |   |       PekCargoConstraintsConverter.php
+|   |   |   |       PekCheckoutPickupPointFormatter.php
+|   |   |   |       PekDestinationTerminalRequest.php
+|   |   |   |       PekDestinationTerminalSearchCache.php
+|   |   |   |       PekPickupPointProvider.php
+|   |   |   |       PekTerminalRepository.php
+|   |   |   |       PekTerminalService.php
+|   |   |   |
 |   |   |   \---Quote
 |   |   |           PekLightCargoSurchargePolicy.php
 |   |   |           PekLightCargoSurchargeResult.php
@@ -808,6 +811,7 @@ C:.
 |   |   |       ShipmentActualCostResolver.php
 |   |   |       ShipmentActualCostService.php
 |   |   |       ShipmentBacklogService.php
+|   |   |       ShipmentCreationAttemptService.php
 |   |   |       ShipmentCreationService.php
 |   |   |       ShipmentMetaboxButtonPolicy.php
 |   |   |       ShipmentModalRequestMapper.php
@@ -866,6 +870,33 @@ C:.
 |   |   +---Modal
 |   |   |       CarrierShipmentModalExtensionInterface.php
 |   |   |       ShipmentModalExtensionRegistry.php
+|   |   |
+|   |   +---Pek
+|   |   |       PekManualAttachContextResolver.php
+|   |   |       PekPrivateAccessTokenService.php
+|   |   |       PekSenderCounterpartService.php
+|   |   |       PekShipmentAdapter.php
+|   |   |       PekShipmentButtonPolicy.php
+|   |   |       PekShipmentCargoBuilder.php
+|   |   |       PekShipmentCorrelationResolver.php
+|   |   |       PekShipmentCourierAddressResolver.php
+|   |   |       PekShipmentCreateResponseParser.php
+|   |   |       PekShipmentDeclaredValueResolver.php
+|   |   |       PekShipmentDestinationResolver.php
+|   |   |       PekShipmentDocumentProvider.php
+|   |   |       PekShipmentDocumentService.php
+|   |   |       PekShipmentModalExtension.php
+|   |   |       PekShipmentPersistenceMapper.php
+|   |   |       PekShipmentProductWeightResolver.php
+|   |   |       PekShipmentRecipientBuilder.php
+|   |   |       PekShipmentRequestBuilder.php
+|   |   |       PekShipmentSenderWarehouseResolver.php
+|   |   |       PekShipmentService.php
+|   |   |       PekShipmentStatusResponseNormalizer.php
+|   |   |       PekShipmentStatusService.php
+|   |   |       PekSmsReleaseAvailabilityService.php
+|   |   |       PekSmsReleaseResult.php
+|   |   |       PekStatusMapping.php
 |   |   |
 |   |   +---Presentation
 |   |   |       ShipmentActualCostComparisonService.php
@@ -1004,15 +1035,33 @@ C:.
     |       run-packaging-smoke.php
     |
     +---pek
-    |       run-pek-admin-routing-smoke.php
-    |       run-pek-admin-ui-smoke.php
-    |       run-pek-checkout-runtime-smoke.php
-    |       run-pek-foundation-smoke.php
-    |       run-pek-geography-smoke.php
-    |       run-pek-pickup-provider-smoke.php
-    |       run-pek-quote-foundation-smoke.php
-    |       run-pek-schema-integrity-smoke.php
-    |       run-pek-warehouse-datetime-smoke.php
+    |   |   run-pek-admin-routing-smoke.php
+    |   |   run-pek-admin-ui-smoke.php
+    |   |   run-pek-checkout-runtime-smoke.php
+    |   |   run-pek-foundation-smoke.php
+    |   |   run-pek-geography-smoke.php
+    |   |   run-pek-pickup-provider-smoke.php
+    |   |   run-pek-quote-foundation-smoke.php
+    |   |   run-pek-schema-integrity-smoke.php
+    |   |   run-pek-shipment-cancellation-smoke.php
+    |   |   run-pek-shipment-create-smoke.php
+    |   |   run-pek-shipment-documents-smoke.php
+    |   |   run-pek-shipment-integration-smoke.php
+    |   |   run-pek-shipment-modal-smoke.php
+    |   |   run-pek-shipment-picker-smoke.php
+    |   |   run-pek-shipment-status-smoke.php
+    |   |   run-pek-warehouse-datetime-smoke.php
+    |   |
+    |   \---fixtures
+    |           confirmed-counterparties-mixed-response.json
+    |           confirmed-counterparties-physical-only-response.json
+    |           confirmed-counterparties-response.json
+    |           connected-services-response.json
+    |           order-print-response.json
+    |           preregistration-submit-courier.json
+    |           preregistration-submit-pickup.json
+    |           preregistration-submit-response.json
+    |           private-token-response.json
     |
     +---pickup
     |       run-carrier-pickup-provider-registry-smoke.php
@@ -1047,6 +1096,7 @@ C:.
     |   |   run-shipment-cost-analytics-smoke.php
     |   |   run-shipment-cost-analytics-storage-smoke.php
     |   |   run-shipment-cost-threshold-policy-smoke.php
+    |   |   run-shipment-creation-attempt-smoke.php
     |   |   run-shipment-document-actions-smoke.php
     |   |   run-shipment-lifecycle-contract-smoke.php
     |   |   run-shipment-modal-extensions-smoke.php

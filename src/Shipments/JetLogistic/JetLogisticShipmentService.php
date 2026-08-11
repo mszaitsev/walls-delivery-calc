@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\JetLogistic;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -13,7 +14,8 @@ defined( 'ABSPATH' ) || exit;
 final class JetLogisticShipmentService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
-		private JetLogisticStatusService $statuses
+		private JetLogisticStatusService $statuses,
+		private ?ShipmentCreationAttemptService $attempts = null
 	) {
 	}
 
@@ -60,6 +62,10 @@ final class JetLogisticShipmentService {
 
 	/** @return array<string,mixed> */
 	public function remove_local( object $order ): array {
+		$shipment = $this->repository->find_by_carrier( $order, JetLogisticSettings::CARRIER_KEY );
+		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
+			$this->attempts->mark_terminal_for_shipment( $order, JetLogisticSettings::CARRIER_KEY, $shipment, 'local_removed' );
+		}
 		$this->repository->delete_for_carrier( $order, JetLogisticSettings::CARRIER_KEY );
 
 		return array( 'success' => true, 'message' => 'Jet Logistic shipment removed from order.' );

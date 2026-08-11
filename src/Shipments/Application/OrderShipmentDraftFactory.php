@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
@@ -22,6 +23,7 @@ use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Shipments\Pek\PekShipmentCourierAddressResolver;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 
 defined( 'ABSPATH' ) || exit;
@@ -39,7 +41,9 @@ final class OrderShipmentDraftFactory {
 		private ?DpdPickupPointService $dpd_pickup_points = null,
 		private ?DpdShipmentDateResolver $dpd_dates = null,
 		private ?YandexDeliverySettings $yandex_settings = null,
-		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null
+		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
+		private ?PekSettings $pek_settings = null,
+		private ?PekShipmentCourierAddressResolver $pek_courier_addresses = null
 	) {
 	}
 
@@ -53,6 +57,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_yandex_request_from_order( $order );
+		}
+		if ( PekSettings::CARRIER_KEY === $carrier_key ) {
+			return $this->create_pek_request_from_order( $order );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$delivery_type = $this->delivery_type_from_order( $order );
@@ -151,6 +158,20 @@ final class OrderShipmentDraftFactory {
 				),
 			);
 		}
+		if ( PekSettings::CARRIER_KEY === $request->carrier_key ) {
+			return array(
+				'request' => $request->to_array(),
+				'services' => $this->pek_service_variants( $request ),
+				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'requires_tariff' => false,
+					'requires_postoffice' => false,
+					'requires_successful_preview' => true,
+					'shows_sender_warehouse' => true,
+					'recipient_type' => 'physical',
+				),
+			);
+		}
 		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 		$service_variants = array();
 		if ( $service instanceof DeliveryService ) {
@@ -182,6 +203,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $base->carrier_key ) {
 			return $this->create_yandex_request_from_admin_data( $base, $data );
+		}
+		if ( PekSettings::CARRIER_KEY === $base->carrier_key ) {
+			return $this->create_pek_request_from_admin_data( $base, $data );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$service = $this->services->find_by_service_key( $service_key );
@@ -629,6 +653,180 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
+	private function create_pek_request_from_order( object $order ): ShipmentCreateRequest {
+		$calculation = $this->calculation_data( $order );
+		$rate_meta = $this->rate_meta_data( $order );
+		$delivery_type = $this->delivery_type_from_order( $order );
+		$items = $this->order_items( $order );
+		$dimensions = is_array( $calculation['package']['dimensions_cm'] ?? null ) ? $calculation['package']['dimensions_cm'] : array();
+		$product_weight = (int) ( $calculation['package']['products_weight_g'] ?? 0 );
+		if ( $product_weight <= 0 ) {
+			foreach ( $items as $item ) {
+				if ( $item instanceof PackageItem ) {
+					$product_weight += $item->get_total_weight_g();
+				}
+			}
+		}
+		$place = new ShipmentPlace(
+			1,
+			$this->pek_transport_weight_g( $order, $items, $product_weight ),
+			max( 1, (int) ( $dimensions['length'] ?? 20 ) ),
+			max( 1, (int) ( $dimensions['width'] ?? 20 ) ),
+			max( 1, (int) ( $dimensions['height'] ?? 10 ) ),
+			Money::from_kopecks( 0 ),
+			$items
+		);
+		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		$api = is_array( $calculation['api'] ?? null ) ? $calculation['api'] : array();
+		$provider_query = is_array( $rate_meta['pickup_provider_query'] ?? null ) ? $rate_meta['pickup_provider_query'] : array();
+		$pek_pickup_snapshot = DeliveryType::PICKUP === $delivery_type ? $this->pek_selected_pickup_snapshot( $order, $pickup, $rate_meta, $provider_query, $api ) : array();
+		$point_code = $this->first_non_empty(
+			$pickup['point_code'] ?? '',
+			$pickup['code'] ?? '',
+			$rate_meta['point_code'] ?? '',
+			$rate_meta['pickup_point_code'] ?? '',
+			$this->meta_string( $order, '_wdc_platform_pickup_code' ),
+			$this->meta_string( $order, '_wdc_pickup_point_code' )
+		);
+		$receiver_branch_id = $this->first_non_empty(
+			$pickup['branchId'] ?? '',
+			$pickup['branch_id'] ?? '',
+			$pickup['raw_reference']['branchId'] ?? '',
+			$rate_meta['receiver_branch_id'] ?? '',
+			$rate_meta['pek_receiver_branch_id'] ?? '',
+			$provider_query['branchId'] ?? '',
+			$api['receiver_branch_id'] ?? '',
+			$api['branchId'] ?? ''
+		);
+		$location_id = (int) $this->first_non_empty(
+			$rate_meta['location_id'] ?? '',
+			$calculation['destination']['location_id'] ?? '',
+			DeliveryType::PICKUP === $delivery_type ? ( $provider_query['location_id'] ?? '' ) : ''
+		);
+		$address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : (string) ( $pickup['address'] ?? $pickup['point_address'] ?? '' );
+		$courier = DeliveryType::COURIER === $delivery_type ? $this->pek_courier_address_with_evidence_from_order( $order ) : array( 'address' => null, 'evidence' => array() );
+
+		return new ShipmentCreateRequest(
+			order_id: $this->order_id( $order ),
+			carrier_key: PekSettings::CARRIER_KEY,
+			delivery_type: $delivery_type,
+			rate_id: PekSettings::SERVICE_KEY . ':' . $delivery_type,
+			recipient_address: DeliveryType::COURIER === $delivery_type && $courier['address'] instanceof Address ? $courier['address'] : $this->recipient_address( $order, $delivery_type, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
+			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $point_code ? new PickupPointSelection( PekSettings::CARRIER_KEY, PekSettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
+			places: array( $place ),
+			declared_value: Money::from_kopecks( 0 ),
+			insurance_enabled: true,
+			services: array(),
+			recipient: array(
+				'name' => $this->recipient_name( $order ),
+				'phone' => $this->phone( $order ),
+				'email' => $this->email( $order ),
+			),
+			meta: array(
+				'carrier_key' => PekSettings::CARRIER_KEY,
+				'service_key' => PekSettings::SERVICE_KEY,
+				'delivery_type' => $delivery_type,
+				'service_title' => PekSettings::TITLE,
+				'order_num' => $this->order_number( $order ),
+				'pickup_family' => PekSettings::SERVICE_KEY . ':pickup',
+				'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $point_code : '',
+				'pickup_point_found' => DeliveryType::COURIER === $delivery_type || '' !== $point_code,
+				'pickup_point_row' => DeliveryType::PICKUP === $delivery_type ? array(
+					'point_code' => $point_code,
+					'address' => $address,
+					'branchId' => $receiver_branch_id,
+				) : array(),
+				'pek_receiver_branch_id' => $receiver_branch_id,
+				'pek_receiver_warehouse_id' => DeliveryType::PICKUP === $delivery_type ? $point_code : '',
+				'pek_destination_location_id' => $location_id,
+				'provider_destination_fingerprint' => (string) ( $rate_meta['provider_destination_fingerprint'] ?? $rate_meta['destination_fingerprint'] ?? $pickup['provider_destination_fingerprint'] ?? '' ),
+				'pickup_provider_query' => $provider_query,
+				'pek_pickup_selected_snapshot' => $pek_pickup_snapshot,
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $address : '',
+				'pek_courier_address_evidence' => DeliveryType::COURIER === $delivery_type && is_array( $courier['evidence'] ?? null ) ? $courier['evidence'] : array(),
+				'calculation_data' => $calculation,
+				'rate_meta' => $rate_meta,
+				'pek_product_weight_g' => max( 0, $product_weight ),
+			)
+		);
+	}
+
+	private function create_pek_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
+		$posted_delivery_type = sanitize_key( wp_unslash( $data['delivery_type'] ?? '' ) );
+		if ( '' !== $posted_delivery_type && $posted_delivery_type !== $base->delivery_type ) {
+			throw new \RuntimeException( 'Сценарий доставки ПЭК изменился. Обновите страницу заказа.' );
+		}
+		$places = array();
+		$place_rows = is_array( $data['places'] ?? null ) ? $data['places'] : array();
+		foreach ( $place_rows as $index => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$places[] = new ShipmentPlace(
+				(int) ( $row['place_number'] ?? $row['number'] ?? ( $index + 1 ) ),
+				$this->whole_number_from_place_row( $row, 'weight_g' ),
+				$this->whole_number_from_place_row( $row, 'length_cm' ),
+				$this->whole_number_from_place_row( $row, 'width_cm' ),
+				$this->whole_number_from_place_row( $row, 'height_cm' ),
+				Money::from_kopecks( 0 ),
+				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
+			);
+		}
+		$recipient_type = sanitize_key( wp_unslash( $data['recipient_type'] ?? 'physical' ) );
+		$override_source = sanitize_key( wp_unslash( $data['pek_sender_warehouse_override_source'] ?? '' ) );
+		$default_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_default_id'] ?? '' ) );
+		$sender_warehouse_id = sanitize_text_field( wp_unslash( $data['pek_sender_warehouse_override_id'] ?? '' ) );
+		unset( $default_warehouse_id );
+		if ( 'shipment_modal_override' === $override_source ) {
+			$sender_warehouse_id = $this->pek_warehouse_uuid( $sender_warehouse_id );
+			if ( '' === $sender_warehouse_id ) {
+				throw new \RuntimeException( 'Выбранный склад самопривоза ПЭК потерял актуальность. Выберите склад ещё раз.' );
+			}
+		} else {
+			$sender_warehouse_id = '';
+		}
+		$meta = array_merge(
+			$base->meta,
+			array(
+				'recipient_type' => 'physical' === $recipient_type ? 'physical' : 'unsupported',
+			)
+		);
+		if ( '' !== $sender_warehouse_id ) {
+			$meta['pek_sender_warehouse_id'] = $sender_warehouse_id;
+			$meta['pek_sender_warehouse_source'] = 'shipment_modal_override';
+		}
+
+		return new ShipmentCreateRequest(
+			$base->order_id,
+			$base->carrier_key,
+			$base->delivery_type,
+			$base->rate_id,
+			$base->recipient_address,
+			$base->pickup_point,
+			array() !== $places ? $places : $base->places,
+			$base->declared_value,
+			true,
+			array(),
+			$base->recipient,
+			$meta
+		);
+	}
+
+	private function pek_warehouse_uuid( string $value ): string {
+		$value = strtolower( trim( $value ) );
+
+		return 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $value ) ? $value : '';
+	}
+
+	/** @return array{address:Address,evidence:array<string,mixed>} */
+	private function pek_courier_address_with_evidence_from_order( object $order ): array {
+		if ( ! $this->pek_courier_addresses instanceof PekShipmentCourierAddressResolver ) {
+			throw new \RuntimeException( 'Не настроен PEK resolver адреса курьерской доставки.' );
+		}
+
+		return $this->pek_courier_addresses->from_order_with_evidence( $order );
+	}
+
 	private function create_dpd_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
 		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? $base->delivery_type ) ) );
 		$places = array();
@@ -870,7 +1068,7 @@ final class OrderShipmentDraftFactory {
 		$package = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
 		$products_weight = (int) ( $package['products_weight_g'] ?? 0 );
 		$packaging_weight = (int) ( $package['packaging_weight_g'] ?? 0 );
-		$weight = (int) ( $package['package_weight_with_packaging_g'] ?? $package['final_weight_g'] ?? 0 );
+		$weight = (int) ( $package['final_weight_g'] ?? $package['package_weight_with_packaging_g'] ?? 0 );
 		if ( $weight <= 0 && $products_weight > 0 ) {
 			$weight = $products_weight + max( 0, $packaging_weight );
 		}
@@ -883,6 +1081,30 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return max( 1, $total ?: 1000 );
+	}
+
+	/** @param array<int,PackageItem> $items */
+	private function pek_transport_weight_g( object $order, array $items, int $product_weight_g ): int {
+		$calculation = $this->calculation_data( $order );
+		$package = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
+		$weight = (int) ( $package['final_weight_g'] ?? $package['package_weight_with_packaging_g'] ?? 0 );
+		if ( $weight > 0 ) {
+			return $weight;
+		}
+		$packaging_weight = (int) ( $package['packaging_weight_g'] ?? 0 );
+		if ( $product_weight_g > 0 ) {
+			return max( 1, $product_weight_g + max( 0, $packaging_weight ) );
+		}
+		$total = 0;
+		foreach ( $items as $item ) {
+			$total += $item instanceof PackageItem ? $item->get_total_weight_g() : 0;
+		}
+
+		if ( $total > 0 ) {
+			return $total;
+		}
+
+		throw new \RuntimeException( 'Для заявки ПЭК нужно подтвердить вес груза.' );
 	}
 
 	/**
@@ -1291,6 +1513,99 @@ final class OrderShipmentDraftFactory {
 
 	/**
 	 * @param array<string,mixed> $pickup
+	 * @param array<string,mixed> $rate_meta
+	 * @param array<string,mixed> $provider_query
+	 * @param array<string,mixed> $api
+	 * @return array<string,mixed>
+	 */
+	private function pek_selected_pickup_snapshot( object $order, array $pickup, array $rate_meta, array $provider_query, array $api ): array {
+		$stored = $this->selected_pickup_snapshot( $order );
+		$snapshot = is_array( $stored['snapshot'] ?? null ) ? array_merge( $stored['snapshot'], $stored ) : $stored;
+		$point_code = $this->first_non_empty(
+			$snapshot['point_code'] ?? '',
+			$snapshot['point_id'] ?? '',
+			$pickup['point_code'] ?? '',
+			$pickup['code'] ?? '',
+			$rate_meta['point_code'] ?? '',
+			$rate_meta['pickup_point_code'] ?? '',
+			$this->meta_string( $order, '_wdc_platform_pickup_code' ),
+			$this->meta_string( $order, '_wdc_pickup_point_code' )
+		);
+		if ( '' === $point_code ) {
+			return array();
+		}
+		$fingerprint = $this->first_non_empty(
+			$snapshot['provider_destination_fingerprint'] ?? '',
+			$pickup['provider_destination_fingerprint'] ?? '',
+			$rate_meta['provider_destination_fingerprint'] ?? '',
+			$rate_meta['destination_fingerprint'] ?? '',
+			$provider_query['provider_destination_fingerprint'] ?? '',
+			$provider_query['destination_fingerprint'] ?? ''
+		);
+		$branch_id = $this->first_non_empty(
+			$snapshot['branchId'] ?? '',
+			$snapshot['branch_id'] ?? '',
+			$pickup['branchId'] ?? '',
+			$pickup['branch_id'] ?? '',
+			$pickup['raw_reference']['branchId'] ?? '',
+			$pickup['raw_reference']['branch_id'] ?? '',
+			$rate_meta['pek_receiver_branch_id'] ?? '',
+			$rate_meta['receiver_branch_id'] ?? '',
+			$api['receiver_branch_id'] ?? '',
+			$api['branchId'] ?? ''
+		);
+		$limits = array();
+		foreach ( array( 'maxWeight', 'maxVolume', 'maxDimension', 'maxWeightOnePlace', 'maxCount' ) as $key ) {
+			$value = $snapshot['limits'][ $key ] ?? $snapshot[ $key ] ?? null;
+			if ( is_int( $value ) || is_float( $value ) || ( is_string( $value ) && is_numeric( $value ) ) ) {
+				$limits[ $key ] = 0 + $value;
+			}
+		}
+
+		return array_filter(
+			array(
+				'carrier_key' => PekSettings::CARRIER_KEY,
+				'service_key' => PekSettings::SERVICE_KEY,
+				'pickup_family' => PekSettings::PICKUP_FAMILY,
+				'point_code' => $point_code,
+				'point_id' => $point_code,
+				'branchId' => $branch_id,
+				'branch_id' => $branch_id,
+				'source' => in_array( (string) ( $snapshot['source'] ?? '' ), array( 'free', 'paid' ), true ) ? (string) $snapshot['source'] : '',
+				'location_id' => (int) $this->first_non_empty( $snapshot['location_id'] ?? '', $pickup['location_id'] ?? '', $provider_query['location_id'] ?? '', $rate_meta['location_id'] ?? '' ),
+				'country_code' => strtoupper( trim( (string) $this->first_non_empty( $snapshot['country_code'] ?? '', $provider_query['country_code'] ?? 'RU' ) ) ),
+				'destination_fingerprint' => $fingerprint,
+				'provider_destination_fingerprint' => $fingerprint,
+				'validation_source' => (string) ( $snapshot['validation_source'] ?? '' ),
+				'selected_at' => (string) ( $snapshot['selected_at'] ?? '' ),
+				'point_title' => (string) ( $snapshot['point_title'] ?? $snapshot['card_title'] ?? '' ),
+				'point_address' => (string) ( $snapshot['point_address'] ?? $snapshot['address'] ?? $pickup['address'] ?? $pickup['point_address'] ?? '' ),
+				'address' => (string) ( $snapshot['address'] ?? $snapshot['point_address'] ?? $pickup['address'] ?? $pickup['point_address'] ?? '' ),
+				'limits' => $limits,
+				'availability' => is_array( $snapshot['availability'] ?? null ) ? $snapshot['availability'] : array(),
+			),
+			static fn( mixed $value ): bool => array() !== $value && '' !== $value && null !== $value
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function selected_pickup_snapshot( object $order ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( '_wdc_pickup_point_snapshot', true );
+		if ( is_string( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $pickup
 	 * @return array<string,mixed>
 	 */
 	private function cdek_pickup_row( array $pickup ): array {
@@ -1525,6 +1840,23 @@ final class OrderShipmentDraftFactory {
 				'title' => $courier_title,
 				'delivery_type' => DeliveryType::COURIER,
 				'tariffs' => $this->dpd_tariff_options( $request ),
+			),
+		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function pek_service_variants( ShipmentCreateRequest $request ): array {
+		$delivery_type = DeliveryType::COURIER === $request->delivery_type ? DeliveryType::COURIER : DeliveryType::PICKUP;
+
+		return array(
+			array(
+				'service_key' => PekSettings::SERVICE_KEY,
+				'group_id' => DeliveryType::COURIER === $delivery_type ? PekSettings::COURIER_RATE_ID : PekSettings::PICKUP_RATE_ID,
+				'title' => DeliveryType::COURIER === $delivery_type ? 'ПЭК курьером' : 'ПЭК до терминала',
+				'delivery_type' => $delivery_type,
+				'tariffs' => array(),
 			),
 		);
 	}

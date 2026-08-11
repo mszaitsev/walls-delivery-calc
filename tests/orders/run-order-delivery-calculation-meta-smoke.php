@@ -6,6 +6,7 @@ use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -182,6 +183,8 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 $session = new CheckoutSessionManager();
 $persister = new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
 $rate = wdc_order_meta_rate();
+$rate['rate_meta']['location_id'] = 153912;
+$rate['rate_meta']['destination_fingerprint'] = 'country=RU|location_id=153912';
 $session->save_rates( array( 'russian_post_worldwide_parcel' => $rate ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );
 
@@ -202,14 +205,77 @@ foreach ( array( 'carrier_key', 'service_key', 'rules_source', 'no_pickup_select
 $calculation = $order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
 order_meta_smoke_assert( is_array( $calculation ) && array() !== $calculation, 'Delivery calculation data must be saved.' );
 order_meta_smoke_assert( ! array_key_exists( 'raw_response', $order->meta['_wdc_platform_rate_meta'] ?? array() ) && ! str_contains( wp_json_encode( $calculation ), 'raw_response' ), 'Order calculation data must not store raw API response.' );
+order_meta_smoke_assert( 153912 === (int) ( $order->meta['_wdc_platform_rate_meta']['location_id'] ?? 0 ) && 'country=RU|location_id=153912' === (string) ( $order->meta['_wdc_platform_rate_meta']['destination_fingerprint'] ?? '' ), 'Order meta must persist sanitized carrier rate destination identity.' );
 order_meta_smoke_assert( 'Почта России — международная доставка' === ( $calculation['service_title'] ?? '' ), 'Calculation data must contain service title.' );
 order_meta_smoke_assert( 'PL' === ( $calculation['destination']['country_code'] ?? '' ) && 'Польша' === ( $calculation['destination']['country_name'] ?? '' ), 'Calculation data must contain destination country.' );
 order_meta_smoke_assert( 1000 === ( $calculation['package']['products_weight_g'] ?? 0 ) && 150 === ( $calculation['package']['packaging_weight_g'] ?? 0 ) && 1150 === ( $calculation['package']['final_weight_g'] ?? 0 ), 'Calculation data must contain package weights.' );
 order_meta_smoke_assert( 3810.06 === ( $calculation['api']['api_base_price_rub'] ?? 0.0 ) && 5338.0 === ( $calculation['result']['final_price_rub'] ?? 0.0 ), 'Calculation data must contain API and final prices.' );
 order_meta_smoke_assert( 'service' === ( $calculation['rules']['rules_source'] ?? '' ) && ! empty( $calculation['rules']['applied_rules'] ) && ! empty( $calculation['rules']['formula_visualization'] ), 'Calculation data must contain rules source, audit and formula.' );
 order_meta_smoke_assert( (bool) preg_grep( '/Итог: 5 338 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula final line must match actual shipping cost.' );
+
+$dadata_type_order = new WdcOrderMetaSmokeOrder();
+$persister->persist(
+	$dadata_type_order,
+	array(
+		'shipping_dadata_status' => 'house_selected',
+		'shipping_dadata_house' => '10',
+		'shipping_dadata_house_type' => 'д',
+		'shipping_dadata_house_type_full' => 'дом',
+		'shipping_dadata_block' => '1',
+		'shipping_dadata_block_type' => 'к',
+		'shipping_dadata_block_type_full' => 'корпус',
+		'shipping_dadata_stead' => '',
+		'shipping_dadata_stead_type' => '',
+		'shipping_dadata_flat' => '5',
+		'shipping_dadata_flat_type' => 'кв',
+		'shipping_dadata_flat_type_full' => 'квартира',
+	)
+);
+order_meta_smoke_assert( '1' === (string) ( $dadata_type_order->meta['_shipping_dadata_block'] ?? '' ) && 'к' === (string) ( $dadata_type_order->meta['_shipping_dadata_block_type'] ?? '' ), 'DaData block and block_type must persist from checkout data to order meta.' );
+order_meta_smoke_assert( 'д' === (string) ( $dadata_type_order->meta['_shipping_dadata_house_type'] ?? '' ) && 'кв' === (string) ( $dadata_type_order->meta['_shipping_dadata_flat_type'] ?? '' ), 'DaData house_type and flat_type must persist from checkout data to order meta.' );
+order_meta_smoke_assert( 'дом' === (string) ( $dadata_type_order->meta['_shipping_dadata_house_type_full'] ?? '' ) && 'корпус' === (string) ( $dadata_type_order->meta['_shipping_dadata_block_type_full'] ?? '' ) && 'квартира' === (string) ( $dadata_type_order->meta['_shipping_dadata_flat_type_full'] ?? '' ), 'Full DaData house/block/flat type values must persist from checkout data to order meta.' );
 order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
+
+$city_fias_session = new CheckoutSessionManager();
+$city_fias_persister = new OrderShippingMetaPersister( $city_fias_session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) );
+$city_fias_rate = wdc_order_meta_rate(
+	array(
+		'carrier_key' => 'pek',
+		'rate_id' => 'pek:courier',
+		'delivery_type' => 'courier',
+		'service_key' => 'pek',
+		'service_title' => 'ПЭК',
+		'rate_meta' => array(
+			'country_mapping' => array(
+				'country_code' => 'RU',
+				'country_name' => 'Россия',
+			),
+		),
+	)
+);
+$city_fias_session->save_rates( array( 'pek:courier' => $city_fias_rate ) );
+$city_fias_session->save_city_context(
+	array(
+		'display_name' => 'Москва',
+		'fias_id' => '0c5b2444-70a0-4932-980c-b4dc0d3f02b5',
+		'source' => 'fias',
+	)
+);
+$city_fias_session->save_normalized_address_result(
+	new AddressNormalizationResult(
+		'Москва, Ходынский б-р, дом 13',
+		new Address( country_code: 'RU', country_name: 'Россия', region_name: 'Москва', city: 'Москва', street: 'Ходынский б-р', house: '13', raw_address: 'Россия, г Москва, Ходынский б-р, дом 13', normalized: true ),
+		true,
+		1.0,
+		'fias'
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'pek:courier' ) );
+$city_fias_order = new WdcOrderMetaSmokeOrder();
+$city_fias_persister->persist( $city_fias_order, array() );
+order_meta_smoke_assert( '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' === (string) ( $city_fias_order->meta['_wdc_platform_city_fias_id'] ?? '' ), 'Generic order persister must preserve server-side city_context FIAS as _wdc_platform_city_fias_id.' );
+order_meta_smoke_assert( ! array_key_exists( '_wdc_platform_location_fias_id', $city_fias_order->meta ) && '0c5b2444-70a0-4932-980c-b4dc0d3f02b5' === (string) ( $city_fias_order->meta['_wdc_platform_city_fias_id'] ?? '' ), 'Selected location FIAS may be absent without losing generic city FIAS persistence.' );
 
 $lead_time_rate = wdc_order_meta_rate(
 	array(

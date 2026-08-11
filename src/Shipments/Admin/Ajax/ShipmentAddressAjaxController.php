@@ -7,6 +7,8 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\LocationMappingV2\YandexLocationMappingV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
@@ -16,15 +18,18 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
+use WallsShop\WDC\Shipments\Application\ShipmentModalRequestMapper;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
@@ -54,7 +59,10 @@ final class ShipmentAddressAjaxController {
 		private ?DpdPickupPointService $dpd_pickup_points = null,
 		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
 		private ?AddressSuggestionService $address_suggestions = null,
-		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null
+		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
+		private ?PekSenderWarehouseService $pek_sender_warehouses = null,
+		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
+		private ?OrderShipmentDraftFactory $draft_factory = null
 	) {
 	}
 
@@ -120,6 +128,25 @@ final class ShipmentAddressAjaxController {
 		$purpose = sanitize_key( wp_unslash( $_POST['purpose'] ?? '' ) );
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier_key && 'source_dropoff' === $purpose ) {
 			$this->ajax_search_yandex_source_dropoff_points( $mode, $limit );
+		}
+		if ( PekSettings::CARRIER_KEY === $carrier_key && 'sender_warehouse' === $purpose && $this->pek_sender_warehouses instanceof PekSenderWarehouseService ) {
+			$result = $this->pek_sender_warehouses->search( $query, $this->pek_sender_warehouse_constraints() );
+			if ( empty( $result['success'] ) ) {
+				wp_send_json_error(
+					array(
+						'message' => (string) ( $result['message'] ?? 'Не удалось получить список складов ПЭК. Повторите попытку позже.' ),
+						'diagnostic' => $this->safe_pek_sender_warehouse_diagnostic( $result['diagnostic'] ?? null ),
+					),
+					502
+				);
+			}
+			$items = array_slice( is_array( $result['items'] ?? null ) ? $result['items'] : array(), 0, $limit );
+			wp_send_json_success(
+				array(
+					'points' => array_map( array( $this, 'pek_sender_warehouse_ajax_row' ), $items ),
+					'message' => (string) ( $result['message'] ?? '' ),
+				)
+			);
 		}
 		if ( DpdSettings::CARRIER_KEY === $carrier_key && $this->dpd_pickup_points instanceof DpdPickupPointService ) {
 			$city_id = (int) preg_replace( '/\D+/', '', (string) wp_unslash( $_POST['city_id'] ?? '' ) );
@@ -248,8 +275,9 @@ final class ShipmentAddressAjaxController {
 					$location_context['postal_code'] = '' !== trim( (string) $location_context['postal_code'] ) ? $location_context['postal_code'] : $shipping_postcode;
 					$location_context['postcode'] = '' !== trim( (string) $location_context['postcode'] ) ? $location_context['postcode'] : $shipping_postcode;
 					$location_context['display_name'] = '' !== trim( (string) $location_context['display_name'] ) ? $location_context['display_name'] : $shipping_address;
-				}
-			}
+		}
+	}
+
 			$rows = $repository->find_rows_by_location_context(
 				$location_context,
 				array( 'limit' => $limit )
@@ -263,6 +291,21 @@ final class ShipmentAddressAjaxController {
 				'points' => array_map( array( $this, 'pickup_point_ajax_row' ), $rows ),
 			)
 		);
+	}
+
+	/** @return array<string,mixed> */
+	private function safe_pek_sender_warehouse_diagnostic( mixed $value ): array {
+		if ( ! is_array( $value ) || array_is_list( $value ) ) {
+			return array();
+		}
+		$result = array();
+		foreach ( array( 'error_code' => 'reason', 'failure_stage' => 'failure_stage', 'endpoint' => 'endpoint', 'http_status' => 'http_status' ) as $out_key => $source_key ) {
+			if ( array_key_exists( $source_key, $value ) ) {
+				$result[ $out_key ] = $value[ $source_key ];
+			}
+		}
+
+		return $result;
 	}
 
 	private function normalize_yandex_courier_address( object $order, string $original_address ): array {
@@ -731,6 +774,73 @@ final class ShipmentAddressAjaxController {
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 			'source' => (string) ( $row['source'] ?? '' ),
 		);
+	}
+
+	private function pek_sender_warehouse_ajax_row( array $row ): array {
+		$warehouse_id = (string) ( $row['warehouseId'] ?? '' );
+		$title = (string) ( $row['divisionName'] ?? $row['branchName'] ?? $warehouse_id );
+
+		return array(
+			'carrier_key' => PekSettings::CARRIER_KEY,
+			'carrier' => PekSettings::CARRIER_KEY,
+			'service_key' => PekSettings::SERVICE_KEY,
+			'pickup_family' => PekSettings::SERVICE_KEY . ':sender_warehouse',
+			'point_code' => $warehouse_id,
+			'warehouseId' => $warehouse_id,
+			'display_code' => $warehouse_id,
+			'point_type' => 'sender_warehouse',
+			'type' => 'sender_warehouse',
+			'point_title' => $title,
+			'display_title' => $title,
+			'city_name' => (string) ( $row['branchName'] ?? '' ),
+			'city' => (string) ( $row['branchName'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+			'lat' => $row['coordinates']['latitude'] ?? null,
+			'lng' => $row['coordinates']['longitude'] ?? null,
+		);
+	}
+
+	private function pek_sender_warehouse_constraints(): ?PickupCargoConstraints {
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = $order_id > 0 && function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			return null;
+		}
+		$places = array();
+		$data = wp_unslash( $_POST );
+		if ( is_array( $data['places'] ?? null ) && $this->shipment_modal_mapper instanceof ShipmentModalRequestMapper ) {
+			try {
+				$places = $this->shipment_modal_mapper->places( $data );
+			} catch ( \Throwable ) {
+				$places = array();
+			}
+		}
+		if ( array() === $places && $this->draft_factory instanceof OrderShipmentDraftFactory ) {
+			try {
+				$request = $this->draft_factory->create_request_from_order( $order );
+				$places = $request->places;
+			} catch ( \Throwable ) {
+				$places = array();
+			}
+		}
+		if ( array() === $places ) {
+			return null;
+		}
+		$weight = 0;
+		$volume = 0;
+		$max_dimension = 0;
+		$max_place_weight = 0;
+		foreach ( $places as $place ) {
+			if ( ! $place instanceof ShipmentPlace ) {
+				continue;
+			}
+			$weight += max( 0, $place->weight_g );
+			$volume += max( 0, $place->length_cm ) * max( 0, $place->width_cm ) * max( 0, $place->height_cm );
+			$max_dimension = max( $max_dimension, $place->length_cm, $place->width_cm, $place->height_cm );
+			$max_place_weight = max( $max_place_weight, $place->weight_g );
+		}
+
+		return new PickupCargoConstraints( $weight, $volume, $max_dimension, $max_place_weight, max( 1, count( $places ) ) );
 	}
 
 }

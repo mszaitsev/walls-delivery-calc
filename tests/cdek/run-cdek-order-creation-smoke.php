@@ -54,6 +54,7 @@ use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
@@ -87,7 +88,7 @@ function cdek_order_actual_cost_service( OrderShipmentRepository $repository ): 
 }
 
 function cdek_order_creation_service( OrderShipmentRepository $repository, CdekShipmentAdapter $adapter ): ShipmentCreationService {
-	return new ShipmentCreationService( $repository, array( $adapter ), cdek_order_actual_cost_service( $repository ), null, null, array( new CdekShipmentPersistenceMapper() ) );
+	return new ShipmentCreationService( $repository, array( $adapter ), cdek_order_actual_cost_service( $repository ), null, null, array( new CdekShipmentPersistenceMapper() ), new ShipmentCreationAttemptService( $repository ) );
 }
 
 function cdek_order_render_cdek_fields( string $country_code ): string {

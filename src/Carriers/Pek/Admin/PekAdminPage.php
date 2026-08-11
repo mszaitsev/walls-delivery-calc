@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Pek\PekCredentials;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\Shipments\Pek\PekSenderCounterpartService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -19,6 +20,7 @@ final class PekAdminPage {
 		'check_pek_connection',
 		'search_pek_sender_warehouse',
 		'select_pek_sender_warehouse',
+		'verify_pek_sender_counterpart',
 		'diagnose_pek_destination_pickup',
 		'diagnose_pek_quote',
 	);
@@ -33,7 +35,8 @@ final class PekAdminPage {
 		private PekDestinationPickupDiagnosticStore $destination_reports,
 		private PekQuoteDiagnosticService $quote_diagnostics,
 		private PekQuoteDiagnosticStore $quote_reports,
-		private ?DeliveryQuoteCacheManager $quote_cache = null
+		private ?DeliveryQuoteCacheManager $quote_cache = null,
+		private ?PekSenderCounterpartService $counterparts = null
 	) {
 	}
 
@@ -49,10 +52,15 @@ final class PekAdminPage {
 		$notice = array( 'type' => 'success', 'message' => 'Настройки ПЭК сохранены.' );
 		try {
 			if ( 'save_pek_settings' === $action ) {
+				$old_login_hash = $this->credentials->account_login_hash();
 				$this->settings->save_from_admin( $post );
 				$this->warehouses->clear_last_search_for_current_user();
-				if ( ! $this->credentials->save_from_admin( $post ) ) {
-					$notice = array( 'type' => 'warning', 'message' => 'Настройки ПЭК сохранены, но API key не обновлён: задайте APP_ENCRYPTION_KEY.' );
+				$credentials_saved = $this->credentials->save_from_admin( $post );
+				if ( ! $credentials_saved ) {
+					$notice = array( 'type' => 'warning', 'message' => 'Настройки ПЭК сохранены, но credentials не изменены: проверьте APP_ENCRYPTION_KEY.' );
+				}
+				if ( $credentials_saved && $old_login_hash !== $this->credentials->account_login_hash() ) {
+					$this->settings->save_sender_counterpart( '', array() );
 				}
 				$this->quote_cache?->clear_all_delivery_cache();
 			} elseif ( 'check_pek_connection' === $action ) {
@@ -64,6 +72,12 @@ final class PekAdminPage {
 			} elseif ( 'select_pek_sender_warehouse' === $action ) {
 				$result = $this->warehouses->validate_and_select( $this->string_from_post( $post, 'pek_sender_warehouse_id' ) );
 				$notice = array( 'type' => $result['success'] ? 'success' : 'error', 'message' => (string) $result['message'] );
+			} elseif ( 'verify_pek_sender_counterpart' === $action ) {
+				if ( ! $this->counterparts instanceof PekSenderCounterpartService ) {
+					throw new \RuntimeException( 'Проверка контрагента ПЭК недоступна.' );
+				}
+				$result = $this->counterparts->verify_and_save();
+				$notice = array( 'type' => $result['success'] ? 'success' : 'error', 'message' => $this->counterpart_notice_message( $result ) );
 			} elseif ( 'diagnose_pek_destination_pickup' === $action ) {
 				$this->destination_reports->clear_for_current_user();
 				$result = $this->destination_diagnostics->run( $post );
@@ -88,6 +102,7 @@ final class PekAdminPage {
 		}
 		$notice = $this->notices->consume_for_current_user();
 		$warehouse = $this->settings->sender_warehouse();
+		$counterpart = $this->settings->sender_counterpart_snapshot();
 		$diagnostic = $this->settings->last_diagnostic();
 		$search = $this->warehouses->last_search_for_current_user();
 		$destination_report = $this->destination_reports->consume_for_current_user();
@@ -126,7 +141,7 @@ final class PekAdminPage {
 				<?php $this->text_row( PekSettings::SENDER_EMAIL_KEY, 'Email', $this->settings->sender_email() ); ?>
 				<?php $this->text_row( PekSettings::CLIENT_CARD_KEY, 'Номер карты клиента ПЭК', $this->settings->client_card() ); ?>
 				<?php $this->text_row( PekSettings::DEFAULT_CARGO_DESCRIPTION_KEY, 'Описание груза по умолчанию', $this->settings->default_cargo_description() ); ?>
-				<tr><th colspan="2"><h4><?php echo esc_html__( 'Доплаты для лёгких грузов', 'walls-delivery-calc' ); ?></h4><p class="description"><?php echo esc_html__( 'Доплаты применяются по весу товаров без учёта упаковочного веса. Они добавляются магазином к стоимости, возвращённой ПЭК. В запрос ПЭК мешок и пломбировка не передаются. Порог применяется строго: вес должен быть менее заданного значения.', 'walls-delivery-calc' ); ?></p></th></tr>
+				<tr><th colspan="2"><h4><?php echo esc_html__( 'Доплаты для лёгких грузов', 'walls-delivery-calc' ); ?></h4><p class="description"><?php echo esc_html__( 'В calculator quote payload магазин не запрашивает мешок и пломбировку; магазинные доплаты добавляются отдельно. При создании заявки documented service sealing может быть запрошен для груза ниже настроенного порога. Недокументированный bag field не передаётся.', 'walls-delivery-calc' ); ?></p></th></tr>
 				<?php $this->text_row( PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY, 'Стоимость мешка, руб.', $this->settings->light_cargo_bag_price_rub() ); ?>
 				<?php $this->text_row( PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY, 'Стоимость пломбировки, руб.', $this->settings->light_cargo_sealing_price_rub() ); ?>
 				<?php $this->number_row( PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY, 'Применять при весе товаров менее, г', $this->settings->light_cargo_weight_limit_g(), 1, 1000000 ); ?>
@@ -141,6 +156,16 @@ final class PekAdminPage {
 			<?php submit_button( __( 'Сохранить настройки ПЭК', 'walls-delivery-calc' ) ); ?>
 		</form>
 
+		<h3><?php echo esc_html__( 'Контрагент отправителя ПЭК', 'walls-delivery-calc' ); ?></h3>
+		<?php $this->render_counterpart_snapshot( $counterpart ); ?>
+		<form method="post">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="verify_pek_sender_counterpart">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<?php submit_button( __( 'Проверить контрагента отправителя', 'walls-delivery-calc' ), 'secondary' ); ?>
+		</form>
+
 		<h3><?php echo esc_html__( 'Диагностика подключения', 'walls-delivery-calc' ); ?></h3>
 		<form method="post">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -152,7 +177,7 @@ final class PekAdminPage {
 		<?php $this->render_compact_report( $diagnostic ); ?>
 
 		<h3><?php echo esc_html__( 'Склад самопривоза отправителя', 'walls-delivery-calc' ); ?></h3>
-		<p class="description"><?php echo esc_html__( 'Выбранный склад является default для будущих отправлений. При создании конкретного отправления ограничения склада будут повторно проверяться по весу, объёму, габаритам и количеству мест. Позднее склад можно будет заменить в shipment modal; modal override на этом этапе ещё не реализован.', 'walls-delivery-calc' ); ?></p>
+		<p class="description"><?php echo esc_html__( 'Выбранный склад является default для будущих отправлений. Склад можно заменить для конкретного отправления в shipment modal; default в настройках при этом не меняется. При создании конкретного отправления ограничения склада будут повторно проверяться по весу, объёму, габаритам и количеству мест.', 'walls-delivery-calc' ); ?></p>
 		<?php $this->render_warehouse_snapshot( $warehouse ); ?>
 		<form method="post" style="max-width:760px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -253,6 +278,23 @@ final class PekAdminPage {
 		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
 		foreach ( array( 'warehouseId' => 'Warehouse ID', 'source' => 'Источник выбора', 'branchName' => 'Филиал', 'divisionName' => 'Отделение', 'departmentType' => 'Тип', 'address' => 'Адрес', 'branchTimezone' => 'Часовой пояс филиала', 'checked_at' => 'Проверено' ) as $key => $label ) {
 			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) ( $snapshot[ $key ] ?? '' ) ) . '</td></tr>';
+		}
+		echo '</tbody></table>';
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function render_counterpart_snapshot( array $snapshot ): void {
+		if ( array() === $snapshot ) {
+			echo '<p class="description">' . esc_html__( 'Контрагент отправителя ещё не подтверждён через API ПЭК.', 'walls-delivery-calc' ) . '</p>';
+			return;
+		}
+		echo '<table class="widefat striped" style="max-width:760px;"><tbody>';
+		foreach ( array( 'guid' => 'GUID', 'legalForm' => 'Legal form', 'title' => 'Название', 'inn_masked' => 'ИНН', 'kpp_masked' => 'КПП', 'client_card_present' => 'Карта клиента', 'checked_at' => 'Проверено' ) as $key => $label ) {
+			$value = $snapshot[ $key ] ?? '';
+			if ( is_bool( $value ) ) {
+				$value = $value ? 'yes' : 'no';
+			}
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( (string) $value ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
 	}
@@ -704,5 +746,27 @@ final class PekAdminPage {
 		$message = preg_replace( '/[A-Za-z0-9._~+\-\/]{24,}/', '[redacted]', $message ) ?? $message;
 
 		return trim( $message );
+	}
+
+	/** @param array<string,mixed> $result */
+	private function counterpart_notice_message( array $result ): string {
+		$message = (string) ( $result['message'] ?? 'Проверка контрагента ПЭК завершена.' );
+		if ( ! empty( $result['success'] ) || ! is_array( $result['diagnostic'] ?? null ) ) {
+			return $message;
+		}
+		$diagnostic = $result['diagnostic'];
+		$parts = array();
+		foreach ( array( 'stage' => 'Этап', 'reason' => 'причина' ) as $key => $label ) {
+			$value = $diagnostic[ $key ] ?? '';
+			if ( is_string( $value ) && '' !== trim( $value ) && 1 === preg_match( '/^[a-z0-9_:-]{1,80}$/', $value ) ) {
+				$parts[] = $label . ': ' . $value;
+			}
+		}
+		$row_index = $diagnostic['row_index'] ?? null;
+		if ( is_int( $row_index ) && $row_index >= 0 ) {
+			$parts[] = 'строка: ' . (string) $row_index;
+		}
+
+		return array() === $parts ? $message : $message . ' ' . implode( '; ', $parts ) . '.';
 	}
 }

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
 use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
@@ -20,6 +21,7 @@ function shipment_test_actual_cost_service( OrderShipmentRepository $repository 
  * @param array<int,mixed> $adapters
  * @param array<int,mixed> $mappers
  */
-function shipment_test_creation_service( OrderShipmentRepository $repository, array $adapters, array $mappers = array(), mixed $registry = null, mixed $logger = null ): ShipmentCreationService {
-	return new ShipmentCreationService( $repository, $adapters, shipment_test_actual_cost_service( $repository ), $logger, $registry, $mappers );
+function shipment_test_creation_service( OrderShipmentRepository $repository, array $adapters, array $mappers = array(), mixed $registry = null, mixed $logger = null, mixed $attempts = null ): ShipmentCreationService {
+	$attempts = $attempts ?? new ShipmentCreationAttemptService( $repository );
+	return new ShipmentCreationService( $repository, $adapters, shipment_test_actual_cost_service( $repository ), $logger, $registry, $mappers, $attempts );
 }

@@ -211,7 +211,12 @@
     const config = window.wdcShipmentsAdmin || {};
     const context = settings.context || pickupContext(form);
     const codeDisplay = settings.sender || context.pickupFamily === 'cdek:pickup';
-    const codeLabel = codeDisplay ? 'Код ПВЗ' : 'Индекс';
+    const entitySingular = settings.entitySingular || 'ПВЗ';
+    const entityPlural = settings.entityPlural || 'ПВЗ';
+    const confirmText = settings.confirmText || 'Выбрать этот ПВЗ';
+    const selectText = settings.selectText || 'Выберите ПВЗ';
+    const emptyText = settings.emptyText || 'ПВЗ не найдены.';
+    const codeLabel = settings.codeLabel || (codeDisplay ? 'Код ПВЗ' : 'Индекс');
     const pickerTitle = settings.title || (context.pickupFamily === 'dpd:pickup' ? 'Выбор ПВЗ DPD' : (codeDisplay ? 'Выбор ПВЗ СДЭК' : 'Выбор ПВЗ / ОПС'));
     window.wdcPickupCheckout = Object.assign({}, window.wdcPickupCheckout || {}, {
       mapProvider: config.mapProvider || 'leaflet',
@@ -239,7 +244,7 @@
       '<div class="wdc-admin-pickup-picker__map" data-wdc-pickup-picker-map></div>',
       '<div class="wdc-admin-pickup-picker__side">',
       '<div class="wdc-admin-pickup-picker__list" data-wdc-pickup-picker-list></div>',
-      '<div class="wdc-admin-pickup-picker__footer"><button type="button" class="button button-primary" data-wdc-pickup-picker-confirm disabled>Выбрать этот ПВЗ</button></div>',
+      '<div class="wdc-admin-pickup-picker__footer"><button type="button" class="button button-primary" data-wdc-pickup-picker-confirm disabled>' + escapeHtml(confirmText) + '</button></div>',
       '</div>',
       '</div>',
       '</div>'
@@ -289,12 +294,14 @@
     function updateConfirmButton() {
       if (!confirmButton) return;
       confirmButton.disabled = !previewPoint;
-      confirmButton.textContent = previewPoint ? 'Выбрать этот ПВЗ' : 'Выберите ПВЗ';
+      confirmButton.textContent = previewPoint ? confirmText : selectText;
     }
 
     function choose(point) {
       if (typeof settings.onChoose === 'function') {
-        settings.onChoose(point);
+        if (settings.onChoose(point) === false) {
+          return;
+        }
       } else {
         updatePickupDraft(form, point);
       }
@@ -303,7 +310,7 @@
 
     function renderList() {
       if (!points.length) {
-        list.innerHTML = '<p class="description">ПВЗ не найдены.</p>';
+        list.innerHTML = '<p class="description">' + escapeHtml(emptyText) + '</p>';
         updateConfirmButton();
         return;
       }
@@ -347,7 +354,7 @@
     }
 
     function renderSearchResults(message) {
-      status.textContent = points.length ? message + ' Найдено: ' + points.length : message + ' ПВЗ не найдены.';
+      status.textContent = points.length ? message + ' Найдено: ' + points.length : message + ' ' + entityPlural + ' не найдены.';
       if (provider && provider.renderMarkers) {
         provider.renderMarkers(points, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: searchMarker });
         if (searchMarker && provider.setCenter) {
@@ -513,4 +520,10 @@
     query.focus();
     if (query.value || context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId) runSearch('location');
   }
+
+  window.wdcShipmentPickupPicker = Object.assign({}, window.wdcShipmentPickupPicker || {}, {
+    open: function (form, options) {
+      createPickupPicker(form, options || {});
+    }
+  });
 

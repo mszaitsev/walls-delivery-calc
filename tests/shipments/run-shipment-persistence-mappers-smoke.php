@@ -104,6 +104,15 @@ function shipment_persistence_saved( ShipmentPersistenceOrder $order, string $ca
 	$shipments = is_array( $order->meta[ OrderShipmentRepository::META_KEY ] ?? null ) ? $order->meta[ OrderShipmentRepository::META_KEY ] : array();
 	return is_array( $shipments[ $carrier_key ] ?? null ) ? $shipments[ $carrier_key ] : array();
 }
+function shipment_persistence_without_attempt_fields( array $shipment ): array {
+	unset( $shipment['creation_attempt_id'], $shipment['creation_attempt_generation'] );
+	return $shipment;
+}
+function shipment_persistence_has_attempt_fields( array $shipment ): bool {
+	return is_string( $shipment['creation_attempt_id'] ?? null )
+		&& 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', (string) $shipment['creation_attempt_id'] )
+		&& 1 === (int) ( $shipment['creation_attempt_generation'] ?? 0 );
+}
 
 $production_adapter_keys = array( RussianPostDomesticSettings::CARRIER_KEY, CdekSettings::CARRIER_KEY, DpdSettings::CARRIER_KEY, YandexDeliverySettings::CARRIER_KEY );
 $production_mappers = array(
@@ -190,7 +199,7 @@ $cdek_expected = array(
 	'actual_cost_updated_at' => '2026-07-15 10:11:12',
 );
 $cdek_actual = shipment_persistence_saved( $cdek_order, CdekSettings::CARRIER_KEY );
-shipment_persistence_assert( $cdek_expected === $cdek_actual && array() === $cdek_order->notes, 'CDEK mapper persistence must equal legacy shipment fields and notes.' );
+shipment_persistence_assert( shipment_persistence_has_attempt_fields( $cdek_actual ) && $cdek_expected === shipment_persistence_without_attempt_fields( $cdek_actual ) && array() === $cdek_order->notes, 'CDEK mapper persistence must equal legacy shipment fields plus generic attempt metadata and notes.' );
 
 $dpd_preview = array( 'method' => 'SOAP', 'path' => 'order2/createOrder2', 'body' => array( 'preview' => 'dpd' ), 'errors' => array(), 'warnings' => array() );
 $dpd_raw = array(
@@ -239,7 +248,8 @@ $dpd_expected = array(
 	'dpd_cargo_value' => 1000.0,
 	'universal_status_code' => 'pending_creation_in_carrier',
 );
-shipment_persistence_assert( $dpd_expected === shipment_persistence_saved( $dpd_order, DpdSettings::CARRIER_KEY ) && array( 'DPD отправление создано вручную. Номер: DPD-1. Мест: 1' ) === $dpd_order->notes, 'DPD mapper persistence must equal legacy shipment fields and notes.' );
+$dpd_actual = shipment_persistence_saved( $dpd_order, DpdSettings::CARRIER_KEY );
+shipment_persistence_assert( shipment_persistence_has_attempt_fields( $dpd_actual ) && $dpd_expected === shipment_persistence_without_attempt_fields( $dpd_actual ) && array( 'DPD отправление создано вручную. Номер: DPD-1. Мест: 1' ) === $dpd_order->notes, 'DPD mapper persistence must equal legacy shipment fields plus generic attempt metadata and notes.' );
 
 $rp_preview = array( 'method' => 'PUT', 'path' => '/2.0/user/backlog', 'body' => array( 'preview' => 'rp' ) );
 $rp_raw = array( 'orders' => array( array( 'barcode' => 'RP1' ) ), 'barcodes' => array( 'RP1' ), 'group_name' => 'GROUP-1', 'http_code' => 200 );
@@ -269,6 +279,7 @@ $rp_expected = array(
 	'group_name' => 'GROUP-1',
 	'backlog_order_id' => 777,
 );
-shipment_persistence_assert( $rp_expected === shipment_persistence_saved( $rp_order, RussianPostDomesticSettings::CARRIER_KEY ) && array( 'Отправление Почты России создано. Barcode: RP1. Мест: 1. ММО group-name: GROUP-1' ) === $rp_order->notes, 'Russian Post mapper persistence must equal legacy shipment fields and notes.' );
+$rp_actual = shipment_persistence_saved( $rp_order, RussianPostDomesticSettings::CARRIER_KEY );
+shipment_persistence_assert( shipment_persistence_has_attempt_fields( $rp_actual ) && $rp_expected === shipment_persistence_without_attempt_fields( $rp_actual ) && array( 'Отправление Почты России создано. Barcode: RP1. Мест: 1. ММО group-name: GROUP-1' ) === $rp_order->notes, 'Russian Post mapper persistence must equal legacy shipment fields plus generic attempt metadata and notes.' );
 
 echo "Shipment persistence mappers smoke passed.\n";

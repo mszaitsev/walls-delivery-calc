@@ -77,7 +77,7 @@ final class ShipmentCreateAjaxController {
 			}
 			$request = $this->drafts->create_request_from_admin_data( $order, $data );
 			$this->validate_preview_request( $request );
-			$preview = $this->creation->safe_preview( $request );
+			$preview = $this->creation->safe_preview( $request, $order );
 			if ( ! empty( $preview['errors'] ) && is_array( $preview['errors'] ) && in_array( $request->carrier_key, array( DpdSettings::CARRIER_KEY, YandexDeliverySettings::CARRIER_KEY ), true ) ) {
 				throw new \InvalidArgumentException( $this->public_shipment_error_message( (string) reset( $preview['errors'] ) ) );
 			}
@@ -105,7 +105,7 @@ final class ShipmentCreateAjaxController {
 			$result = $this->creation->create( $order, $request );
 			if ( ! $result->success ) {
 				$this->discard_preview_buffer( $buffer_level );
-				wp_send_json_error( array( 'message' => $this->public_shipment_error_message( $result->error_message ), 'code' => $result->error_code, 'error_code' => (string) ( $result->error_code ?: 'shipment_create_failed' ), 'preview' => $preview ), 400 );
+				wp_send_json_error( array_filter( array( 'message' => $this->public_shipment_error_message( $result->error_message ), 'code' => $result->error_code, 'error_code' => (string) ( $result->error_code ?: 'shipment_create_failed' ), 'preview' => $preview, 'diagnostic' => $this->safe_create_diagnostic( $result->raw_reference['diagnostic'] ?? null ) ), static fn( mixed $value ): bool => null !== $value ), 400 );
 			}
 
 			$this->discard_preview_buffer( $buffer_level );
@@ -264,6 +264,22 @@ final class ShipmentCreateAjaxController {
 		}
 
 		return $message;
+	}
+
+	/** @return array<string,mixed>|null */
+	private function safe_create_diagnostic( mixed $value ): ?array {
+		if ( ! is_array( $value ) || array() === $value || array_is_list( $value ) ) {
+			return null;
+		}
+		$allowed = array( 'failure_stage', 'endpoint', 'method', 'http_status', 'error_code', 'api_error_message', 'field_errors', 'response_shape' );
+		$result = array();
+		foreach ( $allowed as $key ) {
+			if ( array_key_exists( $key, $value ) ) {
+				$result[ $key ] = $value[ $key ];
+			}
+		}
+
+		return array() !== $result ? $result : null;
 	}
 
 	private function maybe_prepare_cdek_courier_address( object $order, array &$data ): array {

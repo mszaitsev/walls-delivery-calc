@@ -192,6 +192,7 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			$error = is_array( $context['pickup_options_error'] ?? null )
 				? $context['pickup_options_error']
 				: array( 'success' => false, 'error_code' => 'pek_checkout_pickup_options_missing' );
+			$this->log_pickup_options_error( $context, $error );
 			return array( 'rate' => null, 'diagnostic' => $error );
 		}
 
@@ -271,6 +272,25 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 	}
 
 	/** @param array<string,mixed> $context */
+	private function log_pickup_options_error( array $context, array $error ): void {
+		$this->logger->warning(
+			'PEK checkout pickup preliminary options unavailable.',
+			array(
+				'carrier' => self::KEY,
+				'mode' => PekQuoteOptions::MODE_PICKUP,
+				'error_code' => (string) ( $error['error_code'] ?? 'pek_checkout_pickup_options_missing' ),
+				'failure_stage' => (string) ( $error['failure_stage'] ?? 'checkout_context' ),
+				'endpoint' => (string) ( $error['endpoint'] ?? '' ),
+				'method' => (string) ( $error['method'] ?? '' ),
+				'http_status' => $error['http_status'] ?? '',
+				'location_id' => (int) ( $context['location_id'] ?? 0 ),
+				'cache_hit' => ! empty( $error['cache_hit'] ),
+				'api_source' => (string) ( $error['api_source'] ?? '' ),
+			)
+		);
+	}
+
+	/** @param array<string,mixed> $context */
 	private function log_pickup_failure( array $context, PekQuoteResult $result, string $code, bool $selected, bool $recovery_attempted, bool $recovery_success ): void {
 		$this->logger->warning(
 			'PEK checkout quote mode unavailable.',
@@ -328,6 +348,14 @@ final class PekCarrier implements CarrierAdapterInterface, CarrierQuoteCacheCont
 			'pek_calculator_http_status' => $result->http_status,
 			'requires_rate_refresh_on_pickup_selection' => $is_pickup,
 		);
+		$location_id = (int) ( $context['location_id'] ?? 0 );
+		if ( $location_id > 0 ) {
+			$meta['location_id'] = $location_id;
+		}
+		$destination_fingerprint = trim( (string) ( $context['destination_fingerprint'] ?? '' ) );
+		if ( '' !== $destination_fingerprint ) {
+			$meta['destination_fingerprint'] = $destination_fingerprint;
+		}
 		if ( $is_pickup ) {
 			$meta['pickup_family'] = PekSettings::PICKUP_FAMILY;
 			$meta['pickup_provider_query'] = is_array( $context['pickup_provider_query'] ?? null ) ? $context['pickup_provider_query'] : array();

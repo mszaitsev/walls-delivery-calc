@@ -1,0 +1,26 @@
+[
+  {
+    "legalForm": 3,
+    "title": "PRIVATE_TITLE",
+    "guid": "PRIVATE_GUID",
+    "counterpartClientCard": "PRIVATE_CARD",
+    "documents": [
+      {
+        "series": "PRIVATE_PASSPORT_SERIES",
+        "number": "PRIVATE_PASSPORT_NUMBER"
+      }
+    ],
+    "legal": null
+  },
+  {
+    "legalForm": 1,
+    "title": "ТЕСТОВЫЙ ОТПРАВИТЕЛЬ",
+    "guid": "22222222-2222-4222-8222-222222222222",
+    "counterpartClientCard": "CLIENT-CARD",
+    "documents": null,
+    "legal": {
+      "inn": "5400000000",
+      "kpp": "540001001"
+    }
+  }
+]

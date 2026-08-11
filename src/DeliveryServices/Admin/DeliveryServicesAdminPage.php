@@ -25,6 +25,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\Pek\Admin\PekStatusAdminPage;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunnerService;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2Repository;
@@ -152,6 +153,7 @@ final class DeliveryServicesAdminPage {
 		private ?JetLogisticGeographyAdminPage $jet_logistic_geography = null,
 		private ?JetLogisticStatusAdminPage $jet_logistic_statuses = null,
 		private ?PekAdminPage $pek_admin = null,
+		private ?PekStatusAdminPage $pek_statuses = null,
 	) {
 	}
 
@@ -774,6 +776,7 @@ final class DeliveryServicesAdminPage {
 				'save_status_mapping',
 				'save_cdek_statuses',
 				'save_dpd_statuses',
+				'save_pek_statuses',
 				'save_yandex_delivery_statuses',
 				'save_cdek_settings',
 				'save_cdek_calculation',
@@ -829,6 +832,7 @@ final class DeliveryServicesAdminPage {
 					'save_status_mapping',
 					'save_cdek_statuses',
 					'save_dpd_statuses',
+					'save_pek_statuses',
 					'save_cdek_settings',
 					'save_cdek_calculation',
 					'check_cdek_connection',
@@ -931,6 +935,12 @@ final class DeliveryServicesAdminPage {
 						$mapping = $this->dpd_status_mapping->sanitize_mapping( wp_unslash( $_POST[ DpdStatusMapping::MAPPING_KEY ] ) );
 					}
 					$this->dpd_status_mapping->save_mapping( $mapping );
+				}
+			}
+			if ( 'save_pek_statuses' === $action && $this->pek_statuses instanceof PekStatusAdminPage ) {
+				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $service instanceof DeliveryService && PekSettings::SERVICE_KEY === $service->service_key ) {
+					$this->pek_statuses->save_from_post( $_POST );
 				}
 			}
 			if ( 'save_yandex_delivery_statuses' === $action && $this->yandex_status_mapping instanceof YandexStatusMapping ) {
@@ -1232,6 +1242,7 @@ final class DeliveryServicesAdminPage {
 			'save_status_mapping',
 			'save_cdek_statuses',
 			'save_dpd_statuses',
+			'save_pek_statuses',
 			'save_yandex_delivery_statuses',
 			'save_cdek_settings',
 			'save_cdek_calculation',
@@ -1266,6 +1277,7 @@ final class DeliveryServicesAdminPage {
 				'save_status_mapping' => 'status_mapping',
 				'save_cdek_statuses' => 'cdek_statuses',
 				'save_dpd_statuses' => 'dpd_statuses',
+				'save_pek_statuses' => PekStatusAdminPage::TAB_KEY,
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
 				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
 				'save_yandex_delivery_settings', 'check_yandex_delivery_connection' => 'yandex_delivery_settings',
@@ -1658,6 +1670,7 @@ final class DeliveryServicesAdminPage {
 		}
 		if ( PekSettings::SERVICE_KEY === $service->service_key ) {
 			$tabs[ PekAdminPage::TAB_KEY ] = 'ПЭК';
+			$tabs[ PekStatusAdminPage::TAB_KEY ] = 'Статусы ПЭК';
 		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
@@ -1691,6 +1704,7 @@ final class DeliveryServicesAdminPage {
 			'jet_geography' => $this->render_jet_geography_tab( $service ),
 			'jet_statuses' => $this->render_jet_statuses_tab( $service ),
 			PekAdminPage::TAB_KEY => $this->render_pek_settings_tab( $service ),
+			PekStatusAdminPage::TAB_KEY => $this->render_pek_statuses_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
 		?>
@@ -3574,6 +3588,14 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$this->pek_admin->render_embedded( $service );
+	}
+
+	private function render_pek_statuses_tab( DeliveryService $service ): void {
+		if ( PekSettings::SERVICE_KEY !== $service->service_key || ! $this->pek_statuses instanceof PekStatusAdminPage ) {
+			return;
+		}
+
+		$this->pek_statuses->render_embedded( $service );
 	}
 
 	private function render_diagnostics_tab( DeliveryService $service ): void {

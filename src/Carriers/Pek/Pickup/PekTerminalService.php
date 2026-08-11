@@ -156,6 +156,7 @@ final class PekTerminalService {
 					'endpoint' => (string) ( $context['endpoint'] ?? $base_report['endpoint'] ),
 					'method' => (string) ( $context['method'] ?? $base_report['method'] ),
 					'http_status' => $context['http_status'] ?? '',
+					'api_error_message' => $exception->getMessage(),
 					'response_shape' => is_array( $context['response_shape'] ?? null ) ? $context['response_shape'] : array(),
 					'field_errors' => is_array( $context['field_errors'] ?? null ) ? $context['field_errors'] : array(),
 					'input_row_count' => (int) ( $context['input_row_count'] ?? 0 ),

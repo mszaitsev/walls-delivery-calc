@@ -12,6 +12,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostService;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -24,6 +25,7 @@ final class CdekOrderStatusService {
 		private ShipmentActualCostService $actual_cost_service,
 		private Logger|null $logger = null,
 		private CdekStatusMappingService|null $status_mapping = null,
+		private ?ShipmentCreationAttemptService $attempts = null,
 	) {
 	}
 
@@ -152,6 +154,7 @@ final class CdekOrderStatusService {
 		}
 
 		$this->add_cancelled_note( $order, $shipment );
+		$this->mark_terminal_before_delete( $order, $shipment, 'cancelled' );
 		$this->repository->delete_for_carrier( $order, CdekSettings::CARRIER_KEY );
 		$this->log( 'info', 'CDEK order delete accepted.', array( 'entity_uuid' => $uuid, 'request_uuid' => (string) ( $request_row['request_uuid'] ?? '' ), 'request_state' => (string) ( $request_row['state'] ?? '' ) ) );
 
@@ -174,6 +177,7 @@ final class CdekOrderStatusService {
 			return array( 'success' => false, 'message' => 'Локальное удаление СДЭК-отправления запрещено для текущего статуса.' );
 		}
 
+		$this->mark_terminal_before_delete( $order, $shipment, 'local_removed' );
 		$this->repository->delete_for_carrier( $order, CdekSettings::CARRIER_KEY );
 
 		return array(
@@ -629,5 +633,12 @@ final class CdekOrderStatusService {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function mark_terminal_before_delete( object $order, array $shipment, string $reason ): void {
+		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
+			$this->attempts->mark_terminal_for_shipment( $order, CdekSettings::CARRIER_KEY, $shipment, $reason );
+		}
 	}
 }

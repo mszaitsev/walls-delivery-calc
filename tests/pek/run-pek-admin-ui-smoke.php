@@ -13,6 +13,7 @@ use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekDestinationPickupDiagnosticStore;
 use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Admin\PekQuoteDiagnosticStore;
+use WallsShop\WDC\Carriers\Pek\Admin\PekStatusAdminPage;
 use WallsShop\WDC\Carriers\Pek\Api\PekApiClient;
 use WallsShop\WDC\Carriers\Pek\Api\PekConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\Pek\Api\PekHttpClientInterface;
@@ -42,6 +43,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Shipments\Pek\PekStatusMapping;
 
 function pek_ui_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -108,7 +110,7 @@ $GLOBALS['pek_ui_wc_logger'] = new PekUiFakeWooLogger();
 define( 'APP_ENCRYPTION_KEY', 'pek-ui-key' );
 
 $settings_repository = new SettingsRepository();
-$settings = new PekSettings( $settings_repository );
+$settings = new PekSettings( $settings_repository, new \WallsShop\WDC\Carriers\Pek\PekRuPhoneNormalizer() );
 $credentials = new PekCredentials( $settings_repository, new EncryptionService() );
 $credentials->save_from_admin( array( PekSettings::LOGIN_KEY => 'diagnostic-user', 'pek_api_key' => 'very-secret-key' ) );
 $settings->save_sender_warehouse( array( 'warehouseId' => 'nearest-timezone-wh', 'source' => 'free', 'branchTimezone' => 'UTC+04:00', 'branchName' => 'Самара', 'divisionName' => 'Самара Запад' ) );
@@ -241,12 +243,21 @@ pek_ui_assert( str_contains( $html, 'Диагностика расчёта ст�
 pek_ui_assert( str_contains( $html, 'Вес товаров без упаковки, кг' ), 'PEK quote diagnostic form must label manual weight as product weight before packaging.' );
 pek_ui_assert( str_contains( $html, 'Доплаты для лёгких грузов' ) && str_contains( $html, PekSettings::LIGHT_CARGO_BAG_PRICE_RUB_KEY ) && str_contains( $html, PekSettings::LIGHT_CARGO_SEALING_PRICE_RUB_KEY ) && str_contains( $html, PekSettings::LIGHT_CARGO_WEIGHT_LIMIT_G_KEY ) && str_contains( $html, 'value="70"' ) && str_contains( $html, 'value="20"' ) && str_contains( $html, 'value="3000"' ), 'PEK admin settings UI must expose default light-cargo store surcharge fields.' );
 pek_ui_assert( str_contains( $html, '>free<' ), 'PEK admin UI must render sender warehouse source.' );
-pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '04:00:00' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
+pek_ui_assert( str_contains( $html, 'UTC+04:00' ) && ! str_contains( $html, '<td>04:00:00</td>' ), 'PEK admin UI must render canonical sender warehouse branch timezone, not raw nearestdepartments timeZone.' );
 $search_form_pos = strpos( $html, 'name="wdc_delivery_services_action" value="search_pek_sender_warehouse"' );
 $search_field_pos = strpos( $html, 'id="pek_warehouse_search_address"' );
 $table_pos = strpos( $html, '<table class="form-table" role="presentation">', $search_form_pos === false ? 0 : $search_form_pos );
 pek_ui_assert( false !== $search_form_pos && false !== $table_pos && false !== $search_field_pos && $table_pos < $search_field_pos, 'PEK warehouse search field must be inside a form-table.' );
 pek_ui_assert( array() === $notice_store->consume_for_current_user(), 'PEK admin notice must be consumed by render.' );
+
+$status_page = new PekStatusAdminPage( new PekStatusMapping( $settings_repository ) );
+ob_start();
+$status_page->render_embedded( $service );
+$status_html = (string) ob_get_clean();
+pek_ui_assert( str_contains( $status_html, 'name="wdc_delivery_services_action" value="save_pek_statuses"' ) && str_contains( $status_html, 'Статусы ПЭК' ) && str_contains( $status_html, 'ПЭК до терминала' ) && str_contains( $status_html, 'ПЭК курьером' ), 'PEK status admin tab must render its save form and pickup/courier columns.' );
+pek_ui_assert( str_contains( $status_html, 'Аннулировано до приемки груза' ) && str_contains( $status_html, 'Прибыл' ) && str_contains( $status_html, 'Выполняется адресная доставка' ) && str_contains( $status_html, 'Выдан получателю' ) && str_contains( $status_html, 'Выдан мест N из M' ), 'PEK status admin tab must render canonical statuses and issued-places pattern row.' );
+pek_ui_assert( str_contains( $status_html, 'Шаблон статуса ПЭК' ) && str_contains( $status_html, 'ready_for_pickup' ) && str_contains( $status_html, 'in_transit' ), 'PEK status admin tab must expose pattern explanation and distinct arrived defaults.' );
+pek_ui_assert( str_contains( $status_html, 'Настройка не изменяет исходный статус ПЭК' ) && str_contains( $status_html, 'возможность отмены' ) && 0 === count( $ui_http->requests ), 'PEK status admin tab must document safety separation and perform no PEK API calls.' );
 
 $invalid_report = $destination_diagnostic_service->run( array( 'pek_destination_location_id' => 10, 'pek_destination_weight_kg' => 'abc', 'pek_destination_length_cm' => 10, 'pek_destination_width_cm' => 10, 'pek_destination_height_cm' => 10, 'pek_destination_max_place_weight_kg' => 1, 'pek_destination_places_count' => 1 ) );
 pek_ui_assert( false === $invalid_report['success'] && 'pek_invalid_pickup_query' === $invalid_report['error_code'] && 0 === count( $ui_http->requests ), 'Invalid admin cargo input must return success=false without API.' );

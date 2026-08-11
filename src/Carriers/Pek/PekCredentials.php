@@ -19,6 +19,12 @@ final class PekCredentials {
 		return $this->sanitize_login( $this->settings->get_string( PekSettings::LOGIN_KEY, '' ) );
 	}
 
+	public function account_login_hash(): string {
+		$login = $this->login();
+
+		return '' !== $login ? hash( 'sha256', $login ) : '';
+	}
+
 	public function api_key(): string {
 		$encrypted = $this->settings->get_string( PekSettings::API_KEY_ENCRYPTED_KEY, '' );
 		if ( '' === trim( $encrypted ) ) {
@@ -44,8 +50,9 @@ final class PekCredentials {
 
 	/** @param array<string,mixed> $input */
 	public function save_from_admin( array $input ): bool {
-		$this->settings->set( PekSettings::LOGIN_KEY, $this->sanitize_login( (string) ( $input[ PekSettings::LOGIN_KEY ] ?? '' ) ) );
+		$login = $this->sanitize_login( (string) ( $input[ PekSettings::LOGIN_KEY ] ?? '' ) );
 		if ( ! empty( $input['pek_clear_api_key'] ) ) {
+			$this->settings->set( PekSettings::LOGIN_KEY, $login );
 			$this->clear_api_key();
 			return true;
 		}
@@ -54,13 +61,20 @@ final class PekCredentials {
 		$key = function_exists( 'wp_unslash' ) ? wp_unslash( $key ) : $key;
 		$key = trim( $key );
 		if ( '' === $key ) {
+			$this->settings->set( PekSettings::LOGIN_KEY, $login );
 			return true;
 		}
 		if ( ! $this->encryption_ready() ) {
 			return false;
 		}
 
-		$this->settings->set( PekSettings::API_KEY_ENCRYPTED_KEY, $this->encryption->encrypt( $key ) );
+		$encrypted = $this->encryption->encrypt( $key );
+		if ( '' === trim( $encrypted ) ) {
+			return false;
+		}
+
+		$this->settings->set( PekSettings::LOGIN_KEY, $login );
+		$this->settings->set( PekSettings::API_KEY_ENCRYPTED_KEY, $encrypted );
 
 		return true;
 	}

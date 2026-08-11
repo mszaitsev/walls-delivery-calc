@@ -23,14 +23,35 @@ final class ShipmentCreationService {
 		private ShipmentActualCostService $actual_cost_service,
 		private ?Logger $logger = null,
 		private ?CarrierShipmentAdapterRegistry $registry = null,
-		private array $persistence_mappers = array()
+		private array $persistence_mappers = array(),
+		private ?ShipmentCreationAttemptService $attempts = null
 	) {
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function safe_preview( ShipmentCreateRequest $request ): array {
+	public function safe_preview( ShipmentCreateRequest $request, ?object $order = null ): array {
+		if ( null !== $order && ! ( $this->attempts instanceof ShipmentCreationAttemptService ) ) {
+			return array(
+				'method' => '',
+				'path' => '',
+				'body' => array(),
+				'errors' => array( ShipmentCreationAttemptService::STATE_ERROR_MESSAGE ),
+			);
+		}
+		if ( $this->attempts instanceof ShipmentCreationAttemptService && null !== $order ) {
+			try {
+				$request = $this->attempts->reserve_for_request( $order, $request );
+			} catch ( \Throwable $e ) {
+				return array(
+					'method' => '',
+					'path' => '',
+					'body' => array(),
+					'errors' => array( $e->getMessage() ),
+				);
+			}
+		}
 		$adapter = $this->adapter_for( $request );
 
 		if ( ! $adapter instanceof CarrierShipmentAdapterInterface ) {
@@ -49,6 +70,13 @@ final class ShipmentCreationService {
 	}
 
 	public function create( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
+		if ( ! ( $this->attempts instanceof ShipmentCreationAttemptService ) ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_creation_attempt_dependency_missing',
+				error_message: ShipmentCreationAttemptService::STATE_ERROR_MESSAGE
+			);
+		}
 		$order_id = $this->order_id( $order );
 		if ( $order_id > 0 && $request->order_id !== $order_id ) {
 			$this->log_order_mismatch( $order_id, $request );
@@ -59,6 +87,17 @@ final class ShipmentCreationService {
 			);
 		}
 
+		$release_create_lock = null;
+		$release_create_lock = $this->attempts->acquire_create_lock( $order, $request );
+		if ( null === $release_create_lock ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_create_in_progress',
+				error_message: 'Создание отправления уже выполняется. Дождитесь завершения и обновите статус заказа.'
+			);
+		}
+
+		try {
 		$adapter = $this->adapter_for( $request );
 		if ( ! $adapter instanceof CarrierShipmentAdapterInterface ) {
 			return new ShipmentCreateResult( false, error_code: 'unsupported_carrier', error_message: 'Для выбранной службы нет адаптера создания отправлений.' );
@@ -85,6 +124,16 @@ final class ShipmentCreationService {
 			);
 		}
 
+		try {
+			$request = $this->attempts->reserve_for_request( $order, $request );
+		} catch ( \Throwable $e ) {
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_creation_attempt_state_invalid',
+				error_message: $e->getMessage()
+			);
+		}
+
 		$preview = $this->safe_preview( $request );
 		$result = method_exists( $adapter, 'create_for_order' ) ? $adapter->create_for_order( $order, $request ) : $adapter->create( $request );
 		$now = $this->now();
@@ -94,6 +143,9 @@ final class ShipmentCreationService {
 				$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $failed_fields );
 				$shipment = $this->common_shipment_envelope( $request, $result, $preview, $failed_fields, $now );
 				$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
+				if ( ! empty( $shipment['pending_creation_in_carrier'] ) ) {
+					$this->attempts->mark_pending( $order, $request );
+				}
 				$shipment = $this->apply_actual_cost_candidate( $order, $request->carrier_key, $actual_cost_candidate, $shipment );
 				$mapper->after_persist( $order, $shipment );
 				if ( method_exists( $mapper, 'result_after_failed_persist' ) ) {
@@ -133,10 +185,16 @@ final class ShipmentCreationService {
 		$actual_cost_candidate = $this->actual_cost_candidate_from_fields( $mapped_fields );
 		$shipment = $this->common_shipment_envelope( $request, $result, $preview, $mapped_fields, $now );
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
+		$this->attempts->mark_active( $order, $request );
 		$shipment = $this->apply_actual_cost_candidate( $order, $request->carrier_key, $actual_cost_candidate, $shipment );
 		$mapper->after_persist( $order, $shipment );
 
 		return $result;
+		} finally {
+			if ( is_callable( $release_create_lock ) ) {
+				$release_create_lock();
+			}
+		}
 	}
 
 	private function adapter_for( ShipmentCreateRequest $request ): ?CarrierShipmentAdapterInterface {
@@ -176,8 +234,7 @@ final class ShipmentCreationService {
 		$response_snapshot = array_key_exists( 'response_snapshot', $carrier_fields ) ? $carrier_fields['response_snapshot'] : $result->raw_reference;
 		unset( $carrier_fields['actual_cost_candidate'] );
 
-		return array_merge(
-			array(
+		$common = array(
 				'carrier_key' => $request->carrier_key,
 				'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
 				'order_id' => $request->order_id,
@@ -196,7 +253,14 @@ final class ShipmentCreationService {
 				'status_title' => (string) ( $carrier_fields['status_title'] ?? '' ),
 				'created_at' => $now,
 				'updated_at' => $now,
-			),
+			);
+		if ( is_string( $request->meta['creation_attempt_id'] ?? null ) && '' !== trim( (string) $request->meta['creation_attempt_id'] ) ) {
+			$common['creation_attempt_id'] = (string) $request->meta['creation_attempt_id'];
+			$common['creation_attempt_generation'] = (int) ( $request->meta['creation_attempt_generation'] ?? 0 );
+		}
+
+		return array_merge(
+			$common,
 			$carrier_fields
 		);
 	}

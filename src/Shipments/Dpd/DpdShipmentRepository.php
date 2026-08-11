@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Dpd;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -11,7 +12,10 @@ defined( 'ABSPATH' ) || exit;
 final class DpdShipmentRepository {
 	public const ORDER_NUMBER_META_KEY = '_wdc_dpd_order_number';
 
-	public function __construct( private OrderShipmentRepository $repository ) {}
+	public function __construct(
+		private OrderShipmentRepository $repository,
+		private ?ShipmentCreationAttemptService $attempts = null
+	) {}
 
 	/** @return array<string,mixed> */
 	public function find( object $order ): array { return $this->repository->find_by_carrier( $order, DpdSettings::CARRIER_KEY ); }
@@ -27,6 +31,10 @@ final class DpdShipmentRepository {
 	}
 
 	public function delete( object $order ): void {
+		$shipment = $this->repository->find_by_carrier( $order, DpdSettings::CARRIER_KEY );
+		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
+			$this->attempts->mark_terminal_for_shipment( $order, DpdSettings::CARRIER_KEY, $shipment, 'local_removed' );
+		}
 		$this->repository->delete_for_carrier( $order, DpdSettings::CARRIER_KEY );
 		if ( method_exists( $order, 'delete_meta_data' ) && method_exists( $order, 'save' ) ) {
 			$order->delete_meta_data( self::ORDER_NUMBER_META_KEY );

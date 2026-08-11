@@ -15,7 +15,8 @@ final class ShipmentBacklogService {
 		private RussianPostOtpravkaApiClient $otpravka_client,
 		private ShipmentStatusUpdateService $status_updates,
 		private ShipmentActualCostService $actual_cost_service,
-		private RussianPostShipmentActualCostExtractor $actual_cost_extractor
+		private RussianPostShipmentActualCostExtractor $actual_cost_extractor,
+		private ?ShipmentCreationAttemptService $attempts = null
 	) {
 	}
 
@@ -40,6 +41,7 @@ final class ShipmentBacklogService {
 			return $this->failure( '' !== $message ? $message : 'Не удалось отменить отправление Почты России.', $response );
 		}
 
+		$this->mark_terminal_before_delete( $order, $shipment, $shipment_key, 'cancelled' );
 		$this->repository->delete_for_carrier( $order, $shipment_key );
 		$this->add_order_note( $order, 'Отправление Почты России отменено и удалено из backlog. ШПИ: ' . (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) . '.' );
 
@@ -68,6 +70,7 @@ final class ShipmentBacklogService {
 			return $this->failure( 'В заказе нет отправления для удаления.' );
 		}
 
+		$this->mark_terminal_before_delete( $order, $shipment, $shipment_key, 'local_removed' );
 		$this->repository->delete_for_carrier( $order, $shipment_key );
 		$this->add_order_note( $order, 'Данные отправления Почты России удалены из заказа без отмены в Почте России.' );
 
@@ -286,5 +289,12 @@ final class ShipmentBacklogService {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function mark_terminal_before_delete( object $order, array $shipment, string $carrier_key, string $reason ): void {
+		if ( $this->attempts instanceof ShipmentCreationAttemptService ) {
+			$this->attempts->mark_terminal_for_shipment( $order, $carrier_key, $shipment, $reason );
+		}
 	}
 }

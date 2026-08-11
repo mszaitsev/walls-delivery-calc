@@ -64,6 +64,7 @@ final class PekSenderWarehouseSearchCache {
 			'type' => (int) ( $requested['type'] ?? 0 ),
 			'searchRadius' => (int) ( $requested['searchRadius'] ?? 0 ),
 			'limit' => (int) ( $requested['limit'] ?? 0 ),
+			'constraintsFingerprint' => preg_match( '/^[a-f0-9]{64}$/', (string) ( $requested['constraintsFingerprint'] ?? '' ) ) ? (string) $requested['constraintsFingerprint'] : '',
 		);
 	}
 
@@ -106,6 +107,6 @@ final class PekSenderWarehouseSearchCache {
 	private function sanitize_source( mixed $value ): string {
 		$value = trim( (string) $value );
 
-		return in_array( $value, array( 'free', 'paid', 'branches_all' ), true ) ? $value : '';
+		return in_array( $value, array( 'free', 'paid', 'branches_all', 'nearest_cached_selection', 'nearest_fresh_revalidation' ), true ) ? $value : '';
 	}
 }

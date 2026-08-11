@@ -6,11 +6,17 @@ namespace WallsShop\WDC\Orders\Application;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Pek\Checkout\PekCheckoutQuoteContextResolver;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\ValueObjects\Location;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -21,7 +27,10 @@ final class OrderDeliveryReplacementService {
 	public function __construct(
 		private OrderShipmentRepository $shipments,
 		private DeliveryDateFormatter $date_formatter,
-		private DeliveryCalculationDataBuilder $calculation_data_builder
+		private DeliveryCalculationDataBuilder $calculation_data_builder,
+		private ?CarrierPickupPointProviderRegistry $pickup_providers = null,
+		private ?PekCheckoutQuoteContextResolver $pek_quote_context = null,
+		private ?PekCheckoutPickupPointFormatter $pek_formatter = null
 	) {
 	}
 
@@ -46,7 +55,10 @@ final class OrderDeliveryReplacementService {
 		$pickup = is_array( $payload['selected_pickup_point'] ?? null ) ? $payload['selected_pickup_point'] : array();
 		$address = is_array( $payload['normalized_shipping_address'] ?? null ) ? $payload['normalized_shipping_address'] : array();
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
-			$pickup = $this->canonical_pickup_for_save( $order, $rate, $pickup );
+			$pickup = $this->canonical_pickup_for_save( $order, $rate, $pickup, $location );
+			if ( isset( $pickup['_wdc_error'] ) ) {
+				return array( 'success' => false, 'message' => (string) $pickup['_wdc_error'] );
+			}
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				return array( 'success' => false, 'message' => 'Для pickup-варианта выберите ПВЗ.' );
 			}
@@ -730,8 +742,11 @@ final class OrderDeliveryReplacementService {
 	 * @param array<string,mixed> $pickup
 	 * @return array<string,mixed>
 	 */
-	private function canonical_pickup_for_save( object $order, array $rate, array $pickup ): array {
+	private function canonical_pickup_for_save( object $order, array $rate, array $pickup, array $location ): array {
 		$carrier = (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' );
+		if ( PekSettings::CARRIER_KEY === $carrier ) {
+			return $this->canonical_pek_pickup_for_save( $rate, $pickup, $location );
+		}
 		if ( YandexDeliverySettings::CARRIER_KEY === $carrier ) {
 			$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 			$station_id = $this->first_meaningful(
@@ -801,6 +816,92 @@ final class OrderDeliveryReplacementService {
 		$merged['postcode'] = $this->first_meaningful( $source['postcode'] ?? '', $source['point_postcode'] ?? '', $existing['postcode'] ?? '', $existing['point_postcode'] ?? '' );
 
 		return $merged;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $pickup
+	 * @return array<string,mixed>
+	 */
+	private function canonical_pek_pickup_for_save( array $rate, array $pickup, array $location ): array {
+		if (
+			DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' )
+			|| empty( $rate['requires_pickup_point'] )
+		) {
+			return array( '_wdc_error' => 'Выбранный пункт ПЭК потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$carrier = (string) ( $pickup['carrier_key'] ?? $pickup['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+		$service = (string) ( $pickup['service_key'] ?? $snapshot['service_key'] ?? '' );
+		$family = (string) ( $pickup['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		$point_code = $this->first_meaningful( $pickup['point_code'] ?? '', $pickup['point_id'] ?? '', $snapshot['point_code'] ?? '' );
+		if ( PekSettings::CARRIER_KEY !== $carrier || PekSettings::SERVICE_KEY !== $service || PekSettings::PICKUP_FAMILY !== $family || '' === $point_code ) {
+			return array( '_wdc_error' => 'Выбранный пункт ПЭК потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		$query_snapshot = $this->pek_pickup_query_snapshot( $rate );
+		$snapshot_location_id = (int) ( $query_snapshot['location_id'] ?? 0 );
+		$current_location_id = $this->positive_location_id( $location );
+		if ( $snapshot_location_id <= 0 || $current_location_id <= 0 || $snapshot_location_id !== $current_location_id ) {
+			return array( '_wdc_error' => 'Выбранный пункт ПЭК потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		$destination_fingerprint = $this->pek_provider_fingerprint( $query_snapshot );
+		$selection_fingerprint = $this->first_meaningful( $pickup['provider_destination_fingerprint'] ?? '', $snapshot['provider_destination_fingerprint'] ?? '', $pickup['destination_fingerprint'] ?? '', $snapshot['destination_fingerprint'] ?? '' );
+		if ( ! $this->looks_like_sha256( $destination_fingerprint ) || ! hash_equals( $destination_fingerprint, $selection_fingerprint ) ) {
+			return array( '_wdc_error' => 'Выбранный пункт ПЭК потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		$query = $this->pek_quote_context?->query_from_snapshot( $query_snapshot );
+		$provider = $this->pickup_providers?->get( PekSettings::CARRIER_KEY );
+		if ( null === $query || null === $provider || null === $this->pek_formatter ) {
+			return array( '_wdc_error' => 'Выбранный пункт ПЭК потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		try {
+			$resolved = $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, $point_code ) );
+		} catch ( \RuntimeException ) {
+			return array( '_wdc_error' => 'Выбранный пункт ПЭК потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		if ( null === $resolved ) {
+			return array( '_wdc_error' => 'Выбранный пункт ПЭК потерял актуальность. Выберите пункт ещё раз.' );
+		}
+
+		return $this->pek_formatter->format( $resolved, $destination_fingerprint, $query->location_id, $query->country_code );
+	}
+
+	/** @param array<string,mixed> $rate @return array<string,mixed> */
+	private function pek_pickup_query_snapshot( array $rate ): array {
+		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+		if (
+			PekSettings::CARRIER_KEY !== (string) ( $snapshot['carrier_key'] ?? '' )
+			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
+			|| 'RU' !== strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) )
+			|| (int) ( $snapshot['location_id'] ?? 0 ) <= 0
+		) {
+			return array();
+		}
+
+		return $snapshot;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function pek_provider_fingerprint( array $snapshot ): string {
+		$fingerprint = (string) ( $snapshot['provider_destination_fingerprint'] ?? '' );
+		return '' !== $fingerprint ? $fingerprint : (string) ( $snapshot['destination_fingerprint'] ?? '' );
+	}
+
+	private function looks_like_sha256( string $value ): bool {
+		return 64 === strlen( $value ) && ctype_xdigit( $value );
+	}
+
+	/** @param array<string,mixed> $location */
+	private function positive_location_id( array $location ): int {
+		foreach ( array( 'id', 'location_id' ) as $key ) {
+			$value = $location[ $key ] ?? null;
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
 	}
 
 	/**
