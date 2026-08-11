@@ -703,7 +703,12 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
 		$this->container->register( WooCommerceSessionBootstrapper::class, fn(): WooCommerceSessionBootstrapper => new WooCommerceSessionBootstrapper() );
-		$this->container->register( CheckoutPickupPointProviderQueryResolver::class, fn(): CheckoutPickupPointProviderQueryResolver => new CheckoutPickupPointProviderQueryResolver( $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( CheckoutPickupPointProviderQueryResolver::class, fn(): CheckoutPickupPointProviderQueryResolver => new CheckoutPickupPointProviderQueryResolver(
+			$this->container->get( CheckoutSessionManager::class ),
+			array(
+				PekSettings::CARRIER_KEY => array( $this->container->get( PekCheckoutQuoteContextResolver::class ), 'query_from_snapshot' ),
+			)
+		) );
 		$this->container->register( CheckoutLocationSearch::class, fn(): CheckoutLocationSearch => new CheckoutLocationSearch( $this->container->get( LocationSearchService::class ) ) );
 		$this->container->register( CheckoutLocationAjax::class, fn(): CheckoutLocationAjax => new CheckoutLocationAjax( $this->container->get( CheckoutLocationSearch::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationCountryIndexService::class ) ) );
 		$this->container->register( CheckoutCityResolver::class, fn(): CheckoutCityResolver => new CheckoutCityResolver( $this->container->get( LocationRepository::class ), $this->container->get( CheckoutLocationSearch::class ) ) );

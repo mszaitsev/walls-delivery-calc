@@ -9,7 +9,10 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutPickupPointProviderQueryResolver {
-	public function __construct( private CheckoutSessionManager $session_manager ) {
+	/**
+	 * @param array<string,callable(array<string,mixed>):?CarrierPickupPointQuery> $carrier_snapshot_resolvers
+	 */
+	public function __construct( private CheckoutSessionManager $session_manager, private array $carrier_snapshot_resolvers = array() ) {
 	}
 
 	public function resolve( string $shipping_method_id, string $carrier_key, string $pickup_family ): CarrierPickupPointQuery {
@@ -33,6 +36,18 @@ final class CheckoutPickupPointProviderQueryResolver {
 			throw new RuntimeException( 'provider_rate_context_mismatch' );
 		}
 		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : ( is_array( $rate['pickup_provider_query'] ?? null ) ? $rate['pickup_provider_query'] : array() );
+		$carrier_snapshot_resolver = $this->carrier_snapshot_resolvers[ $carrier_key ] ?? null;
+		if ( is_callable( $carrier_snapshot_resolver ) ) {
+			if ( ! $this->valid_carrier_snapshot_envelope( $snapshot, $rate_carrier, $carrier_key ) ) {
+				throw new RuntimeException( 'provider_rate_context_missing' );
+			}
+			$query = $carrier_snapshot_resolver( $snapshot );
+			if ( ! $query instanceof CarrierPickupPointQuery || array() !== $query->validate() || $query->normalized_carrier_key() !== $carrier_key ) {
+				throw new RuntimeException( 'provider_rate_context_missing' );
+			}
+
+			return $query;
+		}
 		if ( ! $this->valid_snapshot( $snapshot, $rate_carrier, $carrier_key ) ) {
 			throw new RuntimeException( 'provider_rate_context_missing' );
 		}
@@ -80,6 +95,16 @@ final class CheckoutPickupPointProviderQueryResolver {
 		}
 
 		return array();
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function valid_carrier_snapshot_envelope( array $snapshot, string $rate_carrier, string $requested_carrier ): bool {
+		return (string) ( $snapshot['carrier_key'] ?? '' ) === $rate_carrier
+			&& (string) ( $snapshot['carrier_key'] ?? '' ) === $requested_carrier
+			&& CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP === (string) ( $snapshot['purpose'] ?? '' )
+			&& (int) ( $snapshot['location_id'] ?? 0 ) > 0
+			&& '' !== trim( (string) ( $snapshot['country_code'] ?? '' ) )
+			&& '' !== trim( (string) ( $snapshot['destination_fingerprint'] ?? '' ) );
 	}
 
 	/** @param array<string,mixed> $snapshot */

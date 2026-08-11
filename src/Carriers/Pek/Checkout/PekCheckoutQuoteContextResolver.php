@@ -136,14 +136,37 @@ final class PekCheckoutQuoteContextResolver {
 	}
 
 	public function query_from_snapshot( array $snapshot ): ?CarrierPickupPointQuery {
+		$location_id = (int) ( $snapshot['location_id'] ?? 0 );
+		if ( $location_id <= 0 ) {
+			return null;
+		}
+		$location = $this->locations->find_by_id( $location_id );
+		if ( ! $location instanceof Location || ! $location->active ) {
+			return null;
+		}
+		$country_code = strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) );
+		$canonical_country = strtoupper( trim( $location->country_code ) );
+		if (
+			'' === $country_code
+			|| $country_code !== $canonical_country
+			|| ! $this->countries->supports_calculation_direction( $this->countries->sender_country(), $country_code )
+		) {
+			return null;
+		}
+		if ( ! $this->valid_snapshot_coordinates( $snapshot ) ) {
+			return null;
+		}
 		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
+		$coordinates = $location->has_coordinates()
+			? array( 'latitude' => $location->latitude, 'longitude' => $location->longitude )
+			: array( 'latitude' => null, 'longitude' => null );
 		$query = new CarrierPickupPointQuery(
 			PekSettings::CARRIER_KEY,
-			(int) ( $snapshot['location_id'] ?? 0 ),
-			(string) ( $snapshot['country_code'] ?? '' ),
-			'',
-			is_numeric( $snapshot['latitude'] ?? null ) ? (float) $snapshot['latitude'] : null,
-			is_numeric( $snapshot['longitude'] ?? null ) ? (float) $snapshot['longitude'] : null,
+			$location_id,
+			$country_code,
+			$this->address_builder->build( $location ),
+			$coordinates['latitude'],
+			$coordinates['longitude'],
 			new PickupCargoConstraints(
 				(int) ( $cargo['weight_g'] ?? 0 ),
 				(int) ( $cargo['volume_cm3'] ?? 0 ),
@@ -157,6 +180,27 @@ final class PekCheckoutQuoteContextResolver {
 		);
 
 		return array() === $query->validate() ? $query : null;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function valid_snapshot_coordinates( array $snapshot ): bool {
+		$latitude = $snapshot['latitude'] ?? null;
+		$longitude = $snapshot['longitude'] ?? null;
+		if ( null === $latitude && null === $longitude ) {
+			return true;
+		}
+		if ( null === $latitude || null === $longitude || ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return false;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+
+		return is_finite( $latitude )
+			&& is_finite( $longitude )
+			&& $latitude >= -90
+			&& $latitude <= 90
+			&& $longitude >= -180
+			&& $longitude <= 180;
 	}
 
 	/** @param array<string,mixed> $snapshot */

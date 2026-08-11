@@ -296,7 +296,7 @@ function pek_checkout_boot( array $responses, array $points, ?CarrierPickupPoint
 	$quote_service = new PekQuoteService( $credentials, $api, new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder(), $countries ), new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
 	$carrier = new PekCarrier( $settings, $credentials, $context, $quote_service, $planned, new Logger(), $countries );
 
-	return array( $carrier, $http, $provider, $wpdb );
+	return array( $carrier, $http, $provider, $wpdb, $context );
 }
 
 function pek_checkout_boot_real_pek_provider( array $responses ): array {
@@ -326,7 +326,7 @@ function pek_checkout_boot_real_pek_provider( array $responses ): array {
 	$quote_service = new PekQuoteService( $credentials, $api, new PekQuoteRequestBuilder( $settings, new PekQuoteCargoBuilder(), $countries ), new PekQuoteResponseParser(), new PekQuoteMessageSanitizer( $credentials, $settings ), new PekLightCargoSurchargePolicy( $settings ), new Logger() );
 	$carrier = new PekCarrier( $settings, $credentials, $context, $quote_service, $planned, new Logger(), $countries );
 
-	return array( $carrier, $http, $provider, $terminal_service, $wpdb );
+	return array( $carrier, $http, $provider, $terminal_service, $wpdb, $context );
 }
 
 function pek_checkout_request( array $context = array(), ?Address $address = null, int $weight_g = 1000, int $packaging_weight_g = 0, string $country_code = 'RU' ): QuoteRequest {
@@ -490,12 +490,14 @@ function pek_checkout_calc_reject_response(): array {
 	);
 }
 
-function pek_checkout_resolver_with_rate( array $stored_rate ): CheckoutPickupPointProviderQueryResolver {
+function pek_checkout_resolver_with_rate( array $stored_rate, ?PekCheckoutQuoteContextResolver $pek_context = null ): CheckoutPickupPointProviderQueryResolver {
 	$GLOBALS['pek_checkout_wc'] = new PekCheckoutFakeWoo();
 	$session = new CheckoutSessionManager();
 	$session->save_rates( array( PekSettings::PICKUP_RATE_ID => $stored_rate ) );
 
-	return new CheckoutPickupPointProviderQueryResolver( $session );
+	$resolvers = null !== $pek_context ? array( PekSettings::CARRIER_KEY => array( $pek_context, 'query_from_snapshot' ) ) : array();
+
+	return new CheckoutPickupPointProviderQueryResolver( $session, $resolvers );
 }
 
 list( $carrier, $http, $provider ) = pek_checkout_boot(
@@ -659,7 +661,7 @@ pek_checkout_assert( 153912 === $address_only_query->location_id && null === $ad
 pek_checkout_assert( 1 === count( $address_only_provider->queries ) && null === $address_only_provider->queries[0]->latitude && null === $address_only_provider->queries[0]->longitude, 'PEK terminal provider must remain usable for address-only checkout mappings.' );
 
 $GLOBALS['pek_checkout_location_rows'] = pek_checkout_kz_location_rows();
-list( $fresh_bad_kz_carrier, $fresh_bad_http ) = pek_checkout_boot_real_pek_provider(
+list( $fresh_bad_kz_carrier, $fresh_bad_http, $fresh_bad_provider, $fresh_bad_terminal_service, $fresh_bad_wpdb, $fresh_bad_context ) = pek_checkout_boot_real_pek_provider(
 	array( pek_checkout_address_zone_response_for_country( 'KZ', 'bad' ), pek_checkout_nearest_response( 'kz-fresh-terminal' ), pek_checkout_calc_response( 1500.00 ), pek_checkout_calc_reject_response() )
 );
 $fresh_bad_quote = $fresh_bad_kz_carrier->quote( pek_checkout_kz_request() );
@@ -675,6 +677,42 @@ $cached_bad_calc_payloads = pek_checkout_calc_payloads( $fresh_bad_http, $reques
 pek_checkout_assert( $cached_bad_quote->success && 1 === count( $cached_bad_quote->rates ) && PekSettings::PICKUP_RATE_ID === $cached_bad_quote->rates[0]->rate_id, 'Cached KZ bad_precision geography must not block PEK pickup.' );
 pek_checkout_assert( 0 === pek_checkout_endpoint_count( $fresh_bad_http, 'findzonebyaddress', $requests_before_cached_bad ) && 1 === pek_checkout_endpoint_count( $fresh_bad_http, 'nearestdepartments', $requests_before_cached_bad ) && 1 === count( array_filter( $cached_bad_calc_payloads, static fn( array $payload ): bool => '' !== (string) ( $payload['receiverWarehouseId'] ?? '' ) ) ), 'Cached bad_precision checkout must skip findzone, call nearestdepartments once, and calculate pickup once in the second run.' );
 pek_checkout_assert( true === (bool) ( $cached_bad_quote->raw_reference['location_mapping_cache_hit'] ?? false ) && 'bad_precision' === (string) ( $cached_bad_quote->raw_reference['location_mapping_diagnostic']['code'] ?? '' ), 'Cached bad_precision quote must expose cache_hit=true without fatal location_unresolved.' );
+$cached_bad_snapshot = $cached_bad_quote->rates[0]->meta['pickup_provider_query'];
+pek_checkout_assert( isset( $cached_bad_snapshot['fallback_address_fingerprint'] ) && ! array_key_exists( 'fallback_address', $cached_bad_snapshot ) && ! array_key_exists( 'raw_address', $cached_bad_snapshot ) && ! array_key_exists( 'full_address', $cached_bad_snapshot ), 'PEK safe provider snapshot must keep fallback_address_fingerprint without raw address fields.' );
+$cached_bad_stored_rate = pek_checkout_stored_rate_from_mapper( $cached_bad_quote->rates[0] );
+$cached_bad_map_resolver = pek_checkout_resolver_with_rate( $cached_bad_stored_rate, $fresh_bad_context );
+$cached_bad_map_query = $cached_bad_map_resolver->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+pek_checkout_assert( 'KZ' === $cached_bad_map_query->country_code && str_contains( $cached_bad_map_query->fallback_address, 'Казахстан' ) && str_contains( $cached_bad_map_query->fallback_address, 'Алматы' ) && null === $cached_bad_map_query->latitude && null === $cached_bad_map_query->longitude, 'KZ map query must rehydrate canonical fallback address server-side and prefer canonical coordinates.' );
+$GLOBALS['pek_checkout_transients'] = array();
+$fresh_bad_http->responses = array( pek_checkout_nearest_response( 'kz-map-terminal' ) );
+$requests_before_map = count( $fresh_bad_http->requests );
+$kz_map_points = $fresh_bad_provider->search( $cached_bad_map_query );
+pek_checkout_assert( 1 === count( $kz_map_points ) && 'kz-map-terminal' === $kz_map_points[0]->code && 0 === pek_checkout_endpoint_count( $fresh_bad_http, 'findzonebyaddress', $requests_before_map ) && 1 === pek_checkout_endpoint_count( $fresh_bad_http, 'nearestdepartments', $requests_before_map ), 'KZ pickup map must return PEK points through cached bad_precision mapping without another findzone call.' );
+$mismatched_country_rate = $cached_bad_stored_rate;
+$mismatched_country_rate['rate_meta']['pickup_provider_query']['country_code'] = 'BY';
+$requests_before_mismatch_snapshot = count( $fresh_bad_http->requests );
+try {
+	pek_checkout_resolver_with_rate( $mismatched_country_rate, $fresh_bad_context )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+	pek_checkout_assert( false, 'PEK map query must reject snapshot/canonical country mismatch.' );
+} catch ( RuntimeException $exception ) {
+	pek_checkout_assert( 'provider_rate_context_missing' === $exception->getMessage() && $requests_before_mismatch_snapshot === count( $fresh_bad_http->requests ), 'PEK map query country mismatch must fail closed before provider HTTP.' );
+}
+$missing_location_rate = $cached_bad_stored_rate;
+$missing_location_rate['rate_meta']['pickup_provider_query']['location_id'] = 999999;
+$requests_before_missing_location = count( $fresh_bad_http->requests );
+try {
+	pek_checkout_resolver_with_rate( $missing_location_rate, $fresh_bad_context )->resolve( PekSettings::PICKUP_RATE_ID, PekSettings::CARRIER_KEY, PekSettings::PICKUP_FAMILY );
+	pek_checkout_assert( false, 'PEK map query must reject missing canonical location.' );
+} catch ( RuntimeException $exception ) {
+	pek_checkout_assert( 'provider_rate_context_missing' === $exception->getMessage() && $requests_before_missing_location === count( $fresh_bad_http->requests ), 'PEK map query missing location must fail closed before provider HTTP.' );
+}
+$kz_selection = ( new PekCheckoutPickupPointFormatter() )->format( $kz_map_points[0], (string) $cached_bad_snapshot['provider_destination_fingerprint'], 240001, 'KZ' );
+$GLOBALS['pek_checkout_transients'] = array();
+$fresh_bad_http->responses = array( pek_checkout_nearest_response( 'kz-map-terminal' ), pek_checkout_calc_response( 1900.00 ), pek_checkout_calc_reject_response() );
+$requests_before_selected_kz = count( $fresh_bad_http->requests );
+$selected_kz_quote = $fresh_bad_kz_carrier->quote( pek_checkout_request( array( 'selected_location_id' => 240001, 'pickup_selections' => array( PekSettings::PICKUP_FAMILY => $kz_selection ) ), null, 1000, 0, 'KZ' ) );
+$selected_kz_calc_payloads = pek_checkout_calc_payloads( $fresh_bad_http, $requests_before_selected_kz );
+pek_checkout_assert( $selected_kz_quote->success && PekSettings::PICKUP_RATE_ID === $selected_kz_quote->rates[0]->rate_id && 'kz-map-terminal' === (string) ( $selected_kz_calc_payloads[0]['receiverWarehouseId'] ?? '' ) && 199000 === $selected_kz_quote->rates[0]->price->get_kopecks(), 'Selecting KZ PEK map point must trigger selected-terminal repricing with selected receiverWarehouseId.' );
 
 $GLOBALS['pek_checkout_location_rows'] = pek_checkout_kz_location_rows();
 list( $no_terminal_carrier ) = pek_checkout_boot_real_pek_provider(

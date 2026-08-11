@@ -579,9 +579,11 @@ function wdc_recalc_pek_settings(): PekSettings {
 	return new PekSettings( new SettingsRepository(), new PekRuPhoneNormalizer() );
 }
 
-function wdc_recalc_pek_quote_context( CarrierPickupPointProviderRegistry $registry, PekCheckoutPickupPointFormatter $formatter ): PekCheckoutQuoteContextResolver {
+function wdc_recalc_pek_quote_context( CarrierPickupPointProviderRegistry $registry, PekCheckoutPickupPointFormatter $formatter, array $location_rows = array() ): PekCheckoutQuoteContextResolver {
 	$settings = wdc_recalc_pek_settings();
-	$locations = new LocationRepository( new WdcRecalcLocationDb() );
+	$db = new WdcRecalcLocationDb();
+	$db->locations = $location_rows;
+	$locations = new LocationRepository( $db );
 	$api = new PekApiClient(
 		$settings,
 		new PekCredentials( new SettingsRepository(), new EncryptionService() ),
@@ -592,7 +594,7 @@ function wdc_recalc_pek_quote_context( CarrierPickupPointProviderRegistry $regis
 	return new PekCheckoutQuoteContextResolver(
 		$settings,
 		$locations,
-		new PekLocationResolver( $locations, new PekAddressBuilder(), new PekLocationMappingRepository( new WdcRecalcLocationDb() ), $api, $settings ),
+		new PekLocationResolver( $locations, new PekAddressBuilder(), new PekLocationMappingRepository( $db ), $api, $settings ),
 		new PekAddressBuilder(),
 		$registry,
 		new PekQuotePlannedDateTimeResolver( $settings ),
@@ -1082,6 +1084,25 @@ $pek_rate = array(
 	'rate_meta' => array( 'pickup_provider_query' => $pek_query_snapshot ),
 );
 $pek_location = array( 'id' => 153912, 'location_id' => 153912, 'country_code' => 'RU', 'display_name' => 'Новосибирск' );
+$pek_location_rows = array(
+	array(
+		'id' => 153912,
+		'country_code' => 'RU',
+		'region_name' => 'Новосибирская область',
+		'region_type' => 'обл',
+		'city_name' => 'Новосибирск',
+		'city_type' => 'г',
+		'place_name' => 'Новосибирск',
+		'place_type' => 'г',
+		'display_name' => 'Новосибирск',
+		'latitude' => 55.03,
+		'longitude' => 82.92,
+		'active' => 1,
+		'fias_id' => 'novosibirsk-fias',
+		'gar_object_id' => 153912,
+		'region_code' => '54',
+	),
+);
 $pek_provider = new WdcRecalcPekPickupProvider(
 	array(
 		new PickupPoint( PekSettings::CARRIER_KEY, 'PEK-FREE-UUID-0001', 'Новосибирск, Станционная, 1', 'Новосибирск', 'Новосибирская область', '', 55.03, 82.92, 'terminal', '09:00-18:00', '', null, true, array( 'source' => 'free', 'division_name' => 'Новосибирск Главный' ) ),
@@ -1090,7 +1111,7 @@ $pek_provider = new WdcRecalcPekPickupProvider(
 );
 $pek_registry = new CarrierPickupPointProviderRegistry( array( $pek_provider ) );
 $pek_formatter = new PekCheckoutPickupPointFormatter();
-$pek_context = wdc_recalc_pek_quote_context( $pek_registry, $pek_formatter );
+$pek_context = wdc_recalc_pek_quote_context( $pek_registry, $pek_formatter, $pek_location_rows );
 $pek_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement, null, null, $pek_registry, $pek_context, $pek_formatter );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $pek_location ), 'selected_rate' => wp_json_encode( $pek_rate ), 'mode' => 'location', 'query' => '', 'limit' => 2000 );
 try {
@@ -1558,7 +1579,7 @@ $pek_own_point = new PickupPoint(
 $pek_save_provider = new WdcRecalcPekPickupProvider( array( $pek_canonical_point, $pek_own_point ) );
 $pek_save_registry = new CarrierPickupPointProviderRegistry( array( $pek_save_provider ) );
 $pek_save_formatter = new PekCheckoutPickupPointFormatter();
-$pek_save_replacement = wdc_recalc_replacement( $pek_save_registry, wdc_recalc_pek_quote_context( $pek_save_registry, $pek_save_formatter ), $pek_save_formatter );
+$pek_save_replacement = wdc_recalc_replacement( $pek_save_registry, wdc_recalc_pek_quote_context( $pek_save_registry, $pek_save_formatter, $pek_location_rows ), $pek_save_formatter );
 $pek_forged_pickup = array(
 	'carrier_key' => PekSettings::CARRIER_KEY,
 	'service_key' => PekSettings::SERVICE_KEY,
@@ -1643,7 +1664,27 @@ foreach ( $foreign_pek_cases as $country => $case ) {
 	$provider = new WdcRecalcPekPickupProvider( array( $point ) );
 	$registry = new CarrierPickupPointProviderRegistry( array( $provider ) );
 	$formatter = new PekCheckoutPickupPointFormatter();
-	$replacement_for_country = wdc_recalc_replacement( $registry, wdc_recalc_pek_quote_context( $registry, $formatter ), $formatter );
+	$location_rows = array(
+		array(
+			'id' => $case['id'],
+			'country_code' => $country,
+			'region_name' => $case['region'],
+			'region_type' => '',
+			'city_name' => $case['city'],
+			'city_type' => '',
+			'place_name' => $case['city'],
+			'place_type' => '',
+			'display_name' => $case['city'],
+			'latitude' => null,
+			'longitude' => null,
+			'active' => 1,
+			'fias_id' => '',
+			'gar_object_id' => 0,
+			'region_code' => '',
+			'postal_code' => $case['postcode'],
+		),
+	);
+	$replacement_for_country = wdc_recalc_replacement( $registry, wdc_recalc_pek_quote_context( $registry, $formatter, $location_rows ), $formatter );
 	$location = array( 'id' => $case['id'], 'location_id' => $case['id'], 'country_code' => $country, 'display_name' => $case['city'], 'city_value' => $case['city'], 'region_name' => $case['region'], 'postal_code' => $case['postcode'] );
 	$pickup = array(
 		'carrier_key' => PekSettings::CARRIER_KEY,
@@ -1697,7 +1738,34 @@ $country_mismatch_provider = new WdcRecalcPekPickupProvider(
 );
 $country_mismatch_registry = new CarrierPickupPointProviderRegistry( array( $country_mismatch_provider ) );
 $country_mismatch_formatter = new PekCheckoutPickupPointFormatter();
-$country_mismatch_replacement = wdc_recalc_replacement( $country_mismatch_registry, wdc_recalc_pek_quote_context( $country_mismatch_registry, $country_mismatch_formatter ), $country_mismatch_formatter );
+$country_mismatch_replacement = wdc_recalc_replacement(
+	$country_mismatch_registry,
+	wdc_recalc_pek_quote_context(
+		$country_mismatch_registry,
+		$country_mismatch_formatter,
+		array(
+			array(
+				'id' => 353912,
+				'country_code' => 'KZ',
+				'region_name' => 'Алматы',
+				'region_type' => '',
+				'city_name' => 'Алматы',
+				'city_type' => '',
+				'place_name' => 'Алматы',
+				'place_type' => '',
+				'display_name' => 'Алматы',
+				'latitude' => null,
+				'longitude' => null,
+				'active' => 1,
+				'fias_id' => '',
+				'gar_object_id' => 0,
+				'region_code' => '',
+				'postal_code' => '050000',
+			),
+		)
+	),
+	$country_mismatch_formatter
+);
 $country_mismatch_order = new WdcRecalcOrder( 353912, array() );
 $country_mismatch_order->shipping_items = array( 'method_title' => 'Old PEK delivery', 'total' => 1205.0 );
 $country_mismatch_before_meta = $country_mismatch_order->meta;
@@ -1719,8 +1787,8 @@ $country_mismatch_result = $country_mismatch_replacement->save(
 		'normalized_shipping_address' => array(),
 	)
 );
-recalc_smoke_assert( false === $country_mismatch_result['success'] && str_contains( (string) $country_mismatch_result['message'], 'не соответствует стране доставки' ), 'Save PEK pickup must fail closed when selected location and canonical point countries differ.' );
-recalc_smoke_assert( $country_mismatch_before_meta === $country_mismatch_order->meta && $country_mismatch_before_shipping === $country_mismatch_order->shipping_items && $country_mismatch_before_country === $country_mismatch_order->get_shipping_country(), 'PEK country mismatch must fail before shipping item, order meta or shipping address mutation.' );
+recalc_smoke_assert( false === $country_mismatch_result['success'] && str_contains( (string) $country_mismatch_result['message'], 'потерял актуальность' ), 'Save PEK pickup must fail closed when selected location and provider snapshot countries differ.' );
+recalc_smoke_assert( 0 === $country_mismatch_provider->resolve_calls && $country_mismatch_before_meta === $country_mismatch_order->meta && $country_mismatch_before_shipping === $country_mismatch_order->shipping_items && $country_mismatch_before_country === $country_mismatch_order->get_shipping_country(), 'PEK country mismatch must fail before provider search, shipping item, order meta or shipping address mutation.' );
 
 $pek_own_rate = $pek_rate;
 $pek_own_rate['cost'] = 1205.0;
