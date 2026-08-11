@@ -62,6 +62,10 @@ final class OrderDeliveryReplacementService {
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				return array( 'success' => false, 'message' => 'Для pickup-варианта выберите ПВЗ.' );
 			}
+			$pickup_country_error = $this->pickup_country_error( $rate, $location, $pickup );
+			if ( '' !== $pickup_country_error ) {
+				return array( 'success' => false, 'message' => $pickup_country_error );
+			}
 		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && ! $this->valid_courier_address( $address ) ) {
 			return array( 'success' => false, 'message' => 'Для курьерской доставки проверьте адрес доставки или используйте введенный адрес вручную.' );
 		}
@@ -425,7 +429,7 @@ final class OrderDeliveryReplacementService {
 			'set_shipping_postcode' => $location_values['postcode'],
 		);
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
-			$values['set_shipping_country'] = 'RU';
+			$values['set_shipping_country'] = $location_values['country'];
 			$values['set_shipping_state'] = (string) ( $pickup['region_name'] ?? $pickup['region'] ?? $location_values['state'] );
 			$values['set_shipping_city'] = (string) ( $pickup['city_name'] ?? $pickup['city'] ?? $location_values['city'] );
 			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location_values['postcode'] );
@@ -864,6 +868,21 @@ final class OrderDeliveryReplacementService {
 		}
 
 		return $this->pek_formatter->format( $resolved, $destination_fingerprint, $query->location_id, $query->country_code );
+	}
+
+	/** @param array<string,mixed> $rate @param array<string,mixed> $location @param array<string,mixed> $pickup */
+	private function pickup_country_error( array $rate, array $location, array $pickup ): string {
+		if ( PekSettings::CARRIER_KEY !== (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? $pickup['carrier'] ?? '' ) ) {
+			return '';
+		}
+		$location_country = strtoupper( trim( (string) ( $location['country_code'] ?? $location['country'] ?? '' ) ) );
+		$pickup_snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$pickup_country = strtoupper( trim( (string) ( $pickup['country_code'] ?? $pickup_snapshot['country_code'] ?? '' ) ) );
+		if ( '' === $location_country || '' === $pickup_country || $location_country !== $pickup_country ) {
+			return 'Выбранный пункт ПЭК не соответствует стране доставки. Выберите пункт ещё раз.';
+		}
+
+		return '';
 	}
 
 	/** @param array<string,mixed> $rate @return array<string,mixed> */

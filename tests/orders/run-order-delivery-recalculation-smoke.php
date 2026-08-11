@@ -1600,6 +1600,127 @@ recalc_smoke_assert( 'PEK-SAVE-UUID' === (string) ( $pek_save_order->meta['_wdc_
 recalc_smoke_assert( 'Партнерский пункт выдачи ПЭК' === (string) ( $pek_save_order->meta['_wdc_pickup_point_title'] ?? '' ) && 'Поддельный заголовок' !== (string) ( $pek_save_order->meta['_wdc_pickup_point_title'] ?? '' ), 'Save PEK pickup must ignore forged browser presentation fields.' );
 recalc_smoke_assert( is_array( $pek_save_snapshot ) && 'Новосибирск, Красный проспект, 20' === (string) ( $pek_save_snapshot['point_address'] ?? '' ) && 'Поддельный адрес' !== (string) ( $pek_save_snapshot['point_address'] ?? '' ), 'Saved PEK pickup snapshot must be canonical provider projection.' );
 recalc_smoke_assert( 1587.0 === (float) ( $pek_save_calc['api']['api_base_price_rub'] ?? 0 ) && PekSettings::PICKUP_FAMILY === (string) ( $pek_save_calc['pickup']['pickup_family'] ?? '' ), 'PEK pickup calculation data must use repriced rate and PEK pickup projection.' );
+recalc_smoke_assert( 'RU' === $pek_save_order->get_shipping_country(), 'RU PEK pickup save must keep RU shipping country through canonical location country.' );
+
+$foreign_pek_cases = array(
+	'KZ' => array( 'id' => 253912, 'city' => 'Алматы', 'region' => 'Алматы', 'postcode' => '050000', 'address' => 'Алматы, проспект Абая, 10', 'fingerprint' => str_repeat( 'b', 64 ), 'cost' => 1900.0 ),
+	'BY' => array( 'id' => 253913, 'city' => 'Минск', 'region' => 'Минская область', 'postcode' => '220030', 'address' => 'Минск, ул. Немига, 5', 'fingerprint' => str_repeat( 'c', 64 ), 'cost' => 1800.0 ),
+	'AM' => array( 'id' => 253914, 'city' => 'Ереван', 'region' => 'Ереван', 'postcode' => '0010', 'address' => 'Ереван, ул. Абовяна, 12', 'fingerprint' => str_repeat( 'd', 64 ), 'cost' => 1750.0 ),
+	'KG' => array( 'id' => 253915, 'city' => 'Бишкек', 'region' => 'Чуйская область', 'postcode' => '720001', 'address' => 'Бишкек, проспект Чуй, 100', 'fingerprint' => str_repeat( 'e', 64 ), 'cost' => 1850.0 ),
+);
+foreach ( $foreign_pek_cases as $country => $case ) {
+	$query_snapshot = array_merge(
+		$pek_query_snapshot,
+		array(
+			'location_id' => $case['id'],
+			'country_code' => $country,
+			'destination_fingerprint' => $case['fingerprint'],
+			'provider_destination_fingerprint' => $case['fingerprint'],
+		)
+	);
+	$rate = $pek_save_rate;
+	$rate['cost'] = $case['cost'];
+	$rate['api_base_price_rub'] = $case['cost'];
+	$rate['rate_meta']['api_base_price_rub'] = $case['cost'];
+	$rate['rate_meta']['pickup_provider_query'] = $query_snapshot;
+	$point_code = 'PEK-' . $country . '-SAVE';
+	$point = new PickupPoint(
+		PekSettings::CARRIER_KEY,
+		$point_code,
+		$case['address'],
+		$case['city'],
+		$case['region'],
+		$case['postcode'],
+		43.2,
+		76.9,
+		'warehouse',
+		'Пн-Пт 09:00-18:00',
+		'Международный терминал ПЭК',
+		null,
+		true,
+		array( 'source' => 'paid', 'division_name' => $case['city'] )
+	);
+	$provider = new WdcRecalcPekPickupProvider( array( $point ) );
+	$registry = new CarrierPickupPointProviderRegistry( array( $provider ) );
+	$formatter = new PekCheckoutPickupPointFormatter();
+	$replacement_for_country = wdc_recalc_replacement( $registry, wdc_recalc_pek_quote_context( $registry, $formatter ), $formatter );
+	$location = array( 'id' => $case['id'], 'location_id' => $case['id'], 'country_code' => $country, 'display_name' => $case['city'], 'city_value' => $case['city'], 'region_name' => $case['region'], 'postal_code' => $case['postcode'] );
+	$pickup = array(
+		'carrier_key' => PekSettings::CARRIER_KEY,
+		'service_key' => PekSettings::SERVICE_KEY,
+		'pickup_family' => PekSettings::PICKUP_FAMILY,
+		'point_code' => $point_code,
+		'provider_destination_fingerprint' => $case['fingerprint'],
+		'snapshot' => array(
+			'carrier_key' => PekSettings::CARRIER_KEY,
+			'service_key' => PekSettings::SERVICE_KEY,
+			'pickup_family' => PekSettings::PICKUP_FAMILY,
+			'point_code' => $point_code,
+			'provider_destination_fingerprint' => $case['fingerprint'],
+		),
+	);
+	$order = new WdcRecalcOrder( 240 + (int) $case['id'], array() );
+	$order->shipping_items = array( 'method_title' => 'Old PEK delivery', 'total' => 1205.0 );
+	$result = $replacement_for_country->save(
+		$order,
+		array(
+			'selected_location' => $location,
+			'selected_rate' => $rate,
+			'selected_pickup_point' => $pickup,
+			'normalized_shipping_address' => array(),
+		)
+	);
+	$snapshot = json_decode( (string) ( $order->meta['_wdc_pickup_point_snapshot'] ?? '{}' ), true );
+	$calculation = $order->meta['_wdc_delivery_calculation_data'] ?? array();
+	recalc_smoke_assert( true === $result['success'], 'Save foreign PEK pickup must succeed for ' . $country . '.' );
+	recalc_smoke_assert( $country === $order->get_shipping_country() && $case['city'] === $order->get_shipping_city() && $case['postcode'] === $order->get_shipping_postcode() && $case['address'] === $order->get_shipping_address_1() && '' === $order->get_shipping_address_2(), 'Save foreign PEK pickup must persist shipping country/city/postcode/address for ' . $country . '.' );
+	recalc_smoke_assert( $country === (string) ( $order->meta['_wdc_platform_rate_meta']['pickup_provider_query']['country_code'] ?? '' ) && (int) $case['id'] === (int) ( $order->meta['_wdc_platform_location_id'] ?? 0 ), 'Save foreign PEK pickup must keep platform location/rate country for ' . $country . '.' );
+	recalc_smoke_assert( is_array( $snapshot ) && $country === (string) ( $snapshot['country_code'] ?? '' ) && $point_code === (string) ( $snapshot['point_code'] ?? '' ), 'Save foreign PEK pickup snapshot must keep country and point code for ' . $country . '.' );
+	recalc_smoke_assert( $country === (string) ( $calculation['destination']['country_code'] ?? '' ) && $point_code === (string) ( $calculation['pickup']['point_code'] ?? '' ), 'Save foreign PEK calculation data must keep destination country and pickup point for ' . $country . '.' );
+}
+
+$country_mismatch_query_snapshot = array_merge(
+	$pek_query_snapshot,
+	array(
+		'location_id' => 353912,
+		'country_code' => 'BY',
+		'destination_fingerprint' => str_repeat( 'f', 64 ),
+		'provider_destination_fingerprint' => str_repeat( 'f', 64 ),
+	)
+);
+$country_mismatch_rate = $pek_save_rate;
+$country_mismatch_rate['rate_meta']['pickup_provider_query'] = $country_mismatch_query_snapshot;
+$country_mismatch_provider = new WdcRecalcPekPickupProvider(
+	array(
+		new PickupPoint( PekSettings::CARRIER_KEY, 'PEK-BY-MISMATCH', 'Минск, ул. Немига, 5', 'Минск', 'Минская область', '220030', 53.9, 27.5, 'warehouse', 'Пн-Пт 09:00-18:00', '', null, true, array( 'source' => 'paid', 'division_name' => 'Минск' ) ),
+	)
+);
+$country_mismatch_registry = new CarrierPickupPointProviderRegistry( array( $country_mismatch_provider ) );
+$country_mismatch_formatter = new PekCheckoutPickupPointFormatter();
+$country_mismatch_replacement = wdc_recalc_replacement( $country_mismatch_registry, wdc_recalc_pek_quote_context( $country_mismatch_registry, $country_mismatch_formatter ), $country_mismatch_formatter );
+$country_mismatch_order = new WdcRecalcOrder( 353912, array() );
+$country_mismatch_order->shipping_items = array( 'method_title' => 'Old PEK delivery', 'total' => 1205.0 );
+$country_mismatch_before_meta = $country_mismatch_order->meta;
+$country_mismatch_before_shipping = $country_mismatch_order->shipping_items;
+$country_mismatch_before_country = $country_mismatch_order->get_shipping_country();
+$country_mismatch_result = $country_mismatch_replacement->save(
+	$country_mismatch_order,
+	array(
+		'selected_location' => array( 'id' => 353912, 'location_id' => 353912, 'country_code' => 'KZ', 'display_name' => 'Алматы', 'city_value' => 'Алматы', 'region_name' => 'Алматы', 'postal_code' => '050000' ),
+		'selected_rate' => $country_mismatch_rate,
+		'selected_pickup_point' => array(
+			'carrier_key' => PekSettings::CARRIER_KEY,
+			'service_key' => PekSettings::SERVICE_KEY,
+			'pickup_family' => PekSettings::PICKUP_FAMILY,
+			'point_code' => 'PEK-BY-MISMATCH',
+			'provider_destination_fingerprint' => str_repeat( 'f', 64 ),
+			'snapshot' => array( 'carrier_key' => PekSettings::CARRIER_KEY, 'service_key' => PekSettings::SERVICE_KEY, 'pickup_family' => PekSettings::PICKUP_FAMILY, 'point_code' => 'PEK-BY-MISMATCH', 'provider_destination_fingerprint' => str_repeat( 'f', 64 ) ),
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $country_mismatch_result['success'] && str_contains( (string) $country_mismatch_result['message'], 'не соответствует стране доставки' ), 'Save PEK pickup must fail closed when selected location and canonical point countries differ.' );
+recalc_smoke_assert( $country_mismatch_before_meta === $country_mismatch_order->meta && $country_mismatch_before_shipping === $country_mismatch_order->shipping_items && $country_mismatch_before_country === $country_mismatch_order->get_shipping_country(), 'PEK country mismatch must fail before shipping item, order meta or shipping address mutation.' );
 
 $pek_own_rate = $pek_rate;
 $pek_own_rate['cost'] = 1205.0;
