@@ -422,6 +422,8 @@ final class JetLogisticGeographyAdminPage {
 			'code' => 'Код',
 			'currency' => 'Валюта расчёта',
 			'currency_source' => 'Источник валюты',
+			'valuta' => 'Валюта API (valuta)',
+			'valuta_name' => 'Название валюты API (valuta_name)',
 			'city_to' => 'Город назначения',
 			'city_terminal_to' => 'Терминал назначения',
 			default => $key,

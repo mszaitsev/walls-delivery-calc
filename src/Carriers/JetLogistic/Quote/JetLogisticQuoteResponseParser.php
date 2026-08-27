@@ -10,15 +10,9 @@ defined( 'ABSPATH' ) || exit;
 final class JetLogisticQuoteResponseParser {
 	/** @param array<string,mixed> $data */
 	public function parse( array $data ): JetLogisticCalculationResult {
-		$currency = strtoupper( trim( (string) ( $data['valuta'] ?? '' ) ) );
-		$currency_name = strtoupper( trim( (string) ( $data['valuta_name'] ?? '' ) ) );
-		$currency_values = array_values( array_filter( array( $currency, $currency_name ), static fn( string $value ): bool => '' !== $value ) );
-		$currency_source = array() === $currency_values ? 'profile' : 'response';
-		foreach ( $currency_values as $currency_value ) {
-			if ( ! in_array( $currency_value, array( 'RUB', 'РУБ' ), true ) ) {
-				throw new JetLogisticApiException( 'Jet Logistic returned non-RUB currency.', array( 'error_code' => 'jet_currency_not_rub' ) );
-			}
-		}
+		$currency = trim( (string) ( $data['valuta'] ?? '' ) );
+		$currency_name = trim( (string) ( $data['valuta_name'] ?? '' ) );
+		$currency_source = $this->currency_source( $currency, $currency_name );
 
 		return new JetLogisticCalculationResult(
 			$this->rubles( $data['price_zabor'] ?? null, 'price_zabor' ),
@@ -35,6 +29,49 @@ final class JetLogisticQuoteResponseParser {
 			'' !== (string) ( $data['valuta_name'] ?? '' ) ? (string) $data['valuta_name'] : 'RUB',
 			$currency_source
 		);
+	}
+
+	private function currency_source( string $currency, string $currency_name ): string {
+		if ( '' !== $currency_name ) {
+			if ( $this->is_rub_currency( $currency_name ) ) {
+				return 'response_name';
+			}
+			throw new JetLogisticApiException(
+				'Jet Logistic returned non-RUB currency.',
+				array(
+					'error_code' => 'jet_currency_not_rub',
+					'valuta' => $this->safe_currency_value( $currency ),
+					'valuta_name' => $this->safe_currency_value( $currency_name ),
+				)
+			);
+		}
+		if ( '' === $currency ) {
+			return 'profile';
+		}
+		if ( is_numeric( $currency ) ) {
+			return 'profile';
+		}
+		if ( $this->is_rub_currency( $currency ) ) {
+			return 'response_code';
+		}
+		throw new JetLogisticApiException(
+			'Jet Logistic returned non-RUB currency.',
+			array(
+				'error_code' => 'jet_currency_not_rub',
+				'valuta' => $this->safe_currency_value( $currency ),
+				'valuta_name' => $this->safe_currency_value( $currency_name ),
+			)
+		);
+	}
+
+	private function is_rub_currency( string $value ): bool {
+		$normalized = mb_strtoupper( trim( $value, " \t\n\r\0\x0B." ), 'UTF-8' );
+		return in_array( $normalized, array( 'RUB', 'RUR', 'РУБ' ), true );
+	}
+
+	private function safe_currency_value( string $value ): string {
+		$value = trim( str_replace( array( "\r", "\n" ), ' ', $value ) );
+		return mb_substr( $value, 0, 64, 'UTF-8' );
 	}
 
 	private function rubles( mixed $value, string $field ): int {
