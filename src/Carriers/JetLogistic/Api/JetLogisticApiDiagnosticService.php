@@ -57,7 +57,9 @@ final class JetLogisticApiDiagnosticService {
 					'http_status' => 200,
 					'details' => array(
 						'currency' => 'RUB',
-						'currency_source' => 'profile' === $calculation->currency_source ? 'профиль Jet' : 'ответ API',
+						'currency_source' => $this->currency_source_label( $calculation->currency_source ),
+						'valuta' => $this->api_currency_value( $response['valuta'] ?? null ),
+						'valuta_name' => $this->api_currency_value( $response['valuta_name'] ?? null ),
 						'city_to' => $calculation->city_to,
 						'city_terminal_to' => $calculation->city_terminal_to,
 					),
@@ -152,7 +154,35 @@ final class JetLogisticApiDiagnosticService {
 			'message' => $message . ' Код: ' . $this->safe_code( $code ) . '.',
 			'http_status' => $this->safe_http_status( $context['http_status'] ?? $context['status'] ?? '' ),
 			'api_response' => $this->api_response_classification( $code ),
+			'details' => $this->exception_details( $context ),
 		);
+	}
+
+	/** @param array<string,mixed> $context @return array<string,string> */
+	private function exception_details( array $context ): array {
+		$details = array();
+		if ( array_key_exists( 'valuta', $context ) || array_key_exists( 'valuta_name', $context ) ) {
+			$details['valuta'] = $this->api_currency_value( $context['valuta'] ?? null );
+			$details['valuta_name'] = $this->api_currency_value( $context['valuta_name'] ?? null );
+		}
+
+		return $details;
+	}
+
+	private function currency_source_label( string $source ): string {
+		return match ( $source ) {
+			'response_name' => 'название валюты API',
+			'response_code' => 'код валюты API',
+			default => 'профиль Jet',
+		};
+	}
+
+	private function api_currency_value( mixed $value ): string {
+		if ( null === $value || '' === trim( (string) $value ) ) {
+			return 'отсутствует';
+		}
+
+		return mb_substr( str_replace( array( "\r", "\n" ), ' ', trim( (string) $value ) ), 0, 64, 'UTF-8' );
 	}
 
 	private function sanitize_tracking_number( string $tracking_number ): string {

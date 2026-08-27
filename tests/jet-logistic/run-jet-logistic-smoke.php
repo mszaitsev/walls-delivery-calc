@@ -882,7 +882,7 @@ $jet_service = $service_repo->find_by_service_key( JetLogisticSettings::SERVICE_
 jet_assert( $jet_service instanceof DeliveryService && $service_manager->service_available_for_country( $jet_service, 'KZ' ) && $service_manager->service_available_for_country( $jet_service, 'BY' ) && ! $service_manager->service_available_for_country( $jet_service, 'RU' ), 'Jet service availability must allow BY/KZ and keep RU destination disabled.' );
 $orchestrator_http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Astana', 'city_to' => 'Astana', 'day_from' => '', 'day_to' => '' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Astana', 'city_to' => 'Astana', 'day_from' => '', 'day_to' => '', 'valuta' => '1', 'valuta_name' => 'RUB' ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $orchestrator_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $orchestrator_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
@@ -925,22 +925,33 @@ $numeric_string_result = ( new JetLogisticQuoteResponseParser() )->parse( array(
 jet_assert( 1000 === $numeric_string_result->price_terminal && 500 === $numeric_string_result->price_delivery && 100 === $numeric_string_result->price_dop, 'Jet quote parser must accept numeric strings from the real API shape.' );
 $real_currencyless_result = ( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'day_from' => 2, 'day_to' => 4 ) );
 jet_assert( 'RUB' === $real_currencyless_result->valuta && 'RUB' === $real_currencyless_result->valuta_name && 'profile' === $real_currencyless_result->currency_source, 'Jet quote parser must accept real calc_transport response shape without currency fields as RUB from Jet profile.' );
-$explicit_rub_result = ( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'РУБ' ) );
-jet_assert( 'response' === $explicit_rub_result->currency_source, 'Jet quote parser must accept explicit RUB/РУБ currency from API response.' );
+$parser = new JetLogisticQuoteResponseParser();
+$currency_case_a = $parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => '1', 'valuta_name' => 'RUB' ) );
+jet_assert( 'response_name' === $currency_case_a->currency_source && '1' === $currency_case_a->valuta && 'RUB' === $currency_case_a->valuta_name, 'Jet quote parser must trust valuta_name=RUB and preserve numeric valuta as provider metadata.' );
+$currency_case_b = $parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => '643', 'valuta_name' => 'РУБ' ) );
+jet_assert( 'response_name' === $currency_case_b->currency_source, 'Jet quote parser must accept valuta_name=РУБ with numeric provider valuta.' );
+$currency_case_c = $parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'KZT', 'valuta_name' => 'RUB' ) );
+jet_assert( 'response_name' === $currency_case_c->currency_source, 'Jet quote parser must treat valuta_name as authoritative when valuta looks like provider metadata.' );
+$currency_case_d = $parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => '', 'valuta_name' => 'RUB' ) );
+jet_assert( 'response_name' === $currency_case_d->currency_source, 'Jet quote parser must accept RUB from valuta_name when valuta is empty.' );
+$currency_case_e = $parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'RUR', 'valuta_name' => '' ) );
+jet_assert( 'response_code' === $currency_case_e->currency_source, 'Jet quote parser must accept textual RUB/RUR/РУБ valuta when valuta_name is absent.' );
+$currency_case_f = $parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => '1', 'valuta_name' => '' ) );
+jet_assert( 'profile' === $currency_case_f->currency_source, 'Jet quote parser must treat numeric valuta without valuta_name as provider ID and fall back to profile RUB.' );
 $non_rub_thrown = false;
 try {
-	( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'KZT' ) );
+	$parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'KZT' ) );
 } catch ( JetLogisticApiException $exception ) {
-	$non_rub_thrown = 'jet_currency_not_rub' === $exception->error_code();
+	$non_rub_thrown = 'jet_currency_not_rub' === $exception->error_code() && 'KZT' === (string) ( $exception->context()['valuta'] ?? '' );
 }
 jet_assert( $non_rub_thrown, 'Jet quote parser must fail closed when API explicitly returns a non-RUB currency.' );
-$mixed_currency_thrown = false;
+$non_rub_name_thrown = false;
 try {
-	( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'KZT', 'valuta_name' => 'RUB' ) );
+	$parser->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => '', 'valuta_name' => 'KZT' ) );
 } catch ( JetLogisticApiException $exception ) {
-	$mixed_currency_thrown = 'jet_currency_not_rub' === $exception->error_code();
+	$non_rub_name_thrown = 'jet_currency_not_rub' === $exception->error_code() && 'KZT' === (string) ( $exception->context()['valuta_name'] ?? '' );
 }
-jet_assert( $mixed_currency_thrown, 'Jet quote parser must fail closed when any explicit API currency field is non-RUB.' );
+jet_assert( $non_rub_name_thrown, 'Jet quote parser must fail closed when authoritative valuta_name is non-RUB.' );
 foreach ( array( 'garbage', -1, '' ) as $bad_price ) {
 	$thrown = false;
 	try {
@@ -1033,13 +1044,13 @@ jet_assert( DeliveryStatus::DELIVERED === $many_status['shipment_patch']['univer
 
 $diagnostic_http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'price_zabor' => '100', 'city_to' => 'Astana', 'city_terminal_to' => 'Astana', 'valuta' => 'RUB' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'price_zabor' => '100', 'city_to' => 'Astana', 'city_terminal_to' => 'Astana', 'valuta' => '1', 'valuta_name' => 'RUB' ) ), JSON_UNESCAPED_UNICODE ) ),
 		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-06-26 00:00:00', 'message' => 'Груз выдан : 26 июня 2026 г.' ), array( 'date' => '2026-06-25 00:00:00', 'message' => 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ) ) ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $diagnostics = new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( $diagnostic_http, $settings, $credentials ), $geo, $status_repo );
 $connection_check = $diagnostics->check_connection();
-jet_assert( ! empty( $connection_check['success'] ) && 'calc_transport' === (string) $connection_check['endpoint'] && 'Токен задан' === (string) $connection_check['token_state'] && ! str_contains( wp_json_encode( $connection_check, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet connection diagnostic must use calculator endpoint safely and redact token.' );
+jet_assert( ! empty( $connection_check['success'] ) && 'calc_transport' === (string) $connection_check['endpoint'] && 'Токен задан' === (string) $connection_check['token_state'] && '1' === (string) ( $connection_check['details']['valuta'] ?? '' ) && 'RUB' === (string) ( $connection_check['details']['valuta_name'] ?? '' ) && ! str_contains( wp_json_encode( $connection_check, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet connection diagnostic must use calculator endpoint safely, expose safe currency fields, and redact token.' );
 $diagnostic_write_counts_before = array( $GLOBALS['wpdb']->status_mapping_insert_calls, $GLOBALS['wpdb']->status_mapping_update_calls, $GLOBALS['wpdb']->status_mapping_delete_calls );
 $tracking_check = $diagnostics->check_tracking( 'JET-DIAG-1' );
 jet_assert( ! empty( $tracking_check['success'] ) && 2 === count( $tracking_check['events'] ?? array() ) && str_contains( (string) ( $tracking_check['details']['event_1'] ?? '' ), 'Груз выдан' ) && str_contains( (string) ( $tracking_check['details']['event_1'] ?? '' ), DeliveryStatus::DELIVERED ) && $diagnostic_write_counts_before === array( $GLOBALS['wpdb']->status_mapping_insert_calls, $GLOBALS['wpdb']->status_mapping_update_calls, $GLOBALS['wpdb']->status_mapping_delete_calls ) && ! str_contains( wp_json_encode( $tracking_check, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet tracking diagnostic must show compact mapped events without destructive writes or token exposure.' );
@@ -1054,6 +1065,8 @@ foreach ( array( 401 => 'jet_http_401', 403 => 'jet_http_403' ) as $http_status 
 $invalid_json_result = ( new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => '<html></html>' ) ) ), $settings, $credentials ), $geo, $status_repo ) )->check_connection();
 $api_error_result = ( new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => false, 'error' => 'bad token jet-test-token' ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), $geo, $status_repo ) )->check_connection();
 jet_assert( empty( $invalid_json_result['success'] ) && 'jet_invalid_json' === (string) $invalid_json_result['code'] && empty( $api_error_result['success'] ) && 'jet_api_error' === (string) $api_error_result['code'] && ! str_contains( wp_json_encode( $api_error_result, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet diagnostics must classify invalid JSON and API-level errors without exposing raw response bodies.' );
+$currency_error_result = ( new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'price_zabor' => '100', 'city_to' => 'Astana', 'city_terminal_to' => 'Astana', 'valuta' => '1', 'valuta_name' => 'KZT' ) ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), $geo, $status_repo ) )->check_connection();
+jet_assert( empty( $currency_error_result['success'] ) && 'jet_currency_not_rub' === (string) $currency_error_result['code'] && '1' === (string) ( $currency_error_result['details']['valuta'] ?? '' ) && 'KZT' === (string) ( $currency_error_result['details']['valuta_name'] ?? '' ), 'Jet connection diagnostic must keep safe valuta/valuta_name evidence when production parser rejects currency.' );
 
 $order = new JetFakeOrder();
 $actual_cost_resolver = ( new ReflectionClass( ShipmentActualCostResolver::class ) )->newInstanceWithoutConstructor();
