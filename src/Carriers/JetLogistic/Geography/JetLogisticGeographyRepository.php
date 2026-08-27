@@ -188,6 +188,31 @@ final class JetLogisticGeographyRepository {
 		return is_array( $rows ) ? $rows : array();
 	}
 
+	/** @return array<string,mixed> */
+	public function first_active_diagnostic_destination( string $exclude_source_identity = '' ): array {
+		if ( property_exists( $this->wpdb, 'jet_cities' ) ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->jet_cities,
+					static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 0 )
+						&& 'matched' === (string) ( $row['match_status'] ?? '' )
+						&& 'RU' !== strtoupper( (string) ( $row['country_code'] ?? '' ) )
+						&& ( '' === $exclude_source_identity || (string) ( $row['source_identity'] ?? '' ) !== $exclude_source_identity )
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => ( (string) ( $a['country_code'] ?? '' ) <=> (string) ( $b['country_code'] ?? '' ) ) ?: ( (string) ( $a['source_city'] ?? '' ) <=> (string) ( $b['source_city'] ?? '' ) ) ?: ( (string) ( $a['source_identity'] ?? '' ) <=> (string) ( $b['source_identity'] ?? '' ) ) );
+
+			return $rows[0] ?? array();
+		}
+		$where = "active = 1 AND match_status = 'matched' AND country_code <> 'RU'";
+		if ( '' !== trim( $exclude_source_identity ) ) {
+			$where .= $this->wpdb->prepare( ' AND source_identity <> %s', $exclude_source_identity );
+		}
+		$row = $this->wpdb->get_row( "SELECT * FROM {$this->table()} WHERE {$where} ORDER BY country_code ASC, source_city ASC, source_identity ASC LIMIT 1", ARRAY_A );
+
+		return is_array( $row ) ? $row : array();
+	}
+
 	/** @return array<int,array<string,mixed>> */
 	public function admin_rows( int $limit = 100 ): array {
 		$limit = max( 1, min( 500, $limit ) );

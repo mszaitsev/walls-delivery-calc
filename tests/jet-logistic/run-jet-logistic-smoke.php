@@ -9,7 +9,10 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiClient;
+use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiDiagnosticService;
+use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiException;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticHttpClientInterface;
+use WallsShop\WDC\Carriers\JetLogistic\Api\WpJetLogisticHttpClient;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvClient;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvParser;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCityNameNormalizer;
@@ -78,10 +81,14 @@ function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 function add_action( string $hook, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool { $GLOBALS['wdc_actions'][] = array( $hook, $callback, $priority, $accepted_args ); return true; }
 function add_submenu_page( mixed ...$args ): string { $GLOBALS['wdc_submenu_pages'][] = $args; return (string) ( $args[4] ?? '' ); }
 function wp_remote_get( string $url, array $args = array() ): mixed { $GLOBALS['wdc_remote_get_requests'][] = array( 'url' => $url, 'args' => $args ); return array_shift( $GLOBALS['wdc_remote_get_responses'] ); }
+function wp_remote_post( string $url, array $args = array() ): mixed { $GLOBALS['wdc_remote_post_requests'][] = array( 'url' => $url, 'args' => $args ); return array_shift( $GLOBALS['wdc_remote_post_responses'] ); }
 function wp_remote_retrieve_response_code( mixed $response ): int { return (int) ( is_array( $response ) ? ( $response['status'] ?? 0 ) : 0 ); }
 function wp_remote_retrieve_body( mixed $response ): string { return (string) ( is_array( $response ) ? ( $response['body'] ?? '' ) : '' ); }
 function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
-final class WP_Error {}
+final class WP_Error {
+	public function __construct( private string $code = '' ) {}
+	public function get_error_code(): string { return $this->code; }
+}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -332,6 +339,8 @@ $GLOBALS['wdc_actions'] = array();
 $GLOBALS['wdc_submenu_pages'] = array();
 $GLOBALS['wdc_remote_get_responses'] = array();
 $GLOBALS['wdc_remote_get_requests'] = array();
+$GLOBALS['wdc_remote_post_responses'] = array();
+$GLOBALS['wdc_remote_post_requests'] = array();
 $GLOBALS['wpdb'] = new wpdb();
 
 $root = dirname( __DIR__, 2 );
@@ -345,8 +354,8 @@ foreach ( array( $geography_admin_source, $status_admin_source ) as $source ) {
 jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . $plugin_source, 'wdc-jet-logistic-geography' ) && ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . $plugin_source, 'wdc-jet-logistic-statuses' ), 'Production code must not keep standalone Jet submenu slugs.' );
 jet_assert( str_contains( $delivery_admin_source, "JetLogisticSettings::SERVICE_KEY === \$service->service_key" ) && str_contains( $delivery_admin_source, "\$tabs['jet_geography']" ) && str_contains( $delivery_admin_source, "\$tabs['jet_statuses']" ), 'Jet tabs must be scoped to the Jet Logistic delivery service.' );
 jet_assert( str_contains( $delivery_admin_source, "'jet_geography' => \$this->render_jet_geography_tab( \$service )" ) && str_contains( $delivery_admin_source, "'jet_statuses' => \$this->render_jet_statuses_tab( \$service )" ), 'Jet tabs must delegate to embedded renderers.' );
-jet_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_remote'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'update_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'delete_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "check_admin_referer( 'wdc_delivery_services' )" ) && str_contains( $delivery_admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Jet POST actions must be handled by the shared delivery services action pipeline.' );
-jet_assert( str_contains( $delivery_admin_source, 'jet_logistic_redirect_url( $action, $tab )' ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping', 'update_jet_status_mapping', 'delete_jet_status_mapping' => 'jet_statuses'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override' === \$action" ), 'Jet POST actions must redirect back to their embedded tabs and preserve Jet geography pagination state for manual overrides.' );
+jet_assert( str_contains( $delivery_admin_source, "'save_jet_settings'" ) && str_contains( $delivery_admin_source, "'check_jet_connection'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_remote'" ) && str_contains( $delivery_admin_source, "'import_jet_geography_csv'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override'" ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'update_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'delete_jet_status_mapping'" ) && str_contains( $delivery_admin_source, "'check_jet_tracking'" ) && str_contains( $delivery_admin_source, "check_admin_referer( 'wdc_delivery_services' )" ) && str_contains( $delivery_admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Jet POST actions must be handled by the shared delivery services action pipeline.' );
+jet_assert( str_contains( $delivery_admin_source, 'jet_logistic_redirect_url( $action, $tab )' ) && str_contains( $delivery_admin_source, "'create_jet_status_mapping', 'update_jet_status_mapping', 'delete_jet_status_mapping', 'check_jet_tracking' => 'jet_statuses'" ) && str_contains( $delivery_admin_source, "'save_jet_geography_override' === \$action" ), 'Jet POST actions must redirect back to their embedded tabs and preserve Jet geography pagination state for manual overrides.' );
 jet_assert( str_contains( $geography_admin_source, "JetLogisticCitiesCsvClient::DEFAULT_URL" ) && ! str_contains( $geography_admin_source, "\$_POST['url'" ) && ! str_contains( $geography_admin_source, 'wp_remote_get' ), 'Jet remote geography import must use the fixed client URL and not read arbitrary POST URLs.' );
 jet_assert( str_contains( $delivery_admin_source, 'set_transient( $this->jet_admin_notice_key()' ) && str_contains( $delivery_admin_source, 'get_transient( $key )' ) && str_contains( $delivery_admin_source, 'delete_transient( $key )' ), 'Jet admin actions must use one-shot flash notices.' );
 jet_assert( ! str_contains( $plugin_source, 'JetLogisticGeographyAdminPage::class )->register()' ) && ! str_contains( $plugin_source, 'JetLogisticStatusAdminPage::class )->register()' ), 'Plugin hooks must not register standalone Jet admin pages.' );
@@ -466,7 +475,7 @@ jet_assert( $region_normalizer->normalize( 'Павлодарская облас�
 
 $settings_repo = new SettingsRepository();
 $credentials = new JetLogisticCredentials( $settings_repo, new EncryptionService() );
-$credentials->save_access_token( 'secret-token' );
+$credentials->save_access_token( 'jet-test-token' );
 $settings_repo->set( JetLogisticSettings::ORIGIN_SOURCE_IDENTITY_KEY, 'origin' );
 $settings = new JetLogisticSettings( $settings_repo );
 $geo = new JetLogisticGeographyRepository( $GLOBALS['wpdb'] );
@@ -505,7 +514,7 @@ $jet_geo_admin->save_settings_from_post( array( 'jet_logistic_access_token' => '
 jet_assert( 'new-secret' === $credentials->access_token() && $credentials->has_access_token(), 'Non-empty Jet token field must replace the existing token.' );
 $jet_geo_admin->save_settings_from_post( array( 'jet_logistic_access_token' => 'ignored-secret', 'jet_logistic_clear_access_token' => '1' ) );
 jet_assert( '' === $credentials->access_token() && ! $credentials->has_access_token(), 'Jet clear token checkbox must remove the token and win over a new token value.' );
-$credentials->save_access_token( 'secret-token' );
+$credentials->save_access_token( 'jet-test-token' );
 $override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 77 ) );
 $manual_row = $geo->active_for_location( 77 );
 jet_assert( ! empty( $override['success'] ) && ! empty( $GLOBALS['wpdb']->jet_overrides['manual-target'] ) && 'matched' === (string) ( $manual_row['match_status'] ?? '' ) && 'manual_override' === (string) ( $manual_row['match_source'] ?? '' ) && 'KZ' === (string) ( $manual_row['country_code'] ?? '' ), 'Jet manual override must save override and immediately update the active geography snapshot.' );
@@ -574,6 +583,7 @@ $jet_geo_admin->render_embedded( new DeliveryService( 501, JetLogisticSettings::
 $admin_html = (string) ob_get_clean();
 $decoded_admin_html = html_entity_decode( $admin_html, ENT_QUOTES, 'UTF-8' );
 jet_assert( str_contains( $decoded_admin_html, '<td class="wdc-row-number">101</td>' ) && str_contains( $decoded_admin_html, '<td class="wdc-row-number">200</td>' ) && ! str_contains( $decoded_admin_html, '<td class="wdc-row-number">1</td>' ), 'Jet geography admin HTML page 2 must show continuous row numbers 101-200 instead of restarting at 1.' );
+jet_assert( str_contains( $decoded_admin_html, 'check_jet_connection' ) && str_contains( $decoded_admin_html, 'Проверить подключение' ), 'Jet geography settings tab must expose safe connection diagnostics.' );
 jet_assert( str_contains( $decoded_admin_html, 'Всего: 250' ) && str_contains( $decoded_admin_html, 'Страница 2 из 3' ) && str_contains( $decoded_admin_html, 'Показаны: 101' ) && str_contains( $decoded_admin_html, '200' ), 'Jet geography admin HTML must show total, visible range and current page metadata.' );
 jet_assert( str_contains( $decoded_admin_html, 'jet_page=1' ) && str_contains( $decoded_admin_html, 'jet_page=3' ) && str_contains( $decoded_admin_html, 'jet_per_page=100' ) && str_contains( $decoded_admin_html, 'page=wdc-delivery-services' ) && str_contains( $decoded_admin_html, 'service=jet_logistic' ), 'Jet geography pagination links must preserve service page, Jet service and per-page state.' );
 jet_assert( str_contains( $decoded_admin_html, 'Display 101' ) && 1 === $GLOBALS['wpdb']->location_find_map_by_ids_calls && 0 === $GLOBALS['wpdb']->location_find_by_id_calls && 101 === min( $GLOBALS['wpdb']->location_find_map_by_ids_last_ids ) && 200 === max( $GLOBALS['wpdb']->location_find_map_by_ids_last_ids ), 'Jet geography admin table must batch-load display names only for the current page IDs.' );
@@ -816,7 +826,7 @@ $http = new JetFakeHttp(
 		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => 999, 'price_terminal' => 1000, 'price_delivery' => 500, 'price_dop' => 100, 'city_to' => 'Astana', 'city_terminal_to' => 'Karaganda', 'day_from' => 3, 'day_to' => 5, 'valuta' => 'RUB' ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
-$api = new JetLogisticApiClient( $http, $settings );
+$api = new JetLogisticApiClient( $http, $settings, $credentials );
 $carrier = new JetLogisticCarrier( $settings, $api, new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
 $package = Package::from_items( array( new PackageItem( 'A', 'Товар', 1, Money::from_rubles( 21000 ), Money::from_rubles( 19500 ), 2000, 100, 50, 40 ) ), 0, Money::from_rubles( 19500 ), Money::from_rubles( 19500 ) );
 $quote = $carrier->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'location_id' => 10 ) ) );
@@ -824,7 +834,8 @@ jet_assert( $quote->success && 2 === count( $quote->rates ) && 1 === count( $htt
 jet_assert( 110000 === $quote->rates[0]->price->get_kopecks() && 160000 === $quote->rates[1]->price->get_kopecks(), 'Jet rates must ignore pickup price_zabor and calculate terminal/delivery/dop sums.' );
 jet_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && false === $quote->rates[0]->requires_pickup_point, 'Jet pickup rate must not require a concrete pickup point.' );
 jet_assert( str_contains( $quote->rates[0]->title, 'Karaganda' ) && str_contains( $quote->rates[0]->comments[0] ?? '', 'Karaganda' ), 'Jet non-local terminal city must be in pickup title and comment.' );
-jet_assert( '[redacted]' === (string) ( $quote->raw_reference['jet_request']['access_token'] ?? '' ) && 'secret-token' === (string) $http->requests[0]['payload']['access_token'], 'Jet token must be sent to API but redacted from diagnostics.' );
+jet_assert( '[redacted]' === (string) ( $quote->raw_reference['jet_request']['access_token'] ?? '' ) && 'jet-test-token' === (string) $http->requests[0]['payload']['access_token'], 'Jet token must be sent to API but redacted from diagnostics.' );
+jet_assert( ! str_contains( (string) $http->requests[0]['url'], 'jet-test-token' ) && ! str_contains( (string) $http->requests[0]['url'], 'access_token' ), 'Jet access_token must not be sent in the API URL.' );
 jet_assert( 19500 === (int) $http->requests[0]['payload']['cost'] && 0 === (int) $http->requests[0]['payload']['dops']['D_SDOC'], 'Jet cost and D_SDOC must use discounted package goods cost below threshold.' );
 
 $payload = ( new JetLogisticQuoteRequestBuilder( $credentials ) )->build(
@@ -833,6 +844,36 @@ $payload = ( new JetLogisticQuoteRequestBuilder( $credentials ) )->build(
 	array( 'source_city' => 'Астана' )
 );
 jet_assert( 20000 === (int) $payload['cost'] && 1 === (int) $payload['dops']['D_SDOC'] && 'ТЕКСТИЛЬ' === $payload['naimenovanie'], 'Jet D_SDOC threshold and fixed cargo name must be applied.' );
+$threshold_payload = ( new JetLogisticQuoteRequestBuilder( $credentials ) )->build(
+	new QuoteRequest( 'KZ', new Address( country_code: 'KZ' ), Package::from_items( array( new PackageItem( 'C', 'Товар', 1, Money::from_rubles( 25000 ), Money::from_rubles( 25000 ), 1000, 10, 10, 10 ) ), 0, Money::from_rubles( 25000 ), Money::from_rubles( 25000 ) ), 'card', Money::from_rubles( 25000 ), '2026-07-28' ),
+	array( 'source_city' => 'Алматы' ),
+	array( 'source_city' => 'Астана' )
+);
+jet_assert( 25000 === (int) $threshold_payload['cost'] && 1 === (int) $threshold_payload['dops']['D_SDOC'], 'Jet D_SDOC must stay enabled above threshold using discounted package total.' );
+$numeric_string_result = ( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '999.50', 'price_terminal' => '1000', 'price_delivery' => 500, 'price_dop' => '100', 'city_to' => 'Астана', 'city_terminal_to' => 'Астана', 'valuta' => 'RUB' ) );
+jet_assert( 1000 === $numeric_string_result->price_terminal && 500 === $numeric_string_result->price_delivery && 100 === $numeric_string_result->price_dop, 'Jet quote parser must accept numeric strings from the real API shape.' );
+foreach ( array( 'garbage', -1, '' ) as $bad_price ) {
+	$thrown = false;
+	try {
+		( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => 0, 'price_terminal' => $bad_price, 'price_delivery' => 0, 'price_dop' => 0, 'city_to' => 'Астана', 'city_terminal_to' => 'Астана', 'valuta' => 'RUB' ) );
+	} catch ( JetLogisticApiException $exception ) {
+		$thrown = 'jet_invalid_response' === $exception->error_code();
+	}
+	jet_assert( $thrown, 'Jet quote parser must reject malformed, negative, or missing price values instead of converting them to zero.' );
+}
+
+$GLOBALS['wdc_remote_post_responses'] = array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array() ), JSON_UNESCAPED_UNICODE ) ) );
+( new WpJetLogisticHttpClient() )->post_json( JetLogisticApiClient::BASE_URL . JetLogisticApiClient::METHOD_CALC_TRANSPORT, array( 'access_token' => 'jet-test-token' ), 15 );
+$wp_post_request = $GLOBALS['wdc_remote_post_requests'][0] ?? array();
+jet_assert( ! str_contains( (string) ( $wp_post_request['url'] ?? '' ), 'jet-test-token' ) && true === ( $wp_post_request['args']['sslverify'] ?? false ) && 0 === (int) ( $wp_post_request['args']['redirection'] ?? -1 ) && str_contains( (string) ( $wp_post_request['args']['body'] ?? '' ), 'access_token' ), 'Jet WordPress HTTP client must send token in JSON body, keep it out of URL, verify TLS, and avoid automatic redirects.' );
+$GLOBALS['wdc_remote_post_responses'] = array( new WP_Error( 'http_request_timeout' ) );
+$timeout_thrown = false;
+try {
+	( new WpJetLogisticHttpClient() )->post_json( JetLogisticApiClient::BASE_URL . JetLogisticApiClient::METHOD_CALC_TRANSPORT, array( 'access_token' => 'jet-test-token' ), 15 );
+} catch ( JetLogisticApiException $exception ) {
+	$timeout_thrown = 'jet_http_timeout' === $exception->error_code() && ! str_contains( $exception->getMessage(), 'jet-test-token' );
+}
+jet_assert( $timeout_thrown, 'Jet HTTP timeout must be classified safely without exposing token.' );
 
 $GLOBALS['wpdb']->jet_statuses = array();
 $status_repo = new JetLogisticStatusMappingRepository( $GLOBALS['wpdb'] );
@@ -868,14 +909,40 @@ ob_start();
 $status_admin->render_embedded( new DeliveryService( 501, JetLogisticSettings::SERVICE_KEY, JetLogisticSettings::CARRIER_KEY, DeliveryService::TYPE_API, 'Jet Logistic' ), array() );
 $status_admin_html = (string) ob_get_clean();
 jet_assert( str_contains( $status_admin_html, 'Фраза в статусе Jet' ) && str_contains( $status_admin_html, 'Универсальный статус' ) && str_contains( $status_admin_html, 'Действия' ) && str_contains( $status_admin_html, 'Сохранить' ) && str_contains( $status_admin_html, 'Удалить' ) && ! str_contains( $status_admin_html, 'Активно' ) && ! str_contains( $status_admin_html, 'Последнее событие' ) && ! str_contains( $status_admin_html, 'Количество' ) && ! str_contains( $status_admin_html, 'name="active"' ), 'Jet status admin HTML must expose phrase CRUD controls and remove active/last_seen/occurrence_count UI.' );
+jet_assert( str_contains( $status_admin_html, 'check_jet_tracking' ) && str_contains( $status_admin_html, 'Номер груза Jet' ) && str_contains( $status_admin_html, 'Проверить статус' ), 'Jet status admin HTML must expose safe tracking diagnostics.' );
 
 $status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-07-28 10:00:00', 'message' => 'Неизвестно' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
-$status_service = new JetLogisticStatusService( new JetLogisticApiClient( $status_http, $settings ), new JetLogisticStatusMapper( $status_repo ) );
+$status_service = new JetLogisticStatusService( new JetLogisticApiClient( $status_http, $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) );
 $status = $status_service->update( array( 'tracking_number' => 'JET-1', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
 jet_assert( DeliveryStatus::IN_TRANSIT === $status['shipment_patch']['universal_status_code'] && 2 === count( $status['shipment_patch']['status_events'] ), 'Unknown latest Jet status must preserve current universal status and deduplicate compact events.' );
+jet_assert( 'jet-test-token' === (string) ( $status_http->requests[0]['payload']['access_token'] ?? '' ) && ! str_contains( (string) $status_http->requests[0]['url'], 'jet-test-token' ), 'Jet tracking API must send access_token in request body and not in URL.' );
 $delivered_status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-06-26 00:00:00', 'message' => 'Груз выдан : 26 июня 2026 г.' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
-$delivered_status = ( new JetLogisticStatusService( new JetLogisticApiClient( $delivered_status_http, $settings ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-2', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
+$delivered_status = ( new JetLogisticStatusService( new JetLogisticApiClient( $delivered_status_http, $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-2', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
 jet_assert( DeliveryStatus::DELIVERED === $delivered_status['shipment_patch']['universal_status_code'] && 'Груз выдан : 26 июня 2026 г.' === (string) $delivered_status['shipment_patch']['carrier_status_message'], 'Jet status service must map substring only from latest message while preserving the full carrier status message.' );
+
+$diagnostic_http = new JetFakeHttp(
+	array(
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'price_zabor' => '100', 'city_to' => 'Astana', 'city_terminal_to' => 'Astana', 'valuta' => 'RUB' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-06-26 00:00:00', 'message' => 'Груз выдан : 26 июня 2026 г.' ), array( 'date' => '2026-06-25 00:00:00', 'message' => 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ) ) ) ), JSON_UNESCAPED_UNICODE ) ),
+	)
+);
+$diagnostics = new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( $diagnostic_http, $settings, $credentials ), $geo, $status_repo );
+$connection_check = $diagnostics->check_connection();
+jet_assert( ! empty( $connection_check['success'] ) && 'calc_transport' === (string) $connection_check['endpoint'] && 'Токен задан' === (string) $connection_check['token_state'] && ! str_contains( wp_json_encode( $connection_check, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet connection diagnostic must use calculator endpoint safely and redact token.' );
+$diagnostic_write_counts_before = array( $GLOBALS['wpdb']->status_mapping_insert_calls, $GLOBALS['wpdb']->status_mapping_update_calls, $GLOBALS['wpdb']->status_mapping_delete_calls );
+$tracking_check = $diagnostics->check_tracking( 'JET-DIAG-1' );
+jet_assert( ! empty( $tracking_check['success'] ) && 2 === count( $tracking_check['events'] ?? array() ) && str_contains( (string) ( $tracking_check['details']['event_1'] ?? '' ), 'Груз выдан' ) && str_contains( (string) ( $tracking_check['details']['event_1'] ?? '' ), DeliveryStatus::DELIVERED ) && $diagnostic_write_counts_before === array( $GLOBALS['wpdb']->status_mapping_insert_calls, $GLOBALS['wpdb']->status_mapping_update_calls, $GLOBALS['wpdb']->status_mapping_delete_calls ) && ! str_contains( wp_json_encode( $tracking_check, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet tracking diagnostic must show compact mapped events without destructive writes or token exposure.' );
+$credentials->clear_access_token();
+$missing_token_check = ( new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( new JetFakeHttp( array() ), $settings, $credentials ), $geo, $status_repo ) )->check_connection();
+$credentials->save_access_token( 'jet-test-token' );
+jet_assert( empty( $missing_token_check['success'] ) && 'jet_token_missing' === (string) $missing_token_check['code'] && 'Токен не задан' === (string) $missing_token_check['token_state'], 'Jet connection diagnostic must classify missing token before any API request.' );
+foreach ( array( 401 => 'jet_http_401', 403 => 'jet_http_403' ) as $http_status => $expected_code ) {
+	$error_result = ( new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => $http_status, 'body' => '{}' ) ) ), $settings, $credentials ), $geo, $status_repo ) )->check_connection();
+	jet_assert( empty( $error_result['success'] ) && $expected_code === (string) $error_result['code'] && ! str_contains( wp_json_encode( $error_result, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet connection diagnostic must classify HTTP auth failures safely.' );
+}
+$invalid_json_result = ( new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => '<html></html>' ) ) ), $settings, $credentials ), $geo, $status_repo ) )->check_connection();
+$api_error_result = ( new JetLogisticApiDiagnosticService( $credentials, $settings, new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => false, 'error' => 'bad token jet-test-token' ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), $geo, $status_repo ) )->check_connection();
+jet_assert( empty( $invalid_json_result['success'] ) && 'jet_invalid_json' === (string) $invalid_json_result['code'] && empty( $api_error_result['success'] ) && 'jet_api_error' === (string) $api_error_result['code'] && ! str_contains( wp_json_encode( $api_error_result, JSON_UNESCAPED_UNICODE ), 'jet-test-token' ), 'Jet diagnostics must classify invalid JSON and API-level errors without exposing raw response bodies.' );
 
 $order = new JetFakeOrder();
 $actual_cost_resolver = ( new ReflectionClass( ShipmentActualCostResolver::class ) )->newInstanceWithoutConstructor();

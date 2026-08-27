@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\JetLogistic\Admin;
 
+use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiDiagnosticService;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
@@ -10,7 +11,10 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticStatusAdminPage {
-	public function __construct( private JetLogisticStatusMappingRepository $repository ) {
+	public function __construct(
+		private JetLogisticStatusMappingRepository $repository,
+		private ?JetLogisticApiDiagnosticService $diagnostics = null
+	) {
 	}
 
 	/** @return array<string,mixed> */
@@ -63,6 +67,15 @@ final class JetLogisticStatusAdminPage {
 		return array( 'success' => true, 'message' => 'Сопоставление статуса Jet Logistic удалено.' );
 	}
 
+	/** @return array<string,mixed> */
+	public function check_tracking_from_post( array $post ): array {
+		if ( ! $this->diagnostics instanceof JetLogisticApiDiagnosticService ) {
+			return array( 'success' => false, 'message' => 'Компонент диагностики статусов Jet Logistic недоступен.' );
+		}
+
+		return $this->diagnostics->check_tracking( (string) ( $post['jet_tracking_number'] ?? '' ) );
+	}
+
 	/** @return array{external_status:string,universal_status:string,error:array<string,mixed>} */
 	private function validate_mapping_post( array $post ): array {
 		$external = sanitize_text_field( wp_unslash( (string) ( $post['external_status'] ?? '' ) ) );
@@ -89,6 +102,14 @@ final class JetLogisticStatusAdminPage {
 		?>
 		<h3><?php echo esc_html__( 'Сопоставление статусов Jet Logistic', 'walls-delivery-calc' ); ?></h3>
 		<p class="description"><?php echo esc_html__( 'Сопоставление сработает, если указанная фраза встречается в сообщении Jet Logistic. Регистр и различие «ё/е» не учитываются. Если в одном сообщении совпадут несколько правил, используется самая длинная фраза.', 'walls-delivery-calc' ); ?></p>
+		<form method="post" style="max-width: 760px; margin-bottom: 16px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="check_jet_tracking">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<p><label><?php echo esc_html__( 'Номер груза Jet', 'walls-delivery-calc' ); ?> <input class="regular-text" name="jet_tracking_number" maxlength="64"></label> <button class="button button-secondary" type="submit"><?php echo esc_html__( 'Проверить статус', 'walls-delivery-calc' ); ?></button></p>
+			<p class="description"><?php echo esc_html__( 'Проверка не изменяет заказ, отправление или правила сопоставления.', 'walls-delivery-calc' ); ?></p>
+		</form>
 		<form method="post" style="max-width: 760px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="wdc_delivery_services_action" value="create_jet_status_mapping">
@@ -140,6 +161,36 @@ final class JetLogisticStatusAdminPage {
 			return;
 		}
 		$type = in_array( (string) ( $notice['type'] ?? 'info' ), array( 'success', 'warning', 'error' ), true ) ? (string) $notice['type'] : 'info';
-		echo '<div class="notice notice-' . esc_attr( $type ) . ' inline"><p>' . esc_html( (string) ( $notice['message'] ?? '' ) ) . '</p></div>';
+		echo '<div class="notice notice-' . esc_attr( $type ) . ' inline"><p>' . esc_html( (string) ( $notice['message'] ?? '' ) ) . '</p>';
+		$details = is_array( $notice['details'] ?? null ) ? $notice['details'] : array();
+		if ( array() !== $details ) {
+			echo '<ul>';
+			foreach ( $details as $key => $value ) {
+				if ( is_scalar( $value ) ) {
+					echo '<li>' . esc_html( $this->notice_detail_label( (string) $key ) . ': ' . (string) $value ) . '</li>';
+				}
+			}
+			echo '</ul>';
+		}
+		echo '</div>';
+	}
+
+	private function notice_detail_label( string $key ): string {
+		return match ( $key ) {
+			'checked_at' => 'Проверено',
+			'token_state' => 'Токен',
+			'endpoint' => 'API endpoint',
+			'method' => 'HTTP method',
+			'http_status' => 'HTTP status',
+			'api_response' => 'Ответ API',
+			'code' => 'Код',
+			'tracking_number' => 'Номер груза Jet',
+			'event_1' => 'Событие 1',
+			'event_2' => 'Событие 2',
+			'event_3' => 'Событие 3',
+			'event_4' => 'Событие 4',
+			'event_5' => 'Событие 5',
+			default => $key,
+		};
 	}
 }

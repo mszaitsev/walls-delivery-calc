@@ -280,6 +280,7 @@ C:.
 |   |   |   |
 |   |   |   +---Api
 |   |   |   |       JetLogisticApiClient.php
+|   |   |   |       JetLogisticApiDiagnosticService.php
 |   |   |   |       JetLogisticApiException.php
 |   |   |   |       JetLogisticHttpClientInterface.php
 |   |   |   |       WpJetLogisticHttpClient.php

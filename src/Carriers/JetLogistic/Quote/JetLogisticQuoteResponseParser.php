@@ -17,10 +17,10 @@ final class JetLogisticQuoteResponseParser {
 		}
 
 		return new JetLogisticCalculationResult(
-			$this->rubles( $data['price_zabor'] ?? null ),
-			$this->rubles( $data['price_terminal'] ?? null ),
-			$this->rubles( $data['price_delivery'] ?? null ),
-			$this->rubles( $data['price_dop'] ?? null ),
+			$this->rubles( $data['price_zabor'] ?? null, 'price_zabor' ),
+			$this->rubles( $data['price_terminal'] ?? null, 'price_terminal' ),
+			$this->rubles( $data['price_delivery'] ?? null, 'price_delivery' ),
+			$this->rubles( $data['price_dop'] ?? null, 'price_dop' ),
 			trim( (string) ( $data['city_from'] ?? '' ) ),
 			trim( (string) ( $data['city_terminal_from'] ?? '' ) ),
 			trim( (string) ( $data['city_terminal_to'] ?? '' ) ),
@@ -32,12 +32,16 @@ final class JetLogisticQuoteResponseParser {
 		);
 	}
 
-	private function rubles( mixed $value ): int {
-		if ( ! is_numeric( $value ) ) {
-			return 0;
+	private function rubles( mixed $value, string $field ): int {
+		if ( null === $value || '' === $value || ! is_numeric( $value ) ) {
+			throw new JetLogisticApiException( 'Jet Logistic returned malformed price.', array( 'error_code' => 'jet_invalid_response', 'field' => $field ) );
+		}
+		$rubles = (float) $value;
+		if ( $rubles < 0 ) {
+			throw new JetLogisticApiException( 'Jet Logistic returned negative price.', array( 'error_code' => 'jet_invalid_response', 'field' => $field ) );
 		}
 
-		return max( 0, (int) round( (float) $value ) );
+		return (int) round( $rubles );
 	}
 
 	private function nullable_int( mixed $value ): ?int {
