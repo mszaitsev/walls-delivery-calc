@@ -145,8 +145,8 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 	/** @return array<string,mixed> */
 	private function origin_mapping(): array {
 		$identity = $this->settings->origin_source_identity();
-		$row = '' !== $identity ? $this->geography->find_by_source_identity( $identity ) : array();
-		if ( array() === $row || empty( $row['active'] ) ) {
+		$row = '' !== $identity ? $this->geography->origin_by_source_identity( $identity ) : array();
+		if ( array() === $row ) {
 			throw new JetLogisticApiException( 'Jet Logistic origin city is not configured.', array( 'error_code' => 'jet_origin_missing' ) );
 		}
 

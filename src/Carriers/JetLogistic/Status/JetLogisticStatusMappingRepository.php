@@ -187,21 +187,28 @@ final class JetLogisticStatusMappingRepository {
 	}
 
 	public function map( string $incoming_message ): string {
+		$mapping = $this->match_mapping( $incoming_message );
+		$status = (string) ( $mapping['universal_status'] ?? '' );
+
+		return DeliveryStatus::is_valid( $status ) ? $status : '';
+	}
+
+	/** @return array<string,mixed> */
+	public function match_mapping( string $incoming_message ): array {
 		$incoming = self::normalize( $incoming_message );
 		if ( '' === $incoming ) {
-			return '';
+			return array();
 		}
 		foreach ( $this->all_mappings() as $mapping ) {
 			$pattern = (string) ( $mapping['normalized_external_status'] ?? '' );
 			if ( '' === $pattern || ! str_contains( $incoming, $pattern ) ) {
 				continue;
 			}
-			$status = (string) ( $mapping['universal_status'] ?? '' );
 
-			return DeliveryStatus::is_valid( $status ) ? $status : '';
+			return $mapping;
 		}
 
-		return '';
+		return array();
 	}
 
 	public static function normalize( string $value ): string {

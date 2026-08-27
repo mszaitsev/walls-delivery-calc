@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\JetLogistic\Admin;
 
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiDiagnosticService;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvClient;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCountrySyncService;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyImportService;
@@ -26,7 +27,8 @@ final class JetLogisticGeographyAdminPage {
 		private JetLogisticCountrySyncService $country_sync,
 		private LocationRepository $locations,
 		private JetLogisticSettings $settings,
-		private JetLogisticCredentials $credentials
+		private JetLogisticCredentials $credentials,
+		private JetLogisticApiDiagnosticService $diagnostics
 	) {
 	}
 
@@ -48,6 +50,11 @@ final class JetLogisticGeographyAdminPage {
 	/** @return array<string,mixed> */
 	public function import_remote_csv(): array {
 		return $this->imports->import_csv( $this->cities->fetch( JetLogisticCitiesCsvClient::DEFAULT_URL ) );
+	}
+
+	/** @return array<string,mixed> */
+	public function check_connection(): array {
+		return $this->diagnostics->check_connection();
 	}
 
 	/** @return array<string,mixed> */
@@ -138,10 +145,18 @@ final class JetLogisticGeographyAdminPage {
 			<input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>">
 			<table class="form-table" role="presentation">
 				<tr><th scope="row">Тайм-аут HTTP, сек.</th><td><input type="number" min="1" max="60" name="<?php echo esc_attr( JetLogisticSettings::REQUEST_TIMEOUT_KEY ); ?>" value="<?php echo esc_attr( (string) $this->settings->request_timeout() ); ?>"></td></tr>
-				<tr><th scope="row">Город отправления</th><td><select name="<?php echo esc_attr( JetLogisticSettings::ORIGIN_SOURCE_IDENTITY_KEY ); ?>"><option value="">Не выбран</option><?php foreach ( $origins as $origin ) : ?><option value="<?php echo esc_attr( (string) ( $origin['source_identity'] ?? '' ) ); ?>" <?php selected( $this->settings->origin_source_identity(), (string) ( $origin['source_identity'] ?? '' ) ); ?>><?php echo esc_html( (string) ( $origin['source_city'] ?? '' ) . ' ' . (string) ( $origin['country_code'] ?? '' ) ); ?></option><?php endforeach; ?></select></td></tr>
+				<tr><th scope="row">Город отправления</th><td><select name="<?php echo esc_attr( JetLogisticSettings::ORIGIN_SOURCE_IDENTITY_KEY ); ?>"><option value="">Не выбран</option><?php foreach ( $origins as $origin ) : ?><option value="<?php echo esc_attr( (string) ( $origin['source_identity'] ?? '' ) ); ?>" <?php selected( $this->settings->origin_source_identity(), (string) ( $origin['source_identity'] ?? '' ) ); ?>><?php echo esc_html( $this->origin_label( $origin ) ); ?></option><?php endforeach; ?></select></td></tr>
 				<tr><th scope="row">Токен API Jet Logistic</th><td><input type="password" class="regular-text" name="jet_logistic_access_token" value="" autocomplete="new-password" placeholder="<?php echo esc_attr( $has_token ? __( 'задано', 'walls-delivery-calc' ) : __( 'не задано', 'walls-delivery-calc' ) ); ?>"><p class="description"><?php echo esc_html__( 'Оставьте поле пустым, чтобы сохранить текущий токен.', 'walls-delivery-calc' ); ?> <?php echo esc_html( $has_token ? __( 'Токен сохранён.', 'walls-delivery-calc' ) : __( 'Токен не задан.', 'walls-delivery-calc' ) ); ?></p><label><input type="checkbox" name="jet_logistic_clear_access_token" value="1"> <?php echo esc_html__( 'Очистить сохранённый токен', 'walls-delivery-calc' ); ?></label></td></tr>
 			</table>
 			<?php submit_button( __( 'Сохранить настройки Jet', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<form method="post" style="max-width: 760px; margin-top: 8px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="check_jet_connection">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="jet_per_page" value="<?php echo esc_attr( (string) $per_page ); ?>">
+			<p><button class="button button-secondary" type="submit"><?php echo esc_html__( 'Проверить подключение', 'walls-delivery-calc' ); ?></button></p>
 		</form>
 
 		<h3><?php echo esc_html__( 'Импорт географии', 'walls-delivery-calc' ); ?></h3>
@@ -335,6 +350,22 @@ final class JetLogisticGeographyAdminPage {
 		return null !== $location->id ? 'ID ' . (string) $location->id : '—';
 	}
 
+	/** @param array<string,mixed> $origin */
+	private function origin_label( array $origin ): string {
+		$city = trim( (string) ( $origin['source_city'] ?? '' ) );
+		$region = trim( (string) ( $origin['source_region'] ?? '' ) );
+		$country = trim( (string) ( $origin['country_code'] ?? '' ) );
+		$label = $city;
+		if ( '' !== $region ) {
+			$label .= ' — ' . $region;
+		}
+		if ( '' !== $country ) {
+			$label .= ' (' . $country . ')';
+		}
+
+		return trim( $label );
+	}
+
 	/** @param array<string,mixed> $notice */
 	private function render_notice( array $notice ): void {
 		if ( array() === $notice ) {
@@ -382,6 +413,17 @@ final class JetLogisticGeographyAdminPage {
 			'location_id' => 'ID населённого пункта',
 			'source_identity' => 'Идентификатор Jet',
 			'country_code' => 'Страна',
+			'checked_at' => 'Проверено',
+			'token_state' => 'Токен',
+			'endpoint' => 'API endpoint',
+			'method' => 'HTTP method',
+			'http_status' => 'HTTP status',
+			'api_response' => 'Ответ API',
+			'code' => 'Код',
+			'currency' => 'Валюта расчёта',
+			'currency_source' => 'Источник валюты',
+			'city_to' => 'Город назначения',
+			'city_terminal_to' => 'Терминал назначения',
 			default => $key,
 		};
 	}

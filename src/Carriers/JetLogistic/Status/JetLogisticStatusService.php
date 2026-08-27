@@ -11,21 +11,24 @@ defined( 'ABSPATH' ) || exit;
 final class JetLogisticStatusService {
 	public function __construct(
 		private JetLogisticApiClient $api,
-		private JetLogisticStatusMapper $mapper
+		private JetLogisticStatusMapper $mapper,
+		private ?JetLogisticStatusEventResolver $resolver = null
 	) {
+		$this->resolver ??= new JetLogisticStatusEventResolver( $this->mapper );
 	}
 
 	/** @param array<string,mixed> $current @return array<string,mixed> */
 	public function update( array $current ): array {
 		$tracking = trim( (string) ( $current['tracking_number'] ?? $current['external_id'] ?? '' ) );
 		if ( '' === $tracking ) {
-			return array( 'success' => false, 'message' => 'Jet Logistic tracking number is missing.' );
+			return array( 'success' => false, 'message' => 'Номер груза Jet Logistic не указан.' );
 		}
 		$response = $this->api->status( $tracking );
-		$events = $this->events( is_array( $response['logs'] ?? null ) ? $response['logs'] : array() );
-		$latest = $events[0] ?? array();
-		$message = (string) ( $latest['message'] ?? '' );
-		$mapped = '' !== $message ? $this->mapper->map( $message ) : '';
+		$resolved = $this->resolver->resolve( is_array( $response['logs'] ?? null ) ? $response['logs'] : array() );
+		$events = $resolved['events'];
+		$current_event = $resolved['current_event'];
+		$message = (string) ( $current_event['message'] ?? '' );
+		$mapped = (string) ( $current_event['universal_status'] ?? '' );
 		$current_status = (string) ( $current['universal_status_code'] ?? DeliveryStatus::IN_TRANSIT );
 		$universal = '' !== $mapped ? $mapped : $current_status;
 
@@ -33,7 +36,7 @@ final class JetLogisticStatusService {
 			'success' => true,
 			'shipment_patch' => array(
 				'carrier_status_message' => $message,
-				'carrier_status_date' => (string) ( $latest['date'] ?? '' ),
+				'carrier_status_date' => (string) ( $current_event['date'] ?? '' ),
 				'status_events' => $events,
 				'status_updated_at' => current_time( 'mysql' ),
 				'universal_status_code' => $universal,
@@ -42,30 +45,5 @@ final class JetLogisticStatusService {
 			'status' => $message,
 			'message' => 'Статус Jet Logistic обновлен.',
 		);
-	}
-
-	/** @param array<int,mixed> $logs @return array<int,array{date:string,message:string}> */
-	private function events( array $logs ): array {
-		$events = array();
-		$seen = array();
-		foreach ( $logs as $log ) {
-			if ( ! is_array( $log ) ) {
-				continue;
-			}
-			$date = trim( (string) ( $log['date'] ?? '' ) );
-			$message = trim( (string) ( $log['message'] ?? '' ) );
-			if ( '' === $date && '' === $message ) {
-				continue;
-			}
-			$key = $date . '|' . $message;
-			if ( isset( $seen[ $key ] ) ) {
-				continue;
-			}
-			$seen[ $key ] = true;
-			$events[] = array( 'date' => $date, 'message' => $message );
-		}
-		usort( $events, static fn( array $a, array $b ): int => strcmp( (string) $b['date'], (string) $a['date'] ) );
-
-		return array_slice( $events, 0, 5 );
 	}
 }

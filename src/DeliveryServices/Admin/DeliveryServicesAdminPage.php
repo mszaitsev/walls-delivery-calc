@@ -746,7 +746,7 @@ final class DeliveryServicesAdminPage {
 			$this->handle_yandex_region_mapping_v2_action( $action );
 			return;
 		}
-		if ( in_array( $action, array( 'save_jet_settings', 'import_jet_geography_remote', 'import_jet_geography_csv', 'save_jet_geography_override', 'create_jet_status_mapping', 'update_jet_status_mapping', 'delete_jet_status_mapping' ), true ) ) {
+		if ( in_array( $action, array( 'save_jet_settings', 'check_jet_connection', 'import_jet_geography_remote', 'import_jet_geography_csv', 'save_jet_geography_override', 'create_jet_status_mapping', 'update_jet_status_mapping', 'delete_jet_status_mapping', 'check_jet_tracking' ), true ) ) {
 			$this->handle_jet_logistic_action( $action );
 			return;
 		}
@@ -1333,12 +1333,14 @@ final class DeliveryServicesAdminPage {
 		try {
 			$result = match ( $action ) {
 				'save_jet_settings' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_settings_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
+				'check_jet_connection' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->check_connection() : array( 'success' => false, 'message' => 'Компонент диагностики Jet Logistic недоступен.' ),
 				'import_jet_geography_remote' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_remote_csv() : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
 				'import_jet_geography_csv' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->import_uploaded_csv( $_FILES ) : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
 				'save_jet_geography_override' => $this->jet_logistic_geography instanceof JetLogisticGeographyAdminPage ? $this->jet_logistic_geography->save_override_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления географией Jet Logistic недоступен.' ),
 				'create_jet_status_mapping' => $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ? $this->jet_logistic_statuses->create_mapping_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления статусами Jet Logistic недоступен.' ),
 				'update_jet_status_mapping' => $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ? $this->jet_logistic_statuses->update_mapping_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления статусами Jet Logistic недоступен.' ),
 				'delete_jet_status_mapping' => $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ? $this->jet_logistic_statuses->delete_mapping_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент управления статусами Jet Logistic недоступен.' ),
+				'check_jet_tracking' => $this->jet_logistic_statuses instanceof JetLogisticStatusAdminPage ? $this->jet_logistic_statuses->check_tracking_from_post( $_POST ) : array( 'success' => false, 'message' => 'Компонент диагностики статусов Jet Logistic недоступен.' ),
 				default => array( 'success' => false, 'message' => 'Неизвестное административное действие Jet Logistic.' ),
 			};
 			if ( in_array( $action, array( 'save_jet_settings', 'import_jet_geography_remote', 'import_jet_geography_csv', 'save_jet_geography_override' ), true ) ) {
@@ -1356,7 +1358,7 @@ final class DeliveryServicesAdminPage {
 		$this->store_jet_admin_notice( $this->jet_notice_from_result( $result ) );
 
 		$tab = match ( $action ) {
-			'create_jet_status_mapping', 'update_jet_status_mapping', 'delete_jet_status_mapping' => 'jet_statuses',
+			'create_jet_status_mapping', 'update_jet_status_mapping', 'delete_jet_status_mapping', 'check_jet_tracking' => 'jet_statuses',
 			default => 'jet_geography',
 		};
 		wp_safe_redirect( $this->jet_logistic_redirect_url( $action, $tab ) );
@@ -1389,6 +1391,11 @@ final class DeliveryServicesAdminPage {
 	/** @param array<string,mixed> $result @return array<string,mixed> */
 	private function jet_notice_from_result( array $result ): array {
 		$details = is_array( $result['stats'] ?? null ) ? $result['stats'] : ( is_array( $result['details'] ?? null ) ? $result['details'] : array() );
+		foreach ( array( 'checked_at', 'token_state', 'endpoint', 'method', 'http_status', 'api_response', 'code', 'tracking_number' ) as $diagnostic_key ) {
+			if ( array_key_exists( $diagnostic_key, $result ) ) {
+				$details[ $diagnostic_key ] = $result[ $diagnostic_key ];
+			}
+		}
 		foreach ( array( 'rows_read', 'rows_unique', 'duplicates', 'duplicate_conflicts', 'legacy_identity_conflicts', 'legacy_override_migration_failures' ) as $counter_key ) {
 			if ( array_key_exists( $counter_key, $result ) ) {
 				$details = array( $counter_key => $result[ $counter_key ] ) + $details;
@@ -1405,10 +1412,12 @@ final class DeliveryServicesAdminPage {
 	private function jet_action_failure_message( string $action ): string {
 		return match ( $action ) {
 			'save_jet_settings' => 'Не удалось сохранить настройки Jet Logistic.',
+			'check_jet_connection' => 'Не удалось проверить подключение Jet Logistic.',
 			'import_jet_geography_csv' => 'Не удалось импортировать загруженный файл cities.csv.',
 			'save_jet_geography_override' => 'Не удалось применить ручное сопоставление Jet Logistic.',
 			'create_jet_status_mapping', 'update_jet_status_mapping' => 'Не удалось сохранить сопоставление статуса Jet Logistic.',
 			'delete_jet_status_mapping' => 'Не удалось удалить сопоставление статуса Jet Logistic.',
+			'check_jet_tracking' => 'Не удалось проверить номер груза Jet Logistic.',
 			default => 'Не удалось выполнить операцию Jet Logistic.',
 		};
 	}
