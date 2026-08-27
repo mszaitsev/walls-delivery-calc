@@ -10,10 +10,14 @@ defined( 'ABSPATH' ) || exit;
 final class JetLogisticQuoteResponseParser {
 	/** @param array<string,mixed> $data */
 	public function parse( array $data ): JetLogisticCalculationResult {
-		$currency = strtoupper( trim( (string) ( $data['valuta'] ?? $data['valuta_name'] ?? '' ) ) );
+		$currency = strtoupper( trim( (string) ( $data['valuta'] ?? '' ) ) );
 		$currency_name = strtoupper( trim( (string) ( $data['valuta_name'] ?? '' ) ) );
-		if ( ! in_array( 'RUB', array( $currency, $currency_name ), true ) && ! in_array( 'РУБ', array( $currency, $currency_name ), true ) ) {
-			throw new JetLogisticApiException( 'Jet Logistic returned non-RUB currency.', array( 'error_code' => 'jet_currency_not_rub' ) );
+		$currency_values = array_values( array_filter( array( $currency, $currency_name ), static fn( string $value ): bool => '' !== $value ) );
+		$currency_source = array() === $currency_values ? 'profile' : 'response';
+		foreach ( $currency_values as $currency_value ) {
+			if ( ! in_array( $currency_value, array( 'RUB', 'РУБ' ), true ) ) {
+				throw new JetLogisticApiException( 'Jet Logistic returned non-RUB currency.', array( 'error_code' => 'jet_currency_not_rub' ) );
+			}
 		}
 
 		return new JetLogisticCalculationResult(
@@ -27,8 +31,9 @@ final class JetLogisticQuoteResponseParser {
 			trim( (string) ( $data['city_to'] ?? '' ) ),
 			$this->nullable_int( $data['day_from'] ?? null ),
 			$this->nullable_int( $data['day_to'] ?? null ),
-			(string) ( $data['valuta'] ?? '' ),
-			(string) ( $data['valuta_name'] ?? '' )
+			'' !== (string) ( $data['valuta'] ?? '' ) ? (string) $data['valuta'] : 'RUB',
+			'' !== (string) ( $data['valuta_name'] ?? '' ) ? (string) $data['valuta_name'] : 'RUB',
+			$currency_source
 		);
 	}
 

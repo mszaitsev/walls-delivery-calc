@@ -302,6 +302,7 @@ C:.
 |   |   |   |       JetLogisticQuoteResponseParser.php
 |   |   |   |
 |   |   |   \---Status
+|   |   |           JetLogisticStatusEventResolver.php
 |   |   |           JetLogisticStatusMapper.php
 |   |   |           JetLogisticStatusMappingRepository.php
 |   |   |           JetLogisticStatusService.php

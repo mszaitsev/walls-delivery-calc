@@ -7,8 +7,10 @@ use Throwable;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyRepository;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticCredentials;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteResponseParser;
+use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusEventResolver;
+use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMapper;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
-use WallsShop\WDC\Domain\Status\DeliveryStatus;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -18,8 +20,12 @@ final class JetLogisticApiDiagnosticService {
 		private JetLogisticSettings $settings,
 		private JetLogisticApiClient $api,
 		private JetLogisticGeographyRepository $geography,
-		private JetLogisticStatusMappingRepository $status_mappings
+		private JetLogisticStatusMappingRepository $status_mappings,
+		private ?JetLogisticQuoteResponseParser $quote_parser = null,
+		private ?JetLogisticStatusEventResolver $status_events = null
 	) {
+		$this->quote_parser ??= new JetLogisticQuoteResponseParser();
+		$this->status_events ??= new JetLogisticStatusEventResolver( new JetLogisticStatusMapper( $this->status_mappings ) );
 	}
 
 	/** @return array<string,mixed> */
@@ -39,6 +45,7 @@ final class JetLogisticApiDiagnosticService {
 
 		try {
 			$response = $this->api->calc_transport( $this->diagnostic_payload( $origin, $destination ) );
+			$calculation = $this->quote_parser->parse( $response );
 			return array_merge(
 				$base,
 				array(
@@ -48,6 +55,12 @@ final class JetLogisticApiDiagnosticService {
 					'message' => 'Подключение Jet Logistic проверено: сервер принял токен и вернул ответ калькулятора.',
 					'api_response' => $this->response_shape( $response ),
 					'http_status' => 200,
+					'details' => array(
+						'currency' => 'RUB',
+						'currency_source' => 'profile' === $calculation->currency_source ? 'профиль Jet' : 'ответ API',
+						'city_to' => $calculation->city_to,
+						'city_terminal_to' => $calculation->city_terminal_to,
+					),
 				)
 			);
 		} catch ( Throwable $exception ) {
@@ -68,7 +81,8 @@ final class JetLogisticApiDiagnosticService {
 
 		try {
 			$response = $this->api->status( $tracking_number );
-			$events = $this->diagnostic_events( is_array( $response['logs'] ?? null ) ? $response['logs'] : array() );
+			$resolved = $this->status_events->resolve( is_array( $response['logs'] ?? null ) ? $response['logs'] : array() );
+			$events = $resolved['events'];
 			return array_merge(
 				$base,
 				array(
@@ -80,7 +94,7 @@ final class JetLogisticApiDiagnosticService {
 					'http_status' => 200,
 					'tracking_number' => $tracking_number,
 					'events' => $events,
-					'details' => $this->event_details( $events ),
+					'details' => $this->event_details( $events, $resolved['current_event'] ),
 				)
 			);
 		} catch ( Throwable $exception ) {
@@ -91,8 +105,7 @@ final class JetLogisticApiDiagnosticService {
 	/** @return array<string,mixed> */
 	private function origin(): array {
 		$identity = $this->settings->origin_source_identity();
-		$row = '' !== $identity ? $this->geography->find_by_source_identity( $identity ) : array();
-		return array() !== $row && ! empty( $row['active'] ) ? $row : array();
+		return '' !== $identity ? $this->geography->origin_by_source_identity( $identity ) : array();
 	}
 
 	/** @param array<string,mixed> $origin @param array<string,mixed> $destination @return array<string,mixed> */
@@ -142,40 +155,6 @@ final class JetLogisticApiDiagnosticService {
 		);
 	}
 
-	/** @param array<int,mixed> $logs @return array<int,array<string,string>> */
-	private function diagnostic_events( array $logs ): array {
-		$events = array();
-		$seen = array();
-		foreach ( $logs as $log ) {
-			if ( ! is_array( $log ) ) {
-				continue;
-			}
-			$date = trim( (string) ( $log['date'] ?? '' ) );
-			$message = trim( (string) ( $log['message'] ?? '' ) );
-			if ( '' === $date && '' === $message ) {
-				continue;
-			}
-			$key = $date . '|' . $message;
-			if ( isset( $seen[ $key ] ) ) {
-				continue;
-			}
-			$seen[ $key ] = true;
-			$mapping = $this->status_mappings->match_mapping( $message );
-			$status = (string) ( $mapping['universal_status'] ?? '' );
-			$status = DeliveryStatus::is_valid( $status ) ? $status : '';
-			$events[] = array(
-				'date' => $date,
-				'message' => $message,
-				'matched_rule' => (string) ( $mapping['external_status'] ?? '' ),
-				'universal_status' => $status,
-				'universal_status_label' => '' !== $status ? DeliveryStatus::label( $status ) : '',
-			);
-		}
-		usort( $events, static fn( array $a, array $b ): int => strcmp( (string) $b['date'], (string) $a['date'] ) );
-
-		return array_slice( $events, 0, 5 );
-	}
-
 	private function sanitize_tracking_number( string $tracking_number ): string {
 		return mb_substr( sanitize_text_field( wp_unslash( $tracking_number ) ), 0, 64, 'UTF-8' );
 	}
@@ -185,13 +164,19 @@ final class JetLogisticApiDiagnosticService {
 		return array() === $keys ? 'Пустой объект ответа.' : 'Ключи ответа: ' . implode( ', ', $keys ) . '.';
 	}
 
-	/** @param array<int,array<string,string>> $events @return array<string,string> */
-	private function event_details( array $events ): array {
+	/** @param array<int,array<string,string>> $events @param array<string,string> $current_event @return array<string,string> */
+	private function event_details( array $events, array $current_event = array() ): array {
 		$details = array();
 		foreach ( array_slice( $events, 0, 5 ) as $index => $event ) {
 			$rule = '' !== (string) ( $event['matched_rule'] ?? '' ) ? (string) $event['matched_rule'] : 'нет сопоставления';
 			$status = '' !== (string) ( $event['universal_status'] ?? '' ) ? (string) $event['universal_status'] : 'не меняется';
 			$details[ 'event_' . ( $index + 1 ) ] = trim( (string) ( $event['date'] ?? '' ) . ' ' . (string) ( $event['message'] ?? '' ) ) . ' | правило: ' . $rule . ' | статус: ' . $status;
+		}
+		if ( array() !== $current_event ) {
+			$details['current_status'] = (string) ( $current_event['message'] ?? '' );
+			$details['current_status_date'] = (string) ( $current_event['date'] ?? '' );
+			$details['current_status_mapping'] = (string) ( $current_event['matched_rule'] ?? '' );
+			$details['current_universal_status'] = (string) ( $current_event['universal_status'] ?? '' );
 		}
 
 		return $details;

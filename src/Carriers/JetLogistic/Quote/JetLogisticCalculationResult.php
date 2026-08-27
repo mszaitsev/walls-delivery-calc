@@ -18,7 +18,8 @@ final class JetLogisticCalculationResult {
 		public readonly ?int $day_from,
 		public readonly ?int $day_to,
 		public readonly string $valuta,
-		public readonly string $valuta_name
+		public readonly string $valuta_name,
+		public readonly string $currency_source = 'response'
 	) {
 	}
 }

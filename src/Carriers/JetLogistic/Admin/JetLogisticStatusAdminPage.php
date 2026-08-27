@@ -190,6 +190,10 @@ final class JetLogisticStatusAdminPage {
 			'event_3' => 'Событие 3',
 			'event_4' => 'Событие 4',
 			'event_5' => 'Событие 5',
+			'current_status' => 'Текущий статус Jet',
+			'current_status_date' => 'Дата текущего статуса',
+			'current_status_mapping' => 'Сопоставление',
+			'current_universal_status' => 'Универсальный статус',
 			default => $key,
 		};
 	}

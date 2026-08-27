@@ -12,4 +12,9 @@ final class JetLogisticStatusMapper {
 	public function map( string $message ): string {
 		return $this->repository->map( $message );
 	}
+
+	/** @return array<string,mixed> */
+	public function match_mapping( string $message ): array {
+		return $this->repository->match_mapping( $message );
+	}
 }

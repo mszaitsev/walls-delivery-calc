@@ -184,8 +184,37 @@ final class JetLogisticGeographyRepository {
 
 	/** @return array<int,array<string,mixed>> */
 	public function active_origin_options(): array {
-		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} WHERE active = 1 AND match_status = 'matched' ORDER BY country_code ASC, source_city ASC", ARRAY_A );
+		return $this->origin_options();
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function origin_options(): array {
+		if ( property_exists( $this->wpdb, 'jet_cities' ) ) {
+			$rows = array_values( array_filter( $this->wpdb->jet_cities, fn( array $row ): bool => $this->is_origin_row( $row ) ) );
+			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $a['source_city'] ?? '' ), (string) ( $b['source_city'] ?? '' ) ) ?: strcmp( (string) ( $a['source_region'] ?? '' ), (string) ( $b['source_region'] ?? '' ) ) ?: strcmp( (string) ( $a['source_identity'] ?? '' ), (string) ( $b['source_identity'] ?? '' ) ) );
+
+			return $rows;
+		}
+
+		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->table()} WHERE country_code = 'RU' AND location_id > 0 AND match_status IN ('ignored','matched') ORDER BY source_city ASC, source_region ASC, source_identity ASC", ARRAY_A );
 		return is_array( $rows ) ? $rows : array();
+	}
+
+	/** @return array<string,mixed> */
+	public function origin_by_source_identity( string $identity ): array {
+		$identity = trim( $identity );
+		if ( '' === $identity ) {
+			return array();
+		}
+		$row = $this->find_by_source_identity( $identity );
+		return array() !== $row && $this->is_origin_row( $row ) ? $row : array();
+	}
+
+	/** @param array<string,mixed> $row */
+	private function is_origin_row( array $row ): bool {
+		return 'RU' === strtoupper( (string) ( $row['country_code'] ?? '' ) )
+			&& (int) ( $row['location_id'] ?? 0 ) > 0
+			&& in_array( (string) ( $row['match_status'] ?? '' ), array( 'ignored', 'matched' ), true );
 	}
 
 	/** @return array<string,mixed> */

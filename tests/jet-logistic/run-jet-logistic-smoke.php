@@ -24,17 +24,34 @@ use WallsShop\WDC\Carriers\JetLogistic\JetLogisticCredentials;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\JetLogistic\Quote\JetLogisticQuoteResponseParser;
+use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusEventResolver;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMapper;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusMappingRepository;
 use WallsShop\WDC\Carriers\JetLogistic\Status\JetLogisticStatusService;
+use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\JetLogisticCarrier;
 use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
+use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
+use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
+use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
+use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
+use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -49,6 +66,10 @@ use WallsShop\WDC\Core\Plugin;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\PlaceRegionMatchResult;
+use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Services\RuleEngine;
+use WallsShop\WDC\Rules\Services\RuleEvaluator;
+use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentAdapter;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
@@ -305,6 +326,14 @@ if ( ! class_exists( 'wpdb' ) ) {
 				}
 				return array_values( $this->jet_overrides );
 			}
+			if ( str_contains( $query, 'wdc_delivery_services' ) ) {
+				$rows = array_values( array_filter( $this->services, static fn( array $row ): bool => 0 === (int) ( $row['deleted'] ?? 0 ) ) );
+				usort( $rows, static fn( array $a, array $b ): int => ( (int) ( $a['sort_order'] ?? 0 ) <=> (int) ( $b['sort_order'] ?? 0 ) ) ?: ( (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) ) );
+				return $rows;
+			}
+			if ( str_contains( $query, 'wdc_rules' ) || str_contains( $query, 'wdc_rule_conditions' ) || str_contains( $query, 'wdc_delivery_service_settings' ) ) {
+				return array();
+			}
 			return array_values( $this->jet_cities );
 		}
 		public function get_col( string $query ): array {
@@ -366,6 +395,8 @@ $render_notice_start = strpos( $geography_admin_source, 'private function render
 $render_embedded_source = false !== $render_embedded_start && false !== $render_notice_start ? substr( $geography_admin_source, $render_embedded_start, $render_notice_start - $render_embedded_start ) : '';
 jet_assert( str_contains( $render_embedded_source, 'admin_page( $pagination_request' ) && str_contains( $render_embedded_source, '<th class="wdc-row-number">№</th>' ) && str_contains( $render_embedded_source, 'Сопоставленный населённый пункт' ) && str_contains( $render_embedded_source, '( ( $page - 1 ) * $per_page ) + $index + 1' ), 'Jet geography admin table must use paginated rows, continuous row numbers and matched location display names.' );
 jet_assert( str_contains( $geography_admin_source, 'render_pagination' ) && str_contains( $geography_admin_source, 'jet_page' ) && str_contains( $geography_admin_source, 'jet_per_page' ) && str_contains( $geography_admin_source, 'location_display_names_for_rows' ) && str_contains( $geography_admin_source, 'find_map_by_ids( $location_ids )' ) && ! str_contains( $render_embedded_source, 'find_by_id(' ), 'Jet geography admin table must render pagination, preserve page state, batch-load display names and avoid per-row find_by_id calls.' );
+jet_assert( str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php' ), 'origin_by_source_identity' ) && str_contains( (string) file_get_contents( $root . '/src/Carriers/Runtime/JetLogisticCarrier.php' ), 'origin_by_source_identity' ), 'Jet origin resolution must use a focused RU origin contract instead of active destination rows.' );
+jet_assert( str_contains( $plugin_source, 'JetLogisticStatusEventResolver::class' ) && str_contains( $plugin_source, 'JetLogisticQuoteResponseParser::class' ) && str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Api/JetLogisticApiDiagnosticService.php' ), 'quote_parser->parse' ), 'Jet diagnostics must reuse production quote parser and shared status event resolver.' );
 jet_assert( ! str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php' ), 'return (bool) $this->wpdb->update' ), 'Jet manual override snapshot update must not cast wpdb update result to bool.' );
 foreach ( array( 'download failed', 'is empty', 'response is too large', 'returned HTML', 'upload failed', 'has no rows', 'operation completed', 'operation failed', 'component is unavailable', 'Unknown Jet Logistic admin action' ) as $english_message ) {
 	jet_assert( ! str_contains( $geography_admin_source . $status_admin_source . $delivery_admin_source . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticCitiesCsvClient.php' ) . (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyImportService.php' ), $english_message ), 'Jet admin user-facing messages must be Russian: ' . $english_message );
@@ -815,28 +846,68 @@ jet_assert( '' !== $first_import_token && '' !== $second_import_token && $first_
 
 $geo->replace_snapshot(
 	array(
-		array( 'source_identity' => 'origin', 'source_city' => 'Almaty', 'source_region' => '', 'normalized_city' => 'almaty', 'normalized_region' => '', 'country_code' => 'KZ', 'location_id' => 1, 'match_status' => 'matched', 'match_source' => 'manual', 'active' => 1 ),
+		array( 'source_identity' => 'origin', 'source_city' => 'Новосибирск', 'source_region' => 'Новосибирская Область', 'normalized_city' => 'новосибирск', 'normalized_region' => 'новосибирская', 'country_code' => 'RU', 'location_id' => 1, 'match_status' => 'ignored', 'match_source' => 'country_ru_inferred_by_region', 'active' => 0 ),
 		array( 'source_identity' => 'dest', 'source_city' => 'Astana', 'source_region' => '', 'normalized_city' => 'astana', 'normalized_region' => '', 'country_code' => 'KZ', 'location_id' => 10, 'match_status' => 'matched', 'match_source' => 'manual', 'active' => 1 ),
 		array( 'source_identity' => 'manual-target', 'source_city' => 'Manual Target', 'source_region' => '', 'normalized_city' => 'manual target', 'normalized_region' => '', 'country_code' => 'KZ', 'location_id' => 77, 'match_status' => 'matched', 'match_source' => 'manual_override', 'active' => 1 ),
 	)
 );
+jet_assert( 1 === count( $geo->origin_options() ) && 'Новосибирск' === (string) ( $geo->origin_options()[0]['source_city'] ?? '' ) && array() !== $geo->origin_by_source_identity( 'origin' ), 'Jet RU ignored geography row must be available as a configured origin.' );
+jet_assert( array() === $geo->active_for_location( 1 ), 'Jet RU origin row must not become an active RU destination mapping.' );
 
 $http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => 999, 'price_terminal' => 1000, 'price_delivery' => 500, 'price_dop' => 100, 'city_to' => 'Astana', 'city_terminal_to' => 'Karaganda', 'day_from' => 3, 'day_to' => 5, 'valuta' => 'RUB' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => 999, 'price_terminal' => 1000, 'price_delivery' => 500, 'price_dop' => 100, 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_to' => 'Astana', 'city_terminal_to' => 'Karaganda', 'day_from' => 3, 'day_to' => 5 ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $api = new JetLogisticApiClient( $http, $settings, $credentials );
 $carrier = new JetLogisticCarrier( $settings, $api, new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
+jet_assert( ! $carrier->supports_country( 'RU' ), 'Jet carrier must keep RU disabled as a destination country.' );
 $package = Package::from_items( array( new PackageItem( 'A', 'Товар', 1, Money::from_rubles( 21000 ), Money::from_rubles( 19500 ), 2000, 100, 50, 40 ) ), 0, Money::from_rubles( 19500 ), Money::from_rubles( 19500 ) );
 $quote = $carrier->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'location_id' => 10 ) ) );
 jet_assert( $quote->success && 2 === count( $quote->rates ) && 1 === count( $http->requests ), 'Jet quote must use one API call and return two rates.' );
 jet_assert( 110000 === $quote->rates[0]->price->get_kopecks() && 160000 === $quote->rates[1]->price->get_kopecks(), 'Jet rates must ignore pickup price_zabor and calculate terminal/delivery/dop sums.' );
+jet_assert( 'Новосибирск' === (string) $http->requests[0]['payload']['cityfrom'], 'Jet quote must send configured RU Jet source city as cityfrom.' );
 jet_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && false === $quote->rates[0]->requires_pickup_point, 'Jet pickup rate must not require a concrete pickup point.' );
 jet_assert( str_contains( $quote->rates[0]->title, 'Karaganda' ) && str_contains( $quote->rates[0]->comments[0] ?? '', 'Karaganda' ), 'Jet non-local terminal city must be in pickup title and comment.' );
 jet_assert( '[redacted]' === (string) ( $quote->raw_reference['jet_request']['access_token'] ?? '' ) && 'jet-test-token' === (string) $http->requests[0]['payload']['access_token'], 'Jet token must be sent to API but redacted from diagnostics.' );
 jet_assert( ! str_contains( (string) $http->requests[0]['url'], 'jet-test-token' ) && ! str_contains( (string) $http->requests[0]['url'], 'access_token' ), 'Jet access_token must not be sent in the API URL.' );
 jet_assert( 19500 === (int) $http->requests[0]['payload']['cost'] && 0 === (int) $http->requests[0]['payload']['dops']['D_SDOC'], 'Jet cost and D_SDOC must use discounted package goods cost below threshold.' );
+
+$GLOBALS['wpdb']->countries[] = array( 'service_id' => 501, 'country_code' => 'KZ' );
+$GLOBALS['wpdb']->countries[] = array( 'service_id' => 501, 'country_code' => 'BY' );
+$service_repo = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$country_repo = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$service_manager = new DeliveryServiceManager( $service_repo, $country_repo, new RuleRepository( $GLOBALS['wpdb'] ), ( new ReflectionClass( RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor(), new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ) );
+$jet_service = $service_repo->find_by_service_key( JetLogisticSettings::SERVICE_KEY );
+jet_assert( $jet_service instanceof DeliveryService && $service_manager->service_available_for_country( $jet_service, 'KZ' ) && $service_manager->service_available_for_country( $jet_service, 'BY' ) && ! $service_manager->service_available_for_country( $jet_service, 'RU' ), 'Jet service availability must allow BY/KZ and keep RU destination disabled.' );
+$orchestrator_http = new JetFakeHttp(
+	array(
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Astana', 'city_to' => 'Astana', 'day_from' => '', 'day_to' => '' ) ), JSON_UNESCAPED_UNICODE ) ),
+	)
+);
+$orchestrator_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $orchestrator_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
+$carrier_registry = new CarrierRegistry();
+$carrier_registry->register( $orchestrator_carrier );
+$formatter = new DeliveryDateFormatter();
+$core_settings = new SettingsRepository();
+$core_settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, 0 );
+$timezone = new TimezoneService();
+$calendar = new CalendarService( ( new ReflectionClass( \WallsShop\WDC\Calendar\Storage\CalendarRepository::class ) )->newInstanceWithoutConstructor(), new \WallsShop\WDC\Calendar\Services\YearGenerator(), $core_settings, $timezone );
+$orchestrator = new CheckoutOrchestrator(
+	$carrier_registry,
+	new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+	new RateSorter(),
+	new FallbackRateFactory(),
+	new CarrierExecutionGuard( new CheckoutLogger() ),
+	new CheckoutLogger(),
+	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	null,
+	new DeliveryServiceRegistry( $service_repo, $carrier_registry ),
+	$service_manager
+);
+$orchestrator_rates = $orchestrator->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 10 ) ) );
+$orchestrator_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_rates );
+jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_rate_ids, true ) && 1 === count( $orchestrator_http->requests ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ destination with one calculator call.' );
 
 $payload = ( new JetLogisticQuoteRequestBuilder( $credentials ) )->build(
 	new QuoteRequest( 'KZ', new Address( country_code: 'KZ' ), Package::from_items( array( new PackageItem( 'B', 'Товар', 1, Money::from_rubles( 25000 ), Money::from_rubles( 20000 ), 1000, 10, 10, 10 ) ), 0, Money::from_rubles( 20000 ), Money::from_rubles( 20000 ) ), 'card', Money::from_rubles( 20000 ), '2026-07-28' ),
@@ -852,6 +923,24 @@ $threshold_payload = ( new JetLogisticQuoteRequestBuilder( $credentials ) )->bui
 jet_assert( 25000 === (int) $threshold_payload['cost'] && 1 === (int) $threshold_payload['dops']['D_SDOC'], 'Jet D_SDOC must stay enabled above threshold using discounted package total.' );
 $numeric_string_result = ( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '999.50', 'price_terminal' => '1000', 'price_delivery' => 500, 'price_dop' => '100', 'city_to' => 'Астана', 'city_terminal_to' => 'Астана', 'valuta' => 'RUB' ) );
 jet_assert( 1000 === $numeric_string_result->price_terminal && 500 === $numeric_string_result->price_delivery && 100 === $numeric_string_result->price_dop, 'Jet quote parser must accept numeric strings from the real API shape.' );
+$real_currencyless_result = ( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'day_from' => 2, 'day_to' => 4 ) );
+jet_assert( 'RUB' === $real_currencyless_result->valuta && 'RUB' === $real_currencyless_result->valuta_name && 'profile' === $real_currencyless_result->currency_source, 'Jet quote parser must accept real calc_transport response shape without currency fields as RUB from Jet profile.' );
+$explicit_rub_result = ( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'РУБ' ) );
+jet_assert( 'response' === $explicit_rub_result->currency_source, 'Jet quote parser must accept explicit RUB/РУБ currency from API response.' );
+$non_rub_thrown = false;
+try {
+	( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'KZT' ) );
+} catch ( JetLogisticApiException $exception ) {
+	$non_rub_thrown = 'jet_currency_not_rub' === $exception->error_code();
+}
+jet_assert( $non_rub_thrown, 'Jet quote parser must fail closed when API explicitly returns a non-RUB currency.' );
+$mixed_currency_thrown = false;
+try {
+	( new JetLogisticQuoteResponseParser() )->parse( array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '500', 'price_dop' => '0', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана', 'valuta' => 'KZT', 'valuta_name' => 'RUB' ) );
+} catch ( JetLogisticApiException $exception ) {
+	$mixed_currency_thrown = 'jet_currency_not_rub' === $exception->error_code();
+}
+jet_assert( $mixed_currency_thrown, 'Jet quote parser must fail closed when any explicit API currency field is non-RUB.' );
 foreach ( array( 'garbage', -1, '' ) as $bad_price ) {
 	$thrown = false;
 	try {
@@ -911,14 +1000,36 @@ $status_admin_html = (string) ob_get_clean();
 jet_assert( str_contains( $status_admin_html, 'Фраза в статусе Jet' ) && str_contains( $status_admin_html, 'Универсальный статус' ) && str_contains( $status_admin_html, 'Действия' ) && str_contains( $status_admin_html, 'Сохранить' ) && str_contains( $status_admin_html, 'Удалить' ) && ! str_contains( $status_admin_html, 'Активно' ) && ! str_contains( $status_admin_html, 'Последнее событие' ) && ! str_contains( $status_admin_html, 'Количество' ) && ! str_contains( $status_admin_html, 'name="active"' ), 'Jet status admin HTML must expose phrase CRUD controls and remove active/last_seen/occurrence_count UI.' );
 jet_assert( str_contains( $status_admin_html, 'check_jet_tracking' ) && str_contains( $status_admin_html, 'Номер груза Jet' ) && str_contains( $status_admin_html, 'Проверить статус' ), 'Jet status admin HTML must expose safe tracking diagnostics.' );
 
+$short_warehouse_mapping = $status_repo->find_by_normalized_status( 'склад' );
+if ( array() !== $short_warehouse_mapping ) {
+	$status_repo->delete_mapping( (int) $short_warehouse_mapping['id'] );
+}
+$status_repo->create_mapping( 'Доставка груза на склад приемки', DeliveryStatus::IN_TRANSIT );
+$status_repo->create_mapping( 'Отправка груза со склада приемки', DeliveryStatus::IN_TRANSIT );
+
 $status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-07-28 10:00:00', 'message' => 'Неизвестно' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
 $status_service = new JetLogisticStatusService( new JetLogisticApiClient( $status_http, $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) );
 $status = $status_service->update( array( 'tracking_number' => 'JET-1', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
-jet_assert( DeliveryStatus::IN_TRANSIT === $status['shipment_patch']['universal_status_code'] && 2 === count( $status['shipment_patch']['status_events'] ), 'Unknown latest Jet status must preserve current universal status and deduplicate compact events.' );
+jet_assert( DeliveryStatus::DELIVERED === $status['shipment_patch']['universal_status_code'] && 'Груз выдан' === (string) $status['shipment_patch']['carrier_status_message'] && 2 === count( $status['shipment_patch']['status_events'] ), 'Unknown latest Jet log line must not override the latest mapped operational status event.' );
 jet_assert( 'jet-test-token' === (string) ( $status_http->requests[0]['payload']['access_token'] ?? '' ) && ! str_contains( (string) $status_http->requests[0]['url'], 'jet-test-token' ), 'Jet tracking API must send access_token in request body and not in URL.' );
+$unknown_only_status = ( new JetLogisticStatusService( new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-07-28 10:00:00', 'message' => 'Передача документов оператору' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-UNKNOWN', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
+jet_assert( DeliveryStatus::IN_TRANSIT === $unknown_only_status['shipment_patch']['universal_status_code'] && '' === (string) $unknown_only_status['shipment_patch']['carrier_status_message'], 'Jet unknown-only status response must preserve current universal status and not choose informational text as current status.' );
 $delivered_status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-06-26 00:00:00', 'message' => 'Груз выдан : 26 июня 2026 г.' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
 $delivered_status = ( new JetLogisticStatusService( new JetLogisticApiClient( $delivered_status_http, $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-2', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
 jet_assert( DeliveryStatus::DELIVERED === $delivered_status['shipment_patch']['universal_status_code'] && 'Груз выдан : 26 июня 2026 г.' === (string) $delivered_status['shipment_patch']['carrier_status_message'], 'Jet status service must map substring only from latest message while preserving the full carrier status message.' );
+$chronology_status = ( new JetLogisticStatusService( new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '31.08.2026', 'message' => 'Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)' ), array( 'date' => '01.09.2026', 'message' => 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-CHRONO', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
+jet_assert( DeliveryStatus::READY_FOR_PICKUP === $chronology_status['shipment_patch']['universal_status_code'] && '01.09.2026' === (string) $chronology_status['shipment_patch']['carrier_status_date'], 'Jet status service must parse dd.mm.YYYY dates chronologically instead of sorting date strings.' );
+$expected_arrival_status = ( new JetLogisticStatusService( new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '26.08.2026', 'message' => 'Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)' ), array( 'date' => '27.08.2026', 'message' => 'Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)' ), array( 'date' => '', 'message' => 'Ожидаемая дата прибытия на склад выдачи Астана-(Столица Республики Казахстан) : 29 августа 2026 г.' ), array( 'date' => '', 'message' => 'Стоимость транспортно-экспедиционных услуг : 8 744,00 КЗТ' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-EXPECTED', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
+jet_assert( DeliveryStatus::IN_TRANSIT === $expected_arrival_status['shipment_patch']['universal_status_code'] && str_contains( (string) $expected_arrival_status['shipment_patch']['carrier_status_message'], 'Отправка груза со склада приемки' ) && '27.08.2026' === (string) $expected_arrival_status['shipment_patch']['carrier_status_date'], 'Jet expected-arrival and cost informational lines must not become current status events.' );
+$production_text_status = ( new JetLogisticStatusService( new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => "Код груза 007483827165, вид груза ШНУРЫ\n\n26.08.2026:\nДоставка груза на склад приемки-Новосибирск-(Новосибирская Область)\n\n27.08.2026:\nОтправка груза со склада приемки-Новосибирск-(Новосибирская Область)\n\nОжидаемая дата прибытия на склад выдачи Астана-(Столица Республики Казахстан) : 29 августа 2026 г.\n\nСтоимость транспортно-экспедиционных услуг : 8 744,00 КЗТ" ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-TEXT', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
+jet_assert( DeliveryStatus::IN_TRANSIT === $production_text_status['shipment_patch']['universal_status_code'] && str_contains( (string) $production_text_status['shipment_patch']['carrier_status_message'], 'Отправка груза со склада приемки' ) && '27.08.2026' === (string) $production_text_status['shipment_patch']['carrier_status_date'], 'Jet status API client must parse production text logs into dated events before current status resolution.' );
+$many_logs = array();
+for ( $i = 0; $i < 9; ++$i ) {
+	$many_logs[] = array( 'date' => '2026-08-' . str_pad( (string) ( 10 + $i ), 2, '0', STR_PAD_LEFT ), 'message' => 'Информационная строка ' . $i );
+}
+$many_logs[] = array( 'date' => '2026-09-01', 'message' => 'Груз выдан : 1 сентября 2026 г.' );
+$many_status = ( new JetLogisticStatusService( new JetLogisticApiClient( new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => $many_logs ) ), JSON_UNESCAPED_UNICODE ) ) ) ), $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) ) )->update( array( 'tracking_number' => 'JET-MANY', 'universal_status_code' => DeliveryStatus::IN_TRANSIT ) );
+jet_assert( DeliveryStatus::DELIVERED === $many_status['shipment_patch']['universal_status_code'] && count( $many_status['shipment_patch']['status_events'] ) <= 5, 'Jet current status must be resolved across all logs before storing at most five compact events.' );
 
 $diagnostic_http = new JetFakeHttp(
 	array(

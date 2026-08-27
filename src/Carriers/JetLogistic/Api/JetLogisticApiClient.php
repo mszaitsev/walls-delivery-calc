@@ -58,8 +58,35 @@ final class JetLogisticApiClient {
 			throw new JetLogisticApiException( 'Jet Logistic API returned an error.', array( 'error_code' => 'jet_api_error', 'endpoint' => $method, 'method' => 'POST', 'http_status' => (int) $response['status'], 'api_error' => $this->safe_error( $decoded['error'] ?? $decoded['message'] ?? '' ) ) );
 		}
 		$result = $decoded['result'] ?? $decoded;
+		if ( self::METHOD_STATUS === $method && is_string( $result ) ) {
+			return array( 'logs' => $this->logs_from_text( $result ) );
+		}
 
 		return is_array( $result ) ? $result : array();
+	}
+
+	/** @return array<int,array{date:string,message:string}> */
+	private function logs_from_text( string $body ): array {
+		$logs = array();
+		$current_date = '';
+		foreach ( preg_split( '/\R/u', $body ) ?: array() as $line ) {
+			$line = trim( (string) $line );
+			if ( '' === $line ) {
+				continue;
+			}
+			if ( preg_match( '/^(\d{2}\.\d{2}\.\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?|\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)\s*:?\s*(.*)$/u', $line, $matches ) ) {
+				$current_date = trim( $matches[1] );
+				$message = trim( $matches[2] );
+				if ( '' === $message ) {
+					continue;
+				}
+				$logs[] = array( 'date' => $current_date, 'message' => $message );
+				continue;
+			}
+			$logs[] = array( 'date' => $current_date, 'message' => $line );
+		}
+
+		return $logs;
 	}
 
 	private function http_error_code( int $status ): string {
