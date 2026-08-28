@@ -61,6 +61,9 @@ return array(
 
 	'jet-logistic.foundation' => array( 'path' => 'tests/jet-logistic/run-jet-logistic-smoke.php', 'groups' => array( 'jet-logistic' ) ),
 	'pek.foundation' => array( 'path' => 'tests/pek/run-pek-foundation-smoke.php', 'groups' => array( 'pek' ) ),
+	'ozon-delivery.foundation' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-foundation-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
+	'ozon-delivery.authorization' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-authorization-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
+	'ozon-delivery.admin' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-admin-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'pek.admin-routing' => array( 'path' => 'tests/pek/run-pek-admin-routing-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.admin-ui' => array( 'path' => 'tests/pek/run-pek-admin-ui-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.warehouse-datetime' => array( 'path' => 'tests/pek/run-pek-warehouse-datetime-smoke.php', 'groups' => array( 'pek' ) ),

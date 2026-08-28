@@ -45,6 +45,17 @@ function plugin_architecture_source( string $relative_path ): string {
 	return (string) file_get_contents( $path );
 }
 
+$ozon_plugin_source = plugin_architecture_source( 'src/Core/Plugin.php' );
+$ozon_admin_source = plugin_architecture_source( 'src/Carriers/OzonDelivery/Admin/OzonDeliveryAdminPage.php' );
+$ozon_transport_source = plugin_architecture_source( 'src/Carriers/OzonDelivery/Api/WpOzonDeliveryHttpClient.php' );
+$ozon_cache_source = plugin_architecture_source( 'src/Carriers/OzonDelivery/Api/OzonDeliveryTokenCache.php' );
+plugin_architecture_assert( str_contains( $ozon_plugin_source, 'OzonDeliveryAdminPage::class' ) && str_contains( $ozon_plugin_source, 'OzonDeliveryAccessTokenService::class' ) && str_contains( $ozon_plugin_source, 'OzonDeliveryTokenCache::class' ), 'Ozon production wiring must remain carrier-owned in Plugin.php.' );
+plugin_architecture_assert( str_contains( $ozon_cache_source, 'EncryptionService' ) && str_contains( $ozon_cache_source, 'encrypted_access_token' ) && ! str_contains( $ozon_cache_source, 'refresh_token' ), 'Ozon token cache must be encrypted and must not retain refresh tokens.' );
+plugin_architecture_assert( ! str_contains( $ozon_plugin_source . $ozon_cache_source, "'grant_type' => 'refresh_token'" ), 'Ozon foundation must not add refresh flow.' );
+plugin_architecture_assert( ! str_contains( plugin_architecture_source( 'src/Checkout/Runtime/CheckoutOrchestrator.php' ), 'Ozon' ) && ! str_contains( plugin_architecture_source( 'src/Carriers/Registry/CarrierRegistry.php' ), 'Ozon' ), 'Ozon foundation must not activate checkout or carrier registry runtime.' );
+plugin_architecture_assert( ! str_contains( $ozon_admin_source, 'wp_remote_request' ) && ! str_contains( $ozon_admin_source, 'Redirect URI' ), 'Ozon admin must not own transport or authorization-code flow.' );
+plugin_architecture_assert( str_contains( $ozon_transport_source, 'MAX_REDIRECTS = 3' ) && str_contains( $ozon_transport_source, "'redirection' => 0" ), 'Ozon transport must own bounded DDoS redirect handling.' );
+
 /**
  * @return array<int,string>
  */

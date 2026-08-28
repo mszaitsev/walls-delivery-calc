@@ -2,6 +2,10 @@
 
 Historical reference. Not source of truth.
 
+## Implemented Ozon Delivery foundation
+
+Version 0.138.2 reserves carrier and service key `ozon_delivery` for Ozon Доставка. It is a disabled builtin DeliveryService with generic service tabs and carrier-specific `API Ozon` credentials/diagnostics. The code-owned private-application scope is `delivery-api.all`. Controlled live verification observed `access_token`, `expires_in`, `refresh_token`, `scope`, and `token_type`; `expires_in` behaved as an absolute Unix timestamp for that application, so access tokens may be cached only as encrypted transient data until the known expiry with a 60-second margin. This is not treated as a universal public Ozon token contract. Refresh tokens are ignored and never stored. Diagnostics always obtain a fresh OAuth token and retain only bounded safe metadata. No checkout, pickup-point, shipment, status, cancellation, document, or multi-box capability is included. Sender handoff is self-drop-off only.
+
 This file preserves the old product tech spec for audit and requirement archaeology. Canonical architecture, workflow, testing, and subsystem documentation lives under `docs/README.md`. Internal paths, roadmap sections, external links, version references, and document structure below may be historical. When this reference conflicts with production code or canonical docs, use production code and canonical docs.
 
 ---

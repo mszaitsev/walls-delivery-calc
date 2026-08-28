@@ -25,6 +25,8 @@ use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryAdminPage;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\Admin\PekStatusAdminPage;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunnerService;
@@ -154,6 +156,7 @@ final class DeliveryServicesAdminPage {
 		private ?JetLogisticStatusAdminPage $jet_logistic_statuses = null,
 		private ?PekAdminPage $pek_admin = null,
 		private ?PekStatusAdminPage $pek_statuses = null,
+		private ?OzonDeliveryAdminPage $ozon_delivery_admin = null,
 	) {
 	}
 
@@ -753,6 +756,11 @@ final class DeliveryServicesAdminPage {
 		if ( PekAdminPage::supports_action( $action ) ) {
 			$this->handle_pek_action( $action );
 			return;
+		}
+		if ( OzonDeliveryAdminPage::supports_action( $action ) && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
+			$this->ozon_delivery_admin->handle_action( $action, $_POST );
+			wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY . '&tab=ozon_api' ) );
+			exit;
 		}
 		if ( in_array( $action, array(
 				'save_global_delivery_settings',
@@ -1681,6 +1689,9 @@ final class DeliveryServicesAdminPage {
 			$tabs[ PekAdminPage::TAB_KEY ] = 'ПЭК';
 			$tabs[ PekStatusAdminPage::TAB_KEY ] = 'Статусы ПЭК';
 		}
+		if ( OzonDeliverySettings::SERVICE_KEY === $service->service_key ) {
+			$tabs['ozon_api'] = 'API Ozon';
+		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
@@ -1714,6 +1725,7 @@ final class DeliveryServicesAdminPage {
 			'jet_statuses' => $this->render_jet_statuses_tab( $service ),
 			PekAdminPage::TAB_KEY => $this->render_pek_settings_tab( $service ),
 			PekStatusAdminPage::TAB_KEY => $this->render_pek_statuses_tab( $service ),
+			'ozon_api' => $this->render_ozon_api_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
 		?>
@@ -3605,6 +3617,14 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$this->pek_statuses->render_embedded( $service );
+	}
+
+	private function render_ozon_api_tab( DeliveryService $service ): void {
+		if ( OzonDeliverySettings::SERVICE_KEY !== $service->service_key || ! $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
+			return;
+		}
+
+		$this->ozon_delivery_admin->render();
 	}
 
 	private function render_diagnostics_tab( DeliveryService $service ): void {

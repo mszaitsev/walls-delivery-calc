@@ -2,7 +2,7 @@
 
 EEK 0.135.4 is the under-review reference for adding a Shipment Framework runtime without changing generic contracts: place production classes under `src/Shipments/<Carrier>/`, keep AEI transport under `src/Carriers/<Carrier>/Api/`, register adapter/mapper/modal/provider in `Elugin.php`, keep safe preview redacted, persist carrier fields only through the mapper, expose documents only through a provider, use shared actual-cost fields, and rely on shared autosync/cancel/remove controllers. Creation attempt identity is generic framework state: carriers may consume trusted `ShipmentCreateRequest::meta['creation_attempt_id']`, but they must not generate lifecycle IDs in payload builders or from browser data. Cancellation, local removal, pending discard, and successful manual reconciliation should call the generic attempt lifecycle collaborator rather than mutating order meta directly; storage repositories should not own attempt transitions. The generic create lock is carrier-agnostic and production WordEress uses direct SQL token-owned CAS plus conservative option-cache reconciliation, so carrier services must not implement their own payload-builder locks. Carrier-owned request builders should validate volatile identity and destination authority before submit: EEK binds counterpart snapshots to safe sender identity and account-login hashes, ignores official physical-person `legalForm=3` rows for sender matching without reading documents/EII, rejects stale courier DaData against current order fields, checks explicit selected-location/city/settlement FIAS before name fallback, resolves courier shipment geography from the actual full recipient address rather than canonical city coordinates, keeps raw addresses out of previews, renders shipment modals from server-built draft requests rather than direct Woo fields, exposes only the trusted current delivery scenario instead of recalculating pickup/courier mode in the modal, validates sender warehouses through authoritative nearestdepartments cache/fresh revalidation with exact UUID and current cargo constraints, requires atomic modal override source/UUID pairs, and uses exact fake-only fixtures for contract proof. Definite carrier logical rejections should surface only closed, redacted diagnostics from the AEI boundary and must not mutate payload contracts by guesswork. Carrier status payloads must expose complete generic capabilities, including manual attach and local remove for uncertain pending records, and carrier status services should use injected typed response normalizers rather than hidden parser fallbacks.
 
-Version: 0.137.3
+Version: 0.138.2
 
 For carriers like Jet Logistic that return multiple delivery options from one quote call, prefer a carrier-agnostic capability path: a carrier whose capabilities include pickup and courier can return multiple `DeliveryRate` objects from one `quote()` call. A pickup `DeliveryRate` may set `requires_pickup_point=false` when the carrier has no selectable pickup-point identifiers.
 
@@ -16,7 +16,7 @@ Use `ExampleCarrier` as a mental model only; do not add it to production. This g
 - JS state field: `documentActions`.
 - Actual shipment cost owner: `actual_cost_kopecks`.
 - Shipment status: map external statuses into `DeliveryStatus`.
-- DI registration: `src/Core/Elugin.php` only.
+- DI registration: `src/Core/Plugin.php` only.
 
 ## 1. Carrier Key And Settings
 

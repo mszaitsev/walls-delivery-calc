@@ -1,0 +1,15 @@
+<?php
+declare(strict_types=1);
+namespace WallsShop\WDC\Carriers\OzonDelivery\Api;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+defined( 'ABSPATH' ) || exit;
+final class OzonDeliveryConnectionDiagnosticService {
+	public function __construct( private OzonDeliveryCredentials $credentials, private OzonDeliveryAccessTokenService $tokens, private OzonDeliverySettings $settings ) {}
+	/** @return array<string,mixed> */ public function run(): array {
+		$result = array( 'success' => false, 'checked_at' => gmdate( 'c' ), 'credentials_present' => $this->credentials->is_complete(), 'oauth_token_received' => false, 'application_api_checked' => false, 'operation' => 'oauth_token', 'http_status' => 0, 'error_code' => '', 'token_scope' => array(), 'token_type' => '', 'token_expiry_known' => false, 'token_expires_at' => '', 'token_source' => '', 'token_cached' => false, 'message' => 'Не заполнены Client ID или Client Secret.' );
+		if ( ! $result['credentials_present'] ) { $this->settings->save_last_diagnostic( $result ); return $result; }
+		try { $token = $this->tokens->obtain_fresh(); $result['success'] = true; $result['oauth_token_received'] = true; $result['http_status'] = 200; $result['token_scope'] = $token->scope; $result['token_type'] = $token->token_type; $result['token_expiry_known'] = null !== $token->expires_at; $result['token_expires_at'] = null === $token->expires_at ? '' : gmdate( 'c', $token->expires_at ); $result['token_source'] = 'fresh'; $result['token_cached'] = $this->tokens->token_is_cached( $token ); $result['message'] = 'Авторизация Ozon Delivery выполнена успешно. Прикладные методы API на этом этапе не проверяются.'; } catch ( OzonDeliveryApiException $e ) { $result['operation'] = $e->operation; $result['http_status'] = $e->http_status; $result['error_code'] = $e->safe_code; $result['message'] = $e->getMessage(); foreach ( $e->metadata as $key => $value ) { $result[ $key ] = $value; } }
+		$this->settings->save_last_diagnostic( $result ); return $result;
+	}
+}

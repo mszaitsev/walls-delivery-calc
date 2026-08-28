@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Infrastructure\Settings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
@@ -122,6 +123,7 @@ final class SettingsRepository {
 			CdekSettings::defaults(),
 			DpdSettings::defaults(),
 			PekSettings::defaults(),
+			OzonDeliverySettings::defaults(),
 			YandexDeliverySettings::defaults()
 		);
 	}
