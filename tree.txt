@@ -20,6 +20,7 @@ C:.
 |   |   |   rules-admin.css
 |   |   |   rules-admin.js
 |   |   |   russian-post-pickup-import.js
+|   |   |   ozon-delivery-pickup-sync.js
 |   |   |   shipment-cost-analytics.js
 |   |   |   shipments-admin.css
 |   |   |   shipments-admin.js
@@ -128,6 +129,7 @@ C:.
 |           0050_repair_pek_foundation_schema.php
 |           0051_migrate_pek_mapping_precision_column.php
 |           0052_create_ozon_delivery_pickup_catalog.php
+|           0053_add_ozon_delivery_pickup_progress_timestamp.php
 |
 +---docs
 |   |   README.md
@@ -1068,6 +1070,7 @@ C:.
     |       run-ozon-delivery-pickup-admin-smoke.php
     |       run-ozon-delivery-pickup-import-smoke.php
     |       run-ozon-delivery-pickup-scheduler-smoke.php
+    |       run-ozon-delivery-pickup-progress-smoke.php
     |
     +---packaging
     |       run-packaging-smoke.php

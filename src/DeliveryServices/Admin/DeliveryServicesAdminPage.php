@@ -192,6 +192,7 @@ final class DeliveryServicesAdminPage {
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_pipeline_v2_resume', array( $this, 'ajax_yandex_delivery_geo_pipeline_v2_resume' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_pipeline_v2_reset', array( $this, 'ajax_yandex_delivery_geo_pipeline_v2_reset' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_source_station', array( $this, 'ajax_yandex_delivery_source_station' ) );
+		add_action( 'wp_ajax_wdc_ozon_delivery_pickup_status', array( $this, 'ajax_ozon_delivery_pickup_status' ) );
 	}
 
 	public function enqueue_assets(): void {
@@ -257,7 +258,13 @@ final class DeliveryServicesAdminPage {
 				)
 			);
 		}
+		if ( self::MENU_SLUG === $page && OzonDeliverySettings::SERVICE_KEY === $service && 'ozon_pickup' === $tab && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
+			wp_enqueue_script( 'wdc-ozon-delivery-pickup-progress', $this->asset_url( 'assets/admin/ozon-delivery-pickup-sync.js' ), array(), $this->asset_version(), true );
+			wp_localize_script( 'wdc-ozon-delivery-pickup-progress', 'wdcOzonDeliveryPickupProgress', array( 'ajaxUrl' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'wdc_ozon_delivery_pickup_status' ), 'pollingIntervalMs' => 3000, 'stallAfterSeconds' => 60, 'initialState' => $this->ozon_delivery_admin->pickup_status() ) );
+		}
 	}
+
+	public function ajax_ozon_delivery_pickup_status(): void { if ( ! current_user_can( AdminMenu::CAPABILITY ) ) { wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 ); } if ( ! check_ajax_referer( 'wdc_ozon_delivery_pickup_status', 'nonce', false ) ) { wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 ); } wp_send_json_success( $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ? $this->ozon_delivery_admin->pickup_status() : array( 'state' => 'idle', 'is_running' => false, 'is_terminal' => true ) ); }
 
 	public function add_menu_page(): void {
 		add_submenu_page(
