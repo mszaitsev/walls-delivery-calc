@@ -4,7 +4,7 @@ Historical reference. Not source of truth.
 
 ## Implemented Ozon Delivery foundation
 
-Version 0.139.2 keeps the local Ozon pickup catalog and safe live import visibility. `ПВЗ Ozon` polls only local generation counters and activity time while state is `building`; it neither calls Ozon nor runs queue steps. The official list response has no confirmed total, so the UI shows indeterminate progress and no percentage. A 60-second no-progress warning is UI-only; only the background importer can activate or fail a generation. Pickup DDL belongs only to migrations `0052` and `0053`; runtime repository classes do not create or alter schema.
+Version 0.139.3 keeps the local Ozon pickup catalog and safe live import visibility. `ПВЗ Ozon` polls only local generation counters and activity time while state is `building`; it neither calls Ozon nor runs queue steps. The official list response has no confirmed total, so the UI shows indeterminate progress and no percentage. A 60-second no-progress warning is UI-only; only the background importer can activate or fail a generation. Pickup DDL belongs only to migrations `0052` and `0053`; runtime repository classes do not create or alter schema. Catalog activation verifies SQL return values, conditionally transitions `ready` to `active`, and confirms one target active generation before commit.
 
 This file preserves the old product tech spec for audit and requirement archaeology. Canonical architecture, workflow, testing, and subsystem documentation lives under `docs/README.md`. Internal paths, roadmap sections, external links, version references, and document structure below may be historical. When this reference conflicts with production code or canonical docs, use production code and canonical docs.
 
