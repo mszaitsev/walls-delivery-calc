@@ -759,7 +759,7 @@ final class DeliveryServicesAdminPage {
 		}
 		if ( OzonDeliveryAdminPage::supports_action( $action ) && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
 			$this->ozon_delivery_admin->handle_action( $action, $_POST );
-			wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY ) );
+			wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY . '&tab=ozon_api' ) );
 			exit;
 		}
 		if ( in_array( $action, array(
@@ -1550,10 +1550,7 @@ final class DeliveryServicesAdminPage {
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Службы доставки', 'walls-delivery-calc' ); ?></h1>
-			<?php if ( OzonDeliverySettings::SERVICE_KEY === $service_key && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) : ?>
-				<?php $this->ozon_delivery_admin->render(); ?>
-				<p><a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG ) ); ?>"><?php echo esc_html__( 'Назад к списку', 'walls-delivery-calc' ); ?></a></p>
-			<?php elseif ( $service instanceof DeliveryService ) : ?>
+			<?php if ( $service instanceof DeliveryService ) : ?>
 				<?php $this->render_edit_page( $service ); ?>
 			<?php else : ?>
 				<?php $this->render_table(); ?>
@@ -1566,7 +1563,6 @@ final class DeliveryServicesAdminPage {
 	private function render_table(): void {
 		$services = $this->services->list_active();
 		?>
-		<p><a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY ) ); ?>"><?php echo esc_html__( 'Ozon Доставка', 'walls-delivery-calc' ); ?></a></p>
 		<form method="post" style="margin: 16px 0;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="wdc_delivery_services_action" value="reorder">
@@ -1693,6 +1689,9 @@ final class DeliveryServicesAdminPage {
 			$tabs[ PekAdminPage::TAB_KEY ] = 'ПЭК';
 			$tabs[ PekStatusAdminPage::TAB_KEY ] = 'Статусы ПЭК';
 		}
+		if ( OzonDeliverySettings::SERVICE_KEY === $service->service_key ) {
+			$tabs['ozon_api'] = 'API Ozon';
+		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
@@ -1726,6 +1725,7 @@ final class DeliveryServicesAdminPage {
 			'jet_statuses' => $this->render_jet_statuses_tab( $service ),
 			PekAdminPage::TAB_KEY => $this->render_pek_settings_tab( $service ),
 			PekStatusAdminPage::TAB_KEY => $this->render_pek_statuses_tab( $service ),
+			'ozon_api' => $this->render_ozon_api_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
 		?>
@@ -3617,6 +3617,14 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$this->pek_statuses->render_embedded( $service );
+	}
+
+	private function render_ozon_api_tab( DeliveryService $service ): void {
+		if ( OzonDeliverySettings::SERVICE_KEY !== $service->service_key || ! $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
+			return;
+		}
+
+		$this->ozon_delivery_admin->render();
 	}
 
 	private function render_diagnostics_tab( DeliveryService $service ): void {

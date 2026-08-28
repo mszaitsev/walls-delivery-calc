@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
@@ -117,6 +118,7 @@ final class DeliveryServiceRepository {
 				PekSettings::SERVICE_KEY,
 				JetLogisticSettings::SERVICE_KEY,
 				YandexDeliverySettings::SERVICE_KEY,
+				OzonDeliverySettings::SERVICE_KEY,
 			),
 			true
 		);
@@ -442,6 +444,19 @@ final class DeliveryServiceRepository {
 		$created = $this->find_by_service_key( PekSettings::SERVICE_KEY );
 
 		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => PekSettings::SERVICE_KEY, 'carrier_key' => PekSettings::CARRIER_KEY, 'title' => PekSettings::PUBLIC_TITLE, 'enabled' => 0 ) );
+	}
+
+	public function ozon_delivery_service_exists(): bool {
+		return $this->find_any_by_service_key( OzonDeliverySettings::SERVICE_KEY ) instanceof DeliveryService;
+	}
+
+	public function ensure_ozon_delivery_service(): DeliveryService {
+		return $this->ensure_builtin_service(
+			OzonDeliverySettings::SERVICE_KEY,
+			OzonDeliverySettings::CARRIER_KEY,
+			OzonDeliverySettings::TITLE,
+			70
+		);
 	}
 
 	public function pek_service_exists(): bool {

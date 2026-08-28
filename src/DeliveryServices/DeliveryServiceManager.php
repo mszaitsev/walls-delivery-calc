@@ -50,6 +50,11 @@ final class DeliveryServiceManager {
 		if ( ! $pek_exists && null !== $pek->id ) {
 			$this->countries->replace_countries( (int) $pek->id, PekSettings::INITIAL_COUNTRIES );
 		}
+		$ozon_exists = $this->services->ozon_delivery_service_exists();
+		$ozon = $this->services->ensure_ozon_delivery_service();
+		if ( ! $ozon_exists && null !== $ozon->id ) {
+			$this->countries->replace_countries( (int) $ozon->id, array( 'RU' ) );
+		}
 	}
 
 	public function service_available_for_country( DeliveryService $service, string $country_code ): bool {
