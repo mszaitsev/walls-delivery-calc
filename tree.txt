@@ -127,6 +127,7 @@ C:.
 |           0049_create_pek_terminals.php
 |           0050_repair_pek_foundation_schema.php
 |           0051_migrate_pek_mapping_precision_column.php
+|           0052_create_ozon_delivery_pickup_catalog.php
 |
 +---docs
 |   |   README.md
@@ -325,6 +326,13 @@ C:.
 |   |   |           OzonDeliveryToken.php
 |   |   |           OzonDeliveryTokenCache.php
 |   |   |           WpOzonDeliveryHttpClient.php
+|   |   |
+|   |   +---Pickup
+|   |   |           OzonDeliveryPickupImportLock.php
+|   |   |           OzonDeliveryPickupImportService.php
+|   |   |           OzonDeliveryPickupParser.php
+|   |   |           OzonDeliveryPickupRepository.php
+|   |   |           OzonDeliveryPickupScheduler.php
 |   |   |
 |   |   +---Pek
 |   |   |   |   PekCountryPolicy.php
@@ -1057,6 +1065,9 @@ C:.
     |       run-ozon-delivery-admin-smoke.php
     |       run-ozon-delivery-authorization-smoke.php
     |       run-ozon-delivery-foundation-smoke.php
+    |       run-ozon-delivery-pickup-admin-smoke.php
+    |       run-ozon-delivery-pickup-import-smoke.php
+    |       run-ozon-delivery-pickup-scheduler-smoke.php
     |
     +---packaging
     |       run-packaging-smoke.php

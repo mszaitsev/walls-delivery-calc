@@ -759,7 +759,7 @@ final class DeliveryServicesAdminPage {
 		}
 		if ( OzonDeliveryAdminPage::supports_action( $action ) && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
 			$this->ozon_delivery_admin->handle_action( $action, $_POST );
-			wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY . '&tab=ozon_api' ) );
+			$tab = in_array( $action, array( 'save_ozon_delivery_pickup_schedule', 'start_ozon_delivery_pickup_import' ), true ) ? 'ozon_pickup' : 'ozon_api'; wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY . '&tab=' . $tab ) );
 			exit;
 		}
 		if ( in_array( $action, array(
@@ -1691,6 +1691,7 @@ final class DeliveryServicesAdminPage {
 		}
 		if ( OzonDeliverySettings::SERVICE_KEY === $service->service_key ) {
 			$tabs['ozon_api'] = 'API Ozon';
+			$tabs['ozon_pickup'] = 'ПВЗ Ozon';
 		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
@@ -1726,6 +1727,7 @@ final class DeliveryServicesAdminPage {
 			PekAdminPage::TAB_KEY => $this->render_pek_settings_tab( $service ),
 			PekStatusAdminPage::TAB_KEY => $this->render_pek_statuses_tab( $service ),
 			'ozon_api' => $this->render_ozon_api_tab( $service ),
+			'ozon_pickup' => $this->render_ozon_pickup_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
 		?>
@@ -3626,6 +3628,8 @@ final class DeliveryServicesAdminPage {
 
 		$this->ozon_delivery_admin->render();
 	}
+
+	private function render_ozon_pickup_tab( DeliveryService $service ): void { if ( OzonDeliverySettings::SERVICE_KEY === $service->service_key && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) { $this->ozon_delivery_admin->render_pickup(); } }
 
 	private function render_diagnostics_tab( DeliveryService $service ): void {
 		if ( ! $this->is_domestic_service( $service ) ) {
