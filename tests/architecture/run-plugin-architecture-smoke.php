@@ -59,6 +59,8 @@ plugin_architecture_assert( ! str_contains( $ozon_admin_source, 'wp_remote_reque
 plugin_architecture_assert( str_contains( $ozon_transport_source, 'MAX_REDIRECTS = 3' ) && str_contains( $ozon_transport_source, "'redirection' => 0" ), 'Ozon transport must own bounded DDoS redirect handling.' );
 plugin_architecture_assert( str_contains( $ozon_plugin_source, 'OzonDeliveryPickupScheduler::class' ) && str_contains( $ozon_pickup_import_source, 'pickup_pagination_invalid' ) && str_contains( $ozon_pickup_repository_source, 'generation_id' ), 'Ozon pickup persistence and importer must remain carrier-owned and wired only through Plugin.php.' );
 plugin_architecture_assert( ! str_contains( $ozon_pickup_repository_source, 'raw_json' ) && ! str_contains( $ozon_pickup_import_source, 'wp_remote_request' ), 'Ozon pickup importer must not retain raw API payload or own HTTP transport.' );
+foreach ( plugin_architecture_php_files( 'src/Carriers/OzonDelivery' ) as $ozon_production_file ) { $ozon_production_source = (string) file_get_contents( $ozon_production_file ); plugin_architecture_assert( ! str_contains( $ozon_production_source, 'dbDelta(' ) && ! str_contains( $ozon_production_source, 'CREATE TABLE' ) && ! str_contains( $ozon_production_source, 'ALTER TABLE' ) && ! str_contains( $ozon_production_source, 'wp-admin/includes/upgrade.php' ), 'Ozon production classes must not contain schema DDL: ' . basename( $ozon_production_file ) ); }
+plugin_architecture_assert( ! str_contains( $ozon_pickup_repository_source, 'create_schema' ), 'Ozon pickup repository must not expose runtime schema management.' );
 
 /**
  * @return array<int,string>
