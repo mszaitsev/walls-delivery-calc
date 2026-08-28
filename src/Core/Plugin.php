@@ -124,6 +124,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupImportLock;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupImportService;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupParser;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduleFormatter;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduler;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
@@ -476,7 +477,8 @@ final class Plugin {
 		$this->container->register( OzonDeliveryApiClient::class, fn(): OzonDeliveryApiClient => new OzonDeliveryApiClient( $this->container->get( OzonDeliveryHttpClientInterface::class ), $this->container->get( OzonDeliveryAccessTokenService::class ) ) );
 		$this->container->register( OzonDeliveryConnectionDiagnosticService::class, fn(): OzonDeliveryConnectionDiagnosticService => new OzonDeliveryConnectionDiagnosticService( $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryAccessTokenService::class ), $this->container->get( OzonDeliverySettings::class ) ) );
 		$this->container->register( OzonDeliveryPickupRepository::class, fn(): OzonDeliveryPickupRepository => new OzonDeliveryPickupRepository() );
-		$this->container->register( OzonDeliveryPickupParser::class, fn(): OzonDeliveryPickupParser => new OzonDeliveryPickupParser() );
+		$this->container->register( OzonDeliveryPickupScheduleFormatter::class, fn(): OzonDeliveryPickupScheduleFormatter => new OzonDeliveryPickupScheduleFormatter() );
+		$this->container->register( OzonDeliveryPickupParser::class, fn(): OzonDeliveryPickupParser => new OzonDeliveryPickupParser( $this->container->get( OzonDeliveryPickupScheduleFormatter::class ) ) );
 		$this->container->register( OzonDeliveryPickupImportLock::class, fn(): OzonDeliveryPickupImportLock => new OzonDeliveryPickupImportLock() );
 		$this->container->register( OzonDeliveryPickupImportService::class, fn(): OzonDeliveryPickupImportService => new OzonDeliveryPickupImportService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryPickupParser::class ), $this->container->get( OzonDeliveryPickupRepository::class ) ) );
 		$this->container->register( OzonDeliveryPickupScheduler::class, fn(): OzonDeliveryPickupScheduler => new OzonDeliveryPickupScheduler( $this->container->get( ActionScheduler::class ), $this->container->get( OzonDeliveryPickupImportService::class ), $this->container->get( OzonDeliveryPickupImportLock::class ), $this->container->get( OzonDeliverySettings::class ) ) );

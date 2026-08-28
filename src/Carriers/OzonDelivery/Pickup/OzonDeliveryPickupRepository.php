@@ -45,12 +45,13 @@ final class OzonDeliveryPickupRepository {
 			if ( false === $this->wpdb->query( 'COMMIT' ) ) {
 				return $this->rollback_activation();
 			}
-
+			$this->cleanup_obsolete_points( $id );
 			return true;
 		} catch ( \Throwable ) {
 			return $this->rollback_activation();
 		}
 	}
+	public function cleanup_obsolete_points( int $active_generation_id ): bool { return false !== $this->wpdb->query( $this->wpdb->prepare( "DELETE FROM {$this->points_table()} WHERE generation_id <> %d", $active_generation_id ) ); }
 	private function rollback_activation(): bool { $this->wpdb->query( 'ROLLBACK' ); return false; }
 	/** @return array<string,mixed>|null */ public function find_active( int $point_id ): ?array { $active = $this->active_generation(); if ( ! $active ) { return null; } $row = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT * FROM {$this->points_table()} WHERE generation_id=%d AND point_id=%d", $active['id'], $point_id ), ARRAY_A ); return is_array( $row ) ? $row : null; }
 	/** @return array<string,mixed> */ public function status(): array { $row = $this->wpdb->get_row( "SELECT * FROM {$this->generations_table()} WHERE state IN ('building','ready','active','failed') ORDER BY id DESC LIMIT 1", ARRAY_A ); $active = $this->active_generation(); $state = is_array( $row ) ? (string) $row['state'] : 'idle'; return array( 'generation_id' => is_array( $row ) ? (int) $row['id'] : null, 'state' => $state, 'started_at' => $row['started_at'] ?? null, 'completed_at' => $row['completed_at'] ?? null, 'progress_updated_at' => $row['progress_updated_at'] ?? null, 'page_count' => (int) ( $row['page_count'] ?? 0 ), 'downloaded_count' => (int) ( $row['downloaded_count'] ?? 0 ), 'accepted_count' => (int) ( $row['accepted_count'] ?? 0 ), 'rejected_count' => (int) ( $row['rejected_count'] ?? 0 ), 'duplicate_count' => (int) ( $row['duplicate_count'] ?? 0 ), 'conflict_count' => (int) ( $row['conflict_count'] ?? 0 ), 'safe_error_code' => (string) ( $row['safe_error_code'] ?? '' ), 'safe_error_message' => (string) ( $row['safe_error_message'] ?? '' ), 'active_generation_id' => is_array( $active ) ? (int) $active['id'] : null, 'active_count' => $this->active_count(), 'is_current_active' => is_array( $row ) && is_array( $active ) && (int) $row['id'] === (int) $active['id'], 'is_running' => 'building' === $state, 'is_terminal' => in_array( $state, array( 'active','failed','idle' ), true ), 'active_completed_at' => $active['completed_at'] ?? null ); }
