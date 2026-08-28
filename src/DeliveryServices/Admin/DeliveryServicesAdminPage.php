@@ -765,8 +765,8 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		if ( OzonDeliveryAdminPage::supports_action( $action ) && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
-			$this->ozon_delivery_admin->handle_action( $action, $_POST );
-			$tab = in_array( $action, array( 'save_ozon_delivery_pickup_schedule', 'start_ozon_delivery_pickup_import' ), true ) ? 'ozon_pickup' : 'ozon_api'; wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY . '&tab=' . $tab ) );
+			$result = $this->ozon_delivery_admin->handle_action( $action, $_POST );
+			$tab = in_array( $action, array( 'save_ozon_delivery_pickup_schedule', 'start_ozon_delivery_pickup_import' ), true ) ? 'ozon_pickup' : 'ozon_api'; $url = admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY . '&tab=' . $tab ); if ( 'start_ozon_delivery_pickup_import' === $action && true !== $result ) { $url = add_query_arg( 'wdc_ozon_pickup_notice', 'failed', $url ); } wp_safe_redirect( $url );
 			exit;
 		}
 		if ( in_array( $action, array(

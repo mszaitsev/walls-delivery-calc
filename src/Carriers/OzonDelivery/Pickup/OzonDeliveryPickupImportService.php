@@ -7,7 +7,8 @@ final class OzonDeliveryPickupImportService {
 	private const MAX_PAGES = 50000;
 	private const MAX_ROWS = 5000000;
 	public function __construct( private OzonDeliveryApiClient $api, private OzonDeliveryPickupParser $parser, private OzonDeliveryPickupRepository $repository ) {}
-	public function start( string $job_id ): int { return $this->repository->start( $job_id ); }
+	public function start( string $job_id ): ?int { return $this->repository->start( $job_id ); }
+	public function fail_job( string $job_id, string $code, string $message ): void { $generation = $this->repository->generation_by_job( $job_id ); if ( is_array( $generation ) && 'building' === (string) $generation['state'] ) { $this->repository->fail( (int) $generation['id'], $code, $message ); } }
 	/** @return array{complete:bool,failed:bool} */
 	public function run_step( string $job_id ): array {
 		$generation = $this->repository->generation_by_job( $job_id ); if ( ! is_array( $generation ) || 'building' !== $generation['state'] ) { return array( 'complete' => true, 'failed' => 'failed' === ( $generation['state'] ?? '' ) ); }

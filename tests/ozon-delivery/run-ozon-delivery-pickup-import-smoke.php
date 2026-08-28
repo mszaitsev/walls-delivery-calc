@@ -12,12 +12,13 @@ function oz_pickup_assert( bool $condition, string $message ): void { if ( ! $co
 
 final class OzonPickupActivationWpdb {
 	public string $prefix = 'wp_';
+	public int $insert_id = 3;
 	/** @var array<int,array<string,mixed>> */ public array $generations;
 	/** @var array<string,mixed> */ private array $failures;
 	/** @var array<int,array<string,mixed>>|null */ private ?array $transaction_backup = null;
 	/** @var list<int> */ public array $deleted_generation_ids = array();
 	/** @param array<int,array<string,mixed>> $generations @param array<string,mixed> $failures */
-	public function __construct( array $generations, array $failures = array() ) { $this->generations = $generations; $this->failures = $failures; }
+	public function __construct( array $generations, array $failures = array() ) { $this->generations = $generations; $this->failures = $failures; if ( isset( $failures['insert_id'] ) ) { $this->insert_id = (int) $failures['insert_id']; } }
 	public function prepare( string $query, mixed ...$arguments ): string { $index = 0; return (string) preg_replace_callback( '/%[ds]/', static function ( array $match ) use ( &$index, $arguments ): string { $value = $arguments[ $index++ ]; return '%d' === $match[0] ? (string) (int) $value : "'" . str_replace( "'", "''", (string) $value ) . "'"; }, $query ); }
 	public function get_row( string $query, mixed $output = null ): ?array { if ( preg_match( '/WHERE id=(\d+)/', $query, $matches ) ) { return $this->generations[ (int) $matches[1] ] ?? null; } return null; }
 	public function get_var( string $query ): int { if ( str_contains( $query, 'COUNT(*)' ) ) { return isset( $this->failures['postcondition_count'] ) ? (int) $this->failures['postcondition_count'] : count( array_filter( $this->generations, static fn( array $generation ): bool => 'active' === $generation['state'] ) ); } if ( isset( $this->failures['postcondition_active_id'] ) ) { return (int) $this->failures['postcondition_active_id']; } foreach ( $this->generations as $id => $generation ) { if ( 'active' === $generation['state'] ) { return $id; } } return 0; }
@@ -30,6 +31,7 @@ final class OzonPickupActivationWpdb {
 		if ( preg_match( '/DELETE FROM .*generation_id=(\d+)/', $query, $matches ) ) { $this->deleted_generation_ids[] = (int) $matches[1]; return 1; }
 		return 1;
 	}
+	/** @param array<string,mixed> $data */ public function insert( string $table, array $data ): int|false { return ! empty( $this->failures['insert'] ) ? false : 1; }
 	/** @param array<string,mixed> $data @param array<string,mixed> $where */ public function update( string $table, array $data, array $where ): int { $id = (int) $where['id']; if ( ! isset( $this->generations[ $id ] ) ) { return 0; } $this->generations[ $id ] = array_merge( $this->generations[ $id ], $data ); return 1; }
 }
 /** @param array<string,mixed> $failures @return array{0:OzonDeliveryPickupRepository,1:OzonPickupActivationWpdb} */
@@ -40,6 +42,10 @@ try { $parser->list_page( array( 'delivery_points' => array(), 'next_cursor' => 
 $point = array( 'delivery_point_id' => 10, 'name' => 'ПВЗ', 'delivery_point_number' => 'X', 'type' => 'pvz', 'full_address' => 'ул. Тестовая, 1', 'coordinates' => array( 'latitude' => 55.0, 'longitude' => 82.0 ), 'schedule' => array(), 'is_active' => true, 'is_bulky' => false, 'restrictions' => array( 'max_weight_g' => 1000 ) );
 $rows = $parser->info_page( array( 'delivery_points' => array( $point ) ) ); oz_pickup_assert( 1 === count( $rows ) && 10 === $rows[0]['point_id'] && '' !== $rows[0]['fingerprint'], 'allowlisted pickup point must normalize deterministically.' );
 $point['coordinates']['latitude'] = 100; oz_pickup_assert( array() === $parser->info_page( array( 'delivery_points' => array( $point ) ) ), 'invalid coordinates must be rejected.' );
+
+$generation_db = new OzonPickupActivationWpdb( array(), array( 'insert' => true ) ); oz_pickup_assert( null === ( new OzonDeliveryPickupRepository( $generation_db ) )->start( 'job' ), 'a failed generation insert must not report a usable generation ID.' );
+$generation_db = new OzonPickupActivationWpdb( array(), array( 'insert_id' => 0 ) ); oz_pickup_assert( null === ( new OzonDeliveryPickupRepository( $generation_db ) )->start( 'job' ), 'a zero generation ID must not report a successful start.' );
+$generation_db = new OzonPickupActivationWpdb( array(), array( 'insert_id' => 3 ) ); oz_pickup_assert( 3 === ( new OzonDeliveryPickupRepository( $generation_db ) )->start( 'job' ), 'only a positive generation ID reports a successful start.' );
 
 foreach ( array( 'building', 'failed', 'obsolete', 'active' ) as $invalid_state ) { [ $activation_repository, $activation_db ] = oz_pickup_activation_repository( array(), $invalid_state ); oz_pickup_assert( ! $activation_repository->activate( 2 ) && 'active' === $activation_db->generations[1]['state'] && $invalid_state === $activation_db->generations[2]['state'], "only a ready generation may activate ({$invalid_state})." ); }
 [ $activation_repository, $activation_db ] = oz_pickup_activation_repository(); $activation_db->generations[2]['accepted_count'] = 0; oz_pickup_assert( ! $activation_repository->activate( 2 ) && 'active' === $activation_db->generations[1]['state'], 'an empty ready generation must not activate.' );
