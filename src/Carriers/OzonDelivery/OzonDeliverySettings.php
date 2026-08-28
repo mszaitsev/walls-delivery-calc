@@ -14,7 +14,7 @@ final class OzonDeliverySettings {
 	public const PUBLIC_TITLE = 'Ozon Доставка';
 	public const API_BASE_URL = 'https://api-delivery.ozon.ru';
 	public const TOKEN_URL = 'https://xapi.ozon.ru/oauth/token';
-	public const TOKEN_SCOPE = array( 'delivery-api.delivery' );
+	public const TOKEN_SCOPE = array( 'delivery-api.all' );
 	public const CLIENT_ID_KEY = 'ozon_delivery_client_id';
 	public const CLIENT_SECRET_ENCRYPTED_KEY = 'ozon_delivery_client_secret_encrypted';
 	public const REQUEST_TIMEOUT_KEY = 'ozon_delivery_request_timeout';

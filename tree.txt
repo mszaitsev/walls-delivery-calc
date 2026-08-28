@@ -322,6 +322,8 @@ C:.
 |   |   |           OzonDeliveryConnectionDiagnosticService.php
 |   |   |           OzonDeliveryHttpClientInterface.php
 |   |   |           OzonDeliveryMessageSanitizer.php
+|   |   |           OzonDeliveryToken.php
+|   |   |           OzonDeliveryTokenCache.php
 |   |   |           WpOzonDeliveryHttpClient.php
 |   |   |
 |   |   +---Pek

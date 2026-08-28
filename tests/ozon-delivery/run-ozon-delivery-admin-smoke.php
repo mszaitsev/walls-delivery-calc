@@ -9,6 +9,6 @@ oau_assert( ! str_contains( $routing, 'class="button" href="<?php echo esc_url( 
 oau_assert( str_contains( $admin, 'Client Secret сохранён' ) && ! str_contains( $admin, 'value="<?php echo esc_attr( $this->credentials->client_secret()' ), 'secret must never render in HTML.' );
 oau_assert( str_contains( $admin, 'Самостоятельная сдача.' ) && str_contains( $admin, 'Забор курьером со склада отправителя не используется.' ), 'self-drop-off invariant must be visible.' );
 oau_assert( ! str_contains( $admin, 'Redirect URI' ) && ! str_contains( $admin, 'callback' ) && ! str_contains( $admin, 'Подключить Ozon' ), 'client_credentials admin UI must have no redirect/callback controls.' );
-oau_assert( str_contains( $admin, 'HTTP status' ) && str_contains( $admin, 'Код ошибки' ) && str_contains( $admin, 'Операция' ) && str_contains( $admin, 'Структура ответа' ) && str_contains( $admin, 'Размер ответа' ), 'admin diagnostic must render safe OAuth evidence.' );
+oau_assert( str_contains( $admin, 'HTTP status' ) && str_contains( $admin, 'Scope' ) && str_contains( $admin, 'Тип token' ) && str_contains( $admin, 'Срок действия известен' ) && str_contains( $admin, 'Истекает' ) && str_contains( $admin, 'Источник token' ) && ! str_contains( $admin, 'refresh_token' ), 'admin diagnostic must render only safe OAuth token metadata.' );
 oau_assert( ! str_contains( $plugin, 'OzonDeliveryCarrier' ) && ! str_contains( $plugin, 'OzonDeliveryShipment' ), 'foundation must not register Ozon checkout or shipment runtime.' );
 echo "Ozon Delivery admin smoke passed.\n";
