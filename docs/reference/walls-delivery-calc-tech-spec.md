@@ -2,6 +2,10 @@
 
 Historical reference. Not source of truth.
 
+## Implemented Ozon Delivery foundation
+
+Version 0.138.0 reserves carrier and service key `ozon_delivery` for Ozon Доставка. It implements encrypted Client Secret storage, a carrier-owned `client_credentials` OAuth token boundary, bounded official DDoS redirect/cookie handling, and an explicit OAuth-only admin diagnostic. Tokens are not persisted or cached because official Ozon Delivery documentation available for this release does not provide token TTL or refresh contract. No checkout, pickup-point, shipment, status, cancellation, document, or multi-box capability is included. Sender handoff is self-drop-off only.
+
 This file preserves the old product tech spec for audit and requirement archaeology. Canonical architecture, workflow, testing, and subsystem documentation lives under `docs/README.md`. Internal paths, roadmap sections, external links, version references, and document structure below may be historical. When this reference conflicts with production code or canonical docs, use production code and canonical docs.
 
 ---

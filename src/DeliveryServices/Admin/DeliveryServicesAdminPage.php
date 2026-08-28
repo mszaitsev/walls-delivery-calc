@@ -25,6 +25,8 @@ use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
+use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryAdminPage;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\Admin\PekStatusAdminPage;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\GeoV2\YandexDeliveryGeoV2BuilderRunnerService;
@@ -154,6 +156,7 @@ final class DeliveryServicesAdminPage {
 		private ?JetLogisticStatusAdminPage $jet_logistic_statuses = null,
 		private ?PekAdminPage $pek_admin = null,
 		private ?PekStatusAdminPage $pek_statuses = null,
+		private ?OzonDeliveryAdminPage $ozon_delivery_admin = null,
 	) {
 	}
 
@@ -753,6 +756,11 @@ final class DeliveryServicesAdminPage {
 		if ( PekAdminPage::supports_action( $action ) ) {
 			$this->handle_pek_action( $action );
 			return;
+		}
+		if ( OzonDeliveryAdminPage::supports_action( $action ) && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) {
+			$this->ozon_delivery_admin->handle_action( $action, $_POST );
+			wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY ) );
+			exit;
 		}
 		if ( in_array( $action, array(
 				'save_global_delivery_settings',
@@ -1542,7 +1550,10 @@ final class DeliveryServicesAdminPage {
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Службы доставки', 'walls-delivery-calc' ); ?></h1>
-			<?php if ( $service instanceof DeliveryService ) : ?>
+			<?php if ( OzonDeliverySettings::SERVICE_KEY === $service_key && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) : ?>
+				<?php $this->ozon_delivery_admin->render(); ?>
+				<p><a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG ) ); ?>"><?php echo esc_html__( 'Назад к списку', 'walls-delivery-calc' ); ?></a></p>
+			<?php elseif ( $service instanceof DeliveryService ) : ?>
 				<?php $this->render_edit_page( $service ); ?>
 			<?php else : ?>
 				<?php $this->render_table(); ?>
@@ -1555,6 +1566,7 @@ final class DeliveryServicesAdminPage {
 	private function render_table(): void {
 		$services = $this->services->list_active();
 		?>
+		<p><a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . OzonDeliverySettings::SERVICE_KEY ) ); ?>"><?php echo esc_html__( 'Ozon Доставка', 'walls-delivery-calc' ); ?></a></p>
 		<form method="post" style="margin: 16px 0;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="wdc_delivery_services_action" value="reorder">
