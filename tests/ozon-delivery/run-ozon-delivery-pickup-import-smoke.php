@@ -6,8 +6,10 @@ function wp_json_encode( mixed $value ): string|false { return json_encode( $val
 function current_time( string $type, bool $gmt = false ): string { return '2026-08-28 00:00:00'; }
 require_once dirname( __DIR__, 2 ) . '/src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupParser.php';
 require_once dirname( __DIR__, 2 ) . '/src/Carriers/OzonDelivery/Pickup/OzonDeliveryPickupRepository.php';
+require_once dirname( __DIR__, 2 ) . '/src/Carriers/OzonDelivery/Api/OzonDeliveryApiClient.php';
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupParser;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
+use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiClient;
 function oz_pickup_assert( bool $condition, string $message ): void { if ( ! $condition ) { throw new RuntimeException( $message ); } }
 
 final class OzonPickupActivationWpdb {
@@ -42,6 +44,8 @@ try { $parser->list_page( array( 'delivery_points' => array(), 'next_cursor' => 
 $point = array( 'delivery_point_id' => 10, 'name' => 'ПВЗ', 'delivery_point_number' => 'X', 'type' => 'pvz', 'full_address' => 'ул. Тестовая, 1', 'coordinates' => array( 'latitude' => 55.0, 'longitude' => 82.0 ), 'schedule' => array(), 'is_active' => true, 'is_bulky' => false, 'restrictions' => array( 'max_weight_g' => 1000 ) );
 $rows = $parser->info_page( array( 'delivery_points' => array( $point ) ) ); oz_pickup_assert( 1 === count( $rows ) && 10 === $rows[0]['point_id'] && '' !== $rows[0]['fingerprint'], 'allowlisted pickup point must normalize deterministically.' );
 $point['coordinates']['latitude'] = 100; oz_pickup_assert( array() === $parser->info_page( array( 'delivery_points' => array( $point ) ) ), 'invalid coordinates must be rejected.' );
+
+$pickup_api = ( new ReflectionClass( OzonDeliveryApiClient::class ) )->newInstanceWithoutConstructor(); $pickup_body = new ReflectionMethod( OzonDeliveryApiClient::class, 'pickup_list_body' ); oz_pickup_assert( array( 'pagination' => array( 'limit' => 100 ) ) === $pickup_body->invoke( $pickup_api, null ) && array( 'pagination' => array( 'limit' => 100 ) ) === $pickup_body->invoke( $pickup_api, '' ) && array( 'pagination' => array( 'limit' => 100 ) ) === $pickup_body->invoke( $pickup_api, '   ' ), 'first pickup-list page must omit null, empty and whitespace-only cursors.' ); oz_pickup_assert( array( 'pagination' => array( 'limit' => 100, 'cursor' => 'cursor-2' ) ) === $pickup_body->invoke( $pickup_api, ' cursor-2 ' ), 'next pickup-list page must use only a non-empty normalized cursor with limit 100.' );
 
 $generation_db = new OzonPickupActivationWpdb( array(), array( 'insert' => true ) ); oz_pickup_assert( null === ( new OzonDeliveryPickupRepository( $generation_db ) )->start( 'job' ), 'a failed generation insert must not report a usable generation ID.' );
 $generation_db = new OzonPickupActivationWpdb( array(), array( 'insert_id' => 0 ) ); oz_pickup_assert( null === ( new OzonDeliveryPickupRepository( $generation_db ) )->start( 'job' ), 'a zero generation ID must not report a successful start.' );

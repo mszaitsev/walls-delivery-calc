@@ -5,7 +5,8 @@ use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 defined( 'ABSPATH' ) || exit;
 final class OzonDeliveryApiClient {
 	public function __construct( private OzonDeliveryHttpClientInterface $http, private OzonDeliveryAccessTokenService $tokens ) {}
-	/** @return array<string,mixed> */ public function pickup_list( string $cursor = '' ): array { return $this->authorized_json_request( 'POST', '/v1/delivery-point/list', array( 'pagination' => array( 'cursor' => $cursor, 'limit' => 100 ) ) ); }
+	/** @return array<string,mixed> */ public function pickup_list( ?string $cursor = null ): array { return $this->authorized_json_request( 'POST', '/v1/delivery-point/list', $this->pickup_list_body( $cursor ) ); }
+	/** @return array<string,array<string,string|int>> */ private function pickup_list_body( ?string $cursor ): array { $pagination = array( 'limit' => 100 ); $cursor = is_string( $cursor ) ? trim( $cursor ) : ''; if ( '' !== $cursor ) { $pagination['cursor'] = $cursor; } return array( 'pagination' => $pagination ); }
 	/** @param array<int,int> $ids @return array<string,mixed> */ public function pickup_info( array $ids ): array { if ( array() === $ids || count( $ids ) > 100 ) { throw new OzonDeliveryApiException( 'pickup_info', 'request_invalid', 0, false, 'Некорректный запрос ПВЗ Ozon Delivery.' ); } return $this->authorized_json_request( 'POST', '/v1/delivery-point/info', array( 'delivery_point_ids' => array_values( $ids ) ) ); }
 	/** @return array<string,mixed> */ public function authorized_json_request( string $method, string $path, array $body = array() ): array {
 		$token = $this->tokens->get_token(); $json = wp_json_encode( $body );

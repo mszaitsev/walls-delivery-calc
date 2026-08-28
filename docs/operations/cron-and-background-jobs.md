@@ -1,6 +1,6 @@
 # Cron And Background Jobs
 
-Version: 0.139.4
+Version: 0.139.5
 
 Background jobs are registered from `Plugin::register_hooks()` and `Plugin::boot_modules()`.
 
