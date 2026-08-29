@@ -128,6 +128,7 @@ final class OzonDeliveryQuoteService {
 			'destination_fingerprint' => $fingerprint,
 			'provider_destination_fingerprint' => $fingerprint,
 			'reload_on_viewport_change' => false,
+			'prefetch_points' => false,
 		);
 	}
 

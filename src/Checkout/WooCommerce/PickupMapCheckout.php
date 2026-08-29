@@ -227,11 +227,14 @@ final class PickupMapCheckout {
 	private function pickup_rate_capabilities_from_rate( array $rate ): array {
 		$meta = $this->rate_meta( $rate );
 		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
-		if ( ! array_key_exists( 'reload_on_viewport_change', $snapshot ) ) {
-			return array();
+		$capabilities = array();
+		foreach ( array( 'reload_on_viewport_change', 'prefetch_points' ) as $key ) {
+			if ( array_key_exists( $key, $snapshot ) ) {
+				$capabilities[ $key ] = (bool) $snapshot[ $key ];
+			}
 		}
 
-		return array( 'reload_on_viewport_change' => (bool) $snapshot['reload_on_viewport_change'] );
+		return $capabilities;
 	}
 
 	/**

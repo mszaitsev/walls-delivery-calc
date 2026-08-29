@@ -66,41 +66,70 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function openModal(container, method) {
 		method = normalizeShippingMethod(method || currentShippingMethod());
-		var contextPromise = refreshCheckoutContextOnce(700, { returnContext: true }).then(function (freshContext) {
-			return freshContext || initialContext();
+		var modal = window.WDCPickupModal.create(labels);
+		var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
+		var search = modal.root.querySelector('[data-wdc-search]');
+		var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
+		var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
+		var map = null;
+		var savingPoint = true;
+		var loadingText = 'Загружаем пункты выдачи…';
+		if (confirmButton) {
+			confirmButton.disabled = true;
+		}
+		setModalLoading(modal.root, loadingText);
+		setModalSelectButtonsDisabled(modal.root, true, loadingText);
+
+		modal.root.addEventListener('wdc:close', close);
+
+		refreshModalContext(method).then(function (resolvedContext) {
+			var context = withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method);
+			map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
+			clearLoading();
+
+			bindModalMapInteractions();
+		}).catch(function () {
+			loadingText = '';
+			savingPoint = false;
+			clearModalLoading(modal.root);
+			setModalSelectButtonsDisabled(modal.root, true, '');
+			if (confirmButton) {
+				confirmButton.disabled = true;
+			}
+			var card = modal.root.querySelector('[data-wdc-card]');
+			if (card) {
+				card.textContent = 'Не удалось получить актуальные данные для карты. Попробуйте открыть карту ещё раз.';
+			}
 		});
 
-		contextPromise.then(function (resolvedContext) {
-			var modal = window.WDCPickupModal.create(labels);
-			var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
-			var search = modal.root.querySelector('[data-wdc-search]');
-			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
-			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
-			var context = withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method);
-			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
-			var savingPoint = false;
-			var loadingText = '';
-
-			function close() {
+		function close() {
+			if (map && map.destroy) {
 				map.destroy();
-				modal.destroy();
 			}
+			modal.destroy();
+		}
 
-			function setLoading(message) {
-				savingPoint = true;
-				loadingText = message || 'Сохраняем пункт выдачи...';
+		function setLoading(message) {
+			savingPoint = true;
+			loadingText = message || 'Сохраняем пункт выдачи...';
+			if (confirmButton) {
 				confirmButton.disabled = true;
-				setModalLoading(modal.root, loadingText);
-				setModalSelectButtonsDisabled(modal.root, true, loadingText);
 			}
+			setModalLoading(modal.root, loadingText);
+			setModalSelectButtonsDisabled(modal.root, true, loadingText);
+		}
 
-			function clearLoading() {
-				savingPoint = false;
-				loadingText = '';
+		function clearLoading() {
+			savingPoint = false;
+			loadingText = '';
+			if (confirmButton) {
 				confirmButton.disabled = false;
-				clearModalLoading(modal.root);
-				setModalSelectButtonsDisabled(modal.root, false, '');
 			}
+			clearModalLoading(modal.root);
+			setModalSelectButtonsDisabled(modal.root, false, '');
+		}
+
+		function bindModalMapInteractions() {
 
 			function commitPoint(point, shippingMethodId, options) {
 				options = options || {};
@@ -274,7 +303,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				geolocationButton.title = 'Определить моё местоположение';
 				geolocationButton.innerHTML = '<span aria-hidden="true" class="wdc-pickup-map__locate-icon"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 11.4 20.2 3.8 12.6 20l-2.1-7.1L4 11.4Z"></path></svg></span>';
 			}
-		});
+		}
 	}
 
 	function applySelection(container, point) {
@@ -814,6 +843,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			if (Object.prototype.hasOwnProperty.call(item, 'reload_on_viewport_change')) {
 				capabilities.reload_on_viewport_change = !falsy(item.reload_on_viewport_change);
 			}
+			if (Object.prototype.hasOwnProperty.call(item, 'prefetch_points')) {
+				capabilities.prefetch_points = !falsy(item.prefetch_points);
+			}
 			if (Object.keys(capabilities).length) {
 				normalized[method] = capabilities;
 			}
@@ -849,6 +881,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var capabilities = rateCapabilitiesForMethod(method);
 		if (Object.prototype.hasOwnProperty.call(capabilities, 'reload_on_viewport_change')) {
 			context.reload_on_viewport_change = capabilities.reload_on_viewport_change;
+		}
+		if (Object.prototype.hasOwnProperty.call(capabilities, 'prefetch_points')) {
+			context.prefetch_points = capabilities.prefetch_points;
 		}
 		return context;
 	}
@@ -1218,7 +1253,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				}
 			}
 			var context = contextFromState(state && state.city_context);
-			if ((context.query || validCoordinate(context.lat, context.lng)) && stateContextMatchesCurrentDestination(context)) {
+			if ((context.query || validCoordinate(context.lat, context.lng)) && (true === options.currentFieldsOnly ? stateContextMatchesCurrentFields(context) : stateContextMatchesCurrentDestination(context))) {
 				updateCurrentContext(context);
 				applyContextToHidden(context);
 				return true === options.returnContext ? context : state;
@@ -1234,6 +1269,35 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				window.setTimeout(function () { resolve(null); }, timeout);
 			})
 		]);
+	}
+
+	function refreshModalContext(method) {
+		if (!window.WDCPickupApi || !window.WDCPickupApi.state) {
+			return Promise.reject(new Error('pickup_state_unavailable'));
+		}
+		var startedAt = Date.now();
+		var deadlineMs = 4500;
+		var attempt = 0;
+
+		function next() {
+			attempt += 1;
+			return refreshCheckoutContextOnce(1200, { returnContext: true, currentFieldsOnly: true }).then(function (context) {
+				method = normalizeShippingMethod(method || currentShippingMethod());
+				if (context && stateContextMatchesCurrentFields(context)) {
+					return context;
+				}
+				if (Date.now() - startedAt >= deadlineMs || attempt >= 4) {
+					throw new Error('pickup_state_stale');
+				}
+				return new Promise(function (resolve, reject) {
+					window.setTimeout(function () {
+						next().then(resolve).catch(reject);
+					}, 250);
+				});
+			});
+		}
+
+		return next();
 	}
 
 	function contextFromState(context) {
@@ -1957,8 +2021,16 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		return contextMatches(fieldContext, context) || contextMatches(currentContext, context);
 	}
 
+	function stateContextMatchesCurrentFields(context) {
+		return contextMatches(contextFromFields(), context);
+	}
+
 	function schedulePrefetch() {
 		clearTimeout(prefetchTimer);
+		if (!prefetchPointsAllowed(currentShippingMethod())) {
+			invalidatePrefetch();
+			return;
+		}
 		prefetchTimer = setTimeout(prefetchInitialPoints, 400);
 	}
 
@@ -1967,6 +2039,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		var method = currentShippingMethod();
+		if (!prefetchPointsAllowed(method)) {
+			invalidatePrefetch();
+			return;
+		}
 		var context = withRateCapabilities(withCarrierContext(initialContext(), method), method);
 		if (!context.query && !validCoordinate(context.lat, context.lng) && !context.city_code && !context.cdek_city_code) {
 			return;
@@ -2042,6 +2118,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function withPrefetch(context, method) {
+		if (!prefetchPointsAllowed(method || (context && context.shipping_method_id))) {
+			return context;
+		}
 		var identity = prefetchIdentity(context, method);
 		var key = identity.key;
 		if (prefetchCache && prefetchCache.key === key && prefetchIdentityMatches(prefetchCache.identity, identity) && Array.isArray(prefetchCache.points) && prefetchCache.points.length) {
@@ -2102,6 +2181,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			&& cached.destination_fingerprint === current.destination_fingerprint
 			&& cached.location_id === current.location_id
 			&& cached.country_code === current.country_code;
+	}
+
+	function prefetchPointsAllowed(method) {
+		var capabilities = rateCapabilitiesForMethod(method);
+		return !Object.prototype.hasOwnProperty.call(capabilities, 'prefetch_points') || capabilities.prefetch_points !== false;
 	}
 
 	function hasPickupBlock() {

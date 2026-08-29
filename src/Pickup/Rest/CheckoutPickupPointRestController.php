@@ -944,8 +944,14 @@ final class CheckoutPickupPointRestController {
 				continue;
 			}
 			$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
-			if ( array_key_exists( 'reload_on_viewport_change', $snapshot ) ) {
-				$capabilities[ $rate_id ] = array( 'reload_on_viewport_change' => (bool) $snapshot['reload_on_viewport_change'] );
+			$rate_capabilities = array();
+			foreach ( array( 'reload_on_viewport_change', 'prefetch_points' ) as $key ) {
+				if ( array_key_exists( $key, $snapshot ) ) {
+					$rate_capabilities[ $key ] = (bool) $snapshot[ $key ];
+				}
+			}
+			if ( array() !== $rate_capabilities ) {
+				$capabilities[ $rate_id ] = $rate_capabilities;
 			}
 		}
 
