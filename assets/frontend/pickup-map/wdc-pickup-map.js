@@ -68,6 +68,7 @@
 		var lastBbox = '';
 		var yandexCityListMode = isYandexDeliveryContext(context);
 		var reloadOnViewportChange = contextReloadOnViewportChange(context);
+		var fixedDatasetLoaded = false;
 		var popupManuallyClosed = false;
 		var suppressNextMapClick = false;
 		var userLocation = null;
@@ -459,6 +460,13 @@
 			if (!bbox) {
 				return;
 			}
+			if (!viewportReloadRequired() && fixedDatasetLoaded && true !== options.forceRemote) {
+				if (listFollowsViewport()) {
+					renderCurrentList();
+					updateListSelectButton();
+				}
+				return;
+			}
 			if (!options.force && !viewportReloadRequired() && visiblePoints.length) {
 				if (listFollowsViewport()) {
 					renderCurrentList();
@@ -476,6 +484,9 @@
 					return;
 				}
 				renderMarkers(points, labels.empty || '');
+				if (!viewportReloadRequired()) {
+					fixedDatasetLoaded = true;
+				}
 				applyInitialPointsViewport(visiblePoints);
 				if (options.previewNearest && visiblePoints[0]) {
 					preview(visiblePoints[0], { focus: false, initial: true });
@@ -515,6 +526,9 @@
 		if (hasPreloadedPoints) {
 			renderMarkers(preloadedPoints, labels.empty || '');
 			applyInitialPointsViewport(visiblePoints);
+			if (!viewportReloadRequired()) {
+				fixedDatasetLoaded = true;
+			}
 		}
 
 		function search(query) {

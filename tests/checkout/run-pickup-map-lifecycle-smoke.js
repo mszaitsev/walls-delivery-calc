@@ -268,6 +268,7 @@ function createHarness(api) {
 			}
 		},
 		Promise,
+		AbortController,
 		Number,
 		Math,
 		parseFloat,
@@ -1002,6 +1003,8 @@ function createCheckoutNoticeHarness(options) {
 	const jqueryHandlers = {};
 	let containers = [];
 	let stateResponse = null;
+	let stateCalls = 0;
+	let pointCalls = 0;
 	const resetCalls = [];
 	const mapContexts = [];
 	const modalRoots = [];
@@ -1023,10 +1026,14 @@ function createCheckoutNoticeHarness(options) {
 		wdc_platform_location_display_name: 'Москва',
 		wdc_platform_location_city_name: 'Москва'
 	};
+	Object.assign(fields, options.fields || {});
 	const documentStub = {
 		body: new FakeElement('body'),
 		addEventListener: (type, callback) => { listeners[type] = listeners[type] || []; listeners[type].push(callback); },
 		querySelector: (selector) => {
+			if (selector === '[data-wdc-pickup-checkout]') {
+				return containers[0] ? containers[0].container : null;
+			}
 			if (selector === 'input[name^="shipping_method"]:checked') {
 				return Object.values(shippingInputs).find((input) => input.checked) || null;
 			}
@@ -1060,7 +1067,18 @@ function createCheckoutNoticeHarness(options) {
 				initialContext: options.initialContext || { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' },
 				pickupRateCapabilities: options.pickupRateCapabilities || {}
 			},
-			WDCPickupApi: { state: () => Promise.resolve(stateResponse), reset: (payload) => { resetCalls.push(payload || {}); return Promise.resolve({ pickup_selections: {} }); } },
+			WDCPickupApi: {
+				state: () => {
+					stateCalls += 1;
+					return options.state ? options.state() : Promise.resolve(stateResponse);
+				},
+				points: (bbox, signal, context) => {
+					pointCalls += 1;
+					return options.points ? options.points(bbox, signal, context) : Promise.resolve([]);
+				},
+				searchInitial: (query, signal, context) => options.searchInitial ? options.searchInitial(query, signal, context) : Promise.resolve([]),
+				reset: (payload) => { resetCalls.push(payload || {}); return Promise.resolve({ pickup_selections: {} }); }
+			},
 			WDCPickupModal: {
 				create: () => {
 					const modalRoot = new FakeElement('modal-root');
@@ -1101,6 +1119,7 @@ function createCheckoutNoticeHarness(options) {
 			}),
 			setTimeout,
 			clearTimeout,
+			AbortController,
 			Event: class Event {
 				constructor(type) { this.type = type; }
 			}
@@ -1110,6 +1129,7 @@ function createCheckoutNoticeHarness(options) {
 		clearTimeout,
 		Date,
 		Promise,
+		AbortController,
 		Number,
 		Math,
 		parseFloat,
@@ -1121,6 +1141,7 @@ function createCheckoutNoticeHarness(options) {
 	sandbox.window.document = documentStub;
 	sandbox.window.Promise = Promise;
 	sandbox.window.Date = Date;
+	sandbox.window.AbortController = AbortController;
 	vm.createContext(sandbox);
 	vm.runInContext(checkoutSource, sandbox);
 	function setContainers(next) {
@@ -1145,6 +1166,8 @@ function createCheckoutNoticeHarness(options) {
 		fields.wdc_platform_location_id = locationId;
 		fields.wdc_platform_location_display_name = displayName;
 		fields.wdc_platform_location_city_name = displayName;
+		fields.wdc_platform_location_lat = '';
+		fields.wdc_platform_location_lng = '';
 		(listeners.change || []).forEach((callback) => callback({ target: { matches: (selector) => selector.indexOf('shipping_city') !== -1 } }));
 	}
 	function open(container) {
@@ -1156,7 +1179,10 @@ function createCheckoutNoticeHarness(options) {
 			preventDefault: () => {}
 		}));
 	}
-	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, resetCalls, sandbox, open, mapContexts, modalRoots, shippingInputs };
+	function apiCounts() {
+		return { state: stateCalls, points: pointCalls };
+	}
+	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, resetCalls, sandbox, open, mapContexts, modalRoots, shippingInputs, apiCounts };
 }
 
 async function destinationFingerprintChangeResetsLocalSelection() {
@@ -1272,6 +1298,126 @@ async function pickupRateCapabilitySurvivesCheckoutStateRefresh() {
 	defaultHarness.open(pek);
 	await wait(20);
 	assert.strictEqual(Object.prototype.hasOwnProperty.call(defaultHarness.mapContexts[0], 'reload_on_viewport_change'), false, 'pickup rate without capability must keep historical map default behavior.');
+}
+
+async function openModalRefreshesAuthoritativeStateBeforeMapCreate() {
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'ozon_delivery:pickup',
+		activeShippingMethod: 'ozon_delivery:pickup',
+		initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		fields: {
+			wdc_platform_location_lat: '55.75',
+			wdc_platform_location_lng: '37.61'
+		},
+		pickupRateCapabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.changeMethod('ozon_delivery:pickup');
+	const ozon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
+	harness.setContainers([ozon]);
+	harness.changeDestination('154954', 'Санкт-Петербург');
+	harness.setStateResponse({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '154954', display_name: 'Санкт-Петербург', city_name: 'Санкт-Петербург', lat: 59.93, lng: 30.31 },
+		pickup_rate_capabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.open(ozon);
+	await wait(30);
+	assert.strictEqual(harness.apiCounts().state, 1, 'opening the pickup modal must request authoritative checkout state even when local coordinates exist.');
+	assert.strictEqual(harness.mapContexts.length, 1, 'map must be created after the authoritative state promise resolves.');
+	assert.strictEqual(harness.mapContexts[0].location_id, '154954', 'map context must use fresh REST destination instead of stale localized destination.');
+	assert.strictEqual(harness.mapContexts[0].reload_on_viewport_change, false, 'fresh REST rate capability must be applied before map creation.');
+}
+
+async function stalePrefetchNeverRendersAfterDestinationChange() {
+	const moscowPoint = point('msk-old', 55.75, 37.61);
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'ozon_delivery:pickup',
+		activeShippingMethod: 'ozon_delivery:pickup',
+		initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		fields: {
+			wdc_platform_location_lat: '55.75',
+			wdc_platform_location_lng: '37.61'
+		},
+		pickupRateCapabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		},
+		points: () => Promise.resolve([moscowPoint])
+	});
+	harness.changeMethod('ozon_delivery:pickup');
+	const ozon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
+	harness.setContainers([ozon]);
+	harness.dispatchDomReady();
+	await wait(900);
+	assert.strictEqual(harness.apiCounts().points, 1, 'initial prefetch must be allowed for the first destination.');
+	harness.changeDestination('650000', 'Новосибирск');
+	harness.setStateResponse({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '650000', display_name: 'Новосибирск', city_name: 'Новосибирск', lat: 55.03, lng: 82.92 },
+		pickup_rate_capabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.open(ozon);
+	await wait(30);
+	assert.strictEqual(harness.mapContexts.length, 1, 'destination-changed modal must still open after fresh state.');
+	assert.strictEqual(harness.mapContexts[0].location_id, '650000', 'destination-changed modal must use the new city context.');
+	assert.strictEqual(Array.isArray(harness.mapContexts[0].preloadedPoints), false, 'stale previous-city prefetch must not be injected into the new modal.');
+}
+
+async function stalePrefetchRaceCannotRepopulateCache() {
+	const pendingA = deferred();
+	const pendingB = deferred();
+	const calls = [];
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'ozon_delivery:pickup',
+		activeShippingMethod: 'ozon_delivery:pickup',
+		initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		fields: {
+			wdc_platform_location_lat: '55.75',
+			wdc_platform_location_lng: '37.61'
+		},
+		pickupRateCapabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		},
+		points: (bbox, signal, context) => {
+			calls.push(context.location_id);
+			return context.location_id === '650000' ? pendingB.promise : pendingA.promise;
+		}
+	});
+	harness.changeMethod('ozon_delivery:pickup');
+	const ozon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
+	harness.setContainers([ozon]);
+	harness.dispatchDomReady();
+	await wait(900);
+	assert.deepStrictEqual(calls, ['153912'], 'prefetch race test must start with Moscow request.');
+	harness.changeDestination('650000', 'Новосибирск');
+	harness.setStateResponse({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '650000', display_name: 'Новосибирск', city_name: 'Новосибирск', lat: 55.03, lng: 82.92 },
+		pickup_rate_capabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.updatedCheckout();
+	await wait(900);
+	assert.deepStrictEqual(calls, ['153912', '650000'], 'destination change must start a new prefetch for the new city.');
+	pendingA.resolve([point('msk-late', 55.75, 37.61)]);
+	await wait(20);
+	harness.open(ozon);
+	await wait(30);
+	assert.strictEqual(Array.isArray(harness.mapContexts[0].preloadedPoints), false, 'late old-city prefetch response must not repopulate cache for the new modal.');
+	pendingB.resolve([point('nsk-current', 55.03, 82.92)]);
+	await wait(20);
+	harness.open(ozon);
+	await wait(30);
+	assert.strictEqual(harness.mapContexts[1].preloadedPoints[0].id, 'nsk-current', 'current-city prefetch may accelerate the modal after it resolves.');
 }
 
 async function checkoutInlineNoticeLatchLifecycle() {
@@ -1414,7 +1560,11 @@ async function run() {
 	assert(checkoutSource.includes('pickupRateCapabilities = normalizePickupRateCapabilities')
 		&& checkoutSource.includes('function mergePickupRateCapabilitiesFromResponse(response)')
 		&& checkoutSource.includes('function withRateCapabilities(context, method)')
-		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method)), method)')
+		&& checkoutSource.includes('refreshCheckoutContextOnce(700, { returnContext: true })')
+		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method)')
+		&& checkoutSource.includes('function prefetchIdentity(context, method)')
+		&& checkoutSource.includes('function prefetchIdentityMatches(cached, current)')
+		&& checkoutSource.includes('prefetchGeneration++')
 		&& !checkoutSource.includes('reload_on_viewport_change: config.reload_on_viewport_change'), 'pickup checkout must keep rate capabilities separate from mutable destination context and apply them when opening the modal.');
 	assert(leafletProviderSource.includes("map.on('zoomend', scheduleClusterRebuild)")
 		&& leafletProviderSource.includes('function cancelScheduledClusterRebuild()')
@@ -1443,6 +1593,9 @@ async function run() {
 	await checkoutInlineNoticeLatchLifecycle();
 	await destinationFingerprintChangeResetsLocalSelection();
 	await pickupRateCapabilitySurvivesCheckoutStateRefresh();
+	await openModalRefreshesAuthoritativeStateBeforeMapCreate();
+	await stalePrefetchNeverRendersAfterDestinationChange();
+	await stalePrefetchRaceCannotRepopulateCache();
 	await initialPointsFetchShowsLoaderUntilRender();
 	await emptyPointsFetchHidesLoader();
 	await pointsFetchErrorHidesLoaderAndShowsError();
