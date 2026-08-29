@@ -176,6 +176,7 @@ final class PickupMapCheckout {
 			$lat = null;
 			$lng = null;
 		}
+		$provider_capabilities = $this->active_pickup_provider_context_capabilities();
 
 		return array_filter(
 			array(
@@ -190,9 +191,28 @@ final class PickupMapCheckout {
 				'postcode' => $context['postcode'] ?? $context['postal_code'] ?? null,
 				'country_code' => $country_code,
 				'selectedPoint' => $this->selected_point_context( $active_family ),
+				'reload_on_viewport_change' => $provider_capabilities['reload_on_viewport_change'] ?? null,
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function active_pickup_provider_context_capabilities(): array {
+		$rate = $this->active_pickup_rate();
+		if ( array() === $rate ) {
+			return array();
+		}
+		$meta = $this->rate_meta( $rate );
+		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+		$capabilities = array();
+		if ( array_key_exists( 'reload_on_viewport_change', $snapshot ) ) {
+			$capabilities['reload_on_viewport_change'] = (bool) $snapshot['reload_on_viewport_change'];
+		}
+
+		return $capabilities;
 	}
 
 	/**

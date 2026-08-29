@@ -466,6 +466,20 @@
 	gap: 8px;
 }
 
+.wdc-pickup-list__items--virtual {
+	position: relative;
+	display: block;
+}
+
+.wdc-pickup-list__window {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	display: grid;
+	gap: 8px;
+}
+
 .wdc-pickup-list__item {
 	display: grid;
 	grid-template-columns: 28px minmax(0, 1fr);

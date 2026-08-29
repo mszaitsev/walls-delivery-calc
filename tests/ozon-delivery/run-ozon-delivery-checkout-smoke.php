@@ -156,7 +156,7 @@ $snapshot = is_array( $ozon_rate->meta['pickup_provider_query'] ?? null ) ? $ozo
 oz_checkout_assert( array() !== $snapshot && 'ozon_delivery' === (string) ( $snapshot['carrier_key'] ?? '' ) && 'destination_pickup' === (string) ( $snapshot['purpose'] ?? '' ), 'Ozon rate must carry canonical pickup_provider_query snapshot.' );
 oz_checkout_assert( 'country=RU|location_id=650000' === (string) ( $snapshot['destination_fingerprint'] ?? '' ) && 'country=RU|location_id=650000' === (string) ( $snapshot['provider_destination_fingerprint'] ?? '' ), 'Ozon pickup_provider_query must carry the generic destination fingerprint.' );
 oz_checkout_assert( ! array_key_exists( 'generation_id', $snapshot ) && ! str_contains( (string) ( $snapshot['destination_fingerprint'] ?? '' ), '92783' ), 'Ozon destination fingerprint must not depend on pickup generation or point_id.' );
-oz_checkout_assert( 60 === (int) ( $snapshot['radius_km'] ?? 0 ) && 1000 === (int) ( $snapshot['cargo']['weight_g'] ?? 0 ), 'Ozon pickup_provider_query must keep the trusted 60 km search radius and cargo.' );
+oz_checkout_assert( 60 === (int) ( $snapshot['radius_km'] ?? 0 ) && 1000 === (int) ( $snapshot['cargo']['weight_g'] ?? 0 ) && false === (bool) ( $snapshot['reload_on_viewport_change'] ?? true ), 'Ozon pickup_provider_query must keep the trusted 60 km search radius, cargo, and fixed-area map capability.' );
 $session->save_rates( array( OzonDeliveryCarrier::RATE_ID => oz_checkout_stored_rate( $ozon_rate ) ) );
 $provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) );
 $resolver = new CheckoutPickupPointProviderQueryResolver( $session );

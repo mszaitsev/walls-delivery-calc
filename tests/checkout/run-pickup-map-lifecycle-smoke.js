@@ -6,6 +6,7 @@ const vm = require('vm');
 const root = path.resolve(__dirname, '..', '..');
 const source = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-pickup-map.js'), 'utf8');
 const checkoutSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/wdc-pickup-checkout.js'), 'utf8');
+const leafletProviderSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js'), 'utf8');
 const yandexProviderSource = fs.readFileSync(path.join(root, 'assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js'), 'utf8');
 
 function wait(ms) {
@@ -224,6 +225,8 @@ function createHarness(api) {
 			},
 			setTimeout,
 			clearTimeout,
+			requestAnimationFrame: (callback) => setTimeout(() => callback(Date.now()), 0),
+			cancelAnimationFrame: (handle) => clearTimeout(handle),
 			AbortController,
 			CustomEvent: class CustomEvent {
 				constructor(type, options) {
@@ -243,6 +246,8 @@ function createHarness(api) {
 		},
 		setTimeout,
 		clearTimeout,
+		requestAnimationFrame: (callback) => setTimeout(() => callback(Date.now()), 0),
+		cancelAnimationFrame: (handle) => clearTimeout(handle),
 		AbortController,
 		CustomEvent: class CustomEvent {
 			constructor(type, options) {
@@ -266,6 +271,8 @@ function createHarness(api) {
 	sandbox.window.parseFloat = parseFloat;
 	sandbox.window.isFinite = isFinite;
 	sandbox.window.isNaN = isNaN;
+	sandbox.window.requestAnimationFrame = sandbox.requestAnimationFrame;
+	sandbox.window.cancelAnimationFrame = sandbox.cancelAnimationFrame;
 	vm.createContext(sandbox);
 	vm.runInContext(source, sandbox);
 
@@ -280,6 +287,17 @@ function createHarness(api) {
 
 function point(id, lat, lng) {
 	return { id, point_code: id, address: 'Address ' + id, lat, lng };
+}
+
+function largePoints(count) {
+	return Array.from({ length: count }, (_, index) => {
+		const id = 'p' + String(index + 1).padStart(5, '0');
+		return point(id, 55.75 + (index % 97) * 0.001, 37.61 + Math.floor(index / 97) * 0.001);
+	});
+}
+
+function renderedPointRows(html) {
+	return (String(html || '').match(/data-wdc-point-id=/g) || []).length;
 }
 
 function mapLoader(harness) {
@@ -808,6 +826,44 @@ async function destroyAfterAddressSearchPreventsLatePointsMutation() {
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'fitToMarkers').length, 0, 'late address-search points must not fit after destroy');
 }
 
+async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
+	let pointRequests = 0;
+	const points = largePoints(6403);
+	const api = {
+		context: {
+			carrier: 'carrier_with_fixed_area_dataset',
+			reload_on_viewport_change: false
+		},
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve(points);
+		}
+	};
+	const harness = createHarness(api);
+	harness.list.clientHeight = 520;
+	await wait(120);
+	assert.strictEqual(pointRequests, 1, 'fixed-area dataset must perform exactly one initial REST fetch');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'initial fixed-area fetch must render markers once');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers')[0][1].length, 6403, 'cluster source must keep the full fixed-area dataset');
+	assert(renderedPointRows(harness.list.innerHTML) <= 80, 'virtualized sidebar must keep DOM rows bounded for 6403 source points');
+	harness.provider().fireBounds('37.1,55.1,38.1,56.1');
+	harness.provider().fireBounds('37.0,55.0,38.2,56.2');
+	harness.provider().fireBounds('36.9,54.9,38.3,56.3');
+	harness.provider().fireBounds('36.8,54.8,38.4,56.4');
+	await wait(380);
+	assert.strictEqual(pointRequests, 1, 'fixed-area viewport changes must not download the same points again');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'fixed-area viewport changes must not force map-level marker rerender through REST');
+	assert(renderedPointRows(harness.list.innerHTML) <= 80, 'virtualized sidebar must remain bounded after viewport changes');
+	harness.list.scrollTop = 6402 * 112;
+	harness.list.dispatch('scroll');
+	await wait(30);
+	assert(harness.list.innerHTML.includes('p06403'), 'virtualized sidebar must make the last point reachable by scroll');
+	await harness.map.search('Address p06403');
+	assert.strictEqual(pointRequests, 1, 'fixed-area local search must use the loaded source array');
+	assert(harness.list.innerHTML.includes('p06403'), 'fixed-area local search must find points outside the initially rendered DOM window');
+	harness.map.destroy();
+}
+
 function createCheckoutContainer(method, family, noticeText, selectedPoint) {
 	const notice = new FakeElement('inline-notice');
 	notice.textContent = noticeText || '';
@@ -1166,8 +1222,16 @@ async function run() {
 		&& source.includes('aria-busy')
 		&& source.includes('activeLoadingRequestId')
 		&& source.includes('endLoading(requestId)')
+		&& source.includes('reload_on_viewport_change')
+		&& source.includes('function viewportReloadRequired()')
+		&& source.includes('function renderVirtualList')
+		&& source.includes('VIRTUAL_LIST_THRESHOLD')
 		&& !source.includes("family === 'ozon_delivery:pickup'")
 		&& !source.includes("carrier === 'ozon_delivery'"), 'pickup map loader must be generic, accessible and tied to the current request lifecycle.');
+	assert(leafletProviderSource.includes("map.on('zoomend', scheduleClusterRebuild)")
+		&& leafletProviderSource.includes('function cancelScheduledClusterRebuild()')
+		&& leafletProviderSource.includes('requestAnimationFrame')
+		&& !leafletProviderSource.includes("map.on('zoomend', rebuildClusters)"), 'Leaflet zoom reclustering must be scheduled and coalesced instead of bound as a synchronous full rebuild.');
 	assert(checkoutSource.includes('function hasAuthoritativePickupSelections(response)')
 		&& checkoutSource.includes('? extractPickupSelections(response)')
 		&& checkoutSource.includes(': mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response))'), 'checkout state response with explicit pickup selections must replace local selections instead of preserving stale selected points.');
@@ -1211,6 +1275,7 @@ async function run() {
 	await addressSearchWithPointsRendersImmediately();
 	await geolocationResponseDoesNotAutoFit();
 	await destroyAfterAddressSearchPreventsLatePointsMutation();
+	await fixedAreaLargeDatasetDoesNotReloadOnViewportChange();
 	console.log('Pickup map lifecycle smoke OK');
 }
 

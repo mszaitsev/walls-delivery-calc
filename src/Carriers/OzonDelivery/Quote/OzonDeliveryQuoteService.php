@@ -127,6 +127,7 @@ final class OzonDeliveryQuoteService {
 			'limit' => $query->limit,
 			'destination_fingerprint' => $fingerprint,
 			'provider_destination_fingerprint' => $fingerprint,
+			'reload_on_viewport_change' => false,
 		);
 	}
 

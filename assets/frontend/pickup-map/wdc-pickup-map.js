@@ -15,6 +15,10 @@
 		return debounced;
 	}
 
+	var VIRTUAL_LIST_THRESHOLD = 200;
+	var VIRTUAL_ROW_HEIGHT = 112;
+	var VIRTUAL_LIST_OVERSCAN = 16;
+
 	function createMap(element, card, confirmButton, labels, initialContext) {
 		var config = window.wdcPickupCheckout || {};
 		var providerName = normalizeProvider(config.mapProvider || 'leaflet');
@@ -56,8 +60,14 @@
 		var hasInitialQuery = !!(context.query && String(context.query).trim());
 		var provider = null;
 		var visiblePoints = [];
+		var pointById = {};
+		var listFilterQuery = '';
+		var virtualListState = null;
+		var virtualListScrollContainer = null;
+		var virtualListScrollFrame = 0;
 		var lastBbox = '';
 		var yandexCityListMode = isYandexDeliveryContext(context);
+		var reloadOnViewportChange = contextReloadOnViewportChange(context);
 		var popupManuallyClosed = false;
 		var suppressNextMapClick = false;
 		var userLocation = null;
@@ -83,12 +93,16 @@
 				scheduleProgrammaticBoundsRelease();
 				return;
 			}
-			if (yandexCityListMode && visiblePoints.length) {
+			if (!viewportReloadRequired() && visiblePoints.length) {
 				renderCurrentList();
 				updateListSelectButton();
 				return;
 			}
 			debouncedLoad(bbox);
+		}
+
+		function viewportReloadRequired() {
+			return reloadOnViewportChange !== false;
 		}
 
 		provider = providerFactory.create(element, {
@@ -243,6 +257,7 @@
 
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
+			rebuildPointIndex();
 			var matchingPreviewPoint = previewPoint ? matchingPoint(previewPoint, visiblePoints) : null;
 			var previewLeftVisiblePoints = previewPoint && !matchingPreviewPoint;
 			if (previewPoint && matchingPreviewPoint) {
@@ -298,6 +313,12 @@
 			if (!list) {
 				return;
 			}
+			points = Array.isArray(points) ? points : [];
+			if (points.length > VIRTUAL_LIST_THRESHOLD) {
+				renderVirtualList(points, totalCount);
+				return;
+			}
+			clearVirtualListState();
 			if (!points.length) {
 				list.innerHTML = [
 					originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
@@ -315,6 +336,83 @@
 				points.map(renderListItem).join(''),
 				'</div>'
 			].join('');
+		}
+
+		function renderVirtualList(points, totalCount) {
+			var container = scrollContainerForList(list);
+			var previousTop = virtualListState && virtualListScrollContainer === container ? container.scrollTop : 0;
+			virtualListState = {
+				points: points,
+				totalCount: totalCount,
+				container: container,
+				rowHeight: VIRTUAL_ROW_HEIGHT,
+				overscan: VIRTUAL_LIST_OVERSCAN
+			};
+			attachVirtualListScroll(container);
+			container.scrollTop = previousTop;
+			renderVirtualListWindow();
+		}
+
+		function renderVirtualListWindow() {
+			if (!virtualListState || !list) {
+				return;
+			}
+			var state = virtualListState;
+			var container = state.container || list;
+			var points = state.points;
+			var viewportHeight = Math.max(240, Number(container.clientHeight || 0) || 520);
+			var start = Math.max(0, Math.floor((Number(container.scrollTop || 0) || 0) / state.rowHeight) - state.overscan);
+			var count = Math.ceil(viewportHeight / state.rowHeight) + state.overscan * 2;
+			var end = Math.min(points.length, start + count);
+			var nearest = points[0] && points[0].distanceText ? points[0].distanceText : '';
+			list.innerHTML = [
+				originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
+				searchAddress ? '<div class="wdc-pickup-list__found"><strong>Найден адрес:</strong><span>' + escapeHtml(searchAddress.value || '') + '</span>' + (nearest ? '<em>Ближайший ПВЗ: ' + escapeHtml(nearest) + '</em>' : '') + '</div>' : '',
+				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(state.totalCount, points.length)) + '</div>',
+				'<div class="wdc-pickup-list__items wdc-pickup-list__items--virtual" style="height:' + (points.length * state.rowHeight) + 'px">',
+				'<div class="wdc-pickup-list__window" style="transform:translateY(' + (start * state.rowHeight) + 'px)">',
+				points.slice(start, end).map(function (point, index) {
+					return renderListItem(point, start + index);
+				}).join(''),
+				'</div>',
+				'</div>'
+			].join('');
+		}
+
+		function attachVirtualListScroll(container) {
+			container = container || list;
+			if (virtualListScrollContainer === container) {
+				return;
+			}
+			clearVirtualListScrollBinding();
+			virtualListScrollContainer = container;
+			if (container && container.addEventListener) {
+				container.addEventListener('scroll', onVirtualListScroll);
+			}
+		}
+
+		function clearVirtualListState() {
+			virtualListState = null;
+			clearVirtualListScrollBinding();
+		}
+
+		function clearVirtualListScrollBinding() {
+			if (virtualListScrollContainer && virtualListScrollContainer.removeEventListener) {
+				virtualListScrollContainer.removeEventListener('scroll', onVirtualListScroll);
+			}
+			virtualListScrollContainer = null;
+			cancelFrame(virtualListScrollFrame);
+			virtualListScrollFrame = 0;
+		}
+
+		function onVirtualListScroll() {
+			if (!virtualListState || virtualListScrollFrame) {
+				return;
+			}
+			virtualListScrollFrame = requestFrame(function () {
+				virtualListScrollFrame = 0;
+				renderVirtualListWindow();
+			});
 		}
 
 		function renderListItem(point, index) {
@@ -355,7 +453,7 @@
 			if (!bbox) {
 				return;
 			}
-			if (yandexCityListMode && visiblePoints.length) {
+			if (!options.force && !viewportReloadRequired() && visiblePoints.length) {
 				renderCurrentList();
 				updateListSelectButton();
 				return;
@@ -392,11 +490,17 @@
 		}
 
 		function listPointsForCurrentBounds() {
-			if (!yandexCityListMode || !lastBbox) {
-				return visiblePoints;
+			var points = visiblePoints;
+			if (yandexCityListMode && lastBbox) {
+				points = visiblePoints.filter(function (point) {
+					return pointInsideBounds(point, lastBbox);
+				});
 			}
-			return visiblePoints.filter(function (point) {
-				return pointInsideBounds(point, lastBbox);
+			if (!listFilterQuery) {
+				return points;
+			}
+			return points.filter(function (point) {
+				return pointMatchesListSearch(point, listFilterQuery);
 			});
 		}
 
@@ -414,6 +518,15 @@
 		}
 
 		function runSearch(query, initial) {
+			if (!initial && !viewportReloadRequired() && visiblePoints.length) {
+				listFilterQuery = normalizeListSearchQuery(query);
+				renderCurrentList();
+				updateListSelectButton();
+				if (!listPointsForCurrentBounds().length) {
+					card.textContent = labels.notFound || labels.empty || '';
+				}
+				return Promise.resolve([]);
+			}
 			if (controller) {
 				controller.abort();
 			}
@@ -431,7 +544,11 @@
 						beginProgrammaticBoundsSuppression();
 						provider.setCenter(point.lat, point.lng, 15);
 						preview(point, { focus: false, initial: true });
-						loadBounds(bboxAround(point.lat, point.lng), { force: true });
+						if (viewportReloadRequired() || !visiblePoints.length) {
+							loadBounds(bboxAround(point.lat, point.lng), { force: true });
+						} else {
+							endLoading(requestId);
+						}
 						return;
 					}
 					card.textContent = labels.notFound || labels.empty || '';
@@ -500,12 +617,18 @@
 			beginProgrammaticBoundsSuppression();
 			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
 			if (Array.isArray(result.points) && result.points.length > 0) {
+				listFilterQuery = '';
 				renderMarkers(result.points, labels.empty || '');
 				card.textContent = labels.addressFound || 'Address found.';
 				return;
 			}
 			refreshDistancesFromOrigin();
-			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true });
+			if (viewportReloadRequired() || !visiblePoints.length) {
+				loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true });
+			} else {
+				renderCurrentList();
+				updateListSelectButton();
+			}
 			card.textContent = labels.addressFound || 'Адрес найден.';
 		}
 
@@ -543,6 +666,7 @@
 				if (debouncedLoad.cancel) {
 					debouncedLoad.cancel();
 				}
+				clearVirtualListState();
 				endProgrammaticBoundsSuppression();
 				detachUserViewportListeners();
 				cancelPendingProviderFit();
@@ -638,6 +762,7 @@
 
 		function refreshDistancesFromOrigin() {
 			visiblePoints = sortPoints(enrichPoints(visiblePoints));
+			rebuildPointIndex();
 			previewPoint = previewPoint ? matchingPoint(previewPoint, visiblePoints) : null;
 			committedPoint = committedPoint ? matchingPoint(committedPoint, visiblePoints) || committedPoint : null;
 			provider.renderMarkers(visiblePoints, {
@@ -649,7 +774,18 @@
 		}
 
 		function findPoint(id) {
-			return visiblePoints.filter(function (point) { return pointId(point) === id; })[0] || null;
+			id = String(id || '');
+			return pointById[id] || null;
+		}
+
+		function rebuildPointIndex() {
+			pointById = {};
+			visiblePoints.forEach(function (point) {
+				var id = pointId(point);
+				if (id && !pointById[id]) {
+					pointById[id] = point;
+				}
+			});
 		}
 
 		function matchingPoint(point, points) {
@@ -676,7 +812,12 @@
 		}
 
 		function scrollListRowIntoView(point) {
-			var row = findListRow(pointId(point));
+			var id = pointId(point);
+			var row = findListRow(id);
+			if (!row && virtualListState && list) {
+				scrollVirtualListToPoint(id);
+				row = findListRow(id);
+			}
 			if (!row || !list) {
 				return;
 			}
@@ -704,6 +845,26 @@
 				return;
 			}
 			container.scrollTop = nextTop;
+		}
+
+		function scrollVirtualListToPoint(id) {
+			if (!virtualListState || !id) {
+				return;
+			}
+			var points = virtualListState.points;
+			var index = -1;
+			for (var i = 0; i < points.length; i++) {
+				if (pointId(points[i]) === id) {
+					index = i;
+					break;
+				}
+			}
+			if (index < 0) {
+				return;
+			}
+			var container = virtualListState.container || list;
+			container.scrollTop = Math.max(0, index * virtualListState.rowHeight - virtualListState.rowHeight * 2);
+			renderVirtualListWindow();
 		}
 
 		function findListRow(id) {
@@ -750,7 +911,9 @@
 			beginProgrammaticBoundsSuppression();
 			provider.setCenter(lat, lng, 15);
 			refreshDistancesFromOrigin();
-			loadBounds(bboxAround(lat, lng), { force: true });
+			if (viewportReloadRequired() || !visiblePoints.length) {
+				loadBounds(bboxAround(lat, lng), { force: true });
+			}
 		}
 
 		function setStatus(message, type) {
@@ -842,6 +1005,62 @@
 
 	function normalizeProvider(provider) {
 		return 'yandex' === provider ? 'yandex' : 'leaflet';
+	}
+
+	function contextReloadOnViewportChange(context) {
+		context = context || {};
+		if (Object.prototype.hasOwnProperty.call(context, 'reload_on_viewport_change')) {
+			return !falsy(context.reload_on_viewport_change);
+		}
+		if (Object.prototype.hasOwnProperty.call(context, 'viewport_reload')) {
+			return !falsy(context.viewport_reload);
+		}
+		return true;
+	}
+
+	function normalizeListSearchQuery(query) {
+		return String(query || '').trim().toLowerCase();
+	}
+
+	function pointMatchesListSearch(point, query) {
+		if (!query) {
+			return true;
+		}
+		var snapshot = pointSnapshot(point);
+		var haystack = [
+			pointDisplayTitle(point),
+			presentationComment(point),
+			point && point.address,
+			point && point.work_time,
+			point && point.point_code,
+			point && point.display_code,
+			point && point.postcode,
+			point && point.postal_code,
+			snapshot.address,
+			snapshot.point_code,
+			snapshot.display_code,
+			snapshot.postcode,
+			snapshot.postal_code
+		].join(' ').toLowerCase();
+		return haystack.indexOf(query) !== -1;
+	}
+
+	function requestFrame(callback) {
+		if (window.requestAnimationFrame) {
+			return window.requestAnimationFrame(callback);
+		}
+		return window.setTimeout(callback, 16);
+	}
+
+	function cancelFrame(handle) {
+		if (!handle) {
+			return;
+		}
+		if (window.cancelAnimationFrame) {
+			window.cancelAnimationFrame(handle);
+			return;
+		}
+		window.clearTimeout(handle);
 	}
 
 	function normalizeAddressMarker(address) {
@@ -1114,6 +1333,10 @@
 
 	function truthy(value) {
 		return value === true || value === 1 || value === '1' || value === 'true';
+	}
+
+	function falsy(value) {
+		return value === false || value === 0 || value === '0' || value === 'false';
 	}
 
 	function supportsPassiveListeners() {
