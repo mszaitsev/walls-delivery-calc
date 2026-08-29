@@ -9,12 +9,17 @@ use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryQuoteDiagnosticService {
-	public function __construct( private OzonDeliverySettings $settings, private OzonDeliveryQuoteService $quotes ) {}
+	private RussianPhoneNormalizer $phones;
+
+	public function __construct( private OzonDeliverySettings $settings, private OzonDeliveryQuoteService $quotes, ?RussianPhoneNormalizer $phones = null ) {
+		$this->phones = $phones ?? new RussianPhoneNormalizer();
+	}
 
 	/** @param array<string,mixed> $input @return array<string,mixed> */
 	public function run( array $input ): array {
@@ -99,11 +104,6 @@ final class OzonDeliveryQuoteDiagnosticService {
 	}
 
 	private function phone( string $value ): string {
-		$value = preg_replace( '/[^\d+]+/', '', $value ) ?? '';
-		if ( preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
-			return '+7' . $matches[1];
-		}
-
-		return preg_match( '/^\+7\d{10}$/', $value ) ? $value : '';
+		return $this->phones->normalize( $value );
 	}
 }

@@ -8,6 +8,7 @@ use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
@@ -19,8 +20,10 @@ final class WooCommercePackageMapper {
 		private ?CheckoutAddressRuntime $address_runtime = null,
 		private ?CheckoutSessionManager $session_manager = null,
 		private ?SettingsRepository $settings = null,
-		private ?LocationRepository $location_repository = null
+		private ?LocationRepository $location_repository = null,
+		private ?RussianPhoneNormalizer $phones = null
 	) {
+		$this->phones = $phones ?? new RussianPhoneNormalizer();
 	}
 
 	/**
@@ -165,13 +168,22 @@ final class WooCommercePackageMapper {
 	}
 
 	private function recipient_phone(): string {
-		$value = isset( $_POST['billing_phone'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['billing_phone'] ) ) : '';
-		$value = preg_replace( '/[^\d+]+/', '', $value ) ?? '';
-		if ( preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
-			return '+7' . $matches[1];
+		$post_data_phone = $this->post_data_billing_phone();
+		if ( '' !== $post_data_phone ) {
+			return $post_data_phone;
 		}
 
-		return preg_match( '/^\+7\d{10}$/', $value ) ? $value : '';
+		return $this->phones->normalize( isset( $_POST['billing_phone'] ) ? wp_unslash( (string) $_POST['billing_phone'] ) : '' );
+	}
+
+	private function post_data_billing_phone(): string {
+		if ( ! isset( $_POST['post_data'] ) || ! is_string( $_POST['post_data'] ) ) {
+			return '';
+		}
+		$parsed = array();
+		parse_str( wp_unslash( $_POST['post_data'] ), $parsed );
+
+		return $this->phones->normalize( $parsed['billing_phone'] ?? '' );
 	}
 
 	/** @return array{latitude:?float,longitude:?float} */

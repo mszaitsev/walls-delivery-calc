@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\OzonDelivery\Quote;
 
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Packaging\PackagingParcel;
 use WallsShop\WDC\Packaging\PackagingResult;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
@@ -11,7 +12,11 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryQuoteRequestBuilder {
-	public function __construct( private OzonDeliverySettings $settings ) {}
+	private RussianPhoneNormalizer $phones;
+
+	public function __construct( private OzonDeliverySettings $settings, ?RussianPhoneNormalizer $phones = null ) {
+		$this->phones = $phones ?? new RussianPhoneNormalizer();
+	}
 
 	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
 	public function build( QuoteRequest $request, PackagingResult $packaging, string $delivery_point_id ): array {
@@ -72,14 +77,12 @@ final class OzonDeliveryQuoteRequestBuilder {
 	}
 
 	private function recipient_phone( QuoteRequest $request ): string {
-		foreach ( array( 'recipient_phone', 'billing_phone', 'phone_number', 'customer_phone' ) as $key ) {
-			$value = preg_replace( '/[^\d+]+/', '', (string) ( $request->customer_context[ $key ] ?? '' ) ) ?? '';
-			if ( preg_match( '/^\+7\d{10}$/', $value ) ) {
-				return $value;
-			}
+		$customer_phone = $this->phones->normalize( $request->customer_context['recipient_phone'] ?? '' );
+		if ( '' !== $customer_phone ) {
+			return $customer_phone;
 		}
 
-		return '';
+		return $this->settings->quote_fallback_phone();
 	}
 
 	private function money_amount( int $kopecks ): string {

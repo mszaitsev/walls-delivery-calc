@@ -607,6 +607,9 @@ C:.
 |   |   |       PackageItem.php
 |   |   |       ShipmentPlace.php
 |   |   |
+|   |   +---Phone
+|   |   |       RussianPhoneNormalizer.php
+|   |   |
 |   |   +---Pickup
 |   |   |       PickupPoint.php
 |   |   |       PickupPointSelection.php

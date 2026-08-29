@@ -597,6 +597,16 @@ function wc_checkout_smoke_orchestrator(): CheckoutOrchestrator {
 	);
 }
 
+function wc_checkout_phone_request_from_post( array $post ): \WallsShop\WDC\Domain\Quote\QuoteRequest {
+	$previous_post = $_POST;
+	$_POST         = $post;
+	try {
+		return ( new WooCommercePackageMapper() )->map( wc_checkout_smoke_package() );
+	} finally {
+		$_POST = $previous_post;
+	}
+}
+
 function wc_checkout_smoke_lead_time_normalizer( int $processing_days = 0 ): DeliveryLeadTimeNormalizer {
 	$settings = new SettingsRepository();
 	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
@@ -619,6 +629,26 @@ wc_checkout_smoke_assert( 100000 === $request->order_total->get_kopecks(), 'Pack
 wc_checkout_smoke_assert( 2 === $request->package->get_total_quantity(), 'Package mapper must map items quantity.' );
 wc_checkout_smoke_assert( 2500 === $request->package->get_total_weight_g(), 'Package mapper must map contents weight.' );
 wc_checkout_smoke_assert( count( $request->package->items ) === 1, 'Package mapper must keep package items.' );
+
+$phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => 'billing_phone=%2B79131234567&billing_first_name=Hidden' ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must read current billing_phone from WooCommerce AJAX post_data.' );
+wc_checkout_smoke_assert( ! array_key_exists( 'post_data', $phone_request->customer_context ) && ! array_key_exists( 'billing_first_name', $phone_request->customer_context ), 'Package mapper must not copy the full checkout post_data into customer_context.' );
+$formatted_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67' ) ) ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $formatted_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must normalize formatted Russian billing_phone from post_data.' );
+$eight_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => '8 913 123 45 67' ) ) ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $eight_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must normalize 8XXXXXXXXXX Russian billing_phone.' );
+$direct_phone_request = wc_checkout_phone_request_from_post( array( 'billing_phone' => '89131234567' ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $direct_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must use direct billing_phone when AJAX post_data is absent.' );
+$priority_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67' ) ), 'billing_phone' => '+79990000000' ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $priority_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must prefer post_data billing_phone over stale direct billing_phone.' );
+$invalid_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => 'call me +79131234567' ) ) ) );
+wc_checkout_smoke_assert( '' === (string) ( $invalid_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must leave invalid billing_phone empty.' );
+$previous_post = $_POST;
+$_POST         = array( 'post_data' => 'billing_phone=%2B79131234567&billing_first_name=Hidden' );
+$post_snapshot = $_POST;
+( new WooCommercePackageMapper() )->map( wc_checkout_smoke_package() );
+wc_checkout_smoke_assert( $post_snapshot === $_POST, 'Package mapper must not mutate global $_POST while parsing WooCommerce post_data.' );
+$_POST = $previous_post;
 
 $coordinate_db = new class extends wpdb {
 	public array $locations = array();

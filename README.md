@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.141.1
+Version: 0.141.2
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current Ozon Delivery scope: pickup checkout pricing for `Ozon до ПВЗ` is implemented through the carrier-owned quote layer and official Ozon Delivery checkout contract, but remains fail-closed until a safe admin live diagnostic succeeds for the configured `shipment_method_id`. Ozon Shipment Framework features are intentionally not included in this version.
+Current Ozon Delivery scope: pickup checkout pricing for `Ozon до ПВЗ` is implemented through the carrier-owned quote layer and official Ozon Delivery checkout contract, but remains fail-closed until a safe admin live diagnostic succeeds for the configured `shipment_method_id`. Checkout uses the standard WooCommerce `billing_phone`, including AJAX `post_data`, and Ozon has an optional carrier-owned fallback phone for missing or locally invalid customer numbers. Ozon Shipment Framework features are intentionally not included in this version.
 
 ## Quick Start
 

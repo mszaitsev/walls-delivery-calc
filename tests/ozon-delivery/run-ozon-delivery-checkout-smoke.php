@@ -84,7 +84,15 @@ oz_checkout_assert( ! str_contains( $orchestrator, 'Ozon' ) && ! str_contains( $
 oz_checkout_assert( ! str_contains( $plugin, 'OzonDeliveryShipment' ) && ! str_contains( $plugin, 'OzonDeliveryShipmentAdapter' ) && ! str_contains( $plugin, 'OzonDeliveryDocument' ), 'Shipment Framework must not gain Ozon shipment mutations in this stage.' );
 
 $GLOBALS['oz_checkout_options'] = array();
-$_POST['billing_phone'] = '+79991234567';
+$_POST = array(
+	'post_data'     => http_build_query(
+		array(
+			'billing_phone'      => '+7 (913) 123-45-67',
+			'billing_first_name' => 'Smoke',
+		)
+	),
+	'billing_phone' => '+79990000000',
+);
 $location_db = new wpdb();
 $location_db->locations = array( array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ) );
 $location_repository = new LocationRepository( $location_db );
@@ -93,6 +101,8 @@ $session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Н�
 $mapped_request = ( new WooCommercePackageMapper( null, $session, null, $location_repository ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
 oz_checkout_assert( 650000 === (int) ( $mapped_request->customer_context['selected_location_id'] ?? 0 ) && 55.030199 === (float) ( $mapped_request->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $mapped_request->customer_context['destination_longitude'] ?? 0 ), 'WooCommerce mapper must resolve trusted destination coordinates by canonical selected_location_id when session coordinates are absent.' );
 oz_checkout_assert( 0 === $location_db->location_single_lookup_calls, 'WooCommerce mapper must not use fuzzy city-name lookup for Ozon preliminary coordinates.' );
+oz_checkout_assert( '+79131234567' === (string) ( $mapped_request->customer_context['recipient_phone'] ?? '' ), 'WooCommerce mapper must read and normalize current billing_phone from checkout AJAX post_data for Ozon pricing.' );
+oz_checkout_assert( ! array_key_exists( 'post_data', $mapped_request->customer_context ) && ! array_key_exists( 'billing_first_name', $mapped_request->customer_context ), 'WooCommerce mapper must not copy raw checkout post_data into quote customer context.' );
 $settings_repo = new SettingsRepository();
 $settings = new OzonDeliverySettings( $settings_repo );
 $settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42' ) );
@@ -106,4 +116,5 @@ $quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteReques
 $carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $mapped_request );
 oz_checkout_assert( 1 === count( $carrier_quote->rates ) && 'Ozon до ПВЗ' === $carrier_quote->rates[0]->title, 'Ozon preliminary checkout quote must produce the pickup rate after canonical coordinate fallback.' );
 oz_checkout_assert( isset( $http->calls[1] ) && str_ends_with( $http->calls[1]['url'], '/v1/order/checkout' ) && 92783 === (int) ( $http->calls[1]['body']['delivery']['delivery_point']['delivery_point_id'] ?? 0 ), 'Ozon preliminary quote must call order_checkout with the representative pickup point found from canonical coordinates.' );
+oz_checkout_assert( '+79131234567' === (string) ( $http->calls[1]['body']['recipient']['phone_number'] ?? '' ), 'Ozon preliminary quote must send normalized customer phone from WooCommerce AJAX post_data to order_checkout.' );
 echo "Ozon Delivery checkout smoke passed.\n";
