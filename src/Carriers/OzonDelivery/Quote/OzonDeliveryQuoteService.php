@@ -50,7 +50,7 @@ final class OzonDeliveryQuoteService {
 				$result->shipment_method_id,
 				$result->endpoint,
 				$result->http_status,
-				array_merge( $result->meta, $built['diagnostics'], $packaging->to_array(), array( 'pickup_source' => $selected_point instanceof PickupPoint ? 'selected' : 'representative', 'pickup_provider_query' => $this->query_snapshot( $query ) ) )
+				array_merge( $result->meta, $built['diagnostics'], $packaging->to_array(), array( 'pickup_source' => $selected_point instanceof PickupPoint ? 'selected' : 'representative', 'pickup_provider_query' => $this->query_snapshot( $query, $request ) ) )
 			);
 		} catch ( OzonDeliveryApiException $exception ) {
 			throw new OzonDeliveryQuoteException( $exception->safe_code ?: 'ozon_api_error', $exception->operation, $exception->http_status, $this->sanitizer->sanitize( $exception->getMessage(), 'Ozon Delivery не рассчитал доставку.' ), $exception->metadata );
@@ -111,7 +111,9 @@ final class OzonDeliveryQuoteService {
 	}
 
 	/** @return array<string,mixed> */
-	private function query_snapshot( CarrierPickupPointQuery $query ): array {
+	private function query_snapshot( CarrierPickupPointQuery $query, QuoteRequest $request ): array {
+		$fingerprint = $this->destination_fingerprint( $request, $query );
+
 		return array(
 			'carrier_key' => $query->carrier_key,
 			'location_id' => $query->location_id,
@@ -123,7 +125,82 @@ final class OzonDeliveryQuoteService {
 			'purpose' => $query->purpose,
 			'radius_km' => $query->radius_km,
 			'limit' => $query->limit,
+			'destination_fingerprint' => $fingerprint,
+			'provider_destination_fingerprint' => $fingerprint,
 		);
+	}
+
+	private function destination_fingerprint( QuoteRequest $request, CarrierPickupPointQuery $query ): string {
+		$context = $request->customer_context;
+		$raw_country = $context['country_code'] ?? '';
+		if ( '' === $this->normalized_location_value( $raw_country ) ) {
+			$raw_country = $query->country_code;
+		}
+		if ( '' === $this->normalized_location_value( $raw_country ) ) {
+			$raw_country = $request->country_code;
+		}
+		if ( '' === $this->normalized_location_value( $raw_country ) ) {
+			$raw_country = $request->destination->country_code;
+		}
+		$country = $this->normalized_location_value( $raw_country );
+		$prefix = '' !== $country ? 'country=' . strtoupper( $country ) . '|' : '';
+		$location_id = $query->location_id > 0 ? (string) $query->location_id : $this->normalized_location_value( $context['selected_location_id'] ?? $context['location_id'] ?? '' );
+		if ( '' !== $location_id && is_numeric( $location_id ) && (int) $location_id > 0 ) {
+			return $prefix . 'location_id=' . (string) (int) $location_id;
+		}
+		foreach ( array( 'fias_id', 'city_fias_id', 'fias_location_guid' ) as $key ) {
+			$value = $this->normalized_location_value( $context[ $key ] ?? '' );
+			if ( '' !== $value ) {
+				return $prefix . 'fias_id=' . $value;
+			}
+		}
+		foreach ( array( 'gar_object_id', 'gar_id' ) as $key ) {
+			$value = $this->normalized_location_value( $context[ $key ] ?? '' );
+			if ( '' !== $value ) {
+				return $prefix . 'gar_object_id=' . $value;
+			}
+		}
+		$city = '';
+		foreach ( array( 'city_name', 'settlement_name', 'place_name', 'city' ) as $key ) {
+			$city = $this->normalized_location_value( $context[ $key ] ?? '' );
+			if ( '' !== $city ) {
+				break;
+			}
+		}
+		if ( '' === $city ) {
+			$city = $this->normalized_location_value( $request->destination->city ?: $request->destination->settlement );
+		}
+		$region = '';
+		foreach ( array( 'region_name', 'state_value', 'region' ) as $key ) {
+			$region = $this->normalized_location_value( $context[ $key ] ?? '' );
+			if ( '' !== $region ) {
+				break;
+			}
+		}
+		if ( '' !== $city || '' !== $region ) {
+			return $prefix . 'place=' . $region . '|' . $city;
+		}
+		foreach ( array( 'postcode', 'postal_code' ) as $key ) {
+			$postcode = $this->normalized_location_value( $context[ $key ] ?? '' );
+			if ( '' !== $postcode ) {
+				return $prefix . 'postcode=' . $postcode;
+			}
+		}
+
+		return '';
+	}
+
+	private function normalized_location_value( mixed $value ): string {
+		if ( ! is_scalar( $value ) ) {
+			return '';
+		}
+		$value = trim( (string) $value );
+		if ( '' === $value ) {
+			return '';
+		}
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+
+		return preg_replace( '/\s+/u', ' ', $value ) ?: $value;
 	}
 
 	private function distance_score( PickupPoint $point, CarrierPickupPointQuery $query ): float {
