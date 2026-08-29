@@ -10,6 +10,7 @@ use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -17,7 +18,8 @@ final class WooCommercePackageMapper {
 	public function __construct(
 		private ?CheckoutAddressRuntime $address_runtime = null,
 		private ?CheckoutSessionManager $session_manager = null,
-		private ?SettingsRepository $settings = null
+		private ?SettingsRepository $settings = null,
+		private ?LocationRepository $location_repository = null
 	) {
 	}
 
@@ -33,6 +35,8 @@ final class WooCommercePackageMapper {
 		$total       = Money::from_rubles( (float) ( $package['contents_cost'] ?? 0 ) );
 		$items       = $this->items_from_contents( is_array( $package['contents'] ?? null ) ? $package['contents'] : array() );
 		$weight_g    = (int) round( max( 0.0, (float) ( $package['contents_weight'] ?? 0 ) ) * 1000 );
+		$location_id = $this->selected_location_id();
+		$coordinates = $this->destination_coordinates( $location_id );
 
 		$domain_package = Package::from_items( $items, 0, $total, $total );
 		if ( 0 === $domain_package->total_weight_g && $weight_g > 0 ) {
@@ -52,11 +56,11 @@ final class WooCommercePackageMapper {
 					'source'         => 'woocommerce_checkout',
 					'normalized_address' => $address->normalized,
 					'fallback_address'   => $address->fallback,
-					'selected_location_id' => $this->selected_location_id(),
+					'selected_location_id' => $location_id,
 					'selected_location_fias_id' => $this->selected_location_fias_id( $address ),
 					'recipient_phone' => $this->recipient_phone(),
-					'destination_latitude' => $this->selected_location_coordinate( 'latitude', 'lat' ),
-					'destination_longitude' => $this->selected_location_coordinate( 'longitude', 'lng' ),
+					'destination_latitude' => $coordinates['latitude'],
+					'destination_longitude' => $coordinates['longitude'],
 					'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
 				),
 				$customer_context
@@ -170,20 +174,56 @@ final class WooCommercePackageMapper {
 		return preg_match( '/^\+7\d{10}$/', $value ) ? $value : '';
 	}
 
-	private function selected_location_coordinate( string $primary, string $alias ): ?float {
+	/** @return array{latitude:?float,longitude:?float} */
+	private function destination_coordinates( string $location_id ): array {
 		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
-		foreach ( array( $city[ $primary ] ?? null, $city[ $alias ] ?? null, $context[ $primary ] ?? null, $context[ $alias ] ?? null ) as $value ) {
-			if ( is_numeric( $value ) ) {
-				$number = (float) $value;
-				$valid = 'latitude' === $primary ? $number >= -90 && $number <= 90 : $number >= -180 && $number <= 180;
-				if ( $valid ) {
-					return $number;
-				}
+		$session = $this->coordinate_pair_from_contexts( $city, $context );
+		if ( null !== $session ) {
+			return $session;
+		}
+
+		$id = is_numeric( $location_id ) ? (int) $location_id : 0;
+		if ( $id <= 0 || ! $this->location_repository instanceof LocationRepository ) {
+			return array( 'latitude' => null, 'longitude' => null );
+		}
+
+		$location = $this->location_repository->find_by_id( $id );
+		if ( null === $location || ! $location->active ) {
+			return array( 'latitude' => null, 'longitude' => null );
+		}
+
+		return $this->valid_coordinate_pair( $location->latitude, $location->longitude ) ?? array( 'latitude' => null, 'longitude' => null );
+	}
+
+	/**
+	 * @param array<string,mixed> $city
+	 * @param array<string,mixed> $context
+	 * @return array{latitude:float,longitude:float}|null
+	 */
+	private function coordinate_pair_from_contexts( array $city, array $context ): ?array {
+		foreach ( array( $city, $context ) as $source ) {
+			$pair = $this->valid_coordinate_pair( $source['latitude'] ?? $source['lat'] ?? null, $source['longitude'] ?? $source['lng'] ?? $source['lon'] ?? null );
+			if ( null !== $pair ) {
+				return $pair;
 			}
 		}
 
 		return null;
+	}
+
+	/** @return array{latitude:float,longitude:float}|null */
+	private function valid_coordinate_pair( mixed $latitude, mixed $longitude ): ?array {
+		if ( ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return null;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+		if ( ! is_finite( $latitude ) || ! is_finite( $longitude ) || $latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180 ) {
+			return null;
+		}
+
+		return array( 'latitude' => $latitude, 'longitude' => $longitude );
 	}
 
 	private function selected_location_fias_id( Address $address ): string {

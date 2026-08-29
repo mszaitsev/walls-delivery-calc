@@ -157,6 +157,8 @@ final class OrderQuoteRequestMapper {
 			$city_display = (string) ( $override['display_name'] ?? $city_display );
 		}
 
+		$coordinates = $this->destination_coordinates( $order, $selected_location, $resolved_location_id );
+
 		$context = array_filter(
 			array(
 				'source'                    => 'woocommerce_order_admin_preview',
@@ -177,8 +179,8 @@ final class OrderQuoteRequestMapper {
 				'selected_location_fias_id' => array() !== $override ? $address->fias_id : ( $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $address->fias_id ),
 				'location_fias_id'          => array() !== $override ? $address->fias_id : ( $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $address->fias_id ),
 				'recipient_phone'           => $this->order_phone( $order ),
-				'destination_latitude'      => $this->location_coordinate( $order, $selected_location, 'latitude', 'lat' ),
-				'destination_longitude'     => $this->location_coordinate( $order, $selected_location, 'longitude', 'lng' ),
+				'destination_latitude'      => $coordinates['latitude'],
+				'destination_longitude'     => $coordinates['longitude'],
 				'fias_id'                   => $address->fias_id,
 				'gar_id'                    => $address->gar_id,
 				'normalized_address'        => $address->normalized,
@@ -264,20 +266,55 @@ final class OrderQuoteRequestMapper {
 		return $selected_pickup_point;
 	}
 
-	/** @param array<string,mixed>|null $selected_location */
-	private function location_coordinate( object $order, ?array $selected_location, string $primary, string $alias ): ?float {
+	/** @param array<string,mixed>|null $selected_location @return array{latitude:?float,longitude:?float} */
+	private function destination_coordinates( object $order, ?array $selected_location, int $location_id ): array {
 		$override = is_array( $selected_location ) ? $selected_location : array();
-		foreach ( array( $override[ $primary ] ?? null, $override[ $alias ] ?? null, $this->meta_string( $order, '_wdc_platform_' . $primary ), $this->meta_string( $order, '_wdc_platform_location_' . $primary ) ) as $value ) {
-			if ( is_numeric( $value ) ) {
-				$number = (float) $value;
-				$valid = 'latitude' === $primary ? $number >= -90 && $number <= 90 : $number >= -180 && $number <= 180;
-				if ( $valid ) {
-					return $number;
-				}
+		$direct = $this->valid_coordinate_pair( $this->first_coordinate_candidate( $override, $order, array( 'latitude', 'lat' ), array( '_wdc_platform_latitude', '_wdc_platform_location_latitude' ) ), $this->first_coordinate_candidate( $override, $order, array( 'longitude', 'lng', 'lon' ), array( '_wdc_platform_longitude', '_wdc_platform_location_longitude' ) ) );
+		if ( null !== $direct ) {
+			return $direct;
+		}
+
+		if ( $location_id <= 0 || ! $this->location_repository instanceof LocationRepository ) {
+			return array( 'latitude' => null, 'longitude' => null );
+		}
+
+		$location = $this->location_repository->find_by_id( $location_id );
+		if ( null === $location || ! $location->active ) {
+			return array( 'latitude' => null, 'longitude' => null );
+		}
+
+		return $this->valid_coordinate_pair( $location->latitude, $location->longitude ) ?? array( 'latitude' => null, 'longitude' => null );
+	}
+
+	/** @param array<string,mixed> $override @param array<int,string> $override_keys @param array<int,string> $meta_keys */
+	private function first_coordinate_candidate( array $override, object $order, array $override_keys, array $meta_keys ): mixed {
+		foreach ( $override_keys as $key ) {
+			if ( array_key_exists( $key, $override ) && '' !== (string) $override[ $key ] ) {
+				return $override[ $key ];
+			}
+		}
+		foreach ( $meta_keys as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( '' !== $value ) {
+				return $value;
 			}
 		}
 
 		return null;
+	}
+
+	/** @return array{latitude:float,longitude:float}|null */
+	private function valid_coordinate_pair( mixed $latitude, mixed $longitude ): ?array {
+		if ( ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return null;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+		if ( ! is_finite( $latitude ) || ! is_finite( $longitude ) || $latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180 ) {
+			return null;
+		}
+
+		return array( 'latitude' => $latitude, 'longitude' => $longitude );
 	}
 
 	private function order_phone( object $order ): string {

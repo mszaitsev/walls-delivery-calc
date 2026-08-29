@@ -620,6 +620,38 @@ wc_checkout_smoke_assert( 2 === $request->package->get_total_quantity(), 'Packag
 wc_checkout_smoke_assert( 2500 === $request->package->get_total_weight_g(), 'Package mapper must map contents weight.' );
 wc_checkout_smoke_assert( count( $request->package->items ) === 1, 'Package mapper must keep package items.' );
 
+$coordinate_db = new class extends wpdb {
+	public array $locations = array();
+	public int $location_find_by_id_calls = 0;
+	public int $location_single_lookup_calls = 0;
+};
+$coordinate_db->locations = array(
+	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
+	array( 'id' => 650001, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неактивный Новосибирск', 'latitude' => 55.1, 'longitude' => 82.9, 'active' => 0 ),
+	array( 'id' => 650002, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неверные координаты', 'latitude' => 91, 'longitude' => 82.9, 'active' => 1 ),
+	array( 'id' => 650003, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неполные координаты', 'latitude' => 55.03, 'longitude' => null, 'active' => 1 ),
+);
+$coordinate_repository = new LocationRepository( $coordinate_db );
+$coordinate_session = new CheckoutSessionManager();
+$coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
+$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+wc_checkout_smoke_assert( 54.9833 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.8964 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must prefer trusted session destination coordinates.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->location_find_by_id_calls, 'Package mapper must not query canonical location when session coordinates are already complete.' );
+
+$coordinate_session_id = new CheckoutSessionManager();
+$coordinate_session_id->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск' ) );
+$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+wc_checkout_smoke_assert( '650000' === (string) ( $coordinate_request_id->customer_context['selected_location_id'] ?? '' ), 'Package mapper must preserve canonical selected_location_id.' );
+wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request_id->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request_id->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must resolve destination coordinates from canonical selected_location_id.' );
+
+foreach ( array( 999999, 650001, 650002, 650003 ) as $bad_location_id ) {
+	$bad_session = new CheckoutSessionManager();
+	$bad_session->save_city_context( array( 'location_id' => $bad_location_id, 'city_name' => 'Новосибирск' ) );
+	$bad_request = ( new WooCommercePackageMapper( null, $bad_session, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+	wc_checkout_smoke_assert( null === ( $bad_request->customer_context['destination_latitude'] ?? null ) && null === ( $bad_request->customer_context['destination_longitude'] ?? null ), 'Package mapper must leave destination coordinates unresolved for missing, inactive, invalid, or partial canonical locations.' );
+}
+wc_checkout_smoke_assert( 0 === $coordinate_db->location_single_lookup_calls, 'Package mapper must not use fuzzy city-name lookup for destination coordinates.' );
+
 $orchestrator = wc_checkout_smoke_orchestrator();
 $result       = $orchestrator->calculate( $request );
 wc_checkout_smoke_assert( count( $result->rates ) >= 2, 'TestDemoCarrier must return checkout rates.' );
