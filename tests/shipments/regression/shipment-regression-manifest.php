@@ -64,6 +64,8 @@ return array(
 	'ozon-delivery.foundation' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-foundation-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.authorization' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-authorization-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.admin' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-admin-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
+	'ozon-delivery.quote' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-quote-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
+	'ozon-delivery.checkout' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-checkout-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.pickup-import' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-import-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.pickup-admin' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-admin-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.pickup-scheduler' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-scheduler-smoke.php', 'groups' => array( 'ozon-delivery' ) ),

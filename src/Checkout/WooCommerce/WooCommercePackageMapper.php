@@ -54,6 +54,9 @@ final class WooCommercePackageMapper {
 					'fallback_address'   => $address->fallback,
 					'selected_location_id' => $this->selected_location_id(),
 					'selected_location_fias_id' => $this->selected_location_fias_id( $address ),
+					'recipient_phone' => $this->recipient_phone(),
+					'destination_latitude' => $this->selected_location_coordinate( 'latitude', 'lat' ),
+					'destination_longitude' => $this->selected_location_coordinate( 'longitude', 'lng' ),
 					'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
 				),
 				$customer_context
@@ -155,6 +158,32 @@ final class WooCommercePackageMapper {
 
 	private function payment_method(): string {
 		return isset( $_POST['payment_method'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['payment_method'] ) ) : '';
+	}
+
+	private function recipient_phone(): string {
+		$value = isset( $_POST['billing_phone'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['billing_phone'] ) ) : '';
+		$value = preg_replace( '/[^\d+]+/', '', $value ) ?? '';
+		if ( preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
+			return '+7' . $matches[1];
+		}
+
+		return preg_match( '/^\+7\d{10}$/', $value ) ? $value : '';
+	}
+
+	private function selected_location_coordinate( string $primary, string $alias ): ?float {
+		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
+		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
+		foreach ( array( $city[ $primary ] ?? null, $city[ $alias ] ?? null, $context[ $primary ] ?? null, $context[ $alias ] ?? null ) as $value ) {
+			if ( is_numeric( $value ) ) {
+				$number = (float) $value;
+				$valid = 'latitude' === $primary ? $number >= -90 && $number <= 90 : $number >= -180 && $number <= 180;
+				if ( $valid ) {
+					return $number;
+				}
+			}
+		}
+
+		return null;
 	}
 
 	private function selected_location_fias_id( Address $address ): string {

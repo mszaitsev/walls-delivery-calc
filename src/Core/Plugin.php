@@ -111,6 +111,7 @@ use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteResponseParser;
 use WallsShop\WDC\Carriers\Pek\Quote\PekQuoteService;
 use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryAdminPage;
+use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryQuoteDiagnosticService;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryAccessTokenService;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiClient;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryConnectionDiagnosticService;
@@ -127,6 +128,9 @@ use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduleFormatter;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduler;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteParser;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteRequestBuilder;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
@@ -173,6 +177,7 @@ use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
 use WallsShop\WDC\Carriers\Runtime\JetLogisticCarrier;
+use WallsShop\WDC\Carriers\Runtime\OzonDeliveryCarrier;
 use WallsShop\WDC\Carriers\Runtime\PekCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
@@ -484,6 +489,11 @@ final class Plugin {
 		$this->container->register( OzonDeliveryPickupImportLock::class, fn(): OzonDeliveryPickupImportLock => new OzonDeliveryPickupImportLock() );
 		$this->container->register( OzonDeliveryPickupImportService::class, fn(): OzonDeliveryPickupImportService => new OzonDeliveryPickupImportService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryPickupParser::class ), $this->container->get( OzonDeliveryPickupRepository::class ) ) );
 		$this->container->register( OzonDeliveryPickupScheduler::class, fn(): OzonDeliveryPickupScheduler => new OzonDeliveryPickupScheduler( $this->container->get( ActionScheduler::class ), $this->container->get( OzonDeliveryPickupImportService::class ), $this->container->get( OzonDeliveryPickupImportLock::class ), $this->container->get( OzonDeliverySettings::class ) ) );
+		$this->container->register( OzonDeliveryQuoteRequestBuilder::class, fn(): OzonDeliveryQuoteRequestBuilder => new OzonDeliveryQuoteRequestBuilder( $this->container->get( OzonDeliverySettings::class ) ) );
+		$this->container->register( OzonDeliveryQuoteParser::class, fn(): OzonDeliveryQuoteParser => new OzonDeliveryQuoteParser( $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
+		$this->container->register( OzonDeliveryQuoteService::class, fn(): OzonDeliveryQuoteService => new OzonDeliveryQuoteService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryQuoteRequestBuilder::class ), $this->container->get( OzonDeliveryQuoteParser::class ), $this->container->get( PackagingBuilder::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
+		$this->container->register( OzonDeliveryQuoteDiagnosticService::class, fn(): OzonDeliveryQuoteDiagnosticService => new OzonDeliveryQuoteDiagnosticService( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryQuoteService::class ) ) );
+		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( PekHttpClientInterface::class, fn(): PekHttpClientInterface => new WpPekHttpClient() );
 		$this->container->register( PekRequestBudget::class, fn(): PekRequestBudget => new PekRequestBudget( $this->container->get( PekSettings::class ) ) );
 		$this->container->register( PekApiClient::class, fn(): PekApiClient => new PekApiClient( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekHttpClientInterface::class ), $this->container->get( PekRequestBudget::class ) ) );
@@ -698,6 +708,7 @@ final class Plugin {
 				$registry->register( $this->container->get( YandexDeliveryCarrier::class ) );
 				$registry->register( $this->container->get( JetLogisticCarrier::class ) );
 				$registry->register( $this->container->get( PekCarrier::class ) );
+				$registry->register( $this->container->get( OzonDeliveryCarrier::class ) );
 
 				return $registry;
 			}
@@ -962,7 +973,7 @@ final class Plugin {
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ), $this->container->get( JetLogisticApiDiagnosticService::class ) ) );
 		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ), $this->container->get( PekDestinationPickupDiagnosticService::class ), $this->container->get( PekDestinationPickupDiagnosticStore::class ), $this->container->get( PekQuoteDiagnosticService::class ), $this->container->get( PekQuoteDiagnosticStore::class ), $this->container->get( DeliveryQuoteCacheManager::class ), $this->container->get( PekSenderCounterpartService::class ) ) );
 		$this->container->register( PekStatusAdminPage::class, fn(): PekStatusAdminPage => new PekStatusAdminPage( $this->container->get( PekStatusMapping::class ) ) );
-		$this->container->register( OzonDeliveryAdminPage::class, fn(): OzonDeliveryAdminPage => new OzonDeliveryAdminPage( $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryConnectionDiagnosticService::class ), $this->container->get( OzonDeliveryPickupRepository::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ) ) );
+		$this->container->register( OzonDeliveryAdminPage::class, fn(): OzonDeliveryAdminPage => new OzonDeliveryAdminPage( $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryConnectionDiagnosticService::class ), $this->container->get( OzonDeliveryPickupRepository::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( OzonDeliveryQuoteDiagnosticService::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(

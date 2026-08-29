@@ -317,8 +317,9 @@ C:.
 |   |   |   |
 |   |   |   +---Admin
 |   |   |   |       OzonDeliveryAdminPage.php
+|   |   |   |       OzonDeliveryQuoteDiagnosticService.php
 |   |   |   |
-|   |   |   \---Api
+|   |   |   +---Api
 |   |   |           OzonDeliveryAccessTokenService.php
 |   |   |           OzonDeliveryApiClient.php
 |   |   |           OzonDeliveryApiException.php
@@ -338,6 +339,13 @@ C:.
 |   |   |           OzonDeliveryPickupRepository.php
 |   |   |           OzonDeliveryPickupScheduleFormatter.php
 |   |   |           OzonDeliveryPickupScheduler.php
+|   |   |
+|   |   \---Quote
+|   |           OzonDeliveryQuoteException.php
+|   |           OzonDeliveryQuoteParser.php
+|   |           OzonDeliveryQuoteRequestBuilder.php
+|   |           OzonDeliveryQuoteResult.php
+|   |           OzonDeliveryQuoteService.php
 |   |   |
 |   |   +---Pek
 |   |   |   |   PekCountryPolicy.php
@@ -404,6 +412,7 @@ C:.
 |   |   |       CdekCarrier.php
 |   |   |       DpdQuoteCarrier.php
 |   |   |       JetLogisticCarrier.php
+|   |   |       OzonDeliveryCarrier.php
 |   |   |       PekCarrier.php
 |   |   |       RussianPostDomesticCarrier.php
 |   |   |       RussianPostInternationalCarrier.php
@@ -1069,6 +1078,7 @@ C:.
     +---ozon-delivery
     |       run-ozon-delivery-admin-smoke.php
     |       run-ozon-delivery-authorization-smoke.php
+    |       run-ozon-delivery-checkout-smoke.php
     |       run-ozon-delivery-foundation-smoke.php
     |       run-ozon-delivery-pickup-admin-smoke.php
     |       run-ozon-delivery-pickup-import-smoke.php
@@ -1076,6 +1086,7 @@ C:.
     |       run-ozon-delivery-pickup-schedule-smoke.php
     |       run-ozon-delivery-pickup-scheduler-smoke.php
     |       run-ozon-delivery-pickup-progress-smoke.php
+    |       run-ozon-delivery-quote-smoke.php
     |
     +---packaging
     |       run-packaging-smoke.php

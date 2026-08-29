@@ -16,6 +16,19 @@ if ( ! function_exists( 'current_time' ) ) {
 	}
 }
 
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $key, mixed $default = false ): mixed {
+		return $GLOBALS['wdc_pickup_smoke_options'][ $key ] ?? $default;
+	}
+}
+
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $key, mixed $value, bool $autoload = true ): bool {
+		$GLOBALS['wdc_pickup_smoke_options'][ $key ] = $value;
+		return true;
+	}
+}
+
 if ( ! function_exists( 'sanitize_text_field' ) ) {
 	function sanitize_text_field( string $value ): string {
 		return trim( strip_tags( $value ) );
@@ -443,7 +456,7 @@ pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shippin
 pickup_smoke_assert( ! isset( $order->shipping['address_2'] ) || '' === (string) $order->shipping['address_2'], 'Pickup order must not write pickup code to shipping address_2.' );
 pickup_smoke_assert( 'Новосибирск' === ( $order->shipping['city'] ?? '' ), 'Pickup order must write normalized city to shipping city.' );
 pickup_smoke_assert( '630000' === ( $order->shipping['postcode'] ?? '' ), 'Pickup order must write resolved postcode to shipping postcode.' );
-pickup_smoke_assert( 1 === count( $shipping_item->meta ), 'Pickup shipping item visible meta must contain only delivery time.' );
+pickup_smoke_assert( count( $shipping_item->meta ) <= 1 && ( array() === $shipping_item->meta || array_key_exists( 'Планируемая* дата доставки', $shipping_item->meta ) ), 'Pickup shipping item visible meta must contain only optional delivery time.' );
 pickup_smoke_assert( ! str_contains( (string) wp_json_encode( $shipping_item->meta ), 'demo-nsk-001' ), 'Pickup shipping item visible meta must not expose pickup code.' );
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );

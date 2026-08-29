@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -175,6 +176,9 @@ final class OrderQuoteRequestMapper {
 				'selected_location_region'  => $address->region_name,
 				'selected_location_fias_id' => array() !== $override ? $address->fias_id : ( $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $address->fias_id ),
 				'location_fias_id'          => array() !== $override ? $address->fias_id : ( $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $address->fias_id ),
+				'recipient_phone'           => $this->order_phone( $order ),
+				'destination_latitude'      => $this->location_coordinate( $order, $selected_location, 'latitude', 'lat' ),
+				'destination_longitude'     => $this->location_coordinate( $order, $selected_location, 'longitude', 'lng' ),
 				'fias_id'                   => $address->fias_id,
 				'gar_id'                    => $address->gar_id,
 				'normalized_address'        => $address->normalized,
@@ -197,6 +201,13 @@ final class OrderQuoteRequestMapper {
 			$context['pickup_selection'] = $pek_selection;
 			$context['pickup_selections'] = array(
 				PekSettings::PICKUP_FAMILY => $pek_selection,
+			);
+		}
+		$ozon_selection = $this->ozon_pickup_selection( $selected_pickup_point );
+		if ( array() !== $ozon_selection ) {
+			$context['pickup_selection'] = $ozon_selection;
+			$context['pickup_selections'] = array(
+				OzonDeliverySettings::PICKUP_FAMILY => $ozon_selection,
 			);
 		}
 
@@ -239,6 +250,44 @@ final class OrderQuoteRequestMapper {
 		}
 
 		return $selected_pickup_point;
+	}
+
+	/** @param array<string,mixed> $selected_pickup_point */
+	private function ozon_pickup_selection( array $selected_pickup_point ): array {
+		$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+		$carrier = (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+		$family = (string) ( $selected_pickup_point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		if ( OzonDeliverySettings::CARRIER_KEY !== $carrier || OzonDeliverySettings::PICKUP_FAMILY !== $family ) {
+			return array();
+		}
+
+		return $selected_pickup_point;
+	}
+
+	/** @param array<string,mixed>|null $selected_location */
+	private function location_coordinate( object $order, ?array $selected_location, string $primary, string $alias ): ?float {
+		$override = is_array( $selected_location ) ? $selected_location : array();
+		foreach ( array( $override[ $primary ] ?? null, $override[ $alias ] ?? null, $this->meta_string( $order, '_wdc_platform_' . $primary ), $this->meta_string( $order, '_wdc_platform_location_' . $primary ) ) as $value ) {
+			if ( is_numeric( $value ) ) {
+				$number = (float) $value;
+				$valid = 'latitude' === $primary ? $number >= -90 && $number <= 90 : $number >= -180 && $number <= 180;
+				if ( $valid ) {
+					return $number;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	private function order_phone( object $order ): string {
+		$value = $this->order_string( $order, 'get_billing_phone' );
+		$value = preg_replace( '/[^\d+]+/', '', $value ) ?? '';
+		if ( preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
+			return '+7' . $matches[1];
+		}
+
+		return preg_match( '/^\+7\d{10}$/', $value ) ? $value : '';
 	}
 
 	private function saved_location_id( object $order ): int {
