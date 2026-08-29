@@ -19,6 +19,8 @@ final class OzonDeliverySettings {
 	public const CLIENT_SECRET_ENCRYPTED_KEY = 'ozon_delivery_client_secret_encrypted';
 	public const REQUEST_TIMEOUT_KEY = 'ozon_delivery_request_timeout';
 	public const LAST_DIAGNOSTIC_KEY = 'ozon_delivery_last_diagnostic';
+	public const PICKUP_AUTO_SYNC_KEY = 'ozon_delivery_pickup_auto_sync';
+	public const PICKUP_SYNC_TIME_KEY = 'ozon_delivery_pickup_sync_time';
 
 	public function __construct( private SettingsRepository $settings ) {}
 
@@ -29,6 +31,8 @@ final class OzonDeliverySettings {
 			self::CLIENT_SECRET_ENCRYPTED_KEY => '',
 			self::REQUEST_TIMEOUT_KEY => 15,
 			self::LAST_DIAGNOSTIC_KEY => array(),
+			self::PICKUP_AUTO_SYNC_KEY => true,
+			self::PICKUP_SYNC_TIME_KEY => '02:00',
 		);
 	}
 
@@ -45,4 +49,9 @@ final class OzonDeliverySettings {
 	public function save_last_diagnostic( array $result ): void {
 		$this->settings->set( self::LAST_DIAGNOSTIC_KEY, $result );
 	}
+
+	public function pickup_auto_sync_enabled(): bool { return $this->settings->get_bool( self::PICKUP_AUTO_SYNC_KEY, true ); }
+	public function pickup_sync_time(): string { $time = $this->settings->get_string( self::PICKUP_SYNC_TIME_KEY, '02:00' ); return 1 === preg_match( '/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $time ) ? $time : '02:00'; }
+	/** @param array<string,mixed> $input */
+	public function save_pickup_schedule( array $input ): void { $time = isset( $input['ozon_delivery_pickup_sync_time'] ) ? trim( (string) $input['ozon_delivery_pickup_sync_time'] ) : '02:00'; $this->settings->set( self::PICKUP_AUTO_SYNC_KEY, ! empty( $input['ozon_delivery_pickup_auto_sync'] ) ); $this->settings->set( self::PICKUP_SYNC_TIME_KEY, 1 === preg_match( '/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $time ) ? $time : '02:00' ); }
 }
