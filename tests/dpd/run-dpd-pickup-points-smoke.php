@@ -274,6 +274,6 @@ $shipments_metabox = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/S
 $dpd_adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentAdapter.php' );
 dpd_pickup_assert( str_contains( $api_source, 'getServiceCostByParcels2' ), 'DPD API client must keep getServiceCostByParcels2.' );
 dpd_pickup_assert( str_contains( $tariff_source, 'getServiceCostByParcels3' ) && str_contains( $tariff_source, 'pickup_terminal_code' ), 'DPD checkout runtime must use Parcels3 with terminalCode-aware pricing.' );
-dpd_pickup_assert( str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $shipments_metabox, 'data-wdc-preview-shipment' ) && str_contains( $shipments_metabox, 'Создать отправление DPD' ) && str_contains( $dpd_adapter_source, 'createOrder2' ), 'DPD shipment metabox must expose preview and manual create only.' );
+dpd_pickup_assert( str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $shipments_metabox, 'data-wdc-preview-shipment' ) && str_contains( $shipments_metabox, 'Подготовить отправление' ) && str_contains( $dpd_adapter_source, 'createOrder2' ), 'DPD shipment metabox must expose preview and manual create only.' );
 
 echo "DPD pickup points smoke test passed.\n";

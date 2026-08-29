@@ -889,6 +889,7 @@ function createCheckoutNoticeHarness() {
 	const jqueryHandlers = {};
 	let containers = [];
 	let stateResponse = null;
+	const resetCalls = [];
 	const shippingInputs = {
 		'pek:pickup': new FakeElement('shipping-pek'),
 		yandex_pickup: new FakeElement('shipping-yandex')
@@ -941,7 +942,7 @@ function createCheckoutNoticeHarness() {
 				currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' },
 				initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' }
 			},
-			WDCPickupApi: { state: () => Promise.resolve(stateResponse), reset: () => Promise.resolve({}) },
+			WDCPickupApi: { state: () => Promise.resolve(stateResponse), reset: (payload) => { resetCalls.push(payload || {}); return Promise.resolve({ pickup_selections: {} }); } },
 			jQuery: (target) => ({
 				on: (event, callback) => { jqueryHandlers[event] = callback; },
 				trigger: (event) => { if (jqueryHandlers[event]) { jqueryHandlers[event](); } },
@@ -996,7 +997,43 @@ function createCheckoutNoticeHarness() {
 		fields.wdc_platform_location_city_name = displayName;
 		(listeners.change || []).forEach((callback) => callback({ target: { matches: (selector) => selector.indexOf('shipping_city') !== -1 } }));
 	}
-	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, sandbox };
+	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, resetCalls, sandbox };
+}
+
+async function destinationFingerprintChangeResetsLocalSelection() {
+	const harness = createCheckoutNoticeHarness();
+	const selectedPoint = {
+		id: 'msk-a',
+		point_code: 'msk-a',
+		carrier_key: 'pek',
+		service_key: 'pek',
+		pickup_family: 'pek:pickup',
+		point_address: 'Москва, Тверская',
+		address: 'Москва, Тверская',
+		country_code: 'RU',
+		location_id: '153912',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	harness.sandbox.window.wdcPickupCheckout.pickupSelections = { 'pek:pickup': selectedPoint };
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoints = { 'pek:pickup': selectedPoint };
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint = selectedPoint;
+	harness.setContainers([createCheckoutContainer('pek:pickup', 'pek:pickup', '', selectedPoint)]);
+	harness.changeDestination('154954', 'Санкт-Петербург');
+	await wait(20);
+	assert.strictEqual(harness.resetCalls.length, 1, 'destination fingerprint change must call the generic server reset endpoint once');
+	assert.strictEqual(Object.keys(harness.resetCalls[0]).length, 0, 'destination fingerprint change must request a global pickup reset without carrier-specific payload');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['pek:pickup'], undefined, 'destination fingerprint change must remove the stale local pickup selection');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint, null, 'destination fingerprint change must clear the visible selected pickup card state');
+
+	const stableHarness = createCheckoutNoticeHarness();
+	stableHarness.sandbox.window.wdcPickupCheckout.pickupSelections = { 'pek:pickup': selectedPoint };
+	stableHarness.sandbox.window.wdcPickupCheckout.selectedPickupPoints = { 'pek:pickup': selectedPoint };
+	stableHarness.sandbox.window.wdcPickupCheckout.selectedPickupPoint = selectedPoint;
+	stableHarness.setContainers([createCheckoutContainer('pek:pickup', 'pek:pickup', '', selectedPoint)]);
+	stableHarness.changeDestination('153912', 'Москва');
+	await wait(20);
+	assert.strictEqual(stableHarness.resetCalls.length, 0, 'same destination fingerprint must not reset the pickup selection');
+	assert.strictEqual(stableHarness.sandbox.window.wdcPickupCheckout.pickupSelections['pek:pickup'].point_code, 'msk-a', 'same destination fingerprint must preserve the local pickup selection');
 }
 
 async function checkoutInlineNoticeLatchLifecycle() {
@@ -1152,6 +1189,7 @@ async function run() {
 		&& checkoutSource.includes("point.requires_rate_refresh === true")
 		&& !checkoutSource.includes("family === 'ozon_delivery:pickup'"), 'pickup checkout refresh after save must use generic requires_rate_refresh capability without an Ozon-specific branch.');
 	await checkoutInlineNoticeLatchLifecycle();
+	await destinationFingerprintChangeResetsLocalSelection();
 	await initialPointsFetchShowsLoaderUntilRender();
 	await emptyPointsFetchHidesLoader();
 	await pointsFetchErrorHidesLoaderAndShowsError();

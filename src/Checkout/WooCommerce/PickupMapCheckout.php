@@ -255,7 +255,7 @@ final class PickupMapCheckout {
 	 * @return array<string,mixed>|null
 	 */
 	private function selected_point_context( string $pickup_family = '', bool $require_address = true ): ?array {
-		$selection = '' !== $pickup_family ? $this->session_manager->checkout_pickup_point_for_family( $pickup_family ) : $this->session_manager->checkout_pickup_point();
+		$selection = '' !== $pickup_family ? $this->session_manager->pickup_selection_for_family_current_destination( $pickup_family ) : $this->session_manager->pickup_selection_current_destination();
 		if ( array() === $selection || ! $this->selection_has_identity( $selection ) ) {
 			return null;
 		}
@@ -437,7 +437,7 @@ final class PickupMapCheckout {
 	 */
 	private function selected_points_context( bool $require_address = false ): array {
 		$selected = array();
-		foreach ( $this->session_manager->pickup_selections() as $family => $selection ) {
+		foreach ( $this->session_manager->pickup_selections_for_current_destination() as $family => $selection ) {
 			$point = $this->selected_point_context( $family, $require_address );
 			if ( null !== $point ) {
 				$selected[ $family ] = $point;

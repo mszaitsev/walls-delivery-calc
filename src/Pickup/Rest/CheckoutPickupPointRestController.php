@@ -216,14 +216,15 @@ final class CheckoutPickupPointRestController {
 		}
 		$family = $this->param( $request, 'pickup_family' );
 		$active_family = '' !== $family ? $family : $this->active_pickup_family();
-		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
+		$point = '' !== $active_family ? $this->session_manager->pickup_selection_for_family_current_destination( $active_family ) : $this->session_manager->pickup_selection_current_destination();
+		$pickup_selections = $this->session_manager->pickup_selections_for_current_destination();
 
 		return $this->response(
 			array(
 				'pickup_point' => array() !== $point ? $point : null,
 				'selected_pickup_point' => array() !== $point ? $point : null,
-				'pickup_selections' => $this->session_manager->pickup_selections(),
-				'pickupSelections' => $this->session_manager->pickup_selections(),
+				'pickup_selections' => $pickup_selections,
+				'pickupSelections' => $pickup_selections,
 				'active_pickup_family' => $active_family,
 				'activePickupFamily' => $active_family,
 				'active_pickup_country_code' => $this->active_pickup_country_code(),

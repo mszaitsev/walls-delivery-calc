@@ -754,6 +754,27 @@ $session->clear_pickup_selection_for_family( $pickup_group_id, 'family_reset_smo
 pickup_checkout_assert( ! isset( $session->pickup_selections()[ $pickup_group_id ] ) && 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'Russian Post family reset must not remove CDEK bucket.' );
 $session->clear_pickup_selection( 'global_reset_smoke' );
 pickup_checkout_assert( array() === $session->pickup_selections(), 'Global pickup reset must remove all pickup family buckets.' );
+$session->save_city_context( array( 'location_id' => 650000, 'country_code' => 'RU', 'city_name' => 'Новосибирск' ) );
+$session->save_pickup_selection_for_family(
+	'custom_carrier:pickup',
+	array(
+		'carrier_key' => 'custom_carrier',
+		'service_key' => 'custom_carrier',
+		'pickup_family' => 'custom_carrier:pickup',
+		'point_code' => 'nsk-a',
+		'point_address' => 'Новосибирск, Красный проспект',
+		'destination_fingerprint' => 'country=RU|location_id=650000',
+		'snapshot' => array(
+			'point_code' => 'nsk-a',
+			'address' => 'Новосибирск, Красный проспект',
+			'destination_fingerprint' => 'country=RU|location_id=650000',
+		),
+	)
+);
+pickup_checkout_assert( 'nsk-a' === (string) ( $session->pickup_selections_for_current_destination()[ 'custom_carrier:pickup' ]['point_code'] ?? '' ), 'Pickup selection must be preserved while the canonical destination fingerprint is unchanged.' );
+$session->save_city_context( array( 'location_id' => 770000, 'country_code' => 'RU', 'city_name' => 'Москва' ) );
+pickup_checkout_assert( 'nsk-a' === (string) ( $session->raw_pickup_selections()[ 'custom_carrier:pickup' ]['point_code'] ?? '' ), 'Raw stale pickup selection fixture must remain present before authoritative destination filtering.' );
+pickup_checkout_assert( array() === $session->pickup_selections_for_current_destination( true ) && array() === $session->raw_pickup_selections(), 'Pickup selections from a different destination fingerprint must be removed before quote mapping.' );
 $session->save_pickup_selection( array( 'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY, 'rate_id' => $pickup_group_id, 'point_code' => '630001-a' ) );
 WC()->session->set( 'chosen_shipping_methods', array( $pickup_group_id ) );
 

@@ -204,7 +204,7 @@ yandex_pickup_selection_assert( 'yandex_delivery:pickup' === (string) ( $save_re
 $resolve = $checkout_rest->resolve_location( new YandexPickupSelectionRequest( array( 'point' => array( 'carrier_key' => YandexDeliverySettings::CARRIER_KEY, 'point_code' => 'DST-A' ) ) ) );
 yandex_pickup_selection_assert( false === (bool) ( $resolve['requires_location_change'] ?? true ) && null === ( $resolve['location'] ?? null ), 'Yandex resolve_location must skip Russian Post location resolver path.' );
 $shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
-yandex_pickup_selection_assert( str_contains( $shipping_method_source, "'pickup_selections' => \$this->session_manager->pickup_selections()" ), 'NewShippingMethod must pass family-specific pickup_selections into QuoteRequest customer context.' );
+yandex_pickup_selection_assert( str_contains( $shipping_method_source, "'pickup_selections' => \$pickup_selections" ) && str_contains( $shipping_method_source, 'pickup_selections_for_current_destination( true )' ), 'NewShippingMethod must pass current-destination family-specific pickup_selections into QuoteRequest customer context.' );
 
 $validation = new CheckoutValidation( $session, new CheckoutAddressValidation( $session ), null, null, $repository, $formatter );
 $errors = new YandexPickupSelectionErrors();
@@ -366,7 +366,7 @@ $_POST = array();
 
 $shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
 $expiration_position = strpos( $shipping_method_source, 'expire_stale_yandex_5post_selection()' );
-$context_position = strpos( $shipping_method_source, "'pickup_selections' => \$this->session_manager->pickup_selections()" );
+$context_position = strpos( $shipping_method_source, 'pickup_selections_for_current_destination( true )' );
 yandex_pickup_selection_assert( false !== $expiration_position && false !== $context_position && $expiration_position < $context_position, 'NewShippingMethod must expire stale 5Post before QuoteRequest receives pickup selections, allowing representative pricing fallback.' );
 $pickup_map_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/PickupMapCheckout.php' );
 yandex_pickup_selection_assert( str_contains( $pickup_map_source, 'expire_stale_yandex_5post_selection()' ), 'PickupMapCheckout must expire stale 5Post before localizing selected pickup UI state.' );

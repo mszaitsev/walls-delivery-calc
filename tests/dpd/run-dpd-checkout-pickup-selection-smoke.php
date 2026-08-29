@@ -19,6 +19,7 @@ use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
@@ -158,7 +159,7 @@ $session->save_rates(
 );
 $session->save_city_context( array( 'location_id' => 77, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'country_code' => 'RU' ) );
 
-$checkout_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $session, null, null, $service );
+$checkout_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $session, null, null, $service, null, null, null, null, new WooCommerceSessionBootstrapper() );
 $dpd_resolve = $checkout_rest->resolve_location( new DpdCheckoutPickupRequest( array( 'point' => array( 'carrier_key' => 'dpd', 'point_code' => 'NSK-PS-1' ) ) ) );
 dpd_checkout_pickup_assert( false === (bool) ( $dpd_resolve['requires_location_change'] ?? true ) && null === ( $dpd_resolve['location'] ?? null ) && ! isset( $dpd_resolve['message'] ), 'DPD resolve_location must skip location resolver and not touch undefined point.' );
 $cdek_resolve = $checkout_rest->resolve_location( new DpdCheckoutPickupRequest( array( 'point' => array( 'carrier_key' => 'cdek', 'point_code' => 'CDEK1' ) ) ) );
