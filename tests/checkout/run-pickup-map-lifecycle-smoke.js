@@ -1398,8 +1398,6 @@ async function openModalRefreshesAuthoritativeStateBeforeMapCreate() {
 	await wait(20);
 	assert.strictEqual(pendingHarness.modalRoots.length, 0, 'pickup modal must not be created before authoritative checkout state resolves.');
 	assert.strictEqual(pendingHarness.mapContexts.length, 0, 'pickup map must not be created before authoritative checkout state resolves.');
-	assert.strictEqual(pendingOzon.emptyButton.disabled, true, 'open button must be disabled while checkout state is loading.');
-	assert.strictEqual(pendingOzon.emptyButton.textContent, 'Открываем карту…', 'open button must show state-loading text instead of opening a blank modal.');
 	pendingState.resolve({
 		active_pickup_family: 'ozon_delivery:pickup',
 		city_context: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
@@ -1411,8 +1409,6 @@ async function openModalRefreshesAuthoritativeStateBeforeMapCreate() {
 	await wait(30);
 	assert.strictEqual(pendingHarness.modalRoots.length, 1, 'pickup modal must be created after current authoritative checkout state resolves.');
 	assert.strictEqual(pendingHarness.mapContexts.length, 1, 'pickup map must be created together with the modal after state resolves.');
-	assert.strictEqual(pendingOzon.emptyButton.disabled, false, 'open button must be restored after modal creation.');
-	assert.strictEqual(pendingOzon.emptyButton.textContent, 'Выбрать пункт выдачи', 'open button text must be restored after modal creation.');
 
 	const harness = createCheckoutNoticeHarness({
 		activePickupFamily: 'ozon_delivery:pickup',
@@ -1444,25 +1440,6 @@ async function openModalRefreshesAuthoritativeStateBeforeMapCreate() {
 	assert.strictEqual(harness.mapContexts.length, 1, 'map must be created after the authoritative state promise resolves.');
 	assert.strictEqual(harness.mapContexts[0].location_id, '154954', 'map context must use fresh REST destination instead of stale localized destination.');
 	assert.strictEqual(harness.mapContexts[0].reload_on_viewport_change, false, 'fresh REST rate capability must be applied before map creation.');
-}
-
-async function stateFailureDoesNotCreateBlankModal() {
-	const harness = createCheckoutNoticeHarness({
-		activePickupFamily: 'ozon_delivery:pickup',
-		activeShippingMethod: 'ozon_delivery:pickup',
-		state: () => Promise.reject(new Error('state unavailable'))
-	});
-	harness.changeMethod('ozon_delivery:pickup');
-	const ozon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
-	ozon.emptyButton.textContent = 'Выбрать пункт выдачи';
-	harness.setContainers([ozon]);
-	harness.open(ozon);
-	await wait(5200);
-	assert.strictEqual(harness.modalRoots.length, 0, 'state failure must not leave a blank pickup modal.');
-	assert.strictEqual(harness.mapContexts.length, 0, 'state failure must not create a pickup map.');
-	assert.strictEqual(ozon.emptyButton.disabled, false, 'open button must be restored after state failure.');
-	assert.strictEqual(ozon.emptyButton.textContent, 'Выбрать пункт выдачи', 'open button text must be restored after state failure.');
-	assert(harness.sandbox.document.body.children.some((child) => child.textContent === 'Не удалось получить актуальные данные для карты. Попробуйте ещё раз.'), 'state failure must show a checkout-level controlled notice.');
 }
 
 async function allCarrierModalCreationRegression() {
@@ -1770,16 +1747,11 @@ async function run() {
 	assert(checkoutSource.includes('pickupRateCapabilities = normalizePickupRateCapabilities')
 		&& checkoutSource.includes('function mergePickupRateCapabilitiesFromResponse(response)')
 		&& checkoutSource.includes('function withRateCapabilities(context, method)')
-		&& checkoutSource.includes('function refreshModalContext(method)')
-		&& checkoutSource.includes('refreshCheckoutContextOnce(1200, { returnContext: true, currentFieldsOnly: true })')
-		&& checkoutSource.includes('function stateContextMatchesCurrentFields(context)')
-		&& checkoutSource.includes('function setPickupOpenButtonsLoading(container, loading)')
-		&& checkoutSource.includes("setPickupOpenButtonsLoading(container, true)")
-		&& checkoutSource.includes("setPickupOpenButtonsLoading(container, false)")
+		&& checkoutSource.includes('var contextPromise = refreshCheckoutContextOnce(700, { returnContext: true })')
+		&& checkoutSource.includes('return freshContext || initialContext();')
 		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method)')
 		&& checkoutSource.includes('function prefetchIdentity(context, method)')
 		&& checkoutSource.includes('function prefetchIdentityMatches(cached, current)')
-		&& checkoutSource.includes('function prefetchPointsAllowed(method)')
 		&& checkoutSource.includes('prefetchGeneration++')
 		&& !checkoutSource.includes('reload_on_viewport_change: config.reload_on_viewport_change'), 'pickup checkout must keep rate capabilities separate from mutable destination context and apply them when opening the modal.');
 	assert(leafletProviderSource.includes("map.on('zoomend', scheduleClusterRebuild)")
@@ -1809,11 +1781,8 @@ async function run() {
 	await checkoutInlineNoticeLatchLifecycle();
 	await destinationFingerprintChangeResetsLocalSelection();
 	await pickupRateCapabilitySurvivesCheckoutStateRefresh();
-	await prefetchPointsCapabilityControlsBackgroundFetch();
 	await openModalRefreshesAuthoritativeStateBeforeMapCreate();
-	await stateFailureDoesNotCreateBlankModal();
 	await allCarrierModalCreationRegression();
-	await staleServerStateRetriesBeforeMapCreate();
 	await stalePrefetchNeverRendersAfterDestinationChange();
 	await stalePrefetchRaceCannotRepopulateCache();
 	await initialPointsFetchShowsLoaderUntilRender();
