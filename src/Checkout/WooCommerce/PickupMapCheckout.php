@@ -58,6 +58,7 @@ final class PickupMapCheckout {
 			$pickup_selections = $this->selected_points_context( false );
 			$selected_pickup_points = $this->selected_points_context( true );
 			$selected_pickup_point = $this->selected_point_context( $active_pickup_family );
+			$pickup_rate_capabilities = $this->pickup_rate_capabilities();
 			wp_localize_script(
 				'wdc-pickup-checkout',
 				'wdcPickupCheckout',
@@ -74,6 +75,8 @@ final class PickupMapCheckout {
 					'activePickupFamily' => $active_pickup_family,
 					'activePickupCountryCode' => $active_pickup_country,
 					'selectedPickupPoint' => $selected_pickup_point,
+					'pickupRateCapabilities' => $pickup_rate_capabilities,
+					'pickup_rate_capabilities' => $pickup_rate_capabilities,
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
 					'pickupFamilies'   => $this->pickup_families(),
@@ -176,7 +179,6 @@ final class PickupMapCheckout {
 			$lat = null;
 			$lng = null;
 		}
-		$provider_capabilities = $this->active_pickup_provider_context_capabilities();
 
 		return array_filter(
 			array(
@@ -191,28 +193,45 @@ final class PickupMapCheckout {
 				'postcode' => $context['postcode'] ?? $context['postal_code'] ?? null,
 				'country_code' => $country_code,
 				'selectedPoint' => $this->selected_point_context( $active_family ),
-				'reload_on_viewport_change' => $provider_capabilities['reload_on_viewport_change'] ?? null,
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
 	}
 
 	/**
-	 * @return array<string,mixed>
+	 * @return array<string,array<string,bool>>
 	 */
-	private function active_pickup_provider_context_capabilities(): array {
-		$rate = $this->active_pickup_rate();
-		if ( array() === $rate ) {
-			return array();
-		}
-		$meta = $this->rate_meta( $rate );
-		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+	private function pickup_rate_capabilities(): array {
 		$capabilities = array();
-		if ( array_key_exists( 'reload_on_viewport_change', $snapshot ) ) {
-			$capabilities['reload_on_viewport_change'] = (bool) $snapshot['reload_on_viewport_change'];
+		foreach ( $this->session_manager->rates() as $rate ) {
+			if ( ! is_array( $rate ) || ! $this->is_pickup_rate( $rate ) ) {
+				continue;
+			}
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			if ( '' === $rate_id ) {
+				continue;
+			}
+			$rate_capabilities = $this->pickup_rate_capabilities_from_rate( $rate );
+			if ( array() !== $rate_capabilities ) {
+				$capabilities[ $rate_id ] = $rate_capabilities;
+			}
 		}
 
 		return $capabilities;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,bool>
+	 */
+	private function pickup_rate_capabilities_from_rate( array $rate ): array {
+		$meta = $this->rate_meta( $rate );
+		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+		if ( ! array_key_exists( 'reload_on_viewport_change', $snapshot ) ) {
+			return array();
+		}
+
+		return array( 'reload_on_viewport_change' => (bool) $snapshot['reload_on_viewport_change'] );
 	}
 
 	/**

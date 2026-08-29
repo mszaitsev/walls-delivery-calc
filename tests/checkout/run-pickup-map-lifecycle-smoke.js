@@ -967,6 +967,7 @@ function createCheckoutContainer(method, family, noticeText, selectedPoint) {
 	const container = new FakeElement('pickup-container-' + method);
 	container.setAttribute('data-shipping-method-id', method);
 	container.setAttribute('data-wdc-pickup-checkout', '');
+	emptyButton.closest = (selector) => selector === '[data-wdc-pickup-checkout]' ? container : null;
 	container.querySelector = (selector) => {
 		if (selector === '[data-wdc-pickup-inline-notice]') {
 			return notice;
@@ -994,20 +995,25 @@ function createCheckoutContainer(method, family, noticeText, selectedPoint) {
 	return { container, notice, emptyButton, card, fields };
 }
 
-function createCheckoutNoticeHarness() {
+function createCheckoutNoticeHarness(options) {
+	options = options || {};
 	const listeners = {};
 	const bodyListeners = {};
 	const jqueryHandlers = {};
 	let containers = [];
 	let stateResponse = null;
 	const resetCalls = [];
+	const mapContexts = [];
+	const modalRoots = [];
 	const shippingInputs = {
 		'pek:pickup': new FakeElement('shipping-pek'),
-		yandex_pickup: new FakeElement('shipping-yandex')
+		yandex_pickup: new FakeElement('shipping-yandex'),
+		'ozon_delivery:pickup': new FakeElement('shipping-ozon')
 	};
 	shippingInputs['pek:pickup'].value = 'pek:pickup';
 	shippingInputs['pek:pickup'].checked = true;
 	shippingInputs.yandex_pickup.value = 'wdc_platform_delivery:yandex_pickup';
+	shippingInputs['ozon_delivery:pickup'].value = 'ozon_delivery:pickup';
 	Object.keys(shippingInputs).forEach((key) => {
 		shippingInputs[key].matches = (selector) => selector === 'input[name^="shipping_method"]';
 	});
@@ -1047,13 +1053,46 @@ function createCheckoutNoticeHarness() {
 	const sandbox = {
 		window: {
 			wdcPickupCheckout: {
-				pickupFamilies: ['pek:pickup', 'yandex_delivery:pickup'],
-				activePickupFamily: 'pek:pickup',
-				activeShippingMethod: 'pek:pickup',
-				currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' },
-				initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' }
+				pickupFamilies: ['pek:pickup', 'yandex_delivery:pickup', 'ozon_delivery:pickup'],
+				activePickupFamily: options.activePickupFamily || 'pek:pickup',
+				activeShippingMethod: options.activeShippingMethod || 'pek:pickup',
+				currentContext: options.currentContext || { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' },
+				initialContext: options.initialContext || { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' },
+				pickupRateCapabilities: options.pickupRateCapabilities || {}
 			},
 			WDCPickupApi: { state: () => Promise.resolve(stateResponse), reset: (payload) => { resetCalls.push(payload || {}); return Promise.resolve({ pickup_selections: {} }); } },
+			WDCPickupModal: {
+				create: () => {
+					const modalRoot = new FakeElement('modal-root');
+					const modalElements = {
+						'[data-wdc-confirm]': new FakeElement('modal-confirm'),
+						'[data-wdc-search]': new FakeElement('modal-search'),
+						'[data-wdc-search-submit]': new FakeElement('modal-search-submit'),
+						'[data-wdc-geolocation]': new FakeElement('modal-geolocation'),
+						'[data-wdc-map]': new FakeElement('modal-map'),
+						'[data-wdc-card]': new FakeElement('modal-card')
+					};
+					modalRoot.querySelector = (selector) => modalElements[selector] || null;
+					modalRoot.querySelectorAll = () => [];
+					modalRoots.push(modalRoot);
+					return {
+						root: modalRoot,
+						open: () => {},
+						destroy: () => {}
+					};
+				}
+			},
+			WDCPickupMap: {
+				create: (element, card, confirm, modalLabels, context) => {
+					mapContexts.push(Object.assign({}, context || {}));
+					return {
+						selected: () => null,
+						search: () => Promise.resolve([]),
+						useUserLocation: () => {},
+						destroy: () => {}
+					};
+				}
+			},
 			jQuery: (target) => ({
 				on: (event, callback) => { jqueryHandlers[event] = callback; },
 				trigger: (event) => { if (jqueryHandlers[event]) { jqueryHandlers[event](); } },
@@ -1108,7 +1147,16 @@ function createCheckoutNoticeHarness() {
 		fields.wdc_platform_location_city_name = displayName;
 		(listeners.change || []).forEach((callback) => callback({ target: { matches: (selector) => selector.indexOf('shipping_city') !== -1 } }));
 	}
-	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, resetCalls, sandbox };
+	function open(container) {
+		(listeners.click || []).forEach((callback) => callback({
+			target: {
+				closest: (selector) => selector === '[data-wdc-pickup-open]' ? container.emptyButton : null,
+				matches: () => false
+			},
+			preventDefault: () => {}
+		}));
+	}
+	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, resetCalls, sandbox, open, mapContexts, modalRoots, shippingInputs };
 }
 
 async function destinationFingerprintChangeResetsLocalSelection() {
@@ -1145,6 +1193,85 @@ async function destinationFingerprintChangeResetsLocalSelection() {
 	await wait(20);
 	assert.strictEqual(stableHarness.resetCalls.length, 0, 'same destination fingerprint must not reset the pickup selection');
 	assert.strictEqual(stableHarness.sandbox.window.wdcPickupCheckout.pickupSelections['pek:pickup'].point_code, 'msk-a', 'same destination fingerprint must preserve the local pickup selection');
+}
+
+async function pickupRateCapabilitySurvivesCheckoutStateRefresh() {
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'ozon_delivery:pickup',
+		activeShippingMethod: 'ozon_delivery:pickup',
+		pickupRateCapabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.changeMethod('ozon_delivery:pickup');
+	const ozon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
+	harness.setContainers([ozon]);
+	harness.open(ozon);
+	await wait(20);
+	assert.strictEqual(harness.mapContexts.length, 1, 'initial localized pickup rate capability must open the modal once');
+	assert.strictEqual(harness.mapContexts[0].reload_on_viewport_change, false, 'initial localized pickup rate capability must reach final map context.');
+
+	harness.setStateResponse({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' },
+		pickup_selections: {},
+		pickup_rate_capabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.currentContext.location_id, '153912', 'authoritative REST state must update destination context.');
+	assert.strictEqual(Object.prototype.hasOwnProperty.call(harness.sandbox.window.wdcPickupCheckout.currentContext, 'reload_on_viewport_change'), false, 'authoritative REST state must keep destination context free of rate capabilities.');
+	harness.open(ozon);
+	await wait(20);
+	assert.strictEqual(harness.mapContexts[1].reload_on_viewport_change, false, 'REST state pickup rate capability must survive ordinary destination context refresh.');
+
+	harness.setStateResponse({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '154954', display_name: 'Санкт-Петербург', city_name: 'Санкт-Петербург' },
+		pickup_selections: {},
+		pickupRateCapabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.changeDestination('154954', 'Санкт-Петербург');
+	harness.updatedCheckout();
+	await wait(30);
+	harness.open(ozon);
+	await wait(20);
+	assert.strictEqual(harness.mapContexts[2].reload_on_viewport_change, false, 'destination change with refreshed Ozon rate must not lose fixed-area capability.');
+
+	harness.setStateResponse({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '154954', display_name: 'Санкт-Петербург', city_name: 'Санкт-Петербург' },
+		pickup_selections: {
+			'ozon_delivery:pickup': {
+				id: 'spb-a',
+				point_code: 'spb-a',
+				carrier_key: 'ozon_delivery',
+				pickup_family: 'ozon_delivery:pickup',
+				point_address: 'Санкт-Петербург',
+				destination_fingerprint: 'country=RU|location_id=154954'
+			}
+		},
+		pickup_rate_capabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		}
+	});
+	harness.updatedCheckout();
+	await wait(30);
+	harness.open(ozon);
+	await wait(20);
+	assert.strictEqual(harness.mapContexts[3].reload_on_viewport_change, false, 'authoritative repricing/state refresh after selected pickup must keep fixed-area capability.');
+
+	const defaultHarness = createCheckoutNoticeHarness();
+	defaultHarness.changeMethod('pek:pickup');
+	const pek = createCheckoutContainer('pek:pickup', 'pek:pickup', '');
+	defaultHarness.setContainers([pek]);
+	defaultHarness.open(pek);
+	await wait(20);
+	assert.strictEqual(Object.prototype.hasOwnProperty.call(defaultHarness.mapContexts[0], 'reload_on_viewport_change'), false, 'pickup rate without capability must keep historical map default behavior.');
 }
 
 async function checkoutInlineNoticeLatchLifecycle() {
@@ -1284,8 +1411,11 @@ async function run() {
 		&& source.includes('VIRTUAL_LIST_THRESHOLD')
 		&& !source.includes("family === 'ozon_delivery:pickup'")
 		&& !source.includes("carrier === 'ozon_delivery'"), 'pickup map loader must be generic, accessible and tied to the current request lifecycle.');
-	assert(checkoutSource.includes('reload_on_viewport_change: config.reload_on_viewport_change')
-		&& checkoutSource.includes('function contextReloadOnViewportChange()'), 'pickup checkout must preserve generic fixed-area viewport reload capability when building modal context.');
+	assert(checkoutSource.includes('pickupRateCapabilities = normalizePickupRateCapabilities')
+		&& checkoutSource.includes('function mergePickupRateCapabilitiesFromResponse(response)')
+		&& checkoutSource.includes('function withRateCapabilities(context, method)')
+		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method)), method)')
+		&& !checkoutSource.includes('reload_on_viewport_change: config.reload_on_viewport_change'), 'pickup checkout must keep rate capabilities separate from mutable destination context and apply them when opening the modal.');
 	assert(leafletProviderSource.includes("map.on('zoomend', scheduleClusterRebuild)")
 		&& leafletProviderSource.includes('function cancelScheduledClusterRebuild()')
 		&& leafletProviderSource.includes('requestAnimationFrame')
@@ -1312,6 +1442,7 @@ async function run() {
 		&& !checkoutSource.includes("family === 'ozon_delivery:pickup'"), 'pickup checkout refresh after save must use generic requires_rate_refresh capability without an Ozon-specific branch.');
 	await checkoutInlineNoticeLatchLifecycle();
 	await destinationFingerprintChangeResetsLocalSelection();
+	await pickupRateCapabilitySurvivesCheckoutStateRefresh();
 	await initialPointsFetchShowsLoaderUntilRender();
 	await emptyPointsFetchHidesLoader();
 	await pointsFetchErrorHidesLoaderAndShowsError();

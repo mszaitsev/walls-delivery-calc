@@ -25,6 +25,7 @@
 	var authoritativePickupStateLoaded = false;
 	var authoritativePickupStateRevision = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
+	var pickupRateCapabilities = normalizePickupRateCapabilities(checkoutConfig.pickupRateCapabilities || checkoutConfig.pickup_rate_capabilities || {});
 	var selectedPickupPoints = extractPickupSelections(checkoutConfig);
 	if (checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint) {
 		var initialFamily = pickupFamily(checkoutConfig.initialContext.selectedPoint);
@@ -45,6 +46,7 @@ window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 window.wdcPickupCheckout.activePickupFamily = activePickupFamily;
 window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
+window.wdcPickupCheckout.pickupRateCapabilities = pickupRateCapabilities;
 var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
@@ -73,7 +75,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			var search = modal.root.querySelector('[data-wdc-search]');
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
-			var context = withPrefetch(withCarrierContext(resolvedContext, method));
+			var context = withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method)), method);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
 			var loadingText = '';
@@ -743,7 +745,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			region_name: config.region_name || '',
 			country_code: contextCountryCode(config),
 			cdek_to_country_code: config.cdek_to_country_code || '',
-			reload_on_viewport_change: config.reload_on_viewport_change,
 			selectedPoint: activeSelected || config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
@@ -768,7 +769,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			region_name: fieldContext.region_name || runtimeContext.region_name || localizedContext.region_name || '',
 			country_code: contextCountryCode(fieldContext) || contextCountryCode(runtimeContext) || contextCountryCode(localizedContext) || 'RU',
 			cdek_to_country_code: fieldContext.cdek_to_country_code || runtimeContext.cdek_to_country_code || localizedContext.cdek_to_country_code || '',
-			reload_on_viewport_change: contextReloadOnViewportChange(runtimeContext, localizedContext),
 			selectedPoint: activeSelected || localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
 		return result;
@@ -794,21 +794,62 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		return String(context.country_code || context.cdek_to_country_code || '').trim().toUpperCase();
 	}
 
-	function contextReloadOnViewportChange() {
-		for (var i = 0; i < arguments.length; i++) {
-			var context = arguments[i] || {};
-			if (Object.prototype.hasOwnProperty.call(context, 'reload_on_viewport_change')) {
-				return !falsy(context.reload_on_viewport_change);
-			}
-			if (Object.prototype.hasOwnProperty.call(context, 'viewport_reload')) {
-				return !falsy(context.viewport_reload);
-			}
-		}
-		return true;
-	}
-
 	function falsy(value) {
 		return value === false || value === 0 || value === '0' || value === 'false';
+	}
+
+	function normalizePickupRateCapabilities(value) {
+		var normalized = {};
+		if (!value || typeof value !== 'object' || Array.isArray(value)) {
+			return normalized;
+		}
+		Object.keys(value).forEach(function (key) {
+			var method = normalizeShippingMethod(key);
+			var item = value[key];
+			if (!method || !item || typeof item !== 'object' || Array.isArray(item)) {
+				return;
+			}
+			var capabilities = {};
+			if (Object.prototype.hasOwnProperty.call(item, 'reload_on_viewport_change')) {
+				capabilities.reload_on_viewport_change = !falsy(item.reload_on_viewport_change);
+			}
+			if (Object.keys(capabilities).length) {
+				normalized[method] = capabilities;
+			}
+		});
+		return normalized;
+	}
+
+	function mergePickupRateCapabilitiesFromResponse(response) {
+		if (!response || typeof response !== 'object') {
+			return;
+		}
+		if (!Object.prototype.hasOwnProperty.call(response, 'pickupRateCapabilities') && !Object.prototype.hasOwnProperty.call(response, 'pickup_rate_capabilities')) {
+			return;
+		}
+		pickupRateCapabilities = normalizePickupRateCapabilities(response.pickupRateCapabilities || response.pickup_rate_capabilities || {});
+		if (!window.wdcPickupCheckout) {
+			window.wdcPickupCheckout = {};
+		}
+		window.wdcPickupCheckout.pickupRateCapabilities = pickupRateCapabilities;
+		window.wdcPickupCheckout.pickup_rate_capabilities = pickupRateCapabilities;
+	}
+
+	function rateCapabilitiesForMethod(method) {
+		var normalizedMethod = normalizeShippingMethod(method || activeMethod || currentShippingMethod());
+		if (normalizedMethod && pickupRateCapabilities[normalizedMethod]) {
+			return pickupRateCapabilities[normalizedMethod];
+		}
+		return {};
+	}
+
+	function withRateCapabilities(context, method) {
+		context = Object.assign({}, context || {});
+		var capabilities = rateCapabilitiesForMethod(method);
+		if (Object.prototype.hasOwnProperty.call(capabilities, 'reload_on_viewport_change')) {
+			context.reload_on_viewport_change = capabilities.reload_on_viewport_change;
+		}
+		return context;
 	}
 
 	function contextFromFields() {
@@ -1341,6 +1382,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		options = options || {};
+		mergePickupRateCapabilitiesFromResponse(response);
 		if (Object.prototype.hasOwnProperty.call(response, 'activePickupFamily') || Object.prototype.hasOwnProperty.call(response, 'active_pickup_family')) {
 			activePickupFamily = String(response.activePickupFamily || response.active_pickup_family || '').trim();
 			if (window.wdcPickupCheckout) {
@@ -1923,7 +1965,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (!hasPickupBlock() || !isPickupMethodActive()) {
 			return;
 		}
-		var context = withCarrierContext(initialContext(), currentShippingMethod());
+		var context = withRateCapabilities(withCarrierContext(initialContext(), currentShippingMethod()), currentShippingMethod());
 		if (!context.query && !validCoordinate(context.lat, context.lng) && !context.city_code && !context.cdek_city_code) {
 			return;
 		}
