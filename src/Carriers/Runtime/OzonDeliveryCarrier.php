@@ -100,6 +100,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 
 		return array(
+			'ozon_delivery_pricing_contract_version' => 2,
 			'ozon_delivery_shipment_method_id' => $this->settings->shipment_method_id(),
 			'ozon_delivery_pricing_gate' => $this->settings->pricing_live_confirmed() ? 'live_confirmed' : 'closed',
 			'ozon_delivery_selected_point_id' => (string) ( $selection['point_code'] ?? $selection['point_id'] ?? $snapshot['point_code'] ?? '' ),

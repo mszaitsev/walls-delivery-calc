@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Quote;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryMessageSanitizer;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -20,6 +21,8 @@ final class OzonDeliveryQuoteParser {
 		}
 		$expected = array_fill_keys( array_map( 'intval', $request_ids ), true );
 		$total = Money::from_kopecks( 0 );
+		$delivery_total_kopecks = 0;
+		$insurance_total_kopecks = 0;
 		$max_days = null;
 		$normalized = array();
 		foreach ( $results as $result ) {
@@ -37,23 +40,25 @@ final class OzonDeliveryQuoteParser {
 				throw new OzonDeliveryQuoteException( $code, 'order_checkout', $http_status, $this->sanitizer->sanitize( $error['message'] ?? null, 'Ozon Delivery не рассчитал доставку.' ) );
 			}
 			$posting = is_array( $result['posting'] ?? null ) ? $result['posting'] : array();
-			$cost = is_array( $posting['estimated_delivery_cost'] ?? null ) ? $posting['estimated_delivery_cost'] : array();
-			$currency = (string) ( $cost['currency_code'] ?? '' );
-			if ( 'RUB' !== $currency ) {
-				throw new OzonDeliveryQuoteException( 'ozon_quote_currency_unexpected', 'order_checkout', $http_status, 'Ozon Delivery вернул неподдерживаемую валюту.' );
-			}
-			$amount = $cost['amount'] ?? null;
-			if ( ! is_int( $amount ) && ! is_float( $amount ) && ! is_string( $amount ) ) {
-				throw new OzonDeliveryQuoteException( 'ozon_quote_price_missing', 'order_checkout', $http_status, 'Ozon Delivery не вернул стоимость доставки.' );
-			}
+			$delivery_kopecks = $this->money_kopecks( $posting['estimated_delivery_cost'] ?? null, 'ozon_quote_price_missing', 'ozon_quote_price_malformed', 'ozon_quote_currency_unexpected', 'Ozon Delivery не вернул стоимость доставки.', $http_status );
+			$insurance_kopecks = $this->money_kopecks( $posting['estimated_insurance_cost'] ?? null, 'ozon_quote_insurance_missing', 'ozon_quote_insurance_malformed', 'ozon_quote_insurance_currency_unexpected', 'Ozon Delivery не вернул стоимость страховки.', $http_status );
 			$days = $posting['estimated_delivery_days'] ?? null;
 			if ( null !== $days && ! is_int( $days ) && ! ( is_string( $days ) && ctype_digit( $days ) ) ) {
 				throw new OzonDeliveryQuoteException( 'ozon_quote_days_malformed', 'order_checkout', $http_status, 'Ozon Delivery вернул некорректный срок доставки.' );
 			}
-			$total = $total->add( Money::from_rubles( (string) $amount, 'RUB' ) );
+			$posting_total_kopecks = $delivery_kopecks + $insurance_kopecks;
+			$delivery_total_kopecks += $delivery_kopecks;
+			$insurance_total_kopecks += $insurance_kopecks;
+			$total = $total->add( Money::from_kopecks( $posting_total_kopecks, 'RUB' ) );
 			$days_int = null === $days ? null : max( 0, (int) $days );
 			$max_days = null === $days_int ? $max_days : max( (int) ( $max_days ?? 0 ), $days_int );
-			$normalized[] = array( 'request_id' => $request_id, 'price_rub' => (string) $amount, 'delivery_days' => $days_int );
+			$normalized[] = array(
+				'request_id' => $request_id,
+				'delivery_cost_rub' => $this->rubles( $delivery_kopecks ),
+				'insurance_cost_rub' => $this->rubles( $insurance_kopecks ),
+				'total_cost_rub' => $this->rubles( $posting_total_kopecks ),
+				'delivery_days' => $days_int,
+			);
 		}
 		if ( array() !== $expected || $total->is_zero() ) {
 			throw new OzonDeliveryQuoteException( 'ozon_quote_incomplete', 'order_checkout', $http_status, 'Ozon Delivery вернул неполный расчет.' );
@@ -67,7 +72,37 @@ final class OzonDeliveryQuoteParser {
 			$shipment_method_id,
 			'POST /v1/order/checkout',
 			$http_status,
-			array( 'postings' => $normalized )
+			array(
+				'postings' => $normalized,
+				'delivery_total_rub' => $this->rubles( $delivery_total_kopecks ),
+				'insurance_total_rub' => $this->rubles( $insurance_total_kopecks ),
+				'total_rub' => $this->rubles( $total->get_kopecks() ),
+			)
 		);
+	}
+
+	private function money_kopecks( mixed $money, string $missing_code, string $amount_code, string $currency_code, string $message, int $http_status ): int {
+		if ( ! is_array( $money ) ) {
+			throw new OzonDeliveryQuoteException( $missing_code, 'order_checkout', $http_status, $message );
+		}
+		if ( 'RUB' !== (string) ( $money['currency_code'] ?? '' ) ) {
+			throw new OzonDeliveryQuoteException( $currency_code, 'order_checkout', $http_status, 'Ozon Delivery вернул неподдерживаемую валюту.' );
+		}
+		if ( ! array_key_exists( 'amount', $money ) ) {
+			throw new OzonDeliveryQuoteException( $missing_code, 'order_checkout', $http_status, $message );
+		}
+		if ( ! is_int( $money['amount'] ) && ! is_float( $money['amount'] ) && ! is_string( $money['amount'] ) ) {
+			throw new OzonDeliveryQuoteException( $amount_code, 'order_checkout', $http_status, 'Ozon Delivery вернул некорректную сумму.' );
+		}
+		$kopecks = MoneyParser::numeric_to_kopecks( $money['amount'] );
+		if ( null === $kopecks || $kopecks < 0 ) {
+			throw new OzonDeliveryQuoteException( $amount_code, 'order_checkout', $http_status, 'Ozon Delivery вернул некорректную сумму.' );
+		}
+
+		return $kopecks;
+	}
+
+	private function rubles( int $kopecks ): string {
+		return number_format( $kopecks / 100, 2, '.', '' );
 	}
 }

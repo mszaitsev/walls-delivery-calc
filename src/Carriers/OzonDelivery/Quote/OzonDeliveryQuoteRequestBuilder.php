@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\OzonDelivery\Quote;
 
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Packaging\PackagingParcel;
 use WallsShop\WDC\Packaging\PackagingResult;
@@ -31,7 +32,13 @@ final class OzonDeliveryQuoteRequestBuilder {
 		if ( ! ctype_digit( $delivery_point_id ) || (int) $delivery_point_id <= 0 ) {
 			throw new OzonDeliveryQuoteException( 'ozon_delivery_point_missing', 'order_checkout', 0, 'Не выбран ПВЗ Ozon для расчета.' );
 		}
-		$declared = $this->money_amount( max( 1, (int) round( (float) ( $packaging->diagnostics['declared_value_rub'] ?? $request->order_total->get_rubles() ) * 100 ) ) );
+		$posting_count = $this->posting_count( $packaging );
+		if ( $posting_count < 1 || $posting_count > 100 ) {
+			throw new OzonDeliveryQuoteException( 'ozon_package_count_unsupported', 'order_checkout', 0, 'Количество отправлений Ozon не поддерживается.' );
+		}
+		$total_declared_kopecks = $this->declared_value_kopecks( $packaging, $request );
+		$declared_kopecks = 1 === $posting_count ? $total_declared_kopecks : $this->ceil_declared_per_posting_kopecks( $total_declared_kopecks, $posting_count );
+		$declared = $this->money_amount( $declared_kopecks );
 		$postings = array();
 		$request_ids = array();
 		$request_id = 100;
@@ -55,7 +62,7 @@ final class OzonDeliveryQuoteRequestBuilder {
 				);
 			}
 		}
-		if ( array() === $postings || count( $postings ) > 100 ) {
+		if ( count( $postings ) !== $posting_count ) {
 			throw new OzonDeliveryQuoteException( 'ozon_package_count_unsupported', 'order_checkout', 0, 'Количество отправлений Ozon не поддерживается.' );
 		}
 
@@ -71,6 +78,8 @@ final class OzonDeliveryQuoteRequestBuilder {
 				'shipment_method_id' => $shipment_method_id,
 				'destination_point_id' => $delivery_point_id,
 				'packages_count' => count( $postings ),
+				'total_declared_value_rub' => $this->money_amount( $total_declared_kopecks ),
+				'declared_value_per_posting_rub' => $declared,
 				'declared_value_rub' => $declared,
 			),
 		);
@@ -87,5 +96,34 @@ final class OzonDeliveryQuoteRequestBuilder {
 
 	private function money_amount( int $kopecks ): string {
 		return number_format( $kopecks / 100, 2, '.', '' );
+	}
+
+	private function posting_count( PackagingResult $packaging ): int {
+		$count = 0;
+		foreach ( $packaging->parcels() as $parcel ) {
+			if ( $parcel instanceof PackagingParcel ) {
+				$count += max( 1, $parcel->quantity );
+			}
+		}
+
+		return $count;
+	}
+
+	private function declared_value_kopecks( PackagingResult $packaging, QuoteRequest $request ): int {
+		$source = $packaging->diagnostics['declared_value_rub'] ?? '';
+		$declared = is_int( $source ) || is_float( $source ) || is_string( $source )
+			? MoneyParser::numeric_to_kopecks( $source )
+			: null;
+		if ( null === $declared ) {
+			$declared = $request->order_total->get_kopecks();
+		}
+
+		return max( 1, $declared );
+	}
+
+	private function ceil_declared_per_posting_kopecks( int $total_kopecks, int $posting_count ): int {
+		$whole_rubles = intdiv( $total_kopecks + ( $posting_count * 100 ) - 1, $posting_count * 100 );
+
+		return max( 100, $whole_rubles * 100 );
 	}
 }

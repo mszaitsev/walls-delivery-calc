@@ -62,7 +62,7 @@ final class OzonCheckoutSmokeHttp implements OzonDeliveryHttpClientInterface {
 		$body = json_decode( (string) ( $args['body'] ?? '{}' ), true );
 		$this->calls[] = array( 'method' => $method, 'url' => $url, 'body' => is_array( $body ) ? $body : array() );
 		if ( str_contains( $url, '/oauth/token' ) ) { return new OzonDeliveryApiResponse( 200, '{"access_token":"token","expires_in":9999999999,"token_type":"bearer","scope":["delivery-api.all"]}', array() ); }
-		return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'results' => array( array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '99.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 5 ) ) ) ) ) ?: '{}', array() );
+		return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'results' => array( array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '99.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 5 ) ) ) ) ) ?: '{}', array() );
 	}
 }
 final class OzonCheckoutSmokePickupDb {
@@ -149,6 +149,8 @@ $runtime_carrier = new OzonDeliveryCarrier( $settings, $credentials, $quote_serv
 $preliminary_cache_context = $runtime_carrier->quote_cache_context( $mapped_request );
 $carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $mapped_request );
 oz_checkout_assert( 1 === count( $carrier_quote->rates ) && 'Ozon до ПВЗ' === $carrier_quote->rates[0]->title, 'Ozon preliminary checkout quote must produce the pickup rate after canonical coordinate fallback.' );
+oz_checkout_assert( 10900 === $carrier_quote->rates[0]->price->get_kopecks() && 109.0 === (float) ( $carrier_quote->rates[0]->meta['api_base_price_rub'] ?? 0 ) && 10.0 === (float) ( $carrier_quote->rates[0]->meta['insurance_total_rub'] ?? 0 ), 'Ozon buyer-facing checkout rate must include delivery and insurance from order_checkout.' );
+oz_checkout_assert( 2 === (int) ( $preliminary_cache_context['ozon_delivery_pricing_contract_version'] ?? 0 ), 'Ozon quote cache context must include the insurance-aware pricing contract version.' );
 oz_checkout_assert( isset( $http->calls[1] ) && str_ends_with( $http->calls[1]['url'], '/v1/order/checkout' ) && 92783 === (int) ( $http->calls[1]['body']['delivery']['delivery_point']['delivery_point_id'] ?? 0 ), 'Ozon preliminary quote must call order_checkout with the representative pickup point found from canonical coordinates.' );
 oz_checkout_assert( '+79131234567' === (string) ( $http->calls[1]['body']['recipient']['phone_number'] ?? '' ), 'Ozon preliminary quote must send normalized customer phone from WooCommerce AJAX post_data to order_checkout.' );
 $ozon_rate = $carrier_quote->rates[0];

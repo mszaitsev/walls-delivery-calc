@@ -29,6 +29,8 @@ use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingParcel;
+use WallsShop\WDC\Packaging\PackagingResult;
 use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Packaging\PackagingBuilderConfig;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
@@ -88,8 +90,9 @@ $service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuild
 $money = Money::from_rubles( 1000 );
 $request = new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Новосибирск' ), new Package( array(), $money, $money, 1000, 0, 1000, 10, 10, 10, 1000, 'manual' ), '', $money, '2026-08-29', array( 'recipient_phone' => '+79991234567', 'destination_latitude' => 55.0300, 'destination_longitude' => 82.9200 ) );
 $result = $service->quote_pickup( $request );
-oz_quote_assert( 12345 === $result->price->get_kopecks() && 'RUB' === $result->price->get_currency(), 'Parser must normalize RUB amount to Money.' );
+oz_quote_assert( 12445 === $result->price->get_kopecks() && 'RUB' === $result->price->get_currency(), 'Parser must add Ozon delivery and insurance amounts to Money.' );
 oz_quote_assert( 2 === $result->delivery_days->max_days && '777' === $result->destination_point_id && 1 === $result->package_count, 'Quote must use nearest representative Ozon point and normalize days.' );
+oz_quote_assert( '123.45' === (string) ( $result->meta['delivery_total_rub'] ?? '' ) && '1.00' === (string) ( $result->meta['insurance_total_rub'] ?? '' ) && '124.45' === (string) ( $result->meta['total_rub'] ?? '' ), 'Parser diagnostics must expose normalized delivery, insurance and total RUB amounts.' );
 $checkout_call = $http->calls[1] ?? array();
 oz_quote_assert( 'POST' === ( $checkout_call['method'] ?? '' ) && str_ends_with( (string) ( $checkout_call['url'] ?? '' ), '/v1/order/checkout' ), 'Quote must call exact official order checkout endpoint.' );
 $body = $checkout_call['body'];
@@ -128,6 +131,74 @@ try {
 } catch ( OzonDeliveryQuoteException $exception ) {
 	oz_quote_assert( 'DeliveryPointRestrictionsError' === $exception->safe_code, 'Official error code must be preserved safely.' );
 }
+$parser = new OzonDeliveryQuoteParser( $sanitizer );
+$single = $parser->parse( array( 'results' => array( array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 7 ) ) ) ), array( 101 ), '777', 42 );
+oz_quote_assert( 11900 === $single->price->get_kopecks() && 7 === $single->delivery_days->max_days && '109.00' === (string) ( $single->meta['postings'][0]['delivery_cost_rub'] ?? '' ) && '10.00' === (string) ( $single->meta['postings'][0]['insurance_cost_rub'] ?? '' ) && '119.00' === (string) ( $single->meta['postings'][0]['total_cost_rub'] ?? '' ), 'Single-box parser must price Ozon as delivery 109 + insurance 10 = 119 RUB.' );
+$multi = $parser->parse(
+	array(
+		'results' => array(
+			array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '106.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 4 ) ),
+			array( 'request_id' => 102, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '106.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 4 ) ),
+			array( 'request_id' => 103, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '106.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 4 ) ),
+		),
+	),
+	array( 101, 102, 103 ),
+	'777',
+	42
+);
+oz_quote_assert( 34800 === $multi->price->get_kopecks() && 4 === $multi->delivery_days->max_days && 3 === $multi->package_count && '318.00' === (string) ( $multi->meta['delivery_total_rub'] ?? '' ) && '30.00' === (string) ( $multi->meta['insurance_total_rub'] ?? '' ) && '348.00' === (string) ( $multi->meta['total_rub'] ?? '' ), 'Multi-box parser must sum all posting delivery and insurance totals from one order_checkout response.' );
+$max_days = $parser->parse(
+	array(
+		'results' => array(
+			array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '1.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '0.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 3 ) ),
+			array( 'request_id' => 102, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '1.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '0.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 4 ) ),
+			array( 'request_id' => 103, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '1.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '0.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 6 ) ),
+		),
+	),
+	array( 101, 102, 103 ),
+	'777',
+	42
+);
+oz_quote_assert( 6 === $max_days->delivery_days->max_days, 'Multi-box delivery days must use the maximum posting delivery days.' );
+foreach ( array(
+	'missing insurance' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 1 ),
+	'missing insurance amount' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 1 ),
+	'unsupported insurance currency' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'USD' ), 'estimated_delivery_days' => 1 ),
+	'malformed insurance amount' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => array(), 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 1 ),
+) as $case => $posting ) {
+	try {
+		$parser->parse( array( 'results' => array( array( 'request_id' => 101, 'posting' => $posting ) ) ), array( 101 ), '777', 42 );
+		oz_quote_assert( false, 'Parser must fail closed on ' . $case . '.' );
+	} catch ( OzonDeliveryQuoteException $exception ) {
+		oz_quote_assert( str_starts_with( $exception->safe_code, 'ozon_quote_insurance_' ), 'Insurance parse failures must use carrier-owned insurance error codes.' );
+	}
+}
+try {
+	$parser->parse(
+		array(
+			'results' => array(
+				array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '106.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 4 ) ),
+				array( 'request_id' => 102, 'error' => array( 'code' => 'posting_failed', 'message' => 'bad posting' ) ),
+			),
+		),
+		array( 101, 102 ),
+		'777',
+		42
+	);
+	oz_quote_assert( false, 'Partial multi-box carrier error must fail the whole quote.' );
+} catch ( OzonDeliveryQuoteException $exception ) {
+	oz_quote_assert( 'posting_failed' === $exception->safe_code, 'Partial multi-box errors must remain fail-closed with the Ozon error code.' );
+}
+$split_builder = new OzonDeliveryQuoteRequestBuilder( $settings, $phones );
+$declared_2985 = $split_builder->build( $request, new PackagingResult( array( new PackagingParcel( 500, 20, 10, 10, 3 ) ), array( 'declared_value_rub' => '2985.00' ) ), '777' );
+oz_quote_assert( 3 === count( $declared_2985['body']['postings'] ) && array( '995.00' ) === array_values( array_unique( array_map( static fn( array $posting ): string => (string) $posting['declared_value']['amount'], $declared_2985['body']['postings'] ) ) ), 'Declared value 2985 RUB over 3 postings must become 995.00 RUB each.' );
+$declared_3001 = $split_builder->build( $request, new PackagingResult( array( new PackagingParcel( 500, 20, 10, 10, 2 ), new PackagingParcel( 500, 20, 10, 10, 1 ) ), array( 'declared_value_rub' => '3001.00' ) ), '777' );
+oz_quote_assert( 3 === count( $declared_3001['body']['postings'] ) && array( '1001.00' ) === array_values( array_unique( array_map( static fn( array $posting ): string => (string) $posting['declared_value']['amount'], $declared_3001['body']['postings'] ) ) ) && '3001.00' === (string) $declared_3001['diagnostics']['total_declared_value_rub'] && '1001.00' === (string) $declared_3001['diagnostics']['declared_value_per_posting_rub'], 'Declared value split must ceil 3001/3 to a whole 1001 RUB per posting and expose safe diagnostics.' );
+$declared_5000_single = $split_builder->build( $request, new PackagingResult( array( new PackagingParcel( 1000, 20, 10, 10, 1 ) ), array( 'declared_value_rub' => '5000.00' ) ), '777' );
+oz_quote_assert( 1 === count( $declared_5000_single['body']['postings'] ) && '5000.00' === (string) $declared_5000_single['body']['postings'][0]['declared_value']['amount'], 'Single posting must keep full declared value.' );
+$declared_5000_two = $split_builder->build( $request, new PackagingResult( array( new PackagingParcel( 1000, 20, 10, 10, 2 ) ), array( 'declared_value_rub' => '5000.00' ) ), '777' );
+oz_quote_assert( 2 === count( $declared_5000_two['body']['postings'] ) && array( '2500.00' ) === array_values( array_unique( array_map( static fn( array $posting ): string => (string) $posting['declared_value']['amount'], $declared_5000_two['body']['postings'] ) ) ), 'Declared value 5000 RUB over 2 postings must become 2500.00 RUB each.' );
+oz_quote_assert( 100100 * 3 >= 300100 && ( 100100 * 3 - 300100 ) < 3 * 100, 'Ceil-per-posting declared value must not underinsure and must over by less than posting_count RUB.' );
 $source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteService.php' ) ?: '';
 oz_quote_assert( ! str_contains( $source, 'wp_remote_' ) && ! str_contains( $source, 'access_token' ) && str_contains( $source, 'PackagingBuilder' ), 'Quote layer must reuse ApiClient/PackagingBuilder and avoid transport/secrets.' );
 echo "Ozon Delivery quote smoke passed.\n";
