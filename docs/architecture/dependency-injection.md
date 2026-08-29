@@ -4,7 +4,7 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.140.0
+Version: 0.140.1
 
 Ozon Delivery pickup catalog services (`OzonDeliveryPickupRepository`, parser, importer, lease, scheduler and `OzonDeliveryPickupPointProvider`) are carrier-owned and composed only in `src/Core/Plugin.php`. The provider is registered through the existing `CarrierPickupPointProviderRegistry`, reads only the active local snapshot and has no API-client dependency. It does not register a runtime carrier or extend Shipment Framework; an Ozon checkout rate is still required before buyer checkout can request its pickup family.
 
