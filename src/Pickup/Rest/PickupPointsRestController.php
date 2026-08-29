@@ -414,6 +414,7 @@ final class PickupPointsRestController {
 		}
 		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', $point->comment );
 		$display_code = $this->registry_presentation_value( $raw, 'display_code', '' );
+		$requires_rate_refresh = $this->registry_boolean_value( $raw, 'requires_rate_refresh' );
 		$snapshot = array(
 			'carrier_key' => $carrier,
 			'service_key' => $carrier,
@@ -441,15 +442,22 @@ final class PickupPointsRestController {
 			'country_code' => strtoupper( trim( $country_code ) ),
 			'destination_fingerprint' => $fingerprint,
 			'provider_destination_fingerprint' => $fingerprint,
+			'requires_rate_refresh' => $requires_rate_refresh,
 		);
 
-		return array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_name, 'snapshot' => $snapshot ) );
+		return array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_name, 'requires_rate_refresh' => $requires_rate_refresh, 'snapshot' => $snapshot ) );
 	}
 
 	/** @param array<string,mixed> $raw */
 	private function registry_presentation_value( array $raw, string $key, string $default ): string {
 		$value = $raw[ $key ] ?? null;
 		return is_scalar( $value ) && '' !== trim( (string) $value ) ? trim( (string) $value ) : $default;
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_boolean_value( array $raw, string $key ): bool {
+		$value = $raw[ $key ] ?? false;
+		return true === $value || '1' === $value || 1 === $value || 'true' === $value;
 	}
 
 	/**

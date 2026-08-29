@@ -47,11 +47,11 @@ final class OzonPickupProviderWpdb {
 	/** @return array<int,array<string,mixed>> */
 	public function get_results( string $query, mixed $output = null ): array {
 		unset( $output );
-		preg_match( '/generation_id=(\d+).*latitude BETWEEN ([0-9.\-]+) AND ([0-9.\-]+).*longitude BETWEEN ([0-9.\-]+) AND ([0-9.\-]+).*LIMIT (\d+)/', $query, $matches );
-		if ( 7 !== count( $matches ) ) { return array(); }
+		preg_match( '/generation_id=(\d+).*latitude BETWEEN ([0-9.\-]+) AND ([0-9.\-]+).*longitude BETWEEN ([0-9.\-]+) AND ([0-9.\-]+)/', $query, $matches );
+		if ( 6 !== count( $matches ) ) { return array(); }
 		$rows = array_filter( $this->ozon_delivery_pickup_points, static fn( array $row ): bool => (int) $row['generation_id'] === (int) $matches[1] && 1 === (int) $row['is_active'] && (float) $row['latitude'] >= (float) $matches[2] && (float) $row['latitude'] <= (float) $matches[3] && (float) $row['longitude'] >= (float) $matches[4] && (float) $row['longitude'] <= (float) $matches[5] );
 		usort( $rows, static fn( array $left, array $right ): int => (int) $left['point_id'] <=> (int) $right['point_id'] );
-		return array_slice( array_values( $rows ), 0, (int) $matches[6] );
+		return array_values( $rows );
 	}
 }
 
@@ -63,6 +63,10 @@ function oz_pickup_provider_query( int $limit = 10, int $weight_g = 0 ): Carrier
 /** @return array<string,mixed> */
 function oz_pickup_provider_point( int $generation_id, int $point_id, string $name, float $latitude = 55.0300, float $longitude = 82.9200 ): array {
 	return array( 'generation_id' => $generation_id, 'point_id' => $point_id, 'name' => $name, 'type' => 'pvz', 'full_address' => 'Новосибирск, Тестовая улица, ' . $point_id, 'latitude' => $latitude, 'longitude' => $longitude, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'min_weight_g' => null, 'max_weight_g' => null, 'max_width_mm' => null, 'max_length_mm' => null, 'max_height_mm' => null );
+}
+
+function oz_pickup_provider_latitude_at_distance_km( float $center, float $distance_km ): float {
+	return $center + rad2deg( $distance_km / 6371.0088 );
 }
 
 $wpdb = new OzonPickupProviderWpdb();
@@ -92,13 +96,13 @@ try { new CarrierPickupPointProviderRegistry( array( $provider, $provider ) ); o
 
 $points = $provider->search( $query );
 oz_pickup_provider_assert( 2 === count( $points ) && '101' === $points[0]->code && '102' === $points[1]->code, 'Only bounded active-generation points in the trusted coordinate radius must be visible.' );
-oz_pickup_provider_assert( 'Ежедневно 09:00-21:00' === $points[0]->work_time && 'Пункт Ozon' === $points[0]->raw_reference['point_name'], 'Provider must return the persisted presentation schedule and safe point name.' );
+oz_pickup_provider_assert( 'Ежедневно 09:00-21:00' === $points[0]->work_time && 'Пункт Ozon' === $points[0]->raw_reference['point_name'] && true === $points[0]->raw_reference['requires_rate_refresh'], 'Provider must return the persisted presentation schedule, safe point name and generic repricing capability.' );
 $dto = $points[0]->to_array();
 oz_pickup_provider_assert( ! isset( $dto['generation_id'], $dto['fingerprint'], $dto['id'] ) && ! isset( $dto['raw_reference']['generation_id'], $dto['raw_reference']['fingerprint'] ), 'Provider DTO must not expose generation, fingerprint or database identity.' );
 $rest = ( new ReflectionClass( PickupPointsRestController::class ) )->newInstanceWithoutConstructor();
 $payload_method = new ReflectionMethod( PickupPointsRestController::class, 'registry_point_payload' );
 $payload = $payload_method->invoke( $rest, $points[0], OzonDeliverySettings::CARRIER_KEY, OzonDeliverySettings::PICKUP_FAMILY, 'safe-fingerprint', 1, 'RU' );
-oz_pickup_provider_assert( '101' === $payload['point_code'] && 'Пункт выдачи Ozon' === $payload['point_title'] && 'Пункт Ozon' === $payload['point_name'] && 'Ежедневно 09:00-21:00' === $payload['work_time'] && ! isset( $payload['generation_id'], $payload['fingerprint'], $payload['raw_reference'] ), 'Generic pickup REST presentation must return only the Ozon provider safe DTO.' );
+oz_pickup_provider_assert( '101' === $payload['point_code'] && 'Пункт выдачи Ozon' === $payload['point_title'] && 'Пункт Ozon' === $payload['point_name'] && 'Ежедневно 09:00-21:00' === $payload['work_time'] && true === $payload['requires_rate_refresh'] && true === $payload['snapshot']['requires_rate_refresh'] && ! isset( $payload['generation_id'], $payload['fingerprint'], $payload['raw_reference'] ), 'Generic pickup REST presentation must return only the Ozon provider safe DTO and repricing capability.' );
 $checkout_rest = ( new ReflectionClass( CheckoutPickupPointRestController::class ) )->newInstanceWithoutConstructor();
 $selection_method = new ReflectionMethod( CheckoutPickupPointRestController::class, 'selection_from_provider_point' );
 $selection_payload = $selection_method->invoke( $checkout_rest, $points[0], OzonDeliverySettings::CARRIER_KEY, OzonDeliverySettings::PICKUP_FAMILY, 'safe-fingerprint', 1, 'RU' );
@@ -107,6 +111,28 @@ oz_pickup_provider_assert( array() === $provider->search( new CarrierPickupPoint
 
 $wpdb->ozon_delivery_pickup_points[] = array_merge( oz_pickup_provider_point( 1, 601, 'Ограниченный пункт' ), array( 'max_weight_g' => 500 ) );
 oz_pickup_provider_assert( ! in_array( '601', array_map( static fn( $point ): string => $point->code, $provider->search( oz_pickup_provider_query( 20, 1000 ) ) ), true ), 'Trusted cargo constraints must filter incompatible active points.' );
+$large_db = new OzonPickupProviderWpdb();
+$large_db->ozon_delivery_pickup_generations = array( array( 'id' => 10, 'state' => 'active' ) );
+for ( $i = 0; $i < 1500; $i++ ) {
+	$large_db->ozon_delivery_pickup_points[] = oz_pickup_provider_point( 10, 100000 + $i, 'Большой город ' . $i, 55.0300 + ( ( $i % 30 ) * 0.001 ), 82.9200 + ( (int) ( $i / 30 ) * 0.001 ) );
+}
+for ( $i = 0; $i < 500; $i++ ) {
+	$large_db->ozon_delivery_pickup_points[] = oz_pickup_provider_point( 10, 200000 + $i, 'За радиусом ' . $i, 55.8000, 82.9200 + ( $i * 0.0001 ) );
+}
+$large_provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( $large_db ) );
+$large_points = $large_provider->search( new CarrierPickupPointQuery( OzonDeliverySettings::CARRIER_KEY, 1, 'RU', '', 55.0300, 82.9200, new PickupCargoConstraints(), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 60, 10 ) );
+oz_pickup_provider_assert( 1500 === count( $large_points ), 'Large-city Ozon buyer lookup must return every eligible point inside 60 km and ignore arbitrary first-N limits.' );
+$boundary_db = new OzonPickupProviderWpdb();
+$boundary_db->ozon_delivery_pickup_generations = array( array( 'id' => 11, 'state' => 'active' ) );
+$boundary_db->ozon_delivery_pickup_points = array(
+	oz_pickup_provider_point( 11, 300001, '59.9 км', oz_pickup_provider_latitude_at_distance_km( 55.0300, 59.9 ), 82.9200 ),
+	oz_pickup_provider_point( 11, 300002, '60.0 км', oz_pickup_provider_latitude_at_distance_km( 55.0300, 60.0 ), 82.9200 ),
+	oz_pickup_provider_point( 11, 300003, '60.1 км', oz_pickup_provider_latitude_at_distance_km( 55.0300, 60.1 ), 82.9200 ),
+	array_merge( oz_pickup_provider_point( 11, 300004, 'Несовместимый груз', 55.0310, 82.9210 ), array( 'max_weight_g' => 500 ) ),
+);
+$boundary_provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( $boundary_db ) );
+$boundary_codes = array_map( static fn( $point ): string => $point->code, $boundary_provider->search( new CarrierPickupPointQuery( OzonDeliverySettings::CARRIER_KEY, 1, 'RU', '', 55.0300, 82.9200, new PickupCargoConstraints( 1000, 0, 0, 1000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 60, 1 ) ) );
+oz_pickup_provider_assert( in_array( '300001', $boundary_codes, true ) && in_array( '300002', $boundary_codes, true ) && ! in_array( '300003', $boundary_codes, true ) && ! in_array( '300004', $boundary_codes, true ), 'Ozon radius filter must include <=60 km and exclude >60 km or cargo-incompatible points.' );
 $selection = $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, '101' ) );
 oz_pickup_provider_assert( null !== $selection && '101' === $selection->code, 'Server-side selection must resolve the current active point by stable Ozon ID.' );
 oz_pickup_provider_assert( null === $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, '201' ) ) && null === $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, '999999' ) ), 'Building and missing points must not resolve.' );
@@ -125,8 +151,8 @@ $repository_source = (string) file_get_contents( $root . '/src/Carriers/OzonDeli
 $plugin_source = (string) file_get_contents( $root . '/src/Core/Plugin.php' );
 $pickup_rest_source = (string) file_get_contents( $root . '/src/Pickup/Rest/PickupPointsRestController.php' );
 $checkout_rest_source = (string) file_get_contents( $root . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' );
-oz_pickup_provider_assert( str_contains( $provider_source, 'CarrierPickupPointProviderInterface' ) && str_contains( $provider_source, 'find_active_in_radius' ) && ! str_contains( $provider_source, 'OzonDeliveryApiClient' ) && ! str_contains( $provider_source, 'pickup_list' ), 'Ozon provider must implement the canonical interface and read only local data.' );
-oz_pickup_provider_assert( str_contains( $repository_source, 'generation_id=%d AND is_active=1') && str_contains( $repository_source, 'latitude BETWEEN %f AND %f') && str_contains( $repository_source, 'longitude BETWEEN %f AND %f'), 'Ozon radius lookup must filter the active generation in SQL.' );
+oz_pickup_provider_assert( str_contains( $provider_source, 'CarrierPickupPointProviderInterface' ) && str_contains( $provider_source, 'find_active_in_area' ) && ! str_contains( $provider_source, 'OzonDeliveryApiClient' ) && ! str_contains( $provider_source, 'pickup_list' ), 'Ozon provider must implement the canonical interface and read only local data.' );
+oz_pickup_provider_assert( str_contains( $repository_source, 'generation_id=%d AND is_active=1') && str_contains( $repository_source, 'latitude BETWEEN %f AND %f') && str_contains( $repository_source, 'longitude BETWEEN %f AND %f') && ! str_contains( $repository_source, 'ORDER BY point_id ASC LIMIT %d' ), 'Ozon buyer radius lookup must filter active generation by coordinate bounds in SQL without permanent first-N truncation.' );
 oz_pickup_provider_assert( str_contains( $plugin_source, 'OzonDeliveryPickupPointProvider::class' ) && str_contains( $plugin_source, 'CarrierPickupPointProviderRegistry' ) && str_contains( $plugin_source, 'OzonDeliveryCarrier::class' ), 'Plugin must register the Ozon pickup provider and live-gated runtime carrier through canonical registries.' );
 oz_pickup_provider_assert( ! str_contains( $pickup_rest_source, 'ozon_delivery' ) && ! str_contains( $checkout_rest_source, 'ozon_delivery' ) && str_contains( $pickup_rest_source, 'registry_point_payload' ), 'Generic pickup REST must use provider presentation without Ozon-specific branches.' );
 

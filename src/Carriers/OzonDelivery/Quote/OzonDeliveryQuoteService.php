@@ -87,7 +87,7 @@ final class OzonDeliveryQuoteService {
 				max( 1, (int) ( $packaging['parcels_count'] ?? 1 ) )
 			),
 			CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
-			50,
+			60,
 			100
 		);
 	}

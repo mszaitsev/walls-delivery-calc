@@ -67,9 +67,23 @@ final class OzonCheckoutSmokeHttp implements OzonDeliveryHttpClientInterface {
 }
 final class OzonCheckoutSmokePickupDb {
 	public string $prefix = 'wp_';
+	/** @var array<int,array<string,mixed>> */
+	public array $points;
+	public function __construct() {
+		$this->points = array(
+			array( 'generation_id' => 1, 'point_id' => 92783, 'name' => 'ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск, Красный проспект', 'latitude' => 55.0301, 'longitude' => 82.9201, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 25000, 'max_width_mm' => 600, 'max_length_mm' => 1200, 'max_height_mm' => 800 ),
+			array( 'generation_id' => 1, 'point_id' => 92784, 'name' => 'Выбранный ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск, улица Ленина', 'latitude' => 55.0310, 'longitude' => 82.9210, 'schedule' => 'Ежедневно 10:00-20:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 25000, 'max_width_mm' => 600, 'max_length_mm' => 1200, 'max_height_mm' => 800 ),
+		);
+	}
 	public function prepare( string $query, mixed ...$values ): string { foreach ( $values as $value ) { $query = preg_replace( '/%[df]/', is_float( $value ) ? sprintf( '%.8F', $value ) : (string) (int) $value, $query, 1 ) ?? $query; } return $query; }
-	public function get_row( string $query, mixed $output = null ): ?array { return str_contains( $query, "WHERE state='active'" ) ? array( 'id' => 1, 'state' => 'active' ) : null; }
-	public function get_results( string $query, mixed $output = null ): array { return array( array( 'generation_id' => 1, 'point_id' => 92783, 'name' => 'ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск, Красный проспект', 'latitude' => 55.0301, 'longitude' => 82.9201, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 25000, 'max_width_mm' => 600, 'max_length_mm' => 1200, 'max_height_mm' => 800 ) ); }
+	public function get_row( string $query, mixed $output = null ): ?array {
+		if ( str_contains( $query, "WHERE state='active'" ) ) { return array( 'id' => 1, 'state' => 'active' ); }
+		if ( preg_match( '/point_id=(\d+)/', $query, $matches ) ) {
+			foreach ( $this->points as $point ) { if ( (int) $point['point_id'] === (int) $matches[1] ) { return $point; } }
+		}
+		return null;
+	}
+	public function get_results( string $query, mixed $output = null ): array { return $this->points; }
 }
 function oz_checkout_assert( bool $condition, string $message ): void { if ( ! $condition ) { throw new RuntimeException( $message ); } }
 function oz_checkout_stored_rate( \WallsShop\WDC\Domain\Quote\DeliveryRate $rate ): array {
@@ -130,6 +144,8 @@ $http = new OzonCheckoutSmokeHttp();
 $sanitizer = new OzonDeliveryMessageSanitizer();
 $api = new OzonDeliveryApiClient( $http, new OzonDeliveryAccessTokenService( $credentials, $http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
 $quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings ), new OzonDeliveryQuoteParser( $sanitizer ), new PackagingBuilder( PackagingBuilderConfig::defaults() ), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
+$runtime_carrier = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() );
+$preliminary_cache_context = $runtime_carrier->quote_cache_context( $mapped_request );
 $carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $mapped_request );
 oz_checkout_assert( 1 === count( $carrier_quote->rates ) && 'Ozon до ПВЗ' === $carrier_quote->rates[0]->title, 'Ozon preliminary checkout quote must produce the pickup rate after canonical coordinate fallback.' );
 oz_checkout_assert( isset( $http->calls[1] ) && str_ends_with( $http->calls[1]['url'], '/v1/order/checkout' ) && 92783 === (int) ( $http->calls[1]['body']['delivery']['delivery_point']['delivery_point_id'] ?? 0 ), 'Ozon preliminary quote must call order_checkout with the representative pickup point found from canonical coordinates.' );
@@ -139,13 +155,20 @@ $snapshot = is_array( $ozon_rate->meta['pickup_provider_query'] ?? null ) ? $ozo
 oz_checkout_assert( array() !== $snapshot && 'ozon_delivery' === (string) ( $snapshot['carrier_key'] ?? '' ) && 'destination_pickup' === (string) ( $snapshot['purpose'] ?? '' ), 'Ozon rate must carry canonical pickup_provider_query snapshot.' );
 oz_checkout_assert( 'country=RU|location_id=650000' === (string) ( $snapshot['destination_fingerprint'] ?? '' ) && 'country=RU|location_id=650000' === (string) ( $snapshot['provider_destination_fingerprint'] ?? '' ), 'Ozon pickup_provider_query must carry the generic destination fingerprint.' );
 oz_checkout_assert( ! array_key_exists( 'generation_id', $snapshot ) && ! str_contains( (string) ( $snapshot['destination_fingerprint'] ?? '' ), '92783' ), 'Ozon destination fingerprint must not depend on pickup generation or point_id.' );
-oz_checkout_assert( 50 === (int) ( $snapshot['radius_km'] ?? 0 ) && 100 === (int) ( $snapshot['limit'] ?? 0 ) && 1000 === (int) ( $snapshot['cargo']['weight_g'] ?? 0 ), 'Ozon pickup_provider_query must keep bounded search radius, limit and trusted cargo.' );
+oz_checkout_assert( 60 === (int) ( $snapshot['radius_km'] ?? 0 ) && 1000 === (int) ( $snapshot['cargo']['weight_g'] ?? 0 ), 'Ozon pickup_provider_query must keep the trusted 60 km search radius and cargo.' );
 $session->save_rates( array( OzonDeliveryCarrier::RATE_ID => oz_checkout_stored_rate( $ozon_rate ) ) );
 $provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) );
 $resolver = new CheckoutPickupPointProviderQueryResolver( $session );
 $resolved_query = $resolver->resolve( OzonDeliveryCarrier::RATE_ID, OzonDeliverySettings::CARRIER_KEY, OzonDeliverySettings::PICKUP_FAMILY );
 $resolved_points = ( new CarrierPickupPointProviderRegistry( array( $provider ) ) )->get( OzonDeliverySettings::CARRIER_KEY )?->search( $resolved_query ) ?? array();
 oz_checkout_assert( 650000 === $resolved_query->location_id && 'RU' === $resolved_query->normalized_country_code() && count( $resolved_points ) > 0 && '92783' === $resolved_points[0]->code, 'Generic resolver must accept Ozon rate context and registry-backed provider must return Ozon pickup points for the map.' );
+oz_checkout_assert( true === ( $resolved_points[0]->raw_reference['requires_rate_refresh'] ?? false ), 'Ozon provider point must declare the generic selected-point repricing capability.' );
+$selected_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'pickup_selections' => array( OzonDeliverySettings::PICKUP_FAMILY => array( 'point_code' => '92784', 'snapshot' => array( 'point_code' => '92784' ) ) ) ) ) );
+$selected_cache_context = $runtime_carrier->quote_cache_context( $selected_request );
+oz_checkout_assert( '' === (string) $preliminary_cache_context['ozon_delivery_selected_point_id'] && '92784' === (string) $selected_cache_context['ozon_delivery_selected_point_id'], 'Ozon quote cache context must differ after selected pickup point changes.' );
+$selected_quote = $runtime_carrier->quote( $selected_request );
+$last_call = $http->calls[ count( $http->calls ) - 1 ] ?? array();
+oz_checkout_assert( 1 === count( $selected_quote->rates ) && str_ends_with( (string) ( $last_call['url'] ?? '' ), '/v1/order/checkout' ) && 92784 === (int) ( $last_call['body']['delivery']['delivery_point']['delivery_point_id'] ?? 0 ), 'Selected Ozon point must trigger authoritative second order_checkout quote with selected delivery_point_id.' );
 $same_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $mapped_request );
 $same_snapshot = is_array( $same_quote->rates[0]->meta['pickup_provider_query'] ?? null ) ? $same_quote->rates[0]->meta['pickup_provider_query'] : array();
 oz_checkout_assert( (string) $snapshot['destination_fingerprint'] === (string) ( $same_snapshot['destination_fingerprint'] ?? '' ), 'Ozon destination fingerprint must remain stable for the same canonical destination.' );

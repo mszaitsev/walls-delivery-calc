@@ -1003,6 +1003,10 @@ async function run() {
 		&& !checkoutSource.includes('sessionStorage')
 		&& !checkoutSource.includes('document.cookie')
 		&& !checkoutSource.includes('setTimeout(function () { clearPickupInlineNotice'), 'checkout rejected pickup inline notices must be page-scoped memory only, with no browser storage or timer auto-hide.');
+	assert(checkoutSource.includes("Object.prototype.hasOwnProperty.call(point, 'requires_rate_refresh')")
+		&& checkoutSource.includes("Object.prototype.hasOwnProperty.call(snapshot, 'requires_rate_refresh')")
+		&& checkoutSource.includes("point.requires_rate_refresh === true")
+		&& !checkoutSource.includes("family === 'ozon_delivery:pickup'"), 'pickup checkout refresh after save must use generic requires_rate_refresh capability without an Ozon-specific branch.');
 	await checkoutInlineNoticeLatchLifecycle();
 	await programmaticSuppressionAllowsFirstUserPan();
 	await lateAsyncDoesNotAutoFitAfterInteraction();

@@ -17,10 +17,11 @@ final class OzonDeliveryPickupPointProvider implements CarrierPickupPointProvide
 	/** @return array<int,PickupPoint> */
 	public function search( CarrierPickupPointQuery $query ): array {
 		if ( array() !== $query->validate() || OzonDeliverySettings::CARRIER_KEY !== $query->normalized_carrier_key() || 'RU' !== $query->normalized_country_code() || null === $query->latitude || null === $query->longitude ) { return array(); }
-		$latitude_delta = $query->radius_km / 111.32;
-		$longitude_delta = $query->radius_km / max( 1.0, 111.32 * abs( cos( deg2rad( $query->latitude ) ) ) );
+		$latitude_delta = rad2deg( $query->radius_km / 6371.0088 );
+		$longitude_delta = rad2deg( $query->radius_km / ( 6371.0088 * max( 0.01, abs( cos( deg2rad( $query->latitude ) ) ) ) ) );
 		$points = array();
-		foreach ( $this->repository->find_active_in_radius( $query->latitude, $query->longitude, $latitude_delta, $longitude_delta, $query->limit ) as $row ) { $point = $this->point( $row, $query ); if ( $point instanceof PickupPoint && $this->within_radius( $point, $query ) ) { $points[] = $point; } }
+		foreach ( $this->repository->find_active_in_area( $query->latitude, $query->longitude, $latitude_delta, $longitude_delta ) as $row ) { $point = $this->point( $row, $query ); if ( $point instanceof PickupPoint && $this->within_radius( $point, $query ) ) { $points[] = $point; } }
+		usort( $points, fn( PickupPoint $left, PickupPoint $right ): int => $this->distance_score( $left, $query ) <=> $this->distance_score( $right, $query ) );
 		return $points;
 	}
 	public function resolve_selection( CarrierPickupPointSelectionQuery $query ): ?PickupPoint {
@@ -35,7 +36,7 @@ final class OzonDeliveryPickupPointProvider implements CarrierPickupPointProvide
 		$latitude = is_numeric( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null; $longitude = is_numeric( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null;
 		if ( $point_id <= 0 || '' === $name || '' === $address || ! in_array( $type, array( 'pvz', 'postamat', 'unknown' ), true ) || 1 !== (int) ( $row['is_active'] ?? 0 ) || null === $latitude || null === $longitude || ! $this->cargo_passes( $row, $query ) ) { return null; }
 		$title = 'postamat' === $type ? 'Постамат Ozon' : 'Пункт выдачи Ozon';
-		return new PickupPoint( OzonDeliverySettings::CARRIER_KEY, (string) $point_id, $address, '', '', '', $latitude, $longitude, $type, trim( (string) ( $row['schedule'] ?? '' ) ), '', null, true, array( 'point_name' => $name, 'presentation_title' => $title, 'presentation_type' => $type, 'marker_type' => 'postamat' === $type ? 'postamat' : 'pickup', 'display_code' => '' ) );
+		return new PickupPoint( OzonDeliverySettings::CARRIER_KEY, (string) $point_id, $address, '', '', '', $latitude, $longitude, $type, trim( (string) ( $row['schedule'] ?? '' ) ), '', null, true, array( 'point_name' => $name, 'presentation_title' => $title, 'presentation_type' => $type, 'marker_type' => 'postamat' === $type ? 'postamat' : 'pickup', 'display_code' => '', 'requires_rate_refresh' => true ) );
 	}
 	/** @param array<string,mixed> $row */
 	private function cargo_passes( array $row, CarrierPickupPointQuery $query ): bool {
@@ -48,6 +49,10 @@ final class OzonDeliveryPickupPointProvider implements CarrierPickupPointProvide
 	private function within_radius( PickupPoint $point, CarrierPickupPointQuery $query ): bool {
 		if ( ! $point->has_coordinates() || null === $query->latitude || null === $query->longitude ) { return false; }
 		$latitude = deg2rad( $point->latitude - $query->latitude ); $longitude = deg2rad( $point->longitude - $query->longitude ); $a = sin( $latitude / 2 ) ** 2 + cos( deg2rad( $query->latitude ) ) * cos( deg2rad( $point->latitude ) ) * sin( $longitude / 2 ) ** 2;
-		return 6371.0088 * 2 * atan2( sqrt( $a ), sqrt( max( 0.0, 1 - $a ) ) ) <= $query->radius_km;
+		return 6371.0088 * 2 * atan2( sqrt( $a ), sqrt( max( 0.0, 1 - $a ) ) ) <= $query->radius_km + 0.001;
+	}
+	private function distance_score( PickupPoint $point, CarrierPickupPointQuery $query ): float {
+		if ( null === $query->latitude || null === $query->longitude || null === $point->latitude || null === $point->longitude ) { return INF; }
+		return ( $point->latitude - $query->latitude ) ** 2 + ( $point->longitude - $query->longitude ) ** 2;
 	}
 }

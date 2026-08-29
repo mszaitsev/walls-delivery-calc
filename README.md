@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.141.3
+Version: 0.141.4
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current Ozon Delivery scope: pickup checkout pricing for `Ozon до ПВЗ` is implemented through the carrier-owned quote layer and official Ozon Delivery checkout contract, but remains fail-closed until a safe admin live diagnostic succeeds for the configured `shipment_method_id`. Checkout uses the standard WooCommerce `billing_phone`, including AJAX `post_data`, and Ozon has an optional carrier-owned fallback phone for missing or locally invalid customer numbers. The Ozon rate carries the trusted `pickup_provider_query.destination_fingerprint` required by the generic pickup REST resolver, so the shared map can load local Ozon points without Ozon-specific JS or REST branches. Ozon Shipment Framework features are intentionally not included in this version.
+Current Ozon Delivery scope: pickup checkout pricing for `Ozon до ПВЗ` is implemented through the carrier-owned quote layer and official Ozon Delivery checkout contract, but remains fail-closed until a safe admin live diagnostic succeeds for the configured `shipment_method_id`. Checkout uses the standard WooCommerce `billing_phone`, including AJAX `post_data`, and Ozon has an optional carrier-owned fallback phone for missing or locally invalid customer numbers. The Ozon rate carries the trusted `pickup_provider_query.destination_fingerprint` required by the generic pickup REST resolver, and the buyer map receives every active cargo-compatible local Ozon point inside the trusted 60 km destination radius without arbitrary first-100/500 truncation. Ozon pickup points declare generic `requires_rate_refresh`, so saving a point triggers selected-point authoritative repricing through the shared checkout lifecycle. Ozon Shipment Framework features are intentionally not included in this version.
 
 ## Quick Start
 

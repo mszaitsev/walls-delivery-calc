@@ -669,7 +669,7 @@ $stored_ozon_rate = wdc_pickup_rest_store_ozon_rate(
 			'max_place_weight_g' => 1000,
 			'places_count' => 1,
 		),
-		'radius_km' => 50,
+		'radius_km' => 60,
 		'limit' => 100,
 		'destination_fingerprint' => $ozon_fingerprint,
 		'provider_destination_fingerprint' => $ozon_fingerprint,
@@ -679,7 +679,7 @@ pickup_rest_assert( isset( $stored_ozon_rate['rate_meta']['pickup_provider_query
 WC()->session = null;
 $ozon_provider = new WdcPickupRestOzonProvider(
 	array(
-		new PickupPoint( OzonDeliverySettings::CARRIER_KEY, '92783', 'Новосибирск, Красный проспект', '', 'Новосибирск', 'Новосибирская область', 55.0301, 82.9201, 'pvz', 'Ежедневно 09:00-21:00', '', null, true, array( 'presentation_title' => 'Пункт выдачи Ozon', 'point_name' => 'Ozon Красный проспект', 'generation_id' => 3 ) ),
+		new PickupPoint( OzonDeliverySettings::CARRIER_KEY, '92783', 'Новосибирск, Красный проспект', '', 'Новосибирск', 'Новосибирская область', 55.0301, 82.9201, 'pvz', 'Ежедневно 09:00-21:00', '', null, true, array( 'presentation_title' => 'Пункт выдачи Ozon', 'point_name' => 'Ozon Красный проспект', 'generation_id' => 3, 'requires_rate_refresh' => true ) ),
 	)
 );
 $ozon_points_controller = new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, new CarrierPickupPointProviderRegistry( array( $ozon_provider ) ), new CheckoutPickupPointProviderQueryResolver( $ozon_session ), null, $session_bootstrapper );
@@ -696,7 +696,7 @@ $ozon_points = $ozon_points_controller->points(
 	)
 );
 pickup_rest_assert( is_array( $ozon_points ) && 1 === count( $ozon_points ) && '92783' === (string) ( $ozon_points[0]['point_code'] ?? '' ), 'Generic /points REST must return Ozon provider points from trusted server-side rate context.' );
-pickup_rest_assert( 'Пункт выдачи Ozon' === (string) ( $ozon_points[0]['point_title'] ?? '' ) && 'Новосибирск, Красный проспект' === (string) ( $ozon_points[0]['address'] ?? '' ) && 'Ежедневно 09:00-21:00' === (string) ( $ozon_points[0]['work_time'] ?? '' ), 'Ozon REST provider projection must expose title, address and schedule for map cards.' );
+pickup_rest_assert( 'Пункт выдачи Ozon' === (string) ( $ozon_points[0]['point_title'] ?? '' ) && 'Новосибирск, Красный проспект' === (string) ( $ozon_points[0]['address'] ?? '' ) && 'Ежедневно 09:00-21:00' === (string) ( $ozon_points[0]['work_time'] ?? '' ) && true === ( $ozon_points[0]['requires_rate_refresh'] ?? null ) && true === ( $ozon_points[0]['snapshot']['requires_rate_refresh'] ?? null ), 'Ozon REST provider projection must expose title, address, schedule and generic repricing capability for map cards.' );
 pickup_rest_assert( 650000 === $ozon_provider->queries[0]->location_id && 1000 === $ozon_provider->queries[0]->cargo->weight_g, 'Ozon /points must ignore browser location/cargo authority and use stored rate snapshot.' );
 pickup_rest_assert( $ozon_fingerprint === (string) ( $ozon_points[0]['destination_fingerprint'] ?? '' ) && $ozon_fingerprint === (string) ( $ozon_points[0]['provider_destination_fingerprint'] ?? '' ), 'Ozon REST provider projection must carry the trusted destination fingerprint.' );
 pickup_rest_assert( ! array_key_exists( 'generation_id', $ozon_points[0] ) && ! array_key_exists( 'raw_reference', $ozon_points[0] ), 'Ozon REST provider projection must not expose generation_id or internal provider raw_reference fields.' );
