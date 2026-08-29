@@ -1557,6 +1557,47 @@ async function stalePrefetchNeverRendersAfterDestinationChange() {
 	assert.strictEqual(Array.isArray(harness.mapContexts[0].preloadedPoints), false, 'stale previous-city prefetch must not be injected into the new modal.');
 }
 
+async function prefetchDisabledIgnoresExistingStaleCache() {
+	const moscowPoint = point('msk-cached', 55.75, 37.61);
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'ozon_delivery:pickup',
+		activeShippingMethod: 'ozon_delivery:pickup',
+		initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		fields: {
+			wdc_platform_location_lat: '55.75',
+			wdc_platform_location_lng: '37.61'
+		},
+		pickupRateCapabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false }
+		},
+		points: () => Promise.resolve([moscowPoint])
+	});
+	harness.changeMethod('ozon_delivery:pickup');
+	const ozon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
+	harness.setContainers([ozon]);
+	harness.dispatchDomReady();
+	await wait(900);
+	assert.strictEqual(harness.apiCounts().points, 1, 'test setup must create a stale Moscow prefetch cache before capability false arrives.');
+	harness.changeDestination('650000', 'Новосибирск');
+	harness.setStateResponse({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '650000', display_name: 'Новосибирск', city_name: 'Новосибирск', lat: 55.03, lng: 82.92 },
+		pickup_rate_capabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false, prefetch_points: false }
+		},
+		pickup_selections: {}
+	});
+	harness.updatedCheckout();
+	await wait(30);
+	harness.open(ozon);
+	await wait(30);
+	assert.strictEqual(harness.mapContexts.length, 1, 'modal must still open with the current destination after stale cache invalidation.');
+	assert.strictEqual(harness.mapContexts[0].location_id, '650000', 'modal context must use Novosibirsk after destination change.');
+	assert.strictEqual(harness.mapContexts[0].prefetch_points, false, 'modal context must carry explicit point-prefetch opt-out.');
+	assert.strictEqual(Array.isArray(harness.mapContexts[0].preloadedPoints), false, 'prefetch_points=false must suppress stale cached Moscow preloadedPoints.');
+}
+
 async function stalePrefetchRaceCannotRepopulateCache() {
 	const pendingA = deferred();
 	const pendingB = deferred();
@@ -1752,6 +1793,9 @@ async function run() {
 		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method)')
 		&& checkoutSource.includes('function prefetchIdentity(context, method)')
 		&& checkoutSource.includes('function prefetchIdentityMatches(cached, current)')
+		&& checkoutSource.includes('function pointPrefetchAllowed(method)')
+		&& checkoutSource.includes("Object.prototype.hasOwnProperty.call(item, 'prefetch_points')")
+		&& checkoutSource.includes('capabilities.prefetch_points === false')
 		&& checkoutSource.includes('prefetchGeneration++')
 		&& !checkoutSource.includes('reload_on_viewport_change: config.reload_on_viewport_change'), 'pickup checkout must keep rate capabilities separate from mutable destination context and apply them when opening the modal.');
 	assert(leafletProviderSource.includes("map.on('zoomend', scheduleClusterRebuild)")
@@ -1781,9 +1825,11 @@ async function run() {
 	await checkoutInlineNoticeLatchLifecycle();
 	await destinationFingerprintChangeResetsLocalSelection();
 	await pickupRateCapabilitySurvivesCheckoutStateRefresh();
+	await prefetchPointsCapabilityControlsBackgroundFetch();
 	await openModalRefreshesAuthoritativeStateBeforeMapCreate();
 	await allCarrierModalCreationRegression();
 	await stalePrefetchNeverRendersAfterDestinationChange();
+	await prefetchDisabledIgnoresExistingStaleCache();
 	await stalePrefetchRaceCannotRepopulateCache();
 	await initialPointsFetchShowsLoaderUntilRender();
 	await emptyPointsFetchHidesLoader();
