@@ -424,6 +424,22 @@ final class CheckoutPickupPointRestController {
 		$type = 'paid' === $source ? 'pvz' : ( 'free' === $source || 'terminal' === $point->type ? 'terminal' : 'pvz' );
 		$title = 'terminal' === $type ? 'Собственный пункт выдачи ПЭК' : 'Партнерский пункт выдачи ПЭК';
 		$comment = 'paid' === $source ? 'Возможна небольшая доплата за доставку в этот пункт' : '';
+		$presentation_type = $this->provider_presentation_value( $raw, 'presentation_type' );
+		if ( in_array( $presentation_type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
+			$type = $presentation_type;
+		}
+		$presentation_title = $this->provider_presentation_value( $raw, 'presentation_title' );
+		if ( '' !== $presentation_title ) {
+			$title = $presentation_title;
+		}
+		$presentation_comment = $this->provider_presentation_value( $raw, 'presentation_comment' );
+		if ( '' !== $presentation_comment ) {
+			$comment = $presentation_comment;
+		}
+		$marker_type = $this->provider_presentation_value( $raw, 'marker_type' );
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+			$marker_type = 'terminal' === $type ? 'terminal' : 'pickup';
+		}
 		$point_name = $this->public_provider_point_name( $point, $raw );
 		$snapshot = array(
 			'carrier_key' => $carrier,
@@ -447,7 +463,7 @@ final class CheckoutPickupPointRestController {
 			'work_time' => $point->work_time,
 			'description' => $point->comment,
 			'presentation_comment' => $comment,
-			'marker_type' => 'terminal' === $type ? 'terminal' : 'pickup',
+			'marker_type' => $marker_type,
 			'source' => in_array( $source, array( 'free', 'paid' ), true ) ? $source : '',
 			'location_id' => $location_id,
 			'country_code' => strtoupper( trim( $country_code ) ),
@@ -465,7 +481,7 @@ final class CheckoutPickupPointRestController {
 	 * @param array<string,mixed> $raw
 	 */
 	private function public_provider_point_name( PickupPoint $point, array $raw ): string {
-		foreach ( array( $raw['division_name'] ?? null, $raw['branch_name'] ?? null ) as $candidate ) {
+		foreach ( array( $raw['point_name'] ?? null, $raw['division_name'] ?? null, $raw['branch_name'] ?? null ) as $candidate ) {
 			if ( ! is_scalar( $candidate ) ) {
 				continue;
 			}
@@ -477,6 +493,12 @@ final class CheckoutPickupPointRestController {
 		}
 
 		return '';
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function provider_presentation_value( array $raw, string $key ): string {
+		$value = $raw[ $key ] ?? null;
+		return is_scalar( $value ) ? trim( (string) $value ) : '';
 	}
 
 	private function looks_like_internal_point_identifier( string $value ): bool {

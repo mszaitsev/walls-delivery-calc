@@ -389,10 +389,67 @@ final class PickupPointsRestController {
 			}
 			if ( PekSettings::CARRIER_KEY === $carrier ) {
 				$formatted[] = $this->pek_formatter->format( $point, $fingerprint, $query->location_id, $query->country_code );
+			} else {
+				$formatted[] = $this->registry_point_payload( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code );
 			}
 		}
 
 		return $this->response( $this->filter_generic_points( $formatted, $query_text ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function registry_point_payload( PickupPoint $point, string $carrier, string $family, string $fingerprint, int $location_id, string $country_code ): array {
+		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
+		$type = $this->registry_presentation_value( $raw, 'presentation_type', $point->type );
+		if ( ! in_array( $type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
+			$type = 'unknown';
+		}
+		$title = $this->registry_presentation_value( $raw, 'presentation_title', 'Пункт выдачи' );
+		$point_name = $this->registry_presentation_value( $raw, 'point_name', '' );
+		$marker_type = $this->registry_presentation_value( $raw, 'marker_type', 'pickup' );
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+			$marker_type = 'pickup';
+		}
+		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', $point->comment );
+		$display_code = $this->registry_presentation_value( $raw, 'display_code', '' );
+		$snapshot = array(
+			'carrier_key' => $carrier,
+			'service_key' => $carrier,
+			'pickup_family' => $family,
+			'point_code' => $point->code,
+			'point_id' => $point->code,
+			'point_type' => $type,
+			'point_type_label' => $title,
+			'point_title' => $title,
+			'card_title' => $title,
+			'point_name' => $point_name,
+			'point_address' => $point->address,
+			'address' => $point->address,
+			'city_name' => $point->city,
+			'region_name' => $point->region,
+			'lat' => $point->latitude,
+			'lng' => $point->longitude,
+			'work_time' => $point->work_time,
+			'description' => $point->comment,
+			'presentation_comment' => $comment,
+			'marker_type' => $marker_type,
+			'display_code' => $display_code,
+			'display_title' => trim( $title . ( '' !== $display_code ? ' ' . $display_code : '' ) ),
+			'location_id' => $location_id,
+			'country_code' => strtoupper( trim( $country_code ) ),
+			'destination_fingerprint' => $fingerprint,
+			'provider_destination_fingerprint' => $fingerprint,
+		);
+
+		return array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_name, 'snapshot' => $snapshot ) );
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_presentation_value( array $raw, string $key, string $default ): string {
+		$value = $raw[ $key ] ?? null;
+		return is_scalar( $value ) && '' !== trim( (string) $value ) ? trim( (string) $value ) : $default;
 	}
 
 	/**
