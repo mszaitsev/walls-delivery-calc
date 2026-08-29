@@ -103,6 +103,17 @@ class FakeElement {
 		return child;
 	}
 
+	insertBefore(child, reference) {
+		child.parentNode = this;
+		const index = this.children.indexOf(reference);
+		if (index === -1) {
+			this.children.push(child);
+		} else {
+			this.children.splice(index, 0, child);
+		}
+		return child;
+	}
+
 	remove() {
 		if (!this.parentNode || !this.parentNode.children) {
 			return;
@@ -1364,6 +1375,45 @@ async function prefetchPointsCapabilityControlsBackgroundFetch() {
 }
 
 async function openModalRefreshesAuthoritativeStateBeforeMapCreate() {
+	const pendingState = deferred();
+	const pendingHarness = createCheckoutNoticeHarness({
+		activePickupFamily: 'ozon_delivery:pickup',
+		activeShippingMethod: 'ozon_delivery:pickup',
+		currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		fields: {
+			wdc_platform_location_lat: '55.75',
+			wdc_platform_location_lng: '37.61'
+		},
+		pickupRateCapabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false, prefetch_points: false }
+		},
+		state: () => pendingState.promise
+	});
+	pendingHarness.changeMethod('ozon_delivery:pickup');
+	const pendingOzon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
+	pendingOzon.emptyButton.textContent = 'Выбрать пункт выдачи';
+	pendingHarness.setContainers([pendingOzon]);
+	pendingHarness.open(pendingOzon);
+	await wait(20);
+	assert.strictEqual(pendingHarness.modalRoots.length, 0, 'pickup modal must not be created before authoritative checkout state resolves.');
+	assert.strictEqual(pendingHarness.mapContexts.length, 0, 'pickup map must not be created before authoritative checkout state resolves.');
+	assert.strictEqual(pendingOzon.emptyButton.disabled, true, 'open button must be disabled while checkout state is loading.');
+	assert.strictEqual(pendingOzon.emptyButton.textContent, 'Открываем карту…', 'open button must show state-loading text instead of opening a blank modal.');
+	pendingState.resolve({
+		active_pickup_family: 'ozon_delivery:pickup',
+		city_context: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+		pickup_rate_capabilities: {
+			'ozon_delivery:pickup': { reload_on_viewport_change: false, prefetch_points: false }
+		},
+		pickup_selections: {}
+	});
+	await wait(30);
+	assert.strictEqual(pendingHarness.modalRoots.length, 1, 'pickup modal must be created after current authoritative checkout state resolves.');
+	assert.strictEqual(pendingHarness.mapContexts.length, 1, 'pickup map must be created together with the modal after state resolves.');
+	assert.strictEqual(pendingOzon.emptyButton.disabled, false, 'open button must be restored after modal creation.');
+	assert.strictEqual(pendingOzon.emptyButton.textContent, 'Выбрать пункт выдачи', 'open button text must be restored after modal creation.');
+
 	const harness = createCheckoutNoticeHarness({
 		activePickupFamily: 'ozon_delivery:pickup',
 		activeShippingMethod: 'ozon_delivery:pickup',
@@ -1394,6 +1444,64 @@ async function openModalRefreshesAuthoritativeStateBeforeMapCreate() {
 	assert.strictEqual(harness.mapContexts.length, 1, 'map must be created after the authoritative state promise resolves.');
 	assert.strictEqual(harness.mapContexts[0].location_id, '154954', 'map context must use fresh REST destination instead of stale localized destination.');
 	assert.strictEqual(harness.mapContexts[0].reload_on_viewport_change, false, 'fresh REST rate capability must be applied before map creation.');
+}
+
+async function stateFailureDoesNotCreateBlankModal() {
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'ozon_delivery:pickup',
+		activeShippingMethod: 'ozon_delivery:pickup',
+		state: () => Promise.reject(new Error('state unavailable'))
+	});
+	harness.changeMethod('ozon_delivery:pickup');
+	const ozon = createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '');
+	ozon.emptyButton.textContent = 'Выбрать пункт выдачи';
+	harness.setContainers([ozon]);
+	harness.open(ozon);
+	await wait(5200);
+	assert.strictEqual(harness.modalRoots.length, 0, 'state failure must not leave a blank pickup modal.');
+	assert.strictEqual(harness.mapContexts.length, 0, 'state failure must not create a pickup map.');
+	assert.strictEqual(ozon.emptyButton.disabled, false, 'open button must be restored after state failure.');
+	assert.strictEqual(ozon.emptyButton.textContent, 'Выбрать пункт выдачи', 'open button text must be restored after state failure.');
+	assert(harness.sandbox.document.body.children.some((child) => child.textContent === 'Не удалось получить актуальные данные для карты. Попробуйте ещё раз.'), 'state failure must show a checkout-level controlled notice.');
+}
+
+async function allCarrierModalCreationRegression() {
+	const carriers = [
+		{ method: 'ozon_delivery:pickup', family: 'ozon_delivery:pickup', capabilities: { reload_on_viewport_change: false, prefetch_points: false } },
+		{ method: 'dpd:pickup', family: 'dpd:pickup', capabilities: {} },
+		{ method: 'yandex_pickup', family: 'yandex_delivery:pickup', capabilities: {} },
+		{ method: 'cdek:pickup', family: 'cdek:pickup', capabilities: {} },
+		{ method: 'russian_post:pickup', family: 'russian_post:pickup', capabilities: {} }
+	];
+	for (const carrier of carriers) {
+		const harness = createCheckoutNoticeHarness({
+			activePickupFamily: carrier.family,
+			activeShippingMethod: carrier.method,
+			currentContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+			initialContext: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+			fields: {
+				wdc_platform_location_lat: '55.75',
+				wdc_platform_location_lng: '37.61'
+			},
+			pickupRateCapabilities: {
+				[carrier.method]: carrier.capabilities
+			},
+			stateResponse: {
+				active_pickup_family: carrier.family,
+				city_context: { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва', lat: 55.75, lng: 37.61 },
+				pickup_rate_capabilities: {
+					[carrier.method]: carrier.capabilities
+				},
+				pickup_selections: {}
+			}
+		});
+		const container = createCheckoutContainer(carrier.method, carrier.family, '');
+		harness.setContainers([container]);
+		harness.open(container);
+		await wait(30);
+		assert.strictEqual(harness.modalRoots.length, 1, carrier.method + ' must create a pickup modal after current state resolves.');
+		assert.strictEqual(harness.mapContexts.length, 1, carrier.method + ' must create a pickup map after current state resolves.');
+	}
 }
 
 async function staleServerStateRetriesBeforeMapCreate() {
@@ -1665,6 +1773,9 @@ async function run() {
 		&& checkoutSource.includes('function refreshModalContext(method)')
 		&& checkoutSource.includes('refreshCheckoutContextOnce(1200, { returnContext: true, currentFieldsOnly: true })')
 		&& checkoutSource.includes('function stateContextMatchesCurrentFields(context)')
+		&& checkoutSource.includes('function setPickupOpenButtonsLoading(container, loading)')
+		&& checkoutSource.includes("setPickupOpenButtonsLoading(container, true)")
+		&& checkoutSource.includes("setPickupOpenButtonsLoading(container, false)")
 		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method)')
 		&& checkoutSource.includes('function prefetchIdentity(context, method)')
 		&& checkoutSource.includes('function prefetchIdentityMatches(cached, current)')
@@ -1700,6 +1811,8 @@ async function run() {
 	await pickupRateCapabilitySurvivesCheckoutStateRefresh();
 	await prefetchPointsCapabilityControlsBackgroundFetch();
 	await openModalRefreshesAuthoritativeStateBeforeMapCreate();
+	await stateFailureDoesNotCreateBlankModal();
+	await allCarrierModalCreationRegression();
 	await staleServerStateRetriesBeforeMapCreate();
 	await stalePrefetchNeverRendersAfterDestinationChange();
 	await stalePrefetchRaceCannotRepopulateCache();

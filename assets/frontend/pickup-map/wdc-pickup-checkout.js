@@ -66,70 +66,57 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function openModal(container, method) {
 		method = normalizeShippingMethod(method || currentShippingMethod());
-		var modal = window.WDCPickupModal.create(labels);
-		var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
-		var search = modal.root.querySelector('[data-wdc-search]');
-		var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
-		var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
-		var map = null;
-		var savingPoint = true;
-		var loadingText = 'Загружаем пункты выдачи…';
-		if (confirmButton) {
-			confirmButton.disabled = true;
+		if (!container || container.dataset.wdcPickupMapOpenPending === '1') {
+			return;
 		}
-		setModalLoading(modal.root, loadingText);
-		setModalSelectButtonsDisabled(modal.root, true, loadingText);
-
-		modal.root.addEventListener('wdc:close', close);
+		container.dataset.wdcPickupMapOpenPending = '1';
+		setPickupOpenButtonsLoading(container, true);
 
 		refreshModalContext(method).then(function (resolvedContext) {
+			container.dataset.wdcPickupMapOpenPending = '';
+			setPickupOpenButtonsLoading(container, false);
+			var modal = window.WDCPickupModal.create(labels);
+			var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
+			var search = modal.root.querySelector('[data-wdc-search]');
+			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
+			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
+			var map = null;
+			var savingPoint = false;
+			var loadingText = '';
 			var context = withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method);
 			map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
-			clearLoading();
 
+			modal.root.addEventListener('wdc:close', close);
 			bindModalMapInteractions();
-		}).catch(function () {
-			loadingText = '';
-			savingPoint = false;
-			clearModalLoading(modal.root);
-			setModalSelectButtonsDisabled(modal.root, true, '');
-			if (confirmButton) {
-				confirmButton.disabled = true;
-			}
-			var card = modal.root.querySelector('[data-wdc-card]');
-			if (card) {
-				card.textContent = 'Не удалось получить актуальные данные для карты. Попробуйте открыть карту ещё раз.';
-			}
-		});
 
-		function close() {
-			if (map && map.destroy) {
-				map.destroy();
+			function close() {
+				if (map && map.destroy) {
+					map.destroy();
+				}
+				modal.destroy();
 			}
-			modal.destroy();
-		}
 
-		function setLoading(message) {
-			savingPoint = true;
-			loadingText = message || 'Сохраняем пункт выдачи...';
-			if (confirmButton) {
-				confirmButton.disabled = true;
+			function setLoading(message) {
+				savingPoint = true;
+				loadingText = message || 'Сохраняем пункт выдачи...';
+				if (confirmButton) {
+					confirmButton.disabled = true;
+				}
+				setModalLoading(modal.root, loadingText);
+				setModalSelectButtonsDisabled(modal.root, true, loadingText);
 			}
-			setModalLoading(modal.root, loadingText);
-			setModalSelectButtonsDisabled(modal.root, true, loadingText);
-		}
 
-		function clearLoading() {
-			savingPoint = false;
-			loadingText = '';
-			if (confirmButton) {
-				confirmButton.disabled = false;
+			function clearLoading() {
+				savingPoint = false;
+				loadingText = '';
+				if (confirmButton) {
+					confirmButton.disabled = false;
+				}
+				clearModalLoading(modal.root);
+				setModalSelectButtonsDisabled(modal.root, false, '');
 			}
-			clearModalLoading(modal.root);
-			setModalSelectButtonsDisabled(modal.root, false, '');
-		}
 
-		function bindModalMapInteractions() {
+			function bindModalMapInteractions() {
 
 			function commitPoint(point, shippingMethodId, options) {
 				options = options || {};
@@ -230,7 +217,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				});
 			}
 
-			modal.root.addEventListener('wdc:close', close);
 			function runAddressSearch() {
 				if (search.value.trim()) {
 					map.search(search.value.trim());
@@ -304,6 +290,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				geolocationButton.innerHTML = '<span aria-hidden="true" class="wdc-pickup-map__locate-icon"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 11.4 20.2 3.8 12.6 20l-2.1-7.1L4 11.4Z"></path></svg></span>';
 			}
 		}
+		}).catch(function () {
+			container.dataset.wdcPickupMapOpenPending = '';
+			setPickupOpenButtonsLoading(container, false);
+			showCheckoutNotice('Не удалось получить актуальные данные для карты. Попробуйте ещё раз.');
+		});
 	}
 
 	function applySelection(container, point) {
@@ -2224,6 +2215,41 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
 			setHidden(button, hasSelection);
 			button.disabled = false;
+		});
+	}
+
+	function setPickupOpenButtonsLoading(container, loading) {
+		if (!container) {
+			return;
+		}
+		var buttons = [];
+		container.querySelectorAll('[data-wdc-pickup-open]').forEach(function (button) {
+			buttons.push(button);
+		});
+		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
+			if (buttons.indexOf(button) === -1) {
+				buttons.push(button);
+			}
+		});
+		buttons.forEach(function (button) {
+			if (!button) {
+				return;
+			}
+			if (loading) {
+				if (!Object.prototype.hasOwnProperty.call(button.dataset, 'wdcPickupOpenOriginalText')) {
+					button.dataset.wdcPickupOpenOriginalText = button.textContent || '';
+				}
+				button.disabled = true;
+				button.setAttribute('aria-busy', 'true');
+				button.textContent = 'Открываем карту…';
+				return;
+			}
+			button.disabled = false;
+			button.setAttribute('aria-busy', 'false');
+			if (Object.prototype.hasOwnProperty.call(button.dataset, 'wdcPickupOpenOriginalText')) {
+				button.textContent = button.dataset.wdcPickupOpenOriginalText;
+				button.dataset.wdcPickupOpenOriginalText = '';
+			}
 		});
 	}
 
