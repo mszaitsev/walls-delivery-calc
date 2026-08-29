@@ -87,7 +87,7 @@ final class PickupMapCheckout {
 						'searchPlaceholder' => 'Адрес или индекс',
 						'postcodeOnlyPlaceholder' => 'Сейчас работает поиск только по почтовому индексу',
 						'empty'             => 'Переместите карту или воспользуйтесь поиском.',
-						'loading'           => 'Поиск...',
+						'loading'           => 'Загружаем пункты выдачи…',
 						'addressNotFound'   => 'Адрес не найден',
 						'postcodeOnly'      => 'Поиск доступен только по индексу',
 						'dadataError'       => 'Ошибка DaData',

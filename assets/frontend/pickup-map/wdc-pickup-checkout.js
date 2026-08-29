@@ -743,6 +743,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			region_name: config.region_name || '',
 			country_code: contextCountryCode(config),
 			cdek_to_country_code: config.cdek_to_country_code || '',
+			reload_on_viewport_change: config.reload_on_viewport_change,
 			selectedPoint: activeSelected || config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
@@ -767,6 +768,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			region_name: fieldContext.region_name || runtimeContext.region_name || localizedContext.region_name || '',
 			country_code: contextCountryCode(fieldContext) || contextCountryCode(runtimeContext) || contextCountryCode(localizedContext) || 'RU',
 			cdek_to_country_code: fieldContext.cdek_to_country_code || runtimeContext.cdek_to_country_code || localizedContext.cdek_to_country_code || '',
+			reload_on_viewport_change: contextReloadOnViewportChange(runtimeContext, localizedContext),
 			selectedPoint: activeSelected || localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
 		return result;
@@ -790,6 +792,23 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function contextCountryCode(context) {
 		context = context || {};
 		return String(context.country_code || context.cdek_to_country_code || '').trim().toUpperCase();
+	}
+
+	function contextReloadOnViewportChange() {
+		for (var i = 0; i < arguments.length; i++) {
+			var context = arguments[i] || {};
+			if (Object.prototype.hasOwnProperty.call(context, 'reload_on_viewport_change')) {
+				return !falsy(context.reload_on_viewport_change);
+			}
+			if (Object.prototype.hasOwnProperty.call(context, 'viewport_reload')) {
+				return !falsy(context.viewport_reload);
+			}
+		}
+		return true;
+	}
+
+	function falsy(value) {
+		return value === false || value === 0 || value === '0' || value === 'false';
 	}
 
 	function contextFromFields() {

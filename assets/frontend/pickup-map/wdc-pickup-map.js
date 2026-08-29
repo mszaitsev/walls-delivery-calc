@@ -94,8 +94,10 @@
 				return;
 			}
 			if (!viewportReloadRequired() && visiblePoints.length) {
-				renderCurrentList();
-				updateListSelectButton();
+				if (listFollowsViewport()) {
+					renderCurrentList();
+					updateListSelectButton();
+				}
 				return;
 			}
 			debouncedLoad(bbox);
@@ -103,6 +105,10 @@
 
 		function viewportReloadRequired() {
 			return reloadOnViewportChange !== false;
+		}
+
+		function listFollowsViewport() {
+			return yandexCityListMode;
 		}
 
 		provider = providerFactory.create(element, {
@@ -454,8 +460,10 @@
 				return;
 			}
 			if (!options.force && !viewportReloadRequired() && visiblePoints.length) {
-				renderCurrentList();
-				updateListSelectButton();
+				if (listFollowsViewport()) {
+					renderCurrentList();
+					updateListSelectButton();
+				}
 				return;
 			}
 			if (controller) {

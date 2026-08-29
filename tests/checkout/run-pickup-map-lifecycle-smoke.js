@@ -31,7 +31,8 @@ class FakeElement {
 		this.attributes = {};
 		this.dataset = {};
 		this.children = [];
-		this.innerHTML = '';
+		this.innerHTMLWrites = 0;
+		this._innerHTML = '';
 		this.textContent = '';
 		this.disabled = false;
 		this.hidden = false;
@@ -64,7 +65,18 @@ class FakeElement {
 		};
 	}
 
+	get innerHTML() {
+		return this._innerHTML;
+	}
+
+	set innerHTML(value) {
+		this.innerHTMLWrites += 1;
+		this._innerHTML = String(value || '');
+	}
+
 	setAttribute(name, value) {
+		this.attributeWrites = this.attributeWrites || [];
+		this.attributeWrites.push([name, String(value)]);
 		this.attributes[name] = String(value);
 		if (name === 'aria-hidden') {
 			this.ariaHidden = String(value);
@@ -298,6 +310,10 @@ function largePoints(count) {
 
 function renderedPointRows(html) {
 	return (String(html || '').match(/data-wdc-point-id=/g) || []).length;
+}
+
+function ariaBusyTrueCount(element) {
+	return (element.attributeWrites || []).filter((write) => write[0] === 'aria-busy' && write[1] === 'true').length;
 }
 
 function mapLoader(harness) {
@@ -843,15 +859,24 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	harness.list.clientHeight = 520;
 	await wait(120);
 	assert.strictEqual(pointRequests, 1, 'fixed-area dataset must perform exactly one initial REST fetch');
+	assert.strictEqual(ariaBusyTrueCount(harness.element), 1, 'fixed-area initial load must show the remote loading state once');
+	assert.strictEqual(mapLoader(harness).hidden, true, 'fixed-area initial success must hide the loader');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'initial fixed-area fetch must render markers once');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers')[0][1].length, 6403, 'cluster source must keep the full fixed-area dataset');
 	assert(renderedPointRows(harness.list.innerHTML) <= 80, 'virtualized sidebar must keep DOM rows bounded for 6403 source points');
+	const busyAfterInitial = ariaBusyTrueCount(harness.element);
+	const listWritesAfterInitial = harness.list.innerHTMLWrites;
+	harness.list.scrollTop = 2400;
 	harness.provider().fireBounds('37.1,55.1,38.1,56.1');
 	harness.provider().fireBounds('37.0,55.0,38.2,56.2');
 	harness.provider().fireBounds('36.9,54.9,38.3,56.3');
 	harness.provider().fireBounds('36.8,54.8,38.4,56.4');
 	await wait(380);
 	assert.strictEqual(pointRequests, 1, 'fixed-area viewport changes must not download the same points again');
+	assert.strictEqual(ariaBusyTrueCount(harness.element), busyAfterInitial, 'fixed-area viewport changes must not show a fake loading/search state');
+	assert.strictEqual(mapLoader(harness).hidden, true, 'fixed-area viewport changes must keep the loader hidden');
+	assert.strictEqual(harness.list.innerHTMLWrites, listWritesAfterInitial, 'fixed-area viewport-only changes must not rerender the full sidebar list');
+	assert.strictEqual(harness.list.scrollTop, 2400, 'fixed-area viewport-only changes must preserve sidebar scroll position');
 	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'fixed-area viewport changes must not force map-level marker rerender through REST');
 	assert(renderedPointRows(harness.list.innerHTML) <= 80, 'virtualized sidebar must remain bounded after viewport changes');
 	harness.list.scrollTop = 6402 * 112;
@@ -861,6 +886,36 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	await harness.map.search('Address p06403');
 	assert.strictEqual(pointRequests, 1, 'fixed-area local search must use the loaded source array');
 	assert(harness.list.innerHTML.includes('p06403'), 'fixed-area local search must find points outside the initially rendered DOM window');
+	harness.map.destroy();
+}
+
+async function viewportFilteredFixedDatasetUpdatesListWithoutLoader() {
+	let pointRequests = 0;
+	const inside = point('inside', 55.75, 37.61);
+	const outside = point('outside', 56.20, 38.20);
+	const api = {
+		context: {
+			carrier: 'yandex_delivery',
+			reload_on_viewport_change: false,
+			preloadedPoints: [inside, outside]
+		},
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve([]);
+		}
+	};
+	const harness = createHarness(api);
+	harness.list.clientHeight = 520;
+	await wait(40);
+	const busyAfterInitial = ariaBusyTrueCount(harness.element);
+	const writesAfterInitial = harness.list.innerHTMLWrites;
+	harness.element.dispatch('pointerdown');
+	harness.provider().fireBounds('37.5,55.5,37.8,55.9');
+	await wait(40);
+	assert.strictEqual(pointRequests, 0, 'viewport-filtered fixed dataset must not run remote points requests for bounds changes');
+	assert.strictEqual(ariaBusyTrueCount(harness.element), busyAfterInitial, 'viewport-filtered local bounds changes must not show loading');
+	assert(harness.list.innerHTMLWrites > writesAfterInitial, 'viewport-filtered local bounds changes must update the sidebar list');
+	assert(harness.list.innerHTML.includes('inside') && !harness.list.innerHTML.includes('outside'), 'viewport-filtered local list must follow the current bbox');
 	harness.map.destroy();
 }
 
@@ -1224,10 +1279,13 @@ async function run() {
 		&& source.includes('endLoading(requestId)')
 		&& source.includes('reload_on_viewport_change')
 		&& source.includes('function viewportReloadRequired()')
+		&& source.includes('function listFollowsViewport()')
 		&& source.includes('function renderVirtualList')
 		&& source.includes('VIRTUAL_LIST_THRESHOLD')
 		&& !source.includes("family === 'ozon_delivery:pickup'")
 		&& !source.includes("carrier === 'ozon_delivery'"), 'pickup map loader must be generic, accessible and tied to the current request lifecycle.');
+	assert(checkoutSource.includes('reload_on_viewport_change: config.reload_on_viewport_change')
+		&& checkoutSource.includes('function contextReloadOnViewportChange()'), 'pickup checkout must preserve generic fixed-area viewport reload capability when building modal context.');
 	assert(leafletProviderSource.includes("map.on('zoomend', scheduleClusterRebuild)")
 		&& leafletProviderSource.includes('function cancelScheduledClusterRebuild()')
 		&& leafletProviderSource.includes('requestAnimationFrame')
@@ -1276,6 +1334,7 @@ async function run() {
 	await geolocationResponseDoesNotAutoFit();
 	await destroyAfterAddressSearchPreventsLatePointsMutation();
 	await fixedAreaLargeDatasetDoesNotReloadOnViewportChange();
+	await viewportFilteredFixedDatasetUpdatesListWithoutLoader();
 	console.log('Pickup map lifecycle smoke OK');
 }
 
