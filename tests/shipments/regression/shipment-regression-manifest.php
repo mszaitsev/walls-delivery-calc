@@ -69,6 +69,7 @@ return array(
 	'ozon-delivery.pickup-scheduler' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-scheduler-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.pickup-progress' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-progress-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.pickup-schedule' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-schedule-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
+	'ozon-delivery.pickup-provider' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-provider-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'pek.admin-routing' => array( 'path' => 'tests/pek/run-pek-admin-routing-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.admin-ui' => array( 'path' => 'tests/pek/run-pek-admin-ui-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.warehouse-datetime' => array( 'path' => 'tests/pek/run-pek-warehouse-datetime-smoke.php', 'groups' => array( 'pek' ) ),

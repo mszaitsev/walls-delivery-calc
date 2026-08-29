@@ -123,6 +123,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupImportLock;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupImportService;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupParser;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduleFormatter;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduler;
@@ -477,6 +478,7 @@ final class Plugin {
 		$this->container->register( OzonDeliveryApiClient::class, fn(): OzonDeliveryApiClient => new OzonDeliveryApiClient( $this->container->get( OzonDeliveryHttpClientInterface::class ), $this->container->get( OzonDeliveryAccessTokenService::class ) ) );
 		$this->container->register( OzonDeliveryConnectionDiagnosticService::class, fn(): OzonDeliveryConnectionDiagnosticService => new OzonDeliveryConnectionDiagnosticService( $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryAccessTokenService::class ), $this->container->get( OzonDeliverySettings::class ) ) );
 		$this->container->register( OzonDeliveryPickupRepository::class, fn(): OzonDeliveryPickupRepository => new OzonDeliveryPickupRepository() );
+		$this->container->register( OzonDeliveryPickupPointProvider::class, fn(): OzonDeliveryPickupPointProvider => new OzonDeliveryPickupPointProvider( $this->container->get( OzonDeliveryPickupRepository::class ) ) );
 		$this->container->register( OzonDeliveryPickupScheduleFormatter::class, fn(): OzonDeliveryPickupScheduleFormatter => new OzonDeliveryPickupScheduleFormatter() );
 		$this->container->register( OzonDeliveryPickupParser::class, fn(): OzonDeliveryPickupParser => new OzonDeliveryPickupParser( $this->container->get( OzonDeliveryPickupScheduleFormatter::class ) ) );
 		$this->container->register( OzonDeliveryPickupImportLock::class, fn(): OzonDeliveryPickupImportLock => new OzonDeliveryPickupImportLock() );
@@ -498,7 +500,7 @@ final class Plugin {
 		$this->container->register( PekCargoConstraintsConverter::class, fn(): PekCargoConstraintsConverter => new PekCargoConstraintsConverter() );
 		$this->container->register( PekTerminalService::class, fn(): PekTerminalService => new PekTerminalService( $this->container->get( PekLocationResolver::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekCargoConstraintsConverter::class ), $this->container->get( PekDestinationTerminalSearchCache::class ), $this->container->get( PekTerminalRepository::class ), $this->container->get( PekSettings::class ) ) );
 		$this->container->register( PekPickupPointProvider::class, fn(): PekPickupPointProvider => new PekPickupPointProvider( $this->container->get( PekTerminalService::class ) ) );
-		$this->container->register( CarrierPickupPointProviderRegistry::class, fn(): CarrierPickupPointProviderRegistry => new CarrierPickupPointProviderRegistry( array( $this->container->get( PekPickupPointProvider::class ) ) ) );
+		$this->container->register( CarrierPickupPointProviderRegistry::class, fn(): CarrierPickupPointProviderRegistry => new CarrierPickupPointProviderRegistry( array( $this->container->get( PekPickupPointProvider::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ) ) ) );
 		$this->container->register( PekDestinationPickupDiagnosticStore::class, fn(): PekDestinationPickupDiagnosticStore => new PekDestinationPickupDiagnosticStore() );
 		$this->container->register( PekDestinationPickupDiagnosticService::class, fn(): PekDestinationPickupDiagnosticService => new PekDestinationPickupDiagnosticService( $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( LocationRepository::class ), $this->container->get( PekTerminalService::class ), $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( PekQuoteCargoBuilder::class, fn(): PekQuoteCargoBuilder => new PekQuoteCargoBuilder() );
@@ -960,7 +962,7 @@ final class Plugin {
 		$this->container->register( JetLogisticStatusAdminPage::class, fn(): JetLogisticStatusAdminPage => new JetLogisticStatusAdminPage( $this->container->get( JetLogisticStatusMappingRepository::class ), $this->container->get( JetLogisticApiDiagnosticService::class ) ) );
 		$this->container->register( PekAdminPage::class, fn(): PekAdminPage => new PekAdminPage( $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( PekConnectionDiagnosticService::class ), $this->container->get( PekSenderWarehouseService::class ), $this->container->get( PekAdminNoticeStore::class ), $this->container->get( PekDestinationPickupDiagnosticService::class ), $this->container->get( PekDestinationPickupDiagnosticStore::class ), $this->container->get( PekQuoteDiagnosticService::class ), $this->container->get( PekQuoteDiagnosticStore::class ), $this->container->get( DeliveryQuoteCacheManager::class ), $this->container->get( PekSenderCounterpartService::class ) ) );
 		$this->container->register( PekStatusAdminPage::class, fn(): PekStatusAdminPage => new PekStatusAdminPage( $this->container->get( PekStatusMapping::class ) ) );
-		$this->container->register( OzonDeliveryAdminPage::class, fn(): OzonDeliveryAdminPage => new OzonDeliveryAdminPage( $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryConnectionDiagnosticService::class ), $this->container->get( OzonDeliveryPickupRepository::class ), $this->container->get( OzonDeliveryPickupScheduler::class ) ) );
+		$this->container->register( OzonDeliveryAdminPage::class, fn(): OzonDeliveryAdminPage => new OzonDeliveryAdminPage( $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryConnectionDiagnosticService::class ), $this->container->get( OzonDeliveryPickupRepository::class ), $this->container->get( OzonDeliveryPickupScheduler::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ) ) );
 		$this->container->register(
 			DeliveryServicesAdminPage::class,
 			fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage(

@@ -51,7 +51,7 @@ pickup_registry_assert( array() !== ( new CarrierPickupPointQuery( 'pek', 0, 'RU
 pickup_registry_assert( ! property_exists( new CarrierPickupPointSelectionQuery( new CarrierPickupPointQuery( 'pek', 1, 'RU', '', null, null, new PickupCargoConstraints(), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 50, 50 ), 'p1' ), 'fresh_validation_required' ), 'Selection query must not expose unused fresh_validation_required flag.' );
 
 $plugin = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-pickup_registry_assert( str_contains( $plugin, 'CarrierPickupPointProviderRegistry::class' ) && str_contains( $plugin, 'PekPickupPointProvider::class' ), 'Plugin.php must wire PEK pickup provider registry.' );
+pickup_registry_assert( str_contains( $plugin, 'CarrierPickupPointProviderRegistry::class' ) && str_contains( $plugin, 'PekPickupPointProvider::class' ) && str_contains( $plugin, 'OzonDeliveryPickupPointProvider::class' ), 'Plugin.php must wire PEK and Ozon pickup providers through the canonical registry.' );
 pickup_registry_assert( ! preg_match( '/CarrierPickupPointProviderRegistry\\(\\s*array\\([^)]*(Cdek|Dpd|Yandex|RussianPost)/s', $plugin ), 'Existing carriers must not be migrated into the new pickup provider registry.' );
 
 $points_rest = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
