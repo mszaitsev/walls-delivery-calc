@@ -60,6 +60,14 @@ function oz_pickup_provider_query( int $limit = 10, int $weight_g = 0 ): Carrier
 	return new CarrierPickupPointQuery( OzonDeliverySettings::CARRIER_KEY, 1, 'RU', '', 55.0300, 82.9200, new PickupCargoConstraints( $weight_g, 0, 0, $weight_g, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 10, $limit );
 }
 
+/** @param array<int,array{weight_g:int,length_cm:float,width_cm:float,height_cm:float}> $places */
+function oz_pickup_provider_places_query( array $places ): CarrierPickupPointQuery {
+	$total_weight = array_sum( array_map( static fn( array $place ): int => $place['weight_g'], $places ) );
+	$max_weight = max( array_map( static fn( array $place ): int => $place['weight_g'], $places ) );
+	$max_dimension = max( array_map( static fn( array $place ): int => (int) ceil( max( $place['length_cm'], $place['width_cm'], $place['height_cm'] ) ), $places ) );
+	return new CarrierPickupPointQuery( OzonDeliverySettings::CARRIER_KEY, 1, 'RU', '', 55.0300, 82.9200, new PickupCargoConstraints( $total_weight, 0, $max_dimension, $max_weight, count( $places ), $places ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 10, 20 );
+}
+
 /** @return array<string,mixed> */
 function oz_pickup_provider_point( int $generation_id, int $point_id, string $name, float $latitude = 55.0300, float $longitude = 82.9200 ): array {
 	return array( 'generation_id' => $generation_id, 'point_id' => $point_id, 'name' => $name, 'type' => 'pvz', 'full_address' => 'Новосибирск, Тестовая улица, ' . $point_id, 'latitude' => $latitude, 'longitude' => $longitude, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'min_weight_g' => null, 'max_weight_g' => null, 'max_width_mm' => null, 'max_length_mm' => null, 'max_height_mm' => null );
@@ -111,6 +119,27 @@ oz_pickup_provider_assert( array() === $provider->search( new CarrierPickupPoint
 
 $wpdb->ozon_delivery_pickup_points[] = array_merge( oz_pickup_provider_point( 1, 601, 'Ограниченный пункт' ), array( 'max_weight_g' => 500 ) );
 oz_pickup_provider_assert( ! in_array( '601', array_map( static fn( $point ): string => $point->code, $provider->search( oz_pickup_provider_query( 20, 1000 ) ) ), true ), 'Trusted cargo constraints must filter incompatible active points.' );
+$limits_db = new OzonPickupProviderWpdb();
+$limits_db->ozon_delivery_pickup_generations = array( array( 'id' => 12, 'state' => 'active' ) );
+$limits_db->ozon_delivery_pickup_points = array( array_merge( oz_pickup_provider_point( 12, 120001, 'ПВЗ с лимитами' ), array( 'min_weight_g' => null, 'max_weight_g' => 10000, 'max_length_mm' => 500, 'max_width_mm' => 500, 'max_height_mm' => 300 ) ) );
+$limits_provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( $limits_db ) );
+$three_valid_places = array(
+	array( 'weight_g' => 8000, 'length_cm' => 50.0, 'width_cm' => 30.0, 'height_cm' => 20.0 ),
+	array( 'weight_g' => 8000, 'length_cm' => 40.0, 'width_cm' => 40.0, 'height_cm' => 20.0 ),
+	array( 'weight_g' => 8000, 'length_cm' => 30.0, 'width_cm' => 20.0, 'height_cm' => 10.0 ),
+);
+oz_pickup_provider_assert( array( '120001' ) === array_map( static fn( $point ): string => $point->code, $limits_provider->search( oz_pickup_provider_places_query( $three_valid_places ) ) ), 'Ozon multi-box pickup eligibility must use per-place weight: 3x8kg fits a 10kg-per-place point even though total is 24kg.' );
+$one_overweight = $three_valid_places;
+$one_overweight[1]['weight_g'] = 12000;
+oz_pickup_provider_assert( array() === $limits_provider->search( oz_pickup_provider_places_query( $one_overweight ) ), 'Ozon pickup eligibility must reject the point when any one place exceeds max_weight_g.' );
+oz_pickup_provider_assert( array( '120001' ) === array_map( static fn( $point ): string => $point->code, $limits_provider->search( oz_pickup_provider_places_query( array( array( 'weight_g' => 5000, 'length_cm' => 50.0, 'width_cm' => 30.0, 'height_cm' => 30.0 ) ) ) ) ), 'Ozon dimension check must allow 50x30x30 in point limits 50x50x30 after orientation normalization.' );
+oz_pickup_provider_assert( array( '120001' ) === array_map( static fn( $point ): string => $point->code, $limits_provider->search( oz_pickup_provider_places_query( array( array( 'weight_g' => 5000, 'length_cm' => 50.0, 'width_cm' => 30.0, 'height_cm' => 20.0 ) ) ) ) ), 'Ozon dimension check must support box rotation by sorting parcel and point dimensions.' );
+oz_pickup_provider_assert( array() === $limits_provider->search( oz_pickup_provider_places_query( array( array( 'weight_g' => 5000, 'length_cm' => 60.0, 'width_cm' => 30.0, 'height_cm' => 30.0 ) ) ) ), 'Ozon dimension check must reject a place that cannot fit any orientation.' );
+$one_oversize = $three_valid_places;
+$one_oversize[2]['length_cm'] = 51.0;
+oz_pickup_provider_assert( array() === $limits_provider->search( oz_pickup_provider_places_query( $one_oversize ) ), 'Ozon multi-box pickup eligibility must reject when any one place exceeds axis-correct point limits.' );
+$snapshot_query = $limits_provider->query_from_snapshot( array( 'carrier_key' => OzonDeliverySettings::CARRIER_KEY, 'location_id' => 1, 'country_code' => 'RU', 'latitude' => 55.0300, 'longitude' => 82.9200, 'cargo' => oz_pickup_provider_places_query( $three_valid_places )->cargo->to_array(), 'purpose' => CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 'radius_km' => 10, 'limit' => 20 ) );
+oz_pickup_provider_assert( $snapshot_query instanceof CarrierPickupPointQuery && 3 === count( $snapshot_query->cargo->places ) && array( '120001' ) === array_map( static fn( $point ): string => $point->code, $limits_provider->search( $snapshot_query ) ), 'Ozon carrier snapshot resolver must preserve per-place cargo constraints for generic REST/map lookup.' );
 $large_db = new OzonPickupProviderWpdb();
 $large_db->ozon_delivery_pickup_generations = array( array( 'id' => 10, 'state' => 'active' ) );
 for ( $i = 0; $i < 1500; $i++ ) {

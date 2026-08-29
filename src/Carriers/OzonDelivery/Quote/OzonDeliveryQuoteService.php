@@ -50,7 +50,7 @@ final class OzonDeliveryQuoteService {
 				$result->shipment_method_id,
 				$result->endpoint,
 				$result->http_status,
-				array_merge( $result->meta, $built['diagnostics'], $packaging->to_array(), array( 'pickup_source' => $selected_point instanceof PickupPoint ? 'selected' : 'representative', 'pickup_provider_query' => $this->query_snapshot( $query, $request ) ) )
+				array_merge( $result->meta, $built['diagnostics'], $packaging->to_array(), array( 'pickup_source' => $selected_point instanceof PickupPoint ? 'selected' : 'representative', 'ozon_delivery_places' => $query->cargo->places, 'pickup_provider_query' => $this->query_snapshot( $query, $request ) ) )
 			);
 		} catch ( OzonDeliveryApiException $exception ) {
 			throw new OzonDeliveryQuoteException( $exception->safe_code ?: 'ozon_api_error', $exception->operation, $exception->http_status, $this->sanitizer->sanitize( $exception->getMessage(), 'Ozon Delivery не рассчитал доставку.' ), $exception->metadata );
@@ -62,14 +62,12 @@ final class OzonDeliveryQuoteService {
 		$lat = $this->number_context( $request, array( 'destination_latitude', 'selected_location_latitude', 'latitude', 'lat' ), -90, 90 );
 		$lng = $this->number_context( $request, array( 'destination_longitude', 'selected_location_longitude', 'longitude', 'lng', 'lon' ), -180, 180 );
 		$dimensions = is_array( $packaging['dimensions'] ?? null ) ? $packaging['dimensions'] : array();
-		$parcel_dimensions = is_array( $packaging['parcel_dimensions'] ?? null ) ? $packaging['parcel_dimensions'] : array();
+		$places = $this->cargo_places( $packaging );
 		$max_dimension = 0;
 		$max_place_weight = 0;
-		foreach ( $parcel_dimensions as $parcel ) {
-			if ( is_array( $parcel ) ) {
-				$max_dimension = max( $max_dimension, (int) ceil( max( (float) ( $parcel['length'] ?? 0 ), (float) ( $parcel['width'] ?? 0 ), (float) ( $parcel['height'] ?? 0 ) ) ) );
-				$max_place_weight = max( $max_place_weight, (int) ( $parcel['weight_g'] ?? $parcel['final_weight_g'] ?? 0 ) );
-			}
+		foreach ( $places as $place ) {
+			$max_dimension = max( $max_dimension, (int) ceil( max( (float) $place['length_cm'], (float) $place['width_cm'], (float) $place['height_cm'] ) ) );
+			$max_place_weight = max( $max_place_weight, (int) $place['weight_g'] );
 		}
 
 		return new CarrierPickupPointQuery(
@@ -84,12 +82,41 @@ final class OzonDeliveryQuoteService {
 				(int) ( $request->package->get_total_volume_cm3() ),
 				$max_dimension > 0 ? $max_dimension : (int) max( (float) ( $dimensions['length'] ?? 0 ), (float) ( $dimensions['width'] ?? 0 ), (float) ( $dimensions['height'] ?? 0 ) ),
 				$max_place_weight > 0 ? $max_place_weight : (int) ( $packaging['final_weight_g'] ?? $request->package->get_total_weight_g() ),
-				max( 1, (int) ( $packaging['parcels_count'] ?? 1 ) )
+				max( 1, count( $places ) ),
+				$places
 			),
 			CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
 			60,
 			100
 		);
+	}
+
+	/** @param array<string,mixed> $packaging @return array<int,array{weight_g:int,length_cm:float,width_cm:float,height_cm:float}> */
+	private function cargo_places( array $packaging ): array {
+		$parcels = is_array( $packaging['parcel_dimensions'] ?? null ) ? $packaging['parcel_dimensions'] : array();
+		if ( array() === $parcels ) {
+			$parcels = is_array( $packaging['parcels'] ?? null ) ? $packaging['parcels'] : array();
+		}
+		$places = array();
+		foreach ( $parcels as $parcel ) {
+			if ( ! is_array( $parcel ) ) {
+				continue;
+			}
+			$weight = max( 1, (int) ( $parcel['weight_g'] ?? $parcel['final_weight_g'] ?? 0 ) );
+			$length = max( 0.1, (float) ( $parcel['length_cm'] ?? $parcel['length'] ?? 0 ) );
+			$width = max( 0.1, (float) ( $parcel['width_cm'] ?? $parcel['width'] ?? 0 ) );
+			$height = max( 0.1, (float) ( $parcel['height_cm'] ?? $parcel['height'] ?? 0 ) );
+			for ( $index = 0; $index < max( 1, (int) ( $parcel['quantity'] ?? 1 ) ); ++$index ) {
+				$places[] = array(
+					'weight_g' => $weight,
+					'length_cm' => $length,
+					'width_cm' => $width,
+					'height_cm' => $height,
+				);
+			}
+		}
+
+		return $places;
 	}
 
 	private function selected_point_code( QuoteRequest $request ): string {

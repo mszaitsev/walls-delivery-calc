@@ -756,6 +756,7 @@ final class Plugin {
 			$this->container->get( CheckoutSessionManager::class ),
 			array(
 				PekSettings::CARRIER_KEY => array( $this->container->get( PekCheckoutQuoteContextResolver::class ), 'query_from_snapshot' ),
+				OzonDeliverySettings::CARRIER_KEY => array( $this->container->get( OzonDeliveryPickupPointProvider::class ), 'query_from_snapshot' ),
 			)
 		) );
 		$this->container->register( CheckoutLocationSearch::class, fn(): CheckoutLocationSearch => new CheckoutLocationSearch( $this->container->get( LocationSearchService::class ) ) );
