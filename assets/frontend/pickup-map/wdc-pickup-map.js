@@ -63,6 +63,9 @@
 		var userLocation = null;
 		var originStatus = '';
 		var originStatusType = '';
+		var loadingRequestId = 0;
+		var activeLoadingRequestId = 0;
+		var loadingOverlay = createLoadingOverlay(element, list, labels);
 
 		if ('yandex' === providerName && !config.yandexApiKeyPresent) {
 			card.textContent = (config.errors && config.errors.yandexApiKeyMissing) || 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.';
@@ -361,7 +364,7 @@
 				controller.abort();
 			}
 			controller = new AbortController();
-			card.textContent = labels.loading || 'Loading...';
+			var requestId = beginLoading(labels.loading || 'Загружаем пункты выдачи…');
 			window.WDCPickupApi.points(bbox, controller.signal, context).then(function (points) {
 				if (destroyed) {
 					return;
@@ -371,10 +374,12 @@
 				if (options.previewNearest && visiblePoints[0]) {
 					preview(visiblePoints[0], { focus: false, initial: true });
 				}
+				endLoading(requestId);
 			}).catch(function (error) {
-				if (error.name !== 'AbortError') {
+				if (!destroyed && error.name !== 'AbortError') {
 					card.textContent = labels.error || 'Error';
 				}
+				endLoading(requestId);
 			});
 		}
 
@@ -413,7 +418,7 @@
 				controller.abort();
 			}
 			controller = new AbortController();
-			card.textContent = labels.loading || 'Loading...';
+			var requestId = beginLoading(labels.loading || 'Загружаем пункты выдачи…');
 			if (initial) {
 				var initialRequest = window.WDCPickupApi.searchInitial || window.WDCPickupApi.search;
 				return initialRequest(query, controller.signal, context).then(function (points) {
@@ -430,10 +435,12 @@
 						return;
 					}
 					card.textContent = labels.notFound || labels.empty || '';
+					endLoading(requestId);
 				}).catch(function (error) {
-					if (error.name !== 'AbortError') {
+					if (!destroyed && error.name !== 'AbortError') {
 						card.textContent = labels.error || 'Error';
 					}
+					endLoading(requestId);
 				});
 			}
 			if (!window.WDCPickupApi.addressSearch) {
@@ -443,14 +450,21 @@
 					}
 					renderMarkers(points, labels.empty || '');
 					applyInitialPointsViewport(visiblePoints);
+					endLoading(requestId);
+				}).catch(function (error) {
+					if (!destroyed && error.name !== 'AbortError') {
+						card.textContent = labels.error || 'Error';
+					}
+					endLoading(requestId);
 				});
 			}
-			card.textContent = labels.searchingAddress || 'Ищем адрес...';
+			updateLoadingMessage(requestId, labels.searchingAddress || 'Ищем адрес...');
 			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
 				if (result && result.address_search_available === false) {
 					setPostcodeOnlyMode();
 					if (!result.address) {
 						card.textContent = labels.postcodeOnly || 'Поиск доступен только по индексу';
+						endLoading(requestId);
 						return;
 					}
 				}
@@ -459,13 +473,16 @@
 				}
 				if (result && result.address && validPointCoordinates(result.address)) {
 					applySearchResult(result);
+					endLoading(requestId);
 					return;
 				}
 				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Адрес не найден.') : (labels.addressNotFound || labels.notFound || 'Адрес не найден.');
+				endLoading(requestId);
 			}).catch(function (error) {
-				if (error.name !== 'AbortError') {
+				if (!destroyed && error.name !== 'AbortError') {
 					card.textContent = labels.dadataError || labels.error || 'Адрес не найден.';
 				}
+				endLoading(requestId);
 			});
 		}
 
@@ -521,6 +538,8 @@
 				if (controller) {
 					controller.abort();
 				}
+				activeLoadingRequestId = ++loadingRequestId;
+				setLoadingState(false, '');
 				if (debouncedLoad.cancel) {
 					debouncedLoad.cancel();
 				}
@@ -534,6 +553,54 @@
 				provider.destroy();
 			}
 		};
+
+		function beginLoading(message) {
+			var requestId = ++loadingRequestId;
+			activeLoadingRequestId = requestId;
+			setLoadingState(true, message || 'Загружаем пункты выдачи…');
+			return requestId;
+		}
+
+		function updateLoadingMessage(requestId, message) {
+			if (requestId !== activeLoadingRequestId) {
+				return;
+			}
+			setLoadingState(true, message || 'Загружаем пункты выдачи…');
+		}
+
+		function endLoading(requestId) {
+			if (requestId !== activeLoadingRequestId) {
+				return;
+			}
+			setLoadingState(false, '');
+		}
+
+		function setLoadingState(loading, message) {
+			if (element && element.setAttribute) {
+				element.setAttribute('aria-busy', loading ? 'true' : 'false');
+			}
+			if (list && list.setAttribute) {
+				list.setAttribute('aria-busy', loading ? 'true' : 'false');
+			}
+			if (loadingOverlay) {
+				loadingOverlay.hidden = !loading;
+				if (loadingOverlay.setAttribute) {
+					loadingOverlay.setAttribute('aria-hidden', loading ? 'false' : 'true');
+				}
+				if (loadingOverlay.textNode) {
+					loadingOverlay.textNode.textContent = message || 'Загружаем пункты выдачи…';
+				}
+			}
+			if (loading && list && !visiblePoints.length) {
+				list.innerHTML = '<div class="wdc-pickup-list__loading" role="status" aria-live="polite">' + escapeHtml(message || 'Загружаем пункты выдачи…') + '</div>';
+			}
+			if (!loading && list && String(list.innerHTML || '').indexOf('wdc-pickup-list__loading') !== -1) {
+				list.innerHTML = '';
+			}
+			if (loading) {
+				card.textContent = message || 'Загружаем пункты выдачи…';
+			}
+		}
 
 		function enrichPoints(points) {
 			return points.map(function (point, index) {
@@ -1189,6 +1256,30 @@
 		return String(value || '').replace(/[&<>"']/g, function (char) {
 			return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
 		});
+	}
+
+	function createLoadingOverlay(element, list, labels) {
+		var parent = element && element.parentNode ? element.parentNode : element;
+		if (!parent || typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof parent.appendChild !== 'function') {
+			return null;
+		}
+		var overlay = document.createElement('div');
+		var spinner = document.createElement('span');
+		var text = document.createElement('span');
+		overlay.className = 'wdc-pickup-map__loading';
+		overlay.hidden = true;
+		overlay.setAttribute('aria-hidden', 'true');
+		overlay.setAttribute('role', 'status');
+		overlay.setAttribute('aria-live', 'polite');
+		spinner.className = 'wdc-pickup-map__loading-spinner';
+		spinner.setAttribute('aria-hidden', 'true');
+		text.className = 'wdc-pickup-map__loading-text';
+		text.textContent = (labels && labels.loading) || 'Загружаем пункты выдачи…';
+		overlay.appendChild(spinner);
+		overlay.appendChild(text);
+		overlay.textNode = text;
+		parent.appendChild(overlay);
+		return overlay;
 	}
 
 	function noopMap() {

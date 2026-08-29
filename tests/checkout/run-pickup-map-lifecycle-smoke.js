@@ -29,6 +29,7 @@ class FakeElement {
 		this.parentNode = null;
 		this.attributes = {};
 		this.dataset = {};
+		this.children = [];
 		this.innerHTML = '';
 		this.textContent = '';
 		this.disabled = false;
@@ -78,6 +79,20 @@ class FakeElement {
 		this.listeners[type].push(callback);
 	}
 
+	appendChild(child) {
+		child.parentNode = this;
+		this.children.push(child);
+		return child;
+	}
+
+	remove() {
+		if (!this.parentNode || !this.parentNode.children) {
+			return;
+		}
+		this.parentNode.children = this.parentNode.children.filter((item) => item !== this);
+		this.parentNode = null;
+	}
+
 	removeEventListener(type, callback) {
 		this.listeners[type] = (this.listeners[type] || []).filter((item) => item !== callback);
 	}
@@ -97,7 +112,10 @@ class FakeElement {
 		return true;
 	}
 
-	querySelector() {
+	querySelector(selector) {
+		if (selector === '[data-wdc-pickup-loading-text]') {
+			return this.children.find((child) => child.attributes && child.attributes['data-wdc-pickup-loading-text'] !== undefined) || null;
+		}
 		return null;
 	}
 
@@ -125,6 +143,8 @@ function createHarness(api) {
 	listParent.querySelector = () => listSelectButton;
 
 	const element = new FakeElement('map');
+	const mapPane = new FakeElement('map-pane');
+	mapPane.appendChild(element);
 	const card = new FakeElement('card');
 	const confirm = new FakeElement('confirm');
 	const dialog = {
@@ -255,11 +275,128 @@ function createHarness(api) {
 		selectPoint: 'select'
 	}, api.context || {});
 
-	return { calls, element, card, confirm, listSelectButton, provider: () => providerInstance, map };
+	return { calls, element, mapPane, card, confirm, list, listSelectButton, provider: () => providerInstance, map };
 }
 
 function point(id, lat, lng) {
 	return { id, point_code: id, address: 'Address ' + id, lat, lng };
+}
+
+function mapLoader(harness) {
+	return harness.mapPane.children.find((child) => child.className === 'wdc-pickup-map__loading') || null;
+}
+
+function abortableDeferred(signal) {
+	const pending = deferred();
+	if (signal && signal.addEventListener) {
+		signal.addEventListener('abort', () => pending.reject({ name: 'AbortError' }));
+	}
+	return pending;
+}
+
+async function initialPointsFetchShowsLoaderUntilRender() {
+	let pending = null;
+	const api = {
+		context: { carrier: 'cdek', cdek_city_code: '9220' },
+		points: (bbox, signal) => {
+			pending = abortableDeferred(signal);
+			return pending.promise;
+		}
+	};
+	const harness = createHarness(api);
+	await wait(80);
+	assert.strictEqual(mapLoader(harness).hidden, false, 'initial points fetch must show the map loading overlay');
+	assert.strictEqual(mapLoader(harness).textNode.textContent, 'loading', 'initial loader must use accessible loading text');
+	assert.strictEqual(harness.element.getAttribute('aria-busy'), 'true', 'map must be aria-busy while points load');
+	assert.strictEqual(harness.list.getAttribute('aria-busy'), 'true', 'list must be aria-busy while points load');
+	assert(harness.list.innerHTML.includes('wdc-pickup-list__loading'), 'empty sidebar must show a loading state during initial fetch');
+	pending.resolve([point('min40', 53.9, 27.56)]);
+	await wait(40);
+	assert.strictEqual(mapLoader(harness).hidden, true, 'loader must hide only after successful marker render');
+	assert.strictEqual(harness.element.getAttribute('aria-busy'), 'false', 'map aria-busy must clear after render');
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 1, 'success must still render markers');
+	harness.map.destroy();
+}
+
+async function emptyPointsFetchHidesLoader() {
+	let pending = null;
+	const api = {
+		context: { carrier: 'cdek', cdek_city_code: '9220' },
+		points: (bbox, signal) => {
+			pending = abortableDeferred(signal);
+			return pending.promise;
+		}
+	};
+	const harness = createHarness(api);
+	await wait(80);
+	pending.resolve([]);
+	await wait(40);
+	assert.strictEqual(mapLoader(harness).hidden, true, 'empty points response must hide loader');
+	assert.strictEqual(harness.card.textContent, 'empty', 'empty response must leave the generic empty text');
+	harness.map.destroy();
+}
+
+async function pointsFetchErrorHidesLoaderAndShowsError() {
+	let pending = null;
+	const api = {
+		context: { carrier: 'cdek', cdek_city_code: '9220' },
+		points: (bbox, signal) => {
+			pending = abortableDeferred(signal);
+			return pending.promise;
+		}
+	};
+	const harness = createHarness(api);
+	await wait(80);
+	pending.reject(new Error('network'));
+	await wait(40);
+	assert.strictEqual(mapLoader(harness).hidden, true, 'request error must hide loader');
+	assert.strictEqual(harness.card.textContent, 'Error', 'request error must show the generic error text');
+	assert.strictEqual(harness.list.innerHTML.includes('Загружаем'), false, 'request error must not leave stale list loading text');
+	harness.map.destroy();
+}
+
+async function abortedRequestDoesNotHideNextLoader() {
+	const pending = [];
+	let requestCount = 0;
+	const api = {
+		context: { carrier: 'cdek', cdek_city_code: '9220' },
+		points: (bbox, signal) => {
+			requestCount += 1;
+			const next = abortableDeferred(signal);
+			pending.push(next);
+			return next.promise;
+		}
+	};
+	const harness = createHarness(api);
+	await wait(80);
+	assert.strictEqual(mapLoader(harness).hidden, false, 'first request must show loader');
+	harness.provider().fireBounds('manual-bounds');
+	await wait(320);
+	assert.strictEqual(requestCount, 2, 'bounds change must start a second request');
+	assert.strictEqual(mapLoader(harness).hidden, false, 'aborted first request must not hide loader for the second request');
+	pending[1].resolve([point('min41', 53.91, 27.57)]);
+	await wait(40);
+	assert.strictEqual(mapLoader(harness).hidden, true, 'second request completion must hide loader');
+	harness.map.destroy();
+}
+
+async function destroyDuringRequestClearsLoader() {
+	let pending = null;
+	const api = {
+		context: { carrier: 'cdek', cdek_city_code: '9220' },
+		points: (bbox, signal) => {
+			pending = abortableDeferred(signal);
+			return pending.promise;
+		}
+	};
+	const harness = createHarness(api);
+	await wait(80);
+	assert.strictEqual(mapLoader(harness).hidden, false, 'request must show loader before destroy');
+	harness.map.destroy();
+	assert.strictEqual(mapLoader(harness).hidden, true, 'destroy must clear a stale loader');
+	pending.resolve([point('late', 53.9, 27.56)]);
+	await wait(40);
+	assert.strictEqual(harness.calls.filter((call) => call[0] === 'renderMarkers').length, 0, 'destroyed map must not render late points');
 }
 
 async function programmaticSuppressionAllowsFirstUserPan() {
@@ -987,6 +1124,13 @@ async function checkoutInlineNoticeLatchLifecycle() {
 }
 
 async function run() {
+	assert(source.includes('function createLoadingOverlay')
+		&& source.includes('wdc-pickup-map__loading')
+		&& source.includes('aria-busy')
+		&& source.includes('activeLoadingRequestId')
+		&& source.includes('endLoading(requestId)')
+		&& !source.includes("family === 'ozon_delivery:pickup'")
+		&& !source.includes("carrier === 'ozon_delivery'"), 'pickup map loader must be generic, accessible and tied to the current request lifecycle.');
 	assert(checkoutSource.includes('function hasAuthoritativePickupSelections(response)')
 		&& checkoutSource.includes('? extractPickupSelections(response)')
 		&& checkoutSource.includes(': mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response))'), 'checkout state response with explicit pickup selections must replace local selections instead of preserving stale selected points.');
@@ -1008,6 +1152,11 @@ async function run() {
 		&& checkoutSource.includes("point.requires_rate_refresh === true")
 		&& !checkoutSource.includes("family === 'ozon_delivery:pickup'"), 'pickup checkout refresh after save must use generic requires_rate_refresh capability without an Ozon-specific branch.');
 	await checkoutInlineNoticeLatchLifecycle();
+	await initialPointsFetchShowsLoaderUntilRender();
+	await emptyPointsFetchHidesLoader();
+	await pointsFetchErrorHidesLoaderAndShowsError();
+	await abortedRequestDoesNotHideNextLoader();
+	await destroyDuringRequestClearsLoader();
 	await programmaticSuppressionAllowsFirstUserPan();
 	await lateAsyncDoesNotAutoFitAfterInteraction();
 	await preloadedPointsFitOnceWithoutSelection();
