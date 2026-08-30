@@ -28,7 +28,11 @@ final class OzonDeliveryShipmentStatusMapping {
 	}
 
 	public static function universal( string $ozon_status ): string {
-		return self::map()[ $ozon_status ] ?? DeliveryStatus::UNKNOWN;
+		return self::map()[ self::normalize( $ozon_status ) ] ?? DeliveryStatus::UNKNOWN;
+	}
+
+	public static function normalize( string $status ): string {
+		return strtolower( trim( $status ) );
 	}
 
 	/** @param array<int,string> $statuses */

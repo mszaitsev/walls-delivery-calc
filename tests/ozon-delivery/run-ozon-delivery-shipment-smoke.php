@@ -104,18 +104,18 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			if ( in_array( $number, $this->fail_approve, true ) ) {
 				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"approve_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
 			}
-			$this->statuses[ $number ] = 'ready_for_shipping';
+			$this->statuses[ $number ] = 'READY_FOR_SHIPPING';
 			return new OzonDeliveryApiResponse( 200, '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/info' ) ) {
 			$postings = array();
 			foreach ( is_array( $body['posting_numbers'] ?? null ) ? $body['posting_numbers'] : array() as $number ) {
-				$postings[] = array( 'posting_number' => (string) $number, 'status' => $this->statuses[ (string) $number ] ?? 'created', 'status_changed_at' => '2026-08-30T12:00:00Z' );
+				$postings[] = array( 'posting_number' => (string) $number, 'status' => $this->statuses[ (string) $number ] ?? 'CREATED', 'status_changed_at' => '2026-08-30T12:00:00Z' );
 			}
 			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'postings' => $postings ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/cancel' ) ) {
-			$this->statuses[ (string) ( $body['posting_number'] ?? '' ) ] = 'canceled';
+			$this->statuses[ (string) ( $body['posting_number'] ?? '' ) ] = 'CANCELED';
 			return new OzonDeliveryApiResponse( 200, '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/label' ) ) {
@@ -279,6 +279,14 @@ $rotated = $stack['service']->create( new OzonShipmentSmokeOrder( 85374, '85374'
 oz_ship_assert( $rotated->success, '50x30x20 actual place must pass selected point limits with rotation.' );
 
 $stack = oz_ship_stack( $db );
+$stack['http']->fail_approve = array( 'OZON-1' );
+$stack['http']->statuses['OZON-1'] = 'READY_FOR_SHIPPING';
+$recovered_order = new OzonShipmentSmokeOrder( 85377, '85377', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$recovered = $stack['service']->create( $recovered_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1 ) ), '777', 85377, '85377' ) );
+oz_ship_assert( $recovered->success, 'Approve recovery must treat official READY_FOR_SHIPPING status as approved after an approve error.' );
+oz_ship_assert( 1 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Approve recovery through posting/info must not create a duplicate Ozon order.' );
+
+$stack = oz_ship_stack( $db );
 $strict_context = $stack['modal']->modal_context( $order, array( 'request' => array( 'meta' => array( 'pickup_point_code' => '888' ) ) ) );
 oz_ship_assert( 9000 === (int) ( $strict_context['max_weight_g'] ?? 0 ) && 400 === (int) ( $strict_context['max_length_mm'] ?? 0 ) && 250 === (int) ( $strict_context['max_height_mm'] ?? 0 ), 'Ozon modal extension must present selected point-specific limits, not global defaults.' );
 $strict = $stack['service']->create( new OzonShipmentSmokeOrder( 85375, '85375', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 50, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1 ) ), '888', 85375, '85375' ) );
@@ -309,7 +317,8 @@ oz_ship_assert( empty( $finished['pending_creation_in_carrier'] ) && 'created' =
 
 $architecture_source = file_get_contents( $root . '/src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentCreateRequestBuilder.php' ) ?: '';
 oz_ship_assert( ! str_contains( $architecture_source, 'PackagingBuilder' ) && ! str_contains( $architecture_source, 'PackagingResult' ) && ! str_contains( $architecture_source, 'ozon_delivery_places' ), 'Ozon shipment create must not depend on checkout Packaging or quote places metadata.' );
-oz_ship_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'created' ) && DeliveryStatus::CREATED_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'ready_for_shipping' ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::universal( 'on_way' ) && DeliveryStatus::READY_FOR_PICKUP === OzonDeliveryShipmentStatusMapping::universal( 'in_delivery_point' ) && DeliveryStatus::DELIVERED === OzonDeliveryShipmentStatusMapping::universal( 'delivered' ) && DeliveryStatus::CANCELLED === OzonDeliveryShipmentStatusMapping::universal( 'canceled' ) && DeliveryStatus::UNKNOWN === OzonDeliveryShipmentStatusMapping::universal( 'brand_new_status' ), 'Ozon status mapping must cover official statuses and keep unknown safe.' );
-oz_ship_assert( DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::aggregate( array( 'ready_for_shipping', 'on_way' ) ) && DeliveryStatus::DELIVERED !== OzonDeliveryShipmentStatusMapping::aggregate( array( 'delivered', 'on_way' ) ), 'Ozon multi-posting aggregate status must not report delivered until all postings are delivered.' );
+oz_ship_assert( 'ready_for_shipping' === OzonDeliveryShipmentStatusMapping::normalize( ' READY_FOR_SHIPPING ' ), 'Ozon status normalization must canonicalize documented enum casing.' );
+oz_ship_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'CREATED' ) && DeliveryStatus::PENDING_CREATION_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'FORMING' ) && DeliveryStatus::REJECTED === OzonDeliveryShipmentStatusMapping::universal( 'FORMING_FAILED' ) && DeliveryStatus::CREATED_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'READY_FOR_SHIPPING' ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::universal( 'IN_CONTAINER' ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::universal( 'ACCEPTANCE_IN_PROGRESS' ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::universal( 'ON_WAY' ) && DeliveryStatus::REJECTED === OzonDeliveryShipmentStatusMapping::universal( 'NOT_ACCEPTED_TO_DELIVERY' ) && DeliveryStatus::READY_FOR_PICKUP === OzonDeliveryShipmentStatusMapping::universal( 'IN_DELIVERY_POINT' ) && DeliveryStatus::HANDED_TO_COURIER === OzonDeliveryShipmentStatusMapping::universal( 'IN_COURIER_SERVICE' ) && DeliveryStatus::DELIVERED === OzonDeliveryShipmentStatusMapping::universal( 'DELIVERED' ) && DeliveryStatus::CANCELLED === OzonDeliveryShipmentStatusMapping::universal( 'CANCELED' ) && DeliveryStatus::UNKNOWN === OzonDeliveryShipmentStatusMapping::universal( 'BRAND_NEW_STATUS' ), 'Ozon status mapping must cover documented posting statuses with official casing and keep unknown safe.' );
+oz_ship_assert( DeliveryStatus::DELIVERED === OzonDeliveryShipmentStatusMapping::aggregate( array( 'DELIVERED', 'DELIVERED' ) ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::aggregate( array( 'READY_FOR_SHIPPING', 'ON_WAY' ) ) && DeliveryStatus::DELIVERED !== OzonDeliveryShipmentStatusMapping::aggregate( array( 'DELIVERED', 'ON_WAY' ) ), 'Ozon multi-posting aggregate status must work with official enum casing and not report delivered until all postings are delivered.' );
 
 echo "Ozon Delivery shipment smoke passed.\n";

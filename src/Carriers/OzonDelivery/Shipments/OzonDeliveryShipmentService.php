@@ -113,6 +113,7 @@ final class OzonDeliveryShipmentService {
 			$normalized[] = array(
 				'posting_number' => (string) ( $posting['posting_number'] ?? '' ),
 				'status' => $status,
+				'normalized_status' => OzonDeliveryShipmentStatusMapping::normalize( $status ),
 				'status_changed_at' => (string) ( $posting['status_changed_at'] ?? '' ),
 			);
 		}
@@ -194,7 +195,7 @@ final class OzonDeliveryShipmentService {
 				try {
 					$info = $this->api->posting_info( array( $number ) );
 					$status = (string) ( $info['postings'][0]['status'] ?? '' );
-					if ( 'ready_for_shipping' === $status ) {
+					if ( 'ready_for_shipping' === OzonDeliveryShipmentStatusMapping::normalize( $status ) ) {
 						$postings[ $index ]['approved'] = true;
 						++$approved_count;
 						continue;
