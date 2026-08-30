@@ -42,7 +42,7 @@ if ( ! function_exists( 'sanitize_text_field' ) ) { function sanitize_text_field
 if ( ! function_exists( 'wp_unslash' ) ) { function wp_unslash( mixed $value ): mixed { return $value; } }
 if ( ! function_exists( 'get_option' ) ) { function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['oz_checkout_options'][ $key ] ?? $default; } }
 if ( ! function_exists( 'update_option' ) ) { function update_option( string $key, mixed $value, bool $autoload = true ): bool { $GLOBALS['oz_checkout_options'][ $key ] = $value; return true; } }
-if ( ! function_exists( 'wc_get_logger' ) ) { function wc_get_logger(): object { return new class { public function log( string $level, string $message, array $context = array() ): void {} }; } }
+if ( ! function_exists( 'wc_get_logger' ) ) { function wc_get_logger(): object { return new class { public function log( string $level, string $message, array $context = array() ): void { $GLOBALS['oz_checkout_logs'][] = array( 'level' => $level, 'message' => $message, 'context' => $context ); } }; } }
 if ( ! class_exists( 'WC_Shipping_Method' ) ) { class WC_Shipping_Method {} }
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -60,16 +60,18 @@ final class OzonCheckoutSmokeProduct { public function get_sku(): string { retur
 final class OzonCheckoutSmokeLongProduct { public function get_sku(): string { return 'ozon-long-smoke'; } public function get_name(): string { return 'Длинный тестовый товар'; } public function get_weight(): float { return 8.0; } public function get_length(): int { return 50; } public function get_width(): int { return 30; } public function get_height(): int { return 20; } }
 final class OzonCheckoutSmokeHttp implements OzonDeliveryHttpClientInterface {
 	public array $calls = array();
+	public string $delivery_cost_rub = '99.00';
+	public string $insurance_cost_rub = '10.00';
 	public function request( string $method, string $url, array $args = array() ): OzonDeliveryApiResponse {
 		$body = json_decode( (string) ( $args['body'] ?? '{}' ), true );
 		$this->calls[] = array( 'method' => $method, 'url' => $url, 'body' => is_array( $body ) ? $body : array() );
 		if ( str_contains( $url, '/oauth/token' ) ) { return new OzonDeliveryApiResponse( 200, '{"access_token":"token","expires_in":9999999999,"token_type":"bearer","scope":["delivery-api.all"]}', array() ); }
 		$results = array();
 		foreach ( is_array( $body['postings'] ?? null ) ? $body['postings'] : array() as $posting ) {
-			$results[] = array( 'request_id' => (int) ( $posting['request_id'] ?? 0 ), 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '99.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 5 ) );
+			$results[] = array( 'request_id' => (int) ( $posting['request_id'] ?? 0 ), 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => $this->delivery_cost_rub, 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => $this->insurance_cost_rub, 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 5 ) );
 		}
 		if ( array() === $results ) {
-			$results[] = array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => '99.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 5 ) );
+			$results[] = array( 'request_id' => 101, 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => $this->delivery_cost_rub, 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => $this->insurance_cost_rub, 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 5 ) );
 		}
 		return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'results' => $results ) ) ?: '{}', array() );
 	}
@@ -125,6 +127,7 @@ oz_checkout_assert( ! str_contains( $orchestrator, 'Ozon' ) && ! str_contains( $
 oz_checkout_assert( ! str_contains( $plugin, 'OzonDeliveryShipment' ) && ! str_contains( $plugin, 'OzonDeliveryShipmentAdapter' ) && ! str_contains( $plugin, 'OzonDeliveryDocument' ), 'Shipment Framework must not gain Ozon shipment mutations in this stage.' );
 
 $GLOBALS['oz_checkout_options'] = array();
+$GLOBALS['oz_checkout_logs'] = array();
 $_POST = array(
 	'post_data'     => http_build_query(
 		array(
@@ -194,6 +197,27 @@ foreach ( $multi_postings as $posting ) {
 $multi_snapshot = is_array( $multi_quote->rates[0]->meta['pickup_provider_query'] ?? null ) ? $multi_quote->rates[0]->meta['pickup_provider_query'] : array();
 oz_checkout_assert( 24000 === (int) ( $multi_snapshot['cargo']['weight_g'] ?? 0 ) && 8000 === (int) ( $multi_snapshot['cargo']['max_place_weight_g'] ?? 0 ) && 3 === count( is_array( $multi_snapshot['cargo']['places'] ?? null ) ? $multi_snapshot['cargo']['places'] : array() ), 'Ozon multi-box provider query must preserve total weight separately from per-place weight and place dimensions.' );
 oz_checkout_assert( 3 === (int) ( $multi_quote->rates[0]->meta['packages_count'] ?? 0 ) && is_array( $multi_quote->rates[0]->meta['ozon_delivery_places'] ?? null ) && 3 === count( $multi_quote->rates[0]->meta['ozon_delivery_places'] ), 'Ozon multi-box quote metadata must expose safe package count and per-place summary.' );
+$http->delivery_cost_rub = '106.00';
+$two_places_request = ( new WooCommercePackageMapper( null, $session, null, $location_repository ) )->map(
+	array(
+		'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск' ),
+		'contents_cost' => 1990,
+		'contents_weight' => 16,
+		'contents' => array( array( 'data' => new OzonCheckoutSmokeLongProduct(), 'quantity' => 2, 'line_total' => 1990 ) ),
+	)
+);
+$logs_before_success = count( $GLOBALS['oz_checkout_logs'] );
+$two_places_quote = $runtime_carrier->quote( $two_places_request );
+$success_log = $GLOBALS['oz_checkout_logs'][ $logs_before_success ] ?? array();
+$success_context = is_array( $success_log['context'] ?? null ) ? $success_log['context'] : array();
+oz_checkout_assert( $logs_before_success + 1 === count( $GLOBALS['oz_checkout_logs'] ) && 'info' === (string) ( $success_log['level'] ?? '' ) && 'Ozon Delivery checkout quote calculated.' === (string) ( $success_log['message'] ?? '' ), 'A successful Ozon quote must add exactly one INFO diagnostic record.' );
+oz_checkout_assert( 1 === count( $two_places_quote->rates ) && 2 === (int) ( $success_context['packages_count'] ?? 0 ) && 2 === count( is_array( $success_context['places'] ?? null ) ? $success_context['places'] : array() ) && 2 === count( is_array( $success_context['postings'] ?? null ) ? $success_context['postings'] : array() ), 'Success context must keep packages_count, expanded places and normalized postings consistent.' );
+oz_checkout_assert( '1990.00' === (string) ( $success_context['total_declared_value_rub'] ?? '' ) && '995.00' === (string) ( $success_context['declared_value_per_posting_rub'] ?? '' ) && '212.00' === (string) ( $success_context['delivery_total_rub'] ?? '' ) && '20.00' === (string) ( $success_context['insurance_total_rub'] ?? '' ) && '232.00' === (string) ( $success_context['total_rub'] ?? '' ), 'Success context must use normalized declared-value and delivery/insurance totals from the quote result.' );
+foreach ( is_array( $success_context['postings'] ?? null ) ? $success_context['postings'] : array() as $posting ) {
+	oz_checkout_assert( '106.00' === (string) ( $posting['delivery_cost_rub'] ?? '' ) && '10.00' === (string) ( $posting['insurance_cost_rub'] ?? '' ) && '116.00' === (string) ( $posting['total_cost_rub'] ?? '' ) && 5 === (int) ( $posting['delivery_days'] ?? 0 ), 'Success context must expose safe normalized costs for each posting.' );
+}
+$success_context_json = wp_json_encode( $success_context ) ?: '';
+oz_checkout_assert( ! str_contains( $success_context_json, '+7913' ) && ! str_contains( $success_context_json, 'ozon-long-smoke' ) && ! str_contains( $success_context_json, 'Длинный тестовый товар' ) && ! str_contains( $success_context_json, 'Красный проспект' ) && ! str_contains( $success_context_json, 'secret' ), 'Success context must not contain phone, SKU, product, address or credentials.' );
 $session->save_rates( array( OzonDeliveryCarrier::RATE_ID => oz_checkout_stored_rate( $ozon_rate ) ) );
 $provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) );
 $resolver = new CheckoutPickupPointProviderQueryResolver( $session );

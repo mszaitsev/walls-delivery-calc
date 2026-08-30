@@ -73,6 +73,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 
 			return $this->empty_quote( $request, $exception->safe_code, array( 'operation' => $exception->operation, 'http_status' => $exception->http_status ) + $this->safe_exception_log_context( $exception ) );
 		}
+		$this->logger->info( 'Ozon Delivery checkout quote calculated.', $this->safe_success_log_context( $result ) );
 
 		return new DeliveryQuote(
 			$this->quote_id( $request, $result ),
@@ -136,6 +137,66 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		}
 
 		return $context;
+	}
+
+	/** @return array<string,mixed> */
+	private function safe_success_log_context( OzonDeliveryQuoteResult $result ): array {
+		$meta = $result->meta;
+		$context = array(
+			'carrier' => self::KEY,
+			'packages_count' => $result->package_count,
+		);
+		foreach ( array( 'total_weight_g', 'goods_weight_g', 'packaging_weight_g', 'packing_strategy', 'selected_box_format', 'total_declared_value_rub', 'declared_value_per_posting_rub', 'delivery_total_rub', 'insurance_total_rub', 'total_rub' ) as $key ) {
+			if ( array_key_exists( $key, $meta ) && is_scalar( $meta[ $key ] ) ) {
+				$context[ $key ] = $meta[ $key ];
+			}
+		}
+		if ( isset( $meta['selected_box_formats'] ) && is_array( $meta['selected_box_formats'] ) ) {
+			$context['selected_box_formats'] = array_values( array_filter( $meta['selected_box_formats'], static fn( mixed $format ): bool => is_string( $format ) ) );
+		}
+		$places = $this->safe_success_rows( $meta['ozon_delivery_places'] ?? null, array( 'weight_g', 'length_cm', 'width_cm', 'height_cm' ) );
+		if ( array() !== $places ) {
+			$context['places'] = $places;
+		}
+		if ( is_array( $meta['ozon_delivery_places'] ?? null ) && count( $meta['ozon_delivery_places'] ) > count( $places ) ) {
+			$context['places_truncated'] = true;
+		}
+		$postings = $this->safe_success_rows( $meta['postings'] ?? null, array( 'request_id', 'delivery_cost_rub', 'insurance_cost_rub', 'total_cost_rub', 'delivery_days' ) );
+		if ( array() !== $postings ) {
+			$context['postings'] = $postings;
+		}
+		if ( is_array( $meta['postings'] ?? null ) && count( $meta['postings'] ) > count( $postings ) ) {
+			$context['postings_truncated'] = true;
+		}
+
+		return $context;
+	}
+
+	/**
+	 * @param array<int,string> $fields
+	 * @return array<int,array<string,int|float|string>>
+	 */
+	private function safe_success_rows( mixed $rows, array $fields ): array {
+		if ( ! is_array( $rows ) ) {
+			return array();
+		}
+		$safe = array();
+		foreach ( array_slice( $rows, 0, 20 ) as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$allowed = array();
+			foreach ( $fields as $field ) {
+				if ( array_key_exists( $field, $row ) && ( is_int( $row[ $field ] ) || is_float( $row[ $field ] ) || is_string( $row[ $field ] ) ) ) {
+					$allowed[ $field ] = $row[ $field ];
+				}
+			}
+			if ( array() !== $allowed ) {
+				$safe[] = $allowed;
+			}
+		}
+
+		return $safe;
 	}
 
 	private function rate_from_result( OzonDeliveryQuoteResult $result ): DeliveryRate {

@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.141.18
+Version: 0.141.19
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current Ozon Delivery scope: pickup checkout pricing for `Ozon до ПВЗ` is implemented through the carrier-owned quote layer and official Ozon Delivery checkout contract, but remains fail-closed until a safe admin live diagnostic succeeds for the configured `shipment_method_id`. Version 0.141.18 preserves insurance-aware pricing, per-place pickup compatibility, and safe representative-point diagnostics. Ozon now supplies a carrier-owned packaging policy: each parcel must fit 50x50x30 cm with rotation allowed; constrained packing uses a deterministic N-box path instead of an oversized stacked fallback, while an indivisible oversize item fails closed before Ozon API. Multi-box pricing stays one `/v1/order/checkout` request with multiple postings; single posting uses the full declared goods value, while multiple postings use the same integer-safe `ceil(total / posting_count)` whole-ruble declared value per posting. Checkout uses the standard WooCommerce `billing_phone`, including AJAX `post_data`, and Ozon has an optional carrier-owned fallback phone for missing or locally invalid customer numbers. The Ozon rate carries the trusted `pickup_provider_query.destination_fingerprint` required by the generic pickup REST resolver, and the buyer map receives every active cargo-compatible local Ozon point inside the trusted 60 km destination radius without arbitrary first-100/500 truncation. For this fixed-area dataset the map performs one remote `/points` load per active modal context, then pan/zoom rebuilds clusters and the virtualized sidebar locally; search works against the full loaded point array. Ozon pickup points declare generic `requires_rate_refresh`, so saving a point triggers selected-point authoritative repricing through the shared checkout lifecycle. Ozon Shipment Framework features are intentionally not included in this version.
+Current Ozon Delivery scope: pickup checkout pricing for `Ozon до ПВЗ` is implemented through the carrier-owned quote layer and official Ozon Delivery checkout contract, but remains fail-closed until a safe admin live diagnostic succeeds for the configured `shipment_method_id`. Version 0.141.19 adds one INFO record after each successful Ozon checkout quote. Its carrier-owned allowlist includes package counts/weights, packing strategy, safe parcel dimensions, normalized declared values, normalized posting delivery/insurance totals, and final totals; it excludes buyer, address, raw API, product, pickup-row, and credential data. Packaging, pricing, pickup filtering, map behavior, and Shipment Framework remain unchanged.
 
 ## Quick Start
 
