@@ -68,10 +68,10 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 					'operation' => $exception->operation,
 					'error_code' => $exception->safe_code,
 					'http_status' => $exception->http_status,
-				)
+				) + $this->safe_exception_log_context( $exception )
 			);
 
-			return $this->empty_quote( $request, $exception->safe_code, array( 'operation' => $exception->operation, 'http_status' => $exception->http_status ) );
+			return $this->empty_quote( $request, $exception->safe_code, array( 'operation' => $exception->operation, 'http_status' => $exception->http_status ) + $this->safe_exception_log_context( $exception ) );
 		}
 
 		return new DeliveryQuote(
@@ -119,6 +119,23 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 
 	private function runtime_enabled(): bool {
 		return $this->credentials->is_complete() && $this->settings->shipment_method_id() > 0 && $this->settings->pricing_live_confirmed();
+	}
+
+	/** @return array<string,mixed> */
+	private function safe_exception_log_context( OzonDeliveryQuoteException $exception ): array {
+		$details = $exception->details;
+		$pickup = is_array( $details['pickup_diagnostics'] ?? null ) ? $details['pickup_diagnostics'] : array();
+		$context = array();
+		foreach ( array( 'places_count', 'total_weight_g', 'max_place_weight_g' ) as $key ) {
+			if ( array_key_exists( $key, $details ) && is_scalar( $details[ $key ] ) ) { $context[ $key ] = $details[ $key ]; }
+		}
+		if ( isset( $details['places'] ) && is_array( $details['places'] ) ) { $context['places'] = $details['places']; }
+		if ( isset( $details['places_truncated'] ) ) { $context['places_truncated'] = (bool) $details['places_truncated']; }
+		foreach ( array( 'rows_in_bbox', 'valid_base_points', 'base_point_rejected', 'outside_radius', 'inside_radius', 'accepted', 'min_weight_rejected', 'max_weight_rejected', 'dimension_rejected', 'cargo_weight_rejected', 'cargo_dimensions_rejected', 'cargo_other_rejected', 'cargo_rejected', 'points_with_all_3_dimension_limits', 'points_with_partial_dimension_limits', 'points_without_dimension_limits', 'points_with_min_weight', 'points_without_min_weight', 'points_with_max_weight', 'points_without_max_weight', 'highest_max_weight_g' ) as $key ) {
+			if ( array_key_exists( $key, $pickup ) && is_scalar( $pickup[ $key ] ) ) { $context[ $key ] = $pickup[ $key ]; }
+		}
+
+		return $context;
 	}
 
 	private function rate_from_result( OzonDeliveryQuoteResult $result ): DeliveryRate {

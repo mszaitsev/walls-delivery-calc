@@ -6,7 +6,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Quote;
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryQuoteException extends \RuntimeException {
-	/** @param array<string,scalar|array<int,string>> $details */
+	/** @param array<string,mixed> $details */
 	public function __construct(
 		public readonly string $safe_code,
 		public readonly string $operation,

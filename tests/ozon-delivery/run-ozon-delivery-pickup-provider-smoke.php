@@ -22,6 +22,18 @@ function oz_pickup_provider_assert( bool $condition, string $message ): void {
 	}
 }
 
+/** @param array<string,mixed> $diagnostics */
+function oz_pickup_provider_assert_diagnostics_consistent( array $diagnostics, string $message ): void {
+	$total = (int) ( $diagnostics['base_point_rejected'] ?? 0 )
+		+ (int) ( $diagnostics['outside_radius'] ?? 0 )
+		+ (int) ( $diagnostics['min_weight_rejected'] ?? 0 )
+		+ (int) ( $diagnostics['max_weight_rejected'] ?? 0 )
+		+ (int) ( $diagnostics['dimension_rejected'] ?? 0 )
+		+ (int) ( $diagnostics['cargo_other_rejected'] ?? 0 )
+		+ (int) ( $diagnostics['accepted'] ?? 0 );
+	oz_pickup_provider_assert( (int) ( $diagnostics['rows_in_bbox'] ?? -1 ) === $total, $message );
+}
+
 final class OzonPickupProviderWpdb {
 	public string $prefix = 'wp_';
 	/** @var array<int,array<string,mixed>> */ public array $ozon_delivery_pickup_generations = array();
@@ -140,6 +152,30 @@ $one_oversize[2]['length_cm'] = 51.0;
 oz_pickup_provider_assert( array() === $limits_provider->search( oz_pickup_provider_places_query( $one_oversize ) ), 'Ozon multi-box pickup eligibility must reject when any one place exceeds axis-correct point limits.' );
 $snapshot_query = $limits_provider->query_from_snapshot( array( 'carrier_key' => OzonDeliverySettings::CARRIER_KEY, 'location_id' => 1, 'country_code' => 'RU', 'latitude' => 55.0300, 'longitude' => 82.9200, 'cargo' => oz_pickup_provider_places_query( $three_valid_places )->cargo->to_array(), 'purpose' => CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 'radius_km' => 10, 'limit' => 20 ) );
 oz_pickup_provider_assert( $snapshot_query instanceof CarrierPickupPointQuery && 3 === count( $snapshot_query->cargo->places ) && array( '120001' ) === array_map( static fn( $point ): string => $point->code, $limits_provider->search( $snapshot_query ) ), 'Ozon carrier snapshot resolver must preserve per-place cargo constraints for generic REST/map lookup.' );
+$diagnostic_db = new OzonPickupProviderWpdb();
+$diagnostic_db->ozon_delivery_pickup_generations = array( array( 'id' => 13, 'state' => 'active' ) );
+$diagnostic_db->ozon_delivery_pickup_points = array( array_merge( oz_pickup_provider_point( 13, 130001, 'Подходящий ПВЗ' ), array( 'max_weight_g' => 10000, 'max_length_mm' => 500, 'max_width_mm' => 500, 'max_height_mm' => 300 ) ) );
+$diagnostic_provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( $diagnostic_db ) );
+$diagnostic_provider->search( oz_pickup_provider_places_query( $three_valid_places ) );
+$accepted_diagnostics = $diagnostic_provider->last_search_diagnostics();
+oz_pickup_provider_assert( 1 === (int) $accepted_diagnostics['rows_in_bbox'] && 1 === (int) $accepted_diagnostics['accepted'] && 0 === (int) $accepted_diagnostics['max_weight_rejected'] && 1 === (int) $accepted_diagnostics['points_with_all_3_dimension_limits'], 'Ozon provider diagnostics must count accepted points and expose dimension-limit presence without raw point payloads.' );
+oz_pickup_provider_assert_diagnostics_consistent( $accepted_diagnostics, 'Accepted diagnostics counters must be internally consistent.' );
+$diagnostic_provider->search( oz_pickup_provider_places_query( $one_overweight ) );
+$overweight_diagnostics = $diagnostic_provider->last_search_diagnostics();
+oz_pickup_provider_assert( 0 === (int) $overweight_diagnostics['accepted'] && 1 === (int) $overweight_diagnostics['max_weight_rejected'] && 0 === (int) $overweight_diagnostics['dimension_rejected'], 'Ozon provider diagnostics must count max-weight cargo rejections.' );
+oz_pickup_provider_assert_diagnostics_consistent( $overweight_diagnostics, 'Overweight diagnostics counters must be internally consistent.' );
+$diagnostic_provider->search( oz_pickup_provider_places_query( array( array( 'weight_g' => 5000, 'length_cm' => 60.0, 'width_cm' => 30.0, 'height_cm' => 30.0 ) ) ) );
+$dimension_diagnostics = $diagnostic_provider->last_search_diagnostics();
+oz_pickup_provider_assert( 0 === (int) $dimension_diagnostics['accepted'] && 1 === (int) $dimension_diagnostics['dimension_rejected'], 'Ozon provider diagnostics must count dimension cargo rejections.' );
+oz_pickup_provider_assert_diagnostics_consistent( $dimension_diagnostics, 'Dimension diagnostics counters must be internally consistent.' );
+$diagnostic_db->ozon_delivery_pickup_points = array(
+	oz_pickup_provider_point( 13, 130004, 'Вне радиуса', 55.1100, 83.0000 ),
+	array_merge( oz_pickup_provider_point( 13, 0, '' ), array( 'point_id' => 0, 'name' => '' ) ),
+);
+$diagnostic_provider->search( new CarrierPickupPointQuery( OzonDeliverySettings::CARRIER_KEY, 1, 'RU', '', 55.0300, 82.9200, new PickupCargoConstraints( 5000, 0, 0, 5000, 1 ), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 10, 20 ) );
+$radius_base_diagnostics = $diagnostic_provider->last_search_diagnostics();
+oz_pickup_provider_assert( 1 === (int) $radius_base_diagnostics['outside_radius'] && 1 === (int) $radius_base_diagnostics['base_point_rejected'], 'Ozon provider diagnostics must count outside-radius and invalid-base rows separately.' );
+oz_pickup_provider_assert_diagnostics_consistent( $radius_base_diagnostics, 'Radius/base diagnostics counters must be internally consistent.' );
 $large_db = new OzonPickupProviderWpdb();
 $large_db->ozon_delivery_pickup_generations = array( array( 'id' => 10, 'state' => 'active' ) );
 for ( $i = 0; $i < 1500; $i++ ) {

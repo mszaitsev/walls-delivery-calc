@@ -36,7 +36,7 @@ final class OzonDeliveryQuoteService {
 		}
 		$point = $selected_point ?? $this->representative_point( $query );
 		if ( ! $point instanceof PickupPoint ) {
-			throw new OzonDeliveryQuoteException( 'ozon_representative_point_missing', 'order_checkout', 0, 'Нет подходящего ПВЗ Ozon для расчета.' );
+			throw new OzonDeliveryQuoteException( 'ozon_representative_point_missing', 'order_checkout', 0, 'Нет подходящего ПВЗ Ozon для расчета.', $this->representative_missing_details( $query ) );
 		}
 		$built = $this->builder->build( $request, $packaging, $point->code );
 		try {
@@ -135,6 +135,20 @@ final class OzonDeliveryQuoteService {
 		usort( $points, fn( PickupPoint $left, PickupPoint $right ): int => $this->distance_score( $left, $query ) <=> $this->distance_score( $right, $query ) );
 
 		return $points[0] ?? null;
+	}
+
+	/** @return array<string,mixed> */
+	private function representative_missing_details( CarrierPickupPointQuery $query ): array {
+		$places = array_slice( $query->cargo->places, 0, 20 );
+
+		return array(
+			'places_count' => $query->cargo->places_count,
+			'total_weight_g' => $query->cargo->weight_g,
+			'max_place_weight_g' => $query->cargo->max_place_weight_g,
+			'places' => $places,
+			'places_truncated' => count( $query->cargo->places ) > count( $places ),
+			'pickup_diagnostics' => $this->pickup_provider->last_search_diagnostics(),
+		);
 	}
 
 	/** @return array<string,mixed> */

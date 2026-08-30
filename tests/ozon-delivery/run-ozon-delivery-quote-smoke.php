@@ -25,6 +25,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
@@ -65,7 +66,7 @@ final class OzonQuoteSmokeHttp implements OzonDeliveryHttpClientInterface {
 	}
 }
 
-final class OzonQuoteSmokeWpdb {
+class OzonQuoteSmokeWpdb {
 	public string $prefix = 'wp_';
 	public function prepare( string $query, mixed ...$values ): string { foreach ( $values as $value ) { $query = preg_replace( '/%[df]/', is_float( $value ) ? sprintf( '%.8F', $value ) : (string) (int) $value, $query, 1 ) ?? $query; } return $query; }
 	public function get_row( string $query, mixed $output = null ): ?array {
@@ -75,6 +76,16 @@ final class OzonQuoteSmokeWpdb {
 	}
 	public function get_results( string $query, mixed $output = null ): array { return array( $this->point( 777, 55.0301, 82.9201 ), $this->point( 778, 55.5000, 83.0000 ) ); }
 	private function point( int $id, float $lat, float $lng ): array { return array( 'generation_id' => 1, 'point_id' => $id, 'name' => 'ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск', 'latitude' => $lat, 'longitude' => $lng, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 25000, 'max_width_mm' => 600, 'max_length_mm' => 1200, 'max_height_mm' => 800 ); }
+}
+
+final class OzonQuoteSmokeRejectingWpdb extends OzonQuoteSmokeWpdb {
+	public function get_row( string $query, mixed $output = null ): ?array {
+		if ( str_contains( $query, "WHERE state='active'" ) ) { return array( 'id' => 1, 'state' => 'active' ); }
+		return null;
+	}
+	public function get_results( string $query, mixed $output = null ): array {
+		return array( array( 'generation_id' => 1, 'point_id' => 880, 'name' => 'ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск', 'latitude' => 55.0301, 'longitude' => 82.9201, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 7000, 'max_width_mm' => 500, 'max_length_mm' => 500, 'max_height_mm' => 300 ) );
+	}
 }
 
 $phones = new RussianPhoneNormalizer();
@@ -99,6 +110,35 @@ $body = $checkout_call['body'];
 oz_quote_assert( '+79991234567' === $body['recipient']['phone_number'] && 42 === $body['postings'][0]['shipment_method_id'] && 777 === $body['delivery']['delivery_point']['delivery_point_id'], 'Request body must contain recipient, shipment_method_id and destination delivery_point_id.' );
 oz_quote_assert( 1000 === $body['postings'][0]['dimensions']['weight_g'] && 100 === $body['postings'][0]['dimensions']['length_mm'] && '1000.00' === $body['postings'][0]['declared_value']['amount'], 'Request body must use grams, millimetres and decimal RUB declared value.' );
 $packaging = ( new PackagingBuilder( PackagingBuilderConfig::defaults() ) )->build( $request );
+$rejecting_http = new OzonQuoteSmokeHttp();
+$rejecting_api = new OzonDeliveryApiClient( $rejecting_http, new OzonDeliveryAccessTokenService( $credentials, $rejecting_http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
+$rejecting_service = new OzonDeliveryQuoteService( $rejecting_api, new OzonDeliveryQuoteRequestBuilder( $settings, $phones ), new OzonDeliveryQuoteParser( $sanitizer ), new PackagingBuilder( PackagingBuilderConfig::defaults() ), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonQuoteSmokeRejectingWpdb() ) ), $sanitizer );
+$multi_money = Money::from_rubles( 2985 );
+$multi_request = new QuoteRequest(
+	'RU',
+	new Address( country_code: 'RU', city: 'Новосибирск' ),
+	Package::from_items(
+		array( new PackageItem( 'safe-test', 'Safe test', 3, Money::from_rubles( 995 ), $multi_money, 8000, 50, 30, 20 ) ),
+		0,
+		$multi_money,
+		$multi_money
+	),
+	'',
+	$multi_money,
+	'2026-08-29',
+	array( 'recipient_phone' => '+79991234567', 'destination_latitude' => 55.0300, 'destination_longitude' => 82.9200 )
+);
+try {
+	$rejecting_service->quote_pickup( $multi_request );
+	oz_quote_assert( false, 'Representative point missing must fail closed before Ozon API when all local candidates reject cargo.' );
+} catch ( OzonDeliveryQuoteException $exception ) {
+	$details = $exception->details;
+	$pickup_diagnostics = is_array( $details['pickup_diagnostics'] ?? null ) ? $details['pickup_diagnostics'] : array();
+	oz_quote_assert( 'ozon_representative_point_missing' === $exception->safe_code && 0 === $exception->http_status && array() === $rejecting_http->calls, 'Representative missing diagnostics must be produced before any Ozon HTTP request.' );
+	oz_quote_assert( 3 === (int) ( $details['places_count'] ?? 0 ) && 24000 === (int) ( $details['total_weight_g'] ?? 0 ) && 8000 === (int) ( $details['max_place_weight_g'] ?? 0 ) && 3 === count( is_array( $details['places'] ?? null ) ? $details['places'] : array() ), 'Representative missing details must include actual expanded place count, total weight, max place weight and safe place dimensions.' );
+	oz_quote_assert( 1 === (int) ( $pickup_diagnostics['rows_in_bbox'] ?? 0 ) && 1 === (int) ( $pickup_diagnostics['inside_radius'] ?? 0 ) && 1 === (int) ( $pickup_diagnostics['max_weight_rejected'] ?? 0 ) && 0 === (int) ( $pickup_diagnostics['accepted'] ?? -1 ), 'Representative missing details must include aggregate pickup rejection counters.' );
+	oz_quote_assert( ! str_contains( wp_json_encode( $details ) ?: '', '+7999' ) && ! str_contains( wp_json_encode( $details ) ?: '', 'Safe test' ), 'Representative missing diagnostics must not expose phone, product name or raw customer data.' );
+}
 $settings->save_last_quote_diagnostic( array( 'success' => true, 'endpoint' => 'POST /v1/order/checkout', 'shipment_method_id' => 42 ) );
 $settings->save_pricing_settings( array( OzonDeliverySettings::QUOTE_FALLBACK_PHONE_KEY => '+7 (916) 000-11-22' ) );
 oz_quote_assert( 42 === $settings->shipment_method_id() && $settings->pricing_live_confirmed(), 'Saving only the Ozon fallback phone must not reset shipment_method_id or close the pricing live gate.' );
