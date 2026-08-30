@@ -5,10 +5,17 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Shipments;
 
 use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
+use WallsShop\WDC\Shipments\Application\ShipmentOrderItemIdentityResolver;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryShipmentAllocationValueResolver {
+	public function __construct(
+		private ?ShipmentOrderItemIdentityResolver $identity_resolver = null
+	) {
+		$this->identity_resolver ??= new ShipmentOrderItemIdentityResolver();
+	}
+
 	/**
 	 * @param array<int,array<string,mixed>> $item_rows
 	 * @param array<int,ShipmentPlace> $places
@@ -26,12 +33,14 @@ final class OzonDeliveryShipmentAllocationValueResolver {
 		$order_items = $this->order_items( $order );
 		$assigned = array();
 		$rows_by_item = array();
+		$has_unresolved_rows = false;
 		foreach ( $item_rows as $row ) {
-			$item_id = $this->item_id( $row['item_key'] ?? '' );
+			$item_id = $this->identity_resolver->order_item_id( $row['item_key'] ?? '', $row['split_parent'] ?? null );
 			$place_number = (int) ( $row['place_number'] ?? 0 );
 			$quantity = (int) ( $row['amount'] ?? 0 );
 			if ( $item_id <= 0 || ! isset( $order_items[ $item_id ] ) ) {
 				$errors[] = 'В распределении Ozon указан неизвестный товар заказа.';
+				$has_unresolved_rows = true;
 				continue;
 			}
 			if ( $quantity <= 0 ) {
@@ -45,11 +54,13 @@ final class OzonDeliveryShipmentAllocationValueResolver {
 			$assigned[ $item_id ] = ( $assigned[ $item_id ] ?? 0 ) + $quantity;
 			$rows_by_item[ $item_id ][] = array( 'place_number' => $place_number, 'quantity' => $quantity );
 		}
-		foreach ( $order_items as $item_id => $item ) {
-			$qty = (int) $item['quantity'];
-			$actual = (int) ( $assigned[ $item_id ] ?? 0 );
-			if ( $actual !== $qty ) {
-				$errors[] = sprintf( 'Товар заказа %d распределён по грузоместам Ozon некорректно.', $item_id );
+		if ( ! $has_unresolved_rows ) {
+			foreach ( $order_items as $item_id => $item ) {
+				$qty = (int) $item['quantity'];
+				$actual = (int) ( $assigned[ $item_id ] ?? 0 );
+				if ( $actual !== $qty ) {
+					$errors[] = sprintf( 'Товар заказа %d распределён по грузоместам Ozon некорректно.', $item_id );
+				}
 			}
 		}
 		if ( array() !== $errors ) {
@@ -107,14 +118,5 @@ final class OzonDeliveryShipmentAllocationValueResolver {
 		}
 
 		return $items;
-	}
-
-	private function item_id( mixed $value ): int {
-		$value = trim( (string) $value );
-		if ( str_starts_with( $value, 'order-item-' ) ) {
-			$value = substr( $value, 11 );
-		}
-
-		return ctype_digit( $value ) ? (int) $value : 0;
 	}
 }

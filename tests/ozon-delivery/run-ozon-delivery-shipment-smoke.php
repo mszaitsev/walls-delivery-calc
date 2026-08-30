@@ -236,14 +236,28 @@ $db->points[888] = array( 'generation_id' => 1, 'point_id' => 888, 'name' => 'С
 
 $order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 3, '3000.00' ) ) );
 $rows = array(
-	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1, 'cost' => 999999 ),
-	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 2, 'cost' => 1 ),
+	array( 'item_key' => 'order-item-101', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1, 'cost' => 999999 ),
+	array( 'item_key' => 'order-item-101:split:2', 'split_parent' => 'order-item-101', 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 2, 'cost' => 1 ),
 );
 $stack = oz_ship_stack( $db );
 $request = oz_ship_request( array(
 	new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ),
 	new ShipmentPlace( 2, 9000, 50, 30, 20, Money::from_kopecks( 0 ) ),
 ), $rows );
+$pickup_preview_request = new ShipmentCreateRequest(
+	order_id: 85372,
+	carrier_key: OzonDeliverySettings::CARRIER_KEY,
+	delivery_type: DeliveryType::PICKUP,
+	rate_id: OzonDeliverySettings::PICKUP_FAMILY,
+	recipient_address: new Address(),
+	pickup_point: new PickupPointSelection( OzonDeliverySettings::CARRIER_KEY, OzonDeliverySettings::SERVICE_KEY, '777', 'ПВЗ Ozon', '2026-08-30 12:00:00' ),
+	places: array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ),
+	declared_value: Money::from_kopecks( 0 ),
+	recipient: array( 'name' => 'Иван Иванов', 'phone' => '+79132038250' ),
+	meta: array( 'shipment_item_rows' => array( array( 'item_key' => 'order-item-101', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 3 ) ) )
+);
+$pickup_preview = $stack['adapter']->build_safe_payload_preview( $pickup_preview_request );
+oz_ship_assert( ! in_array( 'city or settlement is recommended', $pickup_preview['errors'] ?? array(), true ) && ! in_array( 'street and house or raw_address are required for courier delivery', $pickup_preview['errors'] ?? array(), true ), 'Ozon pickup preview must not show courier recipient-address validation errors.' );
 $result = $stack['service']->create( $order, $request );
 oz_ship_assert( $result->success, 'Ozon shipment create+approve must succeed for two actual modal places.' );
 $create_calls = $stack['http']->calls_for( '/v1/order/create' );
@@ -268,6 +282,28 @@ $cancel = $stack['adapter']->cancel_in_carrier( $order );
 oz_ship_assert( ! empty( $cancel['success'] ), 'Ozon cancellation must call cancel for persisted postings: ' . json_encode( $cancel, JSON_UNESCAPED_UNICODE ) );
 $cancelled = ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( 'cancellation_started' === (string) ( $cancelled['status'] ?? '' ) && DeliveryStatus::UNKNOWN === (string) ( $cancelled['universal_status_code'] ?? '' ), 'Cancel request must not mark the shipment fully cancelled before status sync confirms it.' );
+
+$stack = oz_ship_stack( $db );
+$live_identity_order = new OzonShipmentSmokeOrder( 85378, '85378', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$live_identity = $stack['service']->create( $live_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85378, '85378' ) );
+oz_ship_assert( $live_identity->success, 'Ozon allocation must resolve the real Shipment modal item_key format order-item-246.' );
+$live_identity_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
+oz_ship_assert( '2000.00' === (string) ( $live_identity_body['postings'][0]['declared_value']['amount'] ?? '' ), 'Ozon declared value must use server-side Woo order value for order-item-246 amount 2.' );
+
+$stack = oz_ship_stack( $db );
+$split_identity_order = new OzonShipmentSmokeOrder( 85379, '85379', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$split_identity = $stack['service']->create( $split_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1 ),
+	array( 'item_key' => 'order-item-246:split:2', 'split_parent' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1 ),
+), '777', 85379, '85379' ) );
+oz_ship_assert( $split_identity->success, 'Ozon allocation must resolve split Shipment modal rows through split_parent.' );
+$split_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
+oz_ship_assert( '1000.00' === (string) ( $split_body['postings'][0]['declared_value']['amount'] ?? '' ) && '1000.00' === (string) ( $split_body['postings'][1]['declared_value']['amount'] ?? '' ), 'Ozon declared value must prorate order item 246 across split actual places.' );
+
+$stack = oz_ship_stack( $db );
+$invalid_identity_order = new OzonShipmentSmokeOrder( 85380, '85380', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$invalid_identity = $stack['service']->create( $invalid_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'forged-item', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85380, '85380' ) );
+oz_ship_assert( ! $invalid_identity->success && str_contains( $invalid_identity->error_message, 'неизвестный товар заказа' ) && ! str_contains( $invalid_identity->error_message, 'Товар заказа 246 распределён' ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Unknown Ozon item identity must fail before /v1/order/create without misleading derivative allocation errors.' );
 
 $stack = oz_ship_stack( $db );
 $overweight_order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
