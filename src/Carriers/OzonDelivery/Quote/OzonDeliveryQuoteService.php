@@ -10,6 +10,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Packaging\PackagingBuilder;
+use WallsShop\WDC\Packaging\PackagingException;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
 use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
@@ -27,7 +28,11 @@ final class OzonDeliveryQuoteService {
 	) {}
 
 	public function quote_pickup( QuoteRequest $request ): OzonDeliveryQuoteResult {
-		$packaging = $this->packaging->build( $request );
+		try {
+			$packaging = $this->packaging->build( $request );
+		} catch ( PackagingException $exception ) {
+			throw new OzonDeliveryQuoteException( 'ozon_package_item_oversize', 'order_checkout', 0, 'Товары не помещаются в допустимое грузоместо Ozon.' );
+		}
 		$query = $this->pickup_query( $request, $packaging->to_array() );
 		$selected_code = $this->selected_point_code( $request );
 		$selected_point = '' !== $selected_code ? $this->selected_point( $query, $selected_code ) : null;

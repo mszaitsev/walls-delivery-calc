@@ -32,6 +32,7 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Packaging\PackagingBuilder;
 use WallsShop\WDC\Packaging\PackagingBuilderConfig;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryPackagingBuilderFactory;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
 
@@ -152,7 +153,7 @@ $credentials->save_from_admin( array( OzonDeliverySettings::CLIENT_ID_KEY => 'cl
 $http = new OzonCheckoutSmokeHttp();
 $sanitizer = new OzonDeliveryMessageSanitizer();
 $api = new OzonDeliveryApiClient( $http, new OzonDeliveryAccessTokenService( $credentials, $http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
-$quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings ), new OzonDeliveryQuoteParser( $sanitizer ), new PackagingBuilder( PackagingBuilderConfig::defaults() ), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
+$quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
 $runtime_carrier = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() );
 $preliminary_cache_context = $runtime_carrier->quote_cache_context( $mapped_request );
 $carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $mapped_request );

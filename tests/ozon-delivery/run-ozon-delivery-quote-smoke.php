@@ -19,6 +19,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteException;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryPackagingBuilderFactory;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteParser;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
@@ -97,7 +98,8 @@ $credentials->save_from_admin( array( OzonDeliverySettings::CLIENT_ID_KEY => 'cl
 $http = new OzonQuoteSmokeHttp();
 $sanitizer = new OzonDeliveryMessageSanitizer();
 $api = new OzonDeliveryApiClient( $http, new OzonDeliveryAccessTokenService( $credentials, $http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
-$service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings, $phones ), new OzonDeliveryQuoteParser( $sanitizer ), new PackagingBuilder( PackagingBuilderConfig::defaults() ), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonQuoteSmokeWpdb() ) ), $sanitizer );
+$ozon_packaging = ( new OzonDeliveryPackagingBuilderFactory() )->create();
+$service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings, $phones ), new OzonDeliveryQuoteParser( $sanitizer ), $ozon_packaging, new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonQuoteSmokeWpdb() ) ), $sanitizer );
 $money = Money::from_rubles( 1000 );
 $request = new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Новосибирск' ), new Package( array(), $money, $money, 1000, 0, 1000, 10, 10, 10, 1000, 'manual' ), '', $money, '2026-08-29', array( 'recipient_phone' => '+79991234567', 'destination_latitude' => 55.0300, 'destination_longitude' => 82.9200 ) );
 $result = $service->quote_pickup( $request );
@@ -109,10 +111,26 @@ oz_quote_assert( 'POST' === ( $checkout_call['method'] ?? '' ) && str_ends_with(
 $body = $checkout_call['body'];
 oz_quote_assert( '+79991234567' === $body['recipient']['phone_number'] && 42 === $body['postings'][0]['shipment_method_id'] && 777 === $body['delivery']['delivery_point']['delivery_point_id'], 'Request body must contain recipient, shipment_method_id and destination delivery_point_id.' );
 oz_quote_assert( 1000 === $body['postings'][0]['dimensions']['weight_g'] && 100 === $body['postings'][0]['dimensions']['length_mm'] && '1000.00' === $body['postings'][0]['declared_value']['amount'], 'Request body must use grams, millimetres and decimal RUB declared value.' );
-$packaging = ( new PackagingBuilder( PackagingBuilderConfig::defaults() ) )->build( $request );
+$oversize_request = new QuoteRequest(
+	'RU',
+	new Address( country_code: 'RU', city: 'Новосибирск' ),
+	Package::from_items( array( new PackageItem( 'oversize', 'Oversize', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000, 60, 10, 10 ) ), 0, $money, $money ),
+	'',
+	$money,
+	'2026-08-29',
+	array( 'recipient_phone' => '+79991234567', 'destination_latitude' => 55.0300, 'destination_longitude' => 82.9200 )
+);
+$calls_before_oversize = count( $http->calls );
+try {
+	$service->quote_pickup( $oversize_request );
+	oz_quote_assert( false, 'An indivisible item outside the Ozon parcel limit must fail before Ozon API.' );
+} catch ( OzonDeliveryQuoteException $exception ) {
+	oz_quote_assert( 'ozon_package_item_oversize' === $exception->safe_code && $calls_before_oversize === count( $http->calls ), 'Ozon oversize item must fail closed without an order_checkout request.' );
+}
+$packaging = $ozon_packaging->build( $request );
 $rejecting_http = new OzonQuoteSmokeHttp();
 $rejecting_api = new OzonDeliveryApiClient( $rejecting_http, new OzonDeliveryAccessTokenService( $credentials, $rejecting_http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
-$rejecting_service = new OzonDeliveryQuoteService( $rejecting_api, new OzonDeliveryQuoteRequestBuilder( $settings, $phones ), new OzonDeliveryQuoteParser( $sanitizer ), new PackagingBuilder( PackagingBuilderConfig::defaults() ), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonQuoteSmokeRejectingWpdb() ) ), $sanitizer );
+$rejecting_service = new OzonDeliveryQuoteService( $rejecting_api, new OzonDeliveryQuoteRequestBuilder( $settings, $phones ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonQuoteSmokeRejectingWpdb() ) ), $sanitizer );
 $multi_money = Money::from_rubles( 2985 );
 $multi_request = new QuoteRequest(
 	'RU',

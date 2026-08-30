@@ -129,6 +129,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduleFormatter;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduler;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteParser;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryPackagingBuilderFactory;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteRequestBuilder;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
@@ -493,7 +494,8 @@ final class Plugin {
 		$this->container->register( OzonDeliveryPickupScheduler::class, fn(): OzonDeliveryPickupScheduler => new OzonDeliveryPickupScheduler( $this->container->get( ActionScheduler::class ), $this->container->get( OzonDeliveryPickupImportService::class ), $this->container->get( OzonDeliveryPickupImportLock::class ), $this->container->get( OzonDeliverySettings::class ) ) );
 		$this->container->register( OzonDeliveryQuoteRequestBuilder::class, fn(): OzonDeliveryQuoteRequestBuilder => new OzonDeliveryQuoteRequestBuilder( $this->container->get( OzonDeliverySettings::class ), $this->container->get( RussianPhoneNormalizer::class ) ) );
 		$this->container->register( OzonDeliveryQuoteParser::class, fn(): OzonDeliveryQuoteParser => new OzonDeliveryQuoteParser( $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
-		$this->container->register( OzonDeliveryQuoteService::class, fn(): OzonDeliveryQuoteService => new OzonDeliveryQuoteService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryQuoteRequestBuilder::class ), $this->container->get( OzonDeliveryQuoteParser::class ), $this->container->get( PackagingBuilder::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
+		$this->container->register( OzonDeliveryPackagingBuilderFactory::class, fn(): OzonDeliveryPackagingBuilderFactory => new OzonDeliveryPackagingBuilderFactory( $this->container->get( PackagingWeightCalculator::class ) ) );
+		$this->container->register( OzonDeliveryQuoteService::class, fn(): OzonDeliveryQuoteService => new OzonDeliveryQuoteService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryQuoteRequestBuilder::class ), $this->container->get( OzonDeliveryQuoteParser::class ), $this->container->get( OzonDeliveryPackagingBuilderFactory::class )->create(), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
 		$this->container->register( OzonDeliveryQuoteDiagnosticService::class, fn(): OzonDeliveryQuoteDiagnosticService => new OzonDeliveryQuoteDiagnosticService( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( RussianPhoneNormalizer::class ) ) );
 		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( PekHttpClientInterface::class, fn(): PekHttpClientInterface => new WpPekHttpClient() );
