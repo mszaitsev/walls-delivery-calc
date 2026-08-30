@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentPersistenceMapperInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -32,13 +33,20 @@ final class OzonDeliveryShipmentPersistenceMapper implements CarrierShipmentPers
 			'barcode' => $result->tracking_number,
 			'status' => 'created',
 			'status_title' => 'Отправление Ozon создано и подтверждено.',
-			'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
-			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ),
+			'universal_status_code' => (string) ( $raw['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER ),
+			'universal_status_label' => DeliveryStatus::label( (string) ( $raw['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER ) ),
+			'ozon_statuses' => is_array( $raw['ozon_statuses'] ?? null ) ? $raw['ozon_statuses'] : array(),
+			'ozon_status_read_error' => (string) ( $raw['ozon_status_read_error'] ?? '' ),
 			'service_key' => OzonDeliverySettings::SERVICE_KEY,
 			'rate_id' => $request->rate_id,
 			'pickup_point_code' => (string) ( $request->pickup_point?->point_code ?? $request->meta['pickup_point_code'] ?? '' ),
 			'request_snapshot' => is_array( $raw['request'] ?? null ) ? $raw['request'] : $preview,
-			'response_snapshot' => is_array( $raw['response'] ?? null ) ? $raw['response'] : array(),
+			'response_snapshot' => array(
+				'response' => is_array( $raw['response'] ?? null ) ? $raw['response'] : array(),
+				'preflight' => is_array( $raw['preflight'] ?? null ) ? $raw['preflight'] : array(),
+				'approval' => is_array( $raw['approval'] ?? null ) ? $raw['approval'] : array(),
+			),
+			'actual_cost_candidate' => $raw['actual_cost_candidate'] instanceof ShipmentActualCost ? $raw['actual_cost_candidate'] : null,
 			'created_at' => $now,
 		);
 	}
@@ -67,9 +75,11 @@ final class OzonDeliveryShipmentPersistenceMapper implements CarrierShipmentPers
 			'request_snapshot' => is_array( $raw['request'] ?? null ) ? $raw['request'] : $preview,
 			'response_snapshot' => array(
 				'error_code' => $result->error_code,
+				'preflight' => is_array( $raw['preflight'] ?? null ) ? $raw['preflight'] : array(),
 				'approval' => is_array( $raw['approval'] ?? null ) ? $raw['approval'] : array(),
 				'checked_at' => $now,
 			),
+			'actual_cost_candidate' => $raw['actual_cost_candidate'] instanceof ShipmentActualCost ? $raw['actual_cost_candidate'] : null,
 		);
 	}
 

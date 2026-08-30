@@ -66,7 +66,7 @@ final class OzonDeliveryShipmentCreateRequestBuilder {
 			$declared = Money::from_kopecks( (int) ( $value_result['place_values'][ $place_number ] ?? 0 ) );
 			$postings[] = array(
 				'request_id' => $place_number,
-				'posting_external_id' => $this->external_id( $request, $place_number ),
+				'posting_external_id' => $this->posting_external_id( $order_number, $index + 1, $total ),
 				'shipment_method_id' => $method_id,
 				'description' => $this->descriptions->build( $order_number, $index + 1, $total ),
 				'declared_value' => $this->money_object( $declared ),
@@ -87,7 +87,7 @@ final class OzonDeliveryShipmentCreateRequestBuilder {
 			);
 		}
 		$body = array(
-			'order_external_id' => $this->order_external_id( $request ),
+			'order_external_id' => $this->external_id_base( $order_number ),
 			'recipient' => array(
 				'phone_number' => $phone,
 				'full_name' => $name,
@@ -127,12 +127,16 @@ final class OzonDeliveryShipmentCreateRequestBuilder {
 		return method_exists( $order, 'get_order_number' ) ? (string) $order->get_order_number() : (string) ( $request->meta['order_num'] ?? $request->order_id );
 	}
 
-	private function external_id( ShipmentCreateRequest $request, int $place_number ): string {
-		return substr( preg_replace( '/[^A-Za-z0-9_.-]+/', '-', 'wdc-' . $request->order_id . '-' . (string) ( $request->meta['creation_attempt_id'] ?? 'attempt' ) . '-' . $place_number ) ?? '', 0, 120 );
+	private function posting_external_id( string $order_number, int $index, int $total ): string {
+		$base = $this->external_id_base( $order_number );
+
+		return 1 === $total ? $base : substr( $base . '-' . $index, 0, 120 );
 	}
 
-	private function order_external_id( ShipmentCreateRequest $request ): string {
-		return substr( preg_replace( '/[^A-Za-z0-9_.-]+/', '-', 'wdc-order-' . $request->order_id . '-' . (string) ( $request->meta['creation_attempt_id'] ?? 'attempt' ) ) ?? '', 0, 120 );
+	private function external_id_base( string $order_number ): string {
+		$value = trim( preg_replace( '/[^A-Za-z0-9_.-]+/', '-', trim( $order_number ) ) ?? '' );
+
+		return '' !== $value ? substr( $value, 0, 120 ) : 'order';
 	}
 
 	/** @return array{amount:string,currency_code:string} */

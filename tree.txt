@@ -358,6 +358,7 @@ C:.
 |   |   |           OzonDeliveryShipmentDocumentProvider.php
 |   |   |           OzonDeliveryShipmentModalExtension.php
 |   |   |           OzonDeliveryShipmentPersistenceMapper.php
+|   |   |           OzonDeliveryShipmentPreflightQuoteService.php
 |   |   |           OzonDeliveryShipmentService.php
 |   |   |           OzonDeliveryShipmentStatusMapping.php
 |   |   |

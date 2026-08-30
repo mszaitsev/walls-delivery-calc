@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiClient;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiException;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteException;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
@@ -23,6 +24,7 @@ final class OzonDeliveryShipmentService {
 		private OzonDeliveryApiClient $api,
 		private OzonDeliveryShipmentCreateRequestBuilder $builder,
 		private OzonDeliveryShipmentCreateResponseParser $parser,
+		private OzonDeliveryShipmentPreflightQuoteService $preflight,
 		private OzonDeliveryPickupPointProvider $pickup_provider,
 		private OrderShipmentRepository $repository,
 		private ShipmentCreationAttemptService $attempts,
@@ -37,6 +39,15 @@ final class OzonDeliveryShipmentService {
 		}
 		$idempotency_key = $this->idempotency_key( $request );
 		try {
+			$preflight = $this->preflight->quote( $prepared['body'], $this->now() );
+		} catch ( OzonDeliveryQuoteException $exception ) {
+			return new ShipmentCreateResult( false, error_code: 'ozon_shipment_preflight_failed', error_message: 'Не удалось проверить фактическую стоимость отправления Ozon. Отправление не создано.', raw_reference: array( 'summary' => $prepared['summary'], 'preflight' => array( 'safe_code' => $exception->safe_code, 'operation' => $exception->operation, 'http_status' => $exception->http_status ) ) );
+		} catch ( OzonDeliveryApiException $exception ) {
+			return new ShipmentCreateResult( false, error_code: 'ozon_shipment_preflight_failed', error_message: 'Не удалось проверить фактическую стоимость отправления Ozon. Отправление не создано.', raw_reference: array( 'summary' => $prepared['summary'], 'preflight' => $exception->metadata ) );
+		} catch ( \Throwable $exception ) {
+			return new ShipmentCreateResult( false, error_code: 'ozon_shipment_preflight_failed', error_message: 'Не удалось проверить фактическую стоимость отправления Ozon. Отправление не создано.', raw_reference: array( 'summary' => $prepared['summary'], 'preflight' => array( 'error' => $exception->getMessage() ) ) );
+		}
+		try {
 			$response = $this->api->order_create( $prepared['body'], $idempotency_key );
 			$parsed = $this->parser->parse( $response, array_column( $prepared['body']['postings'], 'request_id' ) );
 		} catch ( OzonDeliveryApiException $exception ) {
@@ -45,9 +56,12 @@ final class OzonDeliveryShipmentService {
 			return new ShipmentCreateResult( false, error_code: 'ozon_order_create_malformed', error_message: $exception->getMessage(), raw_reference: array( 'summary' => $prepared['summary'] ) );
 		}
 		$approval = $this->approve_postings( $parsed['postings'] );
+		$status_snapshot = empty( $approval['errors'] ) ? $this->post_approve_status_snapshot( $approval['postings'] ) : array();
 		$raw = array(
 			'request' => $this->safe_request_snapshot( $prepared ),
 			'response' => $this->safe_response_snapshot( $parsed ),
+			'preflight' => is_array( $preflight['summary'] ?? null ) ? $preflight['summary'] : array(),
+			'actual_cost_candidate' => $preflight['actual_cost_candidate'] ?? null,
 			'ozon_order_number' => $parsed['order_number'],
 			'ozon_order_external_id' => $parsed['order_external_id'],
 			'ozon_postings' => $approval['postings'],
@@ -55,6 +69,9 @@ final class OzonDeliveryShipmentService {
 			'summary' => $prepared['summary'],
 			'approval' => array( 'approved_count' => $approval['approved_count'], 'total_count' => count( $approval['postings'] ) ),
 		);
+		if ( array() !== $status_snapshot ) {
+			$raw = array_merge( $raw, $status_snapshot );
+		}
 		if ( ! empty( $approval['errors'] ) ) {
 			return new ShipmentCreateResult( false, error_code: 'ozon_posting_approve_partial', error_message: implode( "\n", $approval['errors'] ), raw_reference: $raw );
 		}
@@ -78,11 +95,18 @@ final class OzonDeliveryShipmentService {
 		$shipment['ozon_postings'] = $approval['postings'];
 		$shipment['response_snapshot']['approval'] = array( 'approved_count' => $approval['approved_count'], 'total_count' => count( $approval['postings'] ) );
 		if ( empty( $approval['errors'] ) ) {
+			$status_snapshot = $this->post_approve_status_snapshot( $approval['postings'] );
 			$shipment['pending_creation_in_carrier'] = false;
 			$shipment['status'] = 'created';
 			$shipment['status_title'] = 'Отправление Ozon создано и подтверждено.';
-			$shipment['universal_status_code'] = DeliveryStatus::CREATED_IN_CARRIER;
-			$shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER );
+			$shipment['universal_status_code'] = (string) ( $status_snapshot['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER );
+			$shipment['universal_status_label'] = DeliveryStatus::label( $shipment['universal_status_code'] );
+			if ( isset( $status_snapshot['ozon_statuses'] ) ) {
+				$shipment['ozon_statuses'] = $status_snapshot['ozon_statuses'];
+			}
+			if ( isset( $status_snapshot['ozon_status_read_error'] ) ) {
+				$shipment['ozon_status_read_error'] = $status_snapshot['ozon_status_read_error'];
+			}
 			$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
 			$this->attempts->mark_active_for_shipment( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
 			return array( 'success' => true, 'message' => 'Отправления Ozon подтверждены.' );
@@ -224,6 +248,44 @@ final class OzonDeliveryShipmentService {
 	/** @param array<string,mixed> $parsed @return array<string,mixed> */
 	private function safe_response_snapshot( array $parsed ): array {
 		return array( 'order_number' => $parsed['order_number'], 'postings' => $parsed['postings'] );
+	}
+
+	/** @param array<int,array<string,mixed>> $postings @return array<string,mixed> */
+	private function post_approve_status_snapshot( array $postings ): array {
+		$numbers = array_values( array_filter( array_map( static fn( array $posting ): string => trim( (string) ( $posting['posting_number'] ?? '' ) ), $postings ) ) );
+		if ( array() === $numbers ) {
+			return array( 'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER, 'ozon_statuses' => array() );
+		}
+		try {
+			$response = $this->api->posting_info( $numbers );
+		} catch ( \Throwable $exception ) {
+			return array(
+				'universal_status_code' => DeliveryStatus::CREATED_IN_CARRIER,
+				'ozon_statuses' => array(),
+				'ozon_status_read_error' => $exception->getMessage(),
+			);
+		}
+		$statuses = array();
+		$normalized = array();
+		foreach ( is_array( $response['postings'] ?? null ) ? $response['postings'] : array() as $posting ) {
+			if ( ! is_array( $posting ) ) {
+				continue;
+			}
+			$status = (string) ( $posting['status'] ?? 'unknown' );
+			$statuses[] = $status;
+			$normalized[] = array(
+				'posting_number' => (string) ( $posting['posting_number'] ?? '' ),
+				'status' => $status,
+				'normalized_status' => OzonDeliveryShipmentStatusMapping::normalize( $status ),
+				'status_changed_at' => (string) ( $posting['status_changed_at'] ?? '' ),
+			);
+		}
+		$universal = OzonDeliveryShipmentStatusMapping::aggregate( $statuses );
+		if ( in_array( $universal, array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::UNKNOWN ), true ) ) {
+			$universal = DeliveryStatus::CREATED_IN_CARRIER;
+		}
+
+		return array( 'universal_status_code' => $universal, 'ozon_statuses' => $normalized );
 	}
 
 	/** @param array<string,mixed> $shipment @return array<int,string> */
