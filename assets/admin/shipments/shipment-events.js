@@ -261,8 +261,10 @@ function initializeShipmentAdmin() {
 
     const create = event.target.closest('[data-wdc-create-shipment]');
     if (create) {
+      if (create.disabled || create.dataset.wdcCreateBusy === '1') return;
       const form = findShipmentForm(create);
       if (!form) return;
+      setShipmentCreateBusy(create, true);
       const errors = form.querySelector('[data-wdc-shipment-errors]');
       if (errors) errors.textContent = '';
       const data = collectShipmentData(form);
@@ -332,7 +334,30 @@ function initializeShipmentAdmin() {
           }
           if (errors) errors.textContent = error.message;
           showShipmentToast(findShipmentForm(create), error.message, 'error');
+          setShipmentCreateBusy(create, false);
   });
+}
+
+function setShipmentCreateBusy(button, busy) {
+  if (!button) return;
+  if (busy) {
+    if (!button.dataset.wdcCreateOriginalLabel) {
+      button.dataset.wdcCreateOriginalLabel = button.textContent || '';
+    }
+    const box = button.closest('[data-wdc-shipments-metabox]');
+    const isOzon = box && box.dataset && String(box.dataset.carrierKey || '').trim() === 'ozon_delivery';
+    button.textContent = isOzon ? 'Создаём отправление Ozon…' : 'Создание отправления…';
+    button.disabled = true;
+    button.dataset.wdcCreateBusy = '1';
+    button.setAttribute('aria-busy', 'true');
+    button.classList.add('wdc-shipment-create-busy');
+    return;
+  }
+  button.textContent = button.dataset.wdcCreateOriginalLabel || button.textContent || '';
+  button.disabled = false;
+  delete button.dataset.wdcCreateBusy;
+  button.removeAttribute('aria-busy');
+  button.classList.remove('wdc-shipment-create-busy');
 }
 
 function requestShipmentActualCost(button, operation) {

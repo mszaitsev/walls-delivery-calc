@@ -143,6 +143,30 @@ final class OzonDeliveryShipmentService {
 		}
 		$universal = OzonDeliveryShipmentStatusMapping::aggregate( $statuses );
 		$shipment['ozon_statuses'] = $normalized;
+		if ( 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) && OzonDeliveryShipmentActionPolicy::all_cancelled( $statuses ) ) {
+			$this->terminalize_attempt( $order, $shipment );
+			$this->repository->delete_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
+			return array(
+				'success' => true,
+				'message' => 'Заказ Ozon отменён и удалён из блока отправлений.',
+				'status' => 'CANCELED',
+				'cancelled_and_removed' => true,
+			);
+		}
+		if ( 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) ) {
+			$shipment['status_title'] = 'Ожидаем подтверждение отмены Ozon…';
+			$shipment['tracking_checked_at'] = $this->now();
+			$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+
+			return array(
+				'success' => true,
+				'message' => 'Ожидаем подтверждение отмены Ozon…',
+				'pending' => true,
+				'retryable' => true,
+				'status' => implode( ',', $statuses ),
+				'shipment' => $shipment,
+			);
+		}
 		$shipment['status'] = $universal;
 		$shipment['status_title'] = DeliveryStatus::label( $universal );
 		$shipment['universal_status_code'] = $universal;
@@ -160,6 +184,10 @@ final class OzonDeliveryShipmentService {
 		if ( array() === $numbers ) {
 			return array( 'success' => false, 'message' => 'Не найдены номера отправлений Ozon.' );
 		}
+		$policy = OzonDeliveryShipmentActionPolicy::for_shipment( $shipment );
+		if ( empty( $policy['can_cancel'] ) ) {
+			return array( 'success' => false, 'message' => 'Текущий статус Ozon не позволяет отменить заказ из плагина. Обновите статус или удалите локальную запись.', 'temporary_can_remove' => true );
+		}
 		$errors = array();
 		foreach ( $numbers as $number ) {
 			try {
@@ -172,12 +200,29 @@ final class OzonDeliveryShipmentService {
 			return array( 'success' => false, 'message' => implode( "\n", $errors ) );
 		}
 		$shipment['status'] = 'cancellation_started';
-		$shipment['status_title'] = 'Отмена Ozon запущена.';
+		$shipment['status_title'] = 'Ожидаем подтверждение отмены Ozon…';
 		$shipment['universal_status_code'] = DeliveryStatus::UNKNOWN;
 		$shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::UNKNOWN );
 		$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
 
-		return array( 'success' => true, 'message' => 'Отмена Ozon запущена.' );
+		return array(
+			'success' => true,
+			'accepted' => true,
+			'cancellation_started' => true,
+			'auto_poll' => true,
+			'poll_interval_ms' => 5000,
+			'poll_max_attempts' => 14,
+			'purpose' => 'cancellation',
+			'message' => 'Запрос на отмену заказа Ozon отправлен. Ожидаем подтверждение отмены Ozon…',
+		);
+	}
+
+	/** @param array<string,mixed> $shipment */
+	public function terminalize_attempt( object $order, array $shipment ): void {
+		if ( array() === $shipment ) {
+			return;
+		}
+		$this->attempts->mark_terminal_for_shipment( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
 	}
 
 	/** @return array<int,string> */

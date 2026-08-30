@@ -1699,6 +1699,7 @@ final class DeliveryServicesAdminPage {
 		if ( OzonDeliverySettings::SERVICE_KEY === $service->service_key ) {
 			$tabs['ozon_api'] = 'API Ozon';
 			$tabs['ozon_pickup'] = 'ПВЗ Ozon';
+			$tabs['ozon_statuses'] = 'Статусы Ozon';
 		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
@@ -1735,6 +1736,7 @@ final class DeliveryServicesAdminPage {
 			PekStatusAdminPage::TAB_KEY => $this->render_pek_statuses_tab( $service ),
 			'ozon_api' => $this->render_ozon_api_tab( $service ),
 			'ozon_pickup' => $this->render_ozon_pickup_tab( $service ),
+			'ozon_statuses' => $this->render_ozon_statuses_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
 		?>
@@ -3637,6 +3639,8 @@ final class DeliveryServicesAdminPage {
 	}
 
 	private function render_ozon_pickup_tab( DeliveryService $service ): void { if ( OzonDeliverySettings::SERVICE_KEY === $service->service_key && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) { $this->ozon_delivery_admin->render_pickup(); } }
+
+	private function render_ozon_statuses_tab( DeliveryService $service ): void { if ( OzonDeliverySettings::SERVICE_KEY === $service->service_key && $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ) { $this->ozon_delivery_admin->render_statuses(); } }
 
 	private function render_diagnostics_tab( DeliveryService $service ): void {
 		if ( ! $this->is_domestic_service( $service ) ) {

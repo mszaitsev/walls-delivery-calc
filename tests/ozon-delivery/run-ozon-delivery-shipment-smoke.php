@@ -21,6 +21,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteParser;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentAdapter;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentActionPolicy;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentAllocationValueResolver;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentCreateRequestBuilder;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentCreateResponseParser;
@@ -82,7 +83,9 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	public array $checkout_quotes = array();
 	public bool $fail_checkout = false;
 	public bool $fail_info = false;
+	public bool $fail_cancel = false;
 	public bool $approve_updates_status = true;
+	public bool $cancel_updates_status = true;
 
 	public function request( string $method, string $url, array $args = array() ): OzonDeliveryApiResponse {
 		$body = json_decode( (string) ( $args['body'] ?? '{}' ), true );
@@ -146,7 +149,12 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'postings' => $postings ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/cancel' ) ) {
-			$this->statuses[ (string) ( $body['posting_number'] ?? '' ) ] = 'CANCELED';
+			if ( $this->fail_cancel ) {
+				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"cancel_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
+			}
+			if ( $this->cancel_updates_status ) {
+				$this->statuses[ (string) ( $body['posting_number'] ?? '' ) ] = 'CANCELED';
+			}
 			return new OzonDeliveryApiResponse( 200, '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/label' ) ) {
@@ -322,9 +330,35 @@ oz_ship_assert( $document instanceof ShipmentBinaryDocument && 'ozon-box-2.pdf' 
 $status = $stack['adapter']->update_status( $order );
 oz_ship_assert( ! empty( $status['success'] ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status['shipment']['universal_status_code'] ?? '' ), 'Ozon status provider must map ready_for_shipping postings to created_in_carrier.' );
 $cancel = $stack['adapter']->cancel_in_carrier( $order );
-oz_ship_assert( ! empty( $cancel['success'] ), 'Ozon cancellation must call cancel for persisted postings: ' . json_encode( $cancel, JSON_UNESCAPED_UNICODE ) );
+oz_ship_assert( ! empty( $cancel['success'] ) && ! empty( $cancel['auto_poll'] ) && 5000 === (int) ( $cancel['poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel['poll_max_attempts'] ?? 0 ) && 'cancellation' === (string) ( $cancel['purpose'] ?? '' ), 'Ozon cancellation must start the shared 5s x 14 polling lifecycle: ' . json_encode( $cancel, JSON_UNESCAPED_UNICODE ) );
 $cancelled = ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( 'cancellation_started' === (string) ( $cancelled['status'] ?? '' ) && DeliveryStatus::UNKNOWN === (string) ( $cancelled['universal_status_code'] ?? '' ), 'Cancel request must not mark the shipment fully cancelled before status sync confirms it.' );
+$cancel_payload = $stack['adapter']->status_payload( $order, $cancelled );
+oz_ship_assert( ! empty( $cancel_payload['polling_continue'] ) && ! empty( $cancel_payload['can_remove_from_order'] ) && empty( $cancel_payload['can_cancel'] ) && 5000 === (int) ( $cancel_payload['registration_poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel_payload['registration_poll_max_attempts'] ?? 0 ), 'Ozon cancellation_started payload must support reload recovery through generic polling.' );
+$cancelled_update = $stack['adapter']->update_status( $order );
+oz_ship_assert( ! empty( $cancelled_update['cancelled_and_removed'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ), 'Status poll with all CANCELED postings must remove local Ozon shipment and return cancelled_and_removed.' );
+
+$stack = oz_ship_stack( $db );
+$delayed_order = new OzonShipmentSmokeOrder( 85387, '85387', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$delayed_create = $stack['service']->create( $delayed_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85387, '85387' ) );
+oz_ship_assert( $delayed_create->success, 'Delayed cancellation fixture must create Ozon shipment first.' );
+$stack['http']->cancel_updates_status = false;
+$delayed_cancel = $stack['adapter']->cancel_in_carrier( $delayed_order );
+oz_ship_assert( ! empty( $delayed_cancel['auto_poll'] ), 'Cancel accepted with delayed Ozon status must start polling.' );
+$delayed_poll = $stack['adapter']->update_status( $delayed_order );
+$delayed_stored = ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( ! empty( $delayed_poll['pending'] ) && empty( $delayed_poll['cancelled_and_removed'] ) && array() !== $delayed_stored, 'Delayed cancel status must keep polling and keep local shipment until all postings are CANCELED.' );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$delayed_done = $stack['adapter']->update_status( $delayed_order );
+oz_ship_assert( ! empty( $delayed_done['cancelled_and_removed'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY ), 'Later all-CANCELED status must clear the Ozon shipment block.' );
+
+$stack = oz_ship_stack( $db );
+$cancel_fail_order = new OzonShipmentSmokeOrder( 85388, '85388', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$cancel_fail_create = $stack['service']->create( $cancel_fail_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85388, '85388' ) );
+oz_ship_assert( $cancel_fail_create->success, 'Cancel failure fixture must create Ozon shipment first.' );
+$stack['http']->fail_cancel = true;
+$cancel_fail = $stack['adapter']->cancel_in_carrier( $cancel_fail_order );
+oz_ship_assert( empty( $cancel_fail['success'] ) && empty( $cancel_fail['auto_poll'] ) && array() !== ( new OrderShipmentRepository() )->find_by_carrier( $cancel_fail_order, OzonDeliverySettings::CARRIER_KEY ), 'Hard Ozon cancel API rejection must not start optimistic polling or delete local shipment.' );
 
 $stack = oz_ship_stack( $db );
 $live_modal_order = new OzonShipmentSmokeOrder( 85378, '85378', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
@@ -459,5 +493,19 @@ oz_ship_assert( ! str_contains( $architecture_source, 'PackagingBuilder' ) && ! 
 oz_ship_assert( 'ready_for_shipping' === OzonDeliveryShipmentStatusMapping::normalize( ' READY_FOR_SHIPPING ' ), 'Ozon status normalization must canonicalize documented enum casing.' );
 oz_ship_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'CREATED' ) && DeliveryStatus::PENDING_CREATION_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'FORMING' ) && DeliveryStatus::REJECTED === OzonDeliveryShipmentStatusMapping::universal( 'FORMING_FAILED' ) && DeliveryStatus::CREATED_IN_CARRIER === OzonDeliveryShipmentStatusMapping::universal( 'READY_FOR_SHIPPING' ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::universal( 'IN_CONTAINER' ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::universal( 'ACCEPTANCE_IN_PROGRESS' ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::universal( 'ON_WAY' ) && DeliveryStatus::REJECTED === OzonDeliveryShipmentStatusMapping::universal( 'NOT_ACCEPTED_TO_DELIVERY' ) && DeliveryStatus::READY_FOR_PICKUP === OzonDeliveryShipmentStatusMapping::universal( 'IN_DELIVERY_POINT' ) && DeliveryStatus::HANDED_TO_COURIER === OzonDeliveryShipmentStatusMapping::universal( 'IN_COURIER_SERVICE' ) && DeliveryStatus::DELIVERED === OzonDeliveryShipmentStatusMapping::universal( 'DELIVERED' ) && DeliveryStatus::CANCELLED === OzonDeliveryShipmentStatusMapping::universal( 'CANCELED' ) && DeliveryStatus::UNKNOWN === OzonDeliveryShipmentStatusMapping::universal( 'BRAND_NEW_STATUS' ), 'Ozon status mapping must cover documented posting statuses with official casing and keep unknown safe.' );
 oz_ship_assert( DeliveryStatus::DELIVERED === OzonDeliveryShipmentStatusMapping::aggregate( array( 'DELIVERED', 'DELIVERED' ) ) && DeliveryStatus::IN_TRANSIT === OzonDeliveryShipmentStatusMapping::aggregate( array( 'READY_FOR_SHIPPING', 'ON_WAY' ) ) && DeliveryStatus::DELIVERED !== OzonDeliveryShipmentStatusMapping::aggregate( array( 'DELIVERED', 'ON_WAY' ) ), 'Ozon multi-posting aggregate status must work with official enum casing and not report delivered until all postings are delivered.' );
+$documented = OzonDeliveryShipmentStatusMapping::documented_statuses();
+oz_ship_assert( in_array( 'READY_FOR_SHIPPING', $documented, true ) && in_array( 'FORMING_FAILED', $documented, true ) && in_array( 'CANCELED', $documented, true ), 'Ozon documented status list must be exposed by the production mapping class for the admin tab.' );
+foreach ( array( 'CREATED', 'FORMING', 'READY_FOR_SHIPPING' ) as $status_code ) {
+	$policy = OzonDeliveryShipmentActionPolicy::for_statuses( array( $status_code ) );
+	oz_ship_assert( ! empty( $policy['can_cancel'] ) && empty( $policy['can_remove'] ), 'Ozon action policy must allow cancel for early status ' . $status_code );
+}
+foreach ( array( 'FORMING_FAILED', 'ON_WAY', 'IN_CONTAINER', 'ACCEPTANCE_IN_PROGRESS', 'NOT_ACCEPTED_TO_DELIVERY', 'IN_DELIVERY_POINT', 'IN_COURIER_SERVICE', 'DELIVERED', 'CANCELED', 'UNKNOWN', 'BRAND_NEW_STATUS' ) as $status_code ) {
+	$policy = OzonDeliveryShipmentActionPolicy::for_statuses( array( $status_code ) );
+	oz_ship_assert( empty( $policy['can_cancel'] ) && ! empty( $policy['can_remove'] ) && ! empty( $policy['can_update'] ), 'Ozon action policy must fail safe to remove/update for status ' . $status_code );
+}
+$multi_cancel = OzonDeliveryShipmentActionPolicy::for_statuses( array( 'READY_FOR_SHIPPING', 'CREATED' ) );
+$multi_remove = OzonDeliveryShipmentActionPolicy::for_statuses( array( 'READY_FOR_SHIPPING', 'ON_WAY' ) );
+$multi_failed = OzonDeliveryShipmentActionPolicy::for_statuses( array( 'FORMING_FAILED', 'READY_FOR_SHIPPING' ) );
+oz_ship_assert( ! empty( $multi_cancel['can_cancel'] ) && empty( $multi_remove['can_cancel'] ) && ! empty( $multi_remove['can_remove'] ) && empty( $multi_failed['can_cancel'] ) && ! empty( $multi_failed['can_remove'] ), 'Ozon multi-posting action policy must allow cancel only when every posting is still cancellable.' );
 
 echo "Ozon Delivery shipment smoke passed.\n";

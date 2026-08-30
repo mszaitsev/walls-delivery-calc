@@ -27,6 +27,25 @@ final class OzonDeliveryShipmentStatusMapping {
 		);
 	}
 
+	/** @return array<int,string> */
+	public static function documented_statuses(): array {
+		return array(
+			'UNKNOWN',
+			'CREATED',
+			'FORMING',
+			'FORMING_FAILED',
+			'READY_FOR_SHIPPING',
+			'IN_CONTAINER',
+			'ACCEPTANCE_IN_PROGRESS',
+			'ON_WAY',
+			'NOT_ACCEPTED_TO_DELIVERY',
+			'IN_DELIVERY_POINT',
+			'IN_COURIER_SERVICE',
+			'DELIVERED',
+			'CANCELED',
+		);
+	}
+
 	public static function universal( string $ozon_status ): string {
 		return self::map()[ self::normalize( $ozon_status ) ] ?? DeliveryStatus::UNKNOWN;
 	}
