@@ -216,19 +216,23 @@ final class CheckoutPickupPointRestController {
 		}
 		$family = $this->param( $request, 'pickup_family' );
 		$active_family = '' !== $family ? $family : $this->active_pickup_family();
-		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
+		$point = '' !== $active_family ? $this->session_manager->pickup_selection_for_family_current_destination( $active_family ) : $this->session_manager->pickup_selection_current_destination();
+		$pickup_selections = $this->session_manager->pickup_selections_for_current_destination();
+		$pickup_rate_capabilities = $this->pickup_rate_capabilities();
 
 		return $this->response(
 			array(
 				'pickup_point' => array() !== $point ? $point : null,
 				'selected_pickup_point' => array() !== $point ? $point : null,
-				'pickup_selections' => $this->session_manager->pickup_selections(),
-				'pickupSelections' => $this->session_manager->pickup_selections(),
+				'pickup_selections' => $pickup_selections,
+				'pickupSelections' => $pickup_selections,
 				'active_pickup_family' => $active_family,
 				'activePickupFamily' => $active_family,
 				'active_pickup_country_code' => $this->active_pickup_country_code(),
 				'activePickupCountryCode' => $this->active_pickup_country_code(),
 				'city_context' => $this->city_context(),
+				'pickup_rate_capabilities' => $pickup_rate_capabilities,
+				'pickupRateCapabilities' => $pickup_rate_capabilities,
 			)
 		);
 	}
@@ -920,6 +924,38 @@ final class CheckoutPickupPointRestController {
 		}
 
 		return '';
+	}
+
+	/**
+	 * @return array<string,array<string,bool>>
+	 */
+	private function pickup_rate_capabilities(): array {
+		$capabilities = array();
+		foreach ( $this->session_manager->rates() as $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$meta = $this->rate_meta( $rate );
+			if ( 'pickup' !== (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' ) || empty( $rate['requires_pickup_point'] ) ) {
+				continue;
+			}
+			$rate_id = $this->normalize_shipping_method_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			if ( '' === $rate_id ) {
+				continue;
+			}
+			$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+			$rate_capabilities = array();
+			foreach ( array( 'reload_on_viewport_change', 'prefetch_points' ) as $key ) {
+				if ( array_key_exists( $key, $snapshot ) ) {
+					$rate_capabilities[ $key ] = (bool) $snapshot[ $key ];
+				}
+			}
+			if ( array() !== $rate_capabilities ) {
+				$capabilities[ $rate_id ] = $rate_capabilities;
+			}
+		}
+
+		return $capabilities;
 	}
 
 	private function active_pickup_country_code(): string {

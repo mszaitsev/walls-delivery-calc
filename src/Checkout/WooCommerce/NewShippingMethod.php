@@ -92,12 +92,13 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			$this->session_manager->expire_stale_yandex_5post_selection();
 			$sort = $this->sort_mode();
 			$this->session_manager->save_sort_mode( $sort );
+			$pickup_selections = $this->session_manager->pickup_selections_for_current_destination( true );
 
 			$request = $this->package_mapper->map(
 				is_array( $package ) ? $package : array(),
 				array(
-					'pickup_selection'  => $this->session_manager->pickup_selection(),
-					'pickup_selections' => $this->session_manager->pickup_selections(),
+					'pickup_selection'  => $this->session_manager->pickup_selection_current_destination(),
+					'pickup_selections' => $pickup_selections,
 					'sort_mode'         => $sort,
 				)
 			);

@@ -251,7 +251,10 @@ $session->save_rates(
 			'delivery_type' => 'pickup',
 			'pickup_family' => 'pek:pickup',
 			'requires_pickup_point' => true,
-			'rate_meta' => array( 'pickup_family' => 'pek:pickup' ),
+			'rate_meta' => array(
+				'pickup_family' => 'pek:pickup',
+				'pickup_provider_query' => array( 'reload_on_viewport_change' => true ),
+			),
 		),
 		'yandex_pickup' => array(
 			'carrier_key' => 'yandex_delivery',
@@ -262,6 +265,27 @@ $session->save_rates(
 			'requires_pickup_point' => true,
 			'rate_meta' => array( 'pickup_family' => 'yandex_delivery:pickup' ),
 		),
+		'ozon_delivery:pickup' => array(
+			'carrier_key' => 'ozon_delivery',
+			'rate_id' => 'ozon_delivery:pickup',
+			'service_key' => 'ozon_delivery',
+			'delivery_type' => 'pickup',
+			'pickup_family' => 'ozon_delivery:pickup',
+			'requires_pickup_point' => true,
+			'rate_meta' => array(
+				'pickup_family' => 'ozon_delivery:pickup',
+				'pickup_provider_query' => array(
+					'carrier_key' => 'ozon_delivery',
+					'purpose' => 'destination_pickup',
+					'location_id' => 153912,
+					'country_code' => 'RU',
+					'destination_fingerprint' => 'country=RU|location_id=153912',
+					'reload_on_viewport_change' => false,
+					'prefetch_points' => false,
+					'cargo' => array( 'weight_g' => 1000 ),
+				),
+			),
+		),
 	)
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:pek:pickup' ) );
@@ -269,6 +293,10 @@ $recovery_state = $state_controller->state();
 pickup_checkout_assert( null === $recovery_state['pickup_point'] && null === $recovery_state['selected_pickup_point'], 'checkout state GET must not restore a cleared PEK selected point after recovery.' );
 pickup_checkout_assert( 'pek:pickup' === (string) ( $recovery_state['active_pickup_family'] ?? '' ) && ! isset( $recovery_state['pickup_selections']['pek:pickup'] ), 'checkout state GET must keep PEK active without stale PEK selection after recovery.' );
 pickup_checkout_assert( 'ya-good' === (string) ( $recovery_state['pickup_selections']['yandex_delivery:pickup']['point_code'] ?? '' ), 'checkout state GET must preserve other carrier pickup selections after PEK recovery.' );
+pickup_checkout_assert( true === ( $recovery_state['pickup_rate_capabilities']['pek:pickup']['reload_on_viewport_change'] ?? null ) && true === ( $recovery_state['pickupRateCapabilities']['pek:pickup']['reload_on_viewport_change'] ?? null ), 'checkout state GET must expose allowlisted pickup rate capabilities by normalized method id.' );
+pickup_checkout_assert( false === ( $recovery_state['pickup_rate_capabilities']['ozon_delivery:pickup']['reload_on_viewport_change'] ?? true ), 'checkout state GET must preserve fixed-area reload_on_viewport_change=false separately from destination context.' );
+pickup_checkout_assert( false === ( $recovery_state['pickup_rate_capabilities']['ozon_delivery:pickup']['prefetch_points'] ?? true ), 'checkout state GET must expose fixed-area prefetch_points=false separately from destination context.' );
+pickup_checkout_assert( ! isset( $recovery_state['pickup_rate_capabilities']['ozon_delivery:pickup']['cargo'], $recovery_state['pickup_rate_capabilities']['ozon_delivery:pickup']['destination_fingerprint'] ), 'checkout state rate capabilities must not expose provider query metadata beyond allowlisted capability flags.' );
 $session->clear_pickup_selection( 'pickup_recovery_state_smoke_reset' );
 WC()->session->set( 'chosen_shipping_methods', array( $pickup_group_id ) );
 
@@ -335,6 +363,33 @@ pickup_checkout_assert( isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts'][
 pickup_checkout_assert( ! isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-yandex'] ), 'Leaflet provider must not enqueue the Yandex adapter.' );
 $localized_leaflet = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
 pickup_checkout_assert( ! array_key_exists( 'debug', $localized_leaflet ) && ! array_key_exists( 'pickupDebug', $localized_leaflet ), 'Pickup checkout localization must not expose temporary frontend diagnostics flags.' );
+pickup_checkout_assert( ! array_key_exists( 'reload_on_viewport_change', $localized_leaflet['initialContext'] ?? array() ), 'Pickup checkout localization must not store rate capabilities inside mutable destination initialContext.' );
+$session->save_rates(
+	array(
+		'ozon_delivery:pickup' => array(
+			'carrier_key' => 'ozon_delivery',
+			'rate_id' => 'ozon_delivery:pickup',
+			'service_key' => 'ozon_delivery',
+			'delivery_type' => 'pickup',
+			'pickup_family' => 'ozon_delivery:pickup',
+			'requires_pickup_point' => true,
+			'rate_meta' => array(
+				'pickup_family' => 'ozon_delivery:pickup',
+				'pickup_provider_query' => array( 'reload_on_viewport_change' => false, 'prefetch_points' => false ),
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'ozon_delivery:pickup' ) );
+$GLOBALS['wdc_pickup_checkout_enqueued_styles'] = array();
+$GLOBALS['wdc_pickup_checkout_enqueued_scripts'] = array();
+$GLOBALS['wdc_pickup_checkout_localized'] = array();
+( new PickupMapCheckout( $session, $environment, $map_settings, $point_type_settings ) )->enqueue_assets();
+$localized_ozon = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+pickup_checkout_assert( false === ( $localized_ozon['pickupRateCapabilities']['ozon_delivery:pickup']['reload_on_viewport_change'] ?? true ) && false === ( $localized_ozon['pickup_rate_capabilities']['ozon_delivery:pickup']['reload_on_viewport_change'] ?? true ) && false === ( $localized_ozon['pickupRateCapabilities']['ozon_delivery:pickup']['prefetch_points'] ?? true ), 'Pickup checkout localization must expose fixed-area pickup rate capabilities separately from initialContext.' );
+pickup_checkout_assert( ! array_key_exists( 'reload_on_viewport_change', $localized_ozon['initialContext'] ?? array() ), 'Fixed-area localization must keep reload_on_viewport_change out of destination initialContext.' );
+$session->save_rates( array( $pickup_group_id => $rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( $pickup_group_id ) );
 $ops_type_keys = array_keys( $localized_leaflet['pickupPointTypes']['OPS'] ?? array() );
 sort( $ops_type_keys );
 pickup_checkout_assert( 'Отделение Почты России' === (string) ( $localized_leaflet['pickupPointTypes']['OPS']['label'] ?? '' ) && array( 'enabled', 'label' ) === $ops_type_keys && true === (bool) ( $localized_leaflet['pickupPointTypes']['PVZ']['enabled'] ?? false ) && true === (bool) ( $localized_leaflet['pickupPointTypes']['APS']['enabled'] ?? false ), 'JS localization must include only pickupPointTypes label/enabled flags.' );
@@ -754,6 +809,27 @@ $session->clear_pickup_selection_for_family( $pickup_group_id, 'family_reset_smo
 pickup_checkout_assert( ! isset( $session->pickup_selections()[ $pickup_group_id ] ) && 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'Russian Post family reset must not remove CDEK bucket.' );
 $session->clear_pickup_selection( 'global_reset_smoke' );
 pickup_checkout_assert( array() === $session->pickup_selections(), 'Global pickup reset must remove all pickup family buckets.' );
+$session->save_city_context( array( 'location_id' => 650000, 'country_code' => 'RU', 'city_name' => 'Новосибирск' ) );
+$session->save_pickup_selection_for_family(
+	'custom_carrier:pickup',
+	array(
+		'carrier_key' => 'custom_carrier',
+		'service_key' => 'custom_carrier',
+		'pickup_family' => 'custom_carrier:pickup',
+		'point_code' => 'nsk-a',
+		'point_address' => 'Новосибирск, Красный проспект',
+		'destination_fingerprint' => 'country=RU|location_id=650000',
+		'snapshot' => array(
+			'point_code' => 'nsk-a',
+			'address' => 'Новосибирск, Красный проспект',
+			'destination_fingerprint' => 'country=RU|location_id=650000',
+		),
+	)
+);
+pickup_checkout_assert( 'nsk-a' === (string) ( $session->pickup_selections_for_current_destination()[ 'custom_carrier:pickup' ]['point_code'] ?? '' ), 'Pickup selection must be preserved while the canonical destination fingerprint is unchanged.' );
+$session->save_city_context( array( 'location_id' => 770000, 'country_code' => 'RU', 'city_name' => 'Москва' ) );
+pickup_checkout_assert( 'nsk-a' === (string) ( $session->raw_pickup_selections()[ 'custom_carrier:pickup' ]['point_code'] ?? '' ), 'Raw stale pickup selection fixture must remain present before authoritative destination filtering.' );
+pickup_checkout_assert( array() === $session->pickup_selections_for_current_destination( true ) && array() === $session->raw_pickup_selections(), 'Pickup selections from a different destination fingerprint must be removed before quote mapping.' );
 $session->save_pickup_selection( array( 'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY, 'rate_id' => $pickup_group_id, 'point_code' => '630001-a' ) );
 WC()->session->set( 'chosen_shipping_methods', array( $pickup_group_id ) );
 
@@ -959,7 +1035,8 @@ pickup_checkout_assert( str_contains( $checkout_js, 'sameLocationContext(previou
 pickup_checkout_assert( str_contains( $checkout_js, 'if (suppressPickupResetOnNextLocationSelected)' ) && str_contains( $checkout_js, 'consumeControlledLocationChange();' ) && str_contains( $checkout_js, 'rememberDestinationFingerprint(context);' ) && ! str_contains( $checkout_js, "resetPickupSelectionOnServer('location_selected')" ), 'Controlled cross-location location-selected events must consume the flag and skip pickup reset.' );
 pickup_checkout_assert( ! str_contains( $checkout_js, "debug('wdc:location-selected detail', event.detail || {});\n\t\tinvalidatePrefetch();\n\t\tupdateCurrentContext(context);\n\t\tapplyContextToHidden(context);\n\t\tresetSelection();" ), 'Location-selected event must not call broad resetSelection after setting context.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'stateContextMatchesCurrentDestination' ) && str_contains( $checkout_js, 'contextMatches(currentContext, context)' ), 'State refresh must ignore empty or stale old-city context.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContextOnce(700, { returnContext: true })' ) && str_contains( $checkout_js, 'Promise.race' ), 'Open modal must briefly wait for checkout state coordinates when context has query but no coordinates.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var contextPromise = refreshCheckoutContextOnce(700, { returnContext: true })' ) && str_contains( $checkout_js, 'return freshContext || initialContext();' ) && str_contains( $checkout_js, 'var modal = window.WDCPickupModal.create(labels);' ) && str_contains( $checkout_js, 'var map = window.WDCPickupMap.create' ), 'Open modal must use the last live-confirmed stable pickup-map opening lifecycle.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'function pointPrefetchAllowed(method)' ) && str_contains( $checkout_js, "Object.prototype.hasOwnProperty.call(item, 'prefetch_points')" ) && str_contains( $checkout_js, 'capabilities.prefetch_points === false' ), 'Pickup checkout frontend must disable background point prefetch only through the generic prefetch_points capability.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'countryBlocked' ) && str_contains( $checkout_js, 'var normalizedCountry = String(country || \'RU\').toUpperCase()' ) && str_contains( $checkout_js, 'normalizedCountry !== activePickupCountryCode' ) && str_contains( $checkout_js, "normalizedCountry !== 'RU'" ), 'Initial context must ignore non-RU checkout destinations.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContext' ) && str_contains( $checkout_js, "window.jQuery(document.body).on('updated_checkout'" ), 'updated_checkout must refresh server city_context and then prefetch pickup points.' );
 $pickup_css = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.css' ) ?: '';
@@ -976,7 +1053,7 @@ pickup_checkout_assert( str_contains( $checkout_js, 'isPickupMethodActive' ) && 
 pickup_checkout_assert( str_contains( $checkout_js, 'hasPickupBlock' ) && str_contains( $checkout_js, '[data-wdc-pickup-checkout]' ), 'Prefetch must require a pickup checkout block.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'prefetchController.abort()' ) && str_contains( $checkout_js, 'setTimeout(prefetchInitialPoints, 400)' ), 'Prefetch must debounce and abort stale requests.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'prefetchCache = null' ) && str_contains( $checkout_js, 'invalidatePrefetch' ), 'Prefetch cache must invalidate on destination changes.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'var context = withPrefetch(withCarrierContext(resolvedContext, method))' ) && str_contains( $checkout_js, 'preloadedPoints: prefetchCache.points' ), 'Open modal must pass cached preloaded points to the map.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var context = withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method)' ) && str_contains( $checkout_js, 'function prefetchIdentity(context, method)' ) && str_contains( $checkout_js, 'function prefetchIdentityMatches(cached, current)' ) && str_contains( $checkout_js, 'preloadedPoints: prefetchCache.points' ), 'Open modal must pass only destination/method-matched cached preloaded points to the map and apply active rate capabilities after destination context merge.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var selectedPickupPoints = extractPickupSelections(checkoutConfig);' ) && str_contains( $checkout_js, 'function extractPickupSelections(payload)' ) && str_contains( $checkout_js, 'payload.pickup_selections' ) && str_contains( $checkout_js, 'payload.selected_pickup_point' ) && str_contains( $checkout_js, 'function selectedPickupPointForFamily(family)' ) && str_contains( $checkout_js, 'selectedPickupPoints[family]' ), 'Checkout JS must keep selected pickup points by pickup_family and understand camelCase/snake_case state payloads.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'function containerMatchesActivePickup(container, activeMethodValue, activeFamilyValue)' ) && str_contains( $checkout_js, "document.querySelectorAll('[data-wdc-pickup-checkout]').length === 1" ) && str_contains( $checkout_js, "container.setAttribute('data-shipping-method-id', method)" ) && str_contains( $checkout_js, 'var containerMatches = containerMatchesActivePickup(container, method, family)' ), 'Checkout JS must restore active pickup selections into generic or stale pickup containers.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'function selectionLocationMatchesContext(point, context)' ) && str_contains( $checkout_js, 'destination_location_id' ) && str_contains( $checkout_js, 'matchedBy = \'location_id\'' ) && str_contains( $checkout_js, 'function fingerprintValue(fingerprint, key)' ), 'Checkout JS must restore selected pickup points by stable destination identifiers before full fingerprint fallback.' );
@@ -1034,7 +1111,7 @@ pickup_checkout_assert( str_contains( $map_js, 'function applySearchResult(resul
 pickup_checkout_assert( str_contains( $map_js, 'function refreshDistancesFromOrigin()' ) && str_contains( $map_js, 'visiblePoints = sortPoints(enrichPoints(visiblePoints));' ) && str_contains( $map_js, 'provider.renderMarkers(visiblePoints' ) && str_contains( $map_js, 'renderCurrentList();' ), 'Changing pickup distance origin must recalculate, sort, rerender markers, and rerender the current side list before nearest text is shown.' );
 pickup_checkout_assert( str_contains( $map_js, 'programmaticBoundsSuppressed' ) && str_contains( $map_js, 'scheduleProgrammaticBoundsRelease();' ) && str_contains( $map_js, 'return;' ) && str_contains( $map_js, 'loadBounds(bboxAround(point.lat, point.lng), { force: true })' ) && str_contains( $map_js, 'loadBounds(\'city-code\', { force: true })' ), 'Programmatic bounds changes must suppress automatic move loads while explicit forced bbox loads remain available.' );
 pickup_checkout_assert( ! str_contains( $map_js, 'renderMarkers(Array.isArray(result.points)' ), 'Successful addressSearch must not render result.points as the final visiblePoints state.' );
-pickup_checkout_assert( str_contains( $map_js, "card.textContent = labels.searchingAddress || 'Ищем адрес...'" ) && str_contains( $map_js, 'refreshDistancesFromOrigin();' ) && str_contains( $map_js, 'loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true })' ), 'Address search must keep the searched address as orientation marker, refresh distances, and explicitly reload pickup points around the searched address.' );
+pickup_checkout_assert( str_contains( $map_js, "updateLoadingMessage(requestId, labels.searchingAddress || 'Ищем адрес...')" ) && str_contains( $map_js, 'refreshDistancesFromOrigin();' ) && str_contains( $map_js, 'loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true })' ), 'Address search must keep the searched address as orientation marker, refresh distances, and explicitly reload pickup points around the searched address.' );
 $apply_start = strpos( $map_js, 'function applySearchResult(result)' );
 $startup_start = strpos( $map_js, 'setTimeout(function ()' );
 pickup_checkout_assert( false !== $apply_start && false !== $startup_start && ! str_contains( substr( $map_js, $apply_start, $startup_start - $apply_start ), 'previewNearest' ), 'Address search must not opt into nearest-point preview.' );
@@ -1044,6 +1121,7 @@ pickup_checkout_assert( str_contains( $map_css, '.wdc-pickup-search' ) && str_co
 pickup_checkout_assert( str_contains( $map_css, '.wdc-pickup-modal__map-pane' ) && str_contains( $map_css, 'position: relative' ) && str_contains( $map_css, '.wdc-pickup-map__locate' ) && str_contains( $map_css, 'right: 16px' ) && str_contains( $map_css, 'bottom: 36px' ) && ! str_contains( $map_css, "bottom: 16px;\n\tz-index: 650" ) && str_contains( $map_css, '.wdc-pickup-map__locate.is-loading' ), 'Pickup CSS must keep the geolocation overlay at the requested 36px bottom offset and keep loading state.' );
 pickup_checkout_assert( str_contains( $map_css, '.wdc-pickup-map__locate-icon svg' ) && str_contains( $map_css, 'fill: #374151' ) && str_contains( $map_css, 'width: 23px' ), 'Pickup CSS must center a dark navigation-arrow SVG in the locate button.' );
 pickup_checkout_assert( str_contains( $map_css, '.wdc-pickup-modal-loading' ) && str_contains( $map_css, '.wdc-pickup-modal-loading__spinner' ) && str_contains( $map_css, '@keyframes wdc-pickup-spin' ) && str_contains( $map_css, '.wdc-pickup-modal-notice' ), 'Pickup modal must style loading overlay, spinner, and error notice.' );
+pickup_checkout_assert( str_contains( $map_js, 'function createLoadingOverlay' ) && str_contains( $map_js, 'activeLoadingRequestId' ) && str_contains( $map_js, 'aria-busy' ) && str_contains( $map_js, 'wdc-pickup-list__loading' ) && str_contains( $map_css, '.wdc-pickup-map__loading' ) && str_contains( $map_css, '.wdc-pickup-list__loading' ), 'Pickup map must expose a generic accessible loading overlay for point fetch/render lifecycle.' );
 pickup_checkout_assert( str_contains( $map_js, 'function useUserLocation(lat, lng)' ) && str_contains( $map_js, "userLocation = normalizeUserLocationMarker({ lat: lat, lng: lng })" ) && str_contains( $map_js, 'distanceOrigin = { lat: lat, lng: lng }' ) && str_contains( $map_js, "originStatus = 'Показаны ближайшие пункты к вашему местоположению'" ), 'Geolocation success must set user location as the distance origin and list status.' );
 $geolocation_map_source = substr( $map_js, strpos( $map_js, 'function useUserLocation(lat, lng)' ), strpos( $map_js, 'function setStatus(message, type)' ) - strpos( $map_js, 'function useUserLocation(lat, lng)' ) );
 pickup_checkout_assert( str_contains( $geolocation_map_source, 'searchAddress = null' ) && str_contains( $geolocation_map_source, 'provider.setCenter(lat, lng, 15)' ) && str_contains( $geolocation_map_source, 'refreshDistancesFromOrigin();' ) && str_contains( $geolocation_map_source, 'loadBounds(bboxAround(lat, lng), { force: true })' ), 'Geolocation success must replace any address origin marker, refresh distances, center the map, and force bbox load around user coordinates.' );
@@ -1135,7 +1213,7 @@ pickup_checkout_assert( str_contains( $leaflet_provider_js, 'openPointPopup' ) &
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'activePointId = popupState.pointId' ) && str_contains( $leaflet_provider_js, 'updateActiveMarkers();' ) && str_contains( $leaflet_provider_js, 'popupAnchor: [0, -58]' ) && str_contains( $leaflet_provider_js, 'offset: window.L.point(0, -5)' ), 'Leaflet provider must keep the active marker visible/red and anchor popup above it.' );
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'onPopupSelect' ) && str_contains( $leaflet_provider_js, 'onPopupClose' ) && str_contains( $leaflet_provider_js, 'suppressPopupClose' ) && str_contains( $leaflet_provider_js, "map.on('popupclose', popupClosed)" ), 'Leaflet provider must report manual popup close while suppressing close events during rerender.' );
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'var maxClusterZoom = 18' ) && str_contains( $leaflet_provider_js, 'var clusterCellSize = 128' ) && str_contains( $leaflet_provider_js, 'map.getZoom() >= maxClusterZoom' ) && str_contains( $leaflet_provider_js, 'return { points: [point]' ), 'Leaflet grid clustering must use wider cells and disable clusters only on zoom 18+.' );
-pickup_checkout_assert( str_contains( $leaflet_provider_js, 'var lastPoints = []' ) && str_contains( $leaflet_provider_js, 'lastPoints = Array.isArray(points) ? points.slice() : []' ) && str_contains( $leaflet_provider_js, "map.on('zoomend', rebuildClusters)" ), 'Leaflet provider must retain the full marker dataset and rebuild its grid clusters on every zoomend.' );
+pickup_checkout_assert( str_contains( $leaflet_provider_js, 'var lastPoints = []' ) && str_contains( $leaflet_provider_js, 'lastPoints = Array.isArray(points) ? points.slice() : []' ) && str_contains( $leaflet_provider_js, "map.on('zoomend', scheduleClusterRebuild)" ) && str_contains( $leaflet_provider_js, 'cancelScheduledClusterRebuild' ), 'Leaflet provider must retain the full marker dataset and coalesce grid cluster rebuilds on zoomend.' );
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'function rebuildClusters()' ) && str_contains( $leaflet_provider_js, 'clearRenderedMarkers();' ) && str_contains( $leaflet_provider_js, 'renderClustered(lastPoints);' ) && str_contains( $leaflet_provider_js, 'clusterPoints(points)' ) && str_contains( $leaflet_provider_js, 'map.latLngToLayerPoint' ), 'Leaflet zoom rebuild must clear old layers and rerun clusterPoints against the current zoom without replacing the retained point dataset.' );
 $leaflet_rebuild_source = substr( $leaflet_provider_js, strpos( $leaflet_provider_js, 'function rebuildClusters()' ), strpos( $leaflet_provider_js, 'function renderClustered(points)' ) - strpos( $leaflet_provider_js, 'function rebuildClusters()' ) );
 pickup_checkout_assert( str_contains( $leaflet_rebuild_source, 'updateActiveMarkers();' ) && ! str_contains( $leaflet_rebuild_source, 'activePointId =' ), 'Leaflet zoom rebuild must preserve activePointId and reapply the active marker style.' );

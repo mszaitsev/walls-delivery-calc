@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -156,6 +157,8 @@ final class OrderQuoteRequestMapper {
 			$city_display = (string) ( $override['display_name'] ?? $city_display );
 		}
 
+		$coordinates = $this->destination_coordinates( $order, $selected_location, $resolved_location_id );
+
 		$context = array_filter(
 			array(
 				'source'                    => 'woocommerce_order_admin_preview',
@@ -175,6 +178,9 @@ final class OrderQuoteRequestMapper {
 				'selected_location_region'  => $address->region_name,
 				'selected_location_fias_id' => array() !== $override ? $address->fias_id : ( $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $address->fias_id ),
 				'location_fias_id'          => array() !== $override ? $address->fias_id : ( $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $address->fias_id ),
+				'recipient_phone'           => $this->order_phone( $order ),
+				'destination_latitude'      => $coordinates['latitude'],
+				'destination_longitude'     => $coordinates['longitude'],
 				'fias_id'                   => $address->fias_id,
 				'gar_id'                    => $address->gar_id,
 				'normalized_address'        => $address->normalized,
@@ -197,6 +203,13 @@ final class OrderQuoteRequestMapper {
 			$context['pickup_selection'] = $pek_selection;
 			$context['pickup_selections'] = array(
 				PekSettings::PICKUP_FAMILY => $pek_selection,
+			);
+		}
+		$ozon_selection = $this->ozon_pickup_selection( $selected_pickup_point );
+		if ( array() !== $ozon_selection ) {
+			$context['pickup_selection'] = $ozon_selection;
+			$context['pickup_selections'] = array(
+				OzonDeliverySettings::PICKUP_FAMILY => $ozon_selection,
 			);
 		}
 
@@ -239,6 +252,79 @@ final class OrderQuoteRequestMapper {
 		}
 
 		return $selected_pickup_point;
+	}
+
+	/** @param array<string,mixed> $selected_pickup_point */
+	private function ozon_pickup_selection( array $selected_pickup_point ): array {
+		$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+		$carrier = (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? '' );
+		$family = (string) ( $selected_pickup_point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' );
+		if ( OzonDeliverySettings::CARRIER_KEY !== $carrier || OzonDeliverySettings::PICKUP_FAMILY !== $family ) {
+			return array();
+		}
+
+		return $selected_pickup_point;
+	}
+
+	/** @param array<string,mixed>|null $selected_location @return array{latitude:?float,longitude:?float} */
+	private function destination_coordinates( object $order, ?array $selected_location, int $location_id ): array {
+		$override = is_array( $selected_location ) ? $selected_location : array();
+		$direct = $this->valid_coordinate_pair( $this->first_coordinate_candidate( $override, $order, array( 'latitude', 'lat' ), array( '_wdc_platform_latitude', '_wdc_platform_location_latitude' ) ), $this->first_coordinate_candidate( $override, $order, array( 'longitude', 'lng', 'lon' ), array( '_wdc_platform_longitude', '_wdc_platform_location_longitude' ) ) );
+		if ( null !== $direct ) {
+			return $direct;
+		}
+
+		if ( $location_id <= 0 || ! $this->location_repository instanceof LocationRepository ) {
+			return array( 'latitude' => null, 'longitude' => null );
+		}
+
+		$location = $this->location_repository->find_by_id( $location_id );
+		if ( null === $location || ! $location->active ) {
+			return array( 'latitude' => null, 'longitude' => null );
+		}
+
+		return $this->valid_coordinate_pair( $location->latitude, $location->longitude ) ?? array( 'latitude' => null, 'longitude' => null );
+	}
+
+	/** @param array<string,mixed> $override @param array<int,string> $override_keys @param array<int,string> $meta_keys */
+	private function first_coordinate_candidate( array $override, object $order, array $override_keys, array $meta_keys ): mixed {
+		foreach ( $override_keys as $key ) {
+			if ( array_key_exists( $key, $override ) && '' !== (string) $override[ $key ] ) {
+				return $override[ $key ];
+			}
+		}
+		foreach ( $meta_keys as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return null;
+	}
+
+	/** @return array{latitude:float,longitude:float}|null */
+	private function valid_coordinate_pair( mixed $latitude, mixed $longitude ): ?array {
+		if ( ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return null;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+		if ( ! is_finite( $latitude ) || ! is_finite( $longitude ) || $latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180 ) {
+			return null;
+		}
+
+		return array( 'latitude' => $latitude, 'longitude' => $longitude );
+	}
+
+	private function order_phone( object $order ): string {
+		$value = $this->order_string( $order, 'get_billing_phone' );
+		$value = preg_replace( '/[^\d+]+/', '', $value ) ?? '';
+		if ( preg_match( '/^8(\d{10})$/', $value, $matches ) ) {
+			return '+7' . $matches[1];
+		}
+
+		return preg_match( '/^\+7\d{10}$/', $value ) ? $value : '';
 	}
 
 	private function saved_location_id( object $order ): int {

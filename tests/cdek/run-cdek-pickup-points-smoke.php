@@ -22,6 +22,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -494,7 +495,7 @@ cdek_pickup_assert( false === $session->pickup_selection_matches( 'cdek', 'cdek:
 $rest_session = new CheckoutSessionManager();
 $rest_session->save_rates( array( 'cdek:pickup:136' => $rate ) );
 $rest_session->save_city_context( array( 'city_code' => 270, 'city_name' => 'Kemerovo', 'region_name' => 'Kemerovo region', 'postcode' => '650004', 'country_code' => 'RU' ) );
-$rest_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $rest_session, null, $service );
+$rest_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $rest_session, null, $service, null, null, null, null, null, new WooCommerceSessionBootstrapper() );
 $rest_saved = $rest_controller->save(
 	array(
 		'carrier' => 'cdek',
@@ -536,7 +537,7 @@ $kz_session = new CheckoutSessionManager();
 $kz_session->save_rates( array( 'cdek:pickup:136' => $kz_rate ) );
 $kz_session->save_city_context( array( 'city_code' => 152, 'city_name' => 'Almaty', 'region_name' => 'Almaty', 'postcode' => '050000', 'country_code' => 'KZ' ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup:136' ) );
-$kz_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $kz_session, null, $service );
+$kz_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $kz_session, null, $service, null, null, null, null, null, new WooCommerceSessionBootstrapper() );
 $http->next_deliverypoints_body = $kz_handout;
 $kz_saved = $kz_controller->save(
 	array(

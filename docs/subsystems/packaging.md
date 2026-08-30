@@ -1,10 +1,12 @@
 # Packaging
 
-Version: 0.133.9
+Version: 0.141.18
 
 Packaging code lives in `src/Packaging`. `PackagingBuilder` and `PackagingWeightCalculator` build shipment places from order/package data. Shipment allocation tests protect the bridge into shipment creation.
 
-Carrier-specific parcel conversions belong in carrier request builders, not in the generic packaging builder.
+Carrier-specific parcel conversions belong in carrier request builders, not in the generic packaging builder. A carrier may, however, supply optional generic `PackagingBuilderConfig` parcel limits through a carrier-owned factory. Without limits, all historical packing behavior remains unchanged. With limits, box formats are filtered by rotated fit, and the builder uses a deterministic bounded N-box path rather than emitting an oversized stacked fallback. An indivisible item outside the configured limit fails closed.
+
+Ozon Delivery owns `OzonDeliveryPackagingBuilderFactory`, which configures a maximum parcel of 50x50x30 cm with rotation allowed. `box_40_40_40` is therefore excluded for Ozon. Each resulting `PackagingParcel` becomes one Ozon checkout posting; content that needs more than two parcels remains valid, while a single item that cannot fit does not produce an oversized posting.
 
 Shipment creation should preserve enough package/place data for carrier payload reconstruction: weight, dimensions when available, declared value, and item allocation. Carrier request builders decide how those fields map to carrier parcels.
 

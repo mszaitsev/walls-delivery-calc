@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\OzonDelivery;
 
+use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -20,10 +21,17 @@ final class OzonDeliverySettings {
 	public const CLIENT_SECRET_ENCRYPTED_KEY = 'ozon_delivery_client_secret_encrypted';
 	public const REQUEST_TIMEOUT_KEY = 'ozon_delivery_request_timeout';
 	public const LAST_DIAGNOSTIC_KEY = 'ozon_delivery_last_diagnostic';
+	public const LAST_QUOTE_DIAGNOSTIC_KEY = 'ozon_delivery_last_quote_diagnostic';
+	public const SHIPMENT_METHOD_ID_KEY = 'ozon_delivery_shipment_method_id';
+	public const QUOTE_FALLBACK_PHONE_KEY = 'ozon_delivery_quote_fallback_phone';
 	public const PICKUP_AUTO_SYNC_KEY = 'ozon_delivery_pickup_auto_sync';
 	public const PICKUP_SYNC_TIME_KEY = 'ozon_delivery_pickup_sync_time';
 
-	public function __construct( private SettingsRepository $settings ) {}
+	private RussianPhoneNormalizer $phones;
+
+	public function __construct( private SettingsRepository $settings, ?RussianPhoneNormalizer $phones = null ) {
+		$this->phones = $phones ?? new RussianPhoneNormalizer();
+	}
 
 	/** @return array<string,mixed> */
 	public static function defaults(): array {
@@ -32,6 +40,9 @@ final class OzonDeliverySettings {
 			self::CLIENT_SECRET_ENCRYPTED_KEY => '',
 			self::REQUEST_TIMEOUT_KEY => 15,
 			self::LAST_DIAGNOSTIC_KEY => array(),
+			self::LAST_QUOTE_DIAGNOSTIC_KEY => array(),
+			self::SHIPMENT_METHOD_ID_KEY => 0,
+			self::QUOTE_FALLBACK_PHONE_KEY => '',
 			self::PICKUP_AUTO_SYNC_KEY => true,
 			self::PICKUP_SYNC_TIME_KEY => '02:00',
 		);
@@ -49,6 +60,42 @@ final class OzonDeliverySettings {
 	/** @param array<string,mixed> $result */
 	public function save_last_diagnostic( array $result ): void {
 		$this->settings->set( self::LAST_DIAGNOSTIC_KEY, $result );
+	}
+
+	public function shipment_method_id(): int {
+		return max( 0, $this->settings->get_int( self::SHIPMENT_METHOD_ID_KEY, 0 ) );
+	}
+
+	public function quote_fallback_phone(): string {
+		return $this->phones->normalize( $this->settings->get_string( self::QUOTE_FALLBACK_PHONE_KEY, '' ) );
+	}
+
+	/** @param array<string,mixed> $input */
+	public function save_pricing_settings( array $input ): void {
+		if ( array_key_exists( self::SHIPMENT_METHOD_ID_KEY, $input ) ) {
+			$value = preg_replace( '/\D+/', '', (string) $input[ self::SHIPMENT_METHOD_ID_KEY ] ) ?? '';
+			$this->settings->set( self::SHIPMENT_METHOD_ID_KEY, '' === $value ? 0 : max( 0, (int) $value ) );
+		}
+		if ( array_key_exists( self::QUOTE_FALLBACK_PHONE_KEY, $input ) ) {
+			$this->settings->set( self::QUOTE_FALLBACK_PHONE_KEY, $this->phones->normalize( $input[ self::QUOTE_FALLBACK_PHONE_KEY ] ) );
+		}
+	}
+
+	/** @return array<string,mixed> */
+	public function last_quote_diagnostic(): array {
+		return $this->settings->get_array( self::LAST_QUOTE_DIAGNOSTIC_KEY, array() );
+	}
+
+	/** @param array<string,mixed> $result */
+	public function save_last_quote_diagnostic( array $result ): void {
+		$this->settings->set( self::LAST_QUOTE_DIAGNOSTIC_KEY, $result );
+	}
+
+	public function pricing_live_confirmed(): bool {
+		$diagnostic = $this->last_quote_diagnostic();
+		return ! empty( $diagnostic['success'] )
+			&& 'POST /v1/order/checkout' === (string) ( $diagnostic['endpoint'] ?? '' )
+			&& (int) ( $diagnostic['shipment_method_id'] ?? 0 ) === $this->shipment_method_id();
 	}
 
 	public function pickup_auto_sync_enabled(): bool { return $this->settings->get_bool( self::PICKUP_AUTO_SYNC_KEY, true ); }

@@ -597,6 +597,16 @@ function wc_checkout_smoke_orchestrator(): CheckoutOrchestrator {
 	);
 }
 
+function wc_checkout_phone_request_from_post( array $post ): \WallsShop\WDC\Domain\Quote\QuoteRequest {
+	$previous_post = $_POST;
+	$_POST         = $post;
+	try {
+		return ( new WooCommercePackageMapper() )->map( wc_checkout_smoke_package() );
+	} finally {
+		$_POST = $previous_post;
+	}
+}
+
 function wc_checkout_smoke_lead_time_normalizer( int $processing_days = 0 ): DeliveryLeadTimeNormalizer {
 	$settings = new SettingsRepository();
 	$settings->set( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY, $processing_days );
@@ -619,6 +629,58 @@ wc_checkout_smoke_assert( 100000 === $request->order_total->get_kopecks(), 'Pack
 wc_checkout_smoke_assert( 2 === $request->package->get_total_quantity(), 'Package mapper must map items quantity.' );
 wc_checkout_smoke_assert( 2500 === $request->package->get_total_weight_g(), 'Package mapper must map contents weight.' );
 wc_checkout_smoke_assert( count( $request->package->items ) === 1, 'Package mapper must keep package items.' );
+
+$phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => 'billing_phone=%2B79131234567&billing_first_name=Hidden' ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must read current billing_phone from WooCommerce AJAX post_data.' );
+wc_checkout_smoke_assert( ! array_key_exists( 'post_data', $phone_request->customer_context ) && ! array_key_exists( 'billing_first_name', $phone_request->customer_context ), 'Package mapper must not copy the full checkout post_data into customer_context.' );
+$formatted_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67' ) ) ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $formatted_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must normalize formatted Russian billing_phone from post_data.' );
+$eight_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => '8 913 123 45 67' ) ) ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $eight_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must normalize 8XXXXXXXXXX Russian billing_phone.' );
+$direct_phone_request = wc_checkout_phone_request_from_post( array( 'billing_phone' => '89131234567' ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $direct_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must use direct billing_phone when AJAX post_data is absent.' );
+$priority_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67' ) ), 'billing_phone' => '+79990000000' ) );
+wc_checkout_smoke_assert( '+79131234567' === (string) ( $priority_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must prefer post_data billing_phone over stale direct billing_phone.' );
+$invalid_phone_request = wc_checkout_phone_request_from_post( array( 'post_data' => http_build_query( array( 'billing_phone' => 'call me +79131234567' ) ) ) );
+wc_checkout_smoke_assert( '' === (string) ( $invalid_phone_request->customer_context['recipient_phone'] ?? '' ), 'Package mapper must leave invalid billing_phone empty.' );
+$previous_post = $_POST;
+$_POST         = array( 'post_data' => 'billing_phone=%2B79131234567&billing_first_name=Hidden' );
+$post_snapshot = $_POST;
+( new WooCommercePackageMapper() )->map( wc_checkout_smoke_package() );
+wc_checkout_smoke_assert( $post_snapshot === $_POST, 'Package mapper must not mutate global $_POST while parsing WooCommerce post_data.' );
+$_POST = $previous_post;
+
+$coordinate_db = new class extends wpdb {
+	public array $locations = array();
+	public int $location_find_by_id_calls = 0;
+	public int $location_single_lookup_calls = 0;
+};
+$coordinate_db->locations = array(
+	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
+	array( 'id' => 650001, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неактивный Новосибирск', 'latitude' => 55.1, 'longitude' => 82.9, 'active' => 0 ),
+	array( 'id' => 650002, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неверные координаты', 'latitude' => 91, 'longitude' => 82.9, 'active' => 1 ),
+	array( 'id' => 650003, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неполные координаты', 'latitude' => 55.03, 'longitude' => null, 'active' => 1 ),
+);
+$coordinate_repository = new LocationRepository( $coordinate_db );
+$coordinate_session = new CheckoutSessionManager();
+$coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
+$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+wc_checkout_smoke_assert( 54.9833 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.8964 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must prefer trusted session destination coordinates.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->location_find_by_id_calls, 'Package mapper must not query canonical location when session coordinates are already complete.' );
+
+$coordinate_session_id = new CheckoutSessionManager();
+$coordinate_session_id->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск' ) );
+$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+wc_checkout_smoke_assert( '650000' === (string) ( $coordinate_request_id->customer_context['selected_location_id'] ?? '' ), 'Package mapper must preserve canonical selected_location_id.' );
+wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request_id->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request_id->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must resolve destination coordinates from canonical selected_location_id.' );
+
+foreach ( array( 999999, 650001, 650002, 650003 ) as $bad_location_id ) {
+	$bad_session = new CheckoutSessionManager();
+	$bad_session->save_city_context( array( 'location_id' => $bad_location_id, 'city_name' => 'Новосибирск' ) );
+	$bad_request = ( new WooCommercePackageMapper( null, $bad_session, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+	wc_checkout_smoke_assert( null === ( $bad_request->customer_context['destination_latitude'] ?? null ) && null === ( $bad_request->customer_context['destination_longitude'] ?? null ), 'Package mapper must leave destination coordinates unresolved for missing, inactive, invalid, or partial canonical locations.' );
+}
+wc_checkout_smoke_assert( 0 === $coordinate_db->location_single_lookup_calls, 'Package mapper must not use fuzzy city-name lookup for destination coordinates.' );
 
 $orchestrator = wc_checkout_smoke_orchestrator();
 $result       = $orchestrator->calculate( $request );

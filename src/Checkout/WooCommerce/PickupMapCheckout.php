@@ -58,6 +58,7 @@ final class PickupMapCheckout {
 			$pickup_selections = $this->selected_points_context( false );
 			$selected_pickup_points = $this->selected_points_context( true );
 			$selected_pickup_point = $this->selected_point_context( $active_pickup_family );
+			$pickup_rate_capabilities = $this->pickup_rate_capabilities();
 			wp_localize_script(
 				'wdc-pickup-checkout',
 				'wdcPickupCheckout',
@@ -74,6 +75,8 @@ final class PickupMapCheckout {
 					'activePickupFamily' => $active_pickup_family,
 					'activePickupCountryCode' => $active_pickup_country,
 					'selectedPickupPoint' => $selected_pickup_point,
+					'pickupRateCapabilities' => $pickup_rate_capabilities,
+					'pickup_rate_capabilities' => $pickup_rate_capabilities,
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
 					'pickupFamilies'   => $this->pickup_families(),
@@ -87,7 +90,7 @@ final class PickupMapCheckout {
 						'searchPlaceholder' => 'Адрес или индекс',
 						'postcodeOnlyPlaceholder' => 'Сейчас работает поиск только по почтовому индексу',
 						'empty'             => 'Переместите карту или воспользуйтесь поиском.',
-						'loading'           => 'Поиск...',
+						'loading'           => 'Загружаем пункты выдачи…',
 						'addressNotFound'   => 'Адрес не найден',
 						'postcodeOnly'      => 'Поиск доступен только по индексу',
 						'dadataError'       => 'Ошибка DaData',
@@ -196,6 +199,45 @@ final class PickupMapCheckout {
 	}
 
 	/**
+	 * @return array<string,array<string,bool>>
+	 */
+	private function pickup_rate_capabilities(): array {
+		$capabilities = array();
+		foreach ( $this->session_manager->rates() as $rate ) {
+			if ( ! is_array( $rate ) || ! $this->is_pickup_rate( $rate ) ) {
+				continue;
+			}
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			if ( '' === $rate_id ) {
+				continue;
+			}
+			$rate_capabilities = $this->pickup_rate_capabilities_from_rate( $rate );
+			if ( array() !== $rate_capabilities ) {
+				$capabilities[ $rate_id ] = $rate_capabilities;
+			}
+		}
+
+		return $capabilities;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,bool>
+	 */
+	private function pickup_rate_capabilities_from_rate( array $rate ): array {
+		$meta = $this->rate_meta( $rate );
+		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+		$capabilities = array();
+		foreach ( array( 'reload_on_viewport_change', 'prefetch_points' ) as $key ) {
+			if ( array_key_exists( $key, $snapshot ) ) {
+				$capabilities[ $key ] = (bool) $snapshot[ $key ];
+			}
+		}
+
+		return $capabilities;
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	private function active_pickup_rate_location(): array {
@@ -255,7 +297,7 @@ final class PickupMapCheckout {
 	 * @return array<string,mixed>|null
 	 */
 	private function selected_point_context( string $pickup_family = '', bool $require_address = true ): ?array {
-		$selection = '' !== $pickup_family ? $this->session_manager->checkout_pickup_point_for_family( $pickup_family ) : $this->session_manager->checkout_pickup_point();
+		$selection = '' !== $pickup_family ? $this->session_manager->pickup_selection_for_family_current_destination( $pickup_family ) : $this->session_manager->pickup_selection_current_destination();
 		if ( array() === $selection || ! $this->selection_has_identity( $selection ) ) {
 			return null;
 		}
@@ -437,7 +479,7 @@ final class PickupMapCheckout {
 	 */
 	private function selected_points_context( bool $require_address = false ): array {
 		$selected = array();
-		foreach ( $this->session_manager->pickup_selections() as $family => $selection ) {
+		foreach ( $this->session_manager->pickup_selections_for_current_destination() as $family => $selection ) {
 			$point = $this->selected_point_context( $family, $require_address );
 			if ( null !== $point ) {
 				$selected[ $family ] = $point;

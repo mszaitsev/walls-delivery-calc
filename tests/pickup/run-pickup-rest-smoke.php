@@ -197,6 +197,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\Pek\Pickup\PekCheckoutPickupPointFormatter;
 use WallsShop\WDC\Domain\Common\DateRange;
@@ -233,6 +234,15 @@ final class WdcPickupRestPekProvider implements CarrierPickupPointProviderInterf
 
 		return null;
 	}
+}
+
+final class WdcPickupRestOzonProvider implements CarrierPickupPointProviderInterface {
+	public array $queries = array();
+	/** @param array<int,PickupPoint> $points */
+	public function __construct( private array $points ) {}
+	public function carrier_key(): string { return OzonDeliverySettings::CARRIER_KEY; }
+	public function search( CarrierPickupPointQuery $query ): array { $this->queries[] = $query; return $this->points; }
+	public function resolve_selection( CarrierPickupPointSelectionQuery $query ): ?PickupPoint { return null; }
 }
 
 function wdc_pickup_rest_pek_snapshot( string $fingerprint = 'pek-destination-fp', mixed $latitude = 55.755864, mixed $longitude = 37.617698 ): array {
@@ -301,6 +311,51 @@ function wdc_pickup_rest_store_pek_rate( CheckoutSessionManager $session, array 
 		)
 	);
 	$session->save_rates( array( PekSettings::PICKUP_RATE_ID => $stored_rate ) );
+
+	return $stored_rate;
+}
+
+function wdc_pickup_rest_store_ozon_rate( CheckoutSessionManager $session, array $snapshot ): array {
+	$rate = new DeliveryRate(
+		'ozon_delivery:pickup',
+		OzonDeliverySettings::CARRIER_KEY,
+		'Ozon Доставка',
+		OzonDeliverySettings::SERVICE_KEY,
+		'Ozon Доставка',
+		'pickup',
+		'Ozon до ПВЗ',
+		DeliveryType::PICKUP,
+		'Ozon до ПВЗ',
+		Money::from_kopecks( 9900 ),
+		null,
+		null,
+		DateRange::single( 5, DateRange::UNIT_CALENDAR_DAYS ),
+		'',
+		'',
+		array(),
+		false,
+		'',
+		true,
+		false,
+		array(
+			'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
+			'pickup_provider_query' => $snapshot,
+			'requires_rate_refresh_on_pickup_selection' => true,
+		),
+		Money::from_kopecks( 9900 )
+	);
+	$mapped = ( new WooCommerceRateMapper() )->map( $rate );
+	$stored_rate = array_merge(
+		$mapped['meta_data'],
+		array(
+			'rate_id' => $rate->rate_id,
+			'label' => $mapped['label'],
+			'cost' => $mapped['cost'],
+			'fallback_used' => false,
+			'service_title' => $rate->service_name,
+		)
+	);
+	$session->save_rates( array( 'ozon_delivery:pickup' => $stored_rate ) );
 
 	return $stored_rate;
 }
@@ -593,6 +648,63 @@ pickup_rest_assert( is_array( $pek_search ) && 1 === count( $pek_search ), 'PEK 
 $pek_wrong_family = $pek_points_controller->points( new WdcPickupRestRequest( array( 'carrier' => PekSettings::CARRIER_KEY, 'shipping_method_id' => PekSettings::PICKUP_RATE_ID, 'pickup_family' => 'forged:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_rest_assert( $pek_wrong_family instanceof WP_Error && 'provider_rate_context_mismatch' === $pek_wrong_family->get_error_code(), 'PEK /points must reject browser-forged pickup family.' );
 
+WC()->session = new WC_Session_Handler();
+$ozon_session = new CheckoutSessionManager();
+$ozon_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 650000 ) );
+$ozon_fingerprint = 'country=RU|location_id=650000';
+$stored_ozon_rate = wdc_pickup_rest_store_ozon_rate(
+	$ozon_session,
+	array(
+		'carrier_key' => OzonDeliverySettings::CARRIER_KEY,
+		'purpose' => CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
+		'location_id' => 650000,
+		'country_code' => 'RU',
+		'fallback_address' => '',
+		'latitude' => 55.030199,
+		'longitude' => 82.92043,
+		'cargo' => array(
+			'weight_g' => 1000,
+			'volume_cm3' => 1000,
+			'max_dimension_cm' => 10,
+			'max_place_weight_g' => 1000,
+			'places_count' => 1,
+		),
+		'radius_km' => 60,
+		'limit' => 100,
+		'destination_fingerprint' => $ozon_fingerprint,
+		'provider_destination_fingerprint' => $ozon_fingerprint,
+	)
+);
+pickup_rest_assert( isset( $stored_ozon_rate['rate_meta']['pickup_provider_query']['destination_fingerprint'] ), 'Ozon REST fixture must store destination fingerprint inside production rate_meta pickup_provider_query.' );
+WC()->session = null;
+$ozon_provider = new WdcPickupRestOzonProvider(
+	array(
+		new PickupPoint( OzonDeliverySettings::CARRIER_KEY, '92783', 'Новосибирск, Красный проспект', '', 'Новосибирск', 'Новосибирская область', 55.0301, 82.9201, 'pvz', 'Ежедневно 09:00-21:00', '', null, true, array( 'presentation_title' => 'Пункт выдачи Ozon', 'point_name' => 'Ozon Красный проспект', 'generation_id' => 3, 'requires_rate_refresh' => true ) ),
+	)
+);
+$ozon_points_controller = new PickupPointsRestController( $repo, $type_settings, $address_search, null, null, null, null, null, new CarrierPickupPointProviderRegistry( array( $ozon_provider ) ), new CheckoutPickupPointProviderQueryResolver( $ozon_session ), null, $session_bootstrapper );
+$ozon_points = $ozon_points_controller->points(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => OzonDeliverySettings::CARRIER_KEY,
+			'shipping_method_id' => 'ozon_delivery:pickup',
+			'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
+			'location_id' => '999999',
+			'weight_g' => '999999',
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( is_array( $ozon_points ) && 1 === count( $ozon_points ) && '92783' === (string) ( $ozon_points[0]['point_code'] ?? '' ), 'Generic /points REST must return Ozon provider points from trusted server-side rate context.' );
+pickup_rest_assert( 'Пункт выдачи Ozon' === (string) ( $ozon_points[0]['point_title'] ?? '' ) && 'Новосибирск, Красный проспект' === (string) ( $ozon_points[0]['address'] ?? '' ) && 'Ежедневно 09:00-21:00' === (string) ( $ozon_points[0]['work_time'] ?? '' ) && true === ( $ozon_points[0]['requires_rate_refresh'] ?? null ) && true === ( $ozon_points[0]['snapshot']['requires_rate_refresh'] ?? null ), 'Ozon REST provider projection must expose title, address, schedule and generic repricing capability for map cards.' );
+pickup_rest_assert( 650000 === $ozon_provider->queries[0]->location_id && 1000 === $ozon_provider->queries[0]->cargo->weight_g, 'Ozon /points must ignore browser location/cargo authority and use stored rate snapshot.' );
+pickup_rest_assert( $ozon_fingerprint === (string) ( $ozon_points[0]['destination_fingerprint'] ?? '' ) && $ozon_fingerprint === (string) ( $ozon_points[0]['provider_destination_fingerprint'] ?? '' ), 'Ozon REST provider projection must carry the trusted destination fingerprint.' );
+pickup_rest_assert( ! array_key_exists( 'generation_id', $ozon_points[0] ) && ! array_key_exists( 'raw_reference', $ozon_points[0] ), 'Ozon REST provider projection must not expose generation_id or internal provider raw_reference fields.' );
+
+WC()->session = new WC_Session_Handler();
+$pek_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 153912 ) );
+wdc_pickup_rest_store_pek_rate( $pek_session, $pek_snapshot );
+WC()->session = null;
 $pek_checkout_controller = new CheckoutPickupPointRestController( $repo, $pek_session, null, null, null, null, null, $pek_registry, $pek_query_resolver, $session_bootstrapper );
 $pek_save = $pek_checkout_controller->save(
 	new WdcPickupRestRequest(

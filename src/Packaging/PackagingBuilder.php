@@ -47,6 +47,7 @@ final class PackagingBuilder {
 		$parcels = array();
 		$parcel_meta = array();
 		foreach ( $long_items as $item ) {
+			$this->assert_parcel_dimensions_allowed( (float) $item['length'], (float) $item['width'], (float) $item['height'] );
 			$parcels[] = $this->parcel_from_box( (float) $item['length'], (float) $item['width'], (float) $item['height'], max( 1, $item['weight_g'] ), 'long_item', '' );
 		}
 
@@ -96,6 +97,7 @@ final class PackagingBuilder {
 			'dimensions' => $this->aggregate_dimensions( $parcel_dimensions ),
 			'box_limit' => array(
 				'formats' => self::BOX_FORMATS,
+				'max_parcel_dimensions_cm' => $this->config->has_parcel_limits() ? array( 'length' => $this->config->max_parcel_length_cm, 'width' => $this->config->max_parcel_width_cm, 'height' => $this->config->max_parcel_height_cm ) : null,
 				'row_width_limit' => self::STACKED_ROW_WIDTH_LIMIT_CM,
 				'long_item_threshold' => self::LONG_ITEM_THRESHOLD_CM,
 				'small_item_max_volume_cm3' => self::SMALL_ITEM_MAX_VOLUME_CM3,
@@ -152,6 +154,7 @@ final class PackagingBuilder {
 		$weight = $this->items_weight( $regular_items );
 		if ( ! $this->items_have_dimensions( $regular_items ) ) {
 			if ( $this->has_package_dimensions( $package ) ) {
+				$this->assert_parcel_dimensions_allowed( (float) $package->length_cm, (float) $package->width_cm, (float) $package->height_cm );
 				$base['parcels'] = array( $this->parcel_from_box( (float) $package->length_cm, (float) $package->width_cm, (float) $package->height_cm, $weight, 'package_dimensions', '' ) );
 				$base['source'] = 'package_dimensions';
 				$base['packing_strategy'] = 'package_dimensions';
@@ -159,6 +162,7 @@ final class PackagingBuilder {
 			}
 
 			$dimensions = $this->default_dimensions();
+			$this->assert_parcel_dimensions_allowed( $dimensions['length'], $dimensions['width'], $dimensions['height'] );
 			$base['parcels'] = array( $this->parcel_from_box( $dimensions['length'], $dimensions['width'], $dimensions['height'], $weight, 'defaults', '' ) );
 			$base['source'] = 'defaults';
 			$base['packing_strategy'] = 'defaults';
@@ -170,6 +174,9 @@ final class PackagingBuilder {
 		$units = $prepared['units'];
 		if ( count( $prepared['packer_units_before_synthetic'] ) > self::MAX_EXPANDED_ITEMS_FOR_3D_PACKER ) {
 			$base['packing_limit_reason'] = 'max_expanded_items_for_3d_packer';
+			if ( $this->config->has_parcel_limits() ) {
+				return $this->limited_multi_box_result( $regular_items, $base );
+			}
 			return $this->stacked_result( $regular_items, $base );
 		}
 
@@ -195,6 +202,9 @@ final class PackagingBuilder {
 			$base['selected_box_format'] = implode( '+', $base['selected_box_formats'] );
 			return $base;
 		}
+		if ( $this->config->has_parcel_limits() ) {
+			return $this->limited_multi_box_result( $regular_items, $base );
+		}
 
 		return $this->stacked_result( $regular_items, $base );
 	}
@@ -206,6 +216,7 @@ final class PackagingBuilder {
 	 */
 	private function stacked_result( array $items, array $base ): array {
 		$stacked = $this->stacked_rows_dimensions( $items );
+		$this->assert_parcel_dimensions_allowed( (float) $stacked['length'], (float) $stacked['width'], (float) $stacked['height'] );
 		$base['parcels'] = array( $this->parcel_from_box( (float) $stacked['length'], (float) $stacked['width'], (float) $stacked['height'], $this->items_weight( $items ), 'items_stacked_rows', '' ) );
 		$base['source'] = 'items_stacked_rows';
 		$base['packing_strategy'] = 'items_stacked_rows';
@@ -289,7 +300,7 @@ final class PackagingBuilder {
 	 */
 	private function best_one_box( array $units): ?array {
 		$best = null;
-		foreach ( self::BOX_FORMATS as $name => $box ) {
+		foreach ( $this->allowed_box_formats() as $name => $box ) {
 			$result = $this->pack_units_in_box( $units, $box, $name );
 			if ( is_array( $result ) ) {
 				$best = $this->better_packed_box( $best, $result );
@@ -304,11 +315,13 @@ final class PackagingBuilder {
 	 * @return array<string,mixed>|null
 	 */
 	private function best_two_boxes( array $units ): ?array {
-		$pairs = array(
-			array( 'box_50_50_30', 'box_50_50_30' ),
-			array( 'box_50_50_30', 'box_40_40_40' ),
-			array( 'box_40_40_40', 'box_40_40_40' ),
-		);
+		$formats = array_keys( $this->allowed_box_formats() );
+		$pairs = array();
+		foreach ( $formats as $first ) {
+			foreach ( $formats as $second ) {
+				$pairs[] = array( $first, $second );
+			}
+		}
 		$orders = array( 'volume', 'max_side', 'weight' );
 		$attempts = 0;
 		$best = null;
@@ -716,13 +729,84 @@ final class PackagingBuilder {
 	 * @param array<string,int|string> $candidate
 	 */
 	private function fits_any_box( array $candidate ): bool {
-		foreach ( self::BOX_FORMATS as $box ) {
-			if ( $candidate['length'] <= $box['length'] && $candidate['width'] <= $box['width'] && $candidate['height'] <= $box['height'] ) {
+		foreach ( $this->allowed_box_formats() as $box ) {
+			if ( $this->config->parcel_dimensions_allowed( (float) $candidate['length'], (float) $candidate['width'], (float) $candidate['height'] ) && $candidate['length'] <= $box['length'] && $candidate['width'] <= $box['width'] && $candidate['height'] <= $box['height'] ) {
 				return true;
 			}
 		}
 
 		return false;
+	}
+
+	/**
+	 * @return array<string,array{length:int,width:int,height:int}>
+	 */
+	private function allowed_box_formats(): array {
+		return array_filter(
+			self::BOX_FORMATS,
+			fn( array $box ): bool => $this->config->parcel_dimensions_allowed( (float) $box['length'], (float) $box['width'], (float) $box['height'] )
+		);
+	}
+
+	/**
+	 * @param array<int,array<string,int|string>> $items
+	 * @param array<string,mixed> $base
+	 * @return array<string,mixed>
+	 */
+	private function limited_multi_box_result( array $items, array $base ): array {
+		$formats = $this->allowed_box_formats();
+		if ( array() === $formats ) {
+			throw new PackagingException( 'packaging_parcel_limits_unusable' );
+		}
+		$boxes = array();
+		foreach ( $this->sort_units( array_map( fn( array $item ): array => $this->unit_from_item( $item, 'item' ), $items ) ) as $unit ) {
+			$best_index = null;
+			$best_result = null;
+			foreach ( $boxes as $index => $box ) {
+				$result = $this->pack_units_in_box( array_merge( $box['units'], array( $unit ) ), $formats[ $box['format'] ], (string) $box['format'] );
+				if ( is_array( $result ) && ( null === $best_result || $this->packed_box_score( $result ) < $this->packed_box_score( $best_result ) ) ) {
+					$best_index = $index;
+					$best_result = $result;
+				}
+			}
+			if ( null !== $best_index ) {
+				$boxes[ $best_index ]['units'][] = $unit;
+				continue;
+			}
+			$best_format = '';
+			foreach ( $formats as $format => $dimensions ) {
+				$result = $this->pack_units_in_box( array( $unit ), $dimensions, $format );
+				if ( is_array( $result ) && ( null === $best_result || $this->packed_box_score( $result ) < $this->packed_box_score( $best_result ) ) ) {
+					$best_format = $format;
+					$best_result = $result;
+				}
+			}
+			if ( '' === $best_format ) {
+				throw new PackagingException( 'packaging_item_oversize' );
+			}
+			$boxes[] = array( 'format' => $best_format, 'units' => array( $unit ) );
+		}
+		$packed = array();
+		foreach ( $boxes as $box ) {
+			$result = $this->pack_units_in_box( $box['units'], $formats[ $box['format'] ], (string) $box['format'] );
+			if ( ! is_array( $result ) ) {
+				throw new PackagingException( 'packaging_item_oversize' );
+			}
+			$packed[] = $result;
+		}
+		$base['parcels'] = array_map( fn( array $box ): PackagingParcel => $this->parcel_from_box( (float) $box['length'], (float) $box['width'], (float) $box['height'], (int) $box['goods_weight_g'], 'multi_boxes_3d', (string) $box['format'] ), $packed );
+		$base['source'] = 'multi_boxes_3d';
+		$base['packing_strategy'] = 'multi_boxes_3d';
+		$base['selected_box_formats'] = array_values( array_map( static fn( array $box ): string => (string) $box['format'], $packed ) );
+		$base['selected_box_format'] = implode( '+', $base['selected_box_formats'] );
+
+		return $base;
+	}
+
+	private function assert_parcel_dimensions_allowed( float $length_cm, float $width_cm, float $height_cm ): void {
+		if ( ! $this->config->parcel_dimensions_allowed( $length_cm, $width_cm, $height_cm ) ) {
+			throw new PackagingException( 'packaging_item_oversize' );
+		}
 	}
 
 	/**
@@ -947,6 +1031,7 @@ final class PackagingBuilder {
 			return match ( $regular_source ) {
 				'one_box_3d' => 'mixed_long_items_one_box_3d',
 				'two_boxes_3d' => 'mixed_long_items_two_boxes_3d',
+				'multi_boxes_3d' => 'mixed_long_items_multi_boxes_3d',
 				'items_stacked_rows' => 'mixed_long_items_stacked_rows',
 				default => 'mixed_long_items_' . $regular_source,
 			};

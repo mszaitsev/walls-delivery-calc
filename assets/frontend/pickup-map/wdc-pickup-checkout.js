@@ -13,6 +13,7 @@
 	var prefetchTimer = 0;
 	var prefetchController = null;
 	var prefetchCache = null;
+	var prefetchGeneration = 0;
 	var suppressNextDestinationReset = false;
 	var suppressDestinationResetTimer = 0;
 	var suppressPickupResetOnNextLocationSelected = false;
@@ -25,6 +26,7 @@
 	var authoritativePickupStateLoaded = false;
 	var authoritativePickupStateRevision = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
+	var pickupRateCapabilities = normalizePickupRateCapabilities(checkoutConfig.pickupRateCapabilities || checkoutConfig.pickup_rate_capabilities || {});
 	var selectedPickupPoints = extractPickupSelections(checkoutConfig);
 	if (checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint) {
 		var initialFamily = pickupFamily(checkoutConfig.initialContext.selectedPoint);
@@ -45,6 +47,7 @@ window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 window.wdcPickupCheckout.activePickupFamily = activePickupFamily;
 window.wdcPickupCheckout.activePickupCountryCode = activePickupCountryCode;
+window.wdcPickupCheckout.pickupRateCapabilities = pickupRateCapabilities;
 var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
@@ -62,10 +65,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function openModal(container, method) {
-		var baseContext = initialContext();
-		var contextPromise = baseContext.query && !validCoordinate(baseContext.lat, baseContext.lng)
-			? refreshCheckoutContextOnce(700, { returnContext: true }).then(function (freshContext) { return freshContext || baseContext; })
-			: Promise.resolve(baseContext);
+		method = normalizeShippingMethod(method || currentShippingMethod());
+		var contextPromise = refreshCheckoutContextOnce(700, { returnContext: true }).then(function (freshContext) {
+			return freshContext || initialContext();
+		});
 
 		contextPromise.then(function (resolvedContext) {
 			var modal = window.WDCPickupModal.create(labels);
@@ -73,7 +76,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			var search = modal.root.querySelector('[data-wdc-search]');
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
-			var context = withPrefetch(withCarrierContext(resolvedContext, method));
+			var context = withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
 			var loadingText = '';
@@ -792,6 +795,73 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		return String(context.country_code || context.cdek_to_country_code || '').trim().toUpperCase();
 	}
 
+	function falsy(value) {
+		return value === false || value === 0 || value === '0' || value === 'false';
+	}
+
+	function normalizePickupRateCapabilities(value) {
+		var normalized = {};
+		if (!value || typeof value !== 'object' || Array.isArray(value)) {
+			return normalized;
+		}
+		Object.keys(value).forEach(function (key) {
+			var method = normalizeShippingMethod(key);
+			var item = value[key];
+			if (!method || !item || typeof item !== 'object' || Array.isArray(item)) {
+				return;
+			}
+			var capabilities = {};
+			if (Object.prototype.hasOwnProperty.call(item, 'reload_on_viewport_change')) {
+				capabilities.reload_on_viewport_change = !falsy(item.reload_on_viewport_change);
+			}
+			if (Object.prototype.hasOwnProperty.call(item, 'prefetch_points')) {
+				capabilities.prefetch_points = !falsy(item.prefetch_points);
+			}
+			if (Object.keys(capabilities).length) {
+				normalized[method] = capabilities;
+			}
+		});
+		return normalized;
+	}
+
+	function mergePickupRateCapabilitiesFromResponse(response) {
+		if (!response || typeof response !== 'object') {
+			return;
+		}
+		if (!Object.prototype.hasOwnProperty.call(response, 'pickupRateCapabilities') && !Object.prototype.hasOwnProperty.call(response, 'pickup_rate_capabilities')) {
+			return;
+		}
+		pickupRateCapabilities = normalizePickupRateCapabilities(response.pickupRateCapabilities || response.pickup_rate_capabilities || {});
+		if (!window.wdcPickupCheckout) {
+			window.wdcPickupCheckout = {};
+		}
+		window.wdcPickupCheckout.pickupRateCapabilities = pickupRateCapabilities;
+		window.wdcPickupCheckout.pickup_rate_capabilities = pickupRateCapabilities;
+		if (!pointPrefetchAllowed(currentShippingMethod())) {
+			invalidatePrefetch();
+		}
+	}
+
+	function rateCapabilitiesForMethod(method) {
+		var normalizedMethod = normalizeShippingMethod(method || activeMethod || currentShippingMethod());
+		if (normalizedMethod && pickupRateCapabilities[normalizedMethod]) {
+			return pickupRateCapabilities[normalizedMethod];
+		}
+		return {};
+	}
+
+	function withRateCapabilities(context, method) {
+		context = Object.assign({}, context || {});
+		var capabilities = rateCapabilitiesForMethod(method);
+		if (Object.prototype.hasOwnProperty.call(capabilities, 'reload_on_viewport_change')) {
+			context.reload_on_viewport_change = capabilities.reload_on_viewport_change;
+		}
+		if (Object.prototype.hasOwnProperty.call(capabilities, 'prefetch_points')) {
+			context.prefetch_points = capabilities.prefetch_points;
+		}
+		return context;
+	}
+
 	function contextFromFields() {
 		var country = fieldValue('shipping_country') || fieldValue('billing_country');
 		var normalizedCountry = String(country || 'RU').toUpperCase();
@@ -1322,6 +1392,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		options = options || {};
+		mergePickupRateCapabilitiesFromResponse(response);
 		if (Object.prototype.hasOwnProperty.call(response, 'activePickupFamily') || Object.prototype.hasOwnProperty.call(response, 'active_pickup_family')) {
 			activePickupFamily = String(response.activePickupFamily || response.active_pickup_family || '').trim();
 			if (window.wdcPickupCheckout) {
@@ -1897,6 +1968,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function schedulePrefetch() {
 		clearTimeout(prefetchTimer);
+		if (!pointPrefetchAllowed(currentShippingMethod())) {
+			invalidatePrefetch();
+			return;
+		}
 		prefetchTimer = setTimeout(prefetchInitialPoints, 400);
 	}
 
@@ -1904,49 +1979,70 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (!hasPickupBlock() || !isPickupMethodActive()) {
 			return;
 		}
-		var context = withCarrierContext(initialContext(), currentShippingMethod());
+		var method = currentShippingMethod();
+		if (!pointPrefetchAllowed(method)) {
+			invalidatePrefetch();
+			return;
+		}
+		var context = withRateCapabilities(withCarrierContext(initialContext(), method), method);
 		if (!context.query && !validCoordinate(context.lat, context.lng) && !context.city_code && !context.cdek_city_code) {
 			return;
 		}
-		var key = cacheKey(context);
+		var identity = prefetchIdentity(context, method);
+		var key = identity.key;
 		if (!key || (prefetchCache && prefetchCache.key === key)) {
 			return;
 		}
 		if (prefetchController) {
 			prefetchController.abort();
 		}
+		var generation = ++prefetchGeneration;
 		prefetchController = new AbortController();
 		if (validCoordinate(context.lat, context.lng)) {
-			prefetchBounds(context, parseFloat(context.lat), parseFloat(context.lng), key, prefetchController.signal, 'destination', true);
+			prefetchBounds(context, parseFloat(context.lat), parseFloat(context.lng), identity, generation, prefetchController.signal, 'destination', true);
 			return;
 		}
 		if (context.city_code || context.cdek_city_code) {
 			window.WDCPickupApi.points('', prefetchController.signal, context).then(function (points) {
+				if (!currentPrefetchGeneration(generation)) {
+					return;
+				}
 				prefetchCache = {
 					key: key,
+					identity: identity,
 					points: points,
 					context: context
 				};
 			}).catch(function () {});
 			return;
 		}
-		window.WDCPickupApi.searchInitial(context.query, prefetchController.signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
-			if (!points[0] || !validCoordinate(points[0].lat, points[0].lng)) {
-				prefetchCache = { key: key, points: [], context: context };
+		window.WDCPickupApi.searchInitial(context.query, prefetchController.signal, withCarrierContext(context, method)).then(function (points) {
+			if (!currentPrefetchGeneration(generation)) {
 				return;
 			}
-			prefetchBounds(context, parseFloat(points[0].lat), parseFloat(points[0].lng), key, prefetchController.signal, 'point_search', false);
+			if (!points[0] || !validCoordinate(points[0].lat, points[0].lng)) {
+				prefetchCache = { key: key, identity: identity, points: [], context: context };
+				return;
+			}
+			prefetchBounds(context, parseFloat(points[0].lat), parseFloat(points[0].lng), identity, generation, prefetchController.signal, 'point_search', false);
 		}).catch(function () {});
 	}
 
-	function prefetchBounds(context, lat, lng, key, signal, centerSource, centerTrusted) {
+	function prefetchBounds(context, lat, lng, identity, generation, signal, centerSource, centerTrusted) {
+		var key = identity.key;
 		if (!validCoordinate(lat, lng)) {
-			prefetchCache = { key: key, points: [], context: context };
+			if (currentPrefetchGeneration(generation)) {
+				prefetchCache = { key: key, identity: identity, points: [], context: context };
+			}
 			return;
 		}
-		window.WDCPickupApi.points(bboxAround(lat, lng), signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
+		window.WDCPickupApi.points(bboxAround(lat, lng), signal, withCarrierContext(context, identity.method)).then(function (points) {
+			if (!currentPrefetchGeneration(generation)) {
+				return;
+			}
 			prefetchCache = {
 				key: key,
+				identity: identity,
 				points: points,
 				centerLat: lat,
 				centerLng: lng,
@@ -1962,11 +2058,16 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		return [lng - delta, lat - delta, lng + delta, lat + delta].join(',');
 	}
 
-	function withPrefetch(context) {
-		var key = cacheKey(context);
-		if (prefetchCache && prefetchCache.key === key && Array.isArray(prefetchCache.points) && prefetchCache.points.length) {
+	function withPrefetch(context, method) {
+		if (!pointPrefetchAllowed(method || (context && context.shipping_method_id))) {
+			return context;
+		}
+		var identity = prefetchIdentity(context, method);
+		var key = identity.key;
+		if (prefetchCache && prefetchCache.key === key && prefetchIdentityMatches(prefetchCache.identity, identity) && Array.isArray(prefetchCache.points) && prefetchCache.points.length) {
 			return Object.assign({}, context, {
 				preloadedPoints: prefetchCache.points,
+				dataset_context_key: key,
 				centerLat: prefetchCache.centerLat,
 				centerLng: prefetchCache.centerLng,
 				centerSource: prefetchCache.centerSource || '',
@@ -1978,10 +2079,57 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function invalidatePrefetch() {
 		prefetchCache = null;
+		prefetchGeneration++;
+		clearTimeout(prefetchTimer);
+		prefetchTimer = 0;
 		if (prefetchController) {
 			prefetchController.abort();
 			prefetchController = null;
 		}
+	}
+
+	function currentPrefetchGeneration(generation) {
+		return generation === prefetchGeneration;
+	}
+
+	function prefetchIdentity(context, method) {
+		context = context || {};
+		var normalizedMethod = normalizeShippingMethod(method || context.shipping_method_id || activeMethod || currentShippingMethod());
+		var family = shippingMethodFamily(normalizedMethod);
+		var fingerprint = destinationFingerprint(context);
+		var key = [
+			normalizedMethod,
+			family,
+			fingerprint,
+			cacheKey(context)
+		].join('|');
+		return {
+			key: key,
+			method: normalizedMethod,
+			pickup_family: family,
+			destination_fingerprint: fingerprint,
+			location_id: normalizeText(context.location_id || ''),
+			country_code: String(context.country_code || '').trim().toUpperCase()
+		};
+	}
+
+	function prefetchIdentityMatches(cached, current) {
+		if (!cached || !current) {
+			return false;
+		}
+		return cached.method === current.method
+			&& cached.pickup_family === current.pickup_family
+			&& cached.destination_fingerprint === current.destination_fingerprint
+			&& cached.location_id === current.location_id
+			&& cached.country_code === current.country_code;
+	}
+
+	function pointPrefetchAllowed(method) {
+		var capabilities = rateCapabilitiesForMethod(method);
+		return !(
+			Object.prototype.hasOwnProperty.call(capabilities, 'prefetch_points')
+			&& capabilities.prefetch_points === false
+		);
 	}
 
 	function hasPickupBlock() {

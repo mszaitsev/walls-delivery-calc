@@ -110,6 +110,18 @@ final class CheckoutSessionManager {
 	}
 
 	/**
+	 * @return array<string,mixed>
+	 */
+	public function pickup_selection_current_destination(): array {
+		$selection = $this->pickup_selection();
+		if ( array() === $selection || ! $this->pickup_selection_location_matches_current( $selection ) ) {
+			return array();
+		}
+
+		return $selection;
+	}
+
+	/**
 	 * @return array<string,array<string,mixed>>
 	 */
 	public function pickup_selections(): array {
@@ -141,6 +153,25 @@ final class CheckoutSessionManager {
 	}
 
 	/**
+	 * @return array<string,array<string,mixed>>
+	 */
+	public function pickup_selections_for_current_destination( bool $clear_stale = false ): array {
+		$selections = $this->pickup_selections();
+		$current = array();
+		foreach ( $selections as $family => $selection ) {
+			if ( ! $this->pickup_selection_location_matches_current( $selection ) ) {
+				if ( $clear_stale ) {
+					$this->clear_pickup_selection_for_family( $family, 'destination_fingerprint_changed' );
+				}
+				continue;
+			}
+			$current[ $family ] = $selection;
+		}
+
+		return $current;
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	public function pickup_selection_for_family( string $pickup_family ): array {
@@ -152,6 +183,21 @@ final class CheckoutSessionManager {
 
 		$selections = $this->pickup_selections();
 		$selection = $selections[ $pickup_family ] ?? array();
+		return is_array( $selection ) ? $selection : array();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function pickup_selection_for_family_current_destination( string $pickup_family, bool $clear_stale = false ): array {
+		$pickup_family = trim( $pickup_family );
+		if ( '' === $pickup_family ) {
+			return array();
+		}
+		$pickup_family = $this->normalize_pickup_family( $pickup_family );
+		$selections = $this->pickup_selections_for_current_destination( $clear_stale );
+		$selection = $selections[ $pickup_family ] ?? array();
+
 		return is_array( $selection ) ? $selection : array();
 	}
 
@@ -385,6 +431,12 @@ final class CheckoutSessionManager {
 		$family = $this->shipping_method_family( $rateId );
 		$selection = str_ends_with( $family, ':pickup' ) ? $this->pickup_selection_for_family( $family ) : $this->pickup_selection();
 		if ( array() === $selection ) {
+			return;
+		}
+		if ( ! $this->pickup_selection_location_matches_current( $selection ) ) {
+			if ( str_ends_with( $family, ':pickup' ) ) {
+				$this->clear_pickup_selection_for_family( $family, 'destination_fingerprint_changed' );
+			}
 			return;
 		}
 

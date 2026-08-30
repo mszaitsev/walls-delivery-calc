@@ -19,6 +19,7 @@
 		var maxClusterZoom = 18;
 		var clusterCellSize = 128;
 		var suppressPopupClose = false;
+		var clusterRebuildFrame = 0;
 
 		if (!window.L) {
 			return unavailable('Leaflet is not available.');
@@ -57,7 +58,7 @@
 			return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].join(',');
 		}
 
-		map.on('zoomend', rebuildClusters);
+		map.on('zoomend', scheduleClusterRebuild);
 		map.on('moveend zoomend', boundsChanged);
 		map.on('click', mapClicked);
 		map.on('popupclose', popupClosed);
@@ -81,6 +82,7 @@
 				updateActiveMarkers();
 			},
 			renderMarkers: function (points, options) {
+				cancelScheduledClusterRebuild();
 				suppressPopupClose = true;
 				popupState = null;
 				clearRenderedMarkers();
@@ -124,8 +126,9 @@
 			getBounds: currentBoundsValue,
 			destroy: function () {
 				suppressPopupClose = true;
+				cancelScheduledClusterRebuild();
 				clearMarkers();
-				map.off('zoomend', rebuildClusters);
+				map.off('zoomend', scheduleClusterRebuild);
 				map.off('moveend zoomend', boundsChanged);
 				map.off('click', mapClicked);
 				map.off('popupclose', popupClosed);
@@ -148,6 +151,22 @@
 				map.invalidateSize();
 			}
 		};
+
+		function scheduleClusterRebuild() {
+			cancelScheduledClusterRebuild();
+			clusterRebuildFrame = requestFrame(function () {
+				clusterRebuildFrame = 0;
+				rebuildClusters();
+			});
+		}
+
+		function cancelScheduledClusterRebuild() {
+			if (!clusterRebuildFrame) {
+				return;
+			}
+			cancelFrame(clusterRebuildFrame);
+			clusterRebuildFrame = 0;
+		}
 
 		function rebuildClusters() {
 			suppressPopupClose = true;
@@ -403,6 +422,24 @@
 				return { points: cellPoints, lat: lat / cellPoints.length, lng: lng / cellPoints.length };
 			});
 		}
+	}
+
+	function requestFrame(callback) {
+		if (window.requestAnimationFrame) {
+			return window.requestAnimationFrame(callback);
+		}
+		return window.setTimeout(callback, 16);
+	}
+
+	function cancelFrame(handle) {
+		if (!handle) {
+			return;
+		}
+		if (window.cancelAnimationFrame) {
+			window.cancelAnimationFrame(handle);
+			return;
+		}
+		window.clearTimeout(handle);
 	}
 
 	function unavailable(message) {

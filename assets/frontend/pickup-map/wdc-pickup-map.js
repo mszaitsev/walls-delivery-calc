@@ -15,6 +15,10 @@
 		return debounced;
 	}
 
+	var VIRTUAL_LIST_THRESHOLD = 200;
+	var VIRTUAL_ROW_HEIGHT = 112;
+	var VIRTUAL_LIST_OVERSCAN = 16;
+
 	function createMap(element, card, confirmButton, labels, initialContext) {
 		var config = window.wdcPickupCheckout || {};
 		var providerName = normalizeProvider(config.mapProvider || 'leaflet');
@@ -56,13 +60,23 @@
 		var hasInitialQuery = !!(context.query && String(context.query).trim());
 		var provider = null;
 		var visiblePoints = [];
+		var pointById = {};
+		var listFilterQuery = '';
+		var virtualListState = null;
+		var virtualListScrollContainer = null;
+		var virtualListScrollFrame = 0;
 		var lastBbox = '';
 		var yandexCityListMode = isYandexDeliveryContext(context);
+		var reloadOnViewportChange = contextReloadOnViewportChange(context);
+		var fixedDatasetLoaded = false;
 		var popupManuallyClosed = false;
 		var suppressNextMapClick = false;
 		var userLocation = null;
 		var originStatus = '';
 		var originStatusType = '';
+		var loadingRequestId = 0;
+		var activeLoadingRequestId = 0;
+		var loadingOverlay = createLoadingOverlay(element, list, labels);
 
 		if ('yandex' === providerName && !config.yandexApiKeyPresent) {
 			card.textContent = (config.errors && config.errors.yandexApiKeyMissing) || 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.';
@@ -80,12 +94,22 @@
 				scheduleProgrammaticBoundsRelease();
 				return;
 			}
-			if (yandexCityListMode && visiblePoints.length) {
-				renderCurrentList();
-				updateListSelectButton();
+			if (!viewportReloadRequired() && visiblePoints.length) {
+				if (listFollowsViewport()) {
+					renderCurrentList();
+					updateListSelectButton();
+				}
 				return;
 			}
 			debouncedLoad(bbox);
+		}
+
+		function viewportReloadRequired() {
+			return reloadOnViewportChange !== false;
+		}
+
+		function listFollowsViewport() {
+			return yandexCityListMode;
 		}
 
 		provider = providerFactory.create(element, {
@@ -240,6 +264,7 @@
 
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
+			rebuildPointIndex();
 			var matchingPreviewPoint = previewPoint ? matchingPoint(previewPoint, visiblePoints) : null;
 			var previewLeftVisiblePoints = previewPoint && !matchingPreviewPoint;
 			if (previewPoint && matchingPreviewPoint) {
@@ -295,6 +320,12 @@
 			if (!list) {
 				return;
 			}
+			points = Array.isArray(points) ? points : [];
+			if (points.length > VIRTUAL_LIST_THRESHOLD) {
+				renderVirtualList(points, totalCount);
+				return;
+			}
+			clearVirtualListState();
 			if (!points.length) {
 				list.innerHTML = [
 					originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
@@ -312,6 +343,83 @@
 				points.map(renderListItem).join(''),
 				'</div>'
 			].join('');
+		}
+
+		function renderVirtualList(points, totalCount) {
+			var container = scrollContainerForList(list);
+			var previousTop = virtualListState && virtualListScrollContainer === container ? container.scrollTop : 0;
+			virtualListState = {
+				points: points,
+				totalCount: totalCount,
+				container: container,
+				rowHeight: VIRTUAL_ROW_HEIGHT,
+				overscan: VIRTUAL_LIST_OVERSCAN
+			};
+			attachVirtualListScroll(container);
+			container.scrollTop = previousTop;
+			renderVirtualListWindow();
+		}
+
+		function renderVirtualListWindow() {
+			if (!virtualListState || !list) {
+				return;
+			}
+			var state = virtualListState;
+			var container = state.container || list;
+			var points = state.points;
+			var viewportHeight = Math.max(240, Number(container.clientHeight || 0) || 520);
+			var start = Math.max(0, Math.floor((Number(container.scrollTop || 0) || 0) / state.rowHeight) - state.overscan);
+			var count = Math.ceil(viewportHeight / state.rowHeight) + state.overscan * 2;
+			var end = Math.min(points.length, start + count);
+			var nearest = points[0] && points[0].distanceText ? points[0].distanceText : '';
+			list.innerHTML = [
+				originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
+				searchAddress ? '<div class="wdc-pickup-list__found"><strong>Найден адрес:</strong><span>' + escapeHtml(searchAddress.value || '') + '</span>' + (nearest ? '<em>Ближайший ПВЗ: ' + escapeHtml(nearest) + '</em>' : '') + '</div>' : '',
+				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(state.totalCount, points.length)) + '</div>',
+				'<div class="wdc-pickup-list__items wdc-pickup-list__items--virtual" style="height:' + (points.length * state.rowHeight) + 'px">',
+				'<div class="wdc-pickup-list__window" style="transform:translateY(' + (start * state.rowHeight) + 'px)">',
+				points.slice(start, end).map(function (point, index) {
+					return renderListItem(point, start + index);
+				}).join(''),
+				'</div>',
+				'</div>'
+			].join('');
+		}
+
+		function attachVirtualListScroll(container) {
+			container = container || list;
+			if (virtualListScrollContainer === container) {
+				return;
+			}
+			clearVirtualListScrollBinding();
+			virtualListScrollContainer = container;
+			if (container && container.addEventListener) {
+				container.addEventListener('scroll', onVirtualListScroll);
+			}
+		}
+
+		function clearVirtualListState() {
+			virtualListState = null;
+			clearVirtualListScrollBinding();
+		}
+
+		function clearVirtualListScrollBinding() {
+			if (virtualListScrollContainer && virtualListScrollContainer.removeEventListener) {
+				virtualListScrollContainer.removeEventListener('scroll', onVirtualListScroll);
+			}
+			virtualListScrollContainer = null;
+			cancelFrame(virtualListScrollFrame);
+			virtualListScrollFrame = 0;
+		}
+
+		function onVirtualListScroll() {
+			if (!virtualListState || virtualListScrollFrame) {
+				return;
+			}
+			virtualListScrollFrame = requestFrame(function () {
+				virtualListScrollFrame = 0;
+				renderVirtualListWindow();
+			});
 		}
 
 		function renderListItem(point, index) {
@@ -352,29 +460,43 @@
 			if (!bbox) {
 				return;
 			}
-			if (yandexCityListMode && visiblePoints.length) {
-				renderCurrentList();
-				updateListSelectButton();
+			if (!viewportReloadRequired() && fixedDatasetLoaded && true !== options.forceRemote) {
+				if (listFollowsViewport()) {
+					renderCurrentList();
+					updateListSelectButton();
+				}
+				return;
+			}
+			if (!options.force && !viewportReloadRequired() && visiblePoints.length) {
+				if (listFollowsViewport()) {
+					renderCurrentList();
+					updateListSelectButton();
+				}
 				return;
 			}
 			if (controller) {
 				controller.abort();
 			}
 			controller = new AbortController();
-			card.textContent = labels.loading || 'Loading...';
+			var requestId = beginLoading(labels.loading || 'Загружаем пункты выдачи…');
 			window.WDCPickupApi.points(bbox, controller.signal, context).then(function (points) {
 				if (destroyed) {
 					return;
 				}
 				renderMarkers(points, labels.empty || '');
+				if (!viewportReloadRequired()) {
+					fixedDatasetLoaded = true;
+				}
 				applyInitialPointsViewport(visiblePoints);
 				if (options.previewNearest && visiblePoints[0]) {
 					preview(visiblePoints[0], { focus: false, initial: true });
 				}
+				endLoading(requestId);
 			}).catch(function (error) {
-				if (error.name !== 'AbortError') {
+				if (!destroyed && error.name !== 'AbortError') {
 					card.textContent = labels.error || 'Error';
 				}
+				endLoading(requestId);
 			});
 		}
 
@@ -387,17 +509,26 @@
 		}
 
 		function listPointsForCurrentBounds() {
-			if (!yandexCityListMode || !lastBbox) {
-				return visiblePoints;
+			var points = visiblePoints;
+			if (yandexCityListMode && lastBbox) {
+				points = visiblePoints.filter(function (point) {
+					return pointInsideBounds(point, lastBbox);
+				});
 			}
-			return visiblePoints.filter(function (point) {
-				return pointInsideBounds(point, lastBbox);
+			if (!listFilterQuery) {
+				return points;
+			}
+			return points.filter(function (point) {
+				return pointMatchesListSearch(point, listFilterQuery);
 			});
 		}
 
 		if (hasPreloadedPoints) {
 			renderMarkers(preloadedPoints, labels.empty || '');
 			applyInitialPointsViewport(visiblePoints);
+			if (!viewportReloadRequired()) {
+				fixedDatasetLoaded = true;
+			}
 		}
 
 		function search(query) {
@@ -409,11 +540,20 @@
 		}
 
 		function runSearch(query, initial) {
+			if (!initial && !viewportReloadRequired() && visiblePoints.length) {
+				listFilterQuery = normalizeListSearchQuery(query);
+				renderCurrentList();
+				updateListSelectButton();
+				if (!listPointsForCurrentBounds().length) {
+					card.textContent = labels.notFound || labels.empty || '';
+				}
+				return Promise.resolve([]);
+			}
 			if (controller) {
 				controller.abort();
 			}
 			controller = new AbortController();
-			card.textContent = labels.loading || 'Loading...';
+			var requestId = beginLoading(labels.loading || 'Загружаем пункты выдачи…');
 			if (initial) {
 				var initialRequest = window.WDCPickupApi.searchInitial || window.WDCPickupApi.search;
 				return initialRequest(query, controller.signal, context).then(function (points) {
@@ -426,14 +566,20 @@
 						beginProgrammaticBoundsSuppression();
 						provider.setCenter(point.lat, point.lng, 15);
 						preview(point, { focus: false, initial: true });
-						loadBounds(bboxAround(point.lat, point.lng), { force: true });
+						if (viewportReloadRequired() || !visiblePoints.length) {
+							loadBounds(bboxAround(point.lat, point.lng), { force: true });
+						} else {
+							endLoading(requestId);
+						}
 						return;
 					}
 					card.textContent = labels.notFound || labels.empty || '';
+					endLoading(requestId);
 				}).catch(function (error) {
-					if (error.name !== 'AbortError') {
+					if (!destroyed && error.name !== 'AbortError') {
 						card.textContent = labels.error || 'Error';
 					}
+					endLoading(requestId);
 				});
 			}
 			if (!window.WDCPickupApi.addressSearch) {
@@ -443,14 +589,21 @@
 					}
 					renderMarkers(points, labels.empty || '');
 					applyInitialPointsViewport(visiblePoints);
+					endLoading(requestId);
+				}).catch(function (error) {
+					if (!destroyed && error.name !== 'AbortError') {
+						card.textContent = labels.error || 'Error';
+					}
+					endLoading(requestId);
 				});
 			}
-			card.textContent = labels.searchingAddress || 'Ищем адрес...';
+			updateLoadingMessage(requestId, labels.searchingAddress || 'Ищем адрес...');
 			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
 				if (result && result.address_search_available === false) {
 					setPostcodeOnlyMode();
 					if (!result.address) {
 						card.textContent = labels.postcodeOnly || 'Поиск доступен только по индексу';
+						endLoading(requestId);
 						return;
 					}
 				}
@@ -459,13 +612,16 @@
 				}
 				if (result && result.address && validPointCoordinates(result.address)) {
 					applySearchResult(result);
+					endLoading(requestId);
 					return;
 				}
 				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Адрес не найден.') : (labels.addressNotFound || labels.notFound || 'Адрес не найден.');
+				endLoading(requestId);
 			}).catch(function (error) {
-				if (error.name !== 'AbortError') {
+				if (!destroyed && error.name !== 'AbortError') {
 					card.textContent = labels.dadataError || labels.error || 'Адрес не найден.';
 				}
+				endLoading(requestId);
 			});
 		}
 
@@ -483,12 +639,18 @@
 			beginProgrammaticBoundsSuppression();
 			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
 			if (Array.isArray(result.points) && result.points.length > 0) {
+				listFilterQuery = '';
 				renderMarkers(result.points, labels.empty || '');
 				card.textContent = labels.addressFound || 'Address found.';
 				return;
 			}
 			refreshDistancesFromOrigin();
-			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true });
+			if (viewportReloadRequired() || !visiblePoints.length) {
+				loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), { force: true });
+			} else {
+				renderCurrentList();
+				updateListSelectButton();
+			}
 			card.textContent = labels.addressFound || 'Адрес найден.';
 		}
 
@@ -521,9 +683,12 @@
 				if (controller) {
 					controller.abort();
 				}
+				activeLoadingRequestId = ++loadingRequestId;
+				setLoadingState(false, '');
 				if (debouncedLoad.cancel) {
 					debouncedLoad.cancel();
 				}
+				clearVirtualListState();
 				endProgrammaticBoundsSuppression();
 				detachUserViewportListeners();
 				cancelPendingProviderFit();
@@ -534,6 +699,54 @@
 				provider.destroy();
 			}
 		};
+
+		function beginLoading(message) {
+			var requestId = ++loadingRequestId;
+			activeLoadingRequestId = requestId;
+			setLoadingState(true, message || 'Загружаем пункты выдачи…');
+			return requestId;
+		}
+
+		function updateLoadingMessage(requestId, message) {
+			if (requestId !== activeLoadingRequestId) {
+				return;
+			}
+			setLoadingState(true, message || 'Загружаем пункты выдачи…');
+		}
+
+		function endLoading(requestId) {
+			if (requestId !== activeLoadingRequestId) {
+				return;
+			}
+			setLoadingState(false, '');
+		}
+
+		function setLoadingState(loading, message) {
+			if (element && element.setAttribute) {
+				element.setAttribute('aria-busy', loading ? 'true' : 'false');
+			}
+			if (list && list.setAttribute) {
+				list.setAttribute('aria-busy', loading ? 'true' : 'false');
+			}
+			if (loadingOverlay) {
+				loadingOverlay.hidden = !loading;
+				if (loadingOverlay.setAttribute) {
+					loadingOverlay.setAttribute('aria-hidden', loading ? 'false' : 'true');
+				}
+				if (loadingOverlay.textNode) {
+					loadingOverlay.textNode.textContent = message || 'Загружаем пункты выдачи…';
+				}
+			}
+			if (loading && list && !visiblePoints.length) {
+				list.innerHTML = '<div class="wdc-pickup-list__loading" role="status" aria-live="polite">' + escapeHtml(message || 'Загружаем пункты выдачи…') + '</div>';
+			}
+			if (!loading && list && String(list.innerHTML || '').indexOf('wdc-pickup-list__loading') !== -1) {
+				list.innerHTML = '';
+			}
+			if (loading) {
+				card.textContent = message || 'Загружаем пункты выдачи…';
+			}
+		}
 
 		function enrichPoints(points) {
 			return points.map(function (point, index) {
@@ -571,6 +784,7 @@
 
 		function refreshDistancesFromOrigin() {
 			visiblePoints = sortPoints(enrichPoints(visiblePoints));
+			rebuildPointIndex();
 			previewPoint = previewPoint ? matchingPoint(previewPoint, visiblePoints) : null;
 			committedPoint = committedPoint ? matchingPoint(committedPoint, visiblePoints) || committedPoint : null;
 			provider.renderMarkers(visiblePoints, {
@@ -582,7 +796,18 @@
 		}
 
 		function findPoint(id) {
-			return visiblePoints.filter(function (point) { return pointId(point) === id; })[0] || null;
+			id = String(id || '');
+			return pointById[id] || null;
+		}
+
+		function rebuildPointIndex() {
+			pointById = {};
+			visiblePoints.forEach(function (point) {
+				var id = pointId(point);
+				if (id && !pointById[id]) {
+					pointById[id] = point;
+				}
+			});
 		}
 
 		function matchingPoint(point, points) {
@@ -609,7 +834,12 @@
 		}
 
 		function scrollListRowIntoView(point) {
-			var row = findListRow(pointId(point));
+			var id = pointId(point);
+			var row = findListRow(id);
+			if (!row && virtualListState && list) {
+				scrollVirtualListToPoint(id);
+				row = findListRow(id);
+			}
 			if (!row || !list) {
 				return;
 			}
@@ -637,6 +867,26 @@
 				return;
 			}
 			container.scrollTop = nextTop;
+		}
+
+		function scrollVirtualListToPoint(id) {
+			if (!virtualListState || !id) {
+				return;
+			}
+			var points = virtualListState.points;
+			var index = -1;
+			for (var i = 0; i < points.length; i++) {
+				if (pointId(points[i]) === id) {
+					index = i;
+					break;
+				}
+			}
+			if (index < 0) {
+				return;
+			}
+			var container = virtualListState.container || list;
+			container.scrollTop = Math.max(0, index * virtualListState.rowHeight - virtualListState.rowHeight * 2);
+			renderVirtualListWindow();
 		}
 
 		function findListRow(id) {
@@ -683,7 +933,9 @@
 			beginProgrammaticBoundsSuppression();
 			provider.setCenter(lat, lng, 15);
 			refreshDistancesFromOrigin();
-			loadBounds(bboxAround(lat, lng), { force: true });
+			if (viewportReloadRequired() || !visiblePoints.length) {
+				loadBounds(bboxAround(lat, lng), { force: true });
+			}
 		}
 
 		function setStatus(message, type) {
@@ -775,6 +1027,62 @@
 
 	function normalizeProvider(provider) {
 		return 'yandex' === provider ? 'yandex' : 'leaflet';
+	}
+
+	function contextReloadOnViewportChange(context) {
+		context = context || {};
+		if (Object.prototype.hasOwnProperty.call(context, 'reload_on_viewport_change')) {
+			return !falsy(context.reload_on_viewport_change);
+		}
+		if (Object.prototype.hasOwnProperty.call(context, 'viewport_reload')) {
+			return !falsy(context.viewport_reload);
+		}
+		return true;
+	}
+
+	function normalizeListSearchQuery(query) {
+		return String(query || '').trim().toLowerCase();
+	}
+
+	function pointMatchesListSearch(point, query) {
+		if (!query) {
+			return true;
+		}
+		var snapshot = pointSnapshot(point);
+		var haystack = [
+			pointDisplayTitle(point),
+			presentationComment(point),
+			point && point.address,
+			point && point.work_time,
+			point && point.point_code,
+			point && point.display_code,
+			point && point.postcode,
+			point && point.postal_code,
+			snapshot.address,
+			snapshot.point_code,
+			snapshot.display_code,
+			snapshot.postcode,
+			snapshot.postal_code
+		].join(' ').toLowerCase();
+		return haystack.indexOf(query) !== -1;
+	}
+
+	function requestFrame(callback) {
+		if (window.requestAnimationFrame) {
+			return window.requestAnimationFrame(callback);
+		}
+		return window.setTimeout(callback, 16);
+	}
+
+	function cancelFrame(handle) {
+		if (!handle) {
+			return;
+		}
+		if (window.cancelAnimationFrame) {
+			window.cancelAnimationFrame(handle);
+			return;
+		}
+		window.clearTimeout(handle);
 	}
 
 	function normalizeAddressMarker(address) {
@@ -1049,6 +1357,10 @@
 		return value === true || value === 1 || value === '1' || value === 'true';
 	}
 
+	function falsy(value) {
+		return value === false || value === 0 || value === '0' || value === 'false';
+	}
+
 	function supportsPassiveListeners() {
 		return false;
 	}
@@ -1189,6 +1501,30 @@
 		return String(value || '').replace(/[&<>"']/g, function (char) {
 			return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
 		});
+	}
+
+	function createLoadingOverlay(element, list, labels) {
+		var parent = element && element.parentNode ? element.parentNode : element;
+		if (!parent || typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof parent.appendChild !== 'function') {
+			return null;
+		}
+		var overlay = document.createElement('div');
+		var spinner = document.createElement('span');
+		var text = document.createElement('span');
+		overlay.className = 'wdc-pickup-map__loading';
+		overlay.hidden = true;
+		overlay.setAttribute('aria-hidden', 'true');
+		overlay.setAttribute('role', 'status');
+		overlay.setAttribute('aria-live', 'polite');
+		spinner.className = 'wdc-pickup-map__loading-spinner';
+		spinner.setAttribute('aria-hidden', 'true');
+		text.className = 'wdc-pickup-map__loading-text';
+		text.textContent = (labels && labels.loading) || 'Загружаем пункты выдачи…';
+		overlay.appendChild(spinner);
+		overlay.appendChild(text);
+		overlay.textNode = text;
+		parent.appendChild(overlay);
+		return overlay;
 	}
 
 	function noopMap() {
