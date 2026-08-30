@@ -1121,11 +1121,9 @@ final class OrderShipmentDraftFactory {
 				continue;
 			}
 			$order_item = $order_items[ $index ] ?? null;
-			$order_item_id = is_object( $order_item ) && method_exists( $order_item, 'get_id' ) ? (int) $order_item->get_id() : 0;
-			$item_id = $order_item_id > 0 ? (string) $order_item_id : 'order-item-' . (string) ( $index + 1 );
+			$item_id = is_object( $order_item ) && method_exists( $order_item, 'get_id' ) ? (string) $order_item->get_id() : 'order-item-' . (string) ( $index + 1 );
 			$rows[] = array(
 				'item_key' => $item_id,
-				'order_item_id' => $order_item_id,
 				'ordered_quantity' => $item->quantity,
 				'place_number' => 1,
 				'name' => $item->name,

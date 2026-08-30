@@ -299,7 +299,7 @@
     row.setAttribute('data-ordered-quantity', '999');
     row.setAttribute('data-wdc-row-index', String(index));
     row.innerHTML = [
-      '<td class="wdc-cdek-item-product"><input type="text" name="shipment_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="shipment_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="shipment_items[' + index + '][order_item_id]" value="0"><input type="hidden" name="shipment_items[' + index + '][ordered_quantity]" value="999"></td>',
+      '<td class="wdc-cdek-item-product"><input type="text" name="shipment_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="shipment_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="shipment_items[' + index + '][ordered_quantity]" value="999"></td>',
       '<td class="wdc-cdek-item-sku wdc-product-search-cell"><input type="text" name="shipment_items[' + index + '][ware_key]" value="" placeholder="Артикул" autocomplete="off" data-wdc-product-search-input><div class="wdc-product-search-results" data-wdc-product-search-results hidden></div></td>',
       '<td><input class="wdc-cdek-input-qty" type="number" min="1" max="999" step="1" name="shipment_items[' + index + '][amount]" value="1" data-wdc-shipment-item-qty data-wdc-integer-input></td>',
       '<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',

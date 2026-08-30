@@ -5,17 +5,10 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Shipments;
 
 use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
-use WallsShop\WDC\Shipments\Application\ShipmentOrderItemIdentityResolver;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryShipmentAllocationValueResolver {
-	public function __construct(
-		private ?ShipmentOrderItemIdentityResolver $identity_resolver = null
-	) {
-		$this->identity_resolver ??= new ShipmentOrderItemIdentityResolver();
-	}
-
 	/**
 	 * @param array<int,array<string,mixed>> $item_rows
 	 * @param array<int,ShipmentPlace> $places
@@ -30,55 +23,39 @@ final class OzonDeliveryShipmentAllocationValueResolver {
 		}
 		$errors = array();
 		$place_values = array_fill_keys( array_keys( $place_numbers ), 0 );
-		$order_items = $this->order_items( $order );
-		$assigned = array();
-		$rows_by_item = array();
-		$has_unresolved_rows = false;
+		$invalid_rows = 0;
 		foreach ( $item_rows as $row ) {
-			$item_id = $this->order_item_id( $row );
 			$place_number = (int) ( $row['place_number'] ?? 0 );
 			$quantity = (int) ( $row['amount'] ?? 0 );
-			if ( $item_id <= 0 || ! isset( $order_items[ $item_id ] ) ) {
-				$errors[] = 'В распределении Ozon указан неизвестный товар заказа.';
-				$has_unresolved_rows = true;
-				continue;
-			}
 			if ( $quantity <= 0 ) {
 				$errors[] = 'Количество товара в грузоместе Ozon должно быть больше нуля.';
+				++$invalid_rows;
 				continue;
 			}
 			if ( ! isset( $place_numbers[ $place_number ] ) ) {
 				$errors[] = 'Товар Ozon назначен в несуществующее грузоместо.';
+				++$invalid_rows;
 				continue;
 			}
-			$assigned[ $item_id ] = ( $assigned[ $item_id ] ?? 0 ) + $quantity;
-			$rows_by_item[ $item_id ][] = array( 'place_number' => $place_number, 'quantity' => $quantity );
-		}
-		if ( ! $has_unresolved_rows ) {
-			foreach ( $order_items as $item_id => $item ) {
-				$qty = (int) $item['quantity'];
-				$actual = (int) ( $assigned[ $item_id ] ?? 0 );
-				if ( $actual !== $qty ) {
-					$errors[] = sprintf( 'Товар заказа %d распределён по грузоместам Ozon некорректно.', $item_id );
-				}
+			$unit_price = $this->unit_price_kopecks( $row );
+			if ( null === $unit_price || $unit_price < 0 ) {
+				$errors[] = sprintf( 'В грузоместе %d указана некорректная цена товара.', $place_number );
+				++$invalid_rows;
+				continue;
 			}
+			$place_values[ $place_number ] += $quantity * $unit_price;
 		}
 		if ( array() !== $errors ) {
-			return array( 'place_values' => $place_values, 'errors' => array_values( array_unique( $errors ) ), 'summary' => array() );
-		}
-		foreach ( $rows_by_item as $item_id => $rows ) {
-			$item = $order_items[ $item_id ];
-			$total_kopecks = (int) $item['total_kopecks'];
-			$total_qty = (int) $item['quantity'];
-			$cumulative = 0;
-			$previous_value = 0;
-			foreach ( $rows as $row ) {
-				$cumulative += (int) $row['quantity'];
-				$current_value = intdiv( $total_kopecks * $cumulative, $total_qty );
-				$share = $current_value - $previous_value;
-				$previous_value = $current_value;
-				$place_values[ (int) $row['place_number'] ] += $share;
-			}
+			return array(
+				'place_values' => $place_values,
+				'errors' => array_values( array_unique( $errors ) ),
+				'summary' => array(
+					'assigned_item_row_count' => count( $item_rows ),
+					'invalid_item_row_count' => $invalid_rows,
+					'total_declared_kopecks' => array_sum( $place_values ),
+					'value_policy' => 'shipment_modal_quantity_times_unit_price',
+				),
+			);
 		}
 		foreach ( $place_values as $place_number => $kopecks ) {
 			if ( $kopecks <= 0 ) {
@@ -90,45 +67,27 @@ final class OzonDeliveryShipmentAllocationValueResolver {
 			'place_values' => $place_values,
 			'errors' => $errors,
 			'summary' => array(
-				'order_item_count' => count( $order_items ),
 				'assigned_item_row_count' => count( $item_rows ),
+				'invalid_item_row_count' => $invalid_rows,
 				'total_declared_kopecks' => array_sum( $place_values ),
-				'value_policy' => 'woocommerce_line_total_excluding_tax_discounted_prorated_by_quantity',
+				'value_policy' => 'shipment_modal_quantity_times_unit_price',
 			),
 		);
-	}
-
-	/** @return array<int,array{quantity:int,total_kopecks:int}> */
-	private function order_items( object $order ): array {
-		if ( ! method_exists( $order, 'get_items' ) ) {
-			return array();
-		}
-		$items = array();
-		foreach ( $order->get_items() as $item ) {
-			if ( ! is_object( $item ) || ! method_exists( $item, 'get_id' ) ) {
-				continue;
-			}
-			$id = (int) $item->get_id();
-			$quantity = method_exists( $item, 'get_quantity' ) ? (int) $item->get_quantity() : 0;
-			$total = method_exists( $item, 'get_total' ) ? (string) $item->get_total() : '0';
-			$kopecks = MoneyParser::numeric_to_kopecks( $total );
-			if ( $id > 0 && $quantity > 0 && null !== $kopecks ) {
-				$items[ $id ] = array( 'quantity' => $quantity, 'total_kopecks' => max( 0, $kopecks ) );
-			}
-		}
-
-		return $items;
 	}
 
 	/**
 	 * @param array<string,mixed> $row
 	 */
-	private function order_item_id( array $row ): int {
-		$explicit = (int) ( $row['order_item_id'] ?? 0 );
-		if ( $explicit > 0 ) {
-			return $explicit;
+	private function unit_price_kopecks( array $row ): ?int {
+		if ( array_key_exists( 'unit_price_kopecks', $row ) ) {
+			$value = $row['unit_price_kopecks'];
+			if ( is_int( $value ) || ( is_string( $value ) && ctype_digit( trim( $value ) ) ) ) {
+				return (int) $value;
+			}
+
+			return null;
 		}
 
-		return $this->identity_resolver->order_item_id( $row['item_key'] ?? '', $row['split_parent'] ?? null );
+		return MoneyParser::numeric_to_kopecks( (string) ( $row['cost'] ?? '' ) );
 	}
 }

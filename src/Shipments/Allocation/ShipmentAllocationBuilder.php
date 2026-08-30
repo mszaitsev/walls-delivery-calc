@@ -19,12 +19,11 @@ final class ShipmentAllocationBuilder {
 		foreach ( $item_rows as $row ) {
 			$place_number = (int) $row['place_number'];
 			$source_item_id = trim( (string) ( $row['item_key'] ?? '' ) );
-			$order_item_id = (int) ( $row['order_item_id'] ?? 0 );
 			$unit_price_kopecks = $this->kopecks( $row['unit_price_kopecks'] ?? null );
 			$assessed_unit_price_kopecks = $this->kopecks( $row['assessed_unit_price_kopecks'] ?? null );
 			$rows_by_place[ $place_number ][] = new ShipmentAllocationItem(
 				$source_item_id,
-				array( 'order_item_id' => $order_item_id > 0 ? (string) $order_item_id : $source_item_id ),
+				array( 'order_item_id' => $source_item_id ),
 				(string) ( $row['name'] ?? '' ),
 				(string) ( $row['sku'] ?? '' ),
 				(int) $row['amount'],

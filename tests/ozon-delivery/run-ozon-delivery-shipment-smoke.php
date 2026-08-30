@@ -236,8 +236,8 @@ $db->points[888] = array( 'generation_id' => 1, 'point_id' => 888, 'name' => 'С
 
 $order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 3, '3000.00' ) ) );
 $rows = array(
-	array( 'item_key' => 'shipment-ui-row-a', 'order_item_id' => 101, 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1, 'cost' => 999999 ),
-	array( 'item_key' => 'shipment-ui-row-a:split:2', 'split_parent' => 'shipment-ui-row-a', 'order_item_id' => 101, 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 2, 'cost' => 1 ),
+	array( 'item_key' => 'shipment-ui-row-a', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => 'shipment-ui-row-a:split:2', 'split_parent' => 'shipment-ui-row-a', 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 2, 'cost' => 1000 ),
 );
 $stack = oz_ship_stack( $db );
 $request = oz_ship_request( array(
@@ -254,7 +254,7 @@ $pickup_preview_request = new ShipmentCreateRequest(
 	places: array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ),
 	declared_value: Money::from_kopecks( 0 ),
 	recipient: array( 'name' => 'Иван Иванов', 'phone' => '+79132038250' ),
-	meta: array( 'shipment_item_rows' => array( array( 'item_key' => 'shipment-ui-row-a', 'order_item_id' => 101, 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 3 ) ) )
+	meta: array( 'shipment_item_rows' => array( array( 'item_key' => 'shipment-ui-row-a', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 3, 'cost' => 1000 ) ) )
 );
 $pickup_preview = $stack['adapter']->build_safe_payload_preview( $pickup_preview_request );
 oz_ship_assert( ! in_array( 'city or settlement is recommended', $pickup_preview['errors'] ?? array(), true ) && ! in_array( 'street and house or raw_address are required for courier delivery', $pickup_preview['errors'] ?? array(), true ), 'Ozon pickup preview must not show courier recipient-address validation errors.' );
@@ -265,7 +265,7 @@ oz_ship_assert( 1 === count( $create_calls ), 'Ozon shipment create must call /v
 $body = $create_calls[0]['body'];
 oz_ship_assert( '11111111-1111-4111-8111-111111111111' === (string) ( $create_calls[0]['headers']['Idempotency-Key'] ?? '' ), 'Ozon order/create must pass the stable Shipment Framework idempotency UUID.' );
 oz_ship_assert( 2 === count( $body['postings'] ?? array() ), 'Ozon postings count must equal actual modal places count.' );
-oz_ship_assert( '1000.00' === (string) $body['postings'][0]['declared_value']['amount'] && '2000.00' === (string) $body['postings'][1]['declared_value']['amount'], 'Declared value must be recalculated server-side from assigned order item quantities, not browser cost.' );
+oz_ship_assert( '1000.00' === (string) $body['postings'][0]['declared_value']['amount'] && '2000.00' === (string) $body['postings'][1]['declared_value']['amount'], 'Declared value must be calculated server-side from Shipment modal quantity times price per actual place.' );
 oz_ship_assert( 5000 === (int) $body['postings'][0]['dimensions']['weight_g'] && 400 === (int) $body['postings'][0]['dimensions']['length_mm'] && 300 === (int) $body['postings'][0]['dimensions']['width_mm'] && 200 === (int) $body['postings'][0]['dimensions']['height_mm'], 'Posting dimensions must use manager-defined actual place data.' );
 oz_ship_assert( 'Товары по заказу 85372. Коробка 1 из 2' === (string) $body['postings'][0]['description'] && 'Товары по заказу 85372. Коробка 2 из 2' === (string) $body['postings'][1]['description'], 'Ozon posting descriptions must use the documented Russian order/box format.' );
 oz_ship_assert( str_contains( (string) ( $body['order_external_id'] ?? '' ), '11111111-1111-4111-8111-111111111111' ), 'Ozon order_external_id must be stable per logical shipment attempt.' );
@@ -284,53 +284,76 @@ $cancelled = ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDel
 oz_ship_assert( 'cancellation_started' === (string) ( $cancelled['status'] ?? '' ) && DeliveryStatus::UNKNOWN === (string) ( $cancelled['universal_status_code'] ?? '' ), 'Cancel request must not mark the shipment fully cancelled before status sync confirms it.' );
 
 $stack = oz_ship_stack( $db );
-$live_identity_order = new OzonShipmentSmokeOrder( 85378, '85378', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
-$live_identity = $stack['service']->create( $live_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'real-framework-ui-key', 'order_item_id' => 246, 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85378, '85378' ) );
-oz_ship_assert( $live_identity->success, 'Ozon allocation must resolve explicit order_item_id 246 independently from item_key format.' );
-$live_identity_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
-oz_ship_assert( '2000.00' === (string) ( $live_identity_body['postings'][0]['declared_value']['amount'] ?? '' ), 'Ozon declared value must use server-side Woo order value for order-item-246 amount 2.' );
+$live_modal_order = new OzonShipmentSmokeOrder( 85378, '85378', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$live_modal = $stack['service']->create( $live_modal_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'real-framework-ui-key', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1230 ) ), '777', 85378, '85378' ) );
+oz_ship_assert( $live_modal->success, 'Ozon allocation must accept actual Shipment modal rows without WooCommerce order item matching.' );
+$live_modal_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
+oz_ship_assert( '2460.00' === (string) ( $live_modal_body['postings'][0]['declared_value']['amount'] ?? '' ), 'Ozon live fixture must calculate 2 x 1230 RUB = 2460 RUB from modal rows.' );
 
 $stack = oz_ship_stack( $db );
-$split_identity_order = new OzonShipmentSmokeOrder( 85379, '85379', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
-$split_identity = $stack['service']->create( $split_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array(
-	array( 'item_key' => 'real-framework-ui-key', 'order_item_id' => 246, 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1 ),
-	array( 'item_key' => 'custom:split:7', 'split_parent' => 'custom', 'order_item_id' => 246, 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1 ),
+$split_modal_order = new OzonShipmentSmokeOrder( 85379, '85379', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$split_modal = $stack['service']->create( $split_modal_order, oz_ship_request( array( new ShipmentPlace( 1, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => 'real-framework-ui-key', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => 'custom:split:7', 'split_parent' => 'custom', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
 ), '777', 85379, '85379' ) );
-oz_ship_assert( $split_identity->success, 'Ozon allocation must keep explicit order_item_id 246 for split rows even when item_key and split_parent are not parseable.' );
+oz_ship_assert( $split_modal->success, 'Ozon allocation must calculate split rows from modal quantities and prices without identity lookup.' );
 $split_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
-oz_ship_assert( '1000.00' === (string) ( $split_body['postings'][0]['declared_value']['amount'] ?? '' ) && '1000.00' === (string) ( $split_body['postings'][1]['declared_value']['amount'] ?? '' ), 'Ozon declared value must prorate order item 246 across split actual places.' );
+oz_ship_assert( '1000.00' === (string) ( $split_body['postings'][0]['declared_value']['amount'] ?? '' ) && '1000.00' === (string) ( $split_body['postings'][1]['declared_value']['amount'] ?? '' ), 'Ozon declared value must use split row modal price and quantity per place.' );
 
 $stack = oz_ship_stack( $db );
-$invalid_identity_order = new OzonShipmentSmokeOrder( 85380, '85380', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
-$invalid_identity = $stack['service']->create( $invalid_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'order-item-246', 'order_item_id' => 999, 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85380, '85380' ) );
-oz_ship_assert( ! $invalid_identity->success && str_contains( $invalid_identity->error_message, 'неизвестный товар заказа' ) && ! str_contains( $invalid_identity->error_message, 'Товар заказа 246 распределён' ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Forged explicit Ozon order_item_id must fail before /v1/order/create and must not be overridden by parseable item_key.' );
+$manual_item_order = new OzonShipmentSmokeOrder( 85380, '85380', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$manual_item = $stack['service']->create( $manual_item_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => 'real-framework-ui-key', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1230 ),
+	array( 'item_key' => 'manual-extra', 'ordered_quantity' => 999, 'place_number' => 1, 'amount' => 1, 'cost' => 500 ),
+), '777', 85380, '85380' ) );
+oz_ship_assert( $manual_item->success, 'Ozon declared value calculation must accept manually added Shipment modal items.' );
+$manual_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
+oz_ship_assert( '2960.00' === (string) ( $manual_body['postings'][0]['declared_value']['amount'] ?? '' ), 'Ozon manual item fixture must calculate 2 x 1230 + 1 x 500 = 2960 RUB.' );
 
 $stack = oz_ship_stack( $db );
-$legacy_identity_order = new OzonShipmentSmokeOrder( 85381, '85381', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
-$legacy_identity = $stack['service']->create( $legacy_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85381, '85381' ) );
-oz_ship_assert( $legacy_identity->success, 'Ozon allocation must keep legacy item_key fallback when explicit order_item_id is absent.' );
+$edited_price_order = new OzonShipmentSmokeOrder( 85381, '85381', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$edited_price = $stack['service']->create( $edited_price_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'edited-price', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1500 ) ), '777', 85381, '85381' ) );
+oz_ship_assert( $edited_price->success, 'Ozon declared value calculation must respect manager-edited Shipment modal price.' );
+$edited_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
+oz_ship_assert( '3000.00' === (string) ( $edited_body['postings'][0]['declared_value']['amount'] ?? '' ), 'Ozon edited price fixture must calculate 2 x 1500 = 3000 RUB.' );
+
+$stack = oz_ship_stack( $db );
+$multi_modal_order = new OzonShipmentSmokeOrder( 85382, '85382', array( new OzonShipmentSmokeOrderItem( 246, 3, '3000.00' ) ) );
+$multi_modal = $stack['service']->create( $multi_modal_order, oz_ship_request( array( new ShipmentPlace( 1, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => 'modal-a', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1230 ),
+	array( 'item_key' => 'modal-b', 'ordered_quantity' => 1, 'place_number' => 2, 'amount' => 1, 'cost' => 500 ),
+	array( 'item_key' => 'manual-c', 'ordered_quantity' => 999, 'place_number' => 2, 'amount' => 2, 'cost' => 100 ),
+), '777', 85382, '85382' ) );
+oz_ship_assert( $multi_modal->success, 'Ozon declared value calculation must group actual modal row totals by place.' );
+$multi_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
+oz_ship_assert( '2460.00' === (string) ( $multi_body['postings'][0]['declared_value']['amount'] ?? '' ) && '700.00' === (string) ( $multi_body['postings'][1]['declared_value']['amount'] ?? '' ), 'Ozon multi-place fixture must calculate declared values 2460 / 700 RUB.' );
+
+$stack = oz_ship_stack( $db );
+$invalid_price_order = new OzonShipmentSmokeOrder( 85383, '85383', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$invalid_price = $stack['service']->create( $invalid_price_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'bad-price', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => '-1' ) ), '777', 85383, '85383' ) );
+oz_ship_assert( ! $invalid_price->success && str_contains( $invalid_price->error_message, 'некорректная цена' ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Invalid Ozon modal item price must fail before /v1/order/create.' );
 
 $stack = oz_ship_stack( $db );
 $overweight_order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
-$overweight = $stack['service']->create( $overweight_order, oz_ship_request( array( new ShipmentPlace( 1, 12000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1 ) ) ) );
+$overweight = $stack['service']->create( $overweight_order, oz_ship_request( array( new ShipmentPlace( 1, 12000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ) ) );
 oz_ship_assert( ! $overweight->success && 'ozon_shipment_validation_failed' === $overweight->error_code && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Overweight actual place must be blocked before /v1/order/create.' );
-$oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1 ) ), '777', 85373, '85373' ) );
+$oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85373, '85373' ) );
 oz_ship_assert( ! $oversize->success && str_contains( $oversize->error_message, 'размер' ), '40x40x40 actual place must fail selected Ozon point limits after rotation-aware dimension check: ' . $oversize->error_code . ' ' . $oversize->error_message );
-$rotated = $stack['service']->create( new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 50, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1 ) ), '777', 85374, '85374' ) );
+$rotated = $stack['service']->create( new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 50, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85374, '85374' ) );
 oz_ship_assert( $rotated->success, '50x30x20 actual place must pass selected point limits with rotation.' );
 
 $stack = oz_ship_stack( $db );
 $stack['http']->fail_approve = array( 'OZON-1' );
 $stack['http']->statuses['OZON-1'] = 'READY_FOR_SHIPPING';
 $recovered_order = new OzonShipmentSmokeOrder( 85377, '85377', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
-$recovered = $stack['service']->create( $recovered_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1 ) ), '777', 85377, '85377' ) );
+$recovered = $stack['service']->create( $recovered_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85377, '85377' ) );
 oz_ship_assert( $recovered->success, 'Approve recovery must treat official READY_FOR_SHIPPING status as approved after an approve error.' );
 oz_ship_assert( 1 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Approve recovery through posting/info must not create a duplicate Ozon order.' );
 
 $stack = oz_ship_stack( $db );
 $strict_context = $stack['modal']->modal_context( $order, array( 'request' => array( 'meta' => array( 'pickup_point_code' => '888' ) ) ) );
 oz_ship_assert( 9000 === (int) ( $strict_context['max_weight_g'] ?? 0 ) && 400 === (int) ( $strict_context['max_length_mm'] ?? 0 ) && 250 === (int) ( $strict_context['max_height_mm'] ?? 0 ), 'Ozon modal extension must present selected point-specific limits, not global defaults.' );
-$strict = $stack['service']->create( new OzonShipmentSmokeOrder( 85375, '85375', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 50, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1 ) ), '888', 85375, '85375' ) );
+$strict = $stack['service']->create( new OzonShipmentSmokeOrder( 85375, '85375', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 50, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '888', 85375, '85375' ) );
 oz_ship_assert( ! $strict->success && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Server-side validation must use stricter selected point limits.' );
 
 $stack = oz_ship_stack( $db );
@@ -341,9 +364,9 @@ $partial_request = oz_ship_request( array(
 	new ShipmentPlace( 2, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
 	new ShipmentPlace( 3, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
 ), array(
-	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1 ),
-	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 1 ),
-	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 3, 'amount' => 1 ),
+	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101', 'ordered_quantity' => 3, 'place_number' => 3, 'amount' => 1, 'cost' => 1000 ),
 ), '777', 85376, '85376' );
 $partial = $stack['service']->create( $partial_order, $partial_request );
 oz_ship_assert( ! $partial->success && 'ozon_posting_approve_partial' === $partial->error_code, 'Partial approve failure must not be reported as full success.' );

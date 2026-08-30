@@ -876,7 +876,6 @@ C:.
 |   |   |       ShipmentCreationService.php
 |   |   |       ShipmentMetaboxButtonPolicy.php
 |   |   |       ShipmentModalRequestMapper.php
-|   |   |       ShipmentOrderItemIdentityResolver.php
 |   |   |       ShipmentOrderStatusMappingService.php
 |   |   |       ShipmentPreparationData.php
 |   |   |       ShipmentServiceSettings.php
