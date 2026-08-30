@@ -561,8 +561,8 @@ final class OrderShipmentsMetabox {
 			<tbody>
 			<?php foreach ( $items as $index => $item ) : ?>
 				<?php
-				$row_key = (string) ( $item['order_item_id'] ?? $item['item_id'] ?? '' );
-				$row_key = '' !== $row_key ? 'order-item-' . $row_key : 'item-' . (string) ( $index + 1 );
+				$order_item_id = max( 0, (int) ( $item['order_item_id'] ?? $item['item_id'] ?? 0 ) );
+				$row_key = $order_item_id > 0 ? 'order-item-' . (string) $order_item_id : 'item-' . (string) ( $index + 1 );
 				$quantity = max( 1, (int) ( $item['quantity'] ?? 1 ) );
 				$sku = (string) ( $item['sku'] ?? '' );
 				if ( '' === $sku ) {
@@ -571,6 +571,7 @@ final class OrderShipmentsMetabox {
 				$unit = is_array( $item['unit_price'] ?? null ) ? (int) ( $item['unit_price']['amount_kopecks'] ?? 0 ) / 100 : 0;
 				$original_item = array(
 					'name' => (string) ( $item['name'] ?? 'Товар' ),
+					'order_item_id' => $order_item_id,
 					'ware_key' => $sku,
 					'ordered_quantity' => $quantity,
 					'amount' => min( 999, $quantity ),
@@ -584,7 +585,7 @@ final class OrderShipmentsMetabox {
 				$original_json = wp_json_encode( $original_item, JSON_UNESCAPED_UNICODE ) ?: '{}';
 				?>
 				<tr data-wdc-shipment-item-row data-wdc-base-row="1" data-wdc-original-item="<?php echo esc_attr( $original_json ); ?>" data-item-key="<?php echo esc_attr( $row_key ); ?>" data-group-key="<?php echo esc_attr( $row_key ); ?>" data-ordered-quantity="<?php echo esc_attr( (string) $quantity ); ?>" data-wdc-row-index="<?php echo esc_attr( (string) $index ); ?>">
-					<td class="wdc-cdek-item-product"><?php echo esc_html( (string) ( $item['name'] ?? 'Товар' ) ); ?><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][name]" value="<?php echo esc_attr( (string) ( $item['name'] ?? 'Товар' ) ); ?>"><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][item_key]" value="<?php echo esc_attr( $row_key ); ?>"><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][ordered_quantity]" value="<?php echo esc_attr( (string) $quantity ); ?>"></td>
+					<td class="wdc-cdek-item-product"><?php echo esc_html( (string) ( $item['name'] ?? 'Товар' ) ); ?><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][name]" value="<?php echo esc_attr( (string) ( $item['name'] ?? 'Товар' ) ); ?>"><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][item_key]" value="<?php echo esc_attr( $row_key ); ?>"><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][order_item_id]" value="<?php echo esc_attr( (string) $order_item_id ); ?>"><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][ordered_quantity]" value="<?php echo esc_attr( (string) $quantity ); ?>"></td>
 					<td class="wdc-cdek-item-sku"><?php echo esc_html( $sku ); ?><input type="hidden" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][ware_key]" value="<?php echo esc_attr( $sku ); ?>"></td>
 					<td><input class="wdc-cdek-input-qty" type="number" min="1" max="<?php echo esc_attr( (string) min( 999, $quantity ) ); ?>" step="1" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][amount]" value="<?php echo esc_attr( (string) min( 999, $quantity ) ); ?>" data-wdc-shipment-item-qty data-wdc-integer-input></td>
 					<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="shipment_items[<?php echo esc_attr( (string) $index ); ?>][cost]" value="<?php echo esc_attr( (string) $unit ); ?>" data-wdc-decimal-input="2"></td>

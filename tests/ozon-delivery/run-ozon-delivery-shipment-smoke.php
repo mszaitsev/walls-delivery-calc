@@ -236,8 +236,8 @@ $db->points[888] = array( 'generation_id' => 1, 'point_id' => 888, 'name' => 'С
 
 $order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 3, '3000.00' ) ) );
 $rows = array(
-	array( 'item_key' => 'order-item-101', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1, 'cost' => 999999 ),
-	array( 'item_key' => 'order-item-101:split:2', 'split_parent' => 'order-item-101', 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 2, 'cost' => 1 ),
+	array( 'item_key' => 'shipment-ui-row-a', 'order_item_id' => 101, 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 1, 'cost' => 999999 ),
+	array( 'item_key' => 'shipment-ui-row-a:split:2', 'split_parent' => 'shipment-ui-row-a', 'order_item_id' => 101, 'ordered_quantity' => 3, 'place_number' => 2, 'amount' => 2, 'cost' => 1 ),
 );
 $stack = oz_ship_stack( $db );
 $request = oz_ship_request( array(
@@ -254,7 +254,7 @@ $pickup_preview_request = new ShipmentCreateRequest(
 	places: array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ),
 	declared_value: Money::from_kopecks( 0 ),
 	recipient: array( 'name' => 'Иван Иванов', 'phone' => '+79132038250' ),
-	meta: array( 'shipment_item_rows' => array( array( 'item_key' => 'order-item-101', 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 3 ) ) )
+	meta: array( 'shipment_item_rows' => array( array( 'item_key' => 'shipment-ui-row-a', 'order_item_id' => 101, 'ordered_quantity' => 3, 'place_number' => 1, 'amount' => 3 ) ) )
 );
 $pickup_preview = $stack['adapter']->build_safe_payload_preview( $pickup_preview_request );
 oz_ship_assert( ! in_array( 'city or settlement is recommended', $pickup_preview['errors'] ?? array(), true ) && ! in_array( 'street and house or raw_address are required for courier delivery', $pickup_preview['errors'] ?? array(), true ), 'Ozon pickup preview must not show courier recipient-address validation errors.' );
@@ -285,25 +285,30 @@ oz_ship_assert( 'cancellation_started' === (string) ( $cancelled['status'] ?? ''
 
 $stack = oz_ship_stack( $db );
 $live_identity_order = new OzonShipmentSmokeOrder( 85378, '85378', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
-$live_identity = $stack['service']->create( $live_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85378, '85378' ) );
-oz_ship_assert( $live_identity->success, 'Ozon allocation must resolve the real Shipment modal item_key format order-item-246.' );
+$live_identity = $stack['service']->create( $live_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'real-framework-ui-key', 'order_item_id' => 246, 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85378, '85378' ) );
+oz_ship_assert( $live_identity->success, 'Ozon allocation must resolve explicit order_item_id 246 independently from item_key format.' );
 $live_identity_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
 oz_ship_assert( '2000.00' === (string) ( $live_identity_body['postings'][0]['declared_value']['amount'] ?? '' ), 'Ozon declared value must use server-side Woo order value for order-item-246 amount 2.' );
 
 $stack = oz_ship_stack( $db );
 $split_identity_order = new OzonShipmentSmokeOrder( 85379, '85379', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
 $split_identity = $stack['service']->create( $split_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 2000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array(
-	array( 'item_key' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1 ),
-	array( 'item_key' => 'order-item-246:split:2', 'split_parent' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1 ),
+	array( 'item_key' => 'real-framework-ui-key', 'order_item_id' => 246, 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1 ),
+	array( 'item_key' => 'custom:split:7', 'split_parent' => 'custom', 'order_item_id' => 246, 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1 ),
 ), '777', 85379, '85379' ) );
-oz_ship_assert( $split_identity->success, 'Ozon allocation must resolve split Shipment modal rows through split_parent.' );
+oz_ship_assert( $split_identity->success, 'Ozon allocation must keep explicit order_item_id 246 for split rows even when item_key and split_parent are not parseable.' );
 $split_body = $stack['http']->calls_for( '/v1/order/create' )[0]['body'] ?? array();
 oz_ship_assert( '1000.00' === (string) ( $split_body['postings'][0]['declared_value']['amount'] ?? '' ) && '1000.00' === (string) ( $split_body['postings'][1]['declared_value']['amount'] ?? '' ), 'Ozon declared value must prorate order item 246 across split actual places.' );
 
 $stack = oz_ship_stack( $db );
 $invalid_identity_order = new OzonShipmentSmokeOrder( 85380, '85380', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
-$invalid_identity = $stack['service']->create( $invalid_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'forged-item', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85380, '85380' ) );
-oz_ship_assert( ! $invalid_identity->success && str_contains( $invalid_identity->error_message, 'неизвестный товар заказа' ) && ! str_contains( $invalid_identity->error_message, 'Товар заказа 246 распределён' ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Unknown Ozon item identity must fail before /v1/order/create without misleading derivative allocation errors.' );
+$invalid_identity = $stack['service']->create( $invalid_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'order-item-246', 'order_item_id' => 999, 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85380, '85380' ) );
+oz_ship_assert( ! $invalid_identity->success && str_contains( $invalid_identity->error_message, 'неизвестный товар заказа' ) && ! str_contains( $invalid_identity->error_message, 'Товар заказа 246 распределён' ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Forged explicit Ozon order_item_id must fail before /v1/order/create and must not be overridden by parseable item_key.' );
+
+$stack = oz_ship_stack( $db );
+$legacy_identity_order = new OzonShipmentSmokeOrder( 85381, '85381', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );
+$legacy_identity = $stack['service']->create( $legacy_identity_order, oz_ship_request( array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => 'order-item-246', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 2, 'cost' => 1 ) ), '777', 85381, '85381' ) );
+oz_ship_assert( $legacy_identity->success, 'Ozon allocation must keep legacy item_key fallback when explicit order_item_id is absent.' );
 
 $stack = oz_ship_stack( $db );
 $overweight_order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );

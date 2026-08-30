@@ -35,7 +35,7 @@ final class OzonDeliveryShipmentAllocationValueResolver {
 		$rows_by_item = array();
 		$has_unresolved_rows = false;
 		foreach ( $item_rows as $row ) {
-			$item_id = $this->identity_resolver->order_item_id( $row['item_key'] ?? '', $row['split_parent'] ?? null );
+			$item_id = $this->order_item_id( $row );
 			$place_number = (int) ( $row['place_number'] ?? 0 );
 			$quantity = (int) ( $row['amount'] ?? 0 );
 			if ( $item_id <= 0 || ! isset( $order_items[ $item_id ] ) ) {
@@ -118,5 +118,17 @@ final class OzonDeliveryShipmentAllocationValueResolver {
 		}
 
 		return $items;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function order_item_id( array $row ): int {
+		$explicit = (int) ( $row['order_item_id'] ?? 0 );
+		if ( $explicit > 0 ) {
+			return $explicit;
+		}
+
+		return $this->identity_resolver->order_item_id( $row['item_key'] ?? '', $row['split_parent'] ?? null );
 	}
 }

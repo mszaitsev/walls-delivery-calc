@@ -11,6 +11,7 @@ use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationBuilder;
 use WallsShop\WDC\Shipments\Allocation\ShipmentAllocation;
 use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationItem;
 use WallsShop\WDC\Shipments\Allocation\ShipmentAllocationPlace;
+use WallsShop\WDC\Shipments\Application\ShipmentModalRequestMapper;
 
 function shipment_allocation_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) { throw new RuntimeException( $message ); }
@@ -23,7 +24,7 @@ function shipment_allocation_expect_exception( callable $callback, string $messa
 		shipment_allocation_assert( str_contains( $exception->getMessage(), $message_part ), $message );
 	}
 }
-function shipment_allocation_row( string $item_key, int $place_number, string $name, string $sku, int $amount, mixed $unit_kopecks, int $weight, mixed $assessed_kopecks = null, ?int $ordered_quantity = null, string $split_parent = '' ): array {
+function shipment_allocation_row( string $item_key, int $place_number, string $name, string $sku, int $amount, mixed $unit_kopecks, int $weight, mixed $assessed_kopecks = null, ?int $ordered_quantity = null, string $split_parent = '', int $order_item_id = 0 ): array {
 	$row = array(
 		'item_key' => $item_key,
 		'ordered_quantity' => $ordered_quantity ?? $amount,
@@ -37,6 +38,9 @@ function shipment_allocation_row( string $item_key, int $place_number, string $n
 	);
 	if ( '' !== $split_parent ) {
 		$row['split_parent'] = $split_parent;
+	}
+	if ( $order_item_id > 0 ) {
+		$row['order_item_id'] = $order_item_id;
 	}
 
 	return $row;
@@ -138,6 +142,21 @@ $same_sku = ( new ShipmentAllocationBuilder() )->build( array(
 ) , array( $places[0] ) );
 shipment_allocation_assert( 'SAME-SKU' === $same_sku->places[0]->items[0]->sku && 'SAME-SKU' === $same_sku->places[0]->items[1]->sku, 'Same-SKU fixture must use identical SKU values.' );
 shipment_allocation_assert( $same_sku->places[0]->items[0]->source_item_id !== $same_sku->places[0]->items[1]->source_item_id && $same_sku->places[0]->items[0]->identity['order_item_id'] !== $same_sku->places[0]->items[1]->identity['order_item_id'], 'Same SKU with different source identity must remain distinct allocation rows.' );
+
+$explicit_identity = ( new ShipmentAllocationBuilder() )->build( array(
+	shipment_allocation_row( 'ui-row-that-is-not-a-woocommerce-id', 1, 'Explicit item', 'EXP', 1, 10000, 300, null, 1, '', 246 ),
+), array( $places[0] ) );
+shipment_allocation_assert( 'ui-row-that-is-not-a-woocommerce-id' === $explicit_identity->places[0]->items[0]->source_item_id && '246' === $explicit_identity->places[0]->items[0]->identity['order_item_id'], 'Generic allocation rows must keep item_key as UI identity and explicit order_item_id as canonical WooCommerce metadata.' );
+
+$mapper_data = array(
+	'places' => array( array( 'place_number' => 1, 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 10 ) ),
+	'shipment_items' => array(
+		array( 'item_key' => 'custom-row', 'order_item_id' => '246', 'ordered_quantity' => 2, 'place_number' => 1, 'name' => 'Mapped', 'ware_key' => 'MAP', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+		array( 'item_key' => 'custom-row:split:2', 'split_parent' => 'custom-row', 'order_item_id' => '246', 'ordered_quantity' => 2, 'place_number' => 1, 'name' => 'Mapped', 'ware_key' => 'MAP', 'amount' => 1, 'cost' => 100, 'weight' => 300 ),
+	),
+);
+$mapped = ( new ShipmentModalRequestMapper() )->parse( $mapper_data );
+shipment_allocation_assert( 246 === (int) $mapped->item_rows[0]['order_item_id'] && 246 === (int) $mapped->item_rows[1]['order_item_id'] && 'custom-row:split:2' === (string) $mapped->item_rows[1]['item_key'] && 'custom-row' === (string) $mapped->item_rows[1]['split_parent'], 'Shipment modal request mapper must preserve explicit order_item_id independently from item_key and split_parent.' );
 
 $assessed = ( new ShipmentAllocationBuilder() )->build( array(
 	shipment_allocation_row( 'assessed-item', 1, 'Assessed item', 'ASS', 1, 99500, 300, 120000 ),
