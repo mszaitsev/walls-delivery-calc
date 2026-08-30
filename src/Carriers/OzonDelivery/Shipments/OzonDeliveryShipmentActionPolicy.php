@@ -45,6 +45,9 @@ final class OzonDeliveryShipmentActionPolicy {
 			return array( 'can_cancel' => false, 'can_remove' => false, 'can_update' => false );
 		}
 		if ( 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) ) {
+			return array( 'can_cancel' => false, 'can_remove' => false, 'can_update' => true );
+		}
+		if ( 'cancellation_exhausted' === (string) ( $shipment['status'] ?? '' ) ) {
 			return array( 'can_cancel' => false, 'can_remove' => true, 'can_update' => true );
 		}
 

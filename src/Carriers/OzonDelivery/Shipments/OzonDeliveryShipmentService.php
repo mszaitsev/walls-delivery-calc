@@ -143,7 +143,8 @@ final class OzonDeliveryShipmentService {
 		}
 		$universal = OzonDeliveryShipmentStatusMapping::aggregate( $statuses );
 		$shipment['ozon_statuses'] = $normalized;
-		if ( 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) && OzonDeliveryShipmentActionPolicy::all_cancelled( $statuses ) ) {
+		$cancellation_status = (string) ( $shipment['status'] ?? '' );
+		if ( in_array( $cancellation_status, array( 'cancellation_started', 'cancellation_exhausted' ), true ) && OzonDeliveryShipmentActionPolicy::all_cancelled( $statuses ) ) {
 			$this->terminalize_attempt( $order, $shipment );
 			$this->repository->delete_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
 			return array(
@@ -153,7 +154,7 @@ final class OzonDeliveryShipmentService {
 				'cancelled_and_removed' => true,
 			);
 		}
-		if ( 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) ) {
+		if ( 'cancellation_started' === $cancellation_status ) {
 			$shipment['status_title'] = 'Ожидаем подтверждение отмены Ozon…';
 			$shipment['tracking_checked_at'] = $this->now();
 			$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );

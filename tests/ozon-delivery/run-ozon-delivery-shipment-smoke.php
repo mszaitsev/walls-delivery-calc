@@ -334,7 +334,17 @@ oz_ship_assert( ! empty( $cancel['success'] ) && ! empty( $cancel['auto_poll'] )
 $cancelled = ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( 'cancellation_started' === (string) ( $cancelled['status'] ?? '' ) && DeliveryStatus::UNKNOWN === (string) ( $cancelled['universal_status_code'] ?? '' ), 'Cancel request must not mark the shipment fully cancelled before status sync confirms it.' );
 $cancel_payload = $stack['adapter']->status_payload( $order, $cancelled );
-oz_ship_assert( ! empty( $cancel_payload['polling_continue'] ) && ! empty( $cancel_payload['can_remove_from_order'] ) && empty( $cancel_payload['can_cancel'] ) && 5000 === (int) ( $cancel_payload['registration_poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel_payload['registration_poll_max_attempts'] ?? 0 ), 'Ozon cancellation_started payload must support reload recovery through generic polling.' );
+oz_ship_assert( ! empty( $cancel_payload['polling_continue'] ) && empty( $cancel_payload['can_remove_from_order'] ) && empty( $cancel_payload['can_cancel'] ) && ! empty( $cancel_payload['can_update_status'] ) && 5000 === (int) ( $cancel_payload['registration_poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel_payload['registration_poll_max_attempts'] ?? 0 ), 'Ozon cancellation_started payload must keep local removal locked while shared cancellation polling is active.' );
+$active_remove = $stack['adapter']->remove_from_order( $order );
+oz_ship_assert( empty( $active_remove['success'] ) && array() !== ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ), 'Ozon cancellation_started shipment must reject direct local remove before Ozon confirms cancellation.' );
+$multi_cancel_policy = OzonDeliveryShipmentActionPolicy::for_shipment( array(
+	'status' => 'cancellation_started',
+	'ozon_statuses' => array(
+		array( 'status' => 'CANCELED' ),
+		array( 'status' => 'READY_FOR_SHIPPING' ),
+	),
+) );
+oz_ship_assert( empty( $multi_cancel_policy['can_cancel'] ) && empty( $multi_cancel_policy['can_remove'] ) && ! empty( $multi_cancel_policy['can_update'] ), 'Mixed multi-posting active cancellation must not allow manual local removal before every posting is CANCELED.' );
 $cancelled_update = $stack['adapter']->update_status( $order );
 oz_ship_assert( ! empty( $cancelled_update['cancelled_and_removed'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ), 'Status poll with all CANCELED postings must remove local Ozon shipment and return cancelled_and_removed.' );
 
@@ -348,9 +358,15 @@ oz_ship_assert( ! empty( $delayed_cancel['auto_poll'] ), 'Cancel accepted with d
 $delayed_poll = $stack['adapter']->update_status( $delayed_order );
 $delayed_stored = ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( ! empty( $delayed_poll['pending'] ) && empty( $delayed_poll['cancelled_and_removed'] ) && array() !== $delayed_stored, 'Delayed cancel status must keep polling and keep local shipment until all postings are CANCELED.' );
+$delayed_payload = $stack['adapter']->status_payload( $delayed_order, $delayed_stored );
+oz_ship_assert( ! empty( $delayed_payload['polling_continue'] ) && empty( $delayed_payload['can_remove_from_order'] ), 'Partially confirmed cancellation must keep the local shipment locked while polling continues.' );
+$timeout = $stack['adapter']->mark_polling_exhausted( $delayed_order, 14, 'cancellation' );
+$timeout_stored = ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY );
+$timeout_payload = $stack['adapter']->status_payload( $delayed_order, $timeout_stored );
+oz_ship_assert( ! empty( $timeout['success'] ) && 'cancellation_exhausted' === (string) ( $timeout_stored['status'] ?? '' ) && empty( $timeout_payload['polling_continue'] ) && empty( $timeout_payload['can_cancel'] ) && ! empty( $timeout_payload['can_remove_from_order'] ) && ! empty( $timeout_payload['can_update_status'] ), 'Exhausted Ozon cancellation polling must keep the shipment but exit the active local-removal lock.' );
 $stack['http']->statuses['OZON-1'] = 'CANCELED';
 $delayed_done = $stack['adapter']->update_status( $delayed_order );
-oz_ship_assert( ! empty( $delayed_done['cancelled_and_removed'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY ), 'Later all-CANCELED status must clear the Ozon shipment block.' );
+oz_ship_assert( ! empty( $delayed_done['cancelled_and_removed'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY ), 'Manual status update after timeout with all-CANCELED status must clear the Ozon shipment block.' );
 
 $stack = oz_ship_stack( $db );
 $cancel_fail_order = new OzonShipmentSmokeOrder( 85388, '85388', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
