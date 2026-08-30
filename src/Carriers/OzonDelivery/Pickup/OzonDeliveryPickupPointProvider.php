@@ -82,6 +82,29 @@ final class OzonDeliveryPickupPointProvider implements CarrierPickupPointProvide
 	public function last_search_diagnostics(): array {
 		return $this->last_search_diagnostics;
 	}
+	/** @return array<string,mixed>|null */
+	public function active_point_row( int $point_id ): ?array {
+		$row = $this->repository->find_active( $point_id );
+		return is_array( $row ) ? $row : null;
+	}
+	/**
+	 * @param array<int,array{weight_g:int,length_cm:float,width_cm:float,height_cm:float}> $places
+	 * @return array{reason:string,place_index:int}|null
+	 */
+	public function first_place_rejection( int $point_id, array $places ): ?array {
+		$row = $this->active_point_row( $point_id );
+		if ( ! is_array( $row ) || ! $this->base_point( $row ) instanceof PickupPoint ) {
+			return array( 'reason' => 'point_unavailable', 'place_index' => 0 );
+		}
+		foreach ( array_values( $places ) as $index => $place ) {
+			$reason = $this->place_rejection_reason( $row, $place );
+			if ( null !== $reason ) {
+				return array( 'reason' => $reason, 'place_index' => $index + 1 );
+			}
+		}
+
+		return null;
+	}
 	/** @param array<string,mixed> $row */
 	private function point( array $row, CarrierPickupPointQuery $query ): ?PickupPoint {
 		$point = $this->base_point( $row );

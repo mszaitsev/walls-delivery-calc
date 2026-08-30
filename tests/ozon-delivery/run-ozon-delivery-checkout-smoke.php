@@ -115,6 +115,7 @@ $plugin = file_get_contents( $root . '/src/Core/Plugin.php' ) ?: '';
 $carrier = file_get_contents( $root . '/src/Carriers/Runtime/OzonDeliveryCarrier.php' ) ?: '';
 $service = file_get_contents( $root . '/src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteService.php' ) ?: '';
 $api = file_get_contents( $root . '/src/Carriers/OzonDelivery/Api/OzonDeliveryApiClient.php' ) ?: '';
+$shipment_builder = file_get_contents( $root . '/src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentCreateRequestBuilder.php' ) ?: '';
 $orchestrator = file_get_contents( $root . '/src/Checkout/Runtime/CheckoutOrchestrator.php' ) ?: '';
 $pickup_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
 $pickup_rest = file_get_contents( $root . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
@@ -124,7 +125,7 @@ oz_checkout_assert( str_contains( $carrier, "public const TARIFF_KEY = 'pickup'"
 oz_checkout_assert( str_contains( $service, 'representative_point' ) && str_contains( $service, 'resolve_selection' ) && str_contains( $service, 'ozon_selected_point_stale' ) && str_contains( $service, 'pickup_provider_query' ), 'Ozon checkout must support representative quote, selected-point repricing and stale selection fail-closed.' );
 oz_checkout_assert( str_contains( $api, 'order_checkout' ) && str_contains( $api, "'/v1/order/checkout'" ) && ! str_contains( $service, 'pickup_list' ) && ! str_contains( $service, 'pickup_info' ), 'Checkout pricing must call only order checkout and not catalog APIs.' );
 oz_checkout_assert( ! str_contains( $orchestrator, 'Ozon' ) && ! str_contains( $pickup_js, 'ozon_delivery' ) && ! str_contains( $pickup_rest, 'ozon_delivery' ), 'Checkout orchestrator, generic pickup JS and generic pickup REST must remain carrier-neutral.' );
-oz_checkout_assert( ! str_contains( $plugin, 'OzonDeliveryShipment' ) && ! str_contains( $plugin, 'OzonDeliveryShipmentAdapter' ) && ! str_contains( $plugin, 'OzonDeliveryDocument' ), 'Shipment Framework must not gain Ozon shipment mutations in this stage.' );
+oz_checkout_assert( ! str_contains( $service, 'OzonDeliveryShipment' ) && ! str_contains( $service, 'ShipmentCreateRequest' ) && ! str_contains( $shipment_builder, 'PackagingBuilder' ) && ! str_contains( $shipment_builder, 'PackagingResult' ) && ! str_contains( $shipment_builder, 'ozon_delivery_places' ), 'Ozon checkout pricing and shipment create must stay separated.' );
 
 $GLOBALS['oz_checkout_options'] = array();
 $GLOBALS['oz_checkout_logs'] = array();

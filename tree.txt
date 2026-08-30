@@ -341,13 +341,25 @@ C:.
 |   |   |   |       OzonDeliveryPickupScheduleFormatter.php
 |   |   |   |       OzonDeliveryPickupScheduler.php
 |   |   |   |
-|   |   |   \---Quote
+|   |   |   +---Quote
 |   |   |           OzonDeliveryPackagingBuilderFactory.php
 |   |   |           OzonDeliveryQuoteException.php
 |   |   |           OzonDeliveryQuoteParser.php
 |   |   |           OzonDeliveryQuoteRequestBuilder.php
 |   |   |           OzonDeliveryQuoteResult.php
 |   |   |           OzonDeliveryQuoteService.php
+|   |   |
+|   |   |   \---Shipments
+|   |   |           OzonDeliveryShipmentAdapter.php
+|   |   |           OzonDeliveryShipmentAllocationValueResolver.php
+|   |   |           OzonDeliveryShipmentCreateRequestBuilder.php
+|   |   |           OzonDeliveryShipmentCreateResponseParser.php
+|   |   |           OzonDeliveryShipmentDescriptionBuilder.php
+|   |   |           OzonDeliveryShipmentDocumentProvider.php
+|   |   |           OzonDeliveryShipmentModalExtension.php
+|   |   |           OzonDeliveryShipmentPersistenceMapper.php
+|   |   |           OzonDeliveryShipmentService.php
+|   |   |           OzonDeliveryShipmentStatusMapping.php
 |   |   |
 |   |   +---Pek
 |   |   |   |   PekCountryPolicy.php

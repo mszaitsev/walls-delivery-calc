@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
@@ -43,7 +44,8 @@ final class OrderShipmentDraftFactory {
 		private ?YandexDeliverySettings $yandex_settings = null,
 		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
 		private ?PekSettings $pek_settings = null,
-		private ?PekShipmentCourierAddressResolver $pek_courier_addresses = null
+		private ?PekShipmentCourierAddressResolver $pek_courier_addresses = null,
+		private ?OzonDeliverySettings $ozon_settings = null
 	) {
 	}
 
@@ -60,6 +62,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( PekSettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_pek_request_from_order( $order );
+		}
+		if ( OzonDeliverySettings::CARRIER_KEY === $carrier_key ) {
+			return $this->create_ozon_request_from_order( $order );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$delivery_type = $this->delivery_type_from_order( $order );
@@ -172,6 +177,26 @@ final class OrderShipmentDraftFactory {
 				),
 			);
 		}
+		if ( OzonDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
+			return array(
+				'request' => $request->to_array(),
+				'services' => array(
+					array(
+						'service_key' => OzonDeliverySettings::SERVICE_KEY,
+						'group_id' => OzonDeliverySettings::PICKUP_FAMILY,
+						'title' => OzonDeliverySettings::TITLE,
+						'delivery_type' => DeliveryType::PICKUP,
+						'tariffs' => array(),
+					),
+				),
+				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'requires_tariff' => false,
+					'requires_postoffice' => false,
+					'requires_successful_preview' => false,
+				),
+			);
+		}
 		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 		$service_variants = array();
 		if ( $service instanceof DeliveryService ) {
@@ -206,6 +231,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( PekSettings::CARRIER_KEY === $base->carrier_key ) {
 			return $this->create_pek_request_from_admin_data( $base, $data );
+		}
+		if ( OzonDeliverySettings::CARRIER_KEY === $base->carrier_key ) {
+			return $this->create_ozon_request_from_admin_data( $base, $data );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$service = $this->services->find_by_service_key( $service_key );
@@ -815,6 +843,95 @@ final class OrderShipmentDraftFactory {
 			array(),
 			$base->recipient,
 			$meta
+		);
+	}
+
+	private function create_ozon_request_from_order( object $order ): ShipmentCreateRequest {
+		$calculation = $this->calculation_data( $order );
+		$rate_meta = $this->rate_meta_data( $order );
+		$items = $this->order_items( $order );
+		$weight = $this->default_weight_g( $order, $items );
+		$place = new ShipmentPlace( 1, $weight, 20, 15, 10, Money::from_kopecks( 0 ), $items );
+		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		$provider_query = is_array( $rate_meta['pickup_provider_query'] ?? null ) ? $rate_meta['pickup_provider_query'] : array();
+		$point_code = $this->first_non_empty(
+			$rate_meta['point_code'] ?? '',
+			$rate_meta['pickup_point_code'] ?? '',
+			$pickup['point_code'] ?? '',
+			$pickup['code'] ?? '',
+			$this->meta_string( $order, '_wdc_platform_pickup_code' ),
+			$this->meta_string( $order, '_wdc_pickup_point_code' )
+		);
+		$address = $this->first_non_empty(
+			$pickup['address'] ?? '',
+			$pickup['point_address'] ?? '',
+			$rate_meta['point_address'] ?? '',
+			$this->meta_string( $order, '_wdc_pickup_point_address' )
+		);
+
+		return new ShipmentCreateRequest(
+			order_id: $this->order_id( $order ),
+			carrier_key: OzonDeliverySettings::CARRIER_KEY,
+			delivery_type: DeliveryType::PICKUP,
+			rate_id: OzonDeliverySettings::PICKUP_FAMILY,
+			recipient_address: $this->recipient_address( $order, DeliveryType::PICKUP, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
+			pickup_point: '' !== $point_code ? new PickupPointSelection( OzonDeliverySettings::CARRIER_KEY, OzonDeliverySettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
+			places: array( $place ),
+			declared_value: Money::from_kopecks( 0 ),
+			insurance_enabled: true,
+			services: array(),
+			recipient: array(
+				'name' => $this->recipient_name( $order ),
+				'phone' => $this->phone( $order ),
+				'email' => $this->email( $order ),
+			),
+			meta: array(
+				'carrier_key' => OzonDeliverySettings::CARRIER_KEY,
+				'service_key' => OzonDeliverySettings::SERVICE_KEY,
+				'delivery_type' => DeliveryType::PICKUP,
+				'service_title' => OzonDeliverySettings::TITLE,
+				'order_num' => $this->order_number( $order ),
+				'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
+				'pickup_point_code' => $point_code,
+				'pickup_point_address' => $address,
+				'pickup_point_found' => '' !== $point_code,
+				'pickup_provider_query' => $provider_query,
+				'calculation_data' => $calculation,
+				'rate_meta' => $rate_meta,
+				'shipment_item_rows' => $this->shipment_item_rows_from_order( $order, $items ),
+				'ozon_shipment_source' => 'shipment_modal_actual_places',
+			)
+		);
+	}
+
+	private function create_ozon_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
+		$posted_delivery_type = sanitize_key( wp_unslash( $data['delivery_type'] ?? '' ) );
+		if ( '' !== $posted_delivery_type && DeliveryType::PICKUP !== $posted_delivery_type ) {
+			throw new \RuntimeException( 'Ozon Delivery поддерживает создание только в выбранный ПВЗ.' );
+		}
+		$prepared = $this->shipment_modal_mapper()->parse( $data );
+
+		return new ShipmentCreateRequest(
+			$base->order_id,
+			OzonDeliverySettings::CARRIER_KEY,
+			DeliveryType::PICKUP,
+			OzonDeliverySettings::PICKUP_FAMILY,
+			$base->recipient_address,
+			$base->pickup_point,
+			$prepared->places,
+			Money::from_kopecks( 0 ),
+			true,
+			array(),
+			$base->recipient,
+			array_merge(
+				$base->meta,
+				array(
+					'service_key' => OzonDeliverySettings::SERVICE_KEY,
+					'delivery_type' => DeliveryType::PICKUP,
+					'shipment_item_rows' => $prepared->item_rows,
+					'ozon_shipment_source' => 'shipment_modal_actual_places',
+				)
+			)
 		);
 	}
 
