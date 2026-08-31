@@ -305,7 +305,8 @@ final class OrderShipmentsMetabox {
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox data-carrier-key="<?php echo esc_attr( $carrier_key ); ?>" data-has-shipment="<?php echo $has_created ? '1' : '0'; ?>" <?php $this->render_presentation_attrs( $presentation ); ?>>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
 			<p><strong><?php echo esc_html__( 'Статус посылки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-summary-status><?php echo esc_html( $this->shipment_status_label( $shipment ) ); ?></span></p>
-			<p data-wdc-tracking-row <?php echo '' === $tracking_presentation['display_text'] && '' === $tracking_presentation['copy_value'] ? 'hidden' : ''; ?>><strong data-wdc-tracking-label><?php echo esc_html( $tracking_presentation['label'] ); ?></strong>: <span data-wdc-tracking-number><?php $this->render_tracking_value( $tracking_presentation ); ?></span> <button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $tracking_presentation['copy_value'] ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $tracking_presentation['copy_value'] ); ?>>🗐</button> <span class="description" data-wdc-copy-tracking-status></span></p>
+			<?php $tracking_items = is_array( $tracking_presentation['items'] ?? null ) ? $tracking_presentation['items'] : array(); ?>
+			<p data-wdc-tracking-row <?php echo array() === $tracking_items && '' === $tracking_presentation['display_text'] && '' === $tracking_presentation['copy_value'] ? 'hidden' : ''; ?>><strong data-wdc-tracking-label><?php echo esc_html( $tracking_presentation['label'] ); ?></strong>: <span data-wdc-tracking-number><?php $this->render_tracking_value( $tracking_presentation ); ?></span> <?php if ( array() === $tracking_items ) : ?><button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $tracking_presentation['copy_value'] ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $tracking_presentation['copy_value'] ); ?>>🗐</button><?php endif; ?> <span class="description" data-wdc-copy-tracking-status></span></p>
 			<p data-wdc-yandex-self-pickup-code-row <?php echo '' === $yandex_self_pickup_code ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Код для получения', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-yandex-self-pickup-code><?php echo esc_html( $yandex_self_pickup_code ); ?></span></p>
 			<p data-wdc-shipment-price-row class="<?php echo esc_attr( $this->shipment_price_class( $price_compare_status ) ); ?>" title="<?php echo esc_attr( $price_compare_message ); ?>" <?php echo '' === $price_label ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Цена', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-price-label><?php echo esc_html( $price_label ); ?></span></p>
 			<div class="wdc-shipment-actual-cost" data-wdc-shipment-actual-cost data-wdc-shipment-actual-cost-control data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $has_created ? '' : 'hidden'; ?>>
@@ -711,7 +712,7 @@ final class OrderShipmentsMetabox {
 	/**
 	 * @param array<string,mixed>  $status
 	 * @param array<string,string> $presentation
-	 * @return array{label:string,display_text:string,url:string,copy_value:string}
+	 * @return array{label:string,display_text:string,url:string,copy_value:string,items:array<int,array<string,string>>}
 	 */
 	private function tracking_presentation( array $status, array $presentation, string $fallback_value ): array {
 		$tracking = is_array( $status['tracking_presentation'] ?? null ) ? $status['tracking_presentation'] : array();
@@ -719,6 +720,7 @@ final class OrderShipmentsMetabox {
 		$display_text = trim( (string) ( $tracking['display_text'] ?? $fallback_value ) );
 		$url = $this->safe_tracking_url( (string) ( $tracking['url'] ?? '' ) );
 		$copy_value = trim( (string) ( $tracking['copy_value'] ?? '' ) );
+		$items = $this->tracking_items( $tracking['items'] ?? null );
 
 		if ( '' !== $url ) {
 			$display_text = '' !== $display_text ? $display_text : $url;
@@ -732,11 +734,31 @@ final class OrderShipmentsMetabox {
 			'display_text' => $display_text,
 			'url' => $url,
 			'copy_value' => $copy_value,
+			'items' => $items,
 		);
 	}
 
-	/** @param array{label:string,display_text:string,url:string,copy_value:string} $tracking */
+	/** @param array{label:string,display_text:string,url:string,copy_value:string,items?:array<int,array<string,string>>} $tracking */
 	private function render_tracking_value( array $tracking ): void {
+		$items = is_array( $tracking['items'] ?? null ) ? $tracking['items'] : array();
+		if ( array() !== $items ) {
+			foreach ( $items as $index => $item ) {
+				if ( $index > 0 ) {
+					echo '<br>';
+				}
+				if ( '' !== (string) ( $item['label'] ?? '' ) ) {
+					printf( '<span class="description">%s: </span>', esc_html( (string) $item['label'] ) );
+				}
+				echo esc_html( (string) ( $item['display_text'] ?? $item['copy_value'] ?? '' ) );
+				printf(
+					' <button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="%s" aria-label="%s" title="%s">🗐</button>',
+					esc_attr( (string) ( $item['copy_value'] ?? $item['display_text'] ?? '' ) ),
+					esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ),
+					esc_attr__( 'Копировать', 'walls-delivery-calc' )
+				);
+			}
+			return;
+		}
 		if ( '' !== $tracking['url'] ) {
 			printf(
 				'<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>',
@@ -747,6 +769,31 @@ final class OrderShipmentsMetabox {
 		}
 
 		echo esc_html( $tracking['display_text'] );
+	}
+
+	/** @return array<int,array<string,string>> */
+	private function tracking_items( mixed $items ): array {
+		if ( ! is_array( $items ) ) {
+			return array();
+		}
+		$result = array();
+		foreach ( $items as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+			$display_text = trim( (string) ( $item['display_text'] ?? $item['displayText'] ?? '' ) );
+			$copy_value = trim( (string) ( $item['copy_value'] ?? $item['copyValue'] ?? $display_text ) );
+			if ( '' === $display_text && '' === $copy_value ) {
+				continue;
+			}
+			$result[] = array(
+				'label' => trim( (string) ( $item['label'] ?? '' ) ),
+				'display_text' => $display_text,
+				'copy_value' => $copy_value,
+			);
+		}
+
+		return $result;
 	}
 
 	private function safe_tracking_url( string $url ): string {

@@ -124,6 +124,20 @@ final class ShipmentCreateAjaxController {
 					'accepted' => ! empty( $accepted_reconciliation['accepted'] ),
 					'reconciliation_required' => ! empty( $accepted_reconciliation['reconciliation_required'] ),
 					'request_id' => (string) ( $accepted_reconciliation['request_id'] ?? '' ),
+					'auto_poll' => ! empty( $result->raw_reference['auto_poll'] ),
+					'poll_required' => ! empty( $result->raw_reference['poll_required'] ),
+					'poll_interval_ms' => (int) ( $result->raw_reference['poll_interval_ms'] ?? 0 ),
+					'poll_max_attempts' => (int) ( $result->raw_reference['poll_max_attempts'] ?? 0 ),
+					'purpose' => (string) ( $result->raw_reference['purpose'] ?? '' ),
+					'lifecycle' => is_array( $result->raw_reference['lifecycle'] ?? null ) ? $result->raw_reference['lifecycle'] : ( ! empty( $result->raw_reference['poll_required'] ) ? array(
+						'phase' => 'polling_required',
+						'accepted' => true,
+						'poll_required' => true,
+						'message' => (string) ( $result->raw_reference['message'] ?? '' ),
+						'poll_interval_ms' => (int) ( $result->raw_reference['poll_interval_ms'] ?? 5000 ),
+						'poll_max_attempts' => (int) ( $result->raw_reference['poll_max_attempts'] ?? 14 ),
+						'purpose' => (string) ( $result->raw_reference['purpose'] ?? 'registration' ),
+					) : array() ),
 					)
 				)
 			);

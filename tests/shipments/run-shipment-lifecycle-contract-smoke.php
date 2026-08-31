@@ -8,6 +8,12 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Shipments\Lifecycle\ShipmentLifecycleResult;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\ShipmentPlace;
+use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 
 function shipment_lifecycle_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -67,6 +73,14 @@ $lifecycle_controller_source = (string) file_get_contents( dirname( __DIR__, 2 )
 shipment_lifecycle_assert( str_contains( $dto_source, "'continuation_token'" ) && ! str_contains( $dto_source, "'attempt_id'" ) && ! str_contains( $dto_source, "'poll_purpose'" ), 'Lifecycle DTO source must serialize only transport-neutral field names.' );
 shipment_lifecycle_assert( str_contains( $continuation_interface_source, '$continuation_token' ) && ! str_contains( $continuation_interface_source, '$attempt_id' ), 'Lifecycle continuation interface must use continuation_token naming.' );
 shipment_lifecycle_assert( str_contains( $lifecycle_controller_source, "\$_POST['continuation_token']" ) && ! str_contains( $lifecycle_controller_source, "\$_POST['attempt_id']" ) && ! str_contains( $lifecycle_controller_source, "'poll_purpose'" ), 'Common admin lifecycle endpoint must accept continuation_token and purpose only.' );
+
+$pickup_request = new ShipmentCreateRequest( 10, 'pickup_carrier', DeliveryType::PICKUP, 'pickup-rate', new Address(), new PickupPointSelection( 'pickup_carrier', 'service', 'PVZ-1', 'ПВЗ', '2026-08-30 12:00:00' ), array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), Money::from_kopecks( 10000 ) );
+$pickup_errors = $pickup_request->validate();
+shipment_lifecycle_assert( ! in_array( 'city or settlement is recommended', $pickup_errors, true ) && ! in_array( 'street and house or raw_address are required for courier delivery', $pickup_errors, true ), 'Pickup ShipmentCreateRequest validation must not apply courier recipient address requirements.' );
+
+$courier_request = new ShipmentCreateRequest( 10, 'courier_carrier', DeliveryType::COURIER, 'courier-rate', new Address(), null, array( new ShipmentPlace( 1, 1000, 20, 15, 10, Money::from_kopecks( 0 ) ) ), Money::from_kopecks( 10000 ) );
+$courier_errors = $courier_request->validate();
+shipment_lifecycle_assert( in_array( 'city or settlement is recommended', $courier_errors, true ) && in_array( 'street and house or raw_address are required for courier delivery', $courier_errors, true ), 'Courier ShipmentCreateRequest validation must keep existing recipient address requirements.' );
 
 shipment_lifecycle_expect_invalid(
 	static fn (): ShipmentLifecycleResult => new ShipmentLifecycleResult( 'dpd_submission_required' ),

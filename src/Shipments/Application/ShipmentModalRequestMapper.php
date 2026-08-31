@@ -66,6 +66,7 @@ final class ShipmentModalRequestMapper {
 			}
 			$item_rows[] = array(
 				'item_key' => $this->text( $row['item_key'] ?? $row['order_item_id'] ?? '' ),
+				'split_parent' => $this->text( $row['split_parent'] ?? '' ),
 				'ordered_quantity' => (int) ( $row['ordered_quantity'] ?? $row['quantity'] ?? $row['amount'] ?? 0 ),
 				'place_number' => (int) ( $row['place_number'] ?? 0 ),
 				'name' => $this->text( $row['name'] ?? '' ),

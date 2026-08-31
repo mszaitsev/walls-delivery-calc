@@ -26,6 +26,7 @@ final class OzonDeliverySettings {
 	public const QUOTE_FALLBACK_PHONE_KEY = 'ozon_delivery_quote_fallback_phone';
 	public const PICKUP_AUTO_SYNC_KEY = 'ozon_delivery_pickup_auto_sync';
 	public const PICKUP_SYNC_TIME_KEY = 'ozon_delivery_pickup_sync_time';
+	public const SHIPMENT_STATUS_MAPPING_KEY = 'ozon_delivery_shipment_status_mapping';
 
 	private RussianPhoneNormalizer $phones;
 
@@ -45,6 +46,7 @@ final class OzonDeliverySettings {
 			self::QUOTE_FALLBACK_PHONE_KEY => '',
 			self::PICKUP_AUTO_SYNC_KEY => true,
 			self::PICKUP_SYNC_TIME_KEY => '02:00',
+			self::SHIPMENT_STATUS_MAPPING_KEY => array(),
 		);
 	}
 
@@ -102,4 +104,8 @@ final class OzonDeliverySettings {
 	public function pickup_sync_time(): string { $time = $this->settings->get_string( self::PICKUP_SYNC_TIME_KEY, '02:00' ); return 1 === preg_match( '/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $time ) ? $time : '02:00'; }
 	/** @param array<string,mixed> $input */
 	public function save_pickup_schedule( array $input ): void { $time = isset( $input['ozon_delivery_pickup_sync_time'] ) ? trim( (string) $input['ozon_delivery_pickup_sync_time'] ) : '02:00'; $this->settings->set( self::PICKUP_AUTO_SYNC_KEY, ! empty( $input['ozon_delivery_pickup_auto_sync'] ) ); $this->settings->set( self::PICKUP_SYNC_TIME_KEY, 1 === preg_match( '/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $time ) ? $time : '02:00' ); }
+	/** @return array<string,string> */
+	public function shipment_status_mapping(): array { $mapping = $this->settings->get_array( self::SHIPMENT_STATUS_MAPPING_KEY, array() ); $result = array(); foreach ( $mapping as $status => $universal ) { if ( is_scalar( $status ) && is_scalar( $universal ) ) { $result[ (string) $status ] = (string) $universal; } } return $result; }
+	/** @param array<string,string> $mapping */
+	public function save_shipment_status_mapping( array $mapping ): void { $this->settings->set( self::SHIPMENT_STATUS_MAPPING_KEY, $mapping ); }
 }

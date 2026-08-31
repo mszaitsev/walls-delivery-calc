@@ -103,6 +103,10 @@ final class ShipmentCreateRequest {
 			$errors = array_merge( $errors, $this->pickup_point->validate() );
 		}
 
-		return array_merge( $errors, $this->recipient_address->validate(), $this->declared_value->validate() );
+		if ( DeliveryType::COURIER === $this->delivery_type ) {
+			$errors = array_merge( $errors, $this->recipient_address->validate() );
+		}
+
+		return array_merge( $errors, $this->declared_value->validate() );
 	}
 }
