@@ -84,6 +84,8 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	public bool $fail_checkout = false;
 	public bool $fail_info = false;
 	public bool $fail_cancel = false;
+	/** @var array<int,string> */
+	public array $fail_cancel_numbers = array();
 	public bool $approve_updates_status = true;
 	public bool $cancel_updates_status = true;
 
@@ -149,11 +151,12 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'postings' => $postings ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
 		}
 		if ( str_contains( $url, '/v1/posting/cancel' ) ) {
-			if ( $this->fail_cancel ) {
+			$posting_number = (string) ( $body['posting_number'] ?? '' );
+			if ( $this->fail_cancel || in_array( $posting_number, $this->fail_cancel_numbers, true ) ) {
 				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"cancel_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
 			}
 			if ( $this->cancel_updates_status ) {
-				$this->statuses[ (string) ( $body['posting_number'] ?? '' ) ] = 'CANCELED';
+				$this->statuses[ $posting_number ] = 'CANCELED';
 			}
 			return new OzonDeliveryApiResponse( 200, '{}', array( 'content-type' => 'application/json' ) );
 		}
@@ -330,7 +333,7 @@ oz_ship_assert( $document instanceof ShipmentBinaryDocument && 'ozon-box-2.pdf' 
 $status = $stack['adapter']->update_status( $order );
 oz_ship_assert( ! empty( $status['success'] ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status['shipment']['universal_status_code'] ?? '' ), 'Ozon status provider must map ready_for_shipping postings to created_in_carrier.' );
 $cancel = $stack['adapter']->cancel_in_carrier( $order );
-oz_ship_assert( ! empty( $cancel['success'] ) && ! empty( $cancel['auto_poll'] ) && 5000 === (int) ( $cancel['poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel['poll_max_attempts'] ?? 0 ) && 'cancellation' === (string) ( $cancel['purpose'] ?? '' ), 'Ozon cancellation must start the shared 5s x 14 polling lifecycle: ' . json_encode( $cancel, JSON_UNESCAPED_UNICODE ) );
+oz_ship_assert( ! empty( $cancel['success'] ) && empty( $cancel['partial'] ) && ! empty( $cancel['auto_poll'] ) && 5000 === (int) ( $cancel['poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel['poll_max_attempts'] ?? 0 ) && 'cancellation' === (string) ( $cancel['purpose'] ?? '' ), 'Ozon cancellation must start the shared 5s x 14 polling lifecycle: ' . json_encode( $cancel, JSON_UNESCAPED_UNICODE ) );
 $cancelled = ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( 'cancellation_started' === (string) ( $cancelled['status'] ?? '' ) && DeliveryStatus::UNKNOWN === (string) ( $cancelled['universal_status_code'] ?? '' ), 'Cancel request must not mark the shipment fully cancelled before status sync confirms it.' );
 $cancel_payload = $stack['adapter']->status_payload( $order, $cancelled );
@@ -374,7 +377,53 @@ $cancel_fail_create = $stack['service']->create( $cancel_fail_order, oz_ship_req
 oz_ship_assert( $cancel_fail_create->success, 'Cancel failure fixture must create Ozon shipment first.' );
 $stack['http']->fail_cancel = true;
 $cancel_fail = $stack['adapter']->cancel_in_carrier( $cancel_fail_order );
-oz_ship_assert( empty( $cancel_fail['success'] ) && empty( $cancel_fail['auto_poll'] ) && array() !== ( new OrderShipmentRepository() )->find_by_carrier( $cancel_fail_order, OzonDeliverySettings::CARRIER_KEY ), 'Hard Ozon cancel API rejection must not start optimistic polling or delete local shipment.' );
+$cancel_fail_stored = ( new OrderShipmentRepository() )->find_by_carrier( $cancel_fail_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( empty( $cancel_fail['success'] ) && empty( $cancel_fail['auto_poll'] ) && 'created' === (string) ( $cancel_fail_stored['status'] ?? '' ), 'Hard Ozon cancel API rejection must not start optimistic polling or change local shipment status.' );
+
+$stack = oz_ship_stack( $db );
+$partial_cancel_order = new OzonShipmentSmokeOrder( 85389, '85389', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) );
+$partial_cancel_create = $stack['service']->create( $partial_cancel_order, oz_ship_request( array(
+	new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+	new ShipmentPlace( 2, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101:split:1', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85389, '85389' ) );
+oz_ship_assert( $partial_cancel_create->success, 'Partial cancel fixture must create a multi-posting Ozon shipment.' );
+$stack['http']->cancel_updates_status = false;
+$stack['http']->fail_cancel_numbers = array( 'OZON-2' );
+$partial_cancel = $stack['adapter']->cancel_in_carrier( $partial_cancel_order );
+$partial_stored = ( new OrderShipmentRepository() )->find_by_carrier( $partial_cancel_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( ! empty( $partial_cancel['success'] ) && ! empty( $partial_cancel['partial'] ) && ! empty( $partial_cancel['auto_poll'] ) && 'cancellation_started' === (string) ( $partial_stored['status'] ?? '' ) && 1 === (int) ( $partial_stored['cancel_attempt']['accepted_count'] ?? 0 ) && 1 === (int) ( $partial_stored['cancel_attempt']['failed_count'] ?? 0 ) && str_contains( (string) ( $partial_cancel['message'] ?? '' ), 'Ozon принял отмену части грузомест' ), 'Partial Ozon cancel acceptance must persist cancellation_started and start reconciliation polling.' );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->statuses['OZON-2'] = 'READY_FOR_SHIPPING';
+$partial_pending = $stack['adapter']->update_status( $partial_cancel_order );
+oz_ship_assert( ! empty( $partial_pending['pending'] ) && empty( $partial_pending['cancelled_and_removed'] ) && 2 === count( $stack['http']->calls_for( '/v1/posting/cancel' ) ) && array() !== ( new OrderShipmentRepository() )->find_by_carrier( $partial_cancel_order, OzonDeliverySettings::CARRIER_KEY ), 'Partial cancel polling must keep local shipment while any posting is not CANCELED and must not repeat cancel mutation.' );
+$stack['http']->statuses['OZON-2'] = 'CANCELED';
+$partial_done = $stack['adapter']->update_status( $partial_cancel_order );
+oz_ship_assert( ! empty( $partial_done['cancelled_and_removed'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $partial_cancel_order, OzonDeliverySettings::CARRIER_KEY ), 'Partial cancel reconciliation must delete local shipment after all postings become CANCELED.' );
+
+$stack = oz_ship_stack( $db );
+$partial_timeout_order = new OzonShipmentSmokeOrder( 85390, '85390', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) );
+$partial_timeout_create = $stack['service']->create( $partial_timeout_order, oz_ship_request( array(
+	new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+	new ShipmentPlace( 2, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101:split:2', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85390, '85390' ) );
+oz_ship_assert( $partial_timeout_create->success, 'Partial cancel timeout fixture must create a multi-posting Ozon shipment.' );
+$stack['http']->cancel_updates_status = false;
+$stack['http']->fail_cancel_numbers = array( 'OZON-2' );
+$partial_timeout_cancel = $stack['adapter']->cancel_in_carrier( $partial_timeout_order );
+oz_ship_assert( ! empty( $partial_timeout_cancel['partial'] ), 'Partial cancel timeout fixture must start from partial accepted mutation.' );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->statuses['OZON-2'] = 'READY_FOR_SHIPPING';
+$partial_timeout_pending = $stack['adapter']->update_status( $partial_timeout_order );
+oz_ship_assert( ! empty( $partial_timeout_pending['pending'] ), 'Partial cancel timeout fixture must keep polling while statuses are mixed.' );
+$partial_timeout = $stack['adapter']->mark_polling_exhausted( $partial_timeout_order, 14, 'cancellation' );
+$partial_timeout_stored = ( new OrderShipmentRepository() )->find_by_carrier( $partial_timeout_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( ! empty( $partial_timeout['success'] ) && 'cancellation_exhausted' === (string) ( $partial_timeout_stored['status'] ?? '' ) && 2 === count( $stack['http']->calls_for( '/v1/posting/cancel' ) ) && array() !== $partial_timeout_stored, 'Partial cancel timeout must keep local shipment, avoid automatic cancel retry, and move it to cancellation_exhausted.' );
 
 $stack = oz_ship_stack( $db );
 $live_modal_order = new OzonShipmentSmokeOrder( 85378, '85378', array( new OzonShipmentSmokeOrderItem( 246, 2, '2000.00' ) ) );

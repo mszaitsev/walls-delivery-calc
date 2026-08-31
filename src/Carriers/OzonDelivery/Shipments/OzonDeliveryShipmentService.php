@@ -189,32 +189,56 @@ final class OzonDeliveryShipmentService {
 		if ( empty( $policy['can_cancel'] ) ) {
 			return array( 'success' => false, 'message' => 'Текущий статус Ozon не позволяет отменить заказ из плагина. Обновите статус или удалите локальную запись.', 'temporary_can_remove' => true );
 		}
-		$errors = array();
+		$accepted_postings = array();
+		$failed_postings = array();
 		foreach ( $numbers as $number ) {
 			try {
 				$this->api->posting_cancel( $number );
+				$accepted_postings[] = $number;
 			} catch ( \Throwable $exception ) {
-				$errors[] = 'Не удалось отменить отправление Ozon ' . $number . '.';
+				$failed_postings[] = $number;
 			}
 		}
-		if ( array() !== $errors ) {
-			return array( 'success' => false, 'message' => implode( "\n", $errors ) );
+		if ( array() === $accepted_postings ) {
+			return array( 'success' => false, 'message' => $this->cancel_failure_message( $failed_postings ) );
 		}
 		$shipment['status'] = 'cancellation_started';
 		$shipment['status_title'] = 'Ожидаем подтверждение отмены Ozon…';
 		$shipment['universal_status_code'] = DeliveryStatus::UNKNOWN;
 		$shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::UNKNOWN );
+		$shipment['cancel_attempt'] = array(
+			'accepted_count' => count( $accepted_postings ),
+			'failed_count' => count( $failed_postings ),
+			'accepted_posting_numbers' => $accepted_postings,
+			'failed_posting_numbers' => $failed_postings,
+		);
 		$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+		$partial = array() !== $failed_postings;
 
 		return array(
 			'success' => true,
 			'accepted' => true,
 			'cancellation_started' => true,
+			'partial' => $partial,
 			'auto_poll' => true,
 			'poll_interval_ms' => 5000,
 			'poll_max_attempts' => 14,
 			'purpose' => 'cancellation',
-			'message' => 'Запрос на отмену заказа Ozon отправлен. Ожидаем подтверждение отмены Ozon…',
+			'message' => $partial ? 'Ozon принял отмену части грузомест. Проверяем итоговый статус всех отправлений…' : 'Запрос на отмену заказа Ozon отправлен. Ожидаем подтверждение отмены Ozon…',
+		);
+	}
+
+	/** @param array<int,string> $failed_postings */
+	private function cancel_failure_message( array $failed_postings ): string {
+		if ( array() === $failed_postings ) {
+			return 'Не удалось отменить заказ Ozon.';
+		}
+		return implode(
+			"\n",
+			array_map(
+				static fn( string $number ): string => 'Не удалось отменить отправление Ozon ' . $number . '.',
+				$failed_postings
+			)
 		);
 	}
 
