@@ -24,7 +24,7 @@ final class OzonDeliveryShipmentActionPolicy {
 	public static function for_statuses( array $raw_statuses ): array {
 		$statuses = self::normalize_statuses( $raw_statuses );
 		if ( array() === $statuses ) {
-			return array( 'can_cancel' => false, 'can_remove' => true, 'can_update' => true );
+			return array( 'can_cancel' => false, 'can_remove' => false, 'can_update' => true );
 		}
 
 		foreach ( $statuses as $status ) {
@@ -44,14 +44,15 @@ final class OzonDeliveryShipmentActionPolicy {
 		if ( array() === $shipment ) {
 			return array( 'can_cancel' => false, 'can_remove' => false, 'can_update' => false );
 		}
-		if ( 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) ) {
-			return array( 'can_cancel' => false, 'can_remove' => false, 'can_update' => true );
-		}
-		if ( 'cancellation_exhausted' === (string) ( $shipment['status'] ?? '' ) ) {
-			return array( 'can_cancel' => false, 'can_remove' => true, 'can_update' => true );
+		if ( in_array( (string) ( $shipment['status'] ?? '' ), array( 'cancellation_started', 'cancellation_exhausted', OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED, OzonDeliveryShipmentCreationStatusPolicy::STATUS_EXHAUSTED ), true ) ) {
+			return array( 'can_cancel' => false, 'can_remove' => self::has_identifier( $shipment ), 'can_update' => true );
 		}
 
-		return self::for_statuses( self::raw_statuses_from_shipment( $shipment ) );
+		$policy = self::for_statuses( self::raw_statuses_from_shipment( $shipment ) );
+		if ( empty( $policy['can_cancel'] ) ) {
+			$policy['can_remove'] = self::has_identifier( $shipment );
+		}
+		return $policy;
 	}
 
 	/** @param array<string,mixed> $shipment @return array<int,string> */
@@ -97,5 +98,23 @@ final class OzonDeliveryShipmentActionPolicy {
 		}
 
 		return array_values( array_unique( $result ) );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private static function has_identifier( array $shipment ): bool {
+		foreach ( array( 'tracking_number', 'barcode', 'ozon_order_number', 'backlog_order_id' ) as $key ) {
+			if ( '' !== trim( (string) ( $shipment[ $key ] ?? '' ) ) ) {
+				return true;
+			}
+		}
+		foreach ( array( 'ozon_postings' => 'posting_number', 'ozon_returns' => 'return_number' ) as $list_key => $value_key ) {
+			foreach ( is_array( $shipment[ $list_key ] ?? null ) ? $shipment[ $list_key ] : array() as $row ) {
+				if ( is_array( $row ) && '' !== trim( (string) ( $row[ $value_key ] ?? '' ) ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 }

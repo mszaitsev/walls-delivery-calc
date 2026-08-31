@@ -29,6 +29,7 @@
     if (updatedRow) updatedRow.hidden = !String(status.updated_at || '').trim();
     updateShipmentButtons(box, shipmentButtonStateFromStatus(status));
     setTrackingDisplay(box, trackingPresentation(status));
+    setReturnTrackingDisplay(box, trackingPresentation(status, 'return_tracking_presentation'));
     renderShipmentPrice(box, status);
     renderActualCostControl(box, status);
     dispatchShipmentCarrierHook('renderStatus', { box: box, status: status });
@@ -95,9 +96,10 @@
     if (value) value.textContent = backlogOrderId;
   }
 
-  function trackingPresentation(status) {
-    const raw = status && status.tracking_presentation && typeof status.tracking_presentation === 'object'
-      ? status.tracking_presentation
+  function trackingPresentation(status, key) {
+    const payloadKey = key || 'tracking_presentation';
+    const raw = status && status[payloadKey] && typeof status[payloadKey] === 'object'
+      ? status[payloadKey]
       : null;
     if (!raw) {
       const value = String(status && status.barcode || '').trim();
@@ -185,6 +187,54 @@
       }
     }
     if (row) row.hidden = !items.length && !value && !copyValue;
+    if (copy) {
+      copy.hidden = !!items.length;
+      copy.disabled = !!items.length || !copyValue;
+      copy.dataset.trackingNumber = copyValue;
+    }
+  }
+
+  function setReturnTrackingDisplay(box, trackingNumber) {
+    if (!box) return;
+    const tracking = trackingNumber && typeof trackingNumber === 'object'
+      ? trackingNumber
+      : { displayText: String(trackingNumber || '').trim(), copyValue: String(trackingNumber || '').trim(), url: '' };
+    const value = String(tracking.displayText || tracking.display_text || tracking.copyValue || tracking.copy_value || '').trim();
+    const copyValue = String(tracking.copyValue || tracking.copy_value || value || '').trim();
+    const items = Array.isArray(tracking.items) ? tracking.items : [];
+    const row = box.querySelector('[data-wdc-return-tracking-row]');
+    const label = box.querySelector('[data-wdc-return-tracking-label]');
+    const number = box.querySelector('[data-wdc-return-tracking-number]');
+    const copy = box.querySelector('[data-wdc-return-copy-tracking]');
+    if (!row || !label || !number) return;
+    if (label && tracking.label) label.textContent = String(tracking.label);
+    number.textContent = '';
+    if (items.length) {
+      items.forEach(function (item, index) {
+        if (index > 0) number.appendChild(document.createElement('br'));
+        if (item.label) {
+          const prefix = document.createElement('span');
+          prefix.className = 'description';
+          prefix.textContent = item.label + ': ';
+          number.appendChild(prefix);
+        }
+        number.appendChild(document.createTextNode(item.displayText || item.copyValue || ''));
+        const itemCopy = document.createElement('button');
+        itemCopy.type = 'button';
+        itemCopy.className = 'wdc-copy-tracking-icon';
+        itemCopy.dataset.wdcCopyTracking = '1';
+        itemCopy.dataset.trackingNumber = item.copyValue || item.displayText || '';
+        itemCopy.disabled = !itemCopy.dataset.trackingNumber;
+        itemCopy.setAttribute('aria-label', 'Копировать номер возврата');
+        itemCopy.title = 'Копировать';
+        itemCopy.textContent = '🗐';
+        number.appendChild(document.createTextNode(' '));
+        number.appendChild(itemCopy);
+      });
+    } else {
+      number.textContent = value;
+    }
+    row.hidden = !items.length && !value && !copyValue;
     if (copy) {
       copy.hidden = !!items.length;
       copy.disabled = !!items.length || !copyValue;
@@ -394,6 +444,7 @@
       if (element) element.textContent = fields[selector];
     });
     setTrackingDisplay(box, '');
+    setReturnTrackingDisplay(box, '');
     renderShipmentPrice(box, {});
     renderActualCostControl(box, { has_shipment: false, has_actual_cost: false });
     const updatedRow = box.querySelector('[data-wdc-updated-row]');

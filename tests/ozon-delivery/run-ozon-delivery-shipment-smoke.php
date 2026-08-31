@@ -21,6 +21,10 @@ use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteParser;
+use WallsShop\WDC\Carriers\OzonDelivery\Returns\OzonDeliveryReturnInfoParser;
+use WallsShop\WDC\Carriers\OzonDelivery\Returns\OzonDeliveryReturnLifecycleResolver;
+use WallsShop\WDC\Carriers\OzonDelivery\Returns\OzonDeliveryReturnSearchParser;
+use WallsShop\WDC\Carriers\OzonDelivery\Returns\OzonDeliveryReturnService;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentAdapter;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentActionPolicy;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentAllocationValueResolver;
@@ -28,6 +32,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentCreateRequ
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentCreateResponseParser;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentDescriptionBuilder;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentDocumentProvider;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentExternalIdResolver;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentModalExtension;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentPersistenceMapper;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentPreflightQuoteService;
@@ -93,6 +98,11 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	public bool $fail_cancel = false;
 	/** @var array<int,string> */
 	public array $fail_cancel_numbers = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $return_pages = array();
+	/** @var array<string,array<string,mixed>> */
+	public array $return_info = array();
+	public bool $fail_return_info = false;
 	public bool $approve_updates_status = true;
 	public string $approve_status = 'READY_FOR_SHIPPING';
 	public bool $cancel_updates_status = true;
@@ -168,6 +178,22 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			}
 			return new OzonDeliveryApiResponse( 200, '{}', array( 'content-type' => 'application/json' ) );
 		}
+		if ( str_contains( $url, '/v1/return/search' ) ) {
+			$cursor = (string) ( $body['pagination']['cursor'] ?? '' );
+			$page_index = '' !== $cursor ? (int) $cursor : 0;
+			$page = $this->return_pages[ $page_index ] ?? array( 'returns' => array(), 'next_cursor' => '' );
+			return new OzonDeliveryApiResponse( 200, wp_json_encode( $page ) ?: '{}', array( 'content-type' => 'application/json' ) );
+		}
+		if ( str_contains( $url, '/v1/return/info' ) ) {
+			if ( $this->fail_return_info ) {
+				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"return_info_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
+			}
+			$returns = array();
+			foreach ( is_array( $body['return_numbers'] ?? null ) ? $body['return_numbers'] : array() as $number ) {
+				$returns[] = $this->return_info[ (string) $number ] ?? array( 'return_number' => (string) $number, 'return_external_id' => '1030', 'status' => 'MOVING' );
+			}
+			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'returns' => $returns ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
+		}
 		if ( str_contains( $url, '/v1/posting/label' ) ) {
 			return new OzonDeliveryApiResponse( 200, '%PDF-1.4 test', array( 'content-type' => 'application/pdf' ) );
 		}
@@ -241,10 +267,12 @@ function oz_ship_stack( OzonShipmentSmokeDb $db ): array {
 	$api = new OzonDeliveryApiClient( $http, $tokens );
 	$repository = new OrderShipmentRepository();
 	$attempts = new ShipmentCreationAttemptService( $repository, static fn(): string => '11111111-1111-4111-8111-111111111111' );
-	$builder = new OzonDeliveryShipmentCreateRequestBuilder( $settings, new RussianPhoneNormalizer(), new OzonDeliveryShipmentDescriptionBuilder(), new OzonDeliveryShipmentAllocationValueResolver() );
+	$external_ids = new OzonDeliveryShipmentExternalIdResolver();
+	$builder = new OzonDeliveryShipmentCreateRequestBuilder( $settings, new RussianPhoneNormalizer(), new OzonDeliveryShipmentDescriptionBuilder(), new OzonDeliveryShipmentAllocationValueResolver(), $external_ids );
 	$pickup_provider = new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( $db ) );
 	$mapper = new OzonDeliveryShipmentStatusMapper( $settings );
-	$service = new OzonDeliveryShipmentService( $api, $builder, new OzonDeliveryShipmentCreateResponseParser(), new OzonDeliveryShipmentPreflightQuoteService( $api, new OzonDeliveryQuoteParser( new OzonDeliveryMessageSanitizer() ) ), $pickup_provider, $repository, $attempts, $mapper, new Logger() );
+	$return_service = new OzonDeliveryReturnService( $api, $external_ids, new OzonDeliveryReturnSearchParser(), new OzonDeliveryReturnInfoParser(), new OzonDeliveryReturnLifecycleResolver(), $mapper );
+	$service = new OzonDeliveryShipmentService( $api, $builder, new OzonDeliveryShipmentCreateResponseParser(), new OzonDeliveryShipmentPreflightQuoteService( $api, new OzonDeliveryQuoteParser( new OzonDeliveryMessageSanitizer() ) ), $pickup_provider, $repository, $attempts, $mapper, $return_service, new Logger() );
 	$actual_cost = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
 	$adapter = new OzonDeliveryShipmentAdapter( $service, $builder, $repository, $actual_cost );
 	$creation = new ShipmentCreationService( $repository, array( $adapter ), new ShipmentActualCostService( $repository ), new Logger(), new CarrierShipmentAdapterRegistry( array( $adapter ) ), array( new OzonDeliveryShipmentPersistenceMapper() ), $attempts );
@@ -431,19 +459,18 @@ oz_ship_assert( ! empty( $cancel['success'] ) && empty( $cancel['partial'] ) && 
 $cancelled = ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( 'cancellation_started' === (string) ( $cancelled['status'] ?? '' ) && DeliveryStatus::UNKNOWN === (string) ( $cancelled['universal_status_code'] ?? '' ), 'Cancel request must not mark the shipment fully cancelled before status sync confirms it.' );
 $cancel_payload = $stack['adapter']->status_payload( $order, $cancelled );
-oz_ship_assert( ! empty( $cancel_payload['polling_continue'] ) && empty( $cancel_payload['can_remove_from_order'] ) && empty( $cancel_payload['can_cancel'] ) && ! empty( $cancel_payload['can_update_status'] ) && 5000 === (int) ( $cancel_payload['registration_poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel_payload['registration_poll_max_attempts'] ?? 0 ), 'Ozon cancellation_started payload must keep local removal locked while shared cancellation polling is active.' );
+oz_ship_assert( ! empty( $cancel_payload['polling_continue'] ) && ! empty( $cancel_payload['can_remove_from_order'] ) && empty( $cancel_payload['can_cancel'] ) && ! empty( $cancel_payload['can_update_status'] ) && 5000 === (int) ( $cancel_payload['registration_poll_interval_ms'] ?? 0 ) && 14 === (int) ( $cancel_payload['registration_poll_max_attempts'] ?? 0 ), 'Ozon cancellation_started payload must keep polling active and allow local remove only as an explicit non-carrier cleanup.' );
 $active_remove = $stack['adapter']->remove_from_order( $order );
-oz_ship_assert( empty( $active_remove['success'] ) && array() !== ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ), 'Ozon cancellation_started shipment must reject direct local remove before Ozon confirms cancellation.' );
+oz_ship_assert( ! empty( $active_remove['success'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ), 'Ozon cancellation_started direct local remove must only delete local data and must not call Ozon API.' );
 $multi_cancel_policy = OzonDeliveryShipmentActionPolicy::for_shipment( array(
 	'status' => 'cancellation_started',
+	'ozon_postings' => array( array( 'posting_number' => 'A' ), array( 'posting_number' => 'B' ) ),
 	'ozon_statuses' => array(
 		array( 'status' => 'CANCELED' ),
 		array( 'status' => 'READY_FOR_SHIPPING' ),
 	),
 ) );
-oz_ship_assert( empty( $multi_cancel_policy['can_cancel'] ) && empty( $multi_cancel_policy['can_remove'] ) && ! empty( $multi_cancel_policy['can_update'] ), 'Mixed multi-posting active cancellation must not allow manual local removal before every posting is CANCELED.' );
-$cancelled_update = $stack['adapter']->update_status( $order );
-oz_ship_assert( ! empty( $cancelled_update['cancelled_and_removed'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ), 'Status poll with all CANCELED postings must remove local Ozon shipment and return cancelled_and_removed.' );
+oz_ship_assert( empty( $multi_cancel_policy['can_cancel'] ) && ! empty( $multi_cancel_policy['can_remove'] ) && ! empty( $multi_cancel_policy['can_update'] ), 'Mixed multi-posting active cancellation must allow explicit local cleanup while carrier cancel remains unavailable.' );
 
 $stack = oz_ship_stack( $db );
 $delayed_order = new OzonShipmentSmokeOrder( 85387, '85387', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
@@ -456,7 +483,7 @@ $delayed_poll = $stack['adapter']->update_status( $delayed_order );
 $delayed_stored = ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY );
 oz_ship_assert( ! empty( $delayed_poll['pending'] ) && empty( $delayed_poll['cancelled_and_removed'] ) && array() !== $delayed_stored, 'Delayed cancel status must keep polling and keep local shipment until all postings are CANCELED.' );
 $delayed_payload = $stack['adapter']->status_payload( $delayed_order, $delayed_stored );
-oz_ship_assert( ! empty( $delayed_payload['polling_continue'] ) && empty( $delayed_payload['can_remove_from_order'] ), 'Partially confirmed cancellation must keep the local shipment locked while polling continues.' );
+oz_ship_assert( ! empty( $delayed_payload['polling_continue'] ) && ! empty( $delayed_payload['can_remove_from_order'] ), 'Partially confirmed cancellation must keep polling while allowing explicit local cleanup.' );
 $timeout = $stack['adapter']->mark_polling_exhausted( $delayed_order, 14, 'cancellation' );
 $timeout_stored = ( new OrderShipmentRepository() )->find_by_carrier( $delayed_order, OzonDeliverySettings::CARRIER_KEY );
 $timeout_payload = $stack['adapter']->status_payload( $delayed_order, $timeout_stored );
@@ -687,5 +714,93 @@ $multi_cancel = OzonDeliveryShipmentActionPolicy::for_statuses( array( 'READY_FO
 $multi_remove = OzonDeliveryShipmentActionPolicy::for_statuses( array( 'READY_FOR_SHIPPING', 'ON_WAY' ) );
 $multi_failed = OzonDeliveryShipmentActionPolicy::for_statuses( array( 'FORMING_FAILED', 'READY_FOR_SHIPPING' ) );
 oz_ship_assert( ! empty( $multi_cancel['can_cancel'] ) && empty( $multi_remove['can_cancel'] ) && ! empty( $multi_remove['can_remove'] ) && empty( $multi_failed['can_cancel'] ) && ! empty( $multi_failed['can_remove'] ), 'Ozon multi-posting action policy must allow cancel only when every posting is still cancellable.' );
+
+$ids = new OzonDeliveryShipmentExternalIdResolver();
+oz_ship_assert( '1030' === $ids->order_external_id( '1030' ) && '1030' === $ids->posting_external_id( '1030', 1, 1 ) && '1030' === $ids->expected_return_external_id( '1030', 1, 1 ) && '1030-1' === $ids->posting_external_id( '1030', 1, 2 ) && '1030-2' === $ids->expected_return_external_id( '1030', 2, 2 ), 'Ozon external ID resolver must keep single order number and multi order-number-place hyphen format.' );
+
+$stack = oz_ship_stack( $db );
+$local_cancel_order = new OzonShipmentSmokeOrder( 85400, '85400', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$local_cancel_create = $stack['service']->create( $local_cancel_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85400, '85400' ) );
+oz_ship_assert( $local_cancel_create->success, 'Local cancel return regression fixture must create a shipment.' );
+$local_cancel = $stack['adapter']->cancel_in_carrier( $local_cancel_order );
+$local_cancel_status = $stack['adapter']->update_status( $local_cancel_order );
+oz_ship_assert( ! empty( $local_cancel['success'] ) && ! empty( $local_cancel_status['cancelled_and_removed'] ) && 0 === count( $stack['http']->calls_for( '/v1/return/search' ) ) && 0 === count( $stack['http']->calls_for( '/v1/return/info' ) ), 'Local early Ozon cancellation must not call return/search or return/info.' );
+
+$stack = oz_ship_stack( $db );
+$external_before_order = new OzonShipmentSmokeOrder( 85401, '85401', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$external_before_create = $stack['service']->create( $external_before_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85401, '85401' ) );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->return_pages = array( array( 'returns' => array(), 'next_cursor' => '' ) );
+$external_before_status = $stack['adapter']->update_status( $external_before_order );
+$external_before_stored = ( new OrderShipmentRepository() )->find_by_carrier( $external_before_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( $external_before_create->success && DeliveryStatus::CANCELLED === (string) ( $external_before_status['shipment']['universal_status_code'] ?? '' ) && array() !== $external_before_stored && ! empty( $external_before_stored['ozon_postings'][0]['handover_seen'] ) === false && ! empty( $stack['adapter']->status_payload( $external_before_order, $external_before_stored )['can_remove_from_order'] ), 'External CANCELED before handover must resolve to local cancelled_no_return, keep shipment, and allow local remove.' );
+
+$stack = oz_ship_stack( $db );
+$external_after_order = new OzonShipmentSmokeOrder( 85402, '85402', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$external_after_create = $stack['service']->create( $external_after_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85402, '85402' ) );
+$stack['http']->statuses['OZON-1'] = 'ON_WAY';
+$stack['adapter']->update_status( $external_after_order );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->return_pages = array( array( 'returns' => array( array( 'return_number' => 'R1', 'return_external_id' => '85402', 'status' => 'MOVING', 'status_changed_at' => '2026-08-31T10:00:00Z' ) ), 'next_cursor' => '' ) );
+$stack['http']->return_info = array( 'R1' => array( 'return_number' => 'R1', 'return_external_id' => '85402', 'status' => 'MOVING', 'status_changed_at' => '2026-08-31T10:05:00Z' ) );
+$external_after_status = $stack['adapter']->update_status( $external_after_order );
+$external_after_payload = $stack['adapter']->status_payload( $external_after_order, $external_after_status['shipment'] );
+oz_ship_assert( $external_after_create->success && DeliveryStatus::RETURNING_TO_SENDER === (string) ( $external_after_status['shipment']['universal_status_code'] ?? '' ) && 'R1' === (string) ( $external_after_status['shipment']['ozon_returns'][0]['return_number'] ?? '' ) && ! empty( $external_after_payload['can_remove_from_order'] ) && empty( $external_after_payload['can_cancel'] ) && str_contains( (string) ( $external_after_payload['return_tracking_presentation']['display_text'] ?? '' ), 'R1' ), 'External CANCELED after handover must find return by exact external ID, call return/info, persist active return, and expose return tracking.' );
+oz_ship_assert( 1 === count( $stack['http']->calls_for( '/v1/return/search' ) ) && 1 === count( $stack['http']->calls_for( '/v1/return/info' ) ), 'First found Ozon return must use search once and then return/info.' );
+$stack['http']->return_info['R1']['status'] = 'RECEIVED';
+$received_status = $stack['adapter']->update_status( $external_after_order );
+oz_ship_assert( DeliveryStatus::RETURNED_TO_SENDER === (string) ( $received_status['shipment']['universal_status_code'] ?? '' ) && 1 === count( $stack['http']->calls_for( '/v1/return/search' ) ) && 2 === count( $stack['http']->calls_for( '/v1/return/info' ) ), 'Stored Ozon return_number must use return/info on later sync without another full return/search and RECEIVED must map to returned_to_sender.' );
+
+$stack = oz_ship_stack( $db );
+$return_not_found_order = new OzonShipmentSmokeOrder( 85403, '85403', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$return_not_found_create = $stack['service']->create( $return_not_found_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85403, '85403' ) );
+$stack['http']->statuses['OZON-1'] = 'ON_WAY';
+$stack['adapter']->update_status( $return_not_found_order );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->return_pages = array( array( 'returns' => array( array( 'return_number' => 'RX', 'return_external_id' => '85403-extra', 'status' => 'MOVING' ) ), 'next_cursor' => '' ) );
+$return_not_found_status = $stack['adapter']->update_status( $return_not_found_order );
+$return_not_found_payload = $stack['adapter']->status_payload( $return_not_found_order, $return_not_found_status['shipment'] );
+oz_ship_assert( $return_not_found_create->success && DeliveryStatus::UNKNOWN === (string) ( $return_not_found_status['shipment']['universal_status_code'] ?? '' ) && 'not_found' === (string) ( $return_not_found_status['shipment']['ozon_return_search']['search_state'] ?? '' ) && str_starts_with( (string) ( $return_not_found_payload['return_tracking_presentation']['display_text'] ?? '' ), 'не найден' ) && 'исходное отправление отменено' === (string) ( $return_not_found_payload['carrier_status_title'] ?? '' ), 'Expected Ozon return not found after handover must be UNKNOWN with safe diagnostics and no substring match: ' . json_encode( array( 'status' => $return_not_found_status['shipment']['universal_status_code'] ?? '', 'search' => $return_not_found_status['shipment']['ozon_return_search'] ?? array(), 'return_tracking' => $return_not_found_payload['return_tracking_presentation'] ?? array(), 'carrier' => $return_not_found_payload['carrier_status_title'] ?? '' ), JSON_UNESCAPED_UNICODE ) );
+
+$stack = oz_ship_stack( $db );
+$multi_return_order = new OzonShipmentSmokeOrder( 85404, '85404', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) );
+$multi_return_create = $stack['service']->create( $multi_return_order, oz_ship_request( array(
+	new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+	new ShipmentPlace( 2, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101:split', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85404, '85404' ) );
+$stack['http']->statuses['OZON-1'] = 'ON_WAY';
+$stack['http']->statuses['OZON-2'] = 'ON_WAY';
+$stack['adapter']->update_status( $multi_return_order );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->statuses['OZON-2'] = 'CANCELED';
+$stack['http']->return_pages = array(
+	array( 'returns' => array( array( 'return_number' => 'R1', 'return_external_id' => '85404-1', 'status' => 'RECEIVED' ) ), 'next_cursor' => '1' ),
+	array( 'returns' => array( array( 'return_number' => 'R2', 'return_external_id' => '85404-2', 'status' => 'MOVING' ), array( 'return_number' => 'R2', 'return_external_id' => '85404-2', 'status' => 'MOVING' ) ), 'next_cursor' => '' ),
+);
+$stack['http']->return_info = array(
+	'R1' => array( 'return_number' => 'R1', 'return_external_id' => '85404-1', 'status' => 'RECEIVED' ),
+	'R2' => array( 'return_number' => 'R2', 'return_external_id' => '85404-2', 'status' => 'MOVING' ),
+);
+$multi_return_status = $stack['adapter']->update_status( $multi_return_order );
+oz_ship_assert( $multi_return_create->success && DeliveryStatus::RETURNING_TO_SENDER === (string) ( $multi_return_status['shipment']['universal_status_code'] ?? '' ) && 2 === count( $multi_return_status['shipment']['ozon_returns'] ?? array() ) && 2 === (int) ( $multi_return_status['shipment']['ozon_return_search']['pages_scanned'] ?? 0 ), 'Ozon multi-box return search must continue to the second page, deduplicate returns, and stay returning while one return is active.' );
+$stack['http']->return_info['R2']['status'] = 'RECEIVED';
+$multi_return_received = $stack['adapter']->update_status( $multi_return_order );
+oz_ship_assert( DeliveryStatus::RETURNED_TO_SENDER === (string) ( $multi_return_received['shipment']['universal_status_code'] ?? '' ), 'Ozon multi-box returns must become returned_to_sender only after all expected returns are RECEIVED.' );
+
+$stack = oz_ship_stack( $db );
+$info_error_order = new OzonShipmentSmokeOrder( 85405, '85405', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$info_error_create = $stack['service']->create( $info_error_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85405, '85405' ) );
+$stack['http']->statuses['OZON-1'] = 'ON_WAY';
+$stack['adapter']->update_status( $info_error_order );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->return_pages = array( array( 'returns' => array( array( 'return_number' => 'R5', 'return_external_id' => '85405', 'status' => 'MOVING' ) ), 'next_cursor' => '' ) );
+$stack['http']->return_info = array( 'R5' => array( 'return_number' => 'R5', 'return_external_id' => '85405', 'status' => 'MOVING' ) );
+$stack['adapter']->update_status( $info_error_order );
+$stack['http']->fail_return_info = true;
+$info_error_status = $stack['adapter']->update_status( $info_error_order );
+oz_ship_assert( $info_error_create->success && 'R5' === (string) ( $info_error_status['shipment']['ozon_returns'][0]['return_number'] ?? '' ) && 'MOVING' === (string) ( $info_error_status['shipment']['ozon_returns'][0]['status'] ?? '' ) && DeliveryStatus::RETURNING_TO_SENDER === (string) ( $info_error_status['shipment']['universal_status_code'] ?? '' ), 'Ozon return/info failure must preserve existing return number and last known status without falling to cancelled.' );
 
 echo "Ozon Delivery shipment smoke passed.\n";
