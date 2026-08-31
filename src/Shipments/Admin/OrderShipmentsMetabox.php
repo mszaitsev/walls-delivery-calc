@@ -719,11 +719,12 @@ final class OrderShipmentsMetabox {
 	 */
 	private function tracking_presentation( array $status, array $presentation, string $fallback_value ): array {
 		$tracking = is_array( $status['tracking_presentation'] ?? null ) ? $status['tracking_presentation'] : array();
-		$label = trim( (string) ( $tracking['label'] ?? $presentation['tracking_label'] ?? __( 'Отслеживание', 'walls-delivery-calc' ) ) );
-		$display_text = trim( (string) ( $tracking['display_text'] ?? $fallback_value ) );
-		$url = $this->safe_tracking_url( (string) ( $tracking['url'] ?? '' ) );
-		$copy_value = trim( (string) ( $tracking['copy_value'] ?? '' ) );
-		$items = $this->tracking_items( $tracking['items'] ?? null );
+		$normalized = $this->normalize_tracking_presentation( $tracking );
+		$label = '' !== $normalized['label'] ? $normalized['label'] : $this->scalar_text( $presentation['tracking_label'] ?? __( 'Отслеживание', 'walls-delivery-calc' ) );
+		$display_text = '' !== $normalized['display_text'] ? $normalized['display_text'] : $fallback_value;
+		$url = $normalized['url'];
+		$copy_value = $normalized['copy_value'];
+		$items = $normalized['items'];
 
 		if ( '' !== $url ) {
 			$display_text = '' !== $display_text ? $display_text : $url;
@@ -774,6 +775,20 @@ final class OrderShipmentsMetabox {
 		echo esc_html( $tracking['display_text'] );
 	}
 
+	/**
+	 * @param array<string,mixed> $raw
+	 * @return array{label:string,display_text:string,url:string,copy_value:string,items:array<int,array{label:string,display_text:string,url:string,copy_value:string}>}
+	 */
+	private function normalize_tracking_presentation( array $raw ): array {
+		return array(
+			'label' => $this->scalar_text( $raw['label'] ?? '' ),
+			'display_text' => $this->scalar_text( $raw['display_text'] ?? $raw['displayText'] ?? '' ),
+			'url' => $this->safe_tracking_url( $this->scalar_text( $raw['url'] ?? '' ) ),
+			'copy_value' => $this->scalar_text( $raw['copy_value'] ?? $raw['copyValue'] ?? '' ),
+			'items' => $this->tracking_items( $raw['items'] ?? null ),
+		);
+	}
+
 	/** @return array<int,array<string,string>> */
 	private function tracking_items( mixed $items ): array {
 		if ( ! is_array( $items ) ) {
@@ -784,19 +799,29 @@ final class OrderShipmentsMetabox {
 			if ( ! is_array( $item ) ) {
 				continue;
 			}
-			$display_text = trim( (string) ( $item['display_text'] ?? $item['displayText'] ?? '' ) );
-			$copy_value = trim( (string) ( $item['copy_value'] ?? $item['copyValue'] ?? $display_text ) );
+			$display_text = $this->scalar_text( $item['display_text'] ?? $item['displayText'] ?? '' );
+			$copy_value = $this->scalar_text( $item['copy_value'] ?? $item['copyValue'] ?? $display_text );
+			$url = $this->safe_tracking_url( $this->scalar_text( $item['url'] ?? '' ) );
+			if ( '' !== $url ) {
+				$display_text = '' !== $display_text ? $display_text : $url;
+				$copy_value = '' !== $copy_value ? $copy_value : $url;
+			}
 			if ( '' === $display_text && '' === $copy_value ) {
 				continue;
 			}
 			$result[] = array(
-				'label' => trim( (string) ( $item['label'] ?? '' ) ),
+				'label' => $this->scalar_text( $item['label'] ?? '' ),
 				'display_text' => $display_text,
+				'url' => $url,
 				'copy_value' => $copy_value,
 			);
 		}
 
 		return $result;
+	}
+
+	private function scalar_text( mixed $value ): string {
+		return is_scalar( $value ) ? trim( (string) $value ) : '';
 	}
 
 	private function safe_tracking_url( string $url ): string {

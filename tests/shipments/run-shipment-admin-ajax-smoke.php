@@ -19,6 +19,33 @@ if ( ! function_exists( '__' ) ) {
 		return $text;
 	}
 }
+if ( ! function_exists( 'esc_html__' ) ) {
+	function esc_html__( string $text, string $domain = '' ): string {
+		unset( $domain );
+		return htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_attr__' ) ) {
+	function esc_attr__( string $text, string $domain = '' ): string {
+		unset( $domain );
+		return htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
 if ( ! function_exists( 'current_user_can' ) ) {
 	function current_user_can( string $capability ): bool {
 		unset( $capability );
@@ -44,6 +71,44 @@ if ( ! function_exists( 'sanitize_text_field' ) ) {
 if ( ! function_exists( 'wp_unslash' ) ) {
 	function wp_unslash( mixed $value ): mixed {
 		return $value;
+	}
+}
+if ( ! function_exists( 'wp_json_encode' ) ) {
+	function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false {
+		return json_encode( $value, $flags, $depth );
+	}
+}
+if ( ! function_exists( 'current_time' ) ) {
+	function current_time( string $type ): string {
+		unset( $type );
+		return '2026-08-31 12:00:00';
+	}
+}
+if ( ! function_exists( 'selected' ) ) {
+	function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+		$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
+	}
+}
+if ( ! function_exists( 'checked' ) ) {
+	function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+		$result = (string) $checked === (string) $current ? ' checked="checked"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
+	}
+}
+if ( ! function_exists( 'disabled' ) ) {
+	function disabled( mixed $disabled, mixed $current = true, bool $display = true ): string {
+		$result = (string) $disabled === (string) $current ? ' disabled="disabled"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
 	}
 }
 if ( ! function_exists( 'wp_send_json_success' ) ) {
@@ -110,6 +175,54 @@ final class ShipmentAdminAjaxSmokeOrder {
 	}
 
 	public function save(): void {
+	}
+
+	public function get_order_number(): string {
+		return (string) $this->id;
+	}
+
+	public function get_items(): array {
+		return array();
+	}
+
+	public function get_shipping_country(): string {
+		return 'RU';
+	}
+
+	public function get_shipping_city(): string {
+		return 'Новосибирск';
+	}
+
+	public function get_shipping_state(): string {
+		return 'Новосибирская обл';
+	}
+
+	public function get_shipping_postcode(): string {
+		return '630005';
+	}
+
+	public function get_shipping_address_1(): string {
+		return 'Красный проспект, 1';
+	}
+
+	public function get_shipping_address_2(): string {
+		return '';
+	}
+
+	public function get_shipping_first_name(): string {
+		return 'Иван';
+	}
+
+	public function get_shipping_last_name(): string {
+		return 'Иванов';
+	}
+
+	public function get_billing_phone(): string {
+		return '+79990000000';
+	}
+
+	public function get_billing_email(): string {
+		return 'manager@example.test';
 	}
 }
 
@@ -459,6 +572,142 @@ unset( $fallback_clear_override['actual_cost_source'], $fallback_clear_override[
 $fallback_clear_override['actual_cost_kopecks'] = null;
 $fallback_clear_status = $payloads->carrier_ui_payload( $fallback_order, 'gamma', $fallback_clear_override )['status'];
 shipment_admin_ajax_assert( null === $fallback_clear_status['actual_cost_kopecks'] && false === $fallback_clear_status['has_actual_cost'] && '' === $fallback_clear_status['actual_cost_label'], 'Fallback payload must use fresh clear override and must not restore repository actual cost.' );
+
+/**
+ * @param array<string,mixed> $shipment
+ * @param array<string,mixed> $status_overrides
+ */
+function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $shipment, array $status_overrides = array() ): string {
+	$repository = new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository();
+	$order = new ShipmentAdminAjaxSmokeOrder(
+		random_int( 700, 999 ),
+		array(
+			'_wdc_platform_carrier_key' => $carrier_key,
+			'_wdc_platform_delivery_type' => \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP,
+			'_wdc_platform_rate_id' => $carrier_key . ':pickup',
+			'_wdc_pickup_point_code' => 'POINT-1',
+			'_wdc_pickup_point_address' => 'Новосибирск, Красный проспект, 1',
+		)
+	);
+	$repository->save_for_carrier( $order, $carrier_key, array_merge( array( 'carrier_key' => $carrier_key, 'status' => 'created' ), $shipment ) );
+	$adapter = new ShipmentAdminAjaxSmokeAdapter( $carrier_key, $repository );
+	$adapter->status_overrides = $status_overrides;
+	$delivery_services = ( new ReflectionClass( \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository::class ) )->newInstanceWithoutConstructor();
+	$status_updates = ( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
+	$controller = static fn( string $class ): object => ( new ReflectionClass( '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class ) )->newInstanceWithoutConstructor();
+	$metabox = new \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox(
+		$repository,
+		new \WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory( $delivery_services, new \WallsShop\WDC\Shipments\Application\ShipmentServiceSettings() ),
+		$delivery_services,
+		$status_updates,
+		shipment_test_actual_cost_resolver(),
+		$controller( 'ShipmentCreateAjaxController' ),
+		$controller( 'ShipmentLifecycleAjaxController' ),
+		$controller( 'ShipmentPreviewAjaxController' ),
+		$controller( 'ShipmentStatusAjaxController' ),
+		$controller( 'ShipmentRemovalAjaxController' ),
+		$controller( 'ShipmentManualAttachAjaxController' ),
+		$controller( 'ShipmentAddressAjaxController' ),
+		$controller( 'ShipmentActualCostAjaxController' ),
+		$controller( 'ShipmentDocumentsAjaxController' ),
+		$controller( 'ShipmentProductsAjaxController' ),
+		null,
+		null,
+		null,
+		'https://example.test/wp-content/plugins/wdc/',
+		'0.144.1',
+		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $adapter ) ),
+		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
+	);
+
+	ob_start();
+	$metabox->render( $order );
+
+	return (string) ob_get_clean();
+}
+
+$ozon_no_return_html = shipment_admin_ajax_render_metabox_html(
+	'ozon_delivery',
+	array( 'tracking_number' => 'OZON-P1', 'barcode' => 'OZON-P1' ),
+	array(
+		'has_shipment' => true,
+		'can_update_status' => true,
+		'tracking_presentation' => array(
+			'label' => 'Номер Ozon',
+			'display_text' => 'OZON-P1',
+			'copy_value' => 'OZON-P1',
+		),
+	)
+);
+shipment_admin_ajax_assert( ! str_contains( $ozon_no_return_html, 'Не удалось подготовить блок отправлений' ) && str_contains( $ozon_no_return_html, 'data-wdc-shipments-metabox' ), 'Metabox render must not fail when return_tracking_presentation is absent.' );
+shipment_admin_ajax_assert( str_contains( $ozon_no_return_html, 'data-wdc-return-tracking-row hidden' ), 'Absent return presentation must keep the return tracking row hidden on initial render.' );
+
+$ozon_return_html = shipment_admin_ajax_render_metabox_html(
+	'ozon_delivery',
+	array( 'tracking_number' => 'OZON-P1', 'barcode' => 'OZON-P1' ),
+	array(
+		'has_shipment' => true,
+		'can_update_status' => true,
+		'return_tracking_presentation' => array(
+			'label' => 'Возврат Ozon',
+			'display_text' => 'R1 (MOVING)',
+			'copy_value' => 'R1',
+		),
+	)
+);
+shipment_admin_ajax_assert( ! str_contains( $ozon_return_html, 'Не удалось подготовить блок отправлений' ) && str_contains( $ozon_return_html, 'Возврат Ozon' ) && str_contains( $ozon_return_html, 'R1 (MOVING)' ) && str_contains( $ozon_return_html, 'data-tracking-number="R1"' ), 'Ozon single return presentation must render without Throwable and keep copy value.' );
+
+$ozon_multi_return_html = shipment_admin_ajax_render_metabox_html(
+	'ozon_delivery',
+	array( 'tracking_number' => 'OZON-P1', 'barcode' => 'OZON-P1' ),
+	array(
+		'has_shipment' => true,
+		'can_update_status' => true,
+		'return_tracking_presentation' => array(
+			'label' => 'Возвраты Ozon',
+			'items' => array(
+				array( 'label' => 'Возврат коробки 1', 'display_text' => 'R1 (RECEIVED)', 'copy_value' => 'R1' ),
+				array( 'label' => 'Возврат коробки 2', 'display_text' => 'R2 (MOVING)', 'copy_value' => 'R2' ),
+			),
+		),
+	)
+);
+shipment_admin_ajax_assert( ! str_contains( $ozon_multi_return_html, 'Не удалось подготовить блок отправлений' ) && str_contains( $ozon_multi_return_html, 'Возврат коробки 1' ) && str_contains( $ozon_multi_return_html, 'R1 (RECEIVED)' ) && str_contains( $ozon_multi_return_html, 'Возврат коробки 2' ) && str_contains( $ozon_multi_return_html, 'R2 (MOVING)' ), 'Ozon multi return presentation must render every item without PHP Error.' );
+
+$cdek_html = shipment_admin_ajax_render_metabox_html(
+	\WallsShop\WDC\Carriers\Cdek\CdekSettings::CARRIER_KEY,
+	array( 'tracking_number' => 'CDEK123', 'barcode' => 'CDEK123' ),
+	array(
+		'has_shipment' => true,
+		'can_update_status' => true,
+		'tracking_presentation' => array(
+			'label' => 'Отслеживание',
+			'display_text' => 'CDEK123',
+			'copy_value' => 'CDEK123',
+		),
+	)
+);
+shipment_admin_ajax_assert( ! str_contains( $cdek_html, 'Не удалось подготовить блок отправлений' ) && str_contains( $cdek_html, 'CDEK123' ) && str_contains( $cdek_html, 'data-wdc-return-tracking-row hidden' ), 'Non-Ozon carrier metabox render must keep primary tracking and hide absent return presentation.' );
+
+$malformed_return_html = shipment_admin_ajax_render_metabox_html(
+	'ozon_delivery',
+	array( 'tracking_number' => 'OZON-P1', 'barcode' => 'OZON-P1' ),
+	array(
+		'has_shipment' => true,
+		'can_update_status' => true,
+		'return_tracking_presentation' => array(
+			'label' => array( 'bad' ),
+			'display_text' => null,
+			'copy_value' => array( 'bad' ),
+			'items' => array(
+				null,
+				array( 'label' => array( 'bad' ), 'display_text' => array( 'bad' ), 'copy_value' => array( 'bad' ) ),
+				array( 'label' => 'Возврат коробки 1', 'display_text' => 'R1', 'copy_value' => 'R1' ),
+			),
+		),
+	)
+);
+shipment_admin_ajax_assert( ! str_contains( $malformed_return_html, 'Не удалось подготовить блок отправлений' ) && str_contains( $malformed_return_html, 'Возврат коробки 1' ) && str_contains( $malformed_return_html, 'R1' ) && ! str_contains( $malformed_return_html, 'Array' ), 'Malformed secondary tracking presentation must fail safe and keep valid items.' );
 
 $GLOBALS['wdc_shipment_admin_ajax_actions'] = array();
 $GLOBALS['wdc_shipment_admin_ajax_orders'] = array(
