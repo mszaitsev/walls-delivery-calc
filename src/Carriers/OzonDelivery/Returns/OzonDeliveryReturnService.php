@@ -71,7 +71,11 @@ final class OzonDeliveryReturnService {
 			if ( isset( $returns[ $place ] ) && '' !== (string) ( $returns[ $place ]['return_number'] ?? '' ) ) {
 				continue;
 			}
-			if ( 'canceled' === OzonDeliveryShipmentStatusMapping::normalize( $raw ) ) {
+			if ( 'cancelled_no_return' === (string) ( $posting['return_state'] ?? '' ) ) {
+				$place_states[ $place ] = array( 'state' => 'cancelled_no_return' );
+				continue;
+			}
+			if ( $this->expects_return_discovery( $posting, $raw, $shipment, $place ) ) {
 				$missing_expected[ $this->external_ids->expected_return_external_id( $order_number, $place, $total ) ] = array(
 					'place_number' => $place,
 					'handover_state' => $this->handover_state( $posting ),
@@ -147,7 +151,15 @@ final class OzonDeliveryReturnService {
 			}
 		}
 		ksort( $place_states );
+		foreach ( $place_states as $place => $state ) {
+			if ( is_array( $state ) && ! isset( $state['place_number'] ) ) {
+				$state['place_number'] = (int) $place;
+				$place_states[ $place ] = $state;
+			}
+		}
 		$shipment['ozon_return_place_states'] = array_values( $place_states );
+		$shipment['ozon_postings'] = $this->sync_posting_return_states( is_array( $shipment['ozon_postings'] ?? null ) ? $shipment['ozon_postings'] : array(), $place_states );
+		$shipment['ozon_return_search'] = $this->normalized_search_diagnostics( is_array( $shipment['ozon_return_search'] ?? null ) ? $shipment['ozon_return_search'] : array(), array_values( $place_states ), $success, $now );
 		$universal = $this->lifecycle->aggregate( array_values( $place_states ) );
 
 		return array(
@@ -198,6 +210,10 @@ final class OzonDeliveryReturnService {
 			) );
 			return array( 'returns' => $returns, 'success' => false, 'retryable' => true, 'error_code' => 'return_info_incomplete', 'missing_numbers' => $missing );
 		}
+		$search = is_array( $shipment['ozon_return_search'] ?? null ) ? $shipment['ozon_return_search'] : array();
+		unset( $search['safe_error_code'], $search['safe_error_message'], $search['http_status'], $search['retryable'] );
+		$search['checked_at'] = $now;
+		$shipment['ozon_return_search'] = $search;
 
 		return array( 'returns' => $returns, 'success' => true, 'retryable' => false, 'error_code' => '', 'missing_numbers' => array() );
 	}
@@ -325,6 +341,30 @@ final class OzonDeliveryReturnService {
 		return null;
 	}
 
+	/** @param array<string,mixed> $shipment */
+	private function expects_return_discovery( array $posting, string $current_raw, array $shipment, int $place ): bool {
+		if ( 'cancelled_no_return' === (string) ( $posting['return_state'] ?? '' ) ) {
+			return false;
+		}
+		if ( 'canceled' === OzonDeliveryShipmentStatusMapping::normalize( $current_raw ) ) {
+			return true;
+		}
+		if ( 'canceled' === OzonDeliveryShipmentStatusMapping::normalize( (string) ( $posting['last_raw_status'] ?? '' ) ) ) {
+			return true;
+		}
+		if ( in_array( (string) ( $posting['return_state'] ?? '' ), array( 'return_not_found', 'return_search_error', 'return_info_error', 'return_unknown' ), true ) ) {
+			return true;
+		}
+		foreach ( is_array( $shipment['ozon_return_place_states'] ?? null ) ? $shipment['ozon_return_place_states'] : array() as $state ) {
+			if ( ! is_array( $state ) || $place !== max( 1, (int) ( $state['place_number'] ?? 0 ) ) ) {
+				continue;
+			}
+			return in_array( (string) ( $state['state'] ?? '' ), array( 'return_not_found', 'return_search_error', 'return_info_error', 'return_unknown' ), true );
+		}
+
+		return false;
+	}
+
 	private function order_number( object $order, array $shipment ): string {
 		if ( method_exists( $order, 'get_order_number' ) ) {
 			return (string) $order->get_order_number();
@@ -341,6 +381,54 @@ final class OzonDeliveryReturnService {
 			}
 		}
 		return $postings;
+	}
+
+	/** @param array<int,mixed> $postings @param array<int,array<string,mixed>> $place_states @return array<int,mixed> */
+	private function sync_posting_return_states( array $postings, array $place_states ): array {
+		$states_by_place = array();
+		foreach ( $place_states as $place => $state ) {
+			if ( is_array( $state ) ) {
+				$states_by_place[ max( 1, (int) $place ) ] = (string) ( $state['state'] ?? '' );
+			}
+		}
+		foreach ( $postings as $index => $posting ) {
+			if ( ! is_array( $posting ) ) {
+				continue;
+			}
+			$place = max( 1, (int) ( $posting['place_number'] ?? 0 ) );
+			$state = (string) ( $states_by_place[ $place ] ?? '' );
+			if ( in_array( $state, array( 'return_not_found', 'return_search_error', 'return_info_error', 'return_unknown', 'return_found_active', 'return_resolved', 'cancelled_no_return' ), true ) ) {
+				$posting['return_state'] = $state;
+			} elseif ( 'outbound_active' === $state ) {
+				unset( $posting['return_state'] );
+			}
+			$postings[ $index ] = $posting;
+		}
+
+		return array_values( $postings );
+	}
+
+	/** @param array<string,mixed> $search @param array<int,array<string,mixed>> $place_states @return array<string,mixed> */
+	private function normalized_search_diagnostics( array $search, array $place_states, bool $success, string $now ): array {
+		if ( array() === $search ) {
+			return $search;
+		}
+		if ( ! $success ) {
+			return $search;
+		}
+		foreach ( $place_states as $state ) {
+			if ( ! is_array( $state ) ) {
+				continue;
+			}
+			if ( in_array( (string) ( $state['state'] ?? '' ), array( 'return_not_found', 'return_search_error', 'return_info_error', 'return_unknown' ), true ) ) {
+				return $search;
+			}
+		}
+		$search['search_state'] = 'found';
+		$search['checked_at'] = $now;
+		unset( $search['safe_error_code'], $search['safe_error_message'], $search['http_status'], $search['retryable'] );
+
+		return $search;
 	}
 
 	/** @param array<int,array<string,mixed>> $returns */

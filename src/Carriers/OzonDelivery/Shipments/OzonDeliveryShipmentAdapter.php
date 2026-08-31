@@ -205,6 +205,7 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 
 	/** @param array<string,mixed> $shipment @return array<string,mixed> */
 	private function return_tracking_presentation( array $shipment ): array {
+		$outbound_count = count( is_array( $shipment['ozon_postings'] ?? null ) ? array_filter( $shipment['ozon_postings'], 'is_array' ) : array() );
 		$returns = is_array( $shipment['ozon_returns'] ?? null ) ? array_values( array_filter( $shipment['ozon_returns'], 'is_array' ) ) : array();
 		usort( $returns, static fn( array $a, array $b ): int => (int) ( $a['place_number'] ?? 0 ) <=> (int) ( $b['place_number'] ?? 0 ) );
 		$items = array();
@@ -221,7 +222,7 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 				'copy_value' => $number,
 			);
 		}
-		if ( count( $items ) <= 1 && array() !== $items ) {
+		if ( $outbound_count <= 1 && count( $items ) <= 1 && array() !== $items ) {
 			return array( 'label' => 'Возврат Ozon', 'display_text' => (string) $items[0]['display_text'], 'copy_value' => (string) $items[0]['copy_value'], 'items' => array() );
 		}
 		if ( array() !== $items ) {

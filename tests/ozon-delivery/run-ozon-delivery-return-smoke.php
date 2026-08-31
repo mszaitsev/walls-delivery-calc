@@ -225,6 +225,37 @@ $stack['http']->return_pages = array( array( 'returns' => array( array( 'return_
 $exact = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), oz_return_shipment( array( oz_return_posting( 1, 'P1', 'CANCELED', DeliveryStatus::IN_TRANSIT, true ) ) ), array( 'P1' => 'CANCELED' ) );
 oz_return_assert( DeliveryStatus::UNKNOWN === $exact['universal_status'] && array() === ( $exact['shipment']['ozon_returns'] ?? array() ), 'Exact return_external_id matching must not match 1030-extra for expected 1030.' );
 
+$stack = oz_return_stack();
+$stack['http']->return_pages = array( array( 'returns' => array(), 'next_cursor' => '' ) );
+$not_found = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), oz_return_shipment( array( oz_return_posting( 1, 'P1', 'CANCELED', DeliveryStatus::IN_TRANSIT, true ) ) ), array( 'P1' => 'CANCELED' ) );
+$stack['http']->return_pages = array( array( 'returns' => array( array( 'return_number' => 'R7', 'return_external_id' => '1030', 'status' => 'MOVING' ) ), 'next_cursor' => '' ) );
+$stack['http']->return_info = array( 'R7' => array( 'return_number' => 'R7', 'return_external_id' => '1030', 'status' => 'MOVING' ) );
+$rediscovered = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), $not_found['shipment'], array( 'P1' => 'UNKNOWN' ) );
+oz_return_assert( DeliveryStatus::RETURNING_TO_SENDER === $rediscovered['universal_status'] && 'R7' === (string) ( $rediscovered['shipment']['ozon_returns'][0]['return_number'] ?? '' ) && 2 === $stack['http']->calls_for( '/v1/return/search' ) && 'return_found_active' === (string) ( $rediscovered['shipment']['ozon_postings'][0]['return_state'] ?? '' ), 'Unresolved return_not_found must repeat search from persisted place evidence and clear obsolete unresolved state after finding a return.' );
+
+$stack = oz_return_stack();
+$stack['http']->return_pages = array( array( 'returns' => array(), 'next_cursor' => '' ) );
+$no_return = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), oz_return_shipment( array( oz_return_posting( 1, 'P1', 'CANCELED', DeliveryStatus::CREATED_IN_CARRIER, false ) ) ), array( 'P1' => 'CANCELED' ) );
+$again = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), $no_return['shipment'], array( 'P1' => 'UNKNOWN' ) );
+oz_return_assert( DeliveryStatus::CANCELLED === $again['universal_status'] && 1 === $stack['http']->calls_for( '/v1/return/search' ) && 'cancelled_no_return' === (string) ( $again['shipment']['ozon_postings'][0]['return_state'] ?? '' ), 'Resolved cancelled_no_return must not repeat return/search on later updates.' );
+
+$stack = oz_return_stack();
+$stack['http']->return_pages = array( array( 'returns' => array( array( 'return_number' => 'R8', 'return_external_id' => '1030', 'status' => 'MOVING' ) ), 'next_cursor' => '' ) );
+$stack['http']->return_info = array( 'R8' => array( 'return_number' => 'R8', 'return_external_id' => '1030', 'status' => 'MOVING' ) );
+$found_for_error = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), oz_return_shipment( array( oz_return_posting( 1, 'P1', 'CANCELED', DeliveryStatus::IN_TRANSIT, true ) ) ), array( 'P1' => 'CANCELED' ) );
+$stack['http']->fail_info = true;
+$failed_info = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), $found_for_error['shipment'], array() );
+$stack['http']->fail_info = false;
+$stack['http']->return_info['R8']['status'] = 'RECEIVED';
+$recovered_info = $stack['service']->reconcile( new OzonReturnSmokeOrder( '1030' ), $failed_info['shipment'], array() );
+oz_return_assert( ! $failed_info['success'] && $recovered_info['success'] && 'found' === (string) ( $recovered_info['shipment']['ozon_return_search']['search_state'] ?? '' ) && '' === (string) ( $recovered_info['shipment']['ozon_return_search']['safe_error_code'] ?? '' ) && DeliveryStatus::RETURNED_TO_SENDER === $recovered_info['universal_status'], 'Successful return/info retry must clear stale info_error diagnostics.' );
+
+$place_numbers = array();
+foreach ( $rediscovered['shipment']['ozon_return_place_states'] as $state ) {
+	$place_numbers[] = (int) ( is_array( $state ) ? ( $state['place_number'] ?? 0 ) : 0 );
+}
+oz_return_assert( array( 1 ) === $place_numbers, 'Return reconciliation must persist exactly one final place state per place.' );
+
 oz_return_assert( ! ( new OzonDeliveryReturnService( new OzonDeliveryApiClient( $stack['http'], new OzonDeliveryAccessTokenService( new OzonDeliveryCredentials( new SettingsRepository(), new EncryptionService() ), $stack['http'], new OzonDeliveryMessageSanitizer(), new OzonDeliveryTokenCache( new EncryptionService() ) ) ), new OzonDeliveryShipmentExternalIdResolver(), new OzonDeliveryReturnSearchParser(), new OzonDeliveryReturnInfoParser(), new OzonDeliveryReturnLifecycleResolver(), $stack['mapper'] ) )->should_reconcile( oz_return_shipment( array( oz_return_posting( 1, 'P1', 'READY_FOR_SHIPPING', DeliveryStatus::CREATED_IN_CARRIER, false ) ) ), array( 'P1' => 'READY_FOR_SHIPPING' ) ), 'Non-canceled outbound without return diagnostics must not start return reconciliation.' );
 
 echo "Ozon Delivery return smoke passed.\n";

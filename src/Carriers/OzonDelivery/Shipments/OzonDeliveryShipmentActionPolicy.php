@@ -47,6 +47,9 @@ final class OzonDeliveryShipmentActionPolicy {
 		if ( in_array( (string) ( $shipment['status'] ?? '' ), array( 'cancellation_started', 'cancellation_exhausted', OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED, OzonDeliveryShipmentCreationStatusPolicy::STATUS_EXHAUSTED ), true ) ) {
 			return array( 'can_cancel' => false, 'can_remove' => self::has_identifier( $shipment ), 'can_update' => true );
 		}
+		if ( self::has_return_lifecycle( $shipment ) ) {
+			return array( 'can_cancel' => false, 'can_remove' => self::has_identifier( $shipment ), 'can_update' => true );
+		}
 
 		$policy = self::for_statuses( self::raw_statuses_from_shipment( $shipment ) );
 		if ( empty( $policy['can_cancel'] ) ) {
@@ -116,5 +119,31 @@ final class OzonDeliveryShipmentActionPolicy {
 		}
 
 		return false;
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private static function has_return_lifecycle( array $shipment ): bool {
+		foreach ( is_array( $shipment['ozon_returns'] ?? null ) ? $shipment['ozon_returns'] : array() as $return ) {
+			if ( is_array( $return ) && '' !== trim( (string) ( $return['return_number'] ?? '' ) ) ) {
+				return true;
+			}
+		}
+		$search = is_array( $shipment['ozon_return_search'] ?? null ) ? $shipment['ozon_return_search'] : array();
+		if ( in_array( (string) ( $search['search_state'] ?? '' ), array( 'found', 'not_found', 'incomplete', 'error', 'info_error' ), true ) ) {
+			return true;
+		}
+		$return_states = array( 'return_not_found', 'return_search_error', 'return_info_error', 'return_unknown', 'return_found_active', 'return_resolved' );
+		foreach ( is_array( $shipment['ozon_postings'] ?? null ) ? $shipment['ozon_postings'] : array() as $posting ) {
+			if ( is_array( $posting ) && in_array( (string) ( $posting['return_state'] ?? '' ), $return_states, true ) ) {
+				return true;
+			}
+		}
+		foreach ( is_array( $shipment['ozon_return_place_states'] ?? null ) ? $shipment['ozon_return_place_states'] : array() as $state ) {
+			if ( is_array( $state ) && in_array( (string) ( $state['state'] ?? '' ), $return_states, true ) ) {
+				return true;
+			}
+		}
+		$universal = (string) ( $shipment['universal_status_code'] ?? $shipment['status'] ?? '' );
+		return in_array( $universal, array( \WallsShop\WDC\Domain\Status\DeliveryStatus::RETURNING_TO_SENDER, \WallsShop\WDC\Domain\Status\DeliveryStatus::RETURNED_TO_SENDER ), true );
 	}
 }

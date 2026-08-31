@@ -365,6 +365,7 @@ C:.
 |   |   |           OzonDeliveryShipmentDescriptionBuilder.php
 |   |   |           OzonDeliveryShipmentDocumentProvider.php
 |   |   |           OzonDeliveryShipmentExternalIdResolver.php
+|   |   |           OzonDeliveryShipmentInfoParser.php
 |   |   |           OzonDeliveryShipmentModalExtension.php
 |   |   |           OzonDeliveryShipmentPersistenceMapper.php
 |   |   |           OzonDeliveryShipmentPreflightQuoteService.php
