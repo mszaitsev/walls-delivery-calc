@@ -12,8 +12,8 @@ final class OzonDeliveryShipmentStatusMapping {
 	public static function default_mapping(): array {
 		return array(
 			'unknown' => DeliveryStatus::UNKNOWN,
-			'created' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
-			'forming' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
+			'created' => DeliveryStatus::CREATED_IN_CARRIER,
+			'forming' => DeliveryStatus::CREATED_IN_CARRIER,
 			'forming_failed' => DeliveryStatus::REJECTED,
 			'ready_for_shipping' => DeliveryStatus::CREATED_IN_CARRIER,
 			'in_container' => DeliveryStatus::IN_TRANSIT,

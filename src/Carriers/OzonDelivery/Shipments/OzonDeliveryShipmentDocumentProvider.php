@@ -31,7 +31,7 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 				continue;
 			}
 			$place = (int) ( $posting['place_number'] ?? $index + 1 );
-			$label = 1 === $total ? 'Скачать ярлык Ozon' : sprintf( 'Скачать ярлык Ozon — коробка %d из %d', $place, $total );
+			$label = 1 === $total ? 'Скачать этикетку' : sprintf( 'Скачать этикетку %d из %d', $place, $total );
 			$actions[] = new ShipmentDocumentAction( self::ACTION_PREFIX . $place, $label, true, 'download', array( 'place_number' => $place ) );
 		}
 		return $actions;
@@ -63,7 +63,9 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 
 	/** @param array<string,mixed> $shipment @return array<int,array<string,mixed>> */
 	private function postings( array $shipment ): array {
-		return is_array( $shipment['ozon_postings'] ?? null ) ? array_values( array_filter( $shipment['ozon_postings'], 'is_array' ) ) : array();
+		$postings = is_array( $shipment['ozon_postings'] ?? null ) ? array_values( array_filter( $shipment['ozon_postings'], 'is_array' ) ) : array();
+		usort( $postings, static fn( array $left, array $right ): int => (int) ( $left['place_number'] ?? 0 ) <=> (int) ( $right['place_number'] ?? 0 ) );
+		return $postings;
 	}
 
 	private function filename( object $order, int $total, int $place ): string {

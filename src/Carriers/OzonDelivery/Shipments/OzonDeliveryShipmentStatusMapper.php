@@ -68,7 +68,11 @@ final class OzonDeliveryShipmentStatusMapper {
 
 	/** @param array<string,mixed> $post */
 	public function save_from_admin( array $post ): void {
-		$submitted = is_array( $post[ OzonDeliverySettings::SHIPMENT_STATUS_MAPPING_KEY ] ?? null ) ? $post[ OzonDeliverySettings::SHIPMENT_STATUS_MAPPING_KEY ] : array();
+		$raw = $post[ OzonDeliverySettings::SHIPMENT_STATUS_MAPPING_KEY ] ?? array();
+		if ( function_exists( 'wp_unslash' ) ) {
+			$raw = wp_unslash( $raw );
+		}
+		$submitted = is_array( $raw ) ? $raw : array();
 		$defaults = OzonDeliveryShipmentStatusMapping::default_mapping();
 		$mapping = array();
 		foreach ( $this->documented_statuses() as $status ) {
