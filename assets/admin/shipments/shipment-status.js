@@ -101,6 +101,9 @@
     const raw = status && status[payloadKey] && typeof status[payloadKey] === 'object'
       ? status[payloadKey]
       : null;
+    if (!raw && payloadKey !== 'tracking_presentation') {
+      return { label: '', displayText: '', copyValue: '', url: '', items: [] };
+    }
     if (!raw) {
       const value = String(status && status.barcode || '').trim();
       return { displayText: value, copyValue: value, url: '' };

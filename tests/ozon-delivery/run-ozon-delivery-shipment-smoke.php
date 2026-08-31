@@ -736,6 +736,16 @@ $external_before_stored = ( new OrderShipmentRepository() )->find_by_carrier( $e
 oz_ship_assert( $external_before_create->success && DeliveryStatus::CANCELLED === (string) ( $external_before_status['shipment']['universal_status_code'] ?? '' ) && array() !== $external_before_stored && ! empty( $external_before_stored['ozon_postings'][0]['handover_seen'] ) === false && ! empty( $stack['adapter']->status_payload( $external_before_order, $external_before_stored )['can_remove_from_order'] ), 'External CANCELED before handover must resolve to local cancelled_no_return, keep shipment, and allow local remove.' );
 
 $stack = oz_ship_stack( $db );
+$unknown_handover_order = new OzonShipmentSmokeOrder( 85411, '85411', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$unknown_handover_create = $stack['service']->create( $unknown_handover_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85411, '85411' ) );
+$stack['http']->statuses['OZON-1'] = 'UNKNOWN';
+$stack['adapter']->update_status( $unknown_handover_order );
+$stack['http']->statuses['OZON-1'] = 'CANCELED';
+$stack['http']->return_pages = array( array( 'returns' => array(), 'next_cursor' => '' ) );
+$unknown_handover_status = $stack['adapter']->update_status( $unknown_handover_order );
+oz_ship_assert( $unknown_handover_create->success && DeliveryStatus::UNKNOWN === (string) ( $unknown_handover_status['shipment']['universal_status_code'] ?? '' ) && ! empty( $unknown_handover_status['shipment']['ozon_postings'][0]['handover_unknown'] ) && 1 === count( $stack['http']->calls_for( '/v1/return/search' ) ), 'UNKNOWN outbound must not prove handover_seen=false before later CANCELED; no-match return search must stay UNKNOWN.' );
+
+$stack = oz_ship_stack( $db );
 $external_after_order = new OzonShipmentSmokeOrder( 85402, '85402', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
 $external_after_create = $stack['service']->create( $external_after_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85402, '85402' ) );
 $stack['http']->statuses['OZON-1'] = 'ON_WAY';

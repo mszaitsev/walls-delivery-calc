@@ -228,7 +228,7 @@ final class OzonDeliveryShipmentService {
 				'shipment' => $shipment,
 			);
 		}
-		if ( $this->has_external_canceled_posting( $statuses ) ) {
+		if ( $this->returns->should_reconcile( $shipment, $outbound_statuses ) ) {
 			$return_result = $this->returns->reconcile( $order, $shipment, $outbound_statuses );
 			$shipment = $return_result['shipment'];
 			$universal = $return_result['universal_status'];
@@ -239,7 +239,13 @@ final class OzonDeliveryShipmentService {
 			$shipment['tracking_checked_at'] = $this->now();
 			$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
 
-			return array( 'success' => true, 'message' => $return_result['message'], 'shipment' => $shipment );
+			return array(
+				'success' => (bool) ( $return_result['success'] ?? true ),
+				'message' => $return_result['message'],
+				'retryable' => (bool) ( $return_result['retryable'] ?? false ),
+				'error_code' => (string) ( $return_result['error_code'] ?? '' ),
+				'shipment' => $shipment,
+			);
 		}
 		$shipment['status'] = $universal;
 		$shipment['status_title'] = DeliveryStatus::label( $universal );
@@ -283,19 +289,30 @@ final class OzonDeliveryShipmentService {
 			$posting['last_raw_status'] = $raw;
 			$posting['last_universal_status'] = $universal;
 			$posting['last_status_changed_at'] = (string) ( $by_number[ $number ]['status_changed_at'] ?? '' );
-			if ( ! empty( $posting['handover_seen'] ) || $this->is_handover_universal( $universal, $raw ) ) {
+			$normalized_raw = OzonDeliveryShipmentStatusMapping::normalize( $raw );
+			if ( ! empty( $posting['handover_seen'] ) ) {
 				$posting['handover_seen'] = true;
 				unset( $posting['handover_unknown'] );
-			} elseif ( 'canceled' === OzonDeliveryShipmentStatusMapping::normalize( $raw ) && ! array_key_exists( 'handover_seen', $posting ) ) {
+			} elseif ( $this->is_handover_universal( $universal, $raw ) ) {
+				$posting['handover_seen'] = true;
+				unset( $posting['handover_unknown'] );
+			} elseif ( DeliveryStatus::UNKNOWN === $universal ) {
+				unset( $posting['handover_seen'] );
+				$posting['handover_unknown'] = true;
+			} elseif ( 'canceled' === $normalized_raw && ! array_key_exists( 'handover_seen', $posting ) ) {
 				$previous_universal = isset( $previous_by_number[ $number ] ) ? $this->status_mapper()->universal( $previous_by_number[ $number ] ) : '';
 				if ( in_array( $previous_universal, array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::CREATED_IN_CARRIER ), true ) ) {
 					$posting['handover_seen'] = false;
 					unset( $posting['handover_unknown'] );
+				} elseif ( DeliveryStatus::is_valid( $previous_universal ) && ! in_array( $previous_universal, array( DeliveryStatus::UNKNOWN, DeliveryStatus::CANCELLED ), true ) ) {
+					$posting['handover_seen'] = true;
+					unset( $posting['handover_unknown'] );
 				} else {
 					$posting['handover_unknown'] = true;
 				}
-			} elseif ( ! array_key_exists( 'handover_seen', $posting ) ) {
+			} elseif ( in_array( $universal, array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::CREATED_IN_CARRIER ), true ) && ! array_key_exists( 'handover_seen', $posting ) ) {
 				$posting['handover_seen'] = false;
+				unset( $posting['handover_unknown'] );
 			}
 			$postings[ $index ] = $posting;
 		}

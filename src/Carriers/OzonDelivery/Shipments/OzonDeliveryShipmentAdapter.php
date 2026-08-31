@@ -165,8 +165,9 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 	/** @param array<string,mixed> $shipment */
 	private function ozon_status_label( array $shipment ): string {
 		$search = is_array( $shipment['ozon_return_search'] ?? null ) ? $shipment['ozon_return_search'] : array();
-		if ( in_array( (string) ( $search['search_state'] ?? '' ), array( 'not_found', 'incomplete', 'error', 'info_error' ), true ) && $this->has_cancelled_outbound_status( $shipment ) ) {
-			return 'исходное отправление отменено';
+		$state = (string) ( $search['search_state'] ?? '' );
+		if ( in_array( $state, array( 'not_found', 'incomplete', 'error', 'info_error' ), true ) && $this->has_cancelled_outbound_status( $shipment ) ) {
+			return 'not_found' === $state ? 'исходное отправление отменено' : 'не удалось проверить возврат Ozon';
 		}
 		$statuses = OzonDeliveryShipmentActionPolicy::raw_statuses_from_shipment( $shipment );
 		return array() === $statuses ? '-' : implode( ', ', $statuses );
@@ -227,9 +228,15 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 			return array( 'label' => 'Возвраты Ozon', 'display_text' => implode( "\n", array_map( static fn( array $item ): string => (string) $item['display_text'], $items ) ), 'copy_value' => '', 'items' => $items );
 		}
 		$search = is_array( $shipment['ozon_return_search'] ?? null ) ? $shipment['ozon_return_search'] : array();
-		if ( in_array( (string) ( $search['search_state'] ?? '' ), array( 'not_found', 'incomplete', 'error' ), true ) ) {
+		$state = (string) ( $search['search_state'] ?? '' );
+		if ( in_array( $state, array( 'not_found', 'incomplete', 'error', 'info_error' ), true ) ) {
 			$checked = trim( (string) ( $search['checked_at'] ?? '' ) );
-			return array( 'label' => 'Возврат Ozon', 'display_text' => 'не найден' . ( '' !== $checked ? ' (проверено: ' . $checked . ')' : '' ), 'copy_value' => '', 'items' => array() );
+			$text = match ( $state ) {
+				'not_found' => 'не найден',
+				'incomplete' => 'поиск не завершён',
+				default => 'не удалось проверить',
+			};
+			return array( 'label' => 'Возврат Ozon', 'display_text' => $text . ( '' !== $checked ? ' (проверено: ' . $checked . ')' : '' ), 'copy_value' => '', 'items' => array() );
 		}
 
 		return array( 'label' => 'Возврат Ozon', 'display_text' => '', 'copy_value' => '', 'items' => array() );
