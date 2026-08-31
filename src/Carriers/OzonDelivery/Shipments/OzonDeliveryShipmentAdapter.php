@@ -117,8 +117,7 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 
 	/** @param array<string,mixed> $payload @return array<string,mixed> */
 	public function attach_manual( object $order, array $payload ): array {
-		unset( $order, $payload );
-		return array( 'success' => false, 'message' => 'Ручное внесение Ozon пока не поддерживается.' );
+		return $this->service->attach_manual( $order, $payload );
 	}
 
 	/** @return array<string,mixed> */

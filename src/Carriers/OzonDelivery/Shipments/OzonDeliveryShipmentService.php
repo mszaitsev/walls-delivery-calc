@@ -259,6 +259,83 @@ final class OzonDeliveryShipmentService {
 		return array( 'success' => true, 'message' => 'Статус Ozon обновлён.', 'shipment' => $shipment );
 	}
 
+	/** @param array<string,mixed> $payload @return array<string,mixed> */
+	public function attach_manual( object $order, array $payload ): array {
+		$posting_number = $this->manual_posting_number( $payload );
+		if ( '' === $posting_number ) {
+			return array( 'success' => false, 'message' => 'Введите номер отправления Ozon.' );
+		}
+		if ( array() !== $this->repository->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ) ) {
+			return array( 'success' => false, 'message' => 'Для заказа уже сохранено отправление Ozon.' );
+		}
+
+		$expected_postings = array( array( 'place_number' => 1, 'posting_number' => $posting_number ) );
+		try {
+			$response = $this->api->posting_info( array( $posting_number ) );
+			$parsed_info = $this->info_parser->parse( $response, $expected_postings );
+		} catch ( OzonDeliveryShipmentInfoParseException ) {
+			return array( 'success' => false, 'message' => 'Ozon не подтвердил указанный номер отправления.' );
+		} catch ( OzonDeliveryApiException $exception ) {
+			$message = 404 === $exception->http_status
+				? 'Отправление Ozon с таким номером не найдено.'
+				: 'Не удалось проверить номер отправления Ozon: ' . $exception->getMessage();
+			return array( 'success' => false, 'message' => $message );
+		} catch ( \Throwable $exception ) {
+			return array( 'success' => false, 'message' => 'Не удалось проверить номер отправления Ozon: ' . $exception->getMessage() );
+		}
+
+		$statuses = $parsed_info['statuses'];
+		$normalized = $parsed_info['normalized'];
+		$raw_status = (string) ( $normalized[0]['status'] ?? '' );
+		$universal = $this->status_mapper()->aggregate( $statuses );
+		$listing = is_array( $response['postings'][0] ?? null ) ? $response['postings'][0] : array();
+		$posting = array(
+			'place_number' => 1,
+			'posting_number' => $posting_number,
+			'posting_external_id' => (string) ( $listing['posting_external_id'] ?? '' ),
+			'last_raw_status' => $raw_status,
+			'last_universal_status' => $this->status_mapper()->universal( $raw_status ),
+			'last_status_changed_at' => (string) ( $normalized[0]['status_changed_at'] ?? '' ),
+			'manual_attach' => true,
+		);
+		$posting = $this->apply_manual_handover_state( $posting, $raw_status );
+		$shipment = array(
+			'carrier_key' => OzonDeliverySettings::CARRIER_KEY,
+			'service_key' => OzonDeliverySettings::SERVICE_KEY,
+			'rate_id' => OzonDeliverySettings::PICKUP_FAMILY,
+			'ozon_order_number' => (string) ( $listing['order_number'] ?? '' ),
+			'ozon_postings' => array( $posting ),
+			'tracking_number' => $posting_number,
+			'barcode' => $posting_number,
+			'status' => DeliveryStatus::CREATED_IN_CARRIER === $universal ? 'created' : $universal,
+			'status_title' => DeliveryStatus::label( $universal ),
+			'universal_status_code' => $universal,
+			'universal_status_label' => DeliveryStatus::label( $universal ),
+			'ozon_statuses' => $normalized,
+			'tracking_checked_at' => $this->now(),
+			'created_at' => $this->now(),
+			'updated_at' => $this->now(),
+			'manual_attach' => true,
+			'request_snapshot' => array( 'method' => 'POST', 'path' => '/v1/posting/info', 'posting_count' => 1 ),
+			'response_snapshot' => array(
+				'operation' => 'POST /v1/posting/info',
+				'posting_number' => $posting_number,
+				'order_number_present' => '' !== (string) ( $listing['order_number'] ?? '' ),
+				'status' => $raw_status,
+				'actual_cost_source' => 'not_available_in_posting_info_contract',
+			),
+		);
+		$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+		$this->attempts->mark_active_for_shipment( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+
+		return array(
+			'success' => true,
+			'message' => 'Номер Ozon прикреплён, статус обновлён.',
+			'tracking_number' => $posting_number,
+			'shipment' => $shipment,
+		);
+	}
+
 	/** @param array<int,array<string,mixed>> $postings @param array<int,array<string,string>> $statuses @param array<int,mixed> $previous_statuses @return array<int,array<string,mixed>> */
 	private function merge_outbound_posting_lifecycle( array $postings, array $statuses, array $previous_statuses ): array {
 		$by_number = array();
@@ -326,6 +403,23 @@ final class OzonDeliveryShipmentService {
 			return false;
 		}
 		return ! in_array( $universal, array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::CREATED_IN_CARRIER, DeliveryStatus::UNKNOWN ), true );
+	}
+
+	/** @param array<string,mixed> $posting @return array<string,mixed> */
+	private function apply_manual_handover_state( array $posting, string $raw_status ): array {
+		$universal = (string) ( $posting['last_universal_status'] ?? $this->status_mapper()->universal( $raw_status ) );
+		if ( $this->is_handover_universal( $universal, $raw_status ) ) {
+			$posting['handover_seen'] = true;
+			unset( $posting['handover_unknown'] );
+		} elseif ( DeliveryStatus::UNKNOWN === $universal || 'canceled' === OzonDeliveryShipmentStatusMapping::normalize( $raw_status ) ) {
+			unset( $posting['handover_seen'] );
+			$posting['handover_unknown'] = true;
+		} else {
+			$posting['handover_seen'] = false;
+			unset( $posting['handover_unknown'] );
+		}
+
+		return $posting;
 	}
 
 	/** @param array<int,string> $statuses */
@@ -400,6 +494,18 @@ final class OzonDeliveryShipmentService {
 				$failed_postings
 			)
 		);
+	}
+
+	/** @param array<string,mixed> $payload */
+	private function manual_posting_number( array $payload ): string {
+		foreach ( array( 'posting_number', 'tracking_number', 'barcode', 'request_id', 'manual_value' ) as $key ) {
+			$value = $payload[ $key ] ?? '';
+			if ( is_scalar( $value ) && '' !== trim( (string) $value ) ) {
+				return substr( trim( (string) $value ), 0, 128 );
+			}
+		}
+
+		return '';
 	}
 
 	/** @param array<string,mixed> $shipment */

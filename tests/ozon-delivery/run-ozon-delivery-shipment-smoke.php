@@ -375,6 +375,33 @@ oz_ship_assert( ! empty( $status_payload['has_actual_cost'] ) && 'carrier_api' =
 oz_ship_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status_payload['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $status_payload['shipment_status_label'] ?? '' ) && 'READY_FOR_SHIPPING, READY_FOR_SHIPPING' === (string) ( $status_payload['carrier_status_title'] ?? '' ), 'Ozon create UI payload must immediately show created_in_carrier and raw Ozon statuses without a manual refresh.' );
 oz_ship_assert( 'Номера Ozon' === (string) ( $status_payload['tracking_presentation']['label'] ?? '' ) && 2 === count( $status_payload['tracking_presentation']['items'] ?? array() ) && 'OZON-1' === (string) ( $status_payload['tracking_presentation']['items'][0]['copy_value'] ?? '' ) && 'OZON-2' === (string) ( $status_payload['tracking_presentation']['items'][1]['copy_value'] ?? '' ), 'Ozon multi-box status payload must expose every posting number sorted by place for individual copying.' );
 
+$manual_stack = oz_ship_stack( $db );
+$manual_order = new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 102, 1, '1500.00' ) ) );
+$manual_stack['http']->statuses['MANUAL-OZON-1'] = 'ON_WAY';
+$manual_attach = $manual_stack['adapter']->attach_manual( $manual_order, array( 'barcode' => ' MANUAL-OZON-1 ' ) );
+$manual_stored = ( new OrderShipmentRepository() )->find_by_carrier( $manual_order, OzonDeliverySettings::CARRIER_KEY );
+$manual_payload = $manual_stack['adapter']->status_payload( $manual_order, $manual_stored );
+oz_ship_assert( ! empty( $manual_attach['success'] ) && 'MANUAL-OZON-1' === (string) ( $manual_attach['tracking_number'] ?? '' ), 'Ozon manual attach must accept a posting_number through the existing generic manual attach payload.' );
+oz_ship_assert( 'MANUAL-OZON-1' === (string) ( $manual_stored['ozon_postings'][0]['posting_number'] ?? '' ) && 'ON_WAY' === (string) ( $manual_stored['ozon_statuses'][0]['status'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $manual_stored['universal_status_code'] ?? '' ), 'Ozon manual attach must persist the official posting/info status through the settings-backed mapper.' );
+oz_ship_assert( empty( $manual_stored['actual_cost_kopecks'] ) && empty( $manual_payload['has_actual_cost'] ), 'Ozon manual attach must not fabricate actual cost from estimated posting/info fields.' );
+$manual_stack['http']->statuses['MANUAL-OZON-1'] = 'DELIVERED';
+$manual_update = $manual_stack['adapter']->update_status( $manual_order );
+oz_ship_assert( ! empty( $manual_update['success'] ) && DeliveryStatus::DELIVERED === (string) ( $manual_update['shipment']['universal_status_code'] ?? '' ), 'Manual-attached Ozon shipment must use the normal status update path.' );
+$manual_return_order = new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 103, 1, '1500.00' ) ) );
+$manual_return_stack = oz_ship_stack( $db );
+$manual_return_stack['http']->statuses['MANUAL-RETURN-1'] = 'ON_WAY';
+oz_ship_assert( ! empty( $manual_return_stack['adapter']->attach_manual( $manual_return_order, array( 'tracking_number' => 'MANUAL-RETURN-1' ) )['success'] ), 'Ozon manual attach fixture must be saved before return lifecycle regression.' );
+$manual_return_stack['http']->statuses['MANUAL-RETURN-1'] = 'CANCELED';
+$manual_return_stack['http']->return_pages = array( array( 'returns' => array( array( 'return_number' => 'R-MANUAL-1', 'return_external_id' => '85374', 'status' => 'MOVING' ) ), 'next_cursor' => '' ) );
+$manual_return_stack['http']->return_info = array( 'R-MANUAL-1' => array( 'return_number' => 'R-MANUAL-1', 'return_external_id' => '85374', 'status' => 'MOVING' ) );
+$manual_return_status = $manual_return_stack['adapter']->update_status( $manual_return_order );
+oz_ship_assert( ! empty( $manual_return_status['success'] ) && DeliveryStatus::RETURNING_TO_SENDER === (string) ( $manual_return_status['shipment']['universal_status_code'] ?? '' ) && 1 === count( $manual_return_stack['http']->calls_for( '/v1/return/search' ) ), 'Manual-attached Ozon shipment must enter the existing return reconciliation flow after external CANCELED.' );
+$unknown_stack = oz_ship_stack( $db );
+$unknown_order = new OzonShipmentSmokeOrder( 85375, '85375', array() );
+$unknown_stack['http']->posting_info_responses[] = array( 'postings' => array() );
+$unknown_attach = $unknown_stack['adapter']->attach_manual( $unknown_order, array( 'barcode' => 'UNKNOWN-OZON' ) );
+oz_ship_assert( empty( $unknown_attach['success'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $unknown_order, OzonDeliverySettings::CARRIER_KEY ), 'Unknown or malformed Ozon posting/info response must not persist manual shipment.' );
+
 $actions = $stack['docs']->actions( $order, $stored );
 oz_ship_assert( 2 === count( $actions ) && 'Скачать этикетку 1 из 2' === $actions[0]->label && 'Скачать этикетку 2 из 2' === $actions[1]->label, 'Ozon multi-box document actions must use concise label button names.' );
 $document = $stack['docs']->download( $order, $stored, 'ozon_label_2' );
