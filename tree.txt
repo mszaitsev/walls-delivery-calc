@@ -355,6 +355,7 @@ C:.
 |   |   |           OzonDeliveryShipmentAllocationValueResolver.php
 |   |   |           OzonDeliveryShipmentCreateRequestBuilder.php
 |   |   |           OzonDeliveryShipmentCreateResponseParser.php
+|   |   |           OzonDeliveryShipmentCreationStatusPolicy.php
 |   |   |           OzonDeliveryShipmentDescriptionBuilder.php
 |   |   |           OzonDeliveryShipmentDocumentProvider.php
 |   |   |           OzonDeliveryShipmentModalExtension.php

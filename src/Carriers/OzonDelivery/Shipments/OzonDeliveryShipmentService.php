@@ -73,6 +73,15 @@ final class OzonDeliveryShipmentService {
 		if ( array() !== $status_snapshot ) {
 			$raw = array_merge( $raw, $status_snapshot );
 		}
+		if ( empty( $approval['errors'] ) && ! empty( $status_snapshot['creation_confirmation_required'] ) ) {
+			$raw['creation_confirmation_required'] = true;
+			$raw['auto_poll'] = true;
+			$raw['poll_required'] = true;
+			$raw['poll_interval_ms'] = 5000;
+			$raw['poll_max_attempts'] = 14;
+			$raw['purpose'] = OzonDeliveryShipmentCreationStatusPolicy::PURPOSE;
+			$raw['message'] = 'Ozon формирует отправление…';
+		}
 		if ( ! empty( $approval['errors'] ) ) {
 			return new ShipmentCreateResult( false, error_code: 'ozon_posting_approve_partial', error_message: implode( "\n", $approval['errors'] ), raw_reference: $raw );
 		}
@@ -163,6 +172,47 @@ final class OzonDeliveryShipmentService {
 			return array(
 				'success' => true,
 				'message' => 'Ожидаем подтверждение отмены Ozon…',
+				'pending' => true,
+				'retryable' => true,
+				'status' => implode( ',', $statuses ),
+				'shipment' => $shipment,
+			);
+		}
+		if ( OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED === $cancellation_status ) {
+			if ( OzonDeliveryShipmentCreationStatusPolicy::any_failure( $statuses ) ) {
+				$shipment['status'] = $universal;
+				$shipment['status_title'] = DeliveryStatus::label( $universal );
+				$shipment['universal_status_code'] = $universal;
+				$shipment['universal_status_label'] = DeliveryStatus::label( $universal );
+				$shipment['tracking_checked_at'] = $this->now();
+				$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+
+				return array(
+					'success' => true,
+					'message' => 'Ozon не смог сформировать отправление.',
+					'status' => implode( ',', $statuses ),
+					'shipment' => $shipment,
+				);
+			}
+			if ( OzonDeliveryShipmentCreationStatusPolicy::all_ready( $statuses ) ) {
+				$shipment['status'] = DeliveryStatus::CREATED_IN_CARRIER === $universal ? 'created' : $universal;
+				$shipment['status_title'] = DeliveryStatus::label( $universal );
+				$shipment['universal_status_code'] = $universal;
+				$shipment['universal_status_label'] = DeliveryStatus::label( $universal );
+				$shipment['tracking_checked_at'] = $this->now();
+				$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+
+				return array( 'success' => true, 'message' => 'Статус Ozon обновлён.', 'status' => implode( ',', $statuses ), 'shipment' => $shipment );
+			}
+			$shipment['status_title'] = DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER );
+			$shipment['universal_status_code'] = DeliveryStatus::CREATED_IN_CARRIER;
+			$shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER );
+			$shipment['tracking_checked_at'] = $this->now();
+			$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+
+			return array(
+				'success' => true,
+				'message' => 'Ozon формирует отправление…',
 				'pending' => true,
 				'retryable' => true,
 				'status' => implode( ',', $statuses ),
@@ -356,7 +406,7 @@ final class OzonDeliveryShipmentService {
 			$universal = DeliveryStatus::CREATED_IN_CARRIER;
 		}
 
-		return array( 'universal_status_code' => $universal, 'ozon_statuses' => $normalized );
+		return array( 'universal_status_code' => $universal, 'ozon_statuses' => $normalized, 'creation_confirmation_required' => OzonDeliveryShipmentCreationStatusPolicy::any_waiting( $statuses ) && ! OzonDeliveryShipmentCreationStatusPolicy::any_failure( $statuses ) );
 	}
 
 	private function status_mapper(): OzonDeliveryShipmentStatusMapper {

@@ -90,7 +90,7 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 			'can_cancel' => $has && $policy['can_cancel'],
 			'can_remove_from_order' => $has && $policy['can_remove'],
 			'cancellation_pending' => $has && 'cancellation_started' === (string) ( $shipment['status'] ?? '' ),
-			'polling_continue' => $has && 'cancellation_started' === (string) ( $shipment['status'] ?? '' ),
+			'polling_continue' => $has && in_array( (string) ( $shipment['status'] ?? '' ), array( 'cancellation_started', OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED ), true ),
 			'registration_poll_interval_ms' => 5000,
 			'registration_poll_max_attempts' => 14,
 			'shipment_status_label' => $has ? $this->shipment_status_label( $shipment ) : 'не создано',
@@ -235,12 +235,40 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 				purpose: 'cancellation'
 			);
 		}
+		if ( OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED === (string) ( $shipment['status'] ?? '' ) ) {
+			return new ShipmentLifecycleResult(
+				ShipmentLifecycleResult::PHASE_POLLING_REQUIRED,
+				accepted: true,
+				poll_required: true,
+				message: 'Ожидаем готовность отправления Ozon…',
+				poll_interval_ms: 5000,
+				poll_max_attempts: 14,
+				purpose: OzonDeliveryShipmentCreationStatusPolicy::PURPOSE
+			);
+		}
 		return new ShipmentLifecycleResult( ShipmentLifecycleResult::PHASE_COMPLETED, accepted: array() !== $shipment );
 	}
 
 	/** @return array<string,mixed> */
 	public function mark_polling_exhausted( object $order, int $attempts, string $purpose = 'registration' ): array {
 		unset( $attempts );
+		if ( OzonDeliveryShipmentCreationStatusPolicy::PURPOSE === $purpose ) {
+			$shipment = $this->repository->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
+			if ( array() !== $shipment ) {
+				$shipment['status'] = OzonDeliveryShipmentCreationStatusPolicy::STATUS_EXHAUSTED;
+				$shipment['status_title'] = DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER );
+				$shipment['universal_status_code'] = DeliveryStatus::CREATED_IN_CARRIER;
+				$shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER );
+				$shipment['tracking_checked_at'] = function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+				$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
+			}
+
+			return array(
+				'success' => true,
+				'message' => 'Ozon ещё формирует отправление. Статус можно обновить позже.',
+				'shipment' => $shipment,
+			);
+		}
 		if ( 'cancellation' !== $purpose ) {
 			return array( 'success' => true, 'message' => 'Автоматическая проверка статуса Ozon завершена.', 'shipment' => $this->repository->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY ) );
 		}

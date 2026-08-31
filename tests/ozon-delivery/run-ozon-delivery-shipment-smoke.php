@@ -32,6 +32,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentModalExten
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentPersistenceMapper;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentPreflightQuoteService;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentService;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentCreationStatusPolicy;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapping;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapper;
 use WallsShop\WDC\Domain\Address\Address;
@@ -93,6 +94,7 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	/** @var array<int,string> */
 	public array $fail_cancel_numbers = array();
 	public bool $approve_updates_status = true;
+	public string $approve_status = 'READY_FOR_SHIPPING';
 	public bool $cancel_updates_status = true;
 
 	public function request( string $method, string $url, array $args = array() ): OzonDeliveryApiResponse {
@@ -142,7 +144,7 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 				return new OzonDeliveryApiResponse( 500, '{"error":{"code":"approve_failed","message":"temporary"}}', array( 'content-type' => 'application/json' ) );
 			}
 			if ( $this->approve_updates_status ) {
-				$this->statuses[ $number ] = 'READY_FOR_SHIPPING';
+				$this->statuses[ $number ] = $this->approve_status;
 			}
 			return new OzonDeliveryApiResponse( 200, '{}', array( 'content-type' => 'application/json' ) );
 		}
@@ -349,6 +351,71 @@ $single_actions = $stack['docs']->actions( $single_document_order, $single_docum
 oz_ship_assert( 1 === count( $single_actions ) && 'Скачать этикетку' === $single_actions[0]->label, 'Ozon single-box document action must use the concise label button name.' );
 $single_document = $stack['docs']->download( $single_document_order, $single_document_shipment, 'ozon_label_1' );
 oz_ship_assert( 'ozon-1030.pdf' === $single_document->filename, 'Ozon label provider must omit box suffix for a single posting.' );
+
+$forming_stack = oz_ship_stack( $db );
+$forming_stack['http']->approve_status = 'FORMING';
+$forming_order = new OzonShipmentSmokeOrder( 85387, '85387', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$forming_create = $forming_stack['service']->create( $forming_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85387, '85387' ) );
+$forming_stored = ( new OrderShipmentRepository() )->find_by_carrier( $forming_order, OzonDeliverySettings::CARRIER_KEY );
+$forming_payload = $forming_stack['adapter']->status_payload( $forming_order, $forming_stored );
+oz_ship_assert( $forming_create->success && ! empty( $forming_create->raw_reference['auto_poll'] ) && OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED === (string) ( $forming_stored['status'] ?? '' ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $forming_stored['universal_status_code'] ?? '' ) && 'FORMING' === (string) ( $forming_stored['ozon_statuses'][0]['status'] ?? '' ) && ! empty( $forming_payload['lifecycle']['poll_required'] ) && OzonDeliveryShipmentCreationStatusPolicy::PURPOSE === (string) ( $forming_payload['lifecycle']['purpose'] ?? '' ), 'Ozon create+approve with immediate FORMING must persist creation confirmation polling while keeping universal created_in_carrier.' );
+$mutation_counts = array(
+	'checkout' => count( $forming_stack['http']->calls_for( '/v1/order/checkout' ) ),
+	'create' => count( $forming_stack['http']->calls_for( '/v1/order/create' ) ),
+	'approve' => count( $forming_stack['http']->calls_for( '/v1/posting/approve' ) ),
+);
+$forming_poll = $forming_stack['adapter']->update_status( $forming_order );
+oz_ship_assert( ! empty( $forming_poll['pending'] ) && OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED === (string) ( $forming_poll['shipment']['status'] ?? '' ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $forming_poll['shipment']['universal_status_code'] ?? '' ), 'Ozon creation confirmation polling must continue while posting remains FORMING.' );
+$forming_stack['http']->statuses['OZON-1'] = 'READY_FOR_SHIPPING';
+$forming_ready = $forming_stack['adapter']->update_status( $forming_order );
+oz_ship_assert( empty( $forming_ready['pending'] ) && 'created' === (string) ( $forming_ready['shipment']['status'] ?? '' ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $forming_ready['shipment']['universal_status_code'] ?? '' ) && 'READY_FOR_SHIPPING' === (string) ( $forming_ready['shipment']['ozon_statuses'][0]['status'] ?? '' ), 'Ozon creation confirmation polling must stop when all postings are READY_FOR_SHIPPING.' );
+oz_ship_assert( $mutation_counts['checkout'] === count( $forming_stack['http']->calls_for( '/v1/order/checkout' ) ) && $mutation_counts['create'] === count( $forming_stack['http']->calls_for( '/v1/order/create' ) ) && $mutation_counts['approve'] === count( $forming_stack['http']->calls_for( '/v1/posting/approve' ) ), 'Ozon creation confirmation polling must call only posting/info and must not repeat checkout, create, or approve mutations.' );
+
+$multi_confirm_stack = oz_ship_stack( $db );
+$multi_confirm_stack['http']->approve_updates_status = false;
+$multi_confirm_stack['http']->statuses['OZON-1'] = 'READY_FOR_SHIPPING';
+$multi_confirm_stack['http']->statuses['OZON-2'] = 'FORMING';
+$multi_confirm_order = new OzonShipmentSmokeOrder( 85390, '85390', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) );
+$multi_confirm_create = $multi_confirm_stack['service']->create( $multi_confirm_order, oz_ship_request( array(
+	new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+	new ShipmentPlace( 2, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ),
+), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101:split:2', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85390, '85390' ) );
+$multi_confirm_poll = $multi_confirm_stack['adapter']->update_status( $multi_confirm_order );
+$multi_confirm_stack['http']->statuses['OZON-2'] = 'READY_FOR_SHIPPING';
+$multi_confirm_ready = $multi_confirm_stack['adapter']->update_status( $multi_confirm_order );
+oz_ship_assert( $multi_confirm_create->success && ! empty( $multi_confirm_poll['pending'] ) && empty( $multi_confirm_ready['pending'] ) && 'created' === (string) ( $multi_confirm_ready['shipment']['status'] ?? '' ), 'Ozon multi-posting creation confirmation must wait until every posting is READY_FOR_SHIPPING.' );
+
+$created_confirm_stack = oz_ship_stack( $db );
+$created_confirm_stack['http']->approve_updates_status = false;
+$created_confirm_order = new OzonShipmentSmokeOrder( 85391, '85391', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$created_confirm = $created_confirm_stack['service']->create( $created_confirm_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85391, '85391' ) );
+$created_confirm_stored = ( new OrderShipmentRepository() )->find_by_carrier( $created_confirm_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( $created_confirm->success && OzonDeliveryShipmentCreationStatusPolicy::STATUS_STARTED === (string) ( $created_confirm_stored['status'] ?? '' ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $created_confirm_stored['universal_status_code'] ?? '' ) && 'CREATED' === (string) ( $created_confirm_stored['ozon_statuses'][0]['status'] ?? '' ), 'Ozon create+approve with immediate CREATED must start creation confirmation polling and keep universal created_in_carrier.' );
+
+$failed_confirm_stack = oz_ship_stack( $db );
+$failed_confirm_stack['http']->approve_status = 'FORMING';
+$failed_confirm_order = new OzonShipmentSmokeOrder( 85392, '85392', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$failed_confirm_stack['service']->create( $failed_confirm_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85392, '85392' ) );
+$failed_counts = array( 'create' => count( $failed_confirm_stack['http']->calls_for( '/v1/order/create' ) ), 'approve' => count( $failed_confirm_stack['http']->calls_for( '/v1/posting/approve' ) ) );
+$failed_confirm_stack['http']->statuses['OZON-1'] = 'FORMING_FAILED';
+$failed_confirm = $failed_confirm_stack['adapter']->update_status( $failed_confirm_order );
+oz_ship_assert( empty( $failed_confirm['pending'] ) && DeliveryStatus::REJECTED === (string) ( $failed_confirm['shipment']['universal_status_code'] ?? '' ) && 'Ozon не смог сформировать отправление.' === (string) ( $failed_confirm['message'] ?? '' ) && $failed_counts['create'] === count( $failed_confirm_stack['http']->calls_for( '/v1/order/create' ) ) && $failed_counts['approve'] === count( $failed_confirm_stack['http']->calls_for( '/v1/posting/approve' ) ), 'Ozon FORMING_FAILED during creation confirmation must stop polling, persist rejected status, and avoid create/approve retry.' );
+
+$timeout_confirm_stack = oz_ship_stack( $db );
+$timeout_confirm_stack['http']->approve_status = 'FORMING';
+$timeout_confirm_order = new OzonShipmentSmokeOrder( 85393, '85393', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
+$timeout_confirm_stack['service']->create( $timeout_confirm_order, oz_ship_request( array( new ShipmentPlace( 1, 1000, 20, 20, 10, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85393, '85393' ) );
+$timeout_confirm = $timeout_confirm_stack['adapter']->mark_polling_exhausted( $timeout_confirm_order, 14, OzonDeliveryShipmentCreationStatusPolicy::PURPOSE );
+$timeout_confirm_stored = ( new OrderShipmentRepository() )->find_by_carrier( $timeout_confirm_order, OzonDeliverySettings::CARRIER_KEY );
+$timeout_confirm_payload = $timeout_confirm_stack['adapter']->status_payload( $timeout_confirm_order, $timeout_confirm_stored );
+oz_ship_assert( ! empty( $timeout_confirm['success'] ) && OzonDeliveryShipmentCreationStatusPolicy::STATUS_EXHAUSTED === (string) ( $timeout_confirm_stored['status'] ?? '' ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $timeout_confirm_stored['universal_status_code'] ?? '' ) && empty( $timeout_confirm_payload['polling_continue'] ) && ! empty( $timeout_confirm_payload['can_update_status'] ) && ( new OrderShipmentRepository() )->has_created_for_carrier( $timeout_confirm_order, OzonDeliverySettings::CARRIER_KEY ), 'Ozon creation confirmation timeout must keep shipment, stop active polling, keep universal created_in_carrier, and prevent duplicate create.' );
+$timeout_confirm_stack['http']->statuses['OZON-1'] = 'READY_FOR_SHIPPING';
+$late_ready = $timeout_confirm_stack['adapter']->update_status( $timeout_confirm_order );
+oz_ship_assert( ! empty( $late_ready['success'] ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $late_ready['shipment']['universal_status_code'] ?? '' ) && 'READY_FOR_SHIPPING' === (string) ( $late_ready['shipment']['ozon_statuses'][0]['status'] ?? '' ), 'Manual status update after creation confirmation timeout must pick up late READY_FOR_SHIPPING.' );
+
 $status = $stack['adapter']->update_status( $order );
 oz_ship_assert( ! empty( $status['success'] ) && DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status['shipment']['universal_status_code'] ?? '' ), 'Ozon status provider must map ready_for_shipping postings to created_in_carrier.' );
 $stack['http']->statuses['OZON-1'] = 'FORMING';
