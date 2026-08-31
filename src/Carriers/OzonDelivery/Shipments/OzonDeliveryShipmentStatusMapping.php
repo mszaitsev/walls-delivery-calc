@@ -9,7 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryShipmentStatusMapping {
 	/** @return array<string,string> */
-	public static function map(): array {
+	public static function default_mapping(): array {
 		return array(
 			'unknown' => DeliveryStatus::UNKNOWN,
 			'created' => DeliveryStatus::PENDING_CREATION_IN_CARRIER,
@@ -24,7 +24,19 @@ final class OzonDeliveryShipmentStatusMapping {
 			'in_courier_service' => DeliveryStatus::HANDED_TO_COURIER,
 			'delivered' => DeliveryStatus::DELIVERED,
 			'canceled' => DeliveryStatus::CANCELLED,
+			'moving' => DeliveryStatus::RETURNING_TO_SENDER,
+			'at_the_pick_up_point' => DeliveryStatus::RETURNING_TO_SENDER,
+			'received' => DeliveryStatus::RETURNED_TO_SENDER,
+			'utilization' => DeliveryStatus::RETURNING_TO_SENDER,
+			'utilized' => DeliveryStatus::RETURNED_TO_SENDER,
+			'written_off' => DeliveryStatus::RETURNED_TO_SENDER,
+			'looking_for' => DeliveryStatus::RETURNING_TO_SENDER,
 		);
+	}
+
+	/** @return array<string,string> */
+	public static function map(): array {
+		return self::default_mapping();
 	}
 
 	/** @return array<int,string> */
@@ -43,6 +55,13 @@ final class OzonDeliveryShipmentStatusMapping {
 			'IN_COURIER_SERVICE',
 			'DELIVERED',
 			'CANCELED',
+			'MOVING',
+			'AT_THE_PICK_UP_POINT',
+			'RECEIVED',
+			'UTILIZATION',
+			'UTILIZED',
+			'WRITTEN_OFF',
+			'LOOKING_FOR',
 		);
 	}
 
@@ -68,6 +87,9 @@ final class OzonDeliveryShipmentStatusMapping {
 		}
 		if ( in_array( DeliveryStatus::CANCELLED, $universal, true ) || in_array( DeliveryStatus::DELIVERED, $universal, true ) ) {
 			return DeliveryStatus::UNKNOWN;
+		}
+		if ( in_array( DeliveryStatus::RETURNING_TO_SENDER, $universal, true ) || in_array( DeliveryStatus::RETURNED_TO_SENDER, $universal, true ) ) {
+			return DeliveryStatus::RETURNING_TO_SENDER;
 		}
 		foreach ( array( DeliveryStatus::READY_FOR_PICKUP, DeliveryStatus::HANDED_TO_COURIER, DeliveryStatus::IN_TRANSIT, DeliveryStatus::CREATED_IN_CARRIER, DeliveryStatus::PENDING_CREATION_IN_CARRIER ) as $candidate ) {
 			if ( in_array( $candidate, $universal, true ) ) {

@@ -105,11 +105,24 @@
     }
     const url = safeTrackingUrl(raw.url || '');
     const displayText = String(raw.display_text || raw.displayText || (url ? 'ссылка' : '')).trim();
+    const items = Array.isArray(raw.items)
+      ? raw.items.map(function (item) {
+        const itemUrl = safeTrackingUrl(item && item.url || '');
+        const itemDisplayText = String(item && (item.display_text || item.displayText) || (itemUrl ? 'ссылка' : '')).trim();
+        return {
+          label: String(item && item.label || '').trim(),
+          displayText: itemDisplayText,
+          copyValue: String(item && (item.copy_value || item.copyValue) || itemUrl || itemDisplayText).trim(),
+          url: itemUrl
+        };
+      }).filter(function (item) { return item.displayText || item.copyValue; })
+      : [];
     return {
       label: String(raw.label || '').trim(),
       displayText: displayText,
       copyValue: String(raw.copy_value || raw.copyValue || url || displayText).trim(),
-      url: url
+      url: url,
+      items: items
     };
   }
 
@@ -121,6 +134,7 @@
     const value = String(tracking.displayText || tracking.display_text || tracking.copyValue || tracking.copy_value || '').trim();
     const copyValue = String(tracking.copyValue || tracking.copy_value || value || '').trim();
     const url = safeTrackingUrl(tracking.url || '');
+    const items = Array.isArray(tracking.items) ? tracking.items : [];
     const row = box.querySelector('[data-wdc-tracking-row]');
     const label = box.querySelector('[data-wdc-tracking-label]');
     const number = box.querySelector('[data-wdc-tracking-number]');
@@ -128,7 +142,38 @@
     if (label && tracking.label) label.textContent = String(tracking.label);
     if (number) {
       number.textContent = '';
-      if (url) {
+      if (items.length) {
+        items.forEach(function (item, index) {
+          if (index > 0) number.appendChild(document.createElement('br'));
+          if (item.label) {
+            const prefix = document.createElement('span');
+            prefix.className = 'description';
+            prefix.textContent = item.label + ': ';
+            number.appendChild(prefix);
+          }
+          if (item.url) {
+            const link = document.createElement('a');
+            link.href = item.url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = item.displayText || 'ссылка';
+            number.appendChild(link);
+          } else {
+            number.appendChild(document.createTextNode(item.displayText || item.copyValue || ''));
+          }
+          const itemCopy = document.createElement('button');
+          itemCopy.type = 'button';
+          itemCopy.className = 'wdc-copy-tracking-icon';
+          itemCopy.dataset.wdcCopyTracking = '1';
+          itemCopy.dataset.trackingNumber = item.copyValue || item.displayText || '';
+          itemCopy.disabled = !itemCopy.dataset.trackingNumber;
+          itemCopy.setAttribute('aria-label', 'Копировать номер отслеживания');
+          itemCopy.title = 'Копировать';
+          itemCopy.textContent = '🗐';
+          number.appendChild(document.createTextNode(' '));
+          number.appendChild(itemCopy);
+        });
+      } else if (url) {
         const link = document.createElement('a');
         link.href = url;
         link.target = '_blank';
@@ -139,9 +184,10 @@
         number.textContent = value;
       }
     }
-    if (row) row.hidden = !value && !copyValue;
+    if (row) row.hidden = !items.length && !value && !copyValue;
     if (copy) {
-      copy.disabled = !copyValue;
+      copy.hidden = !!items.length;
+      copy.disabled = !!items.length || !copyValue;
       copy.dataset.trackingNumber = copyValue;
     }
   }

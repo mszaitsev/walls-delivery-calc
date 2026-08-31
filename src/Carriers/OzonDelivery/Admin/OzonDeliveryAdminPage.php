@@ -7,17 +7,17 @@ use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduler;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
-use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentActionPolicy;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapping;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapper;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 defined( 'ABSPATH' ) || exit;
 final class OzonDeliveryAdminPage {
-	public const ACTIONS = array( 'save_ozon_delivery_settings', 'check_ozon_delivery_connection', 'check_ozon_delivery_quote', 'save_ozon_delivery_pickup_schedule', 'start_ozon_delivery_pickup_import' );
-	public function __construct( private OzonDeliveryCredentials $credentials, private OzonDeliverySettings $settings, private OzonDeliveryConnectionDiagnosticService $diagnostics, private ?OzonDeliveryPickupRepository $pickup_repository = null, private ?OzonDeliveryPickupScheduler $pickup_scheduler = null, private ?OzonDeliveryPickupPointProvider $pickup_provider = null, private ?OzonDeliveryQuoteDiagnosticService $quote_diagnostics = null ) {}
+	public const ACTIONS = array( 'save_ozon_delivery_settings', 'check_ozon_delivery_connection', 'check_ozon_delivery_quote', 'save_ozon_delivery_pickup_schedule', 'start_ozon_delivery_pickup_import', 'save_ozon_delivery_shipment_status_mapping' );
+	public function __construct( private OzonDeliveryCredentials $credentials, private OzonDeliverySettings $settings, private OzonDeliveryConnectionDiagnosticService $diagnostics, private ?OzonDeliveryPickupRepository $pickup_repository = null, private ?OzonDeliveryPickupScheduler $pickup_scheduler = null, private ?OzonDeliveryPickupPointProvider $pickup_provider = null, private ?OzonDeliveryQuoteDiagnosticService $quote_diagnostics = null, private ?OzonDeliveryShipmentStatusMapper $shipment_status_mapper = null ) {}
 	public static function supports_action( string $action ): bool { return in_array( $action, self::ACTIONS, true ); }
-	/** @param array<string,mixed> $post */ public function handle_action( string $action, array $post ): ?bool { if ( 'save_ozon_delivery_settings' === $action ) { $this->credentials->save_from_admin( $post ); $this->settings->save_pricing_settings( $post ); } elseif ( 'check_ozon_delivery_connection' === $action ) { $this->diagnostics->run(); } elseif ( 'check_ozon_delivery_quote' === $action ) { $this->quote_diagnostics?->run( $post ); } elseif ( 'save_ozon_delivery_pickup_schedule' === $action ) { $this->settings->save_pickup_schedule( $post ); $this->pickup_scheduler?->reschedule(); } elseif ( 'start_ozon_delivery_pickup_import' === $action ) { return $this->pickup_scheduler?->start_manual() ?? false; } return null; }
+	/** @param array<string,mixed> $post */ public function handle_action( string $action, array $post ): ?bool { if ( 'save_ozon_delivery_settings' === $action ) { $this->credentials->save_from_admin( $post ); $this->settings->save_pricing_settings( $post ); } elseif ( 'check_ozon_delivery_connection' === $action ) { $this->diagnostics->run(); } elseif ( 'check_ozon_delivery_quote' === $action ) { $this->quote_diagnostics?->run( $post ); } elseif ( 'save_ozon_delivery_pickup_schedule' === $action ) { $this->settings->save_pickup_schedule( $post ); $this->pickup_scheduler?->reschedule(); } elseif ( 'save_ozon_delivery_shipment_status_mapping' === $action ) { $this->shipment_status_mapper()->save_from_admin( $post ); } elseif ( 'start_ozon_delivery_pickup_import' === $action ) { return $this->pickup_scheduler?->start_manual() ?? false; } return null; }
 	public function render(): void { $diagnostic = $this->settings->last_diagnostic(); $quote = $this->settings->last_quote_diagnostic(); ?>
 		<h2><?php echo esc_html( OzonDeliverySettings::TITLE ); ?></h2>
 		<h3><?php echo esc_html__( 'Подключение к API', 'walls-delivery-calc' ); ?></h3>
@@ -38,17 +38,21 @@ final class OzonDeliveryAdminPage {
 	<?php }
 	public function render_statuses(): void { ?>
 		<h2><?php echo esc_html__( 'Статусы Ozon', 'walls-delivery-calc' ); ?></h2>
-		<p><?php echo esc_html__( 'Сопоставление статусов Ozon Delivery с универсальными статусами Калькулятора доставок. Таблица задаётся кодом и используется при синхронизации отправлений.', 'walls-delivery-calc' ); ?></p>
-		<table class="widefat striped" style="max-width:960px">
-			<thead><tr><th><?php echo esc_html__( 'Статус Ozon', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Универсальный статус', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Название в плагине', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Доступное действие', 'walls-delivery-calc' ); ?></th></tr></thead>
+		<p><?php echo esc_html__( 'Сопоставление статусов Ozon Delivery с универсальными статусами Калькулятора доставок. Значения по умолчанию задаются кодом, сохранённые соответствия используются при синхронизации отправлений.', 'walls-delivery-calc' ); ?></p>
+		<form method="post" style="max-width:960px"><?php wp_nonce_field( 'wdc_delivery_services' ); ?><input type="hidden" name="wdc_delivery_services_action" value="save_ozon_delivery_shipment_status_mapping">
+		<table class="widefat striped">
+			<thead><tr><th><?php echo esc_html__( 'Статус Ozon', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Универсальный статус', 'walls-delivery-calc' ); ?></th></tr></thead>
 			<tbody>
-				<?php foreach ( OzonDeliveryShipmentStatusMapping::documented_statuses() as $status ) : ?>
-					<?php $universal = OzonDeliveryShipmentStatusMapping::universal( $status ); $policy = OzonDeliveryShipmentActionPolicy::for_statuses( array( $status ) ); $action = ! empty( $policy['can_cancel'] ) ? 'Отменить заказ' : 'Удалить заказ'; ?>
-					<tr><td><?php echo esc_html( $status ); ?></td><td><?php echo esc_html( $universal ); ?></td><td><?php echo esc_html( DeliveryStatus::label( $universal ) ); ?></td><td><?php echo esc_html( $action ); ?></td></tr>
+				<?php $mapper = $this->shipment_status_mapper(); $mapping = $mapper->mapping(); ?>
+				<?php foreach ( $mapper->documented_statuses() as $status ) : ?>
+					<?php $normalized = OzonDeliveryShipmentStatusMapping::normalize( $status ); $selected = (string) ( $mapping[ $normalized ] ?? DeliveryStatus::UNKNOWN ); ?>
+					<tr><td><code><?php echo esc_html( $status ); ?></code></td><td><select name="<?php echo esc_attr( OzonDeliverySettings::SHIPMENT_STATUS_MAPPING_KEY . '[' . $status . ']' ); ?>"><?php foreach ( DeliveryStatus::all() as $universal ) : ?><option value="<?php echo esc_attr( $universal ); ?>" <?php selected( $selected, $universal ); ?>><?php echo esc_html( DeliveryStatus::label( $universal ) . ' (' . $universal . ')' ); ?></option><?php endforeach; ?></select></td></tr>
 				<?php endforeach; ?>
 			</tbody>
 		</table>
+		<?php submit_button( __( 'Сохранить соответствия', 'walls-delivery-calc' ) ); ?></form>
 	<?php }
+	private function shipment_status_mapper(): OzonDeliveryShipmentStatusMapper { if ( ! $this->shipment_status_mapper instanceof OzonDeliveryShipmentStatusMapper ) { $this->shipment_status_mapper = new OzonDeliveryShipmentStatusMapper( $this->settings ); } return $this->shipment_status_mapper; }
 	/** @return array<string,mixed> */ public function pickup_status(): array { return $this->pickup_repository?->status() ?? array( 'state' => 'idle', 'is_running' => false, 'is_terminal' => true, 'active_count' => 0 ); }
 	/** @return array{submitted:bool,valid:bool,latitude:string,longitude:string,points:array<int,array<string,string>>} */
 	private function pickup_preview(): array { $latitude = trim( (string) wp_unslash( $_GET['wdc_ozon_preview_latitude'] ?? '' ) ); $longitude = trim( (string) wp_unslash( $_GET['wdc_ozon_preview_longitude'] ?? '' ) ); $submitted = array_key_exists( 'wdc_ozon_preview_latitude', $_GET ) || array_key_exists( 'wdc_ozon_preview_longitude', $_GET ); if ( ! $submitted || ! is_numeric( $latitude ) || ! is_numeric( $longitude ) || (float) $latitude < -90 || (float) $latitude > 90 || (float) $longitude < -180 || (float) $longitude > 180 || ! $this->pickup_provider instanceof OzonDeliveryPickupPointProvider ) { return array( 'submitted' => $submitted, 'valid' => false, 'latitude' => $latitude, 'longitude' => $longitude, 'points' => array() ); } $query = new CarrierPickupPointQuery( OzonDeliverySettings::CARRIER_KEY, 1, 'RU', '', (float) $latitude, (float) $longitude, new PickupCargoConstraints(), CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP, 20, 20 ); $points = array(); foreach ( array_slice( $this->pickup_provider->search( $query ), 0, 20 ) as $point ) { $points[] = array( 'name' => (string) ( $point->raw_reference['point_name'] ?? '' ), 'address' => $point->address, 'schedule' => $point->work_time, 'latitude' => (string) $point->latitude, 'longitude' => (string) $point->longitude ); } return array( 'submitted' => true, 'valid' => true, 'latitude' => $latitude, 'longitude' => $longitude, 'points' => $points ); }

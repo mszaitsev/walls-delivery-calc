@@ -28,6 +28,7 @@ final class OzonDeliveryShipmentService {
 		private OzonDeliveryPickupPointProvider $pickup_provider,
 		private OrderShipmentRepository $repository,
 		private ShipmentCreationAttemptService $attempts,
+		private OzonDeliveryShipmentStatusMapper $status_mapper,
 		private ?Logger $logger = null
 	) {}
 
@@ -98,7 +99,7 @@ final class OzonDeliveryShipmentService {
 			$status_snapshot = $this->post_approve_status_snapshot( $approval['postings'] );
 			$shipment['pending_creation_in_carrier'] = false;
 			$shipment['status'] = 'created';
-			$shipment['status_title'] = 'Отправление Ozon создано и подтверждено.';
+			$shipment['status_title'] = DeliveryStatus::label( (string) ( $status_snapshot['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER ) );
 			$shipment['universal_status_code'] = (string) ( $status_snapshot['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER );
 			$shipment['universal_status_label'] = DeliveryStatus::label( $shipment['universal_status_code'] );
 			if ( isset( $status_snapshot['ozon_statuses'] ) ) {
@@ -141,7 +142,7 @@ final class OzonDeliveryShipmentService {
 				'status_changed_at' => (string) ( $posting['status_changed_at'] ?? '' ),
 			);
 		}
-		$universal = OzonDeliveryShipmentStatusMapping::aggregate( $statuses );
+		$universal = $this->status_mapper()->aggregate( $statuses );
 		$shipment['ozon_statuses'] = $normalized;
 		$cancellation_status = (string) ( $shipment['status'] ?? '' );
 		if ( in_array( $cancellation_status, array( 'cancellation_started', 'cancellation_exhausted' ), true ) && OzonDeliveryShipmentActionPolicy::all_cancelled( $statuses ) ) {
@@ -350,12 +351,16 @@ final class OzonDeliveryShipmentService {
 				'status_changed_at' => (string) ( $posting['status_changed_at'] ?? '' ),
 			);
 		}
-		$universal = OzonDeliveryShipmentStatusMapping::aggregate( $statuses );
+		$universal = $this->status_mapper()->aggregate( $statuses );
 		if ( in_array( $universal, array( DeliveryStatus::PENDING_CREATION_IN_CARRIER, DeliveryStatus::UNKNOWN ), true ) ) {
 			$universal = DeliveryStatus::CREATED_IN_CARRIER;
 		}
 
 		return array( 'universal_status_code' => $universal, 'ozon_statuses' => $normalized );
+	}
+
+	private function status_mapper(): OzonDeliveryShipmentStatusMapper {
+		return $this->status_mapper;
 	}
 
 	/** @param array<string,mixed> $shipment @return array<int,string> */

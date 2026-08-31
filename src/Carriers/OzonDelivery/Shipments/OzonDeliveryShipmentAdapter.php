@@ -93,12 +93,14 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 			'polling_continue' => $has && 'cancellation_started' === (string) ( $shipment['status'] ?? '' ),
 			'registration_poll_interval_ms' => 5000,
 			'registration_poll_max_attempts' => 14,
-			'shipment_status_label' => $has ? (string) ( $shipment['status_title'] ?? $shipment['universal_status_label'] ?? 'создано' ) : 'не создано',
+			'shipment_status_label' => $has ? $this->shipment_status_label( $shipment ) : 'не создано',
+			'carrier_status_title' => $this->ozon_status_label( $shipment ),
 			'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
 			'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),
 			'tracking_checked_at' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
 			'updated_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'barcode' => $this->tracking_identifier( $shipment ),
+			'tracking_presentation' => $this->tracking_presentation( $shipment ),
 			'ozon_order_number' => (string) ( $shipment['ozon_order_number'] ?? '' ),
 			'ozon_postings' => is_array( $shipment['ozon_postings'] ?? null ) ? $shipment['ozon_postings'] : array(),
 			'lifecycle' => $lifecycle->to_array(),
@@ -153,6 +155,52 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 			}
 		}
 		return (string) ( is_array( $postings[0] ?? null ) ? ( $postings[0]['posting_number'] ?? '' ) : '' );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function shipment_status_label( array $shipment ): string {
+		$universal = (string) ( $shipment['universal_status_code'] ?? '' );
+		if ( '' !== $universal && DeliveryStatus::is_valid( $universal ) ) {
+			return DeliveryStatus::label( $universal );
+		}
+
+		return (string) ( $shipment['status_title'] ?? 'создано' );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function ozon_status_label( array $shipment ): string {
+		$statuses = OzonDeliveryShipmentActionPolicy::raw_statuses_from_shipment( $shipment );
+		return array() === $statuses ? '-' : implode( ', ', $statuses );
+	}
+
+	/** @param array<string,mixed> $shipment @return array<string,mixed> */
+	private function tracking_presentation( array $shipment ): array {
+		$postings = is_array( $shipment['ozon_postings'] ?? null ) ? array_values( array_filter( $shipment['ozon_postings'], 'is_array' ) ) : array();
+		usort( $postings, static fn( array $a, array $b ): int => (int) ( $a['place_number'] ?? 0 ) <=> (int) ( $b['place_number'] ?? 0 ) );
+		$items = array();
+		foreach ( $postings as $posting ) {
+			$number = trim( (string) ( $posting['posting_number'] ?? '' ) );
+			if ( '' === $number ) {
+				continue;
+			}
+			$place = max( 1, (int) ( $posting['place_number'] ?? count( $items ) + 1 ) );
+			$items[] = array(
+				'label' => sprintf( 'Коробка %d', $place ),
+				'display_text' => $number,
+				'copy_value' => $number,
+			);
+		}
+		if ( count( $items ) <= 1 ) {
+			$value = (string) ( $items[0]['display_text'] ?? $this->tracking_identifier( $shipment ) );
+			return array( 'label' => 'Номер Ozon', 'display_text' => $value, 'copy_value' => $value, 'items' => $items );
+		}
+
+		return array(
+			'label' => 'Номера Ozon',
+			'display_text' => implode( "\n", array_map( static fn( array $item ): string => (string) $item['display_text'], $items ) ),
+			'copy_value' => '',
+			'items' => $items,
+		);
 	}
 
 	public function auto_sync_throttle_microseconds(): int {

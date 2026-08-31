@@ -362,6 +362,7 @@ C:.
 |   |   |           OzonDeliveryShipmentPreflightQuoteService.php
 |   |   |           OzonDeliveryShipmentService.php
 |   |   |           OzonDeliveryShipmentStatusMapping.php
+|   |   |           OzonDeliveryShipmentStatusMapper.php
 |   |   |
 |   |   +---Pek
 |   |   |   |   PekCountryPolicy.php

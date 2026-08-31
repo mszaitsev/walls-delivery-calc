@@ -39,7 +39,6 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 
 	/** @param array<string,mixed> $shipment */
 	public function download( object $order, array $shipment, string $action_key ): ShipmentBinaryDocument {
-		unset( $order );
 		$place = (int) substr( $action_key, strlen( self::ACTION_PREFIX ) );
 		if ( $place <= 0 ) {
 			throw new \RuntimeException( 'Неизвестный ярлык Ozon.' );
@@ -56,7 +55,7 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 				break;
 			}
 			$label = $this->api->posting_label( $number );
-			return new ShipmentBinaryDocument( $label['body'], $label['content_type'], sprintf( 'ozon-box-%d.pdf', $place ) );
+			return new ShipmentBinaryDocument( $label['body'], $label['content_type'], $this->filename( $order, count( $this->postings( $shipment ) ), $place ) );
 		}
 
 		throw new \RuntimeException( 'Отправление Ozon для выбранной коробки не найдено.' );
@@ -65,5 +64,16 @@ final class OzonDeliveryShipmentDocumentProvider implements CarrierShipmentDocum
 	/** @param array<string,mixed> $shipment @return array<int,array<string,mixed>> */
 	private function postings( array $shipment ): array {
 		return is_array( $shipment['ozon_postings'] ?? null ) ? array_values( array_filter( $shipment['ozon_postings'], 'is_array' ) ) : array();
+	}
+
+	private function filename( object $order, int $total, int $place ): string {
+		$order_number = method_exists( $order, 'get_order_number' ) ? (string) $order->get_order_number() : 'order';
+		$order_number = function_exists( 'sanitize_file_name' ) ? sanitize_file_name( $order_number ) : preg_replace( '/[^A-Za-z0-9._-]+/', '-', $order_number );
+		$order_number = trim( (string) $order_number, '.-_' );
+		if ( '' === $order_number ) {
+			$order_number = 'order';
+		}
+
+		return $total <= 1 ? sprintf( 'ozon-%s.pdf', $order_number ) : sprintf( 'ozon-%s-%d.pdf', $order_number, $place );
 	}
 }

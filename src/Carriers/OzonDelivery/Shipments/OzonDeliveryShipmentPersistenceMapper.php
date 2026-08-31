@@ -32,7 +32,7 @@ final class OzonDeliveryShipmentPersistenceMapper implements CarrierShipmentPers
 			'tracking_number' => $result->tracking_number,
 			'barcode' => $result->tracking_number,
 			'status' => 'created',
-			'status_title' => 'Отправление Ozon создано и подтверждено.',
+			'status_title' => DeliveryStatus::label( (string) ( $raw['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER ) ),
 			'universal_status_code' => (string) ( $raw['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER ),
 			'universal_status_label' => DeliveryStatus::label( (string) ( $raw['universal_status_code'] ?? DeliveryStatus::CREATED_IN_CARRIER ) ),
 			'ozon_statuses' => is_array( $raw['ozon_statuses'] ?? null ) ? $raw['ozon_statuses'] : array(),
