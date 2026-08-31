@@ -101,8 +101,10 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 			'updated_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'barcode' => $this->tracking_identifier( $shipment ),
 			'tracking_presentation' => $this->tracking_presentation( $shipment ),
+			'return_tracking_presentation' => $this->return_tracking_presentation( $shipment ),
 			'ozon_order_number' => (string) ( $shipment['ozon_order_number'] ?? '' ),
 			'ozon_postings' => is_array( $shipment['ozon_postings'] ?? null ) ? $shipment['ozon_postings'] : array(),
+			'ozon_returns' => is_array( $shipment['ozon_returns'] ?? null ) ? $shipment['ozon_returns'] : array(),
 			'lifecycle' => $lifecycle->to_array(),
 		), $this->actual_cost_resolver->presentation_payload( $shipment, $order ) );
 	}
@@ -129,16 +131,9 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 	public function remove_from_order( object $order, string $shipment_key = '' ): array {
 		unset( $shipment_key );
 		$shipment = $this->repository->find_by_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
-		if ( 'cancellation_started' === (string) ( $shipment['status'] ?? '' ) ) {
-			return array(
-				'success' => false,
-				'message' => 'Дождитесь подтверждения отмены Ozon или обновите статус отправления.',
-				'shipment' => $shipment,
-			);
-		}
 		$this->service->terminalize_attempt( $order, $shipment );
 		$this->repository->delete_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY );
-		return array( 'success' => true, 'message' => 'Локальная запись отправления Ozon удалена.', 'shipment' => $shipment );
+		return array( 'success' => true, 'message' => 'Локальные данные Ozon удалены из заказа. Отправление или возврат в Ozon не отменялись.', 'shipment' => $shipment );
 	}
 
 	public function supports_status_auto_sync(): bool {
@@ -169,6 +164,11 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 
 	/** @param array<string,mixed> $shipment */
 	private function ozon_status_label( array $shipment ): string {
+		$search = is_array( $shipment['ozon_return_search'] ?? null ) ? $shipment['ozon_return_search'] : array();
+		$state = (string) ( $search['search_state'] ?? '' );
+		if ( in_array( $state, array( 'not_found', 'incomplete', 'error', 'info_error' ), true ) && $this->has_cancelled_outbound_status( $shipment ) ) {
+			return 'not_found' === $state ? 'исходное отправление отменено' : 'не удалось проверить возврат Ozon';
+		}
 		$statuses = OzonDeliveryShipmentActionPolicy::raw_statuses_from_shipment( $shipment );
 		return array() === $statuses ? '-' : implode( ', ', $statuses );
 	}
@@ -201,6 +201,56 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 			'copy_value' => '',
 			'items' => $items,
 		);
+	}
+
+	/** @param array<string,mixed> $shipment @return array<string,mixed> */
+	private function return_tracking_presentation( array $shipment ): array {
+		$outbound_count = count( is_array( $shipment['ozon_postings'] ?? null ) ? array_filter( $shipment['ozon_postings'], 'is_array' ) : array() );
+		$returns = is_array( $shipment['ozon_returns'] ?? null ) ? array_values( array_filter( $shipment['ozon_returns'], 'is_array' ) ) : array();
+		usort( $returns, static fn( array $a, array $b ): int => (int) ( $a['place_number'] ?? 0 ) <=> (int) ( $b['place_number'] ?? 0 ) );
+		$items = array();
+		foreach ( $returns as $return ) {
+			$number = trim( (string) ( $return['return_number'] ?? '' ) );
+			if ( '' === $number ) {
+				continue;
+			}
+			$place = max( 1, (int) ( $return['place_number'] ?? count( $items ) + 1 ) );
+			$status = trim( (string) ( $return['status'] ?? '' ) );
+			$items[] = array(
+				'label' => sprintf( 'Возврат коробки %d', $place ),
+				'display_text' => '' !== $status ? $number . ' (' . $status . ')' : $number,
+				'copy_value' => $number,
+			);
+		}
+		if ( $outbound_count <= 1 && count( $items ) <= 1 && array() !== $items ) {
+			return array( 'label' => 'Возврат Ozon', 'display_text' => (string) $items[0]['display_text'], 'copy_value' => (string) $items[0]['copy_value'], 'items' => array() );
+		}
+		if ( array() !== $items ) {
+			return array( 'label' => 'Возвраты Ozon', 'display_text' => implode( "\n", array_map( static fn( array $item ): string => (string) $item['display_text'], $items ) ), 'copy_value' => '', 'items' => $items );
+		}
+		$search = is_array( $shipment['ozon_return_search'] ?? null ) ? $shipment['ozon_return_search'] : array();
+		$state = (string) ( $search['search_state'] ?? '' );
+		if ( in_array( $state, array( 'not_found', 'incomplete', 'error', 'info_error' ), true ) ) {
+			$checked = trim( (string) ( $search['checked_at'] ?? '' ) );
+			$text = match ( $state ) {
+				'not_found' => 'не найден',
+				'incomplete' => 'поиск не завершён',
+				default => 'не удалось проверить',
+			};
+			return array( 'label' => 'Возврат Ozon', 'display_text' => $text . ( '' !== $checked ? ' (проверено: ' . $checked . ')' : '' ), 'copy_value' => '', 'items' => array() );
+		}
+
+		return array( 'label' => 'Возврат Ozon', 'display_text' => '', 'copy_value' => '', 'items' => array() );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function has_cancelled_outbound_status( array $shipment ): bool {
+		foreach ( OzonDeliveryShipmentActionPolicy::raw_statuses_from_shipment( $shipment ) as $status ) {
+			if ( 'canceled' === OzonDeliveryShipmentStatusMapping::normalize( $status ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public function auto_sync_throttle_microseconds(): int {

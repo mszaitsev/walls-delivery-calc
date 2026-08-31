@@ -349,6 +349,12 @@ C:.
 |   |   |           OzonDeliveryQuoteResult.php
 |   |   |           OzonDeliveryQuoteService.php
 |   |   |
+|   |   |   +---Returns
+|   |   |   |       OzonDeliveryReturnInfoParser.php
+|   |   |   |       OzonDeliveryReturnLifecycleResolver.php
+|   |   |   |       OzonDeliveryReturnSearchParser.php
+|   |   |   |       OzonDeliveryReturnService.php
+|   |   |   |
 |   |   |   \---Shipments
 |   |   |           OzonDeliveryShipmentAdapter.php
 |   |   |           OzonDeliveryShipmentActionPolicy.php
@@ -358,6 +364,8 @@ C:.
 |   |   |           OzonDeliveryShipmentCreationStatusPolicy.php
 |   |   |           OzonDeliveryShipmentDescriptionBuilder.php
 |   |   |           OzonDeliveryShipmentDocumentProvider.php
+|   |   |           OzonDeliveryShipmentExternalIdResolver.php
+|   |   |           OzonDeliveryShipmentInfoParser.php
 |   |   |           OzonDeliveryShipmentModalExtension.php
 |   |   |           OzonDeliveryShipmentPersistenceMapper.php
 |   |   |           OzonDeliveryShipmentPreflightQuoteService.php

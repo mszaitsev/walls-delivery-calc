@@ -51,6 +51,7 @@ final class OzonDeliveryShipmentCreationStatusPolicy {
 				'in_courier_service',
 				'delivered',
 				'moving',
+				'at_pickup_point',
 				'at_the_pick_up_point',
 				'received',
 				'utilization',

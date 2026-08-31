@@ -13,6 +13,20 @@ final class OzonDeliveryApiClient {
 	/** @return array<string,mixed> */ public function posting_approve( string $posting_number ): array { return $this->authorized_empty_success_request( 'POST', '/v1/posting/approve', array( 'posting_number' => $posting_number ) ); }
 	/** @param array<int,string> $posting_numbers @return array<string,mixed> */ public function posting_info( array $posting_numbers ): array { return $this->authorized_json_request( 'POST', '/v1/posting/info', array( 'posting_numbers' => array_values( $posting_numbers ) ) ); }
 	/** @return array<string,mixed> */ public function posting_cancel( string $posting_number ): array { return $this->authorized_empty_success_request( 'POST', '/v1/posting/cancel', array( 'posting_number' => $posting_number ) ); }
+	/** @return array<string,mixed> */ public function return_search( ?string $cursor = null, int $limit = 100 ): array {
+		$limit = max( 1, min( 100, $limit ) );
+		$pagination = array( 'limit' => $limit );
+		$cursor = is_string( $cursor ) ? trim( $cursor ) : '';
+		if ( '' !== $cursor ) {
+			$pagination['cursor'] = $cursor;
+		}
+		return $this->authorized_json_request( 'POST', '/v1/return/search', array( 'pagination' => $pagination ) );
+	}
+	/** @param array<int,string> $return_numbers @return array<string,mixed> */ public function return_info( array $return_numbers ): array {
+		$numbers = array_values( array_filter( array_map( static fn( mixed $number ): string => trim( (string) $number ), $return_numbers ), static fn( string $number ): bool => '' !== $number ) );
+		if ( array() === $numbers || count( $numbers ) > 100 ) { throw new OzonDeliveryApiException( 'return_info', 'request_invalid', 0, false, 'Некорректный запрос возвратов Ozon Delivery.' ); }
+		return $this->authorized_json_request( 'POST', '/v1/return/info', array( 'return_numbers' => $numbers ) );
+	}
 	/** @return array{body:string,content_type:string} */ public function posting_label( string $posting_number ): array {
 		$response = $this->authorized_response( 'POST', '/v1/posting/label', array( 'posting_number' => $posting_number ), array( 'Accept' => 'application/pdf' ) );
 		if ( $response->status_code < 200 || $response->status_code >= 300 || '' === $response->body ) { throw $this->api_error( '/v1/posting/label', $response, json_decode( $response->body, true ) ); }
