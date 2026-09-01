@@ -56,6 +56,7 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_planned_delivery_date'    => $rate['planned_delivery_date'] ?? '',
 			'_wdc_platform_planned_delivery_comment' => $rate['planned_delivery_comment'] ?? '',
 			'_wdc_platform_comments'                 => $rate['comments'] ?? array(),
+			'_wdc_platform_customer_comments'        => $this->customer_comments_from_rate( $rate ),
 			'_wdc_platform_fallback_used'            => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ),
 			'_wdc_platform_requires_pickup_point'    => ! empty( $rate['requires_pickup_point'] ) ? 1 : 0,
 			'_wdc_platform_service_key'              => $rate['service_key'] ?? '',
@@ -205,6 +206,7 @@ final class OrderShippingMetaPersister {
 			array(
 				'destination' => $this->calculation_destination_data( $rate_meta, $order_meta ),
 				'pickup'      => $this->calculation_pickup_data( $rate ),
+				'customer_comments' => $this->customer_comments_from_rate( $rate ),
 			)
 		);
 	}
@@ -325,7 +327,13 @@ final class OrderShippingMetaPersister {
 				'country_name'      => (string) ( $country['country_name'] ?? '' ),
 				'location_id'       => $this->positive_int( $order_meta['_wdc_platform_location_id'] ?? null ),
 				'city_display_name' => (string) ( $order_meta['_wdc_platform_city_display_name'] ?? '' ),
+				'city_source'       => (string) ( $order_meta['_wdc_platform_city_source'] ?? '' ),
+				'city_postcode'     => (string) ( $order_meta['_wdc_platform_city_postcode'] ?? '' ),
+				'normalized'        => $order_meta['_wdc_platform_normalized'] ?? null,
+				'normalization_source' => (string) ( $order_meta['_wdc_platform_normalization_source'] ?? '' ),
+				'resolved_postcode' => (string) ( $order_meta['_wdc_platform_resolved_postcode'] ?? '' ),
 				'fias_id'           => (string) ( $order_meta['_wdc_platform_fias_id'] ?? $order_meta['_wdc_platform_city_fias_id'] ?? '' ),
+				'gar_id'            => (string) ( $order_meta['_wdc_platform_gar_id'] ?? $order_meta['_wdc_platform_city_gar_id'] ?? '' ),
 			),
 			static fn ( mixed $value ): bool => '' !== $value && 0 !== $value
 		);

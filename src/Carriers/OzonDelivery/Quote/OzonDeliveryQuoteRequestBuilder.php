@@ -9,28 +9,88 @@ use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Packaging\PackagingParcel;
 use WallsShop\WDC\Packaging\PackagingResult;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryQuoteRequestBuilder {
 	private RussianPhoneNormalizer $phones;
+	private OzonDeliveryCourierAddressMapper $courier_address;
+	private ?OzonDeliveryCourierLocationResolver $courier_location;
 
-	public function __construct( private OzonDeliverySettings $settings, ?RussianPhoneNormalizer $phones = null ) {
+	public function __construct( private OzonDeliverySettings $settings, ?RussianPhoneNormalizer $phones = null, ?OzonDeliveryCourierAddressMapper $courier_address = null, ?OzonDeliveryCourierLocationResolver $courier_location = null ) {
 		$this->phones = $phones ?? new RussianPhoneNormalizer();
+		$this->courier_address = $courier_address ?? new OzonDeliveryCourierAddressMapper();
+		$this->courier_location = $courier_location;
 	}
 
 	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
 	public function build( QuoteRequest $request, PackagingResult $packaging, string $delivery_point_id ): array {
-		$shipment_method_id = $this->settings->shipment_method_id();
+		return $this->build_pickup( $request, $packaging, $delivery_point_id );
+	}
+
+	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
+	public function build_pickup( QuoteRequest $request, PackagingResult $packaging, string $delivery_point_id ): array {
+		$shipment_method_id = $this->settings->pickup_shipment_method_id();
 		if ( $shipment_method_id <= 0 ) {
 			throw new OzonDeliveryQuoteException( 'ozon_shipment_method_missing', 'order_checkout', 0, 'Не указан метод доставки Ozon.' );
 		}
+		if ( ! ctype_digit( $delivery_point_id ) || (int) $delivery_point_id <= 0 ) {
+			throw new OzonDeliveryQuoteException( 'ozon_delivery_point_missing', 'order_checkout', 0, 'Не выбран ПВЗ Ozon для расчета.' );
+		}
+
+		return $this->build_for_delivery(
+			$request,
+			$packaging,
+			$shipment_method_id,
+			array( 'delivery_point' => array( 'delivery_point_id' => (int) $delivery_point_id ) ),
+			array(
+				'delivery_type' => 'pickup',
+				'destination_point_id' => $delivery_point_id,
+			)
+		);
+	}
+
+	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
+	public function build_courier( QuoteRequest $request, PackagingResult $packaging ): array {
+		$shipment_method_id = $this->settings->courier_shipment_method_id();
+		if ( $shipment_method_id <= 0 ) {
+			throw new OzonDeliveryQuoteException( 'ozon_courier_shipment_method_missing', 'order_checkout', 0, 'Не указан метод доставки Ozon курьером.' );
+		}
+
+		$location = $this->courier_location()->resolve( $request );
+		$diagnostics = array(
+			'delivery_type' => 'courier',
+			'courier_coordinate_source' => $location->source,
+			'courier_location_id' => $location->location_id,
+			'courier_latitude' => $location->latitude,
+			'courier_longitude' => $location->longitude,
+			'courier_coordinates_present' => true,
+		);
+		if ( null !== $location->proxy_point_id ) {
+			$diagnostics['courier_proxy_point_id'] = $location->proxy_point_id;
+			$diagnostics['courier_proxy_distance_m'] = $location->proxy_distance_m;
+		}
+
+		return $this->build_for_delivery(
+			$request,
+			$packaging,
+			$shipment_method_id,
+			$this->courier_address->delivery( $location ),
+			$diagnostics
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $delivery
+	 * @param array<string,mixed> $extra_diagnostics
+	 * @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>}
+	 */
+	private function build_for_delivery( QuoteRequest $request, PackagingResult $packaging, int $shipment_method_id, array $delivery, array $extra_diagnostics ): array {
 		$phone = $this->recipient_phone( $request );
 		if ( '' === $phone ) {
 			throw new OzonDeliveryQuoteException( 'ozon_recipient_phone_missing', 'order_checkout', 0, 'Для расчета Ozon нужен телефон получателя.' );
-		}
-		if ( ! ctype_digit( $delivery_point_id ) || (int) $delivery_point_id <= 0 ) {
-			throw new OzonDeliveryQuoteException( 'ozon_delivery_point_missing', 'order_checkout', 0, 'Не выбран ПВЗ Ozon для расчета.' );
 		}
 		$posting_count = $this->posting_count( $packaging );
 		if ( $posting_count < 1 || $posting_count > 100 ) {
@@ -70,18 +130,19 @@ final class OzonDeliveryQuoteRequestBuilder {
 			'body' => array(
 				'recipient' => array( 'phone_number' => $phone ),
 				'postings' => $postings,
-				'delivery' => array( 'delivery_point' => array( 'delivery_point_id' => (int) $delivery_point_id ) ),
+				'delivery' => $delivery,
 			),
 			'request_ids' => $request_ids,
-			'diagnostics' => array(
+			'diagnostics' => array_merge( array(
 				'endpoint' => 'POST /v1/order/checkout',
 				'shipment_method_id' => $shipment_method_id,
-				'destination_point_id' => $delivery_point_id,
 				'packages_count' => count( $postings ),
+				'postings_count' => count( $postings ),
+				'request_postings' => $this->postings_summary( $postings ),
 				'total_declared_value_rub' => $this->money_amount( $total_declared_kopecks ),
 				'declared_value_per_posting_rub' => $declared,
 				'declared_value_rub' => $declared,
-			),
+			), $extra_diagnostics ),
 		);
 	}
 
@@ -92,6 +153,38 @@ final class OzonDeliveryQuoteRequestBuilder {
 		}
 
 		return $this->settings->quote_fallback_phone();
+	}
+
+	private function courier_location(): OzonDeliveryCourierLocationResolver {
+		if ( ! $this->courier_location instanceof OzonDeliveryCourierLocationResolver ) {
+			$this->courier_location = new OzonDeliveryCourierLocationResolver( new LocationRepository(), new OzonDeliveryPickupRepository() );
+		}
+
+		return $this->courier_location;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $postings
+	 * @return array<int,array<string,int|string>>
+	 */
+	private function postings_summary( array $postings ): array {
+		$summary = array();
+		foreach ( array_slice( $postings, 0, 20 ) as $posting ) {
+			$dimensions = is_array( $posting['dimensions'] ?? null ) ? $posting['dimensions'] : array();
+			$declared = is_array( $posting['declared_value'] ?? null ) ? $posting['declared_value'] : array();
+			$summary[] = array(
+				'request_id' => (int) ( $posting['request_id'] ?? 0 ),
+				'shipment_method_id' => (int) ( $posting['shipment_method_id'] ?? 0 ),
+				'weight_g' => (int) ( $dimensions['weight_g'] ?? 0 ),
+				'length_mm' => (int) ( $dimensions['length_mm'] ?? 0 ),
+				'width_mm' => (int) ( $dimensions['width_mm'] ?? 0 ),
+				'height_mm' => (int) ( $dimensions['height_mm'] ?? 0 ),
+				'declared_value_amount' => is_scalar( $declared['amount'] ?? null ) ? (string) $declared['amount'] : '',
+				'declared_value_currency' => is_scalar( $declared['currency_code'] ?? null ) ? (string) $declared['currency_code'] : '',
+			);
+		}
+
+		return $summary;
 	}
 
 	private function money_amount( int $kopecks ): string {

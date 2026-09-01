@@ -55,7 +55,10 @@
     'dadata_flat_type_full',
     'dadata_fias_id',
 		'dadata_kladr_id',
-		'dadata_fias_level'
+		'dadata_fias_level',
+		'dadata_geo_lat',
+		'dadata_geo_lon',
+		'dadata_geo_lng'
 	];
 
 	function log( message, data ) {
@@ -223,7 +226,10 @@
           'dadata_flat_type_full',
           'dadata_fias_id',
 			'dadata_kladr_id',
-			'dadata_fias_level'
+			'dadata_fias_level',
+			'dadata_geo_lat',
+			'dadata_geo_lon',
+			'dadata_geo_lng'
 		].forEach( function ( key ) {
 			hidden( prefix, key ).val( '' );
 		} );
@@ -246,6 +252,8 @@
 			settlement_kladr_id: hidden( prefix, 'dadata_settlement_kladr_id' ).val() || '',
 			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || '',
 			selected_display_name: globalHiddenValue( 'wdc_platform_location_display_name' ),
+			selected_location_id: globalHiddenValue( 'wdc_platform_location_id' ),
+			selected_location_fias_id: globalHiddenValue( 'wdc_platform_location_fias_id' ),
 			city: firstUsable( prefix, 'city' ).val() || ''
 		};
 		extra = extra || {};
@@ -486,6 +494,7 @@
 			nonce: config.nonce || '',
 			stage: stage,
 			query: query,
+			prefix: prefix,
 			context: context( prefix, extraContext )
 		} ).done( function ( response ) {
 			var body = response && response.data ? response.data : response;
@@ -585,7 +594,9 @@
 			action: config.selection_action || 'wdc_platform_dadata_suggestion_selected',
 			nonce: config.nonce || '',
 			level: item && item.level ? item.level : 'unknown',
-			usage_type: usageType || 'suggestion_click'
+			usage_type: usageType || 'suggestion_click',
+			prefix: activePrefix,
+			selection_token: item && ( item.selectionToken || item.selection_token ) ? ( item.selectionToken || item.selection_token ) : ''
 		} ).done( function ( response ) {
 			log( 'selection usage counted', response || {} );
 		} ).fail( function () {

@@ -67,6 +67,8 @@ function wp_remote_post( string $url, array $args = array() ): array {
 							'fias_id' => 'house-fias',
 							'kladr_id' => 'house-kladr',
 							'postal_code' => '630099',
+							'geo_lat' => '55.030100',
+							'geo_lon' => '82.920100',
 						),
 					),
 				),
@@ -367,6 +369,24 @@ dadata_suggestions_assert( false === $street_item['isDeliverable'], 'Street with
 $house_item = $normalizer->normalize( $response['suggestions'][0] );
 dadata_suggestions_assert( 'house' === $house_item['level'], 'Normalizer must detect house suggestions.' );
 dadata_suggestions_assert( true === $house_item['isDeliverable'], 'Normalizer must mark fias_level 8 as deliverable.' );
+dadata_suggestions_assert( '55.030100' === (string) ( $house_item['data']['geo_lat'] ?? '' ) && '82.920100' === (string) ( $house_item['data']['geo_lon'] ?? '' ), 'Normalizer must preserve server-returned DaData geo coordinates for trusted evidence.' );
+$evidence_session = new CheckoutSessionManager();
+$cached_items = $evidence_session->cache_dadata_address_suggestions(
+	'billing',
+	array(
+		'selected_location_id' => '123',
+		'selected_location_fias_id' => 'city-fias',
+	),
+	array( $house_item )
+);
+$selection_token = (string) ( $cached_items[0]['selection_token'] ?? '' );
+dadata_suggestions_assert( '' !== $selection_token && $selection_token === (string) ( $cached_items[0]['selectionToken'] ?? '' ), 'Server must attach an opaque selection token to DaData suggestions.' );
+dadata_suggestions_assert( false === $evidence_session->confirm_dadata_address_evidence( $selection_token, 'shipping' ), 'Selection token must be scoped to the active checkout prefix.' );
+dadata_suggestions_assert( true === $evidence_session->confirm_dadata_address_evidence( $selection_token, 'billing' ), 'Server-confirmed selection token must create trusted checkout address evidence.' );
+$trusted_evidence = $evidence_session->trusted_dadata_address_evidence();
+dadata_suggestions_assert( 'billing' === (string) ( $trusted_evidence['prefix'] ?? '' ) && '123' === (string) ( $trusted_evidence['selected_location_id'] ?? '' ) && 'city-fias' === (string) ( $trusted_evidence['city_fias_id'] ?? '' ), 'Trusted evidence must keep prefix and selected location identity.' );
+dadata_suggestions_assert( 'Красный пр-кт' === (string) ( $trusted_evidence['street_with_type'] ?? '' ) && '25' === (string) ( $trusted_evidence['house'] ?? '' ) && '55.030100' === (string) ( $trusted_evidence['geo_lat'] ?? '' ), 'Trusted evidence must keep only normalized safe address fields needed for pricing.' );
+dadata_suggestions_assert( ! str_contains( serialize( $trusted_evidence ), '630099, Новосибирская обл' ) && ! str_contains( serialize( $trusted_evidence ), 'secret-api-key' ), 'Trusted evidence must not store raw unrestricted DaData payload or credentials.' );
 foreach ( array( '9', '75' ) as $level ) {
 	$item = $normalizer->normalize( array( 'value' => 'test', 'data' => array( 'fias_level' => $level, 'house' => '1' ) ) );
 	dadata_suggestions_assert( true === $item['isDeliverable'], 'Normalizer must mark fias_level ' . $level . ' as deliverable.' );
@@ -383,7 +403,7 @@ dadata_suggestions_assert( ! str_contains( $js, ".on( 'input' + namespace + ' ke
 dadata_suggestions_assert( str_contains( $js, ".on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, '.wdc-address-picker-search'" ), 'Frontend suggestions JS must search from modal input.' );
 dadata_suggestions_assert( str_contains( $js, "trackSelectionUsage( selectedItem, 'suggestion_click' );" ) && str_contains( $js, 'selectItem( selectedItem );' ), 'Suggestion click usage call must be fire-and-forget before applying selected item.' );
 dadata_suggestions_assert( str_contains( $js, "trackSelectionUsage( item, 'final_selection' );" ), 'Final selection usage must be called from the final address apply path.' );
-dadata_suggestions_assert( str_contains( $js, "usage_type: usageType || 'suggestion_click'" ), 'Selection usage AJAX must send usage_type and default to suggestion_click.' );
+dadata_suggestions_assert( str_contains( $js, "usage_type: usageType || 'suggestion_click'" ) && str_contains( $js, 'selection_token:' ) && str_contains( $js, 'prefix: activePrefix' ), 'Selection usage AJAX must send usage_type, active prefix and opaque selection token.' );
 dadata_suggestions_assert( ! str_contains( $js, 'house_after_street' ), 'Frontend suggestions JS must not automatically use house_after_street mode.' );
 dadata_suggestions_assert( ! str_contains( $js, 'selectedStreet' ), 'Frontend suggestions JS must not keep sticky selectedStreet state.' );
 dadata_suggestions_assert( ! str_contains( $js, 'Изменить улицу' ) && ! str_contains( $js, 'wdc-address-picker-change-street' ), 'Frontend suggestions JS must not show change-street mode UI.' );

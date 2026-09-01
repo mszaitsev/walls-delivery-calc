@@ -23,6 +23,7 @@ final class OzonDeliverySettings {
 	public const LAST_DIAGNOSTIC_KEY = 'ozon_delivery_last_diagnostic';
 	public const LAST_QUOTE_DIAGNOSTIC_KEY = 'ozon_delivery_last_quote_diagnostic';
 	public const SHIPMENT_METHOD_ID_KEY = 'ozon_delivery_shipment_method_id';
+	public const COURIER_SHIPMENT_METHOD_ID_KEY = 'ozon_delivery_courier_shipment_method_id';
 	public const QUOTE_FALLBACK_PHONE_KEY = 'ozon_delivery_quote_fallback_phone';
 	public const PICKUP_AUTO_SYNC_KEY = 'ozon_delivery_pickup_auto_sync';
 	public const PICKUP_SYNC_TIME_KEY = 'ozon_delivery_pickup_sync_time';
@@ -43,6 +44,7 @@ final class OzonDeliverySettings {
 			self::LAST_DIAGNOSTIC_KEY => array(),
 			self::LAST_QUOTE_DIAGNOSTIC_KEY => array(),
 			self::SHIPMENT_METHOD_ID_KEY => 0,
+			self::COURIER_SHIPMENT_METHOD_ID_KEY => 0,
 			self::QUOTE_FALLBACK_PHONE_KEY => '',
 			self::PICKUP_AUTO_SYNC_KEY => true,
 			self::PICKUP_SYNC_TIME_KEY => '02:00',
@@ -68,6 +70,14 @@ final class OzonDeliverySettings {
 		return max( 0, $this->settings->get_int( self::SHIPMENT_METHOD_ID_KEY, 0 ) );
 	}
 
+	public function pickup_shipment_method_id(): int {
+		return $this->shipment_method_id();
+	}
+
+	public function courier_shipment_method_id(): int {
+		return max( 0, $this->settings->get_int( self::COURIER_SHIPMENT_METHOD_ID_KEY, 0 ) );
+	}
+
 	public function quote_fallback_phone(): string {
 		return $this->phones->normalize( $this->settings->get_string( self::QUOTE_FALLBACK_PHONE_KEY, '' ) );
 	}
@@ -77,6 +87,10 @@ final class OzonDeliverySettings {
 		if ( array_key_exists( self::SHIPMENT_METHOD_ID_KEY, $input ) ) {
 			$value = preg_replace( '/\D+/', '', (string) $input[ self::SHIPMENT_METHOD_ID_KEY ] ) ?? '';
 			$this->settings->set( self::SHIPMENT_METHOD_ID_KEY, '' === $value ? 0 : max( 0, (int) $value ) );
+		}
+		if ( array_key_exists( self::COURIER_SHIPMENT_METHOD_ID_KEY, $input ) ) {
+			$value = preg_replace( '/\D+/', '', (string) $input[ self::COURIER_SHIPMENT_METHOD_ID_KEY ] ) ?? '';
+			$this->settings->set( self::COURIER_SHIPMENT_METHOD_ID_KEY, '' === $value ? 0 : max( 0, (int) $value ) );
 		}
 		if ( array_key_exists( self::QUOTE_FALLBACK_PHONE_KEY, $input ) ) {
 			$this->settings->set( self::QUOTE_FALLBACK_PHONE_KEY, $this->phones->normalize( $input[ self::QUOTE_FALLBACK_PHONE_KEY ] ) );

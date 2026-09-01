@@ -26,6 +26,9 @@ final class CheckoutSessionManager {
 	private const CITY_CONTEXT_KEY       = 'wdc_platform_city_context';
 	private const FALLBACK_CITY_KEY      = 'wdc_platform_fallback_city';
 	private const ADDRESS_FINGERPRINT_KEY = 'wdc_platform_address_fingerprint';
+	private const DADATA_SUGGESTION_CACHE_KEY = 'wdc_platform_dadata_suggestion_cache';
+	private const TRUSTED_ADDRESS_EVIDENCE_KEY = 'wdc_platform_trusted_address_evidence';
+	private const DADATA_SUGGESTION_CACHE_LIMIT = 40;
 
 	public function save_selected_delivery_type( string $delivery_type ): void {
 		$this->set( self::DELIVERY_TYPE_KEY, $delivery_type );
@@ -905,6 +908,76 @@ final class CheckoutSessionManager {
 	}
 
 	/**
+	 * @param array<string,string> $context
+	 * @param array<int,array<string,mixed>> $items
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function cache_dadata_address_suggestions( string $prefix, array $context, array $items ): array {
+		$prefix = $this->normalize_address_prefix( $prefix );
+		if ( '' === $prefix || array() === $items ) {
+			return $items;
+		}
+
+		$cache = array();
+		$returned = array();
+		foreach ( $items as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+			$token = $this->new_selection_token();
+			$safe = $this->safe_dadata_suggestion_evidence( $prefix, $context, $item, $token );
+			if ( array() === $safe ) {
+				$returned[] = $item;
+				continue;
+			}
+			if ( count( $cache ) < self::DADATA_SUGGESTION_CACHE_LIMIT ) {
+				$item['selection_token'] = $token;
+				$item['selectionToken'] = $token;
+				$cache[ $token ] = $safe;
+			}
+			$returned[] = $item;
+		}
+
+		$stored = $this->trusted_dadata_suggestion_cache();
+		$stored[ $prefix ] = $cache;
+		$this->set_raw_session_array( self::DADATA_SUGGESTION_CACHE_KEY, $stored );
+
+		return $returned;
+	}
+
+	public function confirm_dadata_address_evidence( string $token, string $prefix ): bool {
+		$token = trim( $token );
+		$prefix = $this->normalize_address_prefix( $prefix );
+		if ( '' === $token || '' === $prefix ) {
+			return false;
+		}
+		$cache = $this->trusted_dadata_suggestion_cache();
+		$evidence = is_array( $cache[ $prefix ][ $token ] ?? null ) ? $cache[ $prefix ][ $token ] : array();
+		if ( array() === $evidence || ! $this->dadata_evidence_has_deliverable_coordinate( $evidence ) ) {
+			return false;
+		}
+
+		$evidence['status'] = 'resolved';
+		$evidence['confirmed_at'] = $this->site_current_datetime()->format( 'c' );
+		$this->set_raw_session_array( self::TRUSTED_ADDRESS_EVIDENCE_KEY, $evidence );
+
+		return true;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function trusted_dadata_address_evidence(): array {
+		$evidence = $this->get_raw_session_value( self::TRUSTED_ADDRESS_EVIDENCE_KEY, array() );
+
+		return is_array( $evidence ) ? $evidence : array();
+	}
+
+	public function clear_trusted_dadata_address_evidence(): void {
+		$this->set_raw_session_array( self::TRUSTED_ADDRESS_EVIDENCE_KEY, array() );
+	}
+
+	/**
 	 * @return array<string,array<string,mixed>>
 	 */
 	public function raw_pickup_selections(): array {
@@ -1009,6 +1082,113 @@ final class CheckoutSessionManager {
 			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
 			error_log( '[walls-delivery-calc] warning: ' . $message . ' ' . ( false !== $encoded ? $encoded : '' ) );
 		}
+	}
+
+	/**
+	 * @return array<string,array<string,array<string,mixed>>>
+	 */
+	private function trusted_dadata_suggestion_cache(): array {
+		$raw = $this->get_raw_session_value( self::DADATA_SUGGESTION_CACHE_KEY, array() );
+		if ( ! is_array( $raw ) ) {
+			return array();
+		}
+		$cache = array();
+		foreach ( $raw as $prefix => $items ) {
+			if ( ! is_string( $prefix ) || ! is_array( $items ) ) {
+				continue;
+			}
+			$prefix = $this->normalize_address_prefix( $prefix );
+			if ( '' === $prefix ) {
+				continue;
+			}
+			$cache[ $prefix ] = array();
+			foreach ( $items as $token => $item ) {
+				if ( is_string( $token ) && is_array( $item ) ) {
+					$cache[ $prefix ][ $token ] = $item;
+				}
+			}
+		}
+
+		return $cache;
+	}
+
+	/**
+	 * @param array<string,string> $context
+	 * @param array<string,mixed> $item
+	 * @return array<string,mixed>
+	 */
+	private function safe_dadata_suggestion_evidence( string $prefix, array $context, array $item, string $token ): array {
+		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
+		$street = $this->safe_text( $data['street'] ?? '' );
+		$street_with_type = $this->safe_text( $data['street_with_type'] ?? '' );
+		$house = $this->safe_text( $data['house'] ?? '' );
+		$stead = $this->safe_text( $data['stead'] ?? '' );
+		$geo_lat = $this->safe_text( $data['geo_lat'] ?? '' );
+		$geo_lon = $this->safe_text( $data['geo_lon'] ?? $data['geo_lng'] ?? '' );
+		if ( '' === $geo_lat || '' === $geo_lon ) {
+			return array();
+		}
+
+		return array_filter(
+			array(
+				'token' => $token,
+				'prefix' => $prefix,
+				'selected_location_id' => $this->safe_text( $context['selected_location_id'] ?? $this->current_location_context()['location_id'] ?? '' ),
+				'selected_location_fias_id' => $this->safe_text( $context['selected_location_fias_id'] ?? $this->current_location_context()['fias_id'] ?? '' ),
+				'region_fias_id' => $this->safe_text( $data['region_fias_id'] ?? '' ),
+				'city_fias_id' => $this->safe_text( $data['city_fias_id'] ?? '' ),
+				'settlement_fias_id' => $this->safe_text( $data['settlement_fias_id'] ?? '' ),
+				'street' => $street,
+				'street_with_type' => $street_with_type,
+				'street_fias_id' => $this->safe_text( $data['street_fias_id'] ?? '' ),
+				'house' => $house,
+				'stead' => $stead,
+				'house_fias_id' => $this->safe_text( $data['house_fias_id'] ?? '' ),
+				'flat' => $this->safe_text( $data['flat'] ?? '' ),
+				'geo_lat' => $geo_lat,
+				'geo_lon' => $geo_lon,
+				'value_hash' => sha1( $this->safe_text( $item['unrestrictedValue'] ?? $item['value'] ?? $item['label'] ?? '' ) ),
+				'level' => $this->safe_text( $item['level'] ?? '' ),
+				'is_deliverable' => ! empty( $item['isDeliverable'] ),
+				'cached_at' => $this->site_current_datetime()->format( 'c' ),
+			),
+			static fn( mixed $value ): bool => '' !== $value && null !== $value
+		);
+	}
+
+	/** @param array<string,mixed> $evidence */
+	private function dadata_evidence_has_deliverable_coordinate( array $evidence ): bool {
+		$has_street = '' !== trim( (string) ( $evidence['street'] ?? $evidence['street_with_type'] ?? '' ) );
+		$has_house = '' !== trim( (string) ( $evidence['house'] ?? $evidence['stead'] ?? '' ) );
+		$has_coordinate = is_numeric( $evidence['geo_lat'] ?? null ) && is_numeric( $evidence['geo_lon'] ?? null );
+
+		return $has_street && $has_house && $has_coordinate && ! empty( $evidence['is_deliverable'] );
+	}
+
+	private function normalize_address_prefix( string $prefix ): string {
+		$prefix = strtolower( trim( $prefix ) );
+		return in_array( $prefix, array( 'billing', 'shipping' ), true ) ? $prefix : '';
+	}
+
+	private function new_selection_token(): string {
+		if ( function_exists( 'wp_generate_uuid4' ) ) {
+			return wp_generate_uuid4();
+		}
+		try {
+			return bin2hex( random_bytes( 16 ) );
+		} catch ( \Throwable ) {
+			return sha1( uniqid( 'wdc_dadata_', true ) );
+		}
+	}
+
+	private function safe_text( mixed $value ): string {
+		if ( is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$value = preg_replace( '/[\x00-\x1F\x7F]+/u', ' ', (string) $value ) ?? (string) $value;
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+
+		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( strip_tags( $value ) );
 	}
 
 	private function session(): mixed {

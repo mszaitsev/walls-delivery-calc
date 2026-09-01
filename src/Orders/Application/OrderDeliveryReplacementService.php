@@ -312,6 +312,7 @@ final class OrderDeliveryReplacementService {
 			'_wdc_platform_planned_delivery_date' => (string) ( $rate['planned_delivery_date'] ?? '' ),
 			'_wdc_platform_planned_delivery_comment' => (string) ( $rate['planned_delivery_comment'] ?? $rate['delivery_comment'] ?? '' ),
 			'_wdc_platform_comments' => is_array( $rate['comments'] ?? null ) ? $rate['comments'] : array(),
+			'_wdc_platform_customer_comments' => $this->customer_comments_from_rate( $rate ),
 			'_wdc_platform_fallback_used' => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ) ? 1 : 0,
 			'_wdc_platform_requires_pickup_point' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? 1 : 0,
 			'_wdc_platform_service_key' => (string) ( $rate['service_key'] ?? '' ),
@@ -552,6 +553,7 @@ final class OrderDeliveryReplacementService {
 					'fias_id' => (string) ( $location['fias_id'] ?? $address['fias_id'] ?? '' ),
 				),
 				'pickup' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? $this->pickup_calculation_data( $rate, $pickup ) : array(),
+				'customer_comments' => $this->customer_comments_from_rate( $rate ),
 			)
 		);
 	}

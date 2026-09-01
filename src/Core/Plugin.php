@@ -129,6 +129,8 @@ use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduleFormatter;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupScheduler;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryCourierAddressMapper;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryCourierLocationResolver;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteParser;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryPackagingBuilderFactory;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteRequestBuilder;
@@ -237,6 +239,7 @@ use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
+use WallsShop\WDC\Checkout\WooCommerce\OrderDeliveryCustomerCommentsDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
@@ -510,13 +513,15 @@ final class Plugin {
 		$this->container->register( OzonDeliveryPickupImportLock::class, fn(): OzonDeliveryPickupImportLock => new OzonDeliveryPickupImportLock() );
 		$this->container->register( OzonDeliveryPickupImportService::class, fn(): OzonDeliveryPickupImportService => new OzonDeliveryPickupImportService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryPickupParser::class ), $this->container->get( OzonDeliveryPickupRepository::class ) ) );
 		$this->container->register( OzonDeliveryPickupScheduler::class, fn(): OzonDeliveryPickupScheduler => new OzonDeliveryPickupScheduler( $this->container->get( ActionScheduler::class ), $this->container->get( OzonDeliveryPickupImportService::class ), $this->container->get( OzonDeliveryPickupImportLock::class ), $this->container->get( OzonDeliverySettings::class ) ) );
-		$this->container->register( OzonDeliveryQuoteRequestBuilder::class, fn(): OzonDeliveryQuoteRequestBuilder => new OzonDeliveryQuoteRequestBuilder( $this->container->get( OzonDeliverySettings::class ), $this->container->get( RussianPhoneNormalizer::class ) ) );
+		$this->container->register( OzonDeliveryCourierAddressMapper::class, fn(): OzonDeliveryCourierAddressMapper => new OzonDeliveryCourierAddressMapper() );
+		$this->container->register( OzonDeliveryCourierLocationResolver::class, fn(): OzonDeliveryCourierLocationResolver => new OzonDeliveryCourierLocationResolver( $this->container->get( LocationRepository::class ), $this->container->get( OzonDeliveryPickupRepository::class ) ) );
+		$this->container->register( OzonDeliveryQuoteRequestBuilder::class, fn(): OzonDeliveryQuoteRequestBuilder => new OzonDeliveryQuoteRequestBuilder( $this->container->get( OzonDeliverySettings::class ), $this->container->get( RussianPhoneNormalizer::class ), $this->container->get( OzonDeliveryCourierAddressMapper::class ), $this->container->get( OzonDeliveryCourierLocationResolver::class ) ) );
 		$this->container->register( OzonDeliveryQuoteParser::class, fn(): OzonDeliveryQuoteParser => new OzonDeliveryQuoteParser( $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
 		$this->container->register( OzonDeliveryPackagingBuilderFactory::class, fn(): OzonDeliveryPackagingBuilderFactory => new OzonDeliveryPackagingBuilderFactory( $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( OzonDeliveryQuoteService::class, fn(): OzonDeliveryQuoteService => new OzonDeliveryQuoteService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryQuoteRequestBuilder::class ), $this->container->get( OzonDeliveryQuoteParser::class ), $this->container->get( OzonDeliveryPackagingBuilderFactory::class )->create(), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
 		$this->container->register( OzonDeliveryQuoteDiagnosticService::class, fn(): OzonDeliveryQuoteDiagnosticService => new OzonDeliveryQuoteDiagnosticService( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( RussianPhoneNormalizer::class ) ) );
 		$this->container->register( OzonDeliveryCustomerCommentProvider::class, fn(): OzonDeliveryCustomerCommentProvider => new OzonDeliveryCustomerCommentProvider() );
-		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( OzonDeliveryCustomerCommentProvider::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( OzonDeliveryCustomerCommentProvider::class ), $this->container->get( Logger::class ), $this->container->get( OzonDeliveryCourierAddressMapper::class ), $this->container->get( OzonDeliveryCourierLocationResolver::class ) ) );
 		$this->container->register( OzonDeliveryShipmentDescriptionBuilder::class, fn(): OzonDeliveryShipmentDescriptionBuilder => new OzonDeliveryShipmentDescriptionBuilder() );
 		$this->container->register( OzonDeliveryShipmentExternalIdResolver::class, fn(): OzonDeliveryShipmentExternalIdResolver => new OzonDeliveryShipmentExternalIdResolver() );
 		$this->container->register( OzonDeliveryShipmentAllocationValueResolver::class, fn(): OzonDeliveryShipmentAllocationValueResolver => new OzonDeliveryShipmentAllocationValueResolver() );
@@ -814,7 +819,7 @@ final class Plugin {
 		$this->container->register( RussianPostCourierCalcPostcodeFillStateService::class, fn(): RussianPostCourierCalcPostcodeFillStateService => new RussianPostCourierCalcPostcodeFillStateService( $this->container->get( LocationRepository::class ), $this->container->get( RussianPostCourierTariffProbeService::class ), null, null, null, $this->container->get( Logger::class ) ) );
 		$this->container->register( AddressSuggestionClientInterface::class, fn(): AddressSuggestionClientInterface => $this->container->get( DaDataSuggestionClient::class ) );
 		$this->container->register( AddressSuggestionService::class, fn(): AddressSuggestionService => new AddressSuggestionService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionNormalizer::class ) ) );
-		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ), $this->container->get( DaDataTokenPool::class ) ) );
+		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( PickupAddressSearchService::class, fn(): PickupAddressSearchService => new PickupAddressSearchService( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( PickupPointsRestController::class, fn(): PickupPointsRestController => new PickupPointsRestController( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->container->get( PickupAddressSearchService::class ), $this->container->get( CdekDeliveryPointService::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( YandexLocationMappingV2Repository::class ), $this->container->get( YandexDeliveryCheckoutPickupPointFormatter::class ), $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( CheckoutPickupPointProviderQueryResolver::class ), $this->container->get( PekCheckoutPickupPointFormatter::class ), $this->container->get( WooCommerceSessionBootstrapper::class ) ) );
 		$this->container->register( LocationCoordinateEnricher::class, fn(): LocationCoordinateEnricher => new LocationCoordinateEnricher( $this->container->get( LocationRepository::class ), $this->container->get( AddressSuggestionClientInterface::class ) ) );
@@ -878,6 +883,7 @@ final class Plugin {
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment, $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ) ) );
 		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay( $this->container->get( PickupPointCardRenderer::class ), $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( OrderDeliveryCustomerCommentsDisplay::class, fn(): OrderDeliveryCustomerCommentsDisplay => new OrderDeliveryCustomerCommentsDisplay( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
@@ -1152,6 +1158,7 @@ final class Plugin {
 			$this->container->get( OrderShippingMetaPersister::class )->register();
 			$this->container->get( PickupMapCheckout::class )->register();
 			$this->container->get( PickupPointOrderDisplay::class )->register();
+			$this->container->get( OrderDeliveryCustomerCommentsDisplay::class )->register();
 			$this->container->get( CheckoutDebugPanel::class )->register();
 		}
 

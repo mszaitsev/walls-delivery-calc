@@ -255,6 +255,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\OrderDeliveryCustomerCommentsDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
@@ -428,6 +429,11 @@ final class WdcSmokeOrder {
 
 	public function update_meta_data( string $key, mixed $value ): void {
 		$this->meta[ $key ] = $value;
+	}
+
+	public function get_meta( string $key, bool $single = true ): mixed {
+		unset( $single );
+		return $this->meta[ $key ] ?? '';
 	}
 
 	public function set_shipping_country( string $value ): void { $this->shipping_country = $value; }
@@ -1435,6 +1441,47 @@ $order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $order );
 wc_checkout_smoke_assert( 'demo:courier' === ( $order->meta['_wdc_platform_rate_id'] ?? '' ), 'Persister must save selected courier from full WooCommerce rate id.' );
 wc_checkout_smoke_assert( 'courier' === ( $order->meta['_wdc_platform_delivery_type'] ?? '' ), 'Persister must not fall back to first pickup rate.' );
+
+$ozon_tracking_comment = 'Отслеживание посылки - в приложении Ozon, раздел Доставка';
+$ozon_refusal_comment = 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.';
+$session->save_rates(
+	array(
+		'ozon_delivery:courier' => array(
+			'rate_id' => 'ozon_delivery:courier',
+			'carrier_key' => 'ozon_delivery',
+			'service_key' => 'ozon_delivery',
+			'service_title' => 'Ozon Доставка',
+			'label' => 'Ozon курьером',
+			'delivery_type' => 'courier',
+			'planned_delivery_date' => '2026-08-12',
+			'planned_delivery_comment' => '5 дней',
+			'cost' => 99.0,
+			'crossed_price' => 149.0,
+			'comments' => array( $ozon_tracking_comment, $ozon_refusal_comment ),
+			'customer_comments' => array( $ozon_tracking_comment, $ozon_refusal_comment ),
+			'rate_meta' => array(
+				'customer_comments' => array( 'forged browser value 999999 руб.' ),
+				'api_base_price_rub' => 149.0,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:ozon_delivery:courier' ) );
+$ozon_courier_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $ozon_courier_order );
+wc_checkout_smoke_assert( array( $ozon_tracking_comment, $ozon_refusal_comment ) === ( $ozon_courier_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Ozon courier order must persist authoritative customer comments from the selected rate.' );
+wc_checkout_smoke_assert( array( $ozon_tracking_comment, $ozon_refusal_comment ) === ( $ozon_courier_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['customer_comments'] ?? null ), 'Ozon courier calculation data must freeze the selected-rate customer comments.' );
+wc_checkout_smoke_assert( ! isset( $ozon_courier_order->meta['_wdc_pickup_point_snapshot'] ), 'Ozon courier comments must not be stored through pickup point snapshot.' );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay() )->render( $ozon_courier_order );
+$ozon_courier_comments_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $ozon_courier_comments_html, $ozon_tracking_comment ) && str_contains( $ozon_courier_comments_html, $ozon_refusal_comment ) && ! str_contains( $ozon_courier_comments_html, '999999' ), 'Generic order delivery comments display must render frozen courier comments and ignore forged browser/rate_meta comments.' );
+$email_settings = new SettingsRepository();
+$email_settings->set( 'pickup_email_card_enabled_emails', array( 'customer_processing_order' ) );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay( $email_settings ) )->render_email( $ozon_courier_order, false, false, (object) array( 'id' => 'customer_processing_order' ) );
+$ozon_courier_email_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $ozon_courier_email_html, $ozon_tracking_comment ) && str_contains( $ozon_courier_email_html, $ozon_refusal_comment ) && ! str_contains( $ozon_courier_email_html, '999999' ), 'Generic email delivery comments display must render frozen Ozon courier comments through the existing email setting.' );
 
 $session->save_rates(
 	array(

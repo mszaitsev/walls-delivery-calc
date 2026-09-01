@@ -62,6 +62,34 @@ final class OzonDeliveryQuoteService {
 		}
 	}
 
+	public function quote_courier( QuoteRequest $request ): OzonDeliveryQuoteResult {
+		try {
+			$packaging = $this->packaging->build( $request );
+		} catch ( PackagingException $exception ) {
+			throw new OzonDeliveryQuoteException( 'ozon_package_item_oversize', 'order_checkout', 0, 'Товары не помещаются в допустимое грузоместо Ozon.' );
+		}
+		$built = $this->builder->build_courier( $request, $packaging );
+		$request_details = $this->courier_request_details( $built['diagnostics'] );
+		try {
+			$data = $this->api->order_checkout( $built['body'] );
+			$result = $this->parser->parse( $data, $built['request_ids'], '', (int) $built['diagnostics']['shipment_method_id'] );
+			return new OzonDeliveryQuoteResult(
+				$result->price,
+				$result->delivery_days,
+				$result->destination_point_id,
+				$result->package_count,
+				$result->shipment_method_id,
+				$result->endpoint,
+				$result->http_status,
+				array_merge( $result->meta, $built['diagnostics'], $packaging->to_array(), array( 'ozon_delivery_places' => $this->cargo_places( $packaging->to_array() ) ) )
+			);
+		} catch ( OzonDeliveryQuoteException $exception ) {
+			throw new OzonDeliveryQuoteException( $exception->safe_code, $exception->operation, $exception->http_status, $exception->getMessage(), array_merge( $request_details, $exception->details ) );
+		} catch ( OzonDeliveryApiException $exception ) {
+			throw new OzonDeliveryQuoteException( $exception->safe_code ?: 'ozon_api_error', $exception->operation, $exception->http_status, $this->sanitizer->sanitize( $exception->getMessage(), 'Ozon Delivery не рассчитал доставку.' ), array_merge( $request_details, $exception->metadata ) );
+		}
+	}
+
 	/** @param array<string,mixed> $packaging */
 	public function pickup_query( QuoteRequest $request, array $packaging ): CarrierPickupPointQuery {
 		$lat = $this->number_context( $request, array( 'destination_latitude', 'selected_location_latitude', 'latitude', 'lat' ), -90, 90 );
@@ -154,6 +182,24 @@ final class OzonDeliveryQuoteService {
 			'places_truncated' => count( $query->cargo->places ) > count( $places ),
 			'pickup_diagnostics' => $this->pickup_provider->last_search_diagnostics(),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $diagnostics
+	 * @return array<string,mixed>
+	 */
+	private function courier_request_details( array $diagnostics ): array {
+		$details = array();
+		foreach ( array( 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'courier_proxy_point_id', 'courier_proxy_distance_m', 'shipment_method_id', 'postings_count' ) as $key ) {
+			if ( array_key_exists( $key, $diagnostics ) && is_scalar( $diagnostics[ $key ] ) ) {
+				$details[ $key ] = $diagnostics[ $key ];
+			}
+		}
+		if ( isset( $diagnostics['request_postings'] ) && is_array( $diagnostics['request_postings'] ) ) {
+			$details['postings'] = $diagnostics['request_postings'];
+		}
+
+		return $details;
 	}
 
 	/** @return array<string,mixed> */

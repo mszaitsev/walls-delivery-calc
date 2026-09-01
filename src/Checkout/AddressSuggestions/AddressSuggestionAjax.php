@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\AddressSuggestions;
 
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+
 defined( 'ABSPATH' ) || exit;
 
 final class AddressSuggestionAjax {
@@ -12,7 +14,8 @@ final class AddressSuggestionAjax {
 
 	public function __construct(
 		private AddressSuggestionService $service,
-		private ?DaDataTokenPool $token_pool = null
+		private ?DaDataTokenPool $token_pool = null,
+		private ?CheckoutSessionManager $session_manager = null
 	) {
 	}
 
@@ -28,6 +31,9 @@ final class AddressSuggestionAjax {
 		$query = $this->field( 'query' );
 		$context = $this->context();
 		$payload = $this->service->suggest( $stage, $query, $context );
+		if ( ! empty( $payload['success'] ) && is_array( $payload['items'] ?? null ) && $this->session_manager instanceof CheckoutSessionManager ) {
+			$payload['items'] = $this->session_manager->cache_dadata_address_suggestions( $this->field( 'prefix' ), $context, $payload['items'] );
+		}
 
 		if ( function_exists( 'wp_send_json' ) ) {
 			wp_send_json( $payload );
@@ -42,16 +48,21 @@ final class AddressSuggestionAjax {
 		$usage_type = $this->selection_usage_type();
 		$stage = 'final_selection' === $usage_type ? 'final_selection' : 'selection';
 		$counted = false;
+		$trusted = false;
 		if ( '' !== $token_id && $this->token_pool instanceof DaDataTokenPool ) {
 			$this->token_pool->increment_usage( $token_id );
 			$this->token_pool->record_request_attempt( $token_id, $stage, $this->field( 'level' ), false, true, 'selection', $usage_type );
 			$counted = true;
+		}
+		if ( 'final_selection' === $usage_type && $this->session_manager instanceof CheckoutSessionManager ) {
+			$trusted = $this->session_manager->confirm_dadata_address_evidence( $this->field( 'selection_token' ), $this->field( 'prefix' ) );
 		}
 
 		$payload = array(
 			'success' => true,
 			'counted' => $counted,
 			'usage_type' => $usage_type,
+			'trusted' => $trusted,
 		);
 
 		if ( function_exists( 'wp_send_json' ) ) {
@@ -88,7 +99,7 @@ final class AddressSuggestionAjax {
 		}
 
 		$context = array();
-		foreach ( array( 'city_kladr_id', 'city_fias_id', 'settlement_kladr_id', 'settlement_fias_id', 'street_fias_id', 'house_fias_id', 'house_kladr_id', 'selected_level', 'desired_level', 'selected_display_name', 'city' ) as $key ) {
+		foreach ( array( 'city_kladr_id', 'city_fias_id', 'settlement_kladr_id', 'settlement_fias_id', 'street_fias_id', 'house_fias_id', 'house_kladr_id', 'selected_level', 'desired_level', 'selected_display_name', 'city', 'selected_location_id', 'selected_location_fias_id' ) as $key ) {
 			$value = $raw[ $key ] ?? '';
 			$value = is_array( $value ) ? '' : (string) $value;
 			$context[ $key ] = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( strip_tags( $value ) );
