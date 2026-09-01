@@ -208,6 +208,32 @@ $ozon_context = $ozon->modal_context( $order, $ozon_draft );
 modal_ext_assert( true === (bool) ( $ozon_context['point_found'] ?? false ) && 10000 === (int) ( $ozon_context['max_weight_g'] ?? 0 ) && 500 === (int) ( $ozon_context['max_length_mm'] ?? 0 ) && 300 === (int) ( $ozon_context['max_height_mm'] ?? 0 ), 'Ozon modal context must expose selected pickup point limits.' );
 $ozon_pickup_html = modal_ext_render( static fn() => $ozon->render_pickup_fields( $order, $ozon_draft, $ozon_context ) );
 modal_ext_assert( str_contains( $ozon_pickup_html, 'Ограничения выбранного ПВЗ Ozon' ) && str_contains( $ozon_pickup_html, 'data-wdc-ozon-place-limits' ) && str_contains( $ozon_pickup_html, 'data-max-weight-g="10000"' ) && str_contains( $ozon_pickup_html, 'data-max-length-mm="500"' ) && str_contains( $ozon_pickup_html, 'data-max-height-mm="300"' ) && str_contains( $ozon_pickup_html, 'data-wdc-ozon-place-limit-warning' ), 'Ozon pickup fields must render selected point limits and dynamic warning host.' );
+$ozon_courier_draft = $base_draft;
+$ozon_courier_draft['request']['delivery_type'] = 'courier';
+$ozon_courier_draft['request']['rate_id'] = 'ozon_delivery:courier';
+$ozon_courier_draft['request']['pickup_point'] = null;
+$ozon_courier_draft['request']['meta'] = array(
+	'delivery_type' => 'courier',
+	'courier_original_address' => '630099, Новосибирск, улица Ленина, 10',
+	'courier_address_source' => 'trusted_order_snapshot',
+	'normalization_valid' => true,
+	'courier_address_snapshot' => array(
+		'postcode' => '630099',
+		'region' => 'Новосибирская область',
+		'city' => 'г Новосибирск',
+		'street' => 'улица Ленина',
+		'house' => '10',
+		'flat' => '12',
+		'geo_lat' => '55.0415',
+		'geo_lon' => '82.9346',
+		'normalized_address' => '630099, Новосибирская область, г Новосибирск, улица Ленина, 10',
+	),
+);
+$ozon_courier_context = $ozon->modal_context( $order, $ozon_courier_draft );
+$ozon_courier_html = modal_ext_render( static fn() => $ozon->render_courier_fields( $order, $ozon_courier_draft, $ozon_courier_context ) );
+modal_ext_assert( 'courier' === (string) ( $ozon_courier_context['delivery_type'] ?? '' ) && ! empty( $ozon_courier_context['normalization_valid'] ), 'Ozon courier modal context must expose validated structured recipient address state.' );
+modal_ext_assert( str_contains( $ozon_courier_html, 'data-wdc-normalize-address' ) && str_contains( $ozon_courier_html, 'name="courier_original_address"' ) && str_contains( $ozon_courier_html, 'data-wdc-normalized-address-json' ) && str_contains( $ozon_courier_html, 'data-wdc-ozon-courier-field="postcode"' ) && str_contains( $ozon_courier_html, 'name="ozon_courier_apartment"' ), 'Ozon courier fields must reuse generic server-side address normalization and render manager-editable supported courier details.' );
+modal_ext_assert( ! str_contains( $ozon_courier_html, 'name="geo_lat"' ) && ! str_contains( $ozon_courier_html, 'name="geo_lon"' ) && ! str_contains( $ozon_courier_html, 'name="fias_id"' ), 'Ozon courier modal must not expose coordinates/FIAS as browser-authoritative form fields.' );
 
 $root = dirname( __DIR__, 2 );
 $metabox_source = (string) file_get_contents( $root . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );

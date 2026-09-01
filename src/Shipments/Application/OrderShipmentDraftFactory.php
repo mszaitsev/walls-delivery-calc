@@ -45,7 +45,8 @@ final class OrderShipmentDraftFactory {
 		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
 		private ?PekSettings $pek_settings = null,
 		private ?PekShipmentCourierAddressResolver $pek_courier_addresses = null,
-		private ?OzonDeliverySettings $ozon_settings = null
+		private ?OzonDeliverySettings $ozon_settings = null,
+		private ?OrderStructuredAddressReader $structured_addresses = null
 	) {
 	}
 
@@ -178,14 +179,15 @@ final class OrderShipmentDraftFactory {
 			);
 		}
 		if ( OzonDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
+			$delivery_type = $request->delivery_type;
 			return array(
 				'request' => $request->to_array(),
 				'services' => array(
 					array(
 						'service_key' => OzonDeliverySettings::SERVICE_KEY,
-						'group_id' => OzonDeliverySettings::PICKUP_FAMILY,
-						'title' => OzonDeliverySettings::TITLE,
-						'delivery_type' => DeliveryType::PICKUP,
+						'group_id' => $request->rate_id,
+						'title' => DeliveryType::COURIER === $delivery_type ? 'Ozon курьером' : OzonDeliverySettings::TITLE,
+						'delivery_type' => $delivery_type,
 						'tariffs' => array(),
 					),
 				),
@@ -852,6 +854,7 @@ final class OrderShipmentDraftFactory {
 		$items = $this->order_items( $order );
 		$weight = $this->default_weight_g( $order, $items );
 		$place = new ShipmentPlace( 1, $weight, 20, 15, 10, Money::from_kopecks( 0 ), $items );
+		$delivery_type = $this->ozon_delivery_type_from_order( $order );
 		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
 		$provider_query = is_array( $rate_meta['pickup_provider_query'] ?? null ) ? $rate_meta['pickup_provider_query'] : array();
 		$point_code = $this->first_non_empty(
@@ -868,14 +871,21 @@ final class OrderShipmentDraftFactory {
 			$rate_meta['point_address'] ?? '',
 			$this->meta_string( $order, '_wdc_pickup_point_address' )
 		);
+		$structured = DeliveryType::COURIER === $delivery_type ? $this->structured_address_reader()->trusted_snapshot( $order ) : null;
+		$legacy_address = DeliveryType::COURIER === $delivery_type ? $this->structured_address_reader()->legacy_recipient_address( $order ) : null;
+		$recipient_address = DeliveryType::COURIER === $delivery_type
+			? ( $structured instanceof OrderStructuredAddress ? $structured->to_address() : ( $legacy_address instanceof Address ? $legacy_address : new Address( country_code: 'RU' ) ) )
+			: $this->recipient_address( $order, DeliveryType::PICKUP, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) );
+		$courier_address_snapshot = $structured instanceof OrderStructuredAddress ? $structured->to_array() : array();
+		$courier_legacy_address = DeliveryType::COURIER === $delivery_type && $legacy_address instanceof Address ? $legacy_address->to_array() : array();
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
 			carrier_key: OzonDeliverySettings::CARRIER_KEY,
-			delivery_type: DeliveryType::PICKUP,
-			rate_id: OzonDeliverySettings::PICKUP_FAMILY,
-			recipient_address: $this->recipient_address( $order, DeliveryType::PICKUP, array( 'point_code' => $point_code, 'address' => $address, 'country_code' => 'RU' ) ),
-			pickup_point: '' !== $point_code ? new PickupPointSelection( OzonDeliverySettings::CARRIER_KEY, OzonDeliverySettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
+			delivery_type: $delivery_type,
+			rate_id: $this->ozon_rate_id( $delivery_type ),
+			recipient_address: $recipient_address,
+			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $point_code ? new PickupPointSelection( OzonDeliverySettings::CARRIER_KEY, OzonDeliverySettings::SERVICE_KEY, $point_code, $address, $this->now() ) : null,
 			places: array( $place ),
 			declared_value: Money::from_kopecks( 0 ),
 			insurance_enabled: true,
@@ -888,14 +898,21 @@ final class OrderShipmentDraftFactory {
 			meta: array(
 				'carrier_key' => OzonDeliverySettings::CARRIER_KEY,
 				'service_key' => OzonDeliverySettings::SERVICE_KEY,
-				'delivery_type' => DeliveryType::PICKUP,
-				'service_title' => OzonDeliverySettings::TITLE,
+				'delivery_type' => $delivery_type,
+				'service_title' => DeliveryType::COURIER === $delivery_type ? 'Ozon курьером' : OzonDeliverySettings::TITLE,
 				'order_num' => $this->order_number( $order ),
 				'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
-				'pickup_point_code' => $point_code,
-				'pickup_point_address' => $address,
-				'pickup_point_found' => '' !== $point_code,
-				'pickup_provider_query' => $provider_query,
+				'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $point_code : '',
+				'pickup_point_address' => DeliveryType::PICKUP === $delivery_type ? $address : '',
+				'pickup_point_found' => DeliveryType::COURIER === $delivery_type || '' !== $point_code,
+				'pickup_provider_query' => DeliveryType::PICKUP === $delivery_type ? $provider_query : array(),
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->structured_address_reader()->legacy_recipient_address_line( $order ) : '',
+				'courier_address_snapshot' => $courier_address_snapshot,
+				'courier_address_source' => array() !== $courier_address_snapshot ? 'trusted_order_snapshot' : 'legacy_woo_order_address',
+				'courier_legacy_address' => $courier_legacy_address,
+				'normalization_required' => DeliveryType::COURIER === $delivery_type,
+				'normalization_valid' => DeliveryType::COURIER === $delivery_type && array() !== $courier_address_snapshot,
+				'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $courier_address_snapshot,
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
 				'shipment_item_rows' => $this->shipment_item_rows_from_order( $order, $items ),
@@ -906,18 +923,26 @@ final class OrderShipmentDraftFactory {
 
 	private function create_ozon_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
 		$posted_delivery_type = sanitize_key( wp_unslash( $data['delivery_type'] ?? '' ) );
-		if ( '' !== $posted_delivery_type && DeliveryType::PICKUP !== $posted_delivery_type ) {
-			throw new \RuntimeException( 'Ozon Delivery поддерживает создание только в выбранный ПВЗ.' );
+		if ( '' !== $posted_delivery_type && $posted_delivery_type !== $base->delivery_type ) {
+			throw new \RuntimeException( 'Сценарий доставки Ozon изменился. Обновите страницу заказа.' );
 		}
 		$prepared = $this->shipment_modal_mapper()->parse( $data );
+		$delivery_type = $base->delivery_type;
+		$courier_original_address = DeliveryType::COURIER === $delivery_type
+			? sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? '' ) )
+			: '';
+		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->ozon_courier_normalized_address_from_admin_data( $data, $base ) : array();
+		$recipient_address = DeliveryType::COURIER === $delivery_type
+			? $this->ozon_courier_address_from_normalized( $base->recipient_address, $normalized_address )
+			: $base->recipient_address;
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
 			OzonDeliverySettings::CARRIER_KEY,
-			DeliveryType::PICKUP,
-			OzonDeliverySettings::PICKUP_FAMILY,
-			$base->recipient_address,
-			$base->pickup_point,
+			$delivery_type,
+			$this->ozon_rate_id( $delivery_type ),
+			$recipient_address,
+			DeliveryType::PICKUP === $delivery_type ? $base->pickup_point : null,
 			$prepared->places,
 			Money::from_kopecks( 0 ),
 			true,
@@ -927,12 +952,155 @@ final class OrderShipmentDraftFactory {
 				$base->meta,
 				array(
 					'service_key' => OzonDeliverySettings::SERVICE_KEY,
-					'delivery_type' => DeliveryType::PICKUP,
+					'delivery_type' => $delivery_type,
 					'shipment_item_rows' => $prepared->item_rows,
 					'ozon_shipment_source' => 'shipment_modal_actual_places',
+					'normalized_address' => $normalized_address,
+					'normalization_required' => DeliveryType::COURIER === $delivery_type,
+					'normalization_valid' => DeliveryType::COURIER === $delivery_type && $this->ozon_normalized_address_valid( $normalized_address, $courier_original_address ),
+					'normalization_attempted' => DeliveryType::COURIER === $delivery_type,
+					'courier_address_snapshot' => DeliveryType::COURIER === $delivery_type && ! empty( $normalized_address['success'] ) && is_array( $normalized_address['fields'] ?? null ) ? $this->ozon_courier_snapshot_from_normalized( $normalized_address, $base ) : array(),
+					'courier_original_address' => $courier_original_address,
+					'courier_original_hash' => DeliveryType::COURIER === $delivery_type ? $this->original_address_hash( $courier_original_address ) : '',
+					'ozon_courier_apartment' => sanitize_text_field( wp_unslash( $data['ozon_courier_apartment'] ?? '' ) ),
+					'ozon_courier_entrance' => sanitize_text_field( wp_unslash( $data['ozon_courier_entrance'] ?? '' ) ),
+					'ozon_courier_floor' => sanitize_text_field( wp_unslash( $data['ozon_courier_floor'] ?? '' ) ),
+					'ozon_courier_intercom' => sanitize_text_field( wp_unslash( $data['ozon_courier_intercom'] ?? '' ) ),
 				)
 			)
 		);
+	}
+
+	private function ozon_delivery_type_from_order( object $order ): string {
+		$rate_id = strtolower( $this->meta_string( $order, '_wdc_platform_rate_id' ) );
+		$delivery_type = strtolower( $this->meta_string( $order, '_wdc_platform_delivery_type' ) );
+		if ( DeliveryType::COURIER === $delivery_type || str_contains( $rate_id, 'courier' ) ) {
+			return DeliveryType::COURIER;
+		}
+
+		return DeliveryType::PICKUP;
+	}
+
+	private function ozon_rate_id( string $delivery_type ): string {
+		return DeliveryType::COURIER === $delivery_type ? OzonDeliverySettings::SERVICE_KEY . ':courier' : OzonDeliverySettings::PICKUP_FAMILY;
+	}
+
+	/** @return array<string,mixed> */
+	private function ozon_courier_normalized_address_from_admin_data( array $data, ShipmentCreateRequest $base ): array {
+		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? '' ) );
+		$snapshot = $this->normalized_address_from_admin_data( $data, $original_address, OzonDeliverySettings::SERVICE_KEY );
+		if ( $this->ozon_normalized_address_valid( $snapshot, $original_address ) ) {
+			return $snapshot;
+		}
+		$base_snapshot = is_array( $base->meta['courier_address_snapshot'] ?? null ) ? $base->meta['courier_address_snapshot'] : array();
+		if ( array() !== $base_snapshot && $this->original_address_hash( $original_address ) === $this->original_address_hash( (string) ( $base->meta['courier_original_address'] ?? '' ) ) ) {
+			return array(
+				'success' => true,
+				'message' => 'Адрес Ozon подтвержден из заказа.',
+				'source' => 'trusted_order_snapshot',
+				'fields' => $base_snapshot,
+				'display' => (string) ( $base_snapshot['normalized_address'] ?? $original_address ),
+				'original_hash' => $this->original_address_hash( $original_address ),
+				'service_key' => OzonDeliverySettings::SERVICE_KEY,
+			);
+		}
+
+		return $snapshot;
+	}
+
+	/** @param array<string,mixed> $normalized_address */
+	private function ozon_normalized_address_valid( array $normalized_address, string $original_address ): bool {
+		if ( empty( $normalized_address['success'] ) || (string) ( $normalized_address['service_key'] ?? '' ) !== OzonDeliverySettings::SERVICE_KEY ) {
+			return false;
+		}
+		if ( (string) ( $normalized_address['original_hash'] ?? '' ) !== $this->original_address_hash( $original_address ) ) {
+			return false;
+		}
+		$fields = is_array( $normalized_address['fields'] ?? null ) ? $normalized_address['fields'] : array();
+		foreach ( array( 'postcode', 'region', 'city', 'street', 'geo_lat', 'geo_lon' ) as $field ) {
+			if ( '' === trim( (string) ( $fields[ $field ] ?? '' ) ) ) {
+				return false;
+			}
+		}
+		if ( '' === trim( (string) ( $fields['house'] ?? $fields['stead'] ?? '' ) ) ) {
+			return false;
+		}
+
+		return $this->coordinate_pair_valid( $fields['geo_lat'] ?? null, $fields['geo_lon'] ?? null );
+	}
+
+	/** @param array<string,mixed> $normalized_address */
+	private function ozon_courier_address_from_normalized( Address $base, array $normalized_address ): Address {
+		$fields = is_array( $normalized_address['fields'] ?? null ) ? $normalized_address['fields'] : array();
+		if ( empty( $normalized_address['success'] ) || array() === $fields ) {
+			return $base;
+		}
+
+		return new Address(
+			country_code: 'RU',
+			country_name: 'Россия',
+			region_name: sanitize_text_field( wp_unslash( $fields['region'] ?? $base->region_name ) ),
+			city: sanitize_text_field( wp_unslash( $fields['city'] ?? $base->city ) ),
+			postcode: preg_replace( '/\D+/', '', (string) wp_unslash( $fields['postcode'] ?? $base->postcode ) ) ?: '',
+			street: sanitize_text_field( wp_unslash( $fields['street'] ?? $base->street ) ),
+			house: sanitize_text_field( wp_unslash( $fields['house'] ?? $fields['stead'] ?? $base->house ) ),
+			apartment: sanitize_text_field( wp_unslash( $fields['flat'] ?? $base->apartment ) ),
+			raw_address: sanitize_text_field( wp_unslash( $normalized_address['display'] ?? $fields['normalized_address'] ?? $base->raw_address ) ),
+			fias_id: sanitize_text_field( wp_unslash( $fields['house_fias_id'] ?? $fields['street_fias_id'] ?? $base->fias_id ) ),
+			normalized: ! empty( $normalized_address['success'] )
+		);
+	}
+
+	/** @param array<string,mixed> $normalized_address @return array<string,mixed> */
+	private function ozon_courier_snapshot_from_normalized( array $normalized_address, ShipmentCreateRequest $base ): array {
+		$fields = is_array( $normalized_address['fields'] ?? null ) ? $normalized_address['fields'] : array();
+		$snapshot = array(
+			'schema_version' => OrderStructuredAddress::SCHEMA_VERSION,
+			'source' => (string) ( $normalized_address['source'] ?? 'dadata+ozon_delivery' ),
+			'address_role' => (string) ( $base->meta['courier_address_snapshot']['address_role'] ?? $base->meta['courier_legacy_address_role'] ?? '' ),
+			'selected_location_id' => (string) ( $fields['selected_location_id'] ?? $base->meta['courier_address_snapshot']['selected_location_id'] ?? $base->meta['calculation_data']['destination']['location_id'] ?? '' ),
+			'selected_location_fias_id' => (string) ( $fields['selected_location_fias_id'] ?? $base->meta['courier_address_snapshot']['selected_location_fias_id'] ?? '' ),
+			'region_fias_id' => (string) ( $fields['region_fias_id'] ?? '' ),
+			'city_fias_id' => (string) ( $fields['city_fias_id'] ?? '' ),
+			'settlement_fias_id' => (string) ( $fields['settlement_fias_id'] ?? '' ),
+			'street' => (string) ( $fields['street'] ?? '' ),
+			'street_with_type' => (string) ( $fields['street_with_type'] ?? $fields['street'] ?? '' ),
+			'street_fias_id' => (string) ( $fields['street_fias_id'] ?? '' ),
+			'house' => (string) ( $fields['house'] ?? '' ),
+			'stead' => (string) ( $fields['stead'] ?? '' ),
+			'house_fias_id' => (string) ( $fields['house_fias_id'] ?? '' ),
+			'flat' => (string) ( $fields['flat'] ?? '' ),
+			'postcode' => (string) ( $fields['postcode'] ?? '' ),
+			'country' => (string) ( $fields['country'] ?? 'Россия' ),
+			'country_code' => (string) ( $fields['country_code'] ?? 'RU' ),
+			'region' => (string) ( $fields['region'] ?? '' ),
+			'city' => (string) ( $fields['city'] ?? '' ),
+			'geo_lat' => (string) ( $fields['geo_lat'] ?? '' ),
+			'geo_lon' => (string) ( $fields['geo_lon'] ?? '' ),
+			'normalized_address' => (string) ( $fields['normalized_address'] ?? $normalized_address['display'] ?? '' ),
+			'confirmed_at' => $this->now(),
+		);
+
+		$address = OrderStructuredAddress::from_array( $snapshot );
+		return $address instanceof OrderStructuredAddress ? $address->to_array() : array();
+	}
+
+	private function coordinate_pair_valid( mixed $lat, mixed $lon ): bool {
+		if ( ! is_numeric( $lat ) || ! is_numeric( $lon ) ) {
+			return false;
+		}
+		$lat = (float) $lat;
+		$lon = (float) $lon;
+
+		return $lat >= -90 && $lat <= 90 && $lon >= -180 && $lon <= 180 && ! ( 0.0 === $lat && 0.0 === $lon );
+	}
+
+	private function structured_address_reader(): OrderStructuredAddressReader {
+		if ( ! $this->structured_addresses instanceof OrderStructuredAddressReader ) {
+			$this->structured_addresses = new OrderStructuredAddressReader();
+		}
+
+		return $this->structured_addresses;
 	}
 
 	private function pek_warehouse_uuid( string $value ): string {

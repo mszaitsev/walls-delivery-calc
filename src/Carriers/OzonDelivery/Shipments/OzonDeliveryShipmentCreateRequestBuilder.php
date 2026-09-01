@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Shipments;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 
@@ -33,13 +34,17 @@ final class OzonDeliveryShipmentCreateRequestBuilder {
 		if ( OzonDeliverySettings::CARRIER_KEY !== $request->carrier_key ) {
 			$errors[] = 'Для отправления выбран не Ozon Delivery.';
 		}
-		$method_id = $this->settings->shipment_method_id();
+		$method_id = DeliveryType::COURIER === $request->delivery_type ? $this->settings->courier_shipment_method_id() : $this->settings->pickup_shipment_method_id();
 		if ( $method_id <= 0 ) {
 			$errors[] = 'Не указан shipment_method_id Ozon.';
 		}
-		$point_id = $this->point_id( $request );
-		if ( $point_id <= 0 ) {
+		$point_id = DeliveryType::PICKUP === $request->delivery_type ? $this->point_id( $request ) : 0;
+		if ( DeliveryType::PICKUP === $request->delivery_type && $point_id <= 0 ) {
 			$errors[] = 'Не выбран ПВЗ Ozon для отправления.';
+		}
+		$courier_delivery = DeliveryType::COURIER === $request->delivery_type ? $this->courier_delivery( $request ) : array();
+		if ( DeliveryType::COURIER === $request->delivery_type && array() === $courier_delivery ) {
+			$errors[] = 'Проверьте и подтвердите адрес курьерской доставки Ozon.';
 		}
 		$phone = $this->phones->normalize( $request->recipient['phone'] ?? '' );
 		if ( '' === $phone ) {
@@ -93,11 +98,13 @@ final class OzonDeliveryShipmentCreateRequestBuilder {
 				'phone_number' => $phone,
 				'full_name' => $name,
 			),
-			'delivery' => array(
-				'delivery_point' => array(
-					'delivery_point_id' => $point_id,
+			'delivery' => DeliveryType::COURIER === $request->delivery_type
+				? array( 'courier' => $courier_delivery )
+				: array(
+					'delivery_point' => array(
+						'delivery_point_id' => $point_id,
+					),
 				),
-			),
 			'postings' => $postings,
 		);
 
@@ -105,8 +112,11 @@ final class OzonDeliveryShipmentCreateRequestBuilder {
 			'body' => array() === $errors ? $body : array(),
 			'summary' => array(
 				'order_external_id' => $body['order_external_id'],
+				'delivery_type' => $request->delivery_type,
 				'delivery_point_id' => $point_id,
 				'shipment_method_id' => $method_id,
+				'courier_address_source' => (string) ( $request->meta['courier_address_source'] ?? $request->meta['courier_address_snapshot']['source'] ?? '' ),
+				'courier_coordinates_present' => DeliveryType::COURIER === $request->delivery_type && isset( $courier_delivery['coordinates'] ),
 				'places_count' => count( $postings ),
 				'postings_count' => count( $postings ),
 				'places' => $places_summary,
@@ -122,6 +132,72 @@ final class OzonDeliveryShipmentCreateRequestBuilder {
 		$digits = preg_replace( '/\D+/', '', $code ) ?? '';
 
 		return '' !== $digits ? (int) $digits : 0;
+	}
+
+	/** @return array<string,mixed> */
+	private function courier_delivery( ShipmentCreateRequest $request ): array {
+		$snapshot = is_array( $request->meta['courier_address_snapshot'] ?? null ) ? $request->meta['courier_address_snapshot'] : array();
+		$lat = $snapshot['geo_lat'] ?? null;
+		$lon = $snapshot['geo_lon'] ?? null;
+		if ( ! $this->coordinate_pair_valid( $lat, $lon ) ) {
+			return array();
+		}
+		$country = trim( (string) ( $snapshot['country'] ?? '' ) );
+		if ( '' === $country ) {
+			$country = trim( $request->recipient_address->country_name );
+		}
+		if ( '' === $country ) {
+			$country = 'Россия';
+		}
+		$required = array(
+			'zip_code' => preg_replace( '/\D+/', '', (string) ( $snapshot['postcode'] ?? $request->recipient_address->postcode ) ) ?: '',
+			'country' => $country,
+			'region' => (string) ( $snapshot['region'] ?? $request->recipient_address->region_name ),
+			'city' => (string) ( $snapshot['city'] ?? $request->recipient_address->city ),
+			'street' => (string) ( $snapshot['street'] ?? $request->recipient_address->street ),
+		);
+		foreach ( $required as $value ) {
+			if ( '' === trim( (string) $value ) ) {
+				return array();
+			}
+		}
+		$courier = array(
+			'coordinates' => array(
+				'latitude' => (float) $lat,
+				'longitude' => (float) $lon,
+			),
+			'zip_code' => $required['zip_code'],
+			'country' => $required['country'],
+			'region' => $required['region'],
+			'city' => $required['city'],
+			'street' => $required['street'],
+		);
+		foreach (
+			array(
+				'house_number' => (string) ( $snapshot['house'] ?? $snapshot['stead'] ?? $request->recipient_address->house ),
+				'apartment' => (string) ( $request->meta['ozon_courier_apartment'] ?? $snapshot['flat'] ?? $request->recipient_address->apartment ),
+				'entrance' => (string) ( $request->meta['ozon_courier_entrance'] ?? '' ),
+				'floor' => (string) ( $request->meta['ozon_courier_floor'] ?? '' ),
+				'intercom' => (string) ( $request->meta['ozon_courier_intercom'] ?? '' ),
+			) as $key => $value
+		) {
+			$value = trim( $value );
+			if ( '' !== $value ) {
+				$courier[ $key ] = $value;
+			}
+		}
+
+		return $courier;
+	}
+
+	private function coordinate_pair_valid( mixed $lat, mixed $lon ): bool {
+		if ( ! is_numeric( $lat ) || ! is_numeric( $lon ) ) {
+			return false;
+		}
+		$lat = (float) $lat;
+		$lon = (float) $lon;
+
+		return $lat >= -90 && $lat <= 90 && $lon >= -180 && $lon <= 180 && ! ( 0.0 === $lat && 0.0 === $lon );
 	}
 
 	private function order_number( object $order, ShipmentCreateRequest $request ): string {

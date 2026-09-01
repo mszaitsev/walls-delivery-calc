@@ -367,6 +367,7 @@ C:.
 |   |   |           OzonDeliveryShipmentAdapter.php
 |   |   |           OzonDeliveryShipmentActionPolicy.php
 |   |   |           OzonDeliveryShipmentAllocationValueResolver.php
+|   |   |           OzonDeliveryCourierAddressNormalizer.php
 |   |   |           OzonDeliveryShipmentCreateRequestBuilder.php
 |   |   |           OzonDeliveryShipmentCreateResponseParser.php
 |   |   |           OzonDeliveryShipmentCreationStatusPolicy.php
@@ -887,6 +888,8 @@ C:.
 |   |   +---Application
 |   |   |       CarrierShipmentAdapterRegistry.php
 |   |   |       OrderShipmentDraftFactory.php
+|   |   |       OrderStructuredAddress.php
+|   |   |       OrderStructuredAddressReader.php
 |   |   |       RussianPostShipmentActualCostExtractor.php
 |   |   |       RussianPostShipmentActualCostLookupService.php
 |   |   |       ShipmentActualCost.php

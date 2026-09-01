@@ -571,6 +571,9 @@ final class OzonDeliveryShipmentService {
 
 	/** @return array<int,string> */
 	private function point_errors( ShipmentCreateRequest $request ): array {
+		if ( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP !== $request->delivery_type ) {
+			return array();
+		}
 		$point_id = (int) preg_replace( '/\D+/', '', $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' ) );
 		$places = array_map( static fn( $place ): array => array( 'weight_g' => $place->weight_g, 'length_cm' => $place->length_cm, 'width_cm' => $place->width_cm, 'height_cm' => $place->height_cm ), $request->places );
 		$rejection = $point_id > 0 ? $this->pickup_provider->first_place_rejection( $point_id, $places ) : array( 'reason' => 'point_unavailable', 'place_index' => 0 );

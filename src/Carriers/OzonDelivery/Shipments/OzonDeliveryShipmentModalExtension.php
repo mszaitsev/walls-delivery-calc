@@ -21,9 +21,11 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 		unset( $order );
 		$request = is_array( $draft['request'] ?? null ) ? $draft['request'] : array();
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
+		$delivery_type = (string) ( $request['delivery_type'] ?? $meta['delivery_type'] ?? '' );
 		$point_id = (int) preg_replace( '/\D+/', '', (string) ( $meta['pickup_point_code'] ?? '' ) );
 		$row = $point_id > 0 ? $this->repository->find_active( $point_id ) : null;
 		return array(
+			'delivery_type' => $delivery_type,
 			'point_found' => is_array( $row ),
 			'point_id' => $point_id,
 			'point_address' => is_array( $row ) ? (string) ( $row['full_address'] ?? '' ) : (string) ( $meta['pickup_point_address'] ?? '' ),
@@ -32,6 +34,10 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 			'max_length_mm' => is_array( $row ) ? (int) ( $row['max_length_mm'] ?? 0 ) : 0,
 			'max_width_mm' => is_array( $row ) ? (int) ( $row['max_width_mm'] ?? 0 ) : 0,
 			'max_height_mm' => is_array( $row ) ? (int) ( $row['max_height_mm'] ?? 0 ) : 0,
+			'courier_original_address' => (string) ( $meta['courier_original_address'] ?? '' ),
+			'courier_address_snapshot' => is_array( $meta['courier_address_snapshot'] ?? null ) ? $meta['courier_address_snapshot'] : array(),
+			'courier_address_source' => (string) ( $meta['courier_address_source'] ?? '' ),
+			'normalization_valid' => ! empty( $meta['normalization_valid'] ),
 		);
 	}
 
@@ -70,6 +76,40 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 
 	/** @param array<string,mixed> $draft @param array<string,mixed> $context */
 	public function render_courier_fields( object $order, array $draft, array $context ): void {
-		unset( $order, $draft, $context );
+		unset( $order, $draft );
+		$snapshot = is_array( $context['courier_address_snapshot'] ?? null ) ? $context['courier_address_snapshot'] : array();
+		$normalized = array(
+			'success' => ! empty( $context['normalization_valid'] ) && array() !== $snapshot,
+			'message' => ! empty( $context['normalization_valid'] ) ? 'Адрес Ozon подтвержден из заказа.' : '',
+			'source' => (string) ( $snapshot['source'] ?? 'trusted_order_snapshot' ),
+			'fields' => $snapshot,
+			'display' => (string) ( $snapshot['normalized_address'] ?? $context['courier_original_address'] ?? '' ),
+			'original_hash' => hash( 'sha256', trim( (string) ( $context['courier_original_address'] ?? '' ) ) ),
+			'service_key' => OzonDeliverySettings::SERVICE_KEY,
+		);
+		$encoded = wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ) ?: '';
+		?>
+		<div data-wdc-ozon-courier-address>
+			<p class="description"><?php echo esc_html__( 'Курьерское отправление Ozon создаётся только по подтвержденному структурированному адресу получателя. Координаты и ФИАС из браузера не используются как источник для создания.', 'walls-delivery-calc' ); ?></p>
+			<label><?php echo esc_html__( 'Адрес получателя', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" data-wdc-courier-original-address rows="2"><?php echo esc_textarea( (string) ( $context['courier_original_address'] ?? '' ) ); ?></textarea></label>
+			<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $encoded ); ?>" data-wdc-normalized-address-json>
+			<p>
+				<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Проверить адрес через DaData', 'walls-delivery-calc' ); ?></button>
+				<span class="description" data-wdc-normalized-status><?php echo ! empty( $context['normalization_valid'] ) ? esc_html__( 'Адрес подтвержден.', 'walls-delivery-calc' ) : esc_html__( 'Адрес нужно подтвердить перед созданием.', 'walls-delivery-calc' ); ?></span>
+			</p>
+			<label><?php echo esc_html__( 'Подтвержденный адрес', 'walls-delivery-calc' ); ?><input readonly data-wdc-normalized-address-display value="<?php echo esc_attr( (string) ( $snapshot['normalized_address'] ?? '' ) ); ?>"></label>
+			<div class="wdc-ozon-courier-address-grid">
+				<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="postcode" value="<?php echo esc_attr( (string) ( $snapshot['postcode'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="region" value="<?php echo esc_attr( (string) ( $snapshot['region'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="city" value="<?php echo esc_attr( (string) ( $snapshot['city'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Улица', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="street" value="<?php echo esc_attr( (string) ( $snapshot['street'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Дом', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="house" value="<?php echo esc_attr( (string) ( $snapshot['house'] ?? $snapshot['stead'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Квартира/офис', 'walls-delivery-calc' ); ?><input name="ozon_courier_apartment" data-wdc-ozon-courier-field="flat" value="<?php echo esc_attr( (string) ( $snapshot['flat'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Подъезд', 'walls-delivery-calc' ); ?><input name="ozon_courier_entrance" value=""></label>
+				<label><?php echo esc_html__( 'Этаж', 'walls-delivery-calc' ); ?><input name="ozon_courier_floor" value=""></label>
+				<label><?php echo esc_html__( 'Домофон', 'walls-delivery-calc' ); ?><input name="ozon_courier_intercom" value=""></label>
+			</div>
+		</div>
+		<?php
 	}
 }

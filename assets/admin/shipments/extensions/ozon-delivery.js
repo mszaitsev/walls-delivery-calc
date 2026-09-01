@@ -60,6 +60,51 @@
     };
   }
 
+  function ozonSelectedDeliveryType(form) {
+    var service = form && form.querySelector('[data-wdc-service-select]');
+    var option = service && service.options[service.selectedIndex] ? service.options[service.selectedIndex] : null;
+    return option ? String(option.dataset.deliveryType || option.value || '').trim() : '';
+  }
+
+  function isOzonCourierForm(form) {
+    return isOzonForm(form) && ozonSelectedDeliveryType(form) === 'courier';
+  }
+
+  function normalizedAddressSnapshot(form) {
+    var input = form && form.querySelector('[data-wdc-normalized-address-json]');
+    if (!input || !input.value) return {};
+    try {
+      return JSON.parse(input.value || '{}') || {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function updateOzonCourierFields(form, snapshot) {
+    if (!form || !snapshot) return;
+    var fields = snapshot.fields || {};
+    var display = form.querySelector('[data-wdc-normalized-address-display]');
+    if (display) display.value = snapshot.display || fields.normalized_address || '';
+    var mapped = {
+      postcode: fields.postcode || '',
+      region: fields.region || '',
+      city: fields.city || '',
+      street: fields.street || '',
+      house: fields.house || fields.stead || '',
+      flat: fields.flat || ''
+    };
+    Object.keys(mapped).forEach(function (key) {
+      var input = form.querySelector('[data-wdc-ozon-courier-field="' + key + '"]');
+      if (input) input.value = mapped[key] || '';
+    });
+  }
+
+  function validateOzonCourierAddress(form) {
+    if (!isOzonCourierForm(form)) return true;
+    var snapshot = normalizedAddressSnapshot(form);
+    return !!(snapshot && snapshot.success === true && snapshot.service_key === 'ozon_delivery');
+  }
+
   function placeInput(row, suffix) {
     return row ? row.querySelector('input[name$="[' + suffix + ']"]') : null;
   }
@@ -180,6 +225,7 @@
 
   function validateOzonPlaceLimits(form) {
     if (!isOzonForm(form)) return true;
+    if (isOzonCourierForm(form)) return true;
     var limits = limitsFromForm(form);
     if (!limits) return true;
     clearInvalidMarks(form);
@@ -211,7 +257,23 @@
       return refresh(form);
     },
     createAvailability: function (form) {
-      return validateOzonPlaceLimits(form);
+      return validateOzonPlaceLimits(form) && validateOzonCourierAddress(form);
+    },
+    afterAddressNormalized: function (payload) {
+      var form = payload && payload.form;
+      var snapshot = payload && payload.snapshot ? payload.snapshot : {};
+      if (!isOzonCourierForm(form)) return false;
+      updateOzonCourierFields(form, snapshot);
+      if (payload.status) {
+        payload.status.textContent = snapshot.success ? 'Адрес Ozon подтвержден.' : (snapshot.message || 'Адрес Ozon не подтвержден.');
+      }
+      return true;
+    },
+    afterAddressReset: function (payload) {
+      var form = payload && payload.form;
+      if (!isOzonCourierForm(form)) return false;
+      updateOzonCourierFields(form, { fields: {}, display: '' });
+      return false;
     }
   });
 

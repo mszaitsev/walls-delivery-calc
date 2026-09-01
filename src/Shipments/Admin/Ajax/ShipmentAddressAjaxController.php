@@ -7,6 +7,8 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryCourierAddressNormalizer;
 use WallsShop\WDC\Carriers\Pek\Api\PekSenderWarehouseService;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
@@ -62,7 +64,8 @@ final class ShipmentAddressAjaxController {
 		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
 		private ?PekSenderWarehouseService $pek_sender_warehouses = null,
 		private ?ShipmentModalRequestMapper $shipment_modal_mapper = null,
-		private ?OrderShipmentDraftFactory $draft_factory = null
+		private ?OrderShipmentDraftFactory $draft_factory = null,
+		private ?OzonDeliveryCourierAddressNormalizer $ozon_courier_addresses = null
 	) {
 	}
 
@@ -97,6 +100,13 @@ final class ShipmentAddressAjaxController {
 			$result = $this->cdek_address_preparation->prepare( $order, $original_address, $this->recipient_location_context_from_request( $order ), DpdSettings::SERVICE_KEY );
 			$result['service_key'] = DpdSettings::SERVICE_KEY;
 			$result['source'] = ! empty( $result['success'] ) ? 'dadata+dpd' : (string) ( $result['source'] ?? 'dadata+dpd' );
+			wp_send_json_success( array( 'normalized_address' => $result ) );
+		}
+		if ( OzonDeliverySettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type ) {
+			if ( ! $this->ozon_courier_addresses instanceof OzonDeliveryCourierAddressNormalizer ) {
+				wp_send_json_error( array( 'message' => __( 'Нормализация адреса Ozon недоступна.', 'walls-delivery-calc' ) ), 500 );
+			}
+			$result = $this->ozon_courier_addresses->normalize( $original_address, $this->ozon_address_context_from_request( $order ) );
 			wp_send_json_success( array( 'normalized_address' => $result ) );
 		}
 		if ( ! $this->address_normalizer instanceof RussianPostAddressNormalizer ) {
@@ -460,6 +470,18 @@ final class ShipmentAddressAjaxController {
 			array(
 				'country_code' => 'RU',
 				'location_city_fias_id' => method_exists( $order, 'get_meta' ) ? (string) $order->get_meta( '_wdc_platform_location_fias_id', true ) : '',
+			),
+			static fn( string $value ): bool => '' !== trim( $value )
+		);
+	}
+
+	/** @return array<string,string> */
+	private function ozon_address_context_from_request( object $order ): array {
+		return array_filter(
+			array(
+				'country_code' => 'RU',
+				'selected_location_id' => sanitize_text_field( wp_unslash( $_POST['recipient_location_id'] ?? $_POST['location_id'] ?? ( method_exists( $order, 'get_meta' ) ? (string) $order->get_meta( '_wdc_platform_location_id', true ) : '' ) ) ),
+				'selected_location_fias_id' => sanitize_text_field( wp_unslash( $_POST['recipient_location_fias_id'] ?? $_POST['fias_id'] ?? ( method_exists( $order, 'get_meta' ) ? (string) $order->get_meta( '_wdc_platform_location_fias_id', true ) : '' ) ) ),
 			),
 			static fn( string $value ): bool => '' !== trim( $value )
 		);

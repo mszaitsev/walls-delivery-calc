@@ -10,6 +10,7 @@ use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder;
+use WallsShop\WDC\Shipments\Application\OrderStructuredAddress;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -93,6 +94,10 @@ final class OrderShippingMetaPersister {
 		$trusted_location_id = $this->trusted_location_id_for_rate( $rate, $data );
 		if ( $trusted_location_id > 0 ) {
 			$map['_wdc_platform_location_id'] = $trusted_location_id;
+		}
+		$structured_address = $this->trusted_structured_recipient_address_snapshot( $rate, $data, $trusted_location_id );
+		if ( array() !== $structured_address ) {
+			$map[ OrderStructuredAddress::META_KEY ] = $structured_address;
 		}
 
 		$pickup = $this->pickup_selection_for_rate( $rate );
@@ -722,6 +727,172 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_fallback_address'      => $normalized ? '' : $address,
 			'_wdc_platform_address_fallback_used' => ! $normalized,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function trusted_structured_recipient_address_snapshot( array $rate, array $data, int $trusted_location_id ): array {
+		$evidence = $this->session_manager->trusted_dadata_address_evidence();
+		if ( array() === $evidence || ! is_array( $evidence ) ) {
+			return array();
+		}
+		$prefix = $this->active_address_prefix( $data );
+		if ( '' === $prefix || $prefix !== $this->normalize_text( (string) ( $evidence['prefix'] ?? '' ) ) ) {
+			return array();
+		}
+		if ( $trusted_location_id <= 0 || $trusted_location_id !== $this->positive_int( $evidence['selected_location_id'] ?? null ) ) {
+			return array();
+		}
+		if ( ! $this->trusted_structured_address_status_valid( $evidence ) || ! $this->trusted_structured_address_geo_valid( $evidence ) ) {
+			return array();
+		}
+		if ( ! $this->trusted_structured_address_line_matches( $evidence, $data, $prefix ) ) {
+			return array();
+		}
+		if ( ! $this->trusted_structured_address_fias_matches( $evidence ) ) {
+			return array();
+		}
+
+		$city_context = $this->session_manager->city_context();
+		$snapshot = array(
+			'schema_version' => OrderStructuredAddress::SCHEMA_VERSION,
+			'source' => 'trusted_dadata_address_evidence',
+			'address_role' => $prefix,
+			'selected_location_id' => (string) $trusted_location_id,
+			'selected_location_fias_id' => $this->first_meaningful( $evidence['selected_location_fias_id'] ?? '', $city_context['fias_id'] ?? '' ),
+			'region_fias_id' => $this->safe_snapshot_value( $evidence['region_fias_id'] ?? '' ),
+			'city_fias_id' => $this->safe_snapshot_value( $evidence['city_fias_id'] ?? '' ),
+			'settlement_fias_id' => $this->safe_snapshot_value( $evidence['settlement_fias_id'] ?? '' ),
+			'street' => $this->first_meaningful( $evidence['street_with_type'] ?? '', $evidence['street'] ?? '' ),
+			'street_with_type' => $this->safe_snapshot_value( $evidence['street_with_type'] ?? '' ),
+			'street_fias_id' => $this->safe_snapshot_value( $evidence['street_fias_id'] ?? '' ),
+			'house' => $this->safe_snapshot_value( $evidence['house'] ?? '' ),
+			'stead' => $this->safe_snapshot_value( $evidence['stead'] ?? '' ),
+			'house_fias_id' => $this->safe_snapshot_value( $evidence['house_fias_id'] ?? '' ),
+			'flat' => $this->first_meaningful( $evidence['flat'] ?? '', $this->checkout_string( $data, $prefix . '_address_2' ) ),
+			'postcode' => preg_replace( '/\D+/', '', $this->first_meaningful( $this->checkout_string( $data, $prefix . '_postcode' ), $city_context['postcode'] ?? '' ) ) ?: '',
+			'country' => 'Россия',
+			'country_code' => strtoupper( $this->first_meaningful( $this->checkout_string( $data, $prefix . '_country' ), $rate['country_code'] ?? '', 'RU' ) ),
+			'region' => $this->first_meaningful( $this->checkout_string( $data, $prefix . '_state' ), $city_context['region_name'] ?? '' ),
+			'city' => $this->first_meaningful( $this->checkout_string( $data, $prefix . '_city' ), $city_context['city_name'] ?? '', $city_context['settlement_name'] ?? '' ),
+			'geo_lat' => $this->safe_snapshot_value( $evidence['geo_lat'] ?? '' ),
+			'geo_lon' => $this->safe_snapshot_value( $evidence['geo_lon'] ?? '' ),
+			'normalized_address' => $this->trusted_structured_normalized_address( $evidence, $data, $prefix ),
+			'confirmed_at' => $this->safe_snapshot_value( $evidence['confirmed_at'] ?? '' ),
+		);
+		$snapshot = array_filter( $snapshot, static fn( mixed $value ): bool => '' !== $value && null !== $value );
+		$address = OrderStructuredAddress::from_array( $snapshot );
+
+		return $address instanceof OrderStructuredAddress ? $address->to_array() : array();
+	}
+
+	/** @param array<string,mixed> $evidence */
+	private function trusted_structured_address_status_valid( array $evidence ): bool {
+		$status = (string) ( $evidence['status'] ?? '' );
+		$level = (string) ( $evidence['level'] ?? '' );
+
+		return in_array( $status, array( 'resolved', 'house_selected' ), true )
+			&& ! empty( $evidence['is_deliverable'] )
+			&& '' !== $this->first_meaningful( $evidence['street'] ?? '', $evidence['street_with_type'] ?? '' )
+			&& '' !== $this->first_meaningful( $evidence['house'] ?? '', $evidence['stead'] ?? '' )
+			&& ( '' === $level || in_array( $level, array( 'house', 'flat', 'room' ), true ) );
+	}
+
+	/** @param array<string,mixed> $evidence */
+	private function trusted_structured_address_geo_valid( array $evidence ): bool {
+		if ( ! is_numeric( $evidence['geo_lat'] ?? null ) || ! is_numeric( $evidence['geo_lon'] ?? null ) ) {
+			return false;
+		}
+		$lat = (float) $evidence['geo_lat'];
+		$lon = (float) $evidence['geo_lon'];
+
+		return $lat >= -90 && $lat <= 90 && $lon >= -180 && $lon <= 180 && ! ( 0.0 === $lat && 0.0 === $lon );
+	}
+
+	/** @param array<string,mixed> $evidence @param array<string,mixed> $data */
+	private function trusted_structured_address_line_matches( array $evidence, array $data, string $prefix ): bool {
+		$current = $this->normalize_text( $this->checkout_string( $data, $prefix . '_address_1' ) );
+		if ( '' === $current ) {
+			return false;
+		}
+
+		return in_array( $current, $this->trusted_address_candidates( $evidence ), true );
+	}
+
+	/** @param array<string,mixed> $evidence */
+	private function trusted_structured_address_fias_matches( array $evidence ): bool {
+		$city_context = $this->session_manager->city_context();
+		$current = $this->normalize_text( (string) ( $city_context['fias_id'] ?? '' ) );
+		if ( '' === $current ) {
+			return true;
+		}
+		$candidates = array_unique(
+			array_filter(
+				array_map(
+					array( $this, 'normalize_text' ),
+					array(
+						(string) ( $evidence['selected_location_fias_id'] ?? '' ),
+						(string) ( $evidence['city_fias_id'] ?? '' ),
+						(string) ( $evidence['settlement_fias_id'] ?? '' ),
+					)
+				)
+			)
+		);
+
+		return array() === $candidates || in_array( $current, $candidates, true );
+	}
+
+	/** @param array<string,mixed> $evidence @return array<int,string> */
+	private function trusted_address_candidates( array $evidence ): array {
+		$street = $this->safe_snapshot_value( $evidence['street'] ?? '' );
+		$street_with_type = $this->safe_snapshot_value( $evidence['street_with_type'] ?? '' );
+		$house = $this->safe_snapshot_value( $evidence['house'] ?? $evidence['stead'] ?? '' );
+		$flat = $this->safe_snapshot_value( $evidence['flat'] ?? '' );
+		$candidates = array( $street, $street_with_type );
+		foreach ( array( $street, $street_with_type ) as $prefix ) {
+			if ( '' !== $prefix && '' !== $house ) {
+				$candidates[] = trim( $prefix . ' ' . $house );
+				if ( '' !== $flat ) {
+					$candidates[] = trim( $prefix . ' ' . $house . ' ' . $flat );
+				}
+			}
+		}
+
+		return array_values( array_unique( array_filter( array_map( array( $this, 'normalize_text' ), $candidates ) ) ) );
+	}
+
+	/** @param array<string,mixed> $evidence @param array<string,mixed> $data */
+	private function trusted_structured_normalized_address( array $evidence, array $data, string $prefix ): string {
+		$parts = array(
+			$this->checkout_string( $data, $prefix . '_postcode' ),
+			$this->checkout_string( $data, $prefix . '_state' ),
+			$this->checkout_string( $data, $prefix . '_city' ),
+			$this->first_meaningful( $evidence['street_with_type'] ?? '', $evidence['street'] ?? '' ),
+			$this->first_meaningful( $evidence['house'] ?? '', $evidence['stead'] ?? '' ),
+			$this->first_meaningful( $evidence['flat'] ?? '', $this->checkout_string( $data, $prefix . '_address_2' ) ),
+		);
+
+		return implode( ', ', array_values( array_filter( array_map( 'trim', $parts ) ) ) );
+	}
+
+	/** @param array<string,mixed> $data */
+	private function active_address_prefix( array $data ): string {
+		$ship_to_different = ! empty( $data['ship_to_different_address'] ) && '0' !== (string) $data['ship_to_different_address'];
+
+		return $ship_to_different ? 'shipping' : 'billing';
+	}
+
+	private function normalize_text( string $value ): string {
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+	}
+
+	private function safe_snapshot_value( mixed $value ): string {
+		return is_scalar( $value ) ? trim( (string) $value ) : '';
 	}
 
 	/**

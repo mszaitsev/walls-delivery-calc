@@ -271,6 +271,7 @@ function oz_ship_stack( OzonShipmentSmokeDb $db ): array {
 		OzonDeliverySettings::CLIENT_ID_KEY => 'client',
 		OzonDeliverySettings::CLIENT_SECRET_ENCRYPTED_KEY => $encryption->encrypt( 'secret' ),
 		OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => 42,
+		OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => 84,
 	) );
 	$settings = new OzonDeliverySettings( $settings_repository );
 	$http = new OzonShipmentSmokeHttp();
@@ -318,6 +319,71 @@ function oz_ship_request( array $places, array $rows, string $point_code = '777'
 			'service_key' => OzonDeliverySettings::SERVICE_KEY,
 			'order_num' => $order_num,
 			'pickup_point_code' => $point_code,
+			'shipment_item_rows' => $rows,
+		)
+	);
+}
+
+/** @param array<int,ShipmentPlace> $places @param array<int,array<string,mixed>> $rows */
+function oz_ship_courier_request( array $places, array $rows, int $order_id = 85410, string $order_num = '85410' ): ShipmentCreateRequest {
+	$courier_snapshot = array(
+		'schema_version' => 1,
+		'source' => 'trusted_order_snapshot',
+		'address_role' => 'shipping',
+		'selected_location_id' => '123',
+		'selected_location_fias_id' => 'CITY-FIAS-123',
+		'region_fias_id' => 'REGION-FIAS-1',
+		'city_fias_id' => 'CITY-FIAS-123',
+		'street' => 'улица Ленина',
+		'street_with_type' => 'улица Ленина',
+		'street_fias_id' => 'STREET-FIAS-1',
+		'house' => '10',
+		'house_fias_id' => 'HOUSE-FIAS-10',
+		'flat' => '12',
+		'postcode' => '630099',
+		'country' => 'Россия',
+		'country_code' => 'RU',
+		'region' => 'Новосибирская область',
+		'city' => 'г Новосибирск',
+		'geo_lat' => '55.0415',
+		'geo_lon' => '82.9346',
+		'normalized_address' => '630099, Новосибирская область, г Новосибирск, улица Ленина, 10, кв 12',
+		'confirmed_at' => '2026-08-30T12:00:00+00:00',
+	);
+
+	return new ShipmentCreateRequest(
+		order_id: $order_id,
+		carrier_key: OzonDeliverySettings::CARRIER_KEY,
+		delivery_type: DeliveryType::COURIER,
+		rate_id: OzonDeliverySettings::SERVICE_KEY . ':courier',
+		recipient_address: new Address(
+			country_code: 'RU',
+			country_name: 'Россия',
+			region_name: 'Новосибирская область',
+			city: 'г Новосибирск',
+			postcode: '630099',
+			street: 'улица Ленина',
+			house: '10',
+			apartment: '12',
+			raw_address: '630099, Новосибирская область, г Новосибирск, улица Ленина, 10, кв 12',
+			normalized: true
+		),
+		pickup_point: null,
+		places: $places,
+		declared_value: Money::from_kopecks( 0 ),
+		insurance_enabled: false,
+		services: array(),
+		recipient: array( 'name' => 'Иван Иванов', 'phone' => '+79132038250', 'email' => 'test@example.test' ),
+		meta: array(
+			'service_key' => OzonDeliverySettings::SERVICE_KEY,
+			'order_num' => $order_num,
+			'delivery_type' => DeliveryType::COURIER,
+			'courier_address_source' => 'trusted_order_snapshot',
+			'courier_address_snapshot' => $courier_snapshot,
+			'ozon_courier_apartment' => '12',
+			'ozon_courier_entrance' => '2',
+			'ozon_courier_floor' => '5',
+			'ozon_courier_intercom' => '55',
 			'shipment_item_rows' => $rows,
 		)
 	);
@@ -380,6 +446,53 @@ $status_payload = $stack['adapter']->status_payload( $order, $stored );
 oz_ship_assert( ! empty( $status_payload['has_actual_cost'] ) && 'carrier_api' === (string) ( $status_payload['actual_cost_source'] ?? '' ), 'Ozon status payload must expose actual cost immediately after create.' );
 oz_ship_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status_payload['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $status_payload['shipment_status_label'] ?? '' ) && 'READY_FOR_SHIPPING, READY_FOR_SHIPPING' === (string) ( $status_payload['carrier_status_title'] ?? '' ), 'Ozon create UI payload must immediately show created_in_carrier and raw Ozon statuses without a manual refresh.' );
 oz_ship_assert( 'Номера Ozon' === (string) ( $status_payload['tracking_presentation']['label'] ?? '' ) && 2 === count( $status_payload['tracking_presentation']['items'] ?? array() ) && 'OZON-1' === (string) ( $status_payload['tracking_presentation']['items'][0]['copy_value'] ?? '' ) && 'OZON-2' === (string) ( $status_payload['tracking_presentation']['items'][1]['copy_value'] ?? '' ), 'Ozon multi-box status payload must expose every posting number sorted by place for individual copying.' );
+
+$courier_stack = oz_ship_stack( $db );
+$courier_order = new OzonShipmentSmokeOrder( 85410, '85410', array( new OzonShipmentSmokeOrderItem( 501, 2, '2000.00' ) ) );
+$courier_result = $courier_stack['service']->create(
+	$courier_order,
+	oz_ship_courier_request(
+		array(
+			new ShipmentPlace( 1, 12000, 40, 30, 20, Money::from_kopecks( 0 ) ),
+			new ShipmentPlace( 2, 9000, 50, 30, 20, Money::from_kopecks( 0 ) ),
+		),
+		array(
+			array( 'item_key' => 'courier-a', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+			array( 'item_key' => 'courier-b', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+		)
+	)
+);
+oz_ship_assert( $courier_result->success, 'Ozon courier shipment must use existing create+approve lifecycle and must not require pickup point limits.' );
+$courier_checkout_calls = $courier_stack['http']->calls_for( '/v1/order/checkout' );
+$courier_create_calls = $courier_stack['http']->calls_for( '/v1/order/create' );
+oz_ship_assert( 1 === count( $courier_checkout_calls ) && 1 === count( $courier_create_calls ), 'Ozon courier shipment must preflight once and then call order/create once.' );
+$courier_checkout_body = $courier_checkout_calls[0]['body'];
+$courier_create_body = $courier_create_calls[0]['body'];
+oz_ship_assert( ! isset( $courier_create_body['delivery']['delivery_point'] ) && isset( $courier_create_body['delivery']['courier'] ), 'Ozon courier create body must use delivery.courier and must not send a delivery_point.' );
+$courier_delivery = $courier_create_body['delivery']['courier'] ?? array();
+oz_ship_assert( '55.0415' === (string) ( $courier_delivery['coordinates']['latitude'] ?? '' ) && '82.9346' === (string) ( $courier_delivery['coordinates']['longitude'] ?? '' ), 'Ozon courier create coordinates must come from canonical structured courier address snapshot.' );
+oz_ship_assert( '630099' === (string) ( $courier_delivery['zip_code'] ?? '' ) && 'Россия' === (string) ( $courier_delivery['country'] ?? '' ) && 'Новосибирская область' === (string) ( $courier_delivery['region'] ?? '' ) && 'г Новосибирск' === (string) ( $courier_delivery['city'] ?? '' ) && 'улица Ленина' === (string) ( $courier_delivery['street'] ?? '' ) && '10' === (string) ( $courier_delivery['house_number'] ?? '' ), 'Ozon courier create body must contain the official structured address fields required by /v1/order/create.' );
+oz_ship_assert( '12' === (string) ( $courier_delivery['apartment'] ?? '' ) && '2' === (string) ( $courier_delivery['entrance'] ?? '' ) && '5' === (string) ( $courier_delivery['floor'] ?? '' ) && '55' === (string) ( $courier_delivery['intercom'] ?? '' ), 'Ozon courier create body must pass supported optional courier address fields only from server-validated draft/meta.' );
+oz_ship_assert( array( 'courier' => array( 'coordinates' => $courier_delivery['coordinates'] ) ) === ( $courier_checkout_body['delivery'] ?? array() ), 'Ozon courier preflight must be derived from the canonical create body and keep only checkout-supported courier coordinates.' );
+foreach ( $courier_create_body['postings'] as $index => $posting ) {
+	$courier_checkout_posting = $courier_checkout_body['postings'][ $index ] ?? array();
+	oz_ship_assert( 84 === (int) ( $posting['shipment_method_id'] ?? 0 ) && $courier_checkout_posting['shipment_method_id'] === $posting['shipment_method_id'] && $courier_checkout_posting['request_id'] === $posting['request_id'] && $courier_checkout_posting['declared_value'] === $posting['declared_value'] && $courier_checkout_posting['dimensions'] === $posting['dimensions'], 'Ozon courier preflight/create parity must keep shipment method, request id, dimensions and declared value from one canonical create body.' );
+}
+$courier_stored = ( new OrderShipmentRepository() )->find_by_carrier( $courier_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( 2 === count( $courier_stack['http']->calls_for( '/v1/posting/approve' ) ) && 'created' === (string) ( $courier_stored['status'] ?? '' ) && 2 === count( $courier_stored['ozon_postings'] ?? array() ), 'Ozon courier shipment must reuse approve and persistence lifecycle after order/create.' );
+
+$courier_unavailable_stack = oz_ship_stack( $db );
+$courier_unavailable_stack['http']->fail_checkout = true;
+$courier_unavailable = $courier_unavailable_stack['service']->create(
+	new OzonShipmentSmokeOrder( 85411, '85411', array( new OzonShipmentSmokeOrderItem( 502, 1, '1000.00' ) ) ),
+	oz_ship_courier_request(
+		array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ),
+		array( array( 'item_key' => 'courier-fail', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ),
+		85411,
+		'85411'
+	)
+);
+oz_ship_assert( ! $courier_unavailable->success && 'ozon_shipment_preflight_failed' === $courier_unavailable->error_code && 0 === count( $courier_unavailable_stack['http']->calls_for( '/v1/order/create' ) ) && 0 === count( $courier_unavailable_stack['http']->calls_for( '/v1/posting/approve' ) ), 'Ozon courier shipment-time checkout availability failure must block order/create and approve.' );
 
 $manual_stack = oz_ship_stack( $db );
 $manual_order = new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 102, 1, '1500.00' ) ) );

@@ -284,6 +284,7 @@ use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
+use WallsShop\WDC\Shipments\Application\OrderStructuredAddress;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 
 
@@ -1482,6 +1483,97 @@ ob_start();
 ( new OrderDeliveryCustomerCommentsDisplay( $email_settings ) )->render_email( $ozon_courier_order, false, false, (object) array( 'id' => 'customer_processing_order' ) );
 $ozon_courier_email_html = (string) ob_get_clean();
 wc_checkout_smoke_assert( str_contains( $ozon_courier_email_html, $ozon_tracking_comment ) && str_contains( $ozon_courier_email_html, $ozon_refusal_comment ) && ! str_contains( $ozon_courier_email_html, '999999' ), 'Generic email delivery comments display must render frozen Ozon courier comments through the existing email setting.' );
+
+$ozon_courier_checkout_data = array(
+	'billing_country' => 'RU',
+	'billing_state' => 'Новосибирская область',
+	'billing_city' => 'Новосибирск',
+	'billing_postcode' => '630099',
+	'billing_address_1' => 'улица Ленина 10',
+	'billing_address_2' => '12',
+	'wdc_platform_location_id' => '123',
+);
+$ozon_courier_evidence_item = array(
+	'value' => '630099, Новосибирская область, Новосибирск, улица Ленина, 10, кв 12',
+	'unrestrictedValue' => '630099, Новосибирская область, Новосибирск, улица Ленина, 10, кв 12',
+	'level' => 'house',
+	'isDeliverable' => true,
+	'data' => array(
+		'region_with_type' => 'Новосибирская область',
+		'city_with_type' => 'г Новосибирск',
+		'street' => 'Ленина',
+		'street_with_type' => 'улица Ленина',
+		'house' => '10',
+		'flat' => '12',
+		'postal_code' => '630099',
+		'geo_lat' => '55.0415',
+		'geo_lon' => '82.9346',
+		'city_fias_id' => 'CITY-FIAS-123',
+		'street_fias_id' => 'STREET-FIAS-1',
+		'house_fias_id' => 'HOUSE-FIAS-10',
+	),
+);
+$session->save_city_context( array( 'location_id' => 123, 'country_code' => 'RU', 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'fias_id' => 'CITY-FIAS-123', 'postcode' => '630099' ) );
+$returned_evidence = $session->cache_dadata_address_suggestions( 'billing', array( 'selected_location_id' => '123', 'selected_location_fias_id' => 'CITY-FIAS-123' ), array( $ozon_courier_evidence_item ) );
+$token = (string) ( $returned_evidence[0]['selection_token'] ?? '' );
+wc_checkout_smoke_assert( '' !== $token && $session->confirm_dadata_address_evidence( $token, 'billing' ), 'DaData selection token must confirm trusted checkout address evidence for order persistence smoke.' );
+$trusted_address_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $trusted_address_order, $ozon_courier_checkout_data );
+$trusted_snapshot = $trusted_address_order->meta[ OrderStructuredAddress::META_KEY ] ?? array();
+wc_checkout_smoke_assert( 'trusted_dadata_address_evidence' === (string) ( $trusted_snapshot['source'] ?? '' ) && 'billing' === (string) ( $trusted_snapshot['address_role'] ?? '' ) && '123' === (string) ( $trusted_snapshot['selected_location_id'] ?? '' ), 'Trusted DaData evidence must be frozen as generic structured recipient address order snapshot.' );
+wc_checkout_smoke_assert( '55.0415' === (string) ( $trusted_snapshot['geo_lat'] ?? '' ) && '82.9346' === (string) ( $trusted_snapshot['geo_lon'] ?? '' ) && 'улица Ленина' === (string) ( $trusted_snapshot['street'] ?? '' ) && '10' === (string) ( $trusted_snapshot['house'] ?? '' ), 'Structured recipient snapshot must keep safe server-confirmed address fields needed for courier shipment.' );
+wc_checkout_smoke_assert( ! isset( $trusted_snapshot['selection_token'], $trusted_snapshot['token'], $trusted_snapshot['raw_response'] ), 'Structured recipient snapshot must not persist browser token or raw DaData response.' );
+
+$session->clear_trusted_dadata_address_evidence();
+$forged_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist(
+	$forged_order,
+	array_merge(
+		$ozon_courier_checkout_data,
+		array(
+			'billing_dadata_status' => 'resolved',
+			'billing_dadata_geo_lat' => '55.75511',
+			'billing_dadata_geo_lon' => '37.622396',
+			'billing_dadata_fias_id' => 'FORGED',
+		)
+	)
+);
+wc_checkout_smoke_assert( ! isset( $forged_order->meta[ OrderStructuredAddress::META_KEY ] ), 'Forged browser DaData hidden fields must not create trusted structured recipient order snapshot.' );
+
+$returned_evidence = $session->cache_dadata_address_suggestions( 'billing', array( 'selected_location_id' => '123', 'selected_location_fias_id' => 'CITY-FIAS-123' ), array( $ozon_courier_evidence_item ) );
+$session->confirm_dadata_address_evidence( (string) ( $returned_evidence[0]['selection_token'] ?? '' ), 'billing' );
+$stale_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $stale_order, array_merge( $ozon_courier_checkout_data, array( 'billing_address_1' => 'улица Ленина 99' ) ) );
+wc_checkout_smoke_assert( ! isset( $stale_order->meta[ OrderStructuredAddress::META_KEY ] ), 'Trusted address evidence must be rejected when final checkout address_1 no longer matches selected DaData house.' );
+
+$ozon_courier_fias_mismatch_item = $ozon_courier_evidence_item;
+$ozon_courier_fias_mismatch_item['data']['city_fias_id'] = 'OTHER-FIAS';
+$ozon_courier_fias_mismatch_item['data']['settlement_fias_id'] = 'OTHER-SETTLEMENT-FIAS';
+$returned_evidence = $session->cache_dadata_address_suggestions( 'billing', array( 'selected_location_id' => '123', 'selected_location_fias_id' => 'OTHER-FIAS' ), array( $ozon_courier_fias_mismatch_item ) );
+$session->confirm_dadata_address_evidence( (string) ( $returned_evidence[0]['selection_token'] ?? '' ), 'billing' );
+$fias_mismatch_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $fias_mismatch_order, $ozon_courier_checkout_data );
+wc_checkout_smoke_assert( ! isset( $fias_mismatch_order->meta[ OrderStructuredAddress::META_KEY ] ), 'Trusted address evidence with locality FIAS mismatch must not become order courier address authority.' );
+
+$returned_evidence = $session->cache_dadata_address_suggestions( 'billing', array( 'selected_location_id' => '123', 'selected_location_fias_id' => 'CITY-FIAS-123' ), array( $ozon_courier_evidence_item ) );
+$session->confirm_dadata_address_evidence( (string) ( $returned_evidence[0]['selection_token'] ?? '' ), 'billing' );
+$shipping_isolation_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist(
+	$shipping_isolation_order,
+	array_merge(
+		$ozon_courier_checkout_data,
+		array(
+			'ship_to_different_address' => '1',
+			'shipping_country' => 'RU',
+			'shipping_state' => 'Новосибирская область',
+			'shipping_city' => 'Новосибирск',
+			'shipping_postcode' => '630099',
+			'shipping_address_1' => 'улица Ленина 10',
+			'shipping_address_2' => '12',
+		)
+	)
+);
+wc_checkout_smoke_assert( ! isset( $shipping_isolation_order->meta[ OrderStructuredAddress::META_KEY ] ), 'Billing trusted evidence must not be saved as recipient snapshot when Woo shipping address is active.' );
 
 $session->save_rates(
 	array(
