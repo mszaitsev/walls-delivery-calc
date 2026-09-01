@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\Runtime;
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Contracts\CarrierCustomerCommentProviderInterface;
 use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
@@ -142,6 +143,7 @@ final class CheckoutOrchestrator {
 						'original_price_rub' => $rate->price->get_rubles(),
 					)
 				);
+				$processed = $this->rate_with_carrier_customer_comments( $processed, $carrier );
 				$rates[] = $processed;
 				$audit[] = array(
 					'rate_id' => $rate->rate_id,
@@ -291,6 +293,63 @@ final class CheckoutOrchestrator {
 			$rate->original_cost,
 			$rate->original_delivery_days
 		);
+	}
+
+	private function rate_with_carrier_customer_comments( DeliveryRate $rate, object $carrier ): DeliveryRate {
+		if ( ! $carrier instanceof CarrierCustomerCommentProviderInterface ) {
+			return $rate;
+		}
+
+		$customer_comments = $this->normalized_comments( $carrier->customer_comments( $rate ) );
+		if ( array() === $customer_comments ) {
+			return $rate;
+		}
+
+		return new DeliveryRate(
+			$rate->rate_id,
+			$rate->carrier_key,
+			$rate->carrier_name,
+			$rate->service_key,
+			$rate->service_name,
+			$rate->tariff_key,
+			$rate->tariff_name,
+			$rate->delivery_type,
+			$rate->title,
+			$rate->price,
+			$rate->original_price,
+			$rate->crossed_price,
+			$rate->delivery_days,
+			$rate->planned_delivery_date,
+			$rate->planned_delivery_comment,
+			$this->normalized_comments( array_merge( $rate->comments, $customer_comments ) ),
+			$rate->disabled,
+			$rate->disabled_reason,
+			$rate->requires_pickup_point,
+			$rate->requires_courier_address,
+			array_merge( $rate->meta, array( 'customer_comments' => $customer_comments ) ),
+			$rate->original_cost,
+			$rate->original_delivery_days
+		);
+	}
+
+	/**
+	 * @param array<int,mixed> $comments
+	 * @return array<int,string>
+	 */
+	private function normalized_comments( array $comments ): array {
+		$result = array();
+		foreach ( $comments as $comment ) {
+			if ( ! is_scalar( $comment ) ) {
+				continue;
+			}
+			$text = trim( (string) $comment );
+			if ( '' === $text || in_array( $text, $result, true ) ) {
+				continue;
+			}
+			$result[] = $text;
+		}
+
+		return $result;
 	}
 
 	private function context_for_rate( QuoteRequest $request, DeliveryRate $rate ): RuleEvaluationContext {

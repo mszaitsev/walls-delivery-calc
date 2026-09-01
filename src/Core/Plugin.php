@@ -119,6 +119,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryHttpClientInterface;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryMessageSanitizer;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryTokenCache;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\WpOzonDeliveryHttpClient;
+use WallsShop\WDC\Carriers\OzonDelivery\Checkout\OzonDeliveryCustomerCommentProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupImportLock;
@@ -514,7 +515,8 @@ final class Plugin {
 		$this->container->register( OzonDeliveryPackagingBuilderFactory::class, fn(): OzonDeliveryPackagingBuilderFactory => new OzonDeliveryPackagingBuilderFactory( $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( OzonDeliveryQuoteService::class, fn(): OzonDeliveryQuoteService => new OzonDeliveryQuoteService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryQuoteRequestBuilder::class ), $this->container->get( OzonDeliveryQuoteParser::class ), $this->container->get( OzonDeliveryPackagingBuilderFactory::class )->create(), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
 		$this->container->register( OzonDeliveryQuoteDiagnosticService::class, fn(): OzonDeliveryQuoteDiagnosticService => new OzonDeliveryQuoteDiagnosticService( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( RussianPhoneNormalizer::class ) ) );
-		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( OzonDeliveryCustomerCommentProvider::class, fn(): OzonDeliveryCustomerCommentProvider => new OzonDeliveryCustomerCommentProvider() );
+		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( OzonDeliveryCustomerCommentProvider::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( OzonDeliveryShipmentDescriptionBuilder::class, fn(): OzonDeliveryShipmentDescriptionBuilder => new OzonDeliveryShipmentDescriptionBuilder() );
 		$this->container->register( OzonDeliveryShipmentExternalIdResolver::class, fn(): OzonDeliveryShipmentExternalIdResolver => new OzonDeliveryShipmentExternalIdResolver() );
 		$this->container->register( OzonDeliveryShipmentAllocationValueResolver::class, fn(): OzonDeliveryShipmentAllocationValueResolver => new OzonDeliveryShipmentAllocationValueResolver() );

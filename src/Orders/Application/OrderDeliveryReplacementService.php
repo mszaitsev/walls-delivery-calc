@@ -333,6 +333,7 @@ final class OrderDeliveryReplacementService {
 			OrderShippingMetaPersister::CALCULATION_META_KEY => $this->calculation_data( $rate, $location, $pickup, $address ),
 		);
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+			$pickup_snapshot = $this->pickup_snapshot_with_customer_comments( $pickup, $rate );
 			$map['_wdc_platform_pickup_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_platform_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$map['_wdc_platform_pickup_comment'] = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' );
@@ -348,7 +349,7 @@ final class OrderDeliveryReplacementService {
 			$map['_wdc_pickup_marker_type'] = (string) ( $pickup['marker_type'] ?? '' );
 			$map['_wdc_pickup_point_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$map['_wdc_pickup_point_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' );
-			$map['_wdc_pickup_point_snapshot'] = function_exists( 'wp_json_encode' ) ? wp_json_encode( $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( $pickup );
+			$map['_wdc_pickup_point_snapshot'] = function_exists( 'wp_json_encode' ) ? wp_json_encode( $pickup_snapshot, JSON_UNESCAPED_UNICODE ) : json_encode( $pickup_snapshot );
 			if ( DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' ) ) {
 				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 				$map['_wdc_dpd_pickup_terminal_code'] = $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '', $snapshot['terminal_code'] ?? '', $snapshot['point_code'] ?? '' );
@@ -550,7 +551,18 @@ final class OrderDeliveryReplacementService {
 					'postcode' => (string) ( $address['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' ),
 					'fias_id' => (string) ( $location['fias_id'] ?? $address['fias_id'] ?? '' ),
 				),
-				'pickup' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? array(
+				'pickup' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? $this->pickup_calculation_data( $rate, $pickup ) : array(),
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $pickup
+	 * @return array<string,mixed>
+	 */
+	private function pickup_calculation_data( array $rate, array $pickup ): array {
+		$data = array(
 					'carrier_key' => (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' ),
 					'service_key' => (string) ( $pickup['service_key'] ?? $rate['service_key'] ?? $rate['carrier_key'] ?? '' ),
 					'pickup_family' => (string) ( $pickup['pickup_family'] ?? ( (string) ( $rate['carrier_key'] ?? '' ) !== '' ? (string) $rate['carrier_key'] . ':pickup' : '' ) ),
@@ -574,9 +586,65 @@ final class OrderDeliveryReplacementService {
 					'terminal_code' => $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '' ),
 					'dpd_source' => $this->first_meaningful( $pickup['dpd_source'] ?? '', $pickup['source'] ?? '' ),
 					'raw_sanitized' => is_array( $pickup['raw_sanitized'] ?? null ) ? $pickup['raw_sanitized'] : ( is_array( $pickup['raw'] ?? null ) ? $pickup['raw'] : array() ),
-				) : array(),
-			)
 		);
+		$customer_comments = $this->customer_comments_from_rate( $rate );
+		if ( array() !== $customer_comments ) {
+			$data['customer_comments'] = $customer_comments;
+		}
+
+		return $data;
+	}
+
+	/**
+	 * @param array<string,mixed> $snapshot
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function pickup_snapshot_with_customer_comments( array $snapshot, array $rate ): array {
+		$comments = $this->customer_comments_from_rate( $rate );
+		if ( array() === $comments ) {
+			unset( $snapshot['customer_comments'] );
+			return $snapshot;
+		}
+
+		$snapshot['customer_comments'] = $comments;
+		return $snapshot;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<int,string>
+	 */
+	private function customer_comments_from_rate( array $rate ): array {
+		if ( is_array( $rate['customer_comments'] ?? null ) ) {
+			return $this->normalized_customer_comments( $rate['customer_comments'] );
+		}
+		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		return is_array( $rate_meta['customer_comments'] ?? null ) ? $this->normalized_customer_comments( $rate_meta['customer_comments'] ) : array();
+	}
+
+	/**
+	 * @param array<int|string,mixed> $comments
+	 * @return array<int,string>
+	 */
+	private function normalized_customer_comments( array $comments ): array {
+		$result = array();
+		foreach ( $comments as $comment ) {
+			if ( ! is_scalar( $comment ) ) {
+				continue;
+			}
+			$text = trim( (string) $comment );
+			if ( '' === $text ) {
+				continue;
+			}
+			$text = substr( $text, 0, 500 );
+			if ( in_array( $text, $result, true ) ) {
+				continue;
+			}
+			$result[] = $text;
+		}
+
+		return $result;
 	}
 
 	private function note_snapshot( object $order, ?array $rate = null ): array {

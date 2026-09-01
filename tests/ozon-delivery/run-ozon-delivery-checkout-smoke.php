@@ -15,6 +15,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryApiResponse;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryHttpClientInterface;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryMessageSanitizer;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryTokenCache;
+use WallsShop\WDC\Carriers\OzonDelivery\Checkout\OzonDeliveryCustomerCommentProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
@@ -26,6 +27,8 @@ use WallsShop\WDC\Carriers\Runtime\OzonDeliveryCarrier;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -111,6 +114,33 @@ function oz_checkout_stored_rate( \WallsShop\WDC\Domain\Quote\DeliveryRate $rate
 		)
 	);
 }
+function oz_checkout_rate_with_price( DeliveryRate $rate, int $price_kopecks, ?int $crossed_kopecks = null ): DeliveryRate {
+	return new DeliveryRate(
+		$rate->rate_id,
+		$rate->carrier_key,
+		$rate->carrier_name,
+		$rate->service_key,
+		$rate->service_name,
+		$rate->tariff_key,
+		$rate->tariff_name,
+		$rate->delivery_type,
+		$rate->title,
+		Money::from_kopecks( $price_kopecks ),
+		$rate->original_price,
+		null === $crossed_kopecks ? null : Money::from_kopecks( $crossed_kopecks ),
+		$rate->delivery_days,
+		$rate->planned_delivery_date,
+		$rate->planned_delivery_comment,
+		$rate->comments,
+		$rate->disabled,
+		$rate->disabled_reason,
+		$rate->requires_pickup_point,
+		$rate->requires_courier_address,
+		$rate->meta,
+		$rate->original_cost,
+		$rate->original_delivery_days
+	);
+}
 $plugin = file_get_contents( $root . '/src/Core/Plugin.php' ) ?: '';
 $carrier = file_get_contents( $root . '/src/Carriers/Runtime/OzonDeliveryCarrier.php' ) ?: '';
 $service = file_get_contents( $root . '/src/Carriers/OzonDelivery/Quote/OzonDeliveryQuoteService.php' ) ?: '';
@@ -158,15 +188,32 @@ $http = new OzonCheckoutSmokeHttp();
 $sanitizer = new OzonDeliveryMessageSanitizer();
 $api = new OzonDeliveryApiClient( $http, new OzonDeliveryAccessTokenService( $credentials, $http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
 $quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
-$runtime_carrier = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() );
+$comment_provider = new OzonDeliveryCustomerCommentProvider();
+$runtime_carrier = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger() );
 $preliminary_cache_context = $runtime_carrier->quote_cache_context( $mapped_request );
-$carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $mapped_request );
+$carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger() ) )->quote( $mapped_request );
 oz_checkout_assert( 1 === count( $carrier_quote->rates ) && 'Ozon до ПВЗ' === $carrier_quote->rates[0]->title, 'Ozon preliminary checkout quote must produce the pickup rate after canonical coordinate fallback.' );
 oz_checkout_assert( 10900 === $carrier_quote->rates[0]->price->get_kopecks() && 109.0 === (float) ( $carrier_quote->rates[0]->meta['api_base_price_rub'] ?? 0 ) && 10.0 === (float) ( $carrier_quote->rates[0]->meta['insurance_total_rub'] ?? 0 ), 'Ozon buyer-facing checkout rate must include delivery and insurance from order_checkout.' );
 oz_checkout_assert( 2 === (int) ( $preliminary_cache_context['ozon_delivery_pricing_contract_version'] ?? 0 ), 'Ozon quote cache context must include the insurance-aware pricing contract version.' );
 oz_checkout_assert( isset( $http->calls[1] ) && str_ends_with( $http->calls[1]['url'], '/v1/order/checkout' ) && 92783 === (int) ( $http->calls[1]['body']['delivery']['delivery_point']['delivery_point_id'] ?? 0 ), 'Ozon preliminary quote must call order_checkout with the representative pickup point found from canonical coordinates.' );
 oz_checkout_assert( '+79131234567' === (string) ( $http->calls[1]['body']['recipient']['phone_number'] ?? '' ), 'Ozon preliminary quote must send normalized customer phone from WooCommerce AJAX post_data to order_checkout.' );
 $ozon_rate = $carrier_quote->rates[0];
+$tracking_comment = OzonDeliveryCustomerCommentProvider::TRACKING_COMMENT;
+$refusal_109_comment = OzonDeliveryCustomerCommentProvider::REFUSAL_PREFIX . '109' . OzonDeliveryCustomerCommentProvider::REFUSAL_SUFFIX;
+$refusal_149_comment = OzonDeliveryCustomerCommentProvider::REFUSAL_PREFIX . '149' . OzonDeliveryCustomerCommentProvider::REFUSAL_SUFFIX;
+$refusal_decimal_comment = OzonDeliveryCustomerCommentProvider::REFUSAL_PREFIX . '149,50' . OzonDeliveryCustomerCommentProvider::REFUSAL_SUFFIX;
+oz_checkout_assert( array( $tracking_comment, $refusal_109_comment ) === $comment_provider->customer_comments( $ozon_rate ), 'Ozon provider must use final rate price when promo crossed_price is absent.' );
+oz_checkout_assert( array( $tracking_comment, $refusal_149_comment ) === $comment_provider->customer_comments( oz_checkout_rate_with_price( $ozon_rate, 9900, 14900 ) ), 'Ozon provider must use crossed_price as the refusal amount when promo shipping applies.' );
+oz_checkout_assert( array( $tracking_comment, $refusal_decimal_comment ) === $comment_provider->customer_comments( oz_checkout_rate_with_price( $ozon_rate, 9900, 14950 ) ), 'Ozon provider must format refusal amount with comma kopecks and no float drift.' );
+$orchestrator_reflection = new ReflectionClass( \WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator::class );
+$orchestrator_stub = $orchestrator_reflection->newInstanceWithoutConstructor();
+$comment_method = $orchestrator_reflection->getMethod( 'rate_with_carrier_customer_comments' );
+$comment_method->setAccessible( true );
+$commented_rate = $comment_method->invoke( $orchestrator_stub, oz_checkout_rate_with_price( $ozon_rate, 9900, 14900 ), $runtime_carrier );
+oz_checkout_assert( $commented_rate instanceof DeliveryRate && array( $tracking_comment, $refusal_149_comment ) === ( $commented_rate->meta['customer_comments'] ?? null ), 'Generic orchestrator enrichment must preserve carrier-owned customer comments in rate meta.' );
+oz_checkout_assert( 1 === count( array_keys( $commented_rate->comments, $tracking_comment, true ) ) && 1 === count( array_keys( $commented_rate->comments, $refusal_149_comment, true ) ), 'Generic orchestrator enrichment must append Ozon comments once without duplicates.' );
+$mapped_commented_rate = ( new WooCommerceRateMapper() )->map( $commented_rate )['meta_data'];
+oz_checkout_assert( in_array( $tracking_comment, $mapped_commented_rate['comments'] ?? array(), true ) && in_array( $refusal_149_comment, $mapped_commented_rate['comments'] ?? array(), true ) && array( $tracking_comment, $refusal_149_comment ) === ( $mapped_commented_rate['customer_comments'] ?? null ), 'WooCommerce mapper must expose Ozon comments for checkout rendering and authoritative pickup snapshot persistence.' );
 $snapshot = is_array( $ozon_rate->meta['pickup_provider_query'] ?? null ) ? $ozon_rate->meta['pickup_provider_query'] : array();
 oz_checkout_assert( array() !== $snapshot && 'ozon_delivery' === (string) ( $snapshot['carrier_key'] ?? '' ) && 'destination_pickup' === (string) ( $snapshot['purpose'] ?? '' ), 'Ozon rate must carry canonical pickup_provider_query snapshot.' );
 oz_checkout_assert( 'country=RU|location_id=650000' === (string) ( $snapshot['destination_fingerprint'] ?? '' ) && 'country=RU|location_id=650000' === (string) ( $snapshot['provider_destination_fingerprint'] ?? '' ), 'Ozon pickup_provider_query must carry the generic destination fingerprint.' );
@@ -232,7 +279,7 @@ oz_checkout_assert( '' === (string) $preliminary_cache_context['ozon_delivery_se
 $selected_quote = $runtime_carrier->quote( $selected_request );
 $last_call = $http->calls[ count( $http->calls ) - 1 ] ?? array();
 oz_checkout_assert( 1 === count( $selected_quote->rates ) && str_ends_with( (string) ( $last_call['url'] ?? '' ), '/v1/order/checkout' ) && 92784 === (int) ( $last_call['body']['delivery']['delivery_point']['delivery_point_id'] ?? 0 ), 'Selected Ozon point must trigger authoritative second order_checkout quote with selected delivery_point_id.' );
-$same_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $mapped_request );
+$same_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger() ) )->quote( $mapped_request );
 $same_snapshot = is_array( $same_quote->rates[0]->meta['pickup_provider_query'] ?? null ) ? $same_quote->rates[0]->meta['pickup_provider_query'] : array();
 oz_checkout_assert( (string) $snapshot['destination_fingerprint'] === (string) ( $same_snapshot['destination_fingerprint'] ?? '' ), 'Ozon destination fingerprint must remain stable for the same canonical destination.' );
 $other_session = new CheckoutSessionManager();
@@ -240,7 +287,7 @@ $other_session->save_city_context( array( 'location_id' => 650001, 'city_name' =
 $other_location_db = new wpdb();
 $other_location_db->locations = array( array( 'id' => 650001, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ) );
 $other_request = ( new WooCommercePackageMapper( null, $other_session, null, new LocationRepository( $other_location_db ) ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
-$other_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, new Logger() ) )->quote( $other_request );
+$other_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger() ) )->quote( $other_request );
 $other_snapshot = is_array( $other_quote->rates[0]->meta['pickup_provider_query'] ?? null ) ? $other_quote->rates[0]->meta['pickup_provider_query'] : array();
 oz_checkout_assert( 'country=RU|location_id=650001' === (string) ( $other_snapshot['destination_fingerprint'] ?? '' ) && (string) $snapshot['destination_fingerprint'] !== (string) $other_snapshot['destination_fingerprint'], 'Ozon destination fingerprint must change when the canonical destination changes.' );
 $session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'country_code' => 'RU' ) );
