@@ -17,7 +17,7 @@ final class OzonDeliveryQuoteParser {
 	public function parse( array $data, array $request_ids, string $point_id, int $shipment_method_id, int $http_status = 200 ): OzonDeliveryQuoteResult {
 		$results = $data['results'] ?? null;
 		if ( ! is_array( $results ) || array_is_list( $data ) || count( $results ) !== count( $request_ids ) ) {
-			throw new OzonDeliveryQuoteException( 'ozon_quote_response_malformed', 'order_checkout', $http_status, 'Ozon Delivery вернул некорректный ответ расчета.' );
+			throw new OzonDeliveryQuoteException( 'ozon_quote_response_malformed', 'order_checkout', $http_status, 'Ozon Delivery вернул некорректный ответ расчета.', $this->response_summary( $results ) );
 		}
 		$expected = array_fill_keys( array_map( 'intval', $request_ids ), true );
 		$total = Money::from_kopecks( 0 );
@@ -27,17 +27,17 @@ final class OzonDeliveryQuoteParser {
 		$normalized = array();
 		foreach ( $results as $result ) {
 			if ( ! is_array( $result ) ) {
-				throw new OzonDeliveryQuoteException( 'ozon_quote_result_malformed', 'order_checkout', $http_status, 'Ozon Delivery вернул некорректный результат расчета.' );
+				throw new OzonDeliveryQuoteException( 'ozon_quote_result_malformed', 'order_checkout', $http_status, 'Ozon Delivery вернул некорректный результат расчета.', $this->response_summary( $results ) );
 			}
 			$request_id = (int) ( $result['request_id'] ?? 0 );
 			if ( $request_id <= 0 || ! isset( $expected[ $request_id ] ) ) {
-				throw new OzonDeliveryQuoteException( 'ozon_quote_request_id_mismatch', 'order_checkout', $http_status, 'Ozon Delivery вернул неожиданный request_id.' );
+				throw new OzonDeliveryQuoteException( 'ozon_quote_request_id_mismatch', 'order_checkout', $http_status, 'Ozon Delivery вернул неожиданный request_id.', $this->response_summary( $results ) );
 			}
 			unset( $expected[ $request_id ] );
 			if ( is_array( $result['error'] ?? null ) ) {
 				$error = $result['error'];
 				$code = $this->sanitizer->code( $error['code'] ?? '' ) ?: 'ozon_quote_carrier_error';
-				throw new OzonDeliveryQuoteException( $code, 'order_checkout', $http_status, $this->sanitizer->sanitize( $error['message'] ?? null, 'Ozon Delivery не рассчитал доставку.' ) );
+				throw new OzonDeliveryQuoteException( $code, 'order_checkout', $http_status, $this->sanitizer->sanitize( $error['message'] ?? null, 'Ozon Delivery не рассчитал доставку.' ), $this->response_summary( $results ) );
 			}
 			$posting = is_array( $result['posting'] ?? null ) ? $result['posting'] : array();
 			$delivery_kopecks = $this->money_kopecks( $posting['estimated_delivery_cost'] ?? null, 'ozon_quote_price_missing', 'ozon_quote_price_malformed', 'ozon_quote_currency_unexpected', 'Ozon Delivery не вернул стоимость доставки.', $http_status );
@@ -61,7 +61,7 @@ final class OzonDeliveryQuoteParser {
 			);
 		}
 		if ( array() !== $expected || $total->is_zero() ) {
-			throw new OzonDeliveryQuoteException( 'ozon_quote_incomplete', 'order_checkout', $http_status, 'Ozon Delivery вернул неполный расчет.' );
+			throw new OzonDeliveryQuoteException( 'ozon_quote_incomplete', 'order_checkout', $http_status, 'Ozon Delivery вернул неполный расчет.', $this->response_summary( $results ) );
 		}
 
 		return new OzonDeliveryQuoteResult(
@@ -104,5 +104,69 @@ final class OzonDeliveryQuoteParser {
 
 	private function rubles( int $kopecks ): string {
 		return number_format( $kopecks / 100, 2, '.', '' );
+	}
+
+	/** @return array<string,mixed> */
+	private function response_summary( mixed $results ): array {
+		if ( ! is_array( $results ) ) {
+			return array(
+				'results_count' => 0,
+				'usable_results_count' => 0,
+				'failed_results_count' => 0,
+				'ozon_results' => array(),
+			);
+		}
+		$usable = 0;
+		$failed = 0;
+		$summaries = array();
+		foreach ( array_slice( $results, 0, 20 ) as $result ) {
+			if ( ! is_array( $result ) ) {
+				++$failed;
+				continue;
+			}
+			if ( is_array( $result['posting'] ?? null ) && ! is_array( $result['error'] ?? null ) ) {
+				++$usable;
+			} else {
+				++$failed;
+			}
+			$summary = $this->result_summary( $result );
+			if ( array() !== $summary ) {
+				$summaries[] = $summary;
+			}
+		}
+
+		return array(
+			'results_count' => count( $results ),
+			'usable_results_count' => $usable,
+			'failed_results_count' => $failed,
+			'ozon_results' => $summaries,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 * @return array<string,int|string|bool>
+	 */
+	private function result_summary( array $result ): array {
+		$summary = array();
+		if ( is_scalar( $result['request_id'] ?? null ) ) {
+			$summary['request_id'] = (int) $result['request_id'];
+		}
+		$error = is_array( $result['error'] ?? null ) ? $result['error'] : array();
+		foreach ( array( 'error_code', 'code', 'status', 'availability' ) as $key ) {
+			$value = $error[ $key ] ?? $result[ $key ] ?? null;
+			if ( is_scalar( $value ) && '' !== trim( (string) $value ) ) {
+				$summary[ $key ] = $this->sanitizer->code( $value ) ?: $this->sanitizer->sanitize( $value, '' );
+			}
+		}
+		$message = $error['message'] ?? $result['message'] ?? null;
+		if ( is_scalar( $message ) ) {
+			$summary['message'] = $this->sanitizer->sanitize( $message, '' );
+		}
+		if ( is_array( $result['posting'] ?? null ) ) {
+			$summary['posting_present'] = true;
+		}
+
+		return $summary;
 	}
 }

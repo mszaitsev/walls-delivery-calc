@@ -180,10 +180,16 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		foreach ( array( 'places_count', 'total_weight_g', 'max_place_weight_g' ) as $key ) {
 			if ( array_key_exists( $key, $details ) && is_scalar( $details[ $key ] ) ) { $context[ $key ] = $details[ $key ]; }
 		}
-		foreach ( array( 'courier_coordinate_source', 'courier_location_id' ) as $key ) {
+		foreach ( array( 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'shipment_method_id', 'postings_count', 'results_count', 'usable_results_count', 'failed_results_count' ) as $key ) {
 			if ( array_key_exists( $key, $details ) && is_scalar( $details[ $key ] ) ) { $context[ $key ] = $details[ $key ]; }
 		}
 		if ( isset( $details['places'] ) && is_array( $details['places'] ) ) { $context['places'] = $details['places']; }
+		$postings = $this->safe_success_rows( $details['postings'] ?? null, array( 'request_id', 'shipment_method_id', 'weight_g', 'length_mm', 'width_mm', 'height_mm', 'declared_value_amount', 'declared_value_currency' ) );
+		if ( array() !== $postings ) { $context['postings'] = $postings; }
+		if ( is_array( $details['postings'] ?? null ) && count( $details['postings'] ) > count( $postings ) ) { $context['postings_truncated'] = true; }
+		$ozon_results = $this->safe_success_rows( $details['ozon_results'] ?? null, array( 'request_id', 'error_code', 'code', 'message', 'status', 'availability', 'posting_present' ) );
+		if ( array() !== $ozon_results ) { $context['ozon_results'] = $ozon_results; }
+		if ( is_array( $details['ozon_results'] ?? null ) && count( $details['ozon_results'] ) > count( $ozon_results ) ) { $context['ozon_results_truncated'] = true; }
 		if ( isset( $details['places_truncated'] ) ) { $context['places_truncated'] = (bool) $details['places_truncated']; }
 		foreach ( array( 'rows_in_bbox', 'valid_base_points', 'base_point_rejected', 'outside_radius', 'inside_radius', 'accepted', 'min_weight_rejected', 'max_weight_rejected', 'dimension_rejected', 'cargo_weight_rejected', 'cargo_dimensions_rejected', 'cargo_other_rejected', 'cargo_rejected', 'points_with_all_3_dimension_limits', 'points_with_partial_dimension_limits', 'points_without_dimension_limits', 'points_with_min_weight', 'points_without_min_weight', 'points_with_max_weight', 'points_without_max_weight', 'highest_max_weight_g' ) as $key ) {
 			if ( array_key_exists( $key, $pickup ) && is_scalar( $pickup[ $key ] ) ) { $context[ $key ] = $pickup[ $key ]; }

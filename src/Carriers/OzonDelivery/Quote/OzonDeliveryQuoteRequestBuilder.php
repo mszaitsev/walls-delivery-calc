@@ -131,6 +131,8 @@ final class OzonDeliveryQuoteRequestBuilder {
 				'endpoint' => 'POST /v1/order/checkout',
 				'shipment_method_id' => $shipment_method_id,
 				'packages_count' => count( $postings ),
+				'postings_count' => count( $postings ),
+				'request_postings' => $this->postings_summary( $postings ),
 				'total_declared_value_rub' => $this->money_amount( $total_declared_kopecks ),
 				'declared_value_per_posting_rub' => $declared,
 				'declared_value_rub' => $declared,
@@ -153,6 +155,30 @@ final class OzonDeliveryQuoteRequestBuilder {
 		}
 
 		return $this->courier_location;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $postings
+	 * @return array<int,array<string,int|string>>
+	 */
+	private function postings_summary( array $postings ): array {
+		$summary = array();
+		foreach ( array_slice( $postings, 0, 20 ) as $posting ) {
+			$dimensions = is_array( $posting['dimensions'] ?? null ) ? $posting['dimensions'] : array();
+			$declared = is_array( $posting['declared_value'] ?? null ) ? $posting['declared_value'] : array();
+			$summary[] = array(
+				'request_id' => (int) ( $posting['request_id'] ?? 0 ),
+				'shipment_method_id' => (int) ( $posting['shipment_method_id'] ?? 0 ),
+				'weight_g' => (int) ( $dimensions['weight_g'] ?? 0 ),
+				'length_mm' => (int) ( $dimensions['length_mm'] ?? 0 ),
+				'width_mm' => (int) ( $dimensions['width_mm'] ?? 0 ),
+				'height_mm' => (int) ( $dimensions['height_mm'] ?? 0 ),
+				'declared_value_amount' => is_scalar( $declared['amount'] ?? null ) ? (string) $declared['amount'] : '',
+				'declared_value_currency' => is_scalar( $declared['currency_code'] ?? null ) ? (string) $declared['currency_code'] : '',
+			);
+		}
+
+		return $summary;
 	}
 
 	private function money_amount( int $kopecks ): string {

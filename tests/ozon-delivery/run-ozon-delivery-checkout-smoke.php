@@ -67,10 +67,15 @@ final class OzonCheckoutSmokeHttp implements OzonDeliveryHttpClientInterface {
 	public array $calls = array();
 	public string $delivery_cost_rub = '99.00';
 	public string $insurance_cost_rub = '10.00';
+	public bool $courier_availability_error = false;
 	public function request( string $method, string $url, array $args = array() ): OzonDeliveryApiResponse {
 		$body = json_decode( (string) ( $args['body'] ?? '{}' ), true );
 		$this->calls[] = array( 'method' => $method, 'url' => $url, 'body' => is_array( $body ) ? $body : array() );
 		if ( str_contains( $url, '/oauth/token' ) ) { return new OzonDeliveryApiResponse( 200, '{"access_token":"token","expires_in":9999999999,"token_type":"bearer","scope":["delivery-api.all"]}', array() ); }
+		if ( $this->courier_availability_error && isset( $body['delivery']['courier'] ) ) {
+			$first = is_array( $body['postings'][0] ?? null ) ? $body['postings'][0] : array();
+			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'results' => array( array( 'request_id' => (int) ( $first['request_id'] ?? 101 ), 'error' => array( 'code' => 'delivery_availability_error', 'message' => 'Courier is unavailable for coordinates', 'recipient' => 'Иван Иванов', 'phone_number' => '+79131234567', 'full_address' => 'Новосибирск, Красный проспект', 'secret' => 'do-not-log' ), 'phone_number' => '+79130000000', 'full_address' => 'Новосибирск, улица Ленина', 'secret' => 'top-secret' ) ) ) ) ?: '{}', array() );
+		}
 		$results = array();
 		foreach ( is_array( $body['postings'] ?? null ) ? $body['postings'] : array() as $posting ) {
 			$results[] = array( 'request_id' => (int) ( $posting['request_id'] ?? 0 ), 'posting' => array( 'estimated_delivery_cost' => array( 'amount' => $this->delivery_cost_rub, 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => $this->insurance_cost_rub, 'currency_code' => 'RUB' ), 'estimated_delivery_days' => 5 ) );
@@ -210,6 +215,23 @@ oz_checkout_assert( DeliveryType::PICKUP === $two_rate_quote->rates[0]->delivery
 $courier_call = $http->calls[ count( $http->calls ) - 1 ] ?? array();
 oz_checkout_assert( 43 === (int) ( $courier_call['body']['postings'][0]['shipment_method_id'] ?? 0 ) && isset( $courier_call['body']['delivery']['courier']['coordinates'] ) && ! isset( $courier_call['body']['delivery']['delivery_point'] ), 'Ozon courier rate must call order_checkout with the official courier coordinates delivery object.' );
 oz_checkout_assert( 55.030199 === (float) ( $courier_call['body']['delivery']['courier']['coordinates']['latitude'] ?? 0 ) && 82.92043 === (float) ( $courier_call['body']['delivery']['courier']['coordinates']['longitude'] ?? 0 ), 'Ozon courier rate must use LocationRepository coordinates for the selected location.' );
+$failure_http = new OzonCheckoutSmokeHttp();
+$failure_http->courier_availability_error = true;
+$failure_api = new OzonDeliveryApiClient( $failure_http, new OzonDeliveryAccessTokenService( $credentials, $failure_http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
+$failure_service = new OzonDeliveryQuoteService( $failure_api, new OzonDeliveryQuoteRequestBuilder( $settings, null, null, $courier_location_resolver ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
+$failure_runtime = new OzonDeliveryCarrier( $settings, $credentials, $failure_service, $comment_provider, new Logger(), null, $courier_location_resolver );
+$logs_before_failure = count( $GLOBALS['oz_checkout_logs'] );
+$failed_courier_quote = $failure_runtime->quote( oz_checkout_with_delivery_type( $mapped_request, DeliveryType::COURIER ) );
+$failure_log = $GLOBALS['oz_checkout_logs'][ $logs_before_failure ] ?? array();
+$failure_context = is_array( $failure_log['context'] ?? null ) ? $failure_log['context'] : array();
+oz_checkout_assert( ! $failed_courier_quote->success && 'delivery_availability_error' === $failed_courier_quote->error_code && 2 === count( $failure_http->calls ) && 'warning' === (string) ( $failure_log['level'] ?? '' ), 'Courier delivery_availability_error must still be treated as unavailable after the Ozon API is reached.' );
+oz_checkout_assert( 'location_repository' === (string) ( $failure_context['courier_coordinate_source'] ?? '' ) && 650000 === (int) ( $failure_context['courier_location_id'] ?? 0 ) && 55.030199 === (float) ( $failure_context['courier_latitude'] ?? 0 ) && 82.92043 === (float) ( $failure_context['courier_longitude'] ?? 0 ) && 43 === (int) ( $failure_context['shipment_method_id'] ?? 0 ), 'Failure log context must include DB location coordinates and courier shipment_method_id.' );
+$failure_postings = is_array( $failure_context['postings'] ?? null ) ? $failure_context['postings'] : array();
+oz_checkout_assert( 1 === (int) ( $failure_context['postings_count'] ?? 0 ) && 1 === count( $failure_postings ) && 1000 === (int) ( $failure_postings[0]['weight_g'] ?? 0 ) && 100 === (int) ( $failure_postings[0]['length_mm'] ?? 0 ) && '1000.00' === (string) ( $failure_postings[0]['declared_value_amount'] ?? '' ) && 'RUB' === (string) ( $failure_postings[0]['declared_value_currency'] ?? '' ), 'Failure log context must include safe posting dimensions and declared value summary.' );
+$failure_results = is_array( $failure_context['ozon_results'] ?? null ) ? $failure_context['ozon_results'] : array();
+oz_checkout_assert( 1 === (int) ( $failure_context['results_count'] ?? 0 ) && 0 === (int) ( $failure_context['usable_results_count'] ?? -1 ) && 1 === (int) ( $failure_context['failed_results_count'] ?? 0 ) && 1 === count( $failure_results ) && 'delivery_availability_error' === (string) ( $failure_results[0]['code'] ?? '' ), 'Failure log context must include safe normalized Ozon result summary.' );
+$failure_context_json = wp_json_encode( $failure_context ) ?: '';
+oz_checkout_assert( ! str_contains( $failure_context_json, '+7913' ) && ! str_contains( $failure_context_json, 'Иван' ) && ! str_contains( $failure_context_json, 'Красный' ) && ! str_contains( $failure_context_json, 'Ленина' ) && ! str_contains( $failure_context_json, 'secret' ), 'Failure log context must not contain phone, recipient, address, secret or raw response fields.' );
 $mapped_request = oz_checkout_with_delivery_type( $mapped_request, DeliveryType::PICKUP );
 $preliminary_cache_context = $runtime_carrier->quote_cache_context( $mapped_request );
 $carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger(), null, $courier_location_resolver ) )->quote( $mapped_request );
