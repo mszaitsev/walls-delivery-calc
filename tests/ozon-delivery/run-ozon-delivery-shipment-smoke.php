@@ -170,7 +170,13 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			}
 			$postings = array();
 			foreach ( is_array( $body['posting_numbers'] ?? null ) ? $body['posting_numbers'] : array() as $number ) {
-				$postings[] = array( 'posting_number' => (string) $number, 'status' => $this->statuses[ (string) $number ] ?? 'CREATED', 'status_changed_at' => '2026-08-30T12:00:00Z' );
+				$postings[] = array(
+					'posting_number' => (string) $number,
+					'status' => $this->statuses[ (string) $number ] ?? 'CREATED',
+					'status_changed_at' => '2026-08-30T12:00:00Z',
+					'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ),
+					'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ),
+				);
 			}
 			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'postings' => $postings ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
 		}
@@ -383,10 +389,54 @@ $manual_stored = ( new OrderShipmentRepository() )->find_by_carrier( $manual_ord
 $manual_payload = $manual_stack['adapter']->status_payload( $manual_order, $manual_stored );
 oz_ship_assert( ! empty( $manual_attach['success'] ) && 'MANUAL-OZON-1' === (string) ( $manual_attach['tracking_number'] ?? '' ), 'Ozon manual attach must accept a posting_number through the existing generic manual attach payload.' );
 oz_ship_assert( 'MANUAL-OZON-1' === (string) ( $manual_stored['ozon_postings'][0]['posting_number'] ?? '' ) && 'ON_WAY' === (string) ( $manual_stored['ozon_statuses'][0]['status'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $manual_stored['universal_status_code'] ?? '' ), 'Ozon manual attach must persist the official posting/info status through the settings-backed mapper.' );
-oz_ship_assert( empty( $manual_stored['actual_cost_kopecks'] ) && empty( $manual_payload['has_actual_cost'] ), 'Ozon manual attach must not fabricate actual cost from estimated posting/info fields.' );
+oz_ship_assert( 11900 === (int) ( $manual_stored['actual_cost_kopecks'] ?? 0 ) && 'RUB' === (string) ( $manual_stored['actual_cost_currency'] ?? '' ) && 'carrier_api' === (string) ( $manual_stored['actual_cost_source'] ?? '' ) && OzonDeliveryShipmentService::MANUAL_ATTACH_ACTUAL_COST_SOURCE_DETAIL === (string) ( $manual_stored['actual_cost_source_detail'] ?? '' ) && ! empty( $manual_payload['has_actual_cost'] ), 'Ozon manual attach must persist posting/info delivery 109 + insurance 10 as canonical actual cost.' );
+oz_ship_assert( 10900 === (int) ( $manual_stored['response_snapshot']['delivery_cost_kopecks'] ?? 0 ) && 1000 === (int) ( $manual_stored['response_snapshot']['insurance_cost_kopecks'] ?? 0 ) && 11900 === (int) ( $manual_stored['response_snapshot']['total_cost_kopecks'] ?? 0 ), 'Ozon manual attach snapshot must keep only safe cost summary fields.' );
 $manual_stack['http']->statuses['MANUAL-OZON-1'] = 'DELIVERED';
 $manual_update = $manual_stack['adapter']->update_status( $manual_order );
 oz_ship_assert( ! empty( $manual_update['success'] ) && DeliveryStatus::DELIVERED === (string) ( $manual_update['shipment']['universal_status_code'] ?? '' ), 'Manual-attached Ozon shipment must use the normal status update path.' );
+
+$decimal_stack = oz_ship_stack( $db );
+$decimal_order = new OzonShipmentSmokeOrder( 85388, '85388', array() );
+$decimal_stack['http']->posting_info_responses[] = array(
+	'postings' => array(
+		array(
+			'posting_number' => 'MANUAL-DECIMAL',
+			'status' => 'READY_FOR_SHIPPING',
+			'status_changed_at' => '2026-08-30T12:00:00Z',
+			'estimated_delivery_cost' => array( 'amount' => '1250.50', 'currency_code' => 'RUB' ),
+			'estimated_insurance_cost' => array( 'amount' => '1250.50', 'currency_code' => 'RUB' ),
+			'recipient' => array( 'phone_number' => '+79990000000' ),
+			'delivery' => array( 'full_address' => 'secret address' ),
+		),
+	),
+);
+$decimal_attach = $decimal_stack['adapter']->attach_manual( $decimal_order, array( 'posting_number' => 'MANUAL-DECIMAL' ) );
+$decimal_stored = ( new OrderShipmentRepository() )->find_by_carrier( $decimal_order, OzonDeliverySettings::CARRIER_KEY );
+$decimal_snapshot_json = wp_json_encode( $decimal_stored['response_snapshot'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '';
+oz_ship_assert( ! empty( $decimal_attach['success'] ) && 250100 === (int) ( $decimal_stored['actual_cost_kopecks'] ?? 0 ), 'Ozon manual attach money parser must sum decimal strings without float drift.' );
+oz_ship_assert( ! str_contains( $decimal_snapshot_json, '+79990000000' ) && ! str_contains( $decimal_snapshot_json, 'secret address' ), 'Ozon manual attach response snapshot must not persist recipient PII or full address.' );
+
+foreach (
+	array(
+		'wrong currency' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'USD' ) ),
+		'missing insurance' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ) ),
+		'malformed amount' => array( 'estimated_delivery_cost' => array( 'amount' => '109.001', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ) ),
+	) as $case_name => $money_case
+) {
+	$invalid_money_stack = oz_ship_stack( $db );
+	$invalid_money_order = new OzonShipmentSmokeOrder( 85410 + strlen( $case_name ), '85410', array() );
+	$invalid_money_stack['http']->posting_info_responses[] = array(
+		'postings' => array(
+			array_merge(
+				array( 'posting_number' => 'MANUAL-BAD-' . strlen( $case_name ), 'status' => 'READY_FOR_SHIPPING', 'status_changed_at' => '2026-08-30T12:00:00Z' ),
+				$money_case
+			),
+		),
+	);
+	$invalid_money_attach = $invalid_money_stack['adapter']->attach_manual( $invalid_money_order, array( 'posting_number' => 'MANUAL-BAD-' . strlen( $case_name ) ) );
+	oz_ship_assert( empty( $invalid_money_attach['success'] ) && str_contains( (string) ( $invalid_money_attach['message'] ?? '' ), 'некорректную стоимость' ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $invalid_money_order, OzonDeliverySettings::CARRIER_KEY ), 'Ozon manual attach must fail closed on invalid posting/info money: ' . $case_name );
+}
+
 $manual_return_order = new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 103, 1, '1500.00' ) ) );
 $manual_return_stack = oz_ship_stack( $db );
 $manual_return_stack['http']->statuses['MANUAL-RETURN-1'] = 'ON_WAY';

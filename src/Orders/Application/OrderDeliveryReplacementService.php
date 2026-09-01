@@ -14,6 +14,8 @@ use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\ValueObjects\Location;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
@@ -793,6 +795,15 @@ final class OrderDeliveryReplacementService {
 				}
 				return $pickup;
 			}
+			if (
+				DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
+				&& ! empty( $rate['requires_pickup_point'] )
+				&& null !== $this->pickup_providers
+				&& '' !== $carrier
+				&& $this->pickup_providers->has( $carrier )
+			) {
+				return $this->canonical_registry_pickup_for_save( $rate, $pickup, $location, $carrier );
+			}
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				$postcode = trim( (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' ) );
 				if ( '' !== $postcode ) {
@@ -820,6 +831,147 @@ final class OrderDeliveryReplacementService {
 		$merged['postcode'] = $this->first_meaningful( $source['postcode'] ?? '', $source['point_postcode'] ?? '', $existing['postcode'] ?? '', $existing['point_postcode'] ?? '' );
 
 		return $merged;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $pickup
+	 * @param array<string,mixed> $location
+	 * @return array<string,mixed>
+	 */
+	private function canonical_registry_pickup_for_save( array $rate, array $pickup, array $location, string $carrier ): array {
+		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : ( is_array( $rate['meta'] ?? null ) ? $rate['meta'] : array() );
+		$query_snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : ( is_array( $rate['pickup_provider_query'] ?? null ) ? $rate['pickup_provider_query'] : array() );
+		$family = $this->first_meaningful( $rate['pickup_family'] ?? '', $meta['pickup_family'] ?? '', $query_snapshot['pickup_family'] ?? '', $carrier . ':pickup' );
+		$pickup_snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$pickup_carrier = $this->first_meaningful( $pickup['carrier_key'] ?? '', $pickup['carrier'] ?? '', $pickup_snapshot['carrier_key'] ?? '' );
+		$pickup_family = $this->first_meaningful( $pickup['pickup_family'] ?? '', $pickup_snapshot['pickup_family'] ?? '' );
+		$point_code = $this->first_meaningful( $pickup['point_code'] ?? '', $pickup['point_id'] ?? '', $pickup_snapshot['point_code'] ?? '', $pickup_snapshot['point_id'] ?? '' );
+		if ( $carrier !== $pickup_carrier || $family !== $pickup_family || '' === $point_code ) {
+			return array( '_wdc_error' => 'Выбранный пункт выдачи потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		$fingerprint = $this->first_meaningful( $query_snapshot['provider_destination_fingerprint'] ?? '', $query_snapshot['destination_fingerprint'] ?? '' );
+		$selection_fingerprint = $this->first_meaningful( $pickup['provider_destination_fingerprint'] ?? '', $pickup_snapshot['provider_destination_fingerprint'] ?? '', $pickup['destination_fingerprint'] ?? '', $pickup_snapshot['destination_fingerprint'] ?? '' );
+		if ( '' === $fingerprint || ! hash_equals( $fingerprint, $selection_fingerprint ) ) {
+			return array( '_wdc_error' => 'Выбранный пункт выдачи потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		$query = $this->registry_pickup_query_from_rate( $rate, $carrier, $query_snapshot );
+		$current_location_id = $this->positive_location_id( $location );
+		if ( null === $query || $current_location_id <= 0 || $query->location_id !== $current_location_id ) {
+			return array( '_wdc_error' => 'Выбранный пункт выдачи потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		$provider = $this->pickup_providers?->get( $carrier );
+		if ( null === $provider ) {
+			return array( '_wdc_error' => 'Выбранный пункт выдачи потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		try {
+			$resolved = $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, $point_code ) );
+		} catch ( \RuntimeException ) {
+			return array( '_wdc_error' => 'Выбранный пункт выдачи потерял актуальность. Выберите пункт ещё раз.' );
+		}
+		if ( ! $resolved instanceof PickupPoint ) {
+			return array( '_wdc_error' => 'Выбранный пункт выдачи потерял актуальность. Выберите пункт ещё раз.' );
+		}
+
+		return $this->registry_pickup_payload( $resolved, $carrier, $family, $fingerprint, $query->location_id, $query->country_code );
+	}
+
+	/** @param array<string,mixed> $rate @param array<string,mixed> $snapshot */
+	private function registry_pickup_query_from_rate( array $rate, string $carrier, array $snapshot ): ?CarrierPickupPointQuery {
+		$provider = $this->pickup_providers?->get( $carrier );
+		if ( null !== $provider && method_exists( $provider, 'query_from_snapshot' ) ) {
+			$query = $provider->query_from_snapshot( $snapshot );
+			return $query instanceof CarrierPickupPointQuery && array() === $query->validate() ? $query : null;
+		}
+		if (
+			$carrier !== (string) ( $snapshot['carrier_key'] ?? '' )
+			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
+			|| (int) ( $snapshot['location_id'] ?? 0 ) <= 0
+			|| '' === trim( (string) ( $snapshot['country_code'] ?? '' ) )
+		) {
+			return null;
+		}
+		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
+		$query = new CarrierPickupPointQuery(
+			$carrier,
+			(int) ( $snapshot['location_id'] ?? 0 ),
+			(string) ( $snapshot['country_code'] ?? 'RU' ),
+			'',
+			is_numeric( $snapshot['latitude'] ?? null ) ? (float) $snapshot['latitude'] : null,
+			is_numeric( $snapshot['longitude'] ?? null ) ? (float) $snapshot['longitude'] : null,
+			new PickupCargoConstraints(
+				(int) ( $cargo['weight_g'] ?? 0 ),
+				(int) ( $cargo['volume_cm3'] ?? 0 ),
+				(int) ( $cargo['max_dimension_cm'] ?? 0 ),
+				(int) ( $cargo['max_place_weight_g'] ?? 0 ),
+				max( 1, (int) ( $cargo['places_count'] ?? 1 ) )
+			),
+			(string) ( $snapshot['purpose'] ?? CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP ),
+			max( 1, (int) ( $snapshot['radius_km'] ?? 50 ) ),
+			max( 1, (int) ( $snapshot['limit'] ?? 50 ) )
+		);
+
+		return array() === $query->validate() ? $query : null;
+	}
+
+	private function registry_pickup_payload( PickupPoint $point, string $carrier, string $family, string $fingerprint, int $location_id, string $country_code ): array {
+		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
+		$type = $this->registry_presentation_value( $raw, 'presentation_type', $point->type );
+		if ( ! in_array( $type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
+			$type = 'unknown';
+		}
+		$title = $this->registry_presentation_value( $raw, 'presentation_title', 'Пункт выдачи' );
+		$point_name = $this->registry_presentation_value( $raw, 'point_name', '' );
+		$marker_type = $this->registry_presentation_value( $raw, 'marker_type', 'pickup' );
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+			$marker_type = 'pickup';
+		}
+		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', $point->comment );
+		$display_code = $this->registry_presentation_value( $raw, 'display_code', '' );
+		$requires_rate_refresh = $this->registry_boolean_value( $raw, 'requires_rate_refresh' );
+		$snapshot = array(
+			'carrier_key' => $carrier,
+			'service_key' => $carrier,
+			'pickup_family' => $family,
+			'point_code' => $point->code,
+			'point_id' => $point->code,
+			'point_type' => $type,
+			'point_type_label' => $title,
+			'point_title' => $title,
+			'card_title' => $title,
+			'point_name' => $point_name,
+			'point_address' => $point->address,
+			'address' => $point->address,
+			'city_name' => $point->city,
+			'region_name' => $point->region,
+			'lat' => $point->latitude,
+			'lng' => $point->longitude,
+			'work_time' => $point->work_time,
+			'description' => $point->comment,
+			'presentation_comment' => $comment,
+			'marker_type' => $marker_type,
+			'display_code' => $display_code,
+			'display_title' => trim( $title . ( '' !== $display_code ? ' ' . $display_code : '' ) ),
+			'location_id' => $location_id,
+			'country_code' => strtoupper( trim( $country_code ) ),
+			'destination_fingerprint' => $fingerprint,
+			'provider_destination_fingerprint' => $fingerprint,
+			'requires_rate_refresh' => $requires_rate_refresh,
+		);
+
+		return array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_name, 'requires_rate_refresh' => $requires_rate_refresh, 'snapshot' => $snapshot ) );
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_presentation_value( array $raw, string $key, string $default ): string {
+		$value = $raw[ $key ] ?? null;
+		return is_scalar( $value ) && '' !== trim( (string) $value ) ? trim( (string) $value ) : $default;
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_boolean_value( array $raw, string $key ): bool {
+		$value = $raw[ $key ] ?? false;
+		return true === $value || '1' === $value || 1 === $value || 'true' === $value;
 	}
 
 	/**

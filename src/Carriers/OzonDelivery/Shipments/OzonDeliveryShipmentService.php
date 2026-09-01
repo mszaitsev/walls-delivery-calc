@@ -9,10 +9,12 @@ use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupPointProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteException;
 use WallsShop\WDC\Carriers\OzonDelivery\Returns\OzonDeliveryReturnService;
+use WallsShop\WDC\Domain\Common\MoneyParser;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Shipments\Application\ShipmentActualCost;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationAttemptService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -20,6 +22,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryShipmentService {
 	public const CONTINUATION_TOKEN = 'ozon_delivery_approve_pending';
+	public const MANUAL_ATTACH_ACTUAL_COST_SOURCE_DETAIL = 'ozon_posting_info_estimated_delivery_plus_insurance';
 
 	public function __construct(
 		private OzonDeliveryApiClient $api,
@@ -289,6 +292,11 @@ final class OzonDeliveryShipmentService {
 		$raw_status = (string) ( $normalized[0]['status'] ?? '' );
 		$universal = $this->status_mapper()->aggregate( $statuses );
 		$listing = is_array( $response['postings'][0] ?? null ) ? $response['postings'][0] : array();
+		try {
+			$manual_cost = $this->manual_attach_actual_cost( $listing );
+		} catch ( \InvalidArgumentException ) {
+			return array( 'success' => false, 'message' => 'Ozon вернул некорректную стоимость отправления.' );
+		}
 		$posting = array(
 			'place_number' => 1,
 			'posting_number' => $posting_number,
@@ -322,9 +330,13 @@ final class OzonDeliveryShipmentService {
 				'posting_number' => $posting_number,
 				'order_number_present' => '' !== (string) ( $listing['order_number'] ?? '' ),
 				'status' => $raw_status,
-				'actual_cost_source' => 'not_available_in_posting_info_contract',
+				'delivery_cost_kopecks' => $manual_cost['delivery_cost_kopecks'],
+				'insurance_cost_kopecks' => $manual_cost['insurance_cost_kopecks'],
+				'total_cost_kopecks' => $manual_cost['actual_cost']->amount_kopecks,
+				'actual_cost_source_detail' => self::MANUAL_ATTACH_ACTUAL_COST_SOURCE_DETAIL,
 			),
 		);
+		$shipment = array_merge( $shipment, $manual_cost['actual_cost']->to_fields( $this->now() ) );
 		$this->repository->save_for_carrier( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
 		$this->attempts->mark_active_for_shipment( $order, OzonDeliverySettings::CARRIER_KEY, $shipment );
 
@@ -334,6 +346,47 @@ final class OzonDeliveryShipmentService {
 			'tracking_number' => $posting_number,
 			'shipment' => $shipment,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $posting
+	 * @return array{actual_cost:ShipmentActualCost,delivery_cost_kopecks:int,insurance_cost_kopecks:int}
+	 */
+	private function manual_attach_actual_cost( array $posting ): array {
+		$delivery = $this->posting_money_kopecks( $posting['estimated_delivery_cost'] ?? null );
+		$insurance = $this->posting_money_kopecks( $posting['estimated_insurance_cost'] ?? null );
+
+		return array(
+			'actual_cost' => new ShipmentActualCost(
+				$delivery + $insurance,
+				'RUB',
+				'carrier_api',
+				self::MANUAL_ATTACH_ACTUAL_COST_SOURCE_DETAIL,
+				$this->now()
+			),
+			'delivery_cost_kopecks' => $delivery,
+			'insurance_cost_kopecks' => $insurance,
+		);
+	}
+
+	private function posting_money_kopecks( mixed $money ): int {
+		if ( ! is_array( $money ) || 'RUB' !== strtoupper( trim( (string) ( $money['currency_code'] ?? '' ) ) ) ) {
+			throw new \InvalidArgumentException( 'Ozon posting money must be RUB.' );
+		}
+		if ( ! array_key_exists( 'amount', $money ) || ! is_scalar( $money['amount'] ) ) {
+			throw new \InvalidArgumentException( 'Ozon posting money amount is missing.' );
+		}
+		$amount = trim( str_replace( array( "\xc2\xa0", ' ' ), '', (string) $money['amount'] ) );
+		$amount = str_replace( ',', '.', $amount );
+		if ( 1 !== preg_match( '/^\d+(?:\.\d{1,2})?$/', $amount ) ) {
+			throw new \InvalidArgumentException( 'Ozon posting money amount is malformed.' );
+		}
+		$kopecks = MoneyParser::numeric_to_kopecks( $amount );
+		if ( null === $kopecks || $kopecks < 0 ) {
+			throw new \InvalidArgumentException( 'Ozon posting money amount is invalid.' );
+		}
+
+		return $kopecks;
 	}
 
 	/** @param array<int,array<string,mixed>> $postings @param array<int,array<string,string>> $statuses @param array<int,mixed> $previous_statuses @return array<int,array<string,mixed>> */
