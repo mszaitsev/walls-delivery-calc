@@ -55,6 +55,16 @@ final class OzonDeliveryCourierLocationResolver {
 
 	private function exact_address_location( QuoteRequest $request, int $location_id ): ?OzonDeliveryCourierLocation {
 		$context = $request->customer_context;
+		if ( true !== ( $context['dadata_trusted'] ?? false ) ) {
+			return null;
+		}
+		$trusted_location_id = max( 0, (int) ( $context['dadata_selected_location_id'] ?? 0 ) );
+		if ( $trusted_location_id !== $location_id ) {
+			return null;
+		}
+		if ( ! $this->trusted_location_fias_matches( $context ) ) {
+			return null;
+		}
 		$status = strtolower( trim( (string) ( $context['dadata_status'] ?? '' ) ) );
 		if ( ! in_array( $status, array( 'resolved', 'house_selected' ), true ) ) {
 			return null;
@@ -78,6 +88,24 @@ final class OzonDeliveryCourierLocationResolver {
 		) ) ?: '' );
 
 		return new OzonDeliveryCourierLocation( 'dadata_address', $location_id, $pair['latitude'], $pair['longitude'], null, null, $fingerprint );
+	}
+
+	/** @param array<string,mixed> $context */
+	private function trusted_location_fias_matches( array $context ): bool {
+		$selected = $this->normalize_piece( (string) ( $context['selected_location_fias_id'] ?? '' ) );
+		$trusted_selected = $this->normalize_piece( (string) ( $context['dadata_selected_location_fias_id'] ?? '' ) );
+		if ( '' !== $selected && '' !== $trusted_selected && $selected !== $trusted_selected ) {
+			return false;
+		}
+		$locality = array_values( array_filter( array(
+			$this->normalize_piece( (string) ( $context['dadata_city_fias_id'] ?? '' ) ),
+			$this->normalize_piece( (string) ( $context['dadata_settlement_fias_id'] ?? '' ) ),
+		) ) );
+		if ( '' === $selected || array() === $locality ) {
+			return true;
+		}
+
+		return in_array( $selected, $locality, true );
 	}
 
 	private function nearest_proxy_point( int $location_id, float $latitude, float $longitude ): OzonDeliveryCourierLocation {

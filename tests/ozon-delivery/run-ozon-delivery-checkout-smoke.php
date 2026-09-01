@@ -197,6 +197,59 @@ oz_checkout_assert( 650000 === (int) ( $mapped_request->customer_context['select
 oz_checkout_assert( 0 === $location_db->location_single_lookup_calls, 'WooCommerce mapper must not use fuzzy city-name lookup for Ozon preliminary coordinates.' );
 oz_checkout_assert( '+79131234567' === (string) ( $mapped_request->customer_context['recipient_phone'] ?? '' ), 'WooCommerce mapper must read and normalize current billing_phone from checkout AJAX post_data for Ozon pricing.' );
 oz_checkout_assert( ! array_key_exists( 'post_data', $mapped_request->customer_context ) && ! array_key_exists( 'billing_first_name', $mapped_request->customer_context ), 'WooCommerce mapper must not copy raw checkout post_data into quote customer context.' );
+$_POST['post_data'] = http_build_query(
+	array(
+		'billing_phone' => '+7 (913) 123-45-67',
+		'billing_address_1' => 'Тверская улица, д 1',
+		'billing_dadata_status' => 'resolved',
+		'billing_dadata_street' => 'Тверская улица',
+		'billing_dadata_house' => '1',
+		'billing_dadata_geo_lat' => '55.75511',
+		'billing_dadata_geo_lon' => '37.622396',
+	)
+);
+$forged_mapped = ( new WooCommercePackageMapper( null, $session, null, $location_repository ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск', 'address_1' => 'Тверская улица, д 1' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
+oz_checkout_assert( ! array_key_exists( 'dadata_trusted', $forged_mapped->customer_context ) && ! array_key_exists( 'dadata_geo_lat', $forged_mapped->customer_context ), 'WooCommerce mapper must ignore forged browser DaData status and coordinates when no server-confirmed evidence exists.' );
+$trusted_session = new CheckoutSessionManager();
+$trusted_session->save_city_context( array( 'location_id' => 650000, 'fias_id' => 'city-fias', 'city_name' => 'Новосибирск', 'country_code' => 'RU' ) );
+$trusted_items = $trusted_session->cache_dadata_address_suggestions(
+	'billing',
+	array( 'selected_location_id' => '650000', 'selected_location_fias_id' => 'city-fias' ),
+	array(
+		array(
+			'level' => 'house',
+			'isDeliverable' => true,
+			'unrestrictedValue' => '630099, Новосибирск, Тверская улица, д 1',
+			'data' => array(
+				'city_fias_id' => 'city-fias',
+				'street' => 'Тверская улица',
+				'street_with_type' => 'Тверская улица',
+				'house' => '1',
+				'geo_lat' => '55.75511',
+				'geo_lon' => '37.622396',
+			),
+		),
+	)
+);
+$trusted_session->confirm_dadata_address_evidence( (string) ( $trusted_items[0]['selection_token'] ?? '' ), 'billing' );
+$trusted_mapped = ( new WooCommercePackageMapper( null, $trusted_session, null, $location_repository ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск', 'address_1' => 'Тверская улица, д 1' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
+oz_checkout_assert( true === ( $trusted_mapped->customer_context['dadata_trusted'] ?? false ) && '55.75511' === (string) ( $trusted_mapped->customer_context['dadata_geo_lat'] ?? '' ) && '650000' === (string) ( $trusted_mapped->customer_context['dadata_selected_location_id'] ?? '' ), 'WooCommerce mapper must expose only session-confirmed DaData evidence as trusted pricing context.' );
+$_POST['post_data'] = http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67', 'billing_address_1' => 'Советская улица, д 99' ) );
+$tampered_mapped = ( new WooCommercePackageMapper( null, $trusted_session, null, $location_repository ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск', 'address_1' => 'Советская улица, д 99' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
+oz_checkout_assert( ! array_key_exists( 'dadata_trusted', $tampered_mapped->customer_context ), 'Manual address edit after trusted DaData selection must invalidate exact-address pricing evidence.' );
+$_POST['post_data'] = http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67', 'billing_address_1' => 'Тверская улица, д 1', 'ship_to_different_address' => '1', 'shipping_address_1' => 'Другая улица, д 2' ) );
+$shipping_mode_mapped = ( new WooCommercePackageMapper( null, $trusted_session, null, $location_repository ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск', 'address_1' => 'Другая улица, д 2' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
+oz_checkout_assert( ! array_key_exists( 'dadata_trusted', $shipping_mode_mapped->customer_context ), 'Billing trusted DaData evidence must not be used when shipping address is active.' );
+$fias_session = new CheckoutSessionManager();
+$fias_session->save_city_context( array( 'location_id' => 650000, 'fias_id' => 'AAA', 'city_name' => 'Новосибирск', 'country_code' => 'RU' ) );
+$fias_items = $fias_session->cache_dadata_address_suggestions( 'billing', array( 'selected_location_id' => '650000', 'selected_location_fias_id' => 'AAA' ), array( array( 'level' => 'house', 'isDeliverable' => true, 'data' => array( 'city_fias_id' => 'BBB', 'street' => 'Тверская улица', 'house' => '1', 'geo_lat' => '55.75511', 'geo_lon' => '37.622396' ) ) ) );
+$fias_session->confirm_dadata_address_evidence( (string) ( $fias_items[0]['selection_token'] ?? '' ), 'billing' );
+$_POST['post_data'] = http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67', 'billing_address_1' => 'Тверская улица, д 1' ) );
+$fias_mapped = ( new WooCommercePackageMapper( null, $fias_session, null, $location_repository ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск', 'address_1' => 'Тверская улица, д 1' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
+oz_checkout_assert( ! array_key_exists( 'dadata_trusted', $fias_mapped->customer_context ), 'Trusted DaData evidence with mismatched city/settlement FIAS must be rejected.' );
+$session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'country_code' => 'RU' ) );
+$session->clear_trusted_dadata_address_evidence();
+$_POST['post_data'] = http_build_query( array( 'billing_phone' => '+7 (913) 123-45-67', 'billing_first_name' => 'Smoke' ) );
 $settings_repo = new SettingsRepository();
 $settings = new OzonDeliverySettings( $settings_repo );
 $settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '43' ) );
@@ -244,11 +297,13 @@ oz_checkout_assert( 4 === (int) ( $preliminary_cache_context['ozon_delivery_pric
 oz_checkout_assert( 'source=ozon_pickup_proxy|location_id=650000|point_id=92783|lat=55.0301|lng=82.9201' === (string) ( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] ?? '' ), 'Ozon courier cache fingerprint must use proxy mode, selected location id and proxy point coordinates.' );
 $street_changed_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'street' => 'Советская', 'house' => '25', 'postcode' => '630099', 'destination_latitude' => 1, 'destination_longitude' => 2, 'lat' => 3, 'lng' => 4 ) ) );
 oz_checkout_assert( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] === ( $runtime_carrier->quote_cache_context( $street_changed_request )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Incomplete or untrusted street/house changes must not affect Ozon courier checkout cache while proxy mode is active.' );
-$exact_address_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '1', 'dadata_geo_lat' => '55.75511', 'dadata_geo_lon' => '37.622396' ) ) );
+$untrusted_exact_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '1', 'dadata_geo_lat' => '55.75511', 'dadata_geo_lon' => '37.622396' ) ) );
+oz_checkout_assert( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] === ( $runtime_carrier->quote_cache_context( $untrusted_exact_request )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Forged browser DaData coordinates without server trust must not affect Ozon courier checkout cache.' );
+$exact_address_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'dadata_trusted' => true, 'dadata_selected_location_id' => 650000, 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '1', 'dadata_geo_lat' => '55.75511', 'dadata_geo_lon' => '37.622396' ) ) );
 $area_calls_before_exact = $pickup_db->area_lookup_calls;
 $exact_cache_context = $runtime_carrier->quote_cache_context( $exact_address_request );
 oz_checkout_assert( str_starts_with( (string) ( $exact_cache_context['ozon_delivery_courier_location_fingerprint'] ?? '' ), 'source=dadata_address|location_id=650000|lat=55.75511|lng=37.622396|address=' ) && $area_calls_before_exact === $pickup_db->area_lookup_calls, 'Exact trusted DaData address coordinates must have priority over the proxy point and must not query pickup points.' );
-$exact_address_house2 = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '2', 'dadata_geo_lat' => '55.75520', 'dadata_geo_lon' => '37.622500' ) ) );
+$exact_address_house2 = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'dadata_trusted' => true, 'dadata_selected_location_id' => 650000, 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '2', 'dadata_geo_lat' => '55.75520', 'dadata_geo_lon' => '37.622500' ) ) );
 oz_checkout_assert( $exact_cache_context['ozon_delivery_courier_location_fingerprint'] !== ( $runtime_carrier->quote_cache_context( $exact_address_house2 )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Exact address house/coordinate changes must invalidate the courier checkout cache.' );
 $forged_browser_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'lat' => 1, 'lng' => 2, 'destination_latitude' => 3, 'destination_longitude' => 4 ) ) );
 oz_checkout_assert( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] === ( $runtime_carrier->quote_cache_context( $forged_browser_request )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Forged browser lat/lng aliases must be ignored by Ozon courier coordinate selection.' );

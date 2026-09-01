@@ -66,8 +66,8 @@ final class WooCommercePackageMapper {
 					'destination_longitude' => $coordinates['longitude'],
 					'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
 				),
-				$this->dadata_address_context(),
-				$customer_context
+				$this->strip_untrusted_dadata_context( $customer_context ),
+				$this->trusted_dadata_address_context( $address )
 			)
 		);
 	}
@@ -194,36 +194,144 @@ final class WooCommercePackageMapper {
 		return is_array( $parsed ) ? $parsed : array();
 	}
 
-	/** @return array<string,string> */
-	private function dadata_address_context(): array {
-		$parsed = $this->checkout_post_data();
-		if ( array() === $parsed ) {
+	/** @return array<string,mixed> */
+	private function trusted_dadata_address_context( Address $address ): array {
+		if ( ! $this->session_manager instanceof CheckoutSessionManager ) {
 			return array();
 		}
-		$prefixes = array();
-		$ship_to_different = $this->truthy( $parsed['ship_to_different_address'] ?? $_POST['ship_to_different_address'] ?? false );
-		if ( $ship_to_different ) {
-			$prefixes[] = 'shipping';
+		$evidence = $this->session_manager->trusted_dadata_address_evidence();
+		if ( array() === $evidence ) {
+			return array();
 		}
-		$prefixes[] = 'billing';
-
-		foreach ( $prefixes as $prefix ) {
-			$status = $this->post_scalar( $parsed, $prefix . '_dadata_status' );
-			if ( '' === $status || 'empty' === strtolower( $status ) ) {
-				continue;
-			}
-			$context = array( 'dadata_status' => $status );
-			foreach ( array( 'street', 'street_with_type', 'house', 'stead', 'flat', 'geo_lat', 'geo_lon', 'geo_lng' ) as $field ) {
-				$value = $this->post_scalar( $parsed, $prefix . '_dadata_' . $field );
-				if ( '' !== $value ) {
-					$context[ 'dadata_' . $field ] = $value;
-				}
-			}
-
-			return $context;
+		$parsed = $this->checkout_post_data();
+		$prefix = $this->active_checkout_prefix( $parsed );
+		if ( $prefix !== (string) ( $evidence['prefix'] ?? '' ) ) {
+			return array();
+		}
+		$location_id = $this->selected_location_id();
+		$evidence_location_id = trim( (string) ( $evidence['selected_location_id'] ?? '' ) );
+		if ( '' === $location_id || '' === $evidence_location_id || $location_id !== $evidence_location_id ) {
+			return array();
+		}
+		if ( ! $this->dadata_location_fias_matches( $evidence, $this->selected_location_fias_id( $address ) ) ) {
+			return array();
+		}
+		if ( ! $this->trusted_address_line_matches_current( $evidence, $parsed, $prefix, $address ) ) {
+			return array();
 		}
 
-		return array();
+		$context = array(
+			'dadata_trusted' => true,
+			'dadata_status' => (string) ( $evidence['status'] ?? 'resolved' ),
+			'dadata_prefix' => $prefix,
+			'dadata_selected_location_id' => $evidence_location_id,
+			'dadata_selected_location_fias_id' => (string) ( $evidence['selected_location_fias_id'] ?? '' ),
+			'dadata_geo_lat' => (string) ( $evidence['geo_lat'] ?? '' ),
+			'dadata_geo_lon' => (string) ( $evidence['geo_lon'] ?? '' ),
+			'dadata_value_hash' => (string) ( $evidence['value_hash'] ?? '' ),
+			'dadata_confirmed_at' => (string) ( $evidence['confirmed_at'] ?? '' ),
+		);
+		foreach ( array( 'region_fias_id', 'city_fias_id', 'settlement_fias_id', 'street', 'street_with_type', 'street_fias_id', 'house', 'stead', 'house_fias_id', 'flat' ) as $field ) {
+			$value = trim( (string) ( $evidence[ $field ] ?? '' ) );
+			if ( '' !== $value ) {
+				$context[ 'dadata_' . $field ] = $value;
+			}
+		}
+
+		return $context;
+	}
+
+	/** @param array<string,mixed> $context */
+	private function strip_untrusted_dadata_context( array $context ): array {
+		foreach ( array_keys( $context ) as $key ) {
+			if ( is_string( $key ) && str_starts_with( $key, 'dadata_' ) ) {
+				unset( $context[ $key ] );
+			}
+		}
+
+		return $context;
+	}
+
+	/** @param array<string,mixed> $parsed */
+	private function active_checkout_prefix( array $parsed ): string {
+		return $this->truthy( $parsed['ship_to_different_address'] ?? $_POST['ship_to_different_address'] ?? false ) ? 'shipping' : 'billing';
+	}
+
+	/** @param array<string,mixed> $evidence */
+	private function dadata_location_fias_matches( array $evidence, string $selected_fias_id ): bool {
+		$selected = $this->normalize_text( $selected_fias_id );
+		if ( '' === $selected ) {
+			return true;
+		}
+		$evidence_selected = $this->normalize_text( (string) ( $evidence['selected_location_fias_id'] ?? '' ) );
+		if ( '' !== $evidence_selected && $selected !== $evidence_selected ) {
+			return false;
+		}
+		$locality = array_filter(
+			array(
+				$this->normalize_text( (string) ( $evidence['city_fias_id'] ?? '' ) ),
+				$this->normalize_text( (string) ( $evidence['settlement_fias_id'] ?? '' ) ),
+			),
+			static fn( string $value ): bool => '' !== $value
+		);
+		if ( array() === $locality ) {
+			return true;
+		}
+
+		return in_array( $selected, $locality, true );
+	}
+
+	/**
+	 * @param array<string,mixed> $evidence
+	 * @param array<string,mixed> $parsed
+	 */
+	private function trusted_address_line_matches_current( array $evidence, array $parsed, string $prefix, Address $address ): bool {
+		$current = $this->normalize_text( $this->post_scalar( $parsed, $prefix . '_address_1' ) );
+		if ( '' === $current ) {
+			$current = $this->normalize_text( $address->street );
+		}
+		if ( '' === $current ) {
+			return false;
+		}
+
+		return in_array( $current, $this->trusted_address_candidates( $evidence ), true );
+	}
+
+	/** @param array<string,mixed> $evidence @return array<int,string> */
+	private function trusted_address_candidates( array $evidence ): array {
+		$street = trim( (string) ( $evidence['street_with_type'] ?? $evidence['street'] ?? '' ) );
+		$house = $this->house_with_type( $evidence );
+		$parts = array_filter(
+			array(
+				$street,
+				$house,
+				trim( (string) ( $evidence['flat'] ?? '' ) ),
+			),
+			static fn( string $value ): bool => '' !== trim( $value )
+		);
+		$candidates = array( implode( ', ', $parts ) );
+		if ( '' !== $street ) {
+			$candidates[] = $street;
+		}
+
+		return array_values( array_unique( array_filter( array_map( array( $this, 'normalize_text' ), $candidates ) ) ) );
+	}
+
+	/** @param array<string,mixed> $evidence */
+	private function house_with_type( array $evidence ): string {
+		$house = trim( (string) ( $evidence['house'] ?? '' ) );
+		if ( '' !== $house ) {
+			return 'д ' . $house;
+		}
+		$stead = trim( (string) ( $evidence['stead'] ?? '' ) );
+		return '' !== $stead ? 'уч ' . $stead : '';
+	}
+
+	private function normalize_text( string $value ): string {
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+		$value = str_replace( array( 'ё', 'Ё' ), array( 'е', 'е' ), $value );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
 	}
 
 	/** @param array<string,mixed> $source */
