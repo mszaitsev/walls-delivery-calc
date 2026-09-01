@@ -80,7 +80,7 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 		$snapshot = is_array( $context['courier_address_snapshot'] ?? null ) ? $context['courier_address_snapshot'] : array();
 		$normalized = array(
 			'success' => ! empty( $context['normalization_valid'] ) && array() !== $snapshot,
-			'message' => ! empty( $context['normalization_valid'] ) ? 'Адрес Ozon подтвержден из заказа.' : '',
+			'message' => ! empty( $context['normalization_valid'] ) ? 'Адрес для Ozon подтвержден.' : '',
 			'source' => (string) ( $snapshot['source'] ?? 'trusted_order_snapshot' ),
 			'fields' => $snapshot,
 			'display' => (string) ( $snapshot['normalized_address'] ?? $context['courier_original_address'] ?? '' ),
@@ -94,7 +94,7 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 			<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $encoded ); ?>" data-wdc-normalized-address-json>
 			<p>
 				<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Проанализировать адрес', 'walls-delivery-calc' ); ?></button>
-				<span class="description" data-wdc-normalized-status><?php echo ! empty( $context['normalization_valid'] ) ? esc_html__( 'Адрес подтвержден.', 'walls-delivery-calc' ) : esc_html__( 'Адрес нужно подтвердить перед созданием.', 'walls-delivery-calc' ); ?></span>
+				<span class="description" data-wdc-normalized-status><?php echo ! empty( $context['normalization_valid'] ) ? esc_html__( 'Адрес для Ozon подтвержден.', 'walls-delivery-calc' ) : esc_html__( 'Адрес нужно подтвердить перед созданием.', 'walls-delivery-calc' ); ?></span>
 			</p>
 			<label><?php echo esc_html__( 'Подтвержденный адрес', 'walls-delivery-calc' ); ?><input readonly data-wdc-normalized-address-display value="<?php echo esc_attr( (string) ( $snapshot['normalized_address'] ?? '' ) ); ?>"></label>
 			<div class="wdc-ozon-courier-address-grid" data-wdc-ozon-courier-address-grid>

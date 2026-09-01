@@ -296,7 +296,7 @@
       if (!isOzonCourierForm(form)) return false;
       updateOzonCourierFields(form, snapshot);
       if (payload.status) {
-        payload.status.textContent = snapshot.success ? 'Адрес Ozon подтвержден.' : (snapshot.message || 'Адрес Ozon не подтвержден.');
+        payload.status.textContent = snapshot.success ? 'Адрес для Ozon подтвержден.' : (snapshot.message || 'Адрес Ozon не подтвержден.');
       }
       return true;
     },

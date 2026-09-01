@@ -57,7 +57,7 @@ final class OzonDeliveryCourierAddressNormalizer {
 		$errors = $this->field_errors( $fields );
 		return array(
 			'success' => array() === $errors,
-			'message' => array() === $errors ? 'Адрес Ozon подтвержден через DaData.' : implode( ' ', $errors ),
+			'message' => array() === $errors ? 'Адрес для Ozon подтвержден.' : implode( ' ', $errors ),
 			'source' => 'dadata+ozon_delivery',
 			'fields' => $fields,
 			'display' => (string) ( $fields['normalized_address'] ?: $original_address ),

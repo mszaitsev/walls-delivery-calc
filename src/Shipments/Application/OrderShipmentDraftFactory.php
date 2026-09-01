@@ -996,7 +996,7 @@ final class OrderShipmentDraftFactory {
 		if ( array() !== $base_snapshot && $this->original_address_hash( $original_address ) === $this->original_address_hash( (string) ( $base->meta['courier_original_address'] ?? '' ) ) ) {
 			return array(
 				'success' => true,
-				'message' => 'Адрес Ozon подтвержден из заказа.',
+				'message' => 'Адрес для Ozon подтвержден.',
 				'source' => 'trusted_order_snapshot',
 				'fields' => $base_snapshot,
 				'display' => (string) ( $base_snapshot['normalized_address'] ?? $original_address ),

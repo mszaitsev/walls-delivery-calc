@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -246,6 +247,8 @@ final class OrderShipmentsMetabox {
 		if ( '' === $selected_delivery_type && array() !== $services ) {
 			$selected_delivery_type = (string) ( $services[0]['delivery_type'] ?? DeliveryType::PICKUP );
 		}
+		$is_ozon = OzonDeliverySettings::CARRIER_KEY === $carrier_key;
+		$render_courier_in_delivery_column = $is_ozon;
 		$selected_tariff_object = '';
 		$selected_service_tariffs = array();
 		$selected_tariff_has_declared_value = false;
@@ -356,17 +359,21 @@ final class OrderShipmentsMetabox {
 								<h3><?php echo esc_html__( 'Получатель', 'walls-delivery-calc' ); ?></h3>
 								<label><?php echo esc_html__( 'ФИО', 'walls-delivery-calc' ); ?><input name="recipient_name" value="<?php echo esc_attr( (string) ( $recipient['name'] ?? '' ) ); ?>"></label>
 								<label><?php echo esc_html__( 'Телефон', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
+								<?php if ( ! $is_ozon ) : ?>
 								<label>Email<input name="recipient_email" value="<?php echo esc_attr( (string) ( $recipient['email'] ?? '' ) ); ?>"></label>
+								<?php endif; ?>
 								<div data-wdc-pickup-section <?php echo DeliveryType::PICKUP === $delivery_type ? '' : 'hidden'; ?>>
 									<?php if ( $modal_extension instanceof CarrierShipmentModalExtensionInterface ) : ?>
 										<?php $modal_extension->render_pickup_fields( $order, $draft, $modal_extension_context ); ?>
 									<?php endif; ?>
 								</div>
+								<?php if ( ! $render_courier_in_delivery_column ) : ?>
 								<div data-wdc-courier-section <?php echo DeliveryType::COURIER === $delivery_type ? '' : 'hidden'; ?>>
 									<?php if ( $modal_extension instanceof CarrierShipmentModalExtensionInterface ) : ?>
 										<?php $modal_extension->render_courier_fields( $order, $draft, $modal_extension_context ); ?>
 									<?php endif; ?>
 								</div>
+								<?php endif; ?>
 							</section>
 							<section>
 								<h3><?php echo esc_html__( 'Доставка', 'walls-delivery-calc' ); ?></h3>
@@ -376,6 +383,13 @@ final class OrderShipmentsMetabox {
 										<option value="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-service-key="<?php echo esc_attr( (string) $service['service_key'] ); ?>" data-delivery-type="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-tariffs="<?php echo esc_attr( wp_json_encode( $service['tariffs'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '[]' ); ?>" <?php selected( $selected_delivery_type, (string) $service['delivery_type'] ); ?>><?php echo esc_html( (string) $service['title'] ); ?></option>
 									<?php endforeach; ?>
 								</select></label>
+								<?php if ( $render_courier_in_delivery_column ) : ?>
+								<div class="wdc-shipment-delivery-column-courier" data-wdc-shipment-delivery-column-courier data-wdc-courier-section <?php echo DeliveryType::COURIER === $delivery_type ? '' : 'hidden'; ?>>
+									<?php if ( $modal_extension instanceof CarrierShipmentModalExtensionInterface ) : ?>
+										<?php $modal_extension->render_courier_fields( $order, $draft, $modal_extension_context ); ?>
+									<?php endif; ?>
+								</div>
+								<?php endif; ?>
 								<?php if ( $requires_tariff ) : ?>
 								<label><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?><select name="tariff_object" data-wdc-tariff-select data-selected-tariff="<?php echo esc_attr( $selected_tariff_object ); ?>" <?php disabled( ! $has_selected_service_tariffs ); ?>>
 									<?php foreach ( $selected_service_tariffs as $tariff ) : ?>

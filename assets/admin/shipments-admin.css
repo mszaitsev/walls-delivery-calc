@@ -211,6 +211,11 @@
   box-sizing: border-box;
 }
 
+.wdc-shipment-delivery-column-courier {
+  min-width: 0;
+  margin: 0 0 10px;
+}
+
 .wdc-shipment-modal {
   position: fixed;
   inset: 0;

@@ -240,6 +240,8 @@ assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier raw/lega
 
 form = makeCourierForm(validCourierSnapshot());
 assert.strictEqual(hooks.createAvailability(form), true, 'Ozon courier valid trusted snapshot may enable create immediately.');
+hooks.afterAddressNormalized({ form, snapshot: validCourierSnapshot(), status: form.statusNode, display: form.displayInput });
+assert.strictEqual(form.statusNode.textContent, 'Адрес для Ozon подтвержден.', 'Successful Ozon courier analysis must use the clearer success wording.');
 
 form = makeCourierForm(validCourierSnapshot({ fields: Object.assign({}, validCourierSnapshot().fields, { house: '', stead: '' }) }));
 assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier DaData result without house or stead must keep create disabled.');
