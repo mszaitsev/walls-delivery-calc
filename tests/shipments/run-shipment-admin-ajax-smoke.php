@@ -621,7 +621,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.144.4',
+		'0.144.5',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $adapter ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);

@@ -35,7 +35,7 @@
   function formatCmList(values) {
     return values.map(function (value) {
       var rounded = Math.round(Number(value || 0) * 100) / 100;
-      return String(rounded).replace(/\.?0+$/, '').replace('.', ',');
+      return String(rounded).replace('.', ',');
     }).join(' × ') + ' см';
   }
 

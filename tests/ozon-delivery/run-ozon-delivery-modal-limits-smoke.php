@@ -131,9 +131,32 @@ assert.strictEqual(hooks.createAvailability(form), true, '30x50x50 must pass rot
 
 form = makeForm([{ weightG: 9000, lengthCm: 51, widthCm: 30, heightCm: 20 }]);
 assert.strictEqual(hooks.createAvailability(form), false, '51x30x20 must exceed the longest Ozon limit.');
+assert.match(form.warning.textContent, /51 × 30 × 20 см/, 'Warning must preserve integer dimension digits in the actual parcel size.');
+assert.match(form.warning.textContent, /50 × 50 × 30 см/, 'Warning must preserve integer dimension digits in the selected point limits.');
+assert.doesNotMatch(form.warning.textContent, /5 × 5 × 3 см/, 'Warning must not strip trailing zeroes from integer dimensions.');
 
 form = makeForm([{ weightG: 9000, lengthCm: 40, widthCm: 40, heightCm: 40 }]);
 assert.strictEqual(hooks.createAvailability(form), false, '40x40x40 must fail rotated 50x50x30 limits.');
+
+form = makeForm([{ weightG: 9000, lengthCm: 51, widthCm: 12, heightCm: 12 }]);
+assert.strictEqual(hooks.createAvailability(form), false, '51x12x12 must exceed the longest Ozon limit.');
+assert.match(form.warning.textContent, /51 × 12 × 12 см/, 'Live-like 51x12x12 warning must show 51, not a truncated value.');
+assert.match(form.warning.textContent, /50 × 50 × 30 см/, 'Live-like 51x12x12 warning must show the full selected point limit.');
+
+form = makeForm([{ weightG: 9000, lengthCm: 50, widthCm: 52, heightCm: 12 }]);
+assert.strictEqual(hooks.createAvailability(form), false, '50x52x12 must exceed the longest Ozon limit after sorting.');
+assert.match(form.warning.textContent, /52 × 50 × 12 см/, 'Sorted warning must preserve 50 as 50.');
+assert.doesNotMatch(form.warning.textContent, /52 × 5 × 12 см/, 'Sorted warning must not show 50 as 5.');
+
+form = makeForm([{ weightG: 9000, lengthCm: 100, widthCm: 12.5, heightCm: 12.25 }], {
+  maxLengthMm: '900',
+  maxWidthMm: '300',
+  maxHeightMm: '300'
+});
+assert.strictEqual(hooks.createAvailability(form), false, '100x12.5x12.25 must exceed a 90 cm longest limit.');
+assert.match(form.warning.textContent, /100 × 12,5 × 12,25 см/, 'Formatter must preserve 100 and decimal significant digits.');
+assert.match(form.warning.textContent, /90 × 30 × 30 см/, 'Formatter must preserve 30 in selected point limits.');
+assert.doesNotMatch(form.warning.textContent, /12,50/, 'Formatter must not add artificial trailing decimal zeroes.');
 
 form = makeForm([
   { weightG: 9000, lengthCm: 50, widthCm: 30, heightCm: 20 },
