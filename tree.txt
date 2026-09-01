@@ -348,6 +348,8 @@ C:.
 |   |   |   |
 |   |   |   +---Quote
 |   |   |           OzonDeliveryCourierAddressMapper.php
+|   |   |           OzonDeliveryCourierLocation.php
+|   |   |           OzonDeliveryCourierLocationResolver.php
 |   |   |           OzonDeliveryPackagingBuilderFactory.php
 |   |   |           OzonDeliveryQuoteException.php
 |   |   |           OzonDeliveryQuoteParser.php

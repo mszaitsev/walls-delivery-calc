@@ -9,16 +9,19 @@ use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Packaging\PackagingParcel;
 use WallsShop\WDC\Packaging\PackagingResult;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryQuoteRequestBuilder {
 	private RussianPhoneNormalizer $phones;
 	private OzonDeliveryCourierAddressMapper $courier_address;
+	private ?OzonDeliveryCourierLocationResolver $courier_location;
 
-	public function __construct( private OzonDeliverySettings $settings, ?RussianPhoneNormalizer $phones = null, ?OzonDeliveryCourierAddressMapper $courier_address = null ) {
+	public function __construct( private OzonDeliverySettings $settings, ?RussianPhoneNormalizer $phones = null, ?OzonDeliveryCourierAddressMapper $courier_address = null, ?OzonDeliveryCourierLocationResolver $courier_location = null ) {
 		$this->phones = $phones ?? new RussianPhoneNormalizer();
 		$this->courier_address = $courier_address ?? new OzonDeliveryCourierAddressMapper();
+		$this->courier_location = $courier_location;
 	}
 
 	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
@@ -55,13 +58,19 @@ final class OzonDeliveryQuoteRequestBuilder {
 			throw new OzonDeliveryQuoteException( 'ozon_courier_shipment_method_missing', 'order_checkout', 0, 'Не указан метод доставки Ozon курьером.' );
 		}
 
+		$location = $this->courier_location()->resolve( $request );
+
 		return $this->build_for_delivery(
 			$request,
 			$packaging,
 			$shipment_method_id,
-			$this->courier_address->delivery( $request ),
+			$this->courier_address->delivery( $location ),
 			array(
 				'delivery_type' => 'courier',
+				'courier_coordinate_source' => 'location_repository',
+				'courier_location_id' => $location->location_id,
+				'courier_latitude' => $location->latitude,
+				'courier_longitude' => $location->longitude,
 				'courier_coordinates_present' => true,
 			)
 		);
@@ -136,6 +145,14 @@ final class OzonDeliveryQuoteRequestBuilder {
 		}
 
 		return $this->settings->quote_fallback_phone();
+	}
+
+	private function courier_location(): OzonDeliveryCourierLocationResolver {
+		if ( ! $this->courier_location instanceof OzonDeliveryCourierLocationResolver ) {
+			$this->courier_location = new OzonDeliveryCourierLocationResolver( new LocationRepository() );
+		}
+
+		return $this->courier_location;
 	}
 
 	private function money_amount( int $kopecks ): string {

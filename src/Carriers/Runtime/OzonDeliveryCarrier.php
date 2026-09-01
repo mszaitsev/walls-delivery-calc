@@ -10,6 +10,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Checkout\OzonDeliveryCustomerCommentProv
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryCourierAddressMapper;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryCourierLocationResolver;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteException;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteResult;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
@@ -21,6 +22,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -40,9 +42,11 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		private OzonDeliveryQuoteService $quotes,
 		private OzonDeliveryCustomerCommentProvider $customer_comments,
 		private Logger $logger,
-		private ?OzonDeliveryCourierAddressMapper $courier_address = null
+		private ?OzonDeliveryCourierAddressMapper $courier_address = null,
+		private ?OzonDeliveryCourierLocationResolver $courier_location = null
 	) {
 		$this->courier_address ??= new OzonDeliveryCourierAddressMapper();
+		$this->courier_location ??= new OzonDeliveryCourierLocationResolver( new LocationRepository() );
 	}
 
 	public function get_identity(): CarrierIdentity {
@@ -134,15 +138,13 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 
 		return array(
-			'ozon_delivery_pricing_contract_version' => 3,
+			'ozon_delivery_pricing_contract_version' => 4,
 			'ozon_delivery_pickup_shipment_method_id' => $this->settings->pickup_shipment_method_id(),
 			'ozon_delivery_courier_shipment_method_id' => $this->settings->courier_shipment_method_id(),
 			'ozon_delivery_pricing_gate' => $this->settings->pricing_live_confirmed() ? 'live_confirmed' : 'closed',
 			'ozon_delivery_requested_delivery_type' => (string) ( $request->customer_context['delivery_type'] ?? '' ),
 			'ozon_delivery_selected_point_id' => (string) ( $selection['point_code'] ?? $selection['point_id'] ?? $snapshot['point_code'] ?? '' ),
-			'ozon_delivery_destination_latitude' => (string) ( $request->customer_context['destination_latitude'] ?? $request->customer_context['selected_location_latitude'] ?? $request->customer_context['lat'] ?? '' ),
-			'ozon_delivery_destination_longitude' => (string) ( $request->customer_context['destination_longitude'] ?? $request->customer_context['selected_location_longitude'] ?? $request->customer_context['lng'] ?? '' ),
-			'ozon_delivery_courier_address_fingerprint' => $this->courier_address->fingerprint( $request ),
+			'ozon_delivery_courier_location_fingerprint' => $this->courier_location_fingerprint( $request ),
 			'ozon_delivery_declared_value_kopecks' => $request->package->declared_value->get_kopecks() ?: $request->order_total->get_kopecks(),
 			'ozon_delivery_package_weight_g' => $request->package->get_total_weight_g(),
 			'ozon_delivery_package_volume_cm3' => $request->package->get_total_volume_cm3(),
@@ -178,6 +180,9 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		foreach ( array( 'places_count', 'total_weight_g', 'max_place_weight_g' ) as $key ) {
 			if ( array_key_exists( $key, $details ) && is_scalar( $details[ $key ] ) ) { $context[ $key ] = $details[ $key ]; }
 		}
+		foreach ( array( 'courier_coordinate_source', 'courier_location_id' ) as $key ) {
+			if ( array_key_exists( $key, $details ) && is_scalar( $details[ $key ] ) ) { $context[ $key ] = $details[ $key ]; }
+		}
 		if ( isset( $details['places'] ) && is_array( $details['places'] ) ) { $context['places'] = $details['places']; }
 		if ( isset( $details['places_truncated'] ) ) { $context['places_truncated'] = (bool) $details['places_truncated']; }
 		foreach ( array( 'rows_in_bbox', 'valid_base_points', 'base_point_rejected', 'outside_radius', 'inside_radius', 'accepted', 'min_weight_rejected', 'max_weight_rejected', 'dimension_rejected', 'cargo_weight_rejected', 'cargo_dimensions_rejected', 'cargo_other_rejected', 'cargo_rejected', 'points_with_all_3_dimension_limits', 'points_with_partial_dimension_limits', 'points_without_dimension_limits', 'points_with_min_weight', 'points_without_min_weight', 'points_with_max_weight', 'points_without_max_weight', 'highest_max_weight_g' ) as $key ) {
@@ -195,6 +200,11 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			'packages_count' => $result->package_count,
 		);
 		foreach ( array( 'total_weight_g', 'goods_weight_g', 'packaging_weight_g', 'packing_strategy', 'selected_box_format', 'total_declared_value_rub', 'declared_value_per_posting_rub', 'delivery_total_rub', 'insurance_total_rub', 'total_rub' ) as $key ) {
+			if ( array_key_exists( $key, $meta ) && is_scalar( $meta[ $key ] ) ) {
+				$context[ $key ] = $meta[ $key ];
+			}
+		}
+		foreach ( array( 'shipment_method_id', 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude' ) as $key ) {
 			if ( array_key_exists( $key, $meta ) && is_scalar( $meta[ $key ] ) ) {
 				$context[ $key ] = $meta[ $key ];
 			}
@@ -294,6 +304,15 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			$result->price,
 			$result->delivery_days
 		);
+	}
+
+	private function courier_location_fingerprint( QuoteRequest $request ): string {
+		try {
+			return $this->courier_address->fingerprint( $this->courier_location->resolve( $request ) );
+		} catch ( OzonDeliveryQuoteException $exception ) {
+			$location_id = max( 0, (int) ( $request->customer_context['selected_location_id'] ?? 0 ) );
+			return 'location_id=' . $location_id . '|missing=' . $exception->safe_code;
+		}
 	}
 
 	/** @param array<string,mixed> $meta */
