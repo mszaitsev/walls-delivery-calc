@@ -247,6 +247,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 		public function query( string $query ): int|bool {
 			$this->queries[] = $query;
+			if ( str_contains( $query, 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( $query ) ), 'DELETE ' ) ) {
+				$this->apply_country_delete_query( $query );
+			}
+			if ( str_contains( $query, 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( $query ) ), 'INSERT ' ) ) {
+				$this->apply_country_upsert_query( $query );
+			}
 			if ( preg_match( '/DROP INDEX ([a-z_]+) ON/', $query, $m ) ) {
 				unset( $this->jet_status_indexes[ $m[1] ] );
 			}
@@ -264,6 +270,51 @@ if ( ! class_exists( 'wpdb' ) ) {
 				}
 			}
 			return 1;
+		}
+		private function apply_country_delete_query( string $query ): void {
+			if ( ! preg_match( '/service_id = ([0-9]+)/', $query, $service_match ) ) {
+				return;
+			}
+			$service_id = (int) $service_match[1];
+			$countries = array();
+			if ( preg_match( '/country_code IN \\(([^)]+)\\)/', $query, $country_match ) ) {
+				preg_match_all( "/'([^']+)'/", $country_match[1], $matches );
+				$countries = array_map( 'strval', $matches[1] ?? array() );
+			}
+			$this->countries = array_values(
+				array_filter(
+					$this->countries,
+					static function ( array $row ) use ( $service_id, $countries ): bool {
+						if ( (int) ( $row['service_id'] ?? 0 ) !== $service_id ) {
+							return true;
+						}
+						if ( array() === $countries ) {
+							return false;
+						}
+						return ! in_array( (string) ( $row['country_code'] ?? '' ), $countries, true );
+					}
+				)
+			);
+		}
+		private function apply_country_upsert_query( string $query ): void {
+			if ( ! preg_match_all( "/\\(([0-9]+), '([^']+)', '([^']+)'\\)/", $query, $matches, PREG_SET_ORDER ) ) {
+				return;
+			}
+			foreach ( $matches as $match ) {
+				$service_id = (int) $match[1];
+				$country = (string) $match[2];
+				foreach ( $this->countries as $row ) {
+					if ( (int) ( $row['service_id'] ?? 0 ) === $service_id && (string) ( $row['country_code'] ?? '' ) === $country ) {
+						continue 2;
+					}
+				}
+				$this->countries[] = array(
+					'id' => ++$this->insert_id,
+					'service_id' => $service_id,
+					'country_code' => $country,
+					'created_at' => (string) $match[3],
+				);
+			}
 		}
 		public function get_var( string $query ): mixed {
 			if ( str_contains( $query, 'GET_LOCK' ) ) {

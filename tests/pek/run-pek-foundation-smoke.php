@@ -642,7 +642,7 @@ $manager->ensure_builtin_services();
 pek_assert( array( 'RU' ) === $countries->countries( (int) $pek_service->id ), 'PEK repeated boot must keep existing RU.' );
 $countries->replace_countries( (int) $pek_service->id, array( 'RU', 'KZ' ) );
 $manager->ensure_builtin_services();
-pek_assert( array( 'RU', 'KZ' ) === $countries->countries( (int) $pek_service->id ), 'PEK repeated ensure must not overwrite custom RU+KZ.' );
+pek_assert( array( 'KZ', 'RU' ) === $countries->countries( (int) $pek_service->id ), 'PEK repeated ensure must not overwrite custom RU+KZ.' );
 $countries->replace_countries( (int) $pek_service->id, array() );
 $manager->ensure_builtin_services();
 pek_assert( array() === $countries->countries( (int) $pek_service->id ), 'PEK explicit empty country selection must remain empty after boot.' );
