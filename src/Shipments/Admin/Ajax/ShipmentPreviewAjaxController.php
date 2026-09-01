@@ -274,14 +274,62 @@ final class ShipmentPreviewAjaxController {
 
 	/** @return array<string,string> */
 	private function ozon_address_context_from_request( object $order, array $data ): array {
+		return $this->ozon_server_owned_address_context( $order );
+	}
+
+	/** @return array<string,string> */
+	private function ozon_server_owned_address_context( object $order ): array {
+		$location_id = '';
+		$location_fias_id = '';
+		$structured = ( new \WallsShop\WDC\Shipments\Application\OrderStructuredAddressReader() )->trusted_snapshot( $order );
+		if ( $structured instanceof \WallsShop\WDC\Shipments\Application\OrderStructuredAddress ) {
+			$location_id = $structured->string( 'selected_location_id' );
+			$location_fias_id = $structured->string( 'selected_location_fias_id' );
+		}
+		if ( '' === $location_id && method_exists( $order, 'get_meta' ) ) {
+			$location_id = $this->first_context_string( $order->get_meta( '_wdc_platform_location_id', true ) );
+		}
+		if ( '' === $location_fias_id && method_exists( $order, 'get_meta' ) ) {
+			$location_fias_id = $this->first_context_string( $order->get_meta( '_wdc_platform_location_fias_id', true ) );
+		}
+		$calculation = $this->order_array_meta( $order, '_wdc_delivery_calculation_data' );
+		$rate_meta = $this->order_array_meta( $order, '_wdc_platform_rate_meta' );
+		if ( '' === $location_id ) {
+			$location_id = $this->first_context_string(
+				$calculation['destination']['location_id'] ?? null,
+				$rate_meta['location_id'] ?? null,
+				$rate_meta['location']['location_id'] ?? null
+			);
+		}
+		if ( '' === $location_fias_id ) {
+			$location_fias_id = $this->first_context_string(
+				$calculation['destination']['location_fias_id'] ?? null,
+				$rate_meta['location_fias_id'] ?? null,
+				$rate_meta['location']['location_fias_id'] ?? null
+			);
+		}
+
 		return array_filter(
 			array(
 				'country_code' => 'RU',
-				'selected_location_id' => sanitize_text_field( wp_unslash( $data['recipient_location_id'] ?? $data['location_id'] ?? ( method_exists( $order, 'get_meta' ) ? (string) $order->get_meta( '_wdc_platform_location_id', true ) : '' ) ) ),
-				'selected_location_fias_id' => sanitize_text_field( wp_unslash( $data['recipient_location_fias_id'] ?? $data['fias_id'] ?? ( method_exists( $order, 'get_meta' ) ? (string) $order->get_meta( '_wdc_platform_location_fias_id', true ) : '' ) ) ),
+				'selected_location_id' => $location_id,
+				'selected_location_fias_id' => $location_fias_id,
 			),
 			static fn( string $value ): bool => '' !== trim( $value )
 		);
+	}
+
+	private function first_context_string( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			if ( is_scalar( $value ) ) {
+				$value = sanitize_text_field( (string) $value );
+				if ( '' !== trim( $value ) ) {
+					return $value;
+				}
+			}
+		}
+
+		return '';
 	}
 
 	private function recipient_location_context_from_request( object $order, array $data = array() ): array {

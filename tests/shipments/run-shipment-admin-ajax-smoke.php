@@ -431,6 +431,72 @@ foreach ( array_keys( $controllers ) as $class ) {
 }
 require_once $root . '/src/Shipments/Admin/OrderShipmentsMetabox.php';
 
+/**
+ * @param class-string $controller_class
+ * @param array<string,mixed> $meta
+ * @param array<string,mixed> $data
+ * @return array<string,string>
+ */
+function shipment_admin_ajax_ozon_context( string $controller_class, array $meta, array $data = array() ): array {
+	$order = new ShipmentAdminAjaxSmokeOrder( random_int( 10000, 20000 ), $meta );
+	$reflection = new ReflectionClass( $controller_class );
+	$controller = $reflection->newInstanceWithoutConstructor();
+	$method = $reflection->getMethod( 'ozon_address_context_from_request' );
+	$method->setAccessible( true );
+	if ( 2 === $method->getNumberOfParameters() ) {
+		return $method->invoke( $controller, $order, $data );
+	}
+	$_POST = $data;
+	return $method->invoke( $controller, $order );
+}
+
+$forged_ozon_context_data = array(
+	'recipient_location_id' => '999',
+	'recipient_location_fias_id' => 'FAKE-FIAS',
+	'location_id' => '998',
+	'fias_id' => 'FAKE-FIAS-2',
+);
+$server_order_meta = array(
+	'_wdc_platform_location_id' => '123',
+	'_wdc_platform_location_fias_id' => 'REAL-FIAS',
+);
+foreach (
+	array(
+		\WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAddressAjaxController::class,
+		\WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController::class,
+		\WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController::class,
+	) as $ozon_context_controller
+) {
+	$context = shipment_admin_ajax_ozon_context( $ozon_context_controller, $server_order_meta, $forged_ozon_context_data );
+	shipment_admin_ajax_assert( '123' === (string) ( $context['selected_location_id'] ?? '' ) && 'REAL-FIAS' === (string) ( $context['selected_location_fias_id'] ?? '' ), 'Ozon courier AJAX address context must ignore forged browser location identity for ' . $ozon_context_controller );
+	shipment_admin_ajax_assert( ! in_array( '999', $context, true ) && ! in_array( 'FAKE-FIAS', $context, true ), 'Ozon courier AJAX address context must not contain forged browser location/FIAS for ' . $ozon_context_controller );
+}
+
+$trusted_snapshot_meta = array(
+	\WallsShop\WDC\Shipments\Application\OrderStructuredAddress::META_KEY => array(
+		'source' => 'dadata_checkout',
+		'address_role' => 'shipping',
+		'selected_location_id' => '123',
+		'selected_location_fias_id' => 'REAL-FIAS',
+		'country' => 'Россия',
+		'country_code' => 'RU',
+		'region' => 'Новосибирская обл',
+		'city' => 'г Новосибирск',
+		'street' => 'ул Ленина',
+		'house' => '10',
+		'postcode' => '630005',
+		'geo_lat' => '55.0415',
+		'geo_lon' => '82.9346',
+	),
+	'_wdc_platform_location_id' => '777',
+	'_wdc_platform_location_fias_id' => 'STALE-FIAS',
+);
+$trusted_context = shipment_admin_ajax_ozon_context( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentPreviewAjaxController::class, $trusted_snapshot_meta, $forged_ozon_context_data );
+shipment_admin_ajax_assert( '123' === (string) ( $trusted_context['selected_location_id'] ?? '' ) && 'REAL-FIAS' === (string) ( $trusted_context['selected_location_fias_id'] ?? '' ), 'Trusted structured order snapshot must have priority over stale legacy order location meta for Ozon courier normalization.' );
+
+$no_identity_context = shipment_admin_ajax_ozon_context( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentCreateAjaxController::class, array(), $forged_ozon_context_data );
+shipment_admin_ajax_assert( ! isset( $no_identity_context['selected_location_id'] ) && ! isset( $no_identity_context['selected_location_fias_id'] ), 'Ozon courier AJAX address context must not use browser location/FIAS when no server-owned identity exists.' );
+
 $metabox_class = new ReflectionClass( \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox::class );
 $metabox_instance = $metabox_class->newInstanceWithoutConstructor();
 foreach ( $controller_properties as $class => $property_name ) {
@@ -621,7 +687,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.147.0',
+		'0.147.1',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $adapter ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);

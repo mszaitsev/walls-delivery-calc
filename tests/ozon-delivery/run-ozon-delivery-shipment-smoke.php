@@ -41,6 +41,12 @@ use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentService;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentCreationStatusPolicy;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapping;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapper;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryCourierAddressNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
@@ -84,6 +90,70 @@ function oz_ship_assert( bool $condition, string $message ): void {
 		throw new RuntimeException( $message );
 	}
 }
+
+final class OzonShipmentSmokeSuggestionClient implements AddressSuggestionClientInterface {
+	/** @var array<string,string> */
+	public array $last_context = array();
+
+	/** @param array<string,string> $context @return array<string,mixed> */
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		unset( $stage, $query );
+		$this->last_context = $context;
+		return array(
+			'success' => true,
+			'status_code' => 200,
+			'suggestions' => array(
+				array(
+					'value' => 'г Новосибирск, ул Ленина, д 10',
+					'unrestricted_value' => '630005, Новосибирская обл, г Новосибирск, ул Ленина, д 10',
+					'data' => array(
+						'fias_level' => '8',
+						'region_with_type' => 'Новосибирская обл',
+						'region_fias_id' => 'region-fias',
+						'city_with_type' => 'г Новосибирск',
+						'city_fias_id' => 'dadata-city-fias',
+						'street_with_type' => 'ул Ленина',
+						'street_fias_id' => 'street-fias',
+						'house' => '10',
+						'house_fias_id' => 'house-fias',
+						'postal_code' => '630005',
+						'geo_lat' => '55.0415',
+						'geo_lon' => '82.9346',
+					),
+				),
+			),
+		);
+	}
+}
+
+$GLOBALS['oz_ship_options'] = array(
+	'wdc_core_settings' => array(
+		'dadata_suggestions_enabled' => true,
+		DaDataTokenPool::OPTION_KEY => array(
+			array( 'id' => 'token-1', 'enabled' => true, 'encrypted_token' => 'encrypted' ),
+		),
+	),
+);
+$suggestion_client = new OzonShipmentSmokeSuggestionClient();
+$ozon_normalizer = new OzonDeliveryCourierAddressNormalizer(
+	new AddressSuggestionService(
+		new AddressSuggestionSettings( new SettingsRepository(), new EncryptionService(), new DaDataTokenPool( new SettingsRepository(), new EncryptionService() ) ),
+		$suggestion_client,
+		new AddressSuggestionNormalizer()
+	)
+);
+$normalized = $ozon_normalizer->normalize(
+	'630005, Новосибирск, Ленина, 10',
+	array(
+		'selected_location_id' => '123',
+		'selected_location_fias_id' => 'REAL-FIAS',
+	)
+);
+$normalized_fields = is_array( $normalized['fields'] ?? null ) ? $normalized['fields'] : array();
+oz_ship_assert( ! empty( $normalized['success'] ), 'Ozon courier address normalizer must accept a server-side deliverable DaData suggestion.' );
+oz_ship_assert( '123' === (string) ( $normalized_fields['selected_location_id'] ?? '' ) && 'REAL-FIAS' === (string) ( $normalized_fields['selected_location_fias_id'] ?? '' ), 'Ozon courier address normalizer must copy selected location identity from server context.' );
+oz_ship_assert( 'ул Ленина' === (string) ( $normalized_fields['street'] ?? '' ) && '10' === (string) ( $normalized_fields['house'] ?? '' ) && '630005' === (string) ( $normalized_fields['postcode'] ?? '' ) && '55.0415' === (string) ( $normalized_fields['geo_lat'] ?? '' ) && '82.9346' === (string) ( $normalized_fields['geo_lon'] ?? '' ), 'Ozon courier address normalizer must keep exact safe DaData address fields.' );
+oz_ship_assert( 'RU' === (string) ( $suggestion_client->last_context['country_code'] ?? '' ) && '123' === (string) ( $suggestion_client->last_context['selected_location_id'] ?? '' ), 'Ozon courier address normalizer must pass server context to AddressSuggestionService.' );
 
 final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,body:array<string,mixed>,headers:array<string,mixed>}> */

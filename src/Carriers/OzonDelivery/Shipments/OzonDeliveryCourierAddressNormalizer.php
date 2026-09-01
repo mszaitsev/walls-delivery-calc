@@ -22,24 +22,24 @@ final class OzonDeliveryCourierAddressNormalizer {
 		}
 		foreach ( is_array( $response['items'] ?? null ) ? $response['items'] : array() as $item ) {
 			if ( is_array( $item ) && ! empty( $item['isDeliverable'] ) ) {
-				return $this->from_item( $item, $original_address );
+				return $this->from_item( $item, $original_address, $context );
 			}
 		}
 
 		return $this->failure( 'Адрес распознан недостаточно точно. Уточните улицу и дом.', $original_address );
 	}
 
-	/** @param array<string,mixed> $item @return array<string,mixed> */
-	private function from_item( array $item, string $original_address ): array {
+	/** @param array<string,mixed> $item @param array<string,string> $context @return array<string,mixed> */
+	private function from_item( array $item, string $original_address, array $context ): array {
 		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
 		$fields = array(
 			'selected_location_id' => $this->text( $context['selected_location_id'] ?? '' ),
 			'selected_location_fias_id' => $this->text( $context['selected_location_fias_id'] ?? '' ),
 			'country' => 'Россия',
 			'country_code' => 'RU',
-			'region' => $this->text( $data['region_with_type'] ?? $data['region'] ?? '' ),
-			'city' => $this->text( $data['settlement_with_type'] ?? $data['settlement'] ?? $data['city_with_type'] ?? $data['city'] ?? '' ),
-			'street' => $this->text( $data['street_with_type'] ?? $data['street'] ?? '' ),
+			'region' => $this->first_text( $data['region_with_type'] ?? '', $data['region'] ?? '' ),
+			'city' => $this->first_text( $data['settlement_with_type'] ?? '', $data['settlement'] ?? '', $data['city_with_type'] ?? '', $data['city'] ?? '' ),
+			'street' => $this->first_text( $data['street_with_type'] ?? '', $data['street'] ?? '' ),
 			'street_with_type' => $this->text( $data['street_with_type'] ?? '' ),
 			'house' => $this->text( $data['house'] ?? '' ),
 			'stead' => $this->text( $data['stead'] ?? '' ),
@@ -109,5 +109,16 @@ final class OzonDeliveryCourierAddressNormalizer {
 
 	private function text( mixed $value ): string {
 		return is_scalar( $value ) ? trim( (string) $value ) : '';
+	}
+
+	private function first_text( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$value = $this->text( $value );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
 	}
 }
