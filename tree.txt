@@ -347,6 +347,7 @@ C:.
 |   |   |   |       OzonDeliveryPickupScheduler.php
 |   |   |   |
 |   |   |   +---Quote
+|   |   |           OzonDeliveryCourierAddressMapper.php
 |   |   |           OzonDeliveryPackagingBuilderFactory.php
 |   |   |           OzonDeliveryQuoteException.php
 |   |   |           OzonDeliveryQuoteParser.php
@@ -583,6 +584,7 @@ C:.
 |   |           CheckoutValidation.php
 |   |           CourierRateSupport.php
 |   |           NewShippingMethod.php
+|   |           OrderDeliveryCustomerCommentsDisplay.php
 |   |           OrderShippingMetaPersister.php
 |   |           PickupMapCheckout.php
 |   |           PickupPointOrderDisplay.php

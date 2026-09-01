@@ -21,7 +21,7 @@ final class OzonDeliveryCustomerCommentProvider {
 	public function customer_comments( DeliveryRate $rate ): array {
 		if (
 			OzonDeliverySettings::CARRIER_KEY !== $rate->carrier_key
-			|| DeliveryType::PICKUP !== $rate->delivery_type
+			|| ! in_array( $rate->delivery_type, array( DeliveryType::PICKUP, DeliveryType::COURIER ), true )
 			|| $rate->disabled
 			|| ! empty( $rate->meta['fallback'] )
 		) {

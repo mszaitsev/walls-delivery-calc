@@ -41,6 +41,7 @@ final class DeliveryCalculationDataBuilder {
 				'delivery_type' => (string) ( $rate['delivery_type'] ?? '' ),
 				'destination' => is_array( $context['destination'] ?? null ) ? $context['destination'] : array(),
 				'pickup' => is_array( $context['pickup'] ?? null ) ? $context['pickup'] : array(),
+				'customer_comments' => $this->customer_comments( $rate, $rate_meta, $context ),
 				'package' => $this->calculation_package_data( $rate_meta ),
 				'api' => $api,
 				'rules' => $this->calculation_rules_data( $rate, $rate_meta, $api, $result, $api_base, $final ),
@@ -48,6 +49,33 @@ final class DeliveryCalculationDataBuilder {
 			),
 			static fn( mixed $value ): bool => array() !== $value && '' !== $value
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @param array<string,mixed> $context
+	 * @return array<int,string>
+	 */
+	private function customer_comments( array $rate, array $rate_meta, array $context ): array {
+		$raw = is_array( $context['customer_comments'] ?? null ) ? $context['customer_comments'] : ( is_array( $rate['customer_comments'] ?? null ) ? $rate['customer_comments'] : ( is_array( $rate_meta['customer_comments'] ?? null ) ? $rate_meta['customer_comments'] : array() ) );
+		$result = array();
+		foreach ( $raw as $comment ) {
+			if ( ! is_scalar( $comment ) ) {
+				continue;
+			}
+			$text = trim( (string) $comment );
+			if ( '' === $text ) {
+				continue;
+			}
+			$text = substr( $text, 0, 500 );
+			if ( in_array( $text, $result, true ) ) {
+				continue;
+			}
+			$result[] = $text;
+		}
+
+		return $result;
 	}
 
 	/**

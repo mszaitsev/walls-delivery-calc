@@ -92,7 +92,7 @@ final class OzonQuoteSmokeRejectingWpdb extends OzonQuoteSmokeWpdb {
 $phones = new RussianPhoneNormalizer();
 $settings_repo = new SettingsRepository();
 $settings = new OzonDeliverySettings( $settings_repo, $phones );
-$settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42' ) );
+$settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '43' ) );
 $credentials = new OzonDeliveryCredentials( $settings_repo, new EncryptionService(), new OzonDeliveryTokenCache( new EncryptionService() ) );
 $credentials->save_from_admin( array( OzonDeliverySettings::CLIENT_ID_KEY => 'client', 'ozon_delivery_client_secret' => 'secret' ) );
 $http = new OzonQuoteSmokeHttp();
@@ -111,6 +111,17 @@ oz_quote_assert( 'POST' === ( $checkout_call['method'] ?? '' ) && str_ends_with(
 $body = $checkout_call['body'];
 oz_quote_assert( '+79991234567' === $body['recipient']['phone_number'] && 42 === $body['postings'][0]['shipment_method_id'] && 777 === $body['delivery']['delivery_point']['delivery_point_id'], 'Request body must contain recipient, shipment_method_id and destination delivery_point_id.' );
 oz_quote_assert( 1000 === $body['postings'][0]['dimensions']['weight_g'] && 100 === $body['postings'][0]['dimensions']['length_mm'] && '1000.00' === $body['postings'][0]['declared_value']['amount'], 'Request body must use grams, millimetres and decimal RUB declared value.' );
+$packaging = $ozon_packaging->build( $request );
+$courier_payload = ( new OzonDeliveryQuoteRequestBuilder( $settings, $phones ) )->build_courier( $request, $packaging );
+oz_quote_assert( 43 === (int) ( $courier_payload['body']['postings'][0]['shipment_method_id'] ?? 0 ) && isset( $courier_payload['body']['delivery']['courier']['coordinates'] ) && ! isset( $courier_payload['body']['delivery']['delivery_point'] ), 'Courier order_checkout request must use the separate courier shipment_method_id and official delivery.courier.coordinates contract.' );
+oz_quote_assert( 55.03 === (float) ( $courier_payload['body']['delivery']['courier']['coordinates']['latitude'] ?? 0 ) && 82.92 === (float) ( $courier_payload['body']['delivery']['courier']['coordinates']['longitude'] ?? 0 ), 'Courier order_checkout request must use trusted checkout destination coordinates.' );
+$missing_courier_coords = new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Новосибирск' ), new Package( array(), $money, $money, 1000, 0, 1000, 10, 10, 10, 1000, 'manual' ), '', $money, '2026-08-29', array( 'recipient_phone' => '+79991234567' ) );
+try {
+	( new OzonDeliveryQuoteRequestBuilder( $settings, $phones ) )->build_courier( $missing_courier_coords, $packaging );
+	oz_quote_assert( false, 'Courier checkout must fail closed when trusted coordinates are absent.' );
+} catch ( OzonDeliveryQuoteException $exception ) {
+	oz_quote_assert( 'ozon_courier_coordinates_missing' === $exception->safe_code, 'Missing courier coordinates must use the stable fail-closed code.' );
+}
 $oversize_request = new QuoteRequest(
 	'RU',
 	new Address( country_code: 'RU', city: 'Новосибирск' ),
@@ -127,7 +138,6 @@ try {
 } catch ( OzonDeliveryQuoteException $exception ) {
 	oz_quote_assert( 'ozon_package_item_oversize' === $exception->safe_code && $calls_before_oversize === count( $http->calls ), 'Ozon oversize item must fail closed without an order_checkout request.' );
 }
-$packaging = $ozon_packaging->build( $request );
 $rejecting_http = new OzonQuoteSmokeHttp();
 $rejecting_api = new OzonDeliveryApiClient( $rejecting_http, new OzonDeliveryAccessTokenService( $credentials, $rejecting_http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
 $rejecting_service = new OzonDeliveryQuoteService( $rejecting_api, new OzonDeliveryQuoteRequestBuilder( $settings, $phones ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonQuoteSmokeRejectingWpdb() ) ), $sanitizer );
@@ -168,7 +178,7 @@ $fallback_payload = $phone_builder->build( $fallback_request, $packaging, '777' 
 oz_quote_assert( '+79160001122' === (string) ( $fallback_payload['body']['recipient']['phone_number'] ?? '' ), 'Ozon request builder must use normalized fallback phone when customer phone is absent.' );
 oz_quote_assert( ! str_contains( wp_json_encode( $fallback_payload['diagnostics'] ) ?: '', '79160001122' ), 'Ozon builder diagnostics must not contain phone values.' );
 $empty_fallback_settings = new OzonDeliverySettings( new SettingsRepository(), $phones );
-$empty_fallback_settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::QUOTE_FALLBACK_PHONE_KEY => '' ) );
+$empty_fallback_settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '43', OzonDeliverySettings::QUOTE_FALLBACK_PHONE_KEY => '' ) );
 try {
 	( new OzonDeliveryQuoteRequestBuilder( $empty_fallback_settings, $phones ) )->build( $fallback_request, $packaging, '777' );
 	oz_quote_assert( false, 'Missing customer and fallback phone must fail closed.' );
@@ -176,7 +186,7 @@ try {
 	oz_quote_assert( 'ozon_recipient_phone_missing' === $exception->safe_code, 'Missing phone must keep the stable fail-closed code.' );
 }
 $invalid_fallback_settings = new OzonDeliverySettings( new SettingsRepository(), $phones );
-$invalid_fallback_settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::QUOTE_FALLBACK_PHONE_KEY => 'call me +79131234567' ) );
+$invalid_fallback_settings->save_pricing_settings( array( OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => '42', OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => '43', OzonDeliverySettings::QUOTE_FALLBACK_PHONE_KEY => 'call me +79131234567' ) );
 try {
 	( new OzonDeliveryQuoteRequestBuilder( $invalid_fallback_settings, $phones ) )->build( $fallback_request, $packaging, '777' );
 	oz_quote_assert( false, 'Invalid fallback phone must not become an Ozon request phone.' );

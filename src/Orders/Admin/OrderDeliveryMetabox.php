@@ -76,6 +76,12 @@ final class OrderDeliveryMetabox {
 			'Выбранный тариф' => (string) ( $calculation['selected_tariff_title'] ?? '' ),
 			'Тип доставки' => $this->delivery_type_label( (string) ( $calculation['delivery_type'] ?? '' ) ),
 			'Страна назначения' => $this->should_show_country( $destination ) ? $this->country_label( $destination ) : '',
+			'Населенный пункт' => (string) ( $destination['city_display_name'] ?? '' ),
+			'Источник населенного пункта' => $this->city_source_text( (string) ( $destination['city_source'] ?? '' ) ),
+			'Индекс населенного пункта' => (string) ( $destination['city_postcode'] ?? '' ),
+			'Нормализация адреса' => $this->normalization_data_label( $destination ),
+			'Индекс' => (string) ( $destination['resolved_postcode'] ?? '' ),
+			'FIAS ID' => (string) ( $destination['fias_id'] ?? '' ),
 			'Вес товаров' => $this->grams( $package['products_weight_g'] ?? null ),
 			'Вес упаковки' => $this->grams( $package['packaging_weight_g'] ?? null ),
 			'Итоговый вес для API' => $this->grams( $package['final_weight_g'] ?? null ),
@@ -566,7 +572,11 @@ final class OrderDeliveryMetabox {
 	}
 
 	private function city_source_label( object $order ): string {
-		return match ( $this->order_meta( $order, '_wdc_platform_city_source' ) ) {
+		return $this->city_source_text( $this->order_meta( $order, '_wdc_platform_city_source' ) );
+	}
+
+	private function city_source_text( string $source ): string {
+		return match ( $source ) {
 			'local_db' => 'справочник плагина',
 			'manual' => 'введено вручную',
 			default => '',
@@ -598,6 +608,33 @@ final class OrderDeliveryMetabox {
 		}
 
 		return '' !== $source ? $source : 'не выполнялась';
+	}
+
+	/**
+	 * @param array<string,mixed> $destination
+	 */
+	private function normalization_data_label( array $destination ): string {
+		$normalized = $destination['normalized'] ?? null;
+		$source     = (string) ( $destination['normalization_source'] ?? '' );
+		$fias_id    = (string) ( $destination['fias_id'] ?? '' );
+		$gar_id     = (string) ( $destination['gar_id'] ?? '' );
+
+		if ( true === $normalized || '1' === (string) $normalized || 'true' === (string) $normalized ) {
+			$label = match ( $source ) {
+				'fias', 'gar' => 'ФИАС/ГАР',
+				'dadata' => 'DaData',
+				default => $source,
+			};
+			$ids = trim( $fias_id . ( '' !== $gar_id ? ' / ' . $gar_id : '' ), ' /' );
+
+			return trim( $label . ( '' !== $ids ? ': ' . $ids : '' ) );
+		}
+
+		if ( 'fallback' === $source ) {
+			return 'fallback';
+		}
+
+		return '' !== $source ? $source : '';
 	}
 
 	private function shipping_address( object $order ): string {

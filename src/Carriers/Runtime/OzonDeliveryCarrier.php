@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\OzonDelivery\Checkout\OzonDeliveryCustomerCommentProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryCourierAddressMapper;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteException;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteResult;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
@@ -26,16 +27,23 @@ defined( 'ABSPATH' ) || exit;
 final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface, CarrierCustomerCommentProviderInterface {
 	public const KEY = OzonDeliverySettings::CARRIER_KEY;
 	public const RATE_ID = 'ozon_delivery:pickup';
+	public const PICKUP_RATE_ID = 'ozon_delivery:pickup';
+	public const COURIER_RATE_ID = 'ozon_delivery:courier';
 	public const TARIFF_KEY = 'pickup';
 	public const TARIFF_NAME = 'Ozon до ПВЗ';
+	public const COURIER_TARIFF_KEY = 'courier';
+	public const COURIER_TARIFF_NAME = 'Ozon курьером';
 
 	public function __construct(
 		private OzonDeliverySettings $settings,
 		private OzonDeliveryCredentials $credentials,
 		private OzonDeliveryQuoteService $quotes,
 		private OzonDeliveryCustomerCommentProvider $customer_comments,
-		private Logger $logger
-	) {}
+		private Logger $logger,
+		private ?OzonDeliveryCourierAddressMapper $courier_address = null
+	) {
+		$this->courier_address ??= new OzonDeliveryCourierAddressMapper();
+	}
 
 	public function get_identity(): CarrierIdentity {
 		return new CarrierIdentity( self::KEY, OzonDeliverySettings::TITLE, 'api', $this->runtime_enabled() );
@@ -46,7 +54,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			supports_quotes: true,
 			supports_pickup_points: true,
 			supports_status_sync: false,
-			supports_courier_delivery: false,
+			supports_courier_delivery: true,
 			supports_pickup_delivery: true,
 			supports_international: false
 		);
@@ -57,42 +65,59 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 	}
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {
-		if ( ! $this->supports_country( $request->country_code ?: $request->destination->country_code ) ) {
+		if ( ! $this->base_runtime_enabled() || 'RU' !== strtoupper( trim( $request->country_code ?: $request->destination->country_code ) ) ) {
 			return $this->empty_quote( $request, 'ozon_delivery_runtime_unavailable' );
 		}
 
-		try {
-			$result = $this->quotes->quote_pickup( $request );
-		} catch ( OzonDeliveryQuoteException $exception ) {
-			$this->logger->warning(
-				'Ozon Delivery checkout quote unavailable.',
-				array(
-					'carrier' => self::KEY,
-					'operation' => $exception->operation,
-					'error_code' => $exception->safe_code,
-					'http_status' => $exception->http_status,
-				) + $this->safe_exception_log_context( $exception )
-			);
-
-			return $this->empty_quote( $request, $exception->safe_code, array( 'operation' => $exception->operation, 'http_status' => $exception->http_status ) + $this->safe_exception_log_context( $exception ) );
+		$requested = (string) ( $request->customer_context['delivery_type'] ?? '' );
+		$modes = DeliveryType::PICKUP === $requested || DeliveryType::COURIER === $requested ? array( $requested ) : array( DeliveryType::PICKUP, DeliveryType::COURIER );
+		$rates = array();
+		$first_error = null;
+		foreach ( $modes as $mode ) {
+			if ( DeliveryType::PICKUP === $mode && ! $this->pickup_runtime_enabled() ) {
+				continue;
+			}
+			if ( DeliveryType::COURIER === $mode && ! $this->courier_runtime_enabled() ) {
+				continue;
+			}
+			try {
+				$result = DeliveryType::COURIER === $mode ? $this->quotes->quote_courier( $request ) : $this->quotes->quote_pickup( $request );
+				$this->logger->info( 'Ozon Delivery checkout quote calculated.', $this->safe_success_log_context( $result ) + array( 'delivery_type' => $mode ) );
+				$rates[] = $this->rate_from_result( $result, $mode );
+			} catch ( OzonDeliveryQuoteException $exception ) {
+				$first_error ??= $exception;
+				$this->logger->warning(
+					'Ozon Delivery checkout quote unavailable.',
+					array(
+						'carrier' => self::KEY,
+						'delivery_type' => $mode,
+						'operation' => $exception->operation,
+						'error_code' => $exception->safe_code,
+						'http_status' => $exception->http_status,
+					) + $this->safe_exception_log_context( $exception )
+				);
+			}
 		}
-		$this->logger->info( 'Ozon Delivery checkout quote calculated.', $this->safe_success_log_context( $result ) );
+
+		if ( array() === $rates ) {
+			return $first_error instanceof OzonDeliveryQuoteException
+				? $this->empty_quote( $request, $first_error->safe_code, array( 'operation' => $first_error->operation, 'http_status' => $first_error->http_status ) + $this->safe_exception_log_context( $first_error ) )
+				: $this->empty_quote( $request, 'ozon_delivery_runtime_unavailable' );
+		}
 
 		return new DeliveryQuote(
-			$this->quote_id( $request, $result ),
+			$this->quote_id( $request, $rates ),
 			self::KEY,
 			$request->destination,
 			$request->package,
-			array( $this->rate_from_result( $result ) ),
+			$rates,
 			true,
 			'',
 			'',
 			false,
 			'api',
 			array(
-				'endpoint' => $result->endpoint,
-				'destination_point_id' => $result->destination_point_id,
-				'package_count' => $result->package_count,
+				'rate_count' => count( $rates ),
 			)
 		);
 	}
@@ -109,12 +134,15 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 
 		return array(
-			'ozon_delivery_pricing_contract_version' => 2,
-			'ozon_delivery_shipment_method_id' => $this->settings->shipment_method_id(),
+			'ozon_delivery_pricing_contract_version' => 3,
+			'ozon_delivery_pickup_shipment_method_id' => $this->settings->pickup_shipment_method_id(),
+			'ozon_delivery_courier_shipment_method_id' => $this->settings->courier_shipment_method_id(),
 			'ozon_delivery_pricing_gate' => $this->settings->pricing_live_confirmed() ? 'live_confirmed' : 'closed',
+			'ozon_delivery_requested_delivery_type' => (string) ( $request->customer_context['delivery_type'] ?? '' ),
 			'ozon_delivery_selected_point_id' => (string) ( $selection['point_code'] ?? $selection['point_id'] ?? $snapshot['point_code'] ?? '' ),
 			'ozon_delivery_destination_latitude' => (string) ( $request->customer_context['destination_latitude'] ?? $request->customer_context['selected_location_latitude'] ?? $request->customer_context['lat'] ?? '' ),
 			'ozon_delivery_destination_longitude' => (string) ( $request->customer_context['destination_longitude'] ?? $request->customer_context['selected_location_longitude'] ?? $request->customer_context['lng'] ?? '' ),
+			'ozon_delivery_courier_address_fingerprint' => $this->courier_address->fingerprint( $request ),
 			'ozon_delivery_declared_value_kopecks' => $request->package->declared_value->get_kopecks() ?: $request->order_total->get_kopecks(),
 			'ozon_delivery_package_weight_g' => $request->package->get_total_weight_g(),
 			'ozon_delivery_package_volume_cm3' => $request->package->get_total_volume_cm3(),
@@ -127,7 +155,19 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 	}
 
 	private function runtime_enabled(): bool {
-		return $this->credentials->is_complete() && $this->settings->shipment_method_id() > 0 && $this->settings->pricing_live_confirmed();
+		return $this->base_runtime_enabled() && ( $this->pickup_runtime_enabled() || $this->courier_runtime_enabled() );
+	}
+
+	private function base_runtime_enabled(): bool {
+		return $this->credentials->is_complete() && $this->settings->pricing_live_confirmed();
+	}
+
+	private function pickup_runtime_enabled(): bool {
+		return $this->settings->pickup_shipment_method_id() > 0;
+	}
+
+	private function courier_runtime_enabled(): bool {
+		return $this->settings->courier_shipment_method_id() > 0;
 	}
 
 	/** @return array<string,mixed> */
@@ -207,17 +247,18 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		return $safe;
 	}
 
-	private function rate_from_result( OzonDeliveryQuoteResult $result ): DeliveryRate {
+	private function rate_from_result( OzonDeliveryQuoteResult $result, string $delivery_type ): DeliveryRate {
+		$is_courier = DeliveryType::COURIER === $delivery_type;
 		return new DeliveryRate(
-			self::RATE_ID,
+			$is_courier ? self::COURIER_RATE_ID : self::PICKUP_RATE_ID,
 			self::KEY,
 			OzonDeliverySettings::TITLE,
 			OzonDeliverySettings::SERVICE_KEY,
 			OzonDeliverySettings::TITLE,
-			self::TARIFF_KEY,
-			self::TARIFF_NAME,
-			DeliveryType::PICKUP,
-			self::TARIFF_NAME,
+			$is_courier ? self::COURIER_TARIFF_KEY : self::TARIFF_KEY,
+			$is_courier ? self::COURIER_TARIFF_NAME : self::TARIFF_NAME,
+			$is_courier ? DeliveryType::COURIER : DeliveryType::PICKUP,
+			$is_courier ? self::COURIER_TARIFF_NAME : self::TARIFF_NAME,
 			$result->price,
 			null,
 			null,
@@ -227,23 +268,26 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			array(),
 			false,
 			'',
-			true,
-			false,
+			! $is_courier,
+			$is_courier,
 			array_merge(
 				array(
 					'preserve_rate_title' => true,
 					'carrier_key' => self::KEY,
 					'service_key' => OzonDeliverySettings::SERVICE_KEY,
-					'delivery_type' => DeliveryType::PICKUP,
-					'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
-					'requires_rate_refresh_on_pickup_selection' => true,
+					'delivery_type' => $is_courier ? DeliveryType::COURIER : DeliveryType::PICKUP,
 					'api_base_price_rub' => $result->price->get_rubles(),
 					'ozon_delivery_base_price_kopecks' => $result->price->get_kopecks(),
 					'ozon_delivery_destination_point_id' => $result->destination_point_id,
 					'ozon_delivery_shipment_method_id' => $result->shipment_method_id,
+					'ozon_delivery_delivery_mode' => $is_courier ? 'courier' : 'pickup',
 					'ozon_delivery_package_count' => $result->package_count,
 					'ozon_delivery_endpoint' => $result->endpoint,
 					'ozon_delivery_http_status' => $result->http_status,
+				),
+				$is_courier ? array() : array(
+					'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
+					'requires_rate_refresh_on_pickup_selection' => true,
 				),
 				$result->meta
 			),
@@ -257,7 +301,9 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		return new DeliveryQuote( self::KEY . ':' . sha1( $code . wp_json_encode( $request->to_array() ) ), self::KEY, $request->destination, $request->package, array(), false, $code, 'Расчет Ozon Delivery недоступен.', false, 'api', $meta );
 	}
 
-	private function quote_id( QuoteRequest $request, OzonDeliveryQuoteResult $result ): string {
-		return self::KEY . ':' . sha1( wp_json_encode( array( $request->to_array(), $result->destination_point_id, $result->package_count, $result->price->get_kopecks() ) ) ?: '' );
+	/** @param array<int,DeliveryRate> $rates */
+	private function quote_id( QuoteRequest $request, array $rates ): string {
+		$rate_keys = array_map( static fn( DeliveryRate $rate ): array => array( $rate->rate_id, $rate->price->get_kopecks(), $rate->delivery_type ), $rates );
+		return self::KEY . ':' . sha1( wp_json_encode( array( $request->to_array(), $rate_keys ) ) ?: '' );
 	}
 }

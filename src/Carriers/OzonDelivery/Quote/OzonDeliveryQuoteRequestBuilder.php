@@ -14,23 +14,68 @@ defined( 'ABSPATH' ) || exit;
 
 final class OzonDeliveryQuoteRequestBuilder {
 	private RussianPhoneNormalizer $phones;
+	private OzonDeliveryCourierAddressMapper $courier_address;
 
-	public function __construct( private OzonDeliverySettings $settings, ?RussianPhoneNormalizer $phones = null ) {
+	public function __construct( private OzonDeliverySettings $settings, ?RussianPhoneNormalizer $phones = null, ?OzonDeliveryCourierAddressMapper $courier_address = null ) {
 		$this->phones = $phones ?? new RussianPhoneNormalizer();
+		$this->courier_address = $courier_address ?? new OzonDeliveryCourierAddressMapper();
 	}
 
 	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
 	public function build( QuoteRequest $request, PackagingResult $packaging, string $delivery_point_id ): array {
-		$shipment_method_id = $this->settings->shipment_method_id();
+		return $this->build_pickup( $request, $packaging, $delivery_point_id );
+	}
+
+	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
+	public function build_pickup( QuoteRequest $request, PackagingResult $packaging, string $delivery_point_id ): array {
+		$shipment_method_id = $this->settings->pickup_shipment_method_id();
 		if ( $shipment_method_id <= 0 ) {
 			throw new OzonDeliveryQuoteException( 'ozon_shipment_method_missing', 'order_checkout', 0, 'Не указан метод доставки Ozon.' );
 		}
+		if ( ! ctype_digit( $delivery_point_id ) || (int) $delivery_point_id <= 0 ) {
+			throw new OzonDeliveryQuoteException( 'ozon_delivery_point_missing', 'order_checkout', 0, 'Не выбран ПВЗ Ozon для расчета.' );
+		}
+
+		return $this->build_for_delivery(
+			$request,
+			$packaging,
+			$shipment_method_id,
+			array( 'delivery_point' => array( 'delivery_point_id' => (int) $delivery_point_id ) ),
+			array(
+				'delivery_type' => 'pickup',
+				'destination_point_id' => $delivery_point_id,
+			)
+		);
+	}
+
+	/** @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>} */
+	public function build_courier( QuoteRequest $request, PackagingResult $packaging ): array {
+		$shipment_method_id = $this->settings->courier_shipment_method_id();
+		if ( $shipment_method_id <= 0 ) {
+			throw new OzonDeliveryQuoteException( 'ozon_courier_shipment_method_missing', 'order_checkout', 0, 'Не указан метод доставки Ozon курьером.' );
+		}
+
+		return $this->build_for_delivery(
+			$request,
+			$packaging,
+			$shipment_method_id,
+			$this->courier_address->delivery( $request ),
+			array(
+				'delivery_type' => 'courier',
+				'courier_coordinates_present' => true,
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $delivery
+	 * @param array<string,mixed> $extra_diagnostics
+	 * @return array{body:array<string,mixed>,request_ids:array<int,int>,diagnostics:array<string,mixed>}
+	 */
+	private function build_for_delivery( QuoteRequest $request, PackagingResult $packaging, int $shipment_method_id, array $delivery, array $extra_diagnostics ): array {
 		$phone = $this->recipient_phone( $request );
 		if ( '' === $phone ) {
 			throw new OzonDeliveryQuoteException( 'ozon_recipient_phone_missing', 'order_checkout', 0, 'Для расчета Ozon нужен телефон получателя.' );
-		}
-		if ( ! ctype_digit( $delivery_point_id ) || (int) $delivery_point_id <= 0 ) {
-			throw new OzonDeliveryQuoteException( 'ozon_delivery_point_missing', 'order_checkout', 0, 'Не выбран ПВЗ Ozon для расчета.' );
 		}
 		$posting_count = $this->posting_count( $packaging );
 		if ( $posting_count < 1 || $posting_count > 100 ) {
@@ -70,18 +115,17 @@ final class OzonDeliveryQuoteRequestBuilder {
 			'body' => array(
 				'recipient' => array( 'phone_number' => $phone ),
 				'postings' => $postings,
-				'delivery' => array( 'delivery_point' => array( 'delivery_point_id' => (int) $delivery_point_id ) ),
+				'delivery' => $delivery,
 			),
 			'request_ids' => $request_ids,
-			'diagnostics' => array(
+			'diagnostics' => array_merge( array(
 				'endpoint' => 'POST /v1/order/checkout',
 				'shipment_method_id' => $shipment_method_id,
-				'destination_point_id' => $delivery_point_id,
 				'packages_count' => count( $postings ),
 				'total_declared_value_rub' => $this->money_amount( $total_declared_kopecks ),
 				'declared_value_per_posting_rub' => $declared,
 				'declared_value_rub' => $declared,
-			),
+			), $extra_diagnostics ),
 		);
 	}
 
