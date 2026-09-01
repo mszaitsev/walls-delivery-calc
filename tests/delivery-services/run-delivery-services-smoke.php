@@ -35,10 +35,24 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $conditions = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $queries = array();
+		public bool $fail_next_query = false;
 		private int $condition_insert_id = 0;
 
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
-		public function query( string $query ): bool { $this->queries[] = array( 'query' => $query ); return true; }
+		public function query( string $query ): bool {
+			$this->queries[] = array( 'query' => $query );
+			if ( $this->fail_next_query ) {
+				$this->fail_next_query = false;
+				return false;
+			}
+			if ( str_contains( $query, 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( $query ) ), 'DELETE ' ) ) {
+				$this->apply_country_delete_query( $query );
+			}
+			if ( str_contains( $query, 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( $query ) ), 'INSERT ' ) ) {
+				$this->apply_country_upsert_query( $query );
+			}
+			return true;
+		}
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
 				$query = preg_replace( '/%[sd]/', is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'", $query, 1 ) ?? $query;
@@ -229,6 +243,51 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			return $this->services;
 		}
+		private function apply_country_delete_query( string $query ): void {
+			if ( ! preg_match( '/service_id = ([0-9]+)/', $query, $service_match ) ) {
+				return;
+			}
+			$service_id = (int) $service_match[1];
+			$countries = array();
+			if ( preg_match( '/country_code IN \\(([^)]+)\\)/', $query, $country_match ) ) {
+				preg_match_all( "/'([^']+)'/", $country_match[1], $matches );
+				$countries = array_map( 'strval', $matches[1] ?? array() );
+			}
+			$this->countries = array_values(
+				array_filter(
+					$this->countries,
+					static function ( array $row ) use ( $service_id, $countries ): bool {
+						if ( (int) ( $row['service_id'] ?? 0 ) !== $service_id ) {
+							return true;
+						}
+						if ( array() === $countries ) {
+							return false;
+						}
+						return ! in_array( (string) ( $row['country_code'] ?? '' ), $countries, true );
+					}
+				)
+			);
+		}
+		private function apply_country_upsert_query( string $query ): void {
+			if ( ! preg_match_all( "/\\(([0-9]+), '([^']+)', '([^']+)'\\)/", $query, $matches, PREG_SET_ORDER ) ) {
+				return;
+			}
+			foreach ( $matches as $match ) {
+				$service_id = (int) $match[1];
+				$country = (string) $match[2];
+				foreach ( $this->countries as $row ) {
+					if ( (int) ( $row['service_id'] ?? 0 ) === $service_id && (string) ( $row['country_code'] ?? '' ) === $country ) {
+						continue 2;
+					}
+				}
+				$this->countries[] = array(
+					'id' => ++$this->insert_id,
+					'service_id' => $service_id,
+					'country_code' => $country,
+					'created_at' => (string) $match[3],
+				);
+			}
+		}
 	}
 }
 
@@ -313,11 +372,11 @@ $run_cdek_eaeu_migration = static function ( array $seed_countries, bool $reset_
 	return $countries->countries( (int) $cdek->id );
 };
 
-$default_cdek_countries = array( 'RU', 'AM', 'BY', 'KZ', 'KG' );
+$default_cdek_countries = array( 'AM', 'BY', 'KG', 'KZ', 'RU' );
 wdc_ds_assert( $default_cdek_countries === $run_cdek_eaeu_migration( array() ), 'CDEK 0042 migration must seed empty countries through MigrationManager without ArgumentCountError.' );
 wdc_ds_assert( in_array( '0042_seed_cdek_eaeu_countries.php', (array) get_option( 'wdc_applied_migrations', array() ), true ), 'CDEK 0042 migration must be marked as applied.' );
 wdc_ds_assert( $default_cdek_countries === $run_cdek_eaeu_migration( array( 'RU' ) ), 'CDEK 0042 migration must expand RU-only countries to EAEU defaults.' );
-wdc_ds_assert( array( 'RU', 'BY' ) === $run_cdek_eaeu_migration( array( 'RU', 'BY' ) ), 'CDEK 0042 migration must preserve custom country selection.' );
+wdc_ds_assert( array( 'BY', 'RU' ) === $run_cdek_eaeu_migration( array( 'RU', 'BY' ) ), 'CDEK 0042 migration must preserve custom country selection.' );
 unset( $GLOBALS['wdc_options']['wdc_applied_migrations'], $GLOBALS['wdc_options']['wdc_db_version'] );
 $countries->replace_countries( (int) $cdek->id, array() );
 $run_cdek_eaeu_migration( array(), false );
@@ -402,8 +461,99 @@ $settings->delete_setting( $custom_id, 'endpoint' );
 wdc_ds_assert( null === $settings->get_setting( $custom_id, 'endpoint' ), 'Settings repository must delete values.' );
 
 $countries->replace_countries( $custom_id, array( 'us', 'DE', 'bad', 'US' ) );
-wdc_ds_assert( array( 'US', 'DE' ) === $countries->countries( $custom_id ), 'Country repository must normalize and de-duplicate country codes.' );
+wdc_ds_assert( array( 'DE', 'US' ) === $countries->countries( $custom_id ), 'Country repository must normalize, sort and de-duplicate country codes.' );
 wdc_ds_assert( in_array( 'US', $countries->countries( $custom_id ), true ) && in_array( 'DE', $countries->countries( $custom_id ), true ), 'Country repository must keep valid countries.' );
+
+$country_write_queries = static function ( wpdb $db ): array {
+	return array_values(
+		array_filter(
+			$db->queries,
+			static function ( array $row ): bool {
+				$query = strtoupper( (string) ( $row['query'] ?? '' ) );
+				return str_contains( $query, 'WDC_DELIVERY_SERVICE_COUNTRIES' ) && ( str_starts_with( trim( $query ), 'DELETE ' ) || str_starts_with( trim( $query ), 'INSERT ' ) );
+			}
+		)
+	);
+};
+$country_delete_queries = static function ( wpdb $db ): array {
+	return array_values(
+		array_filter(
+			$db->queries,
+			static fn ( array $row ): bool => str_contains( (string) ( $row['query'] ?? '' ), 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( (string) ( $row['query'] ?? '' ) ) ), 'DELETE ' )
+		)
+	);
+};
+$country_insert_queries = static function ( wpdb $db ): array {
+	return array_values(
+		array_filter(
+			$db->queries,
+			static fn ( array $row ): bool => str_contains( (string) ( $row['query'] ?? '' ), 'wdc_delivery_service_countries' ) && str_starts_with( strtoupper( trim( (string) ( $row['query'] ?? '' ) ) ), 'INSERT ' )
+		)
+	);
+};
+
+$country_sync_db = new wpdb();
+$country_sync_repo = new DeliveryServiceCountryRepository( $country_sync_db );
+$country_sync_db->countries[] = array( 'id' => ++$country_sync_db->insert_id, 'service_id' => 279, 'country_code' => 'RU', 'created_at' => '2026-01-01 00:00:00' );
+$country_sync_repo->replace_countries( 279, array( 'RU' ) );
+wdc_ds_assert( array() === $country_write_queries( $country_sync_db ), 'Country replace no-op must not write when current and desired sets are equal.' );
+$country_sync_repo->replace_countries( 279, array( 'ru', 'RU', ' xx-invalid ', 'RU' ) );
+wdc_ds_assert( array() === $country_write_queries( $country_sync_db ), 'Country replace normalized no-op must not write.' );
+wdc_ds_assert( '2026-01-01 00:00:00' === (string) ( $country_sync_db->countries[0]['created_at'] ?? '' ), 'Country no-op must preserve existing created_at.' );
+
+$country_insert_db = new wpdb();
+$country_insert_repo = new DeliveryServiceCountryRepository( $country_insert_db );
+$country_insert_repo->replace_countries( 280, array( 'RU' ) );
+wdc_ds_assert( array( 'RU' ) === $country_insert_repo->countries( 280 ), 'Country replace must insert missing desired rows.' );
+$insert_queries = $country_insert_queries( $country_insert_db );
+wdc_ds_assert( 1 === count( $insert_queries ) && str_contains( (string) $insert_queries[0]['query'], 'ON DUPLICATE KEY UPDATE' ), 'Country replace inserts must use duplicate-safe UPSERT.' );
+
+$country_stale_db = new wpdb();
+$country_stale_repo = new DeliveryServiceCountryRepository( $country_stale_db );
+foreach ( array( 'RU', 'KZ', 'BY' ) as $code ) {
+	$country_stale_db->countries[] = array( 'id' => ++$country_stale_db->insert_id, 'service_id' => 281, 'country_code' => $code, 'created_at' => '2026-01-01 00:00:00' );
+}
+$country_stale_repo->replace_countries( 281, array( 'RU', 'BY' ) );
+wdc_ds_assert( array( 'BY', 'RU' ) === $country_stale_repo->countries( 281 ), 'Country replace must delete only stale countries.' );
+wdc_ds_assert( 1 === count( $country_delete_queries( $country_stale_db ) ) && 0 === count( $country_insert_queries( $country_stale_db ) ), 'Country replace must not reinsert existing desired rows.' );
+wdc_ds_assert( str_contains( (string) $country_delete_queries( $country_stale_db )[0]['query'], "'KZ'" ) && ! str_contains( (string) $country_delete_queries( $country_stale_db )[0]['query'], "'RU'" ), 'Country stale delete must target stale rows only.' );
+
+$country_empty_db = new wpdb();
+$country_empty_repo = new DeliveryServiceCountryRepository( $country_empty_db );
+foreach ( array( 'RU', 'KZ' ) as $code ) {
+	$country_empty_db->countries[] = array( 'id' => ++$country_empty_db->insert_id, 'service_id' => 282, 'country_code' => $code, 'created_at' => '2026-01-01 00:00:00' );
+}
+$country_empty_repo->replace_countries( 282, array() );
+wdc_ds_assert( array() === $country_empty_repo->countries( 282 ), 'Country replace must support exact empty desired set.' );
+
+$country_race_db = new wpdb();
+$country_race_repo = new DeliveryServiceCountryRepository( $country_race_db );
+$country_race_repo->replace_countries( 283, array( 'RU' ) );
+$country_race_repo->replace_countries( 283, array( 'RU' ) );
+wdc_ds_assert( array( 'RU' ) === $country_race_repo->countries( 283 ), 'Repeated same-target country sync must keep one unique row.' );
+$country_race_repo_reflection = new ReflectionClass( DeliveryServiceCountryRepository::class );
+$upsert = $country_race_repo_reflection->getMethod( 'upsert_countries' );
+$upsert->setAccessible( true );
+$upsert->invoke( $country_race_repo, 283, array( 'RU' ) );
+wdc_ds_assert( 1 === count( array_values( array_filter( $country_race_db->countries, static fn ( array $row ): bool => 283 === (int) $row['service_id'] && 'RU' === (string) $row['country_code'] ) ) ), 'Duplicate-race UPSERT must not create a second country row.' );
+
+$country_admin_db = new wpdb();
+$country_admin_repo = new DeliveryServiceCountryRepository( $country_admin_db );
+foreach ( array( 'RU', 'KZ' ) as $code ) {
+	$country_admin_db->countries[] = array( 'id' => ++$country_admin_db->insert_id, 'service_id' => 284, 'country_code' => $code, 'created_at' => '2026-01-01 00:00:00' );
+}
+$country_admin_repo->replace_countries( 284, array( 'BY', 'AM' ) );
+wdc_ds_assert( array( 'AM', 'BY' ) === $country_admin_repo->countries( 284 ), 'Admin country replace must remain an exact replace.' );
+
+$country_error_db = new wpdb();
+$country_error_repo = new DeliveryServiceCountryRepository( $country_error_db );
+$country_error_db->fail_next_query = true;
+try {
+	$country_error_repo->replace_countries( 285, array( 'RU' ) );
+	wdc_ds_assert( false, 'Country replace must not swallow genuine DB write failures.' );
+} catch ( RuntimeException $exception ) {
+	wdc_ds_assert( str_contains( $exception->getMessage(), 'upsert' ), 'Country replace must surface a controlled write failure.' );
+}
 
 $directory = ( new ReflectionClass( WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor();
 $seed_db = new wpdb();
@@ -417,11 +567,20 @@ $manager = new DeliveryServiceManager( $services, $countries, new RuleRepository
 $manager->ensure_builtin_services();
 $unified_domestic_service = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 wdc_ds_assert( $unified_domestic_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $unified_domestic_service->id ), true ) && $manager->service_available_for_country( $unified_domestic_service, 'RU' ), 'Unified domestic service must bootstrap RU availability.' );
+$GLOBALS['wpdb']->queries = array();
+$manager->ensure_builtin_services();
+$manager->ensure_builtin_services();
+wdc_ds_assert( array() === $country_write_queries( $GLOBALS['wpdb'] ), 'Repeated builtin bootstrap must not write delivery service country rows in steady state.' );
+$countries->delete_countries( (int) $unified_domestic_service->id );
+$GLOBALS['wpdb']->queries = array();
+$manager->ensure_builtin_services();
+wdc_ds_assert( in_array( 'RU', $countries->countries( (int) $unified_domestic_service->id ), true ), 'Builtin bootstrap must self-heal a missing fixed RU country row.' );
+wdc_ds_assert( 1 === count( $country_insert_queries( $GLOBALS['wpdb'] ) ), 'Builtin country self-heal must insert the missing row through repository UPSERT.' );
 $pek_service = $services->find_by_service_key( PekSettings::SERVICE_KEY );
 wdc_ds_assert( $pek_service instanceof DeliveryService && array() === $countries->countries( (int) $pek_service->id ), 'Existing manually created PEK service must not be treated as fresh setup.' );
 $countries->replace_countries( (int) $pek_service->id, array( 'RU', 'KZ' ) );
 $manager->ensure_builtin_services();
-wdc_ds_assert( array( 'RU', 'KZ' ) === $countries->countries( (int) $pek_service->id ), 'PEK bootstrap must not overwrite administrator country choices.' );
+wdc_ds_assert( array( 'KZ', 'RU' ) === $countries->countries( (int) $pek_service->id ), 'PEK bootstrap must not overwrite administrator country choices.' );
 $countries->replace_countries( (int) $pek_service->id, array() );
 $manager->ensure_builtin_services();
 wdc_ds_assert( array() === $countries->countries( (int) $pek_service->id ), 'PEK bootstrap must preserve explicit empty administrator country choice.' );
