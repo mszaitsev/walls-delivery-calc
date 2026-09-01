@@ -97,13 +97,14 @@ class OzonQuoteSmokeWpdb extends wpdb {
 	public array $locations = array(
 		array( 'id' => 123, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.0415, 'longitude' => 82.9346, 'active' => 1 ),
 	);
+	public int $area_lookup_calls = 0;
 	public function prepare( string $query, mixed ...$values ): string { foreach ( $values as $value ) { $query = preg_replace( '/%[df]/', is_float( $value ) ? sprintf( '%.8F', $value ) : (string) (int) $value, $query, 1 ) ?? $query; } return $query; }
 	public function get_row( string $query, mixed $output = null ): ?array {
 		if ( str_contains( $query, "WHERE state='active'" ) ) { return array( 'id' => 1, 'state' => 'active' ); }
 		if ( str_contains( $query, 'point_id=777' ) ) { return $this->point( 777, 55.0301, 82.9201 ); }
 		return null;
 	}
-	public function get_results( string $query, mixed $output = null ): array { return array( $this->point( 777, 55.0301, 82.9201 ), $this->point( 778, 55.5000, 83.0000 ) ); }
+	public function get_results( string $query, mixed $output = null ): array { ++$this->area_lookup_calls; return array( $this->point( 777, 55.0301, 82.9201 ), $this->point( 779, 55.0416, 82.9347 ), $this->point( 778, 55.5000, 83.0000 ) ); }
 	private function point( int $id, float $lat, float $lng ): array { return array( 'generation_id' => 1, 'point_id' => $id, 'name' => 'ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск', 'latitude' => $lat, 'longitude' => $lng, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 25000, 'max_width_mm' => 600, 'max_length_mm' => 1200, 'max_height_mm' => 800 ); }
 }
 
@@ -128,9 +129,10 @@ $sanitizer = new OzonDeliveryMessageSanitizer();
 $api = new OzonDeliveryApiClient( $http, new OzonDeliveryAccessTokenService( $credentials, $http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
 $ozon_packaging = ( new OzonDeliveryPackagingBuilderFactory() )->create();
 $location_db = new OzonQuoteSmokeWpdb();
-$courier_location = new OzonDeliveryCourierLocationResolver( new LocationRepository( $location_db ) );
+$pickup_repository = new OzonDeliveryPickupRepository( $location_db );
+$courier_location = new OzonDeliveryCourierLocationResolver( new LocationRepository( $location_db ), $pickup_repository );
 $quote_builder = new OzonDeliveryQuoteRequestBuilder( $settings, $phones, null, $courier_location );
-$service = new OzonDeliveryQuoteService( $api, $quote_builder, new OzonDeliveryQuoteParser( $sanitizer ), $ozon_packaging, new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( $location_db ) ), $sanitizer );
+$service = new OzonDeliveryQuoteService( $api, $quote_builder, new OzonDeliveryQuoteParser( $sanitizer ), $ozon_packaging, new OzonDeliveryPickupPointProvider( $pickup_repository ), $sanitizer );
 $money = Money::from_rubles( 1000 );
 $request = new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Новосибирск' ), new Package( array(), $money, $money, 1000, 0, 1000, 10, 10, 10, 1000, 'manual' ), '', $money, '2026-08-29', array( 'recipient_phone' => '+79991234567', 'selected_location_id' => 123, 'destination_latitude' => 55.0300, 'destination_longitude' => 82.9200 ) );
 $courier_request = new QuoteRequest( 'RU', $request->destination, $request->package, $request->payment_method, $request->order_total, $request->calculation_date, array( 'recipient_phone' => '+79991234567', 'selected_location_id' => 123, 'destination_latitude' => 1, 'destination_longitude' => 2, 'lat' => 3, 'lng' => 4 ) );
@@ -146,8 +148,12 @@ oz_quote_assert( 1000 === $body['postings'][0]['dimensions']['weight_g'] && 100 
 $packaging = $ozon_packaging->build( $request );
 $courier_payload = $quote_builder->build_courier( $courier_request, $packaging );
 oz_quote_assert( 43 === (int) ( $courier_payload['body']['postings'][0]['shipment_method_id'] ?? 0 ) && isset( $courier_payload['body']['delivery']['courier']['coordinates'] ) && ! isset( $courier_payload['body']['delivery']['delivery_point'] ), 'Courier order_checkout request must use the separate courier shipment_method_id and official delivery.courier.coordinates contract.' );
-oz_quote_assert( 55.0415 === (float) ( $courier_payload['body']['delivery']['courier']['coordinates']['latitude'] ?? 0 ) && 82.9346 === (float) ( $courier_payload['body']['delivery']['courier']['coordinates']['longitude'] ?? 0 ), 'Courier order_checkout request must use only LocationRepository coordinates and ignore forged customer_context coordinates.' );
-oz_quote_assert( 'location_repository' === (string) ( $courier_payload['diagnostics']['courier_coordinate_source'] ?? '' ) && 123 === (int) ( $courier_payload['diagnostics']['courier_location_id'] ?? 0 ), 'Courier builder diagnostics must expose the safe location repository coordinate source.' );
+oz_quote_assert( 55.0416 === (float) ( $courier_payload['body']['delivery']['courier']['coordinates']['latitude'] ?? 0 ) && 82.9347 === (float) ( $courier_payload['body']['delivery']['courier']['coordinates']['longitude'] ?? 0 ), 'Courier order_checkout request must use the nearest active Ozon pickup proxy point and ignore forged customer_context coordinates.' );
+oz_quote_assert( 'ozon_pickup_proxy' === (string) ( $courier_payload['diagnostics']['courier_coordinate_source'] ?? '' ) && 123 === (int) ( $courier_payload['diagnostics']['courier_location_id'] ?? 0 ) && 779 === (int) ( $courier_payload['diagnostics']['courier_proxy_point_id'] ?? 0 ), 'Courier builder diagnostics must expose the safe proxy coordinate source.' );
+$exact_request = new QuoteRequest( 'RU', $request->destination, $request->package, $request->payment_method, $request->order_total, $request->calculation_date, array( 'recipient_phone' => '+79991234567', 'selected_location_id' => 123, 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '1', 'dadata_geo_lat' => '55.75511', 'dadata_geo_lon' => '37.622396' ) );
+$area_calls_before_exact = $location_db->area_lookup_calls;
+$exact_payload = $quote_builder->build_courier( $exact_request, $packaging );
+oz_quote_assert( 55.75511 === (float) ( $exact_payload['body']['delivery']['courier']['coordinates']['latitude'] ?? 0 ) && 37.622396 === (float) ( $exact_payload['body']['delivery']['courier']['coordinates']['longitude'] ?? 0 ) && 'dadata_address' === (string) ( $exact_payload['diagnostics']['courier_coordinate_source'] ?? '' ) && $area_calls_before_exact === $location_db->area_lookup_calls, 'Exact trusted DaData address coordinates must have priority over proxy point lookup.' );
 $missing_courier_coords = new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Новосибирск' ), new Package( array(), $money, $money, 1000, 0, 1000, 10, 10, 10, 1000, 'manual' ), '', $money, '2026-08-29', array( 'recipient_phone' => '+79991234567' ) );
 try {
 	$quote_builder->build_courier( $missing_courier_coords, $packaging );
@@ -168,7 +174,7 @@ foreach ( $invalid_location_cases as $invalid_location ) {
 	$invalid_http = new OzonQuoteSmokeHttp();
 	$invalid_service = new OzonDeliveryQuoteService(
 		new OzonDeliveryApiClient( $invalid_http, new OzonDeliveryAccessTokenService( $credentials, $invalid_http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) ),
-		new OzonDeliveryQuoteRequestBuilder( $settings, $phones, null, new OzonDeliveryCourierLocationResolver( new LocationRepository( $invalid_db ) ) ),
+		new OzonDeliveryQuoteRequestBuilder( $settings, $phones, null, new OzonDeliveryCourierLocationResolver( new LocationRepository( $invalid_db ), new OzonDeliveryPickupRepository( $invalid_db ) ) ),
 		new OzonDeliveryQuoteParser( $sanitizer ),
 		$ozon_packaging,
 		new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( $invalid_db ) ),
@@ -180,6 +186,22 @@ foreach ( $invalid_location_cases as $invalid_location ) {
 	} catch ( OzonDeliveryQuoteException $exception ) {
 		oz_quote_assert( 'ozon_courier_location_coordinates_missing' === $exception->safe_code && array() === $invalid_http->calls, 'Invalid DB courier coordinates must not call Ozon order_checkout or fallback to browser coordinates.' );
 	}
+}
+
+final class OzonQuoteSmokeNoProxyWpdb extends OzonQuoteSmokeWpdb {
+	public function get_results( string $query, mixed $output = null ): array {
+		++$this->area_lookup_calls;
+		return array( $this->point_for_test( 901, 55.0600, 82.9600 ) );
+	}
+	private function point_for_test( int $id, float $lat, float $lng ): array { return array( 'generation_id' => 1, 'point_id' => $id, 'name' => 'Дальний ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск', 'latitude' => $lat, 'longitude' => $lng, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 25000, 'max_width_mm' => 600, 'max_length_mm' => 1200, 'max_height_mm' => 800 ); }
+}
+$no_proxy_db = new OzonQuoteSmokeNoProxyWpdb();
+$no_proxy_db->locations = array( array( 'id' => 123, 'country_code' => 'RU', 'latitude' => 55.0415, 'longitude' => 82.9346, 'active' => 1 ) );
+try {
+	( new OzonDeliveryQuoteRequestBuilder( $settings, $phones, null, new OzonDeliveryCourierLocationResolver( new LocationRepository( $no_proxy_db ), new OzonDeliveryPickupRepository( $no_proxy_db ) ) ) )->build_courier( $courier_request, $packaging );
+	oz_quote_assert( false, 'Courier checkout must fail closed when no active Ozon proxy point exists within 1 km.' );
+} catch ( OzonDeliveryQuoteException $exception ) {
+	oz_quote_assert( 'ozon_courier_proxy_point_missing' === $exception->safe_code, 'Missing nearby Ozon proxy point must use a stable fail-closed code.' );
 }
 $oversize_request = new QuoteRequest(
 	'RU',

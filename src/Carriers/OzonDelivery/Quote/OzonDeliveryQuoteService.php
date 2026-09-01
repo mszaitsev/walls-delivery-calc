@@ -190,7 +190,7 @@ final class OzonDeliveryQuoteService {
 	 */
 	private function courier_request_details( array $diagnostics ): array {
 		$details = array();
-		foreach ( array( 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'shipment_method_id', 'postings_count' ) as $key ) {
+		foreach ( array( 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'courier_proxy_point_id', 'courier_proxy_distance_m', 'shipment_method_id', 'postings_count' ) as $key ) {
 			if ( array_key_exists( $key, $diagnostics ) && is_scalar( $diagnostics[ $key ] ) ) {
 				$details[ $key ] = $diagnostics[ $key ];
 			}

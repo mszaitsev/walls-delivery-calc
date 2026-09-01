@@ -10,6 +10,7 @@ use WallsShop\WDC\Packaging\PackagingParcel;
 use WallsShop\WDC\Packaging\PackagingResult;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -59,20 +60,25 @@ final class OzonDeliveryQuoteRequestBuilder {
 		}
 
 		$location = $this->courier_location()->resolve( $request );
+		$diagnostics = array(
+			'delivery_type' => 'courier',
+			'courier_coordinate_source' => $location->source,
+			'courier_location_id' => $location->location_id,
+			'courier_latitude' => $location->latitude,
+			'courier_longitude' => $location->longitude,
+			'courier_coordinates_present' => true,
+		);
+		if ( null !== $location->proxy_point_id ) {
+			$diagnostics['courier_proxy_point_id'] = $location->proxy_point_id;
+			$diagnostics['courier_proxy_distance_m'] = $location->proxy_distance_m;
+		}
 
 		return $this->build_for_delivery(
 			$request,
 			$packaging,
 			$shipment_method_id,
 			$this->courier_address->delivery( $location ),
-			array(
-				'delivery_type' => 'courier',
-				'courier_coordinate_source' => 'location_repository',
-				'courier_location_id' => $location->location_id,
-				'courier_latitude' => $location->latitude,
-				'courier_longitude' => $location->longitude,
-				'courier_coordinates_present' => true,
-			)
+			$diagnostics
 		);
 	}
 
@@ -151,7 +157,7 @@ final class OzonDeliveryQuoteRequestBuilder {
 
 	private function courier_location(): OzonDeliveryCourierLocationResolver {
 		if ( ! $this->courier_location instanceof OzonDeliveryCourierLocationResolver ) {
-			$this->courier_location = new OzonDeliveryCourierLocationResolver( new LocationRepository() );
+			$this->courier_location = new OzonDeliveryCourierLocationResolver( new LocationRepository(), new OzonDeliveryPickupRepository() );
 		}
 
 		return $this->courier_location;

@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryCourierLocationResolve
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteException;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteResult;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteService;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
 use WallsShop\WDC\Domain\Common\Money;
@@ -46,7 +47,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		private ?OzonDeliveryCourierLocationResolver $courier_location = null
 	) {
 		$this->courier_address ??= new OzonDeliveryCourierAddressMapper();
-		$this->courier_location ??= new OzonDeliveryCourierLocationResolver( new LocationRepository() );
+		$this->courier_location ??= new OzonDeliveryCourierLocationResolver( new LocationRepository(), new OzonDeliveryPickupRepository() );
 	}
 
 	public function get_identity(): CarrierIdentity {
@@ -180,7 +181,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		foreach ( array( 'places_count', 'total_weight_g', 'max_place_weight_g' ) as $key ) {
 			if ( array_key_exists( $key, $details ) && is_scalar( $details[ $key ] ) ) { $context[ $key ] = $details[ $key ]; }
 		}
-		foreach ( array( 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'shipment_method_id', 'postings_count', 'results_count', 'usable_results_count', 'failed_results_count' ) as $key ) {
+		foreach ( array( 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'courier_proxy_point_id', 'courier_proxy_distance_m', 'courier_proxy_radius_m', 'courier_search_latitude', 'courier_search_longitude', 'shipment_method_id', 'postings_count', 'results_count', 'usable_results_count', 'failed_results_count' ) as $key ) {
 			if ( array_key_exists( $key, $details ) && is_scalar( $details[ $key ] ) ) { $context[ $key ] = $details[ $key ]; }
 		}
 		if ( isset( $details['places'] ) && is_array( $details['places'] ) ) { $context['places'] = $details['places']; }
@@ -210,7 +211,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 				$context[ $key ] = $meta[ $key ];
 			}
 		}
-		foreach ( array( 'shipment_method_id', 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude' ) as $key ) {
+		foreach ( array( 'shipment_method_id', 'courier_coordinate_source', 'courier_location_id', 'courier_latitude', 'courier_longitude', 'courier_proxy_point_id', 'courier_proxy_distance_m' ) as $key ) {
 			if ( array_key_exists( $key, $meta ) && is_scalar( $meta[ $key ] ) ) {
 				$context[ $key ] = $meta[ $key ];
 			}

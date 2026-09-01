@@ -55,7 +55,10 @@
     'dadata_flat_type_full',
     'dadata_fias_id',
 		'dadata_kladr_id',
-		'dadata_fias_level'
+		'dadata_fias_level',
+		'dadata_geo_lat',
+		'dadata_geo_lon',
+		'dadata_geo_lng'
 	];
 
 	function log( message, data ) {
@@ -223,7 +226,10 @@
           'dadata_flat_type_full',
           'dadata_fias_id',
 			'dadata_kladr_id',
-			'dadata_fias_level'
+			'dadata_fias_level',
+			'dadata_geo_lat',
+			'dadata_geo_lon',
+			'dadata_geo_lng'
 		].forEach( function ( key ) {
 			hidden( prefix, key ).val( '' );
 		} );

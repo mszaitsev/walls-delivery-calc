@@ -66,6 +66,7 @@ final class WooCommercePackageMapper {
 					'destination_longitude' => $coordinates['longitude'],
 					'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
 				),
+				$this->dadata_address_context(),
 				$customer_context
 			)
 		);
@@ -177,13 +178,71 @@ final class WooCommercePackageMapper {
 	}
 
 	private function post_data_billing_phone(): string {
+		$parsed = $this->checkout_post_data();
+
+		return $this->phones->normalize( $parsed['billing_phone'] ?? '' );
+	}
+
+	/** @return array<string,mixed> */
+	private function checkout_post_data(): array {
 		if ( ! isset( $_POST['post_data'] ) || ! is_string( $_POST['post_data'] ) ) {
-			return '';
+			return array();
 		}
 		$parsed = array();
 		parse_str( wp_unslash( $_POST['post_data'] ), $parsed );
 
-		return $this->phones->normalize( $parsed['billing_phone'] ?? '' );
+		return is_array( $parsed ) ? $parsed : array();
+	}
+
+	/** @return array<string,string> */
+	private function dadata_address_context(): array {
+		$parsed = $this->checkout_post_data();
+		if ( array() === $parsed ) {
+			return array();
+		}
+		$prefixes = array();
+		$ship_to_different = $this->truthy( $parsed['ship_to_different_address'] ?? $_POST['ship_to_different_address'] ?? false );
+		if ( $ship_to_different ) {
+			$prefixes[] = 'shipping';
+		}
+		$prefixes[] = 'billing';
+
+		foreach ( $prefixes as $prefix ) {
+			$status = $this->post_scalar( $parsed, $prefix . '_dadata_status' );
+			if ( '' === $status || 'empty' === strtolower( $status ) ) {
+				continue;
+			}
+			$context = array( 'dadata_status' => $status );
+			foreach ( array( 'street', 'street_with_type', 'house', 'stead', 'flat', 'geo_lat', 'geo_lon', 'geo_lng' ) as $field ) {
+				$value = $this->post_scalar( $parsed, $prefix . '_dadata_' . $field );
+				if ( '' !== $value ) {
+					$context[ 'dadata_' . $field ] = $value;
+				}
+			}
+
+			return $context;
+		}
+
+		return array();
+	}
+
+	/** @param array<string,mixed> $source */
+	private function post_scalar( array $source, string $key ): string {
+		$value = $source[ $key ] ?? '';
+		if ( is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+
+		return trim( sanitize_text_field( wp_unslash( (string) $value ) ) );
+	}
+
+	private function truthy( mixed $value ): bool {
+		if ( is_bool( $value ) ) {
+			return $value;
+		}
+		$value = strtolower( trim( (string) $value ) );
+
+		return in_array( $value, array( '1', 'yes', 'true', 'on' ), true );
 	}
 
 	/** @return array{latitude:?float,longitude:?float} */

@@ -90,6 +90,7 @@ final class OzonCheckoutSmokePickupDb {
 	public string $prefix = 'wp_';
 	/** @var array<int,array<string,mixed>> */
 	public array $points;
+	public int $area_lookup_calls = 0;
 	public function __construct() {
 		$this->points = array(
 			array( 'generation_id' => 1, 'point_id' => 92783, 'name' => 'ПВЗ Ozon', 'type' => 'pvz', 'full_address' => 'Новосибирск, Красный проспект', 'latitude' => 55.0301, 'longitude' => 82.9201, 'schedule' => 'Ежедневно 09:00-21:00', 'is_active' => 1, 'is_bulky' => 0, 'min_weight_g' => 10, 'max_weight_g' => 10000, 'max_width_mm' => 500, 'max_length_mm' => 500, 'max_height_mm' => 300 ),
@@ -105,7 +106,7 @@ final class OzonCheckoutSmokePickupDb {
 		}
 		return null;
 	}
-	public function get_results( string $query, mixed $output = null ): array { return $this->points; }
+	public function get_results( string $query, mixed $output = null ): array { ++$this->area_lookup_calls; return $this->points; }
 }
 function oz_checkout_assert( bool $condition, string $message ): void { if ( ! $condition ) { throw new RuntimeException( $message ); } }
 function oz_checkout_stored_rate( \WallsShop\WDC\Domain\Quote\DeliveryRate $rate ): array {
@@ -205,8 +206,10 @@ $credentials->save_from_admin( array( OzonDeliverySettings::CLIENT_ID_KEY => 'cl
 $http = new OzonCheckoutSmokeHttp();
 $sanitizer = new OzonDeliveryMessageSanitizer();
 $api = new OzonDeliveryApiClient( $http, new OzonDeliveryAccessTokenService( $credentials, $http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
-$courier_location_resolver = new OzonDeliveryCourierLocationResolver( $location_repository );
-$quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings, null, null, $courier_location_resolver ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
+$pickup_db = new OzonCheckoutSmokePickupDb();
+$pickup_repository = new OzonDeliveryPickupRepository( $pickup_db );
+$courier_location_resolver = new OzonDeliveryCourierLocationResolver( $location_repository, $pickup_repository );
+$quote_service = new OzonDeliveryQuoteService( $api, new OzonDeliveryQuoteRequestBuilder( $settings, null, null, $courier_location_resolver ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( $pickup_repository ), $sanitizer );
 $comment_provider = new OzonDeliveryCustomerCommentProvider();
 $runtime_carrier = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger(), null, $courier_location_resolver );
 $two_rate_quote = $runtime_carrier->quote( $mapped_request );
@@ -214,18 +217,18 @@ oz_checkout_assert( 2 === count( $two_rate_quote->rates ) && 'Ozon до ПВЗ' 
 oz_checkout_assert( DeliveryType::PICKUP === $two_rate_quote->rates[0]->delivery_type && DeliveryType::COURIER === $two_rate_quote->rates[1]->delivery_type && $two_rate_quote->rates[0]->rate_id !== $two_rate_quote->rates[1]->rate_id, 'Ozon pickup and courier rates must have distinct rate IDs and delivery types.' );
 $courier_call = $http->calls[ count( $http->calls ) - 1 ] ?? array();
 oz_checkout_assert( 43 === (int) ( $courier_call['body']['postings'][0]['shipment_method_id'] ?? 0 ) && isset( $courier_call['body']['delivery']['courier']['coordinates'] ) && ! isset( $courier_call['body']['delivery']['delivery_point'] ), 'Ozon courier rate must call order_checkout with the official courier coordinates delivery object.' );
-oz_checkout_assert( 55.030199 === (float) ( $courier_call['body']['delivery']['courier']['coordinates']['latitude'] ?? 0 ) && 82.92043 === (float) ( $courier_call['body']['delivery']['courier']['coordinates']['longitude'] ?? 0 ), 'Ozon courier rate must use LocationRepository coordinates for the selected location.' );
+oz_checkout_assert( 55.0301 === (float) ( $courier_call['body']['delivery']['courier']['coordinates']['latitude'] ?? 0 ) && 82.9201 === (float) ( $courier_call['body']['delivery']['courier']['coordinates']['longitude'] ?? 0 ), 'Ozon courier rate must use the nearest active Ozon pickup point as a pricing proxy instead of sending city-center coordinates.' );
 $failure_http = new OzonCheckoutSmokeHttp();
 $failure_http->courier_availability_error = true;
 $failure_api = new OzonDeliveryApiClient( $failure_http, new OzonDeliveryAccessTokenService( $credentials, $failure_http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
-$failure_service = new OzonDeliveryQuoteService( $failure_api, new OzonDeliveryQuoteRequestBuilder( $settings, null, null, $courier_location_resolver ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
+$failure_service = new OzonDeliveryQuoteService( $failure_api, new OzonDeliveryQuoteRequestBuilder( $settings, null, null, $courier_location_resolver ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( $pickup_repository ), $sanitizer );
 $failure_runtime = new OzonDeliveryCarrier( $settings, $credentials, $failure_service, $comment_provider, new Logger(), null, $courier_location_resolver );
 $logs_before_failure = count( $GLOBALS['oz_checkout_logs'] );
 $failed_courier_quote = $failure_runtime->quote( oz_checkout_with_delivery_type( $mapped_request, DeliveryType::COURIER ) );
 $failure_log = $GLOBALS['oz_checkout_logs'][ $logs_before_failure ] ?? array();
 $failure_context = is_array( $failure_log['context'] ?? null ) ? $failure_log['context'] : array();
 oz_checkout_assert( ! $failed_courier_quote->success && 'delivery_availability_error' === $failed_courier_quote->error_code && 2 === count( $failure_http->calls ) && 'warning' === (string) ( $failure_log['level'] ?? '' ), 'Courier delivery_availability_error must still be treated as unavailable after the Ozon API is reached.' );
-oz_checkout_assert( 'location_repository' === (string) ( $failure_context['courier_coordinate_source'] ?? '' ) && 650000 === (int) ( $failure_context['courier_location_id'] ?? 0 ) && 55.030199 === (float) ( $failure_context['courier_latitude'] ?? 0 ) && 82.92043 === (float) ( $failure_context['courier_longitude'] ?? 0 ) && 43 === (int) ( $failure_context['shipment_method_id'] ?? 0 ), 'Failure log context must include DB location coordinates and courier shipment_method_id.' );
+oz_checkout_assert( 'ozon_pickup_proxy' === (string) ( $failure_context['courier_coordinate_source'] ?? '' ) && 650000 === (int) ( $failure_context['courier_location_id'] ?? 0 ) && 55.0301 === (float) ( $failure_context['courier_latitude'] ?? 0 ) && 82.9201 === (float) ( $failure_context['courier_longitude'] ?? 0 ) && 92783 === (int) ( $failure_context['courier_proxy_point_id'] ?? 0 ) && 43 === (int) ( $failure_context['shipment_method_id'] ?? 0 ), 'Failure log context must include proxy coordinate source, DB location id, proxy coordinates and courier shipment_method_id.' );
 $failure_postings = is_array( $failure_context['postings'] ?? null ) ? $failure_context['postings'] : array();
 oz_checkout_assert( 1 === (int) ( $failure_context['postings_count'] ?? 0 ) && 1 === count( $failure_postings ) && 1000 === (int) ( $failure_postings[0]['weight_g'] ?? 0 ) && 100 === (int) ( $failure_postings[0]['length_mm'] ?? 0 ) && '1000.00' === (string) ( $failure_postings[0]['declared_value_amount'] ?? '' ) && 'RUB' === (string) ( $failure_postings[0]['declared_value_currency'] ?? '' ), 'Failure log context must include safe posting dimensions and declared value summary.' );
 $failure_results = is_array( $failure_context['ozon_results'] ?? null ) ? $failure_context['ozon_results'] : array();
@@ -238,9 +241,17 @@ $carrier_quote = ( new OzonDeliveryCarrier( $settings, $credentials, $quote_serv
 oz_checkout_assert( 1 === count( $carrier_quote->rates ) && 'Ozon до ПВЗ' === $carrier_quote->rates[0]->title, 'Ozon preliminary checkout quote must produce the pickup rate after canonical coordinate fallback.' );
 oz_checkout_assert( 10900 === $carrier_quote->rates[0]->price->get_kopecks() && 109.0 === (float) ( $carrier_quote->rates[0]->meta['api_base_price_rub'] ?? 0 ) && 10.0 === (float) ( $carrier_quote->rates[0]->meta['insurance_total_rub'] ?? 0 ), 'Ozon buyer-facing checkout rate must include delivery and insurance from order_checkout.' );
 oz_checkout_assert( 4 === (int) ( $preliminary_cache_context['ozon_delivery_pricing_contract_version'] ?? 0 ) && 43 === (int) ( $preliminary_cache_context['ozon_delivery_courier_shipment_method_id'] ?? 0 ), 'Ozon quote cache context must include the LocationRepository courier pricing contract version and courier shipment method.' );
-oz_checkout_assert( 'location_id=650000|lat=55.030199|lng=82.92043' === (string) ( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] ?? '' ), 'Ozon courier cache fingerprint must use only selected LocationRepository id and coordinates.' );
+oz_checkout_assert( 'source=ozon_pickup_proxy|location_id=650000|point_id=92783|lat=55.0301|lng=82.9201' === (string) ( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] ?? '' ), 'Ozon courier cache fingerprint must use proxy mode, selected location id and proxy point coordinates.' );
 $street_changed_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'street' => 'Советская', 'house' => '25', 'postcode' => '630099', 'destination_latitude' => 1, 'destination_longitude' => 2, 'lat' => 3, 'lng' => 4 ) ) );
-oz_checkout_assert( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] === ( $runtime_carrier->quote_cache_context( $street_changed_request )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Street/house changes must not affect Ozon courier checkout cache while selected_location_id is unchanged.' );
+oz_checkout_assert( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] === ( $runtime_carrier->quote_cache_context( $street_changed_request )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Incomplete or untrusted street/house changes must not affect Ozon courier checkout cache while proxy mode is active.' );
+$exact_address_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '1', 'dadata_geo_lat' => '55.75511', 'dadata_geo_lon' => '37.622396' ) ) );
+$area_calls_before_exact = $pickup_db->area_lookup_calls;
+$exact_cache_context = $runtime_carrier->quote_cache_context( $exact_address_request );
+oz_checkout_assert( str_starts_with( (string) ( $exact_cache_context['ozon_delivery_courier_location_fingerprint'] ?? '' ), 'source=dadata_address|location_id=650000|lat=55.75511|lng=37.622396|address=' ) && $area_calls_before_exact === $pickup_db->area_lookup_calls, 'Exact trusted DaData address coordinates must have priority over the proxy point and must not query pickup points.' );
+$exact_address_house2 = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'dadata_status' => 'resolved', 'dadata_street' => 'Тверская улица', 'dadata_house' => '2', 'dadata_geo_lat' => '55.75520', 'dadata_geo_lon' => '37.622500' ) ) );
+oz_checkout_assert( $exact_cache_context['ozon_delivery_courier_location_fingerprint'] !== ( $runtime_carrier->quote_cache_context( $exact_address_house2 )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Exact address house/coordinate changes must invalidate the courier checkout cache.' );
+$forged_browser_request = new \WallsShop\WDC\Domain\Quote\QuoteRequest( $mapped_request->country_code, $mapped_request->destination, $mapped_request->package, $mapped_request->payment_method, $mapped_request->order_total, $mapped_request->calculation_date, array_merge( $mapped_request->customer_context, array( 'lat' => 1, 'lng' => 2, 'destination_latitude' => 3, 'destination_longitude' => 4 ) ) );
+oz_checkout_assert( $preliminary_cache_context['ozon_delivery_courier_location_fingerprint'] === ( $runtime_carrier->quote_cache_context( $forged_browser_request )['ozon_delivery_courier_location_fingerprint'] ?? null ), 'Forged browser lat/lng aliases must be ignored by Ozon courier coordinate selection.' );
 oz_checkout_assert( isset( $http->calls[1] ) && str_ends_with( $http->calls[1]['url'], '/v1/order/checkout' ) && 92783 === (int) ( $http->calls[1]['body']['delivery']['delivery_point']['delivery_point_id'] ?? 0 ), 'Ozon preliminary quote must call order_checkout with the representative pickup point found from canonical coordinates.' );
 oz_checkout_assert( '+79131234567' === (string) ( $http->calls[1]['body']['recipient']['phone_number'] ?? '' ), 'Ozon preliminary quote must send normalized customer phone from WooCommerce AJAX post_data to order_checkout.' );
 $ozon_rate = $carrier_quote->rates[0];
@@ -337,7 +348,7 @@ $other_location_db = new wpdb();
 $other_location_db->locations = array( array( 'id' => 650001, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 54.9, 'longitude' => 83.1, 'active' => 1 ) );
 $other_request = ( new WooCommercePackageMapper( null, $other_session, null, new LocationRepository( $other_location_db ) ) )->map( array( 'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск' ), 'contents_cost' => 1000, 'contents_weight' => 1, 'contents' => array( array( 'data' => new OzonCheckoutSmokeProduct(), 'quantity' => 1, 'line_total' => 1000 ) ) ) );
 $other_request = oz_checkout_with_delivery_type( $other_request, DeliveryType::PICKUP );
-$other_runtime = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger(), null, new OzonDeliveryCourierLocationResolver( new LocationRepository( $other_location_db ) ) );
+$other_runtime = new OzonDeliveryCarrier( $settings, $credentials, $quote_service, $comment_provider, new Logger(), null, new OzonDeliveryCourierLocationResolver( new LocationRepository( $other_location_db ), $pickup_repository ) );
 $other_quote = $other_runtime->quote( $other_request );
 $other_snapshot = is_array( $other_quote->rates[0]->meta['pickup_provider_query'] ?? null ) ? $other_quote->rates[0]->meta['pickup_provider_query'] : array();
 oz_checkout_assert( 'country=RU|location_id=650001' === (string) ( $other_snapshot['destination_fingerprint'] ?? '' ) && (string) $snapshot['destination_fingerprint'] !== (string) $other_snapshot['destination_fingerprint'], 'Ozon destination fingerprint must change when the canonical destination changes.' );
@@ -346,7 +357,7 @@ $no_coordinate_db = new wpdb();
 $no_coordinate_db->locations = array( array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => null, 'longitude' => null, 'active' => 1 ) );
 $no_coordinate_http = new OzonCheckoutSmokeHttp();
 $no_coordinate_api = new OzonDeliveryApiClient( $no_coordinate_http, new OzonDeliveryAccessTokenService( $credentials, $no_coordinate_http, $sanitizer, new OzonDeliveryTokenCache( new EncryptionService() ) ) );
-$no_coordinate_resolver = new OzonDeliveryCourierLocationResolver( new LocationRepository( $no_coordinate_db ) );
+$no_coordinate_resolver = new OzonDeliveryCourierLocationResolver( new LocationRepository( $no_coordinate_db ), new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) );
 $no_coordinate_service = new OzonDeliveryQuoteService( $no_coordinate_api, new OzonDeliveryQuoteRequestBuilder( $settings, null, null, $no_coordinate_resolver ), new OzonDeliveryQuoteParser( $sanitizer ), ( new OzonDeliveryPackagingBuilderFactory() )->create(), new OzonDeliveryPickupPointProvider( new OzonDeliveryPickupRepository( new OzonCheckoutSmokePickupDb() ) ), $sanitizer );
 $no_coordinate_runtime = new OzonDeliveryCarrier( $settings, $credentials, $no_coordinate_service, $comment_provider, new Logger(), null, $no_coordinate_resolver );
 $courier_only_missing = $no_coordinate_runtime->quote( oz_checkout_with_delivery_type( $mapped_request, DeliveryType::COURIER ) );
