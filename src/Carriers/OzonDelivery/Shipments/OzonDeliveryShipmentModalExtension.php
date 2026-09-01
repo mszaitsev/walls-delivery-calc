@@ -27,6 +27,7 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 			'point_found' => is_array( $row ),
 			'point_id' => $point_id,
 			'point_address' => is_array( $row ) ? (string) ( $row['full_address'] ?? '' ) : (string) ( $meta['pickup_point_address'] ?? '' ),
+			'min_weight_g' => is_array( $row ) ? (int) ( $row['min_weight_g'] ?? 0 ) : 0,
 			'max_weight_g' => is_array( $row ) ? (int) ( $row['max_weight_g'] ?? 0 ) : 0,
 			'max_length_mm' => is_array( $row ) ? (int) ( $row['max_length_mm'] ?? 0 ) : 0,
 			'max_width_mm' => is_array( $row ) ? (int) ( $row['max_width_mm'] ?? 0 ) : 0,
@@ -50,11 +51,19 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 		$dimensions = 3 === count( $limits ) ? sprintf( '%d × %d × %d см', (int) ceil( $limits[0] / 10 ), (int) ceil( $limits[1] / 10 ), (int) ceil( $limits[2] / 10 ) ) : 'не указаны';
 		$weight = (int) ( $context['max_weight_g'] ?? 0 ) > 0 ? rtrim( rtrim( number_format( (int) $context['max_weight_g'] / 1000, 3, ',', '' ), '0' ), ',' ) . ' кг' : 'не указан';
 		?>
-		<div class="notice notice-info inline">
+		<div class="notice notice-info inline"
+			data-wdc-ozon-place-limits
+			data-point-found="<?php echo esc_attr( ! empty( $context['point_found'] ) ? '1' : '0' ); ?>"
+			data-min-weight-g="<?php echo esc_attr( (string) max( 0, (int) ( $context['min_weight_g'] ?? 0 ) ) ); ?>"
+			data-max-weight-g="<?php echo esc_attr( (string) max( 0, (int) ( $context['max_weight_g'] ?? 0 ) ) ); ?>"
+			data-max-length-mm="<?php echo esc_attr( (string) max( 0, (int) ( $context['max_length_mm'] ?? 0 ) ) ); ?>"
+			data-max-width-mm="<?php echo esc_attr( (string) max( 0, (int) ( $context['max_width_mm'] ?? 0 ) ) ); ?>"
+			data-max-height-mm="<?php echo esc_attr( (string) max( 0, (int) ( $context['max_height_mm'] ?? 0 ) ) ); ?>">
 			<p><strong><?php echo esc_html__( 'Ограничения выбранного ПВЗ Ozon', 'walls-delivery-calc' ); ?></strong></p>
 			<p><?php echo esc_html( sprintf( __( 'Максимальный вес одного места: %s', 'walls-delivery-calc' ), $weight ) ); ?></p>
 			<p><?php echo esc_html( sprintf( __( 'Максимальные размеры: %s', 'walls-delivery-calc' ), $dimensions ) ); ?></p>
 			<?php if ( ! empty( $context['point_address'] ) ) : ?><p class="description"><?php echo esc_html( (string) $context['point_address'] ); ?></p><?php endif; ?>
+			<div class="wdc-ozon-place-limit-warning" data-wdc-ozon-place-limit-warning role="alert" aria-live="polite" hidden></div>
 		</div>
 		<?php
 	}

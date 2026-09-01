@@ -698,11 +698,32 @@ oz_ship_assert( ! $preflight_failed->success && 'ozon_shipment_preflight_failed'
 $stack = oz_ship_stack( $db );
 $overweight_order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
 $overweight = $stack['service']->create( $overweight_order, oz_ship_request( array( new ShipmentPlace( 1, 12000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ) ) );
-oz_ship_assert( ! $overweight->success && 'ozon_shipment_validation_failed' === $overweight->error_code && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Overweight actual place must be blocked before /v1/order/create.' );
-$oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85373, '85373' ) );
-oz_ship_assert( ! $oversize->success && str_contains( $oversize->error_message, 'размер' ), '40x40x40 actual place must fail selected Ozon point limits after rotation-aware dimension check: ' . $oversize->error_code . ' ' . $oversize->error_message );
+oz_ship_assert( ! $overweight->success && 'ozon_shipment_validation_failed' === $overweight->error_code && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ) && 0 === count( $stack['http']->calls_for( '/v1/posting/approve' ) ), 'Overweight actual place must be blocked before any Ozon create mutation or preflight.' );
+
+$stack = oz_ship_stack( $db );
+$too_long = $stack['service']->create( new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 51, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85373, '85373' ) );
+oz_ship_assert( ! $too_long->success && 'ozon_shipment_validation_failed' === $too_long->error_code && str_contains( $too_long->error_message, 'размер' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), '51x30x20 actual place must fail selected Ozon point limits before Ozon API preflight.' );
+
+$stack = oz_ship_stack( $db );
+$oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85374, '85374' ) );
+oz_ship_assert( ! $oversize->success && str_contains( $oversize->error_message, 'размер' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), '40x40x40 actual place must fail selected Ozon point limits after rotation-aware dimension check before Ozon API preflight: ' . $oversize->error_code . ' ' . $oversize->error_message );
+
 $rotated = $stack['service']->create( new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 50, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85374, '85374' ) );
 oz_ship_assert( $rotated->success, '50x30x20 actual place must pass selected point limits with rotation.' );
+
+$stack = oz_ship_stack( $db );
+$multi_overweight = $stack['service']->create( new OzonShipmentSmokeOrder( 85390, '85390', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 30, 20, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 11000, 30, 30, 20, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85390, '85390' ) );
+oz_ship_assert( ! $multi_overweight->success && str_contains( $multi_overweight->error_message, 'Грузоместо 2' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Overweight second Ozon place must block the whole multi-box shipment before Ozon API calls.' );
+
+$stack = oz_ship_stack( $db );
+$multi_oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85391, '85391', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 30, 20, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85391, '85391' ) );
+oz_ship_assert( ! $multi_oversize->success && str_contains( $multi_oversize->error_message, 'Грузоместо 2' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Oversized second Ozon place must block the whole multi-box shipment before Ozon API calls.' );
 
 $stack = oz_ship_stack( $db );
 $stack['http']->fail_approve = array( 'OZON-1' );

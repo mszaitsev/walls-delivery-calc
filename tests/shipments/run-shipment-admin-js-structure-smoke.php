@@ -395,6 +395,8 @@ $files = array(
 	'dpd'          => $root . '/assets/admin/shipments/extensions/dpd.js',
 	'russian_post' => $root . '/assets/admin/shipments/extensions/russian-post.js',
 	'yandex'       => $root . '/assets/admin/shipments/extensions/yandex.js',
+	'pek'          => $root . '/assets/admin/shipments/extensions/pek.js',
+	'ozon'         => $root . '/assets/admin/shipments/extensions/ozon-delivery.js',
 	'events'       => $root . '/assets/admin/shipments/shipment-events.js',
 );
 
@@ -405,13 +407,13 @@ foreach ( $files as $key => $file ) {
 }
 
 shipment_admin_js_structure_assert( str_contains( $source['bootstrap'], 'initializeShipmentAdmin()' ) && ! str_contains( $source['bootstrap'], 'data-wdc-' ) && ! str_contains( $source['bootstrap'], 'function renderShipmentStatus' ) && ! str_contains( $source['bootstrap'], 'function requestPreview' ), 'Bootstrap must only initialize the modular shipment admin runtime.' );
-shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex)\\b/i', $source['core'] ), 'Core module must not contain carrier-specific logic.' );
+shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex|ozon)\\b/i', $source['core'] ), 'Core module must not contain carrier-specific logic.' );
 shipment_admin_js_structure_assert( str_contains( $source['preview'], 'function requestPreview' ) && str_contains( $source['preview'], 'function updateCreateAvailability' ), 'Preview module must own preview requests and create availability refresh.' );
 shipment_admin_js_structure_assert( str_contains( $source['status'], 'function renderShipmentStatus' ) && str_contains( $source['status'], 'function updateShipmentButtons' ) && ! str_contains( $source['status'], 'fetch(' ), 'Status module must render status/buttons without AJAX fetch calls.' );
 shipment_admin_js_structure_assert( str_contains( $source['status'], "payloadKey !== 'tracking_presentation'" ) && str_contains( $source['status'], "return { label: '', displayText: '', copyValue: '', url: '', items: [] };" ) && str_contains( $source['status'], 'status && status.barcode' ), 'Secondary tracking presentations must not fallback to barcode; only primary tracking may use the legacy barcode fallback.' );
 shipment_admin_js_structure_assert( str_contains( $source['polling'], 'function requestShipmentStatus' ) && str_contains( $source['polling'], 'function startShipmentRegistrationPolling' ) && str_contains( $source['polling'], 'function requestShipmentCancel' ), 'Polling module must own status polling, registration polling and cancellation requests.' );
-shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex)\\b/i', $source['polling'] ), 'Polling module must remain carrier-neutral.' );
-shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex)\\b/i', $source['status'] ), 'Status module must remain carrier-neutral.' );
+shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex|ozon)\\b/i', $source['polling'] ), 'Polling module must remain carrier-neutral.' );
+shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex|ozon)\\b/i', $source['status'] ), 'Status module must remain carrier-neutral.' );
 shipment_admin_js_structure_assert( str_contains( $source['allocation'], 'function splitShipmentItemRow' ) && str_contains( $source['allocation'], 'function addManualShipmentItemRow' ) && str_contains( $source['allocation'], 'function updateShipmentPlaceOptions' ), 'Allocation module must own places/items/split/manual rows.' );
 $place_select_change_pos = strpos( $source['events'], "event.target.matches('[data-wdc-shipment-place-select]')" );
 $carrier_change_hook_pos = strpos( $source['events'], "dispatchShipmentCarrierHook('handleChange', event)" );
@@ -422,9 +424,11 @@ shipment_admin_js_structure_assert( str_contains( $source['picker'], 'if (contex
 shipment_admin_js_structure_assert( str_contains( $source['cdek'], 'requestCdekBarcodeDownload' ) && str_contains( $source['cdek'], 'updateCdekDeliveryModeUi' ), 'CDEK extension must own CDEK UI hooks and barcode download.' );
 shipment_admin_js_structure_assert( str_contains( $source['dpd'], 'requestDpdDocumentsDownload' ) && str_contains( $source['dpd'], 'syncDpdAddressFields' ), 'DPD extension must own DPD UI, documents and address hooks.' );
 shipment_admin_js_structure_assert( str_contains( $source['yandex'], 'requestYandexLabelDownload' ) && str_contains( $source['yandex'], 'yandexSourceDropoffContext' ), 'Yandex extension must own Yandex label and source drop-off hooks.' );
+shipment_admin_js_structure_assert( str_contains( $source['ozon'], 'data-wdc-ozon-place-limits' ) && str_contains( $source['ozon'], 'createAvailability' ) && str_contains( $source['ozon'], 'dimensionsFit' ), 'Ozon Delivery extension must own Ozon pickup point limit validation and create availability hook.' );
 shipment_admin_js_structure_assert( str_contains( $source['russian_post'], 'Russian Post' ), 'Russian Post extension module must exist even when current behavior is shared.' );
 shipment_admin_js_structure_assert( str_contains( $source['events'], 'function initializeShipmentAdmin' ) && str_contains( $source['events'], 'document.addEventListener' ), 'Events module must own DOM event wiring for the modular runtime.' );
 shipment_admin_js_structure_assert( ! preg_match( '/\\b(cdek|dpd|russian|yandex)\\b/i', $source['events'] ), 'Events module must remain carrier-neutral.' );
+shipment_admin_js_structure_assert( str_contains( $source['events'], "dispatchShipmentCarrierHook('afterPlacesChanged'" ), 'Events/allocation changes must notify carrier extensions through a neutral afterPlacesChanged hook.' );
 shipment_admin_js_structure_assert( str_contains( $source['events'], 'function setShipmentCreateBusy' ) && str_contains( $source['events'], "create.dataset.wdcCreateBusy === '1'" ) && str_contains( $source['events'], "button.setAttribute('aria-busy', 'true')" ) && str_contains( $source['events'], 'wdc-shipment-create-busy' ) && str_contains( $source['events'], 'Создаём отправление Ozon…' ) && ! str_contains( $source['events'], 'Сверяем стоимость' ) && ! str_contains( $source['events'], 'Подтверждаем' ), 'Create action must use a real busy/disabled guard without fake staged progress toasts.' );
 shipment_admin_js_structure_assert( str_contains( $source['core'], 'function dispatchShipmentCarrierHook' ) && str_contains( $source['core'], 'registerShipmentCarrierHooks' ), 'Core module must expose the small carrier hook registry.' );
 

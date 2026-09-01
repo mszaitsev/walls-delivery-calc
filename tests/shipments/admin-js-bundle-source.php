@@ -15,6 +15,8 @@ if ( ! function_exists( 'wdc_shipment_admin_js_bundle_source' ) ) {
 			$root . '/assets/admin/shipments/extensions/dpd.js',
 			$root . '/assets/admin/shipments/extensions/russian-post.js',
 			$root . '/assets/admin/shipments/extensions/yandex.js',
+			$root . '/assets/admin/shipments/extensions/pek.js',
+			$root . '/assets/admin/shipments/extensions/ozon-delivery.js',
 			$root . '/assets/admin/shipments/shipment-events.js',
 			$root . '/assets/admin/shipments-admin.js',
 		);

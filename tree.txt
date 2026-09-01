@@ -38,6 +38,7 @@ C:.
 |   |       \---extensions
 |   |               cdek.js
 |   |               dpd.js
+|   |               ozon-delivery.js
 |   |               pek.js
 |   |               russian-post.js
 |   |               yandex.js
@@ -1108,6 +1109,7 @@ C:.
     |       run-ozon-delivery-authorization-smoke.php
     |       run-ozon-delivery-checkout-smoke.php
     |       run-ozon-delivery-foundation-smoke.php
+    |       run-ozon-delivery-modal-limits-smoke.php
     |       run-ozon-delivery-pickup-admin-smoke.php
     |       run-ozon-delivery-pickup-import-smoke.php
     |       run-ozon-delivery-pickup-progress-smoke.php

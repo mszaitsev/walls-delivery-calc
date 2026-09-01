@@ -281,6 +281,7 @@
     row.after(clone);
     rebalanceShipmentItemGroup(form, groupKey);
     updateShipmentPlaceOptions(form);
+    dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'item_split_added' });
     schedulePreview(form);
   }
 
@@ -312,6 +313,7 @@
     ].join('');
     body.appendChild(row);
     updateShipmentPlaceOptions(form);
+    dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'manual_item_added' });
     schedulePreview(form);
   }
 
