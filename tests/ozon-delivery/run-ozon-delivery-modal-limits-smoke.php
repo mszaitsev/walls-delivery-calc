@@ -21,6 +21,7 @@ class FakeInput {
     this.value = String(value || '');
     this.form = form;
     this.attrs = {};
+    this.dataset = {};
   }
   setAttribute(name, value) { this.attrs[name] = String(value); }
   removeAttribute(name) { delete this.attrs[name]; }
@@ -79,8 +80,13 @@ class FakeNode {
 function makeForm(rows, limits) {
   const form = {
     carrierKey: 'ozon_delivery',
+    deliveryType: 'pickup',
     availabilityUpdates: 0,
     warning: new FakeNode(),
+    normalizedInput: new FakeInput('', null),
+    displayInput: new FakeInput('', null),
+    statusNode: new FakeNode(),
+    courierFields: {},
     limits: { dataset: Object.assign({
       pointFound: '1',
       minWeightG: '0',
@@ -91,8 +97,16 @@ function makeForm(rows, limits) {
     }, limits || {}) },
     querySelector(selector) {
       if (selector === 'input[name="carrier_key"]') return { value: this.carrierKey };
+      if (selector === '[data-wdc-service-select]') {
+        return { selectedIndex: 0, options: [{ value: this.deliveryType, dataset: { deliveryType: this.deliveryType } }] };
+      }
       if (selector === '[data-wdc-ozon-place-limits]') return this.limits;
       if (selector === '[data-wdc-ozon-place-limit-warning]') return this.warning;
+      if (selector === '[data-wdc-normalized-address-json]') return this.normalizedInput;
+      if (selector === '[data-wdc-normalized-address-display]') return this.displayInput;
+      if (selector === '[data-wdc-normalized-status]') return this.statusNode;
+      const courierMatch = selector.match(/\[data-wdc-ozon-courier-field="(.+)"\]/);
+      if (courierMatch) return this.courierFields[courierMatch[1]] || null;
       return null;
     },
     querySelectorAll(selector) {
@@ -102,7 +116,40 @@ function makeForm(rows, limits) {
     }
   };
   form.rows = rows.map((row, index) => new FakeRow(index + 1, row, form));
+  form.normalizedInput.form = form;
+  form.displayInput.form = form;
+  ['postcode', 'country', 'region', 'city', 'street', 'house', 'flat'].forEach((key) => {
+    form.courierFields[key] = new FakeInput('', form);
+  });
   return form;
+}
+
+function makeCourierForm(snapshot) {
+  const form = makeForm([{ weightG: 9000, lengthCm: 50, widthCm: 30, heightCm: 20 }]);
+  form.deliveryType = 'courier';
+  form.normalizedInput.value = snapshot ? JSON.stringify(snapshot) : '';
+  return form;
+}
+
+function validCourierSnapshot(overrides) {
+  return Object.assign({
+    success: true,
+    service_key: 'ozon_delivery',
+    fields: {
+      postcode: '630099',
+      country: 'Россия',
+      region: 'Новосибирская область',
+      city: 'г Новосибирск',
+      street: 'улица Ленина',
+      house: '10',
+      stead: '',
+      flat: '12',
+      geo_lat: '55.0415',
+      geo_lon: '82.9346',
+      normalized_address: '630099, Новосибирская область, г Новосибирск, улица Ленина, 10'
+    },
+    display: '630099, Новосибирская область, г Новосибирск, улица Ленина, 10'
+  }, overrides || {});
 }
 
 global.window = global;
@@ -187,6 +234,26 @@ form = makeForm([{ weightG: 15000, lengthCm: 100, widthCm: 100, heightCm: 100 }]
 form.carrierKey = 'cdek';
 assert.strictEqual(hooks.createAvailability(form), true, 'Non-Ozon modal must be a no-op.');
 assert.strictEqual(form.warning.hidden, true, 'Non-Ozon modal must not show Ozon warnings.');
+
+form = makeCourierForm(null);
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier raw/legacy address must block create until normalization succeeds.');
+
+form = makeCourierForm(validCourierSnapshot());
+assert.strictEqual(hooks.createAvailability(form), true, 'Ozon courier valid trusted snapshot may enable create immediately.');
+
+form = makeCourierForm(validCourierSnapshot({ fields: Object.assign({}, validCourierSnapshot().fields, { house: '', stead: '' }) }));
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier DaData result without house or stead must keep create disabled.');
+
+form = makeCourierForm(validCourierSnapshot({ success: false, message: 'DaData не вернула дом.' }));
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier failed address normalization must keep create disabled.');
+
+form = makeCourierForm(validCourierSnapshot());
+assert.strictEqual(hooks.createAvailability(form), true, 'Ozon courier address starts valid before manager edit.');
+form.normalizedInput.value = '';
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier manager semantic edit reset must make previous normalization stale and disable create.');
+
+form = makeCourierForm(validCourierSnapshot({ service_key: 'cdek', fields: validCourierSnapshot().fields }));
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier create availability must require Ozon-owned normalized address state.');
 
 console.log('Ozon Delivery modal limits JS smoke passed.');
 JS;

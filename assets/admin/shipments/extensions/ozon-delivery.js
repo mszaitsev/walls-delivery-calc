@@ -22,6 +22,15 @@
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   }
 
+  function textValue(value) {
+    return String(value || '').trim();
+  }
+
+  function numberValue(value) {
+    var parsed = parseFloat(String(value || '').replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+
   function formatKg(grams) {
     var value = Math.round(Number(grams || 0)) / 1000;
     return String(value.toFixed(3)).replace(/\.?0+$/, '').replace('.', ',') + ' кг';
@@ -87,6 +96,7 @@
     if (display) display.value = snapshot.display || fields.normalized_address || '';
     var mapped = {
       postcode: fields.postcode || '',
+      country: fields.country || '',
       region: fields.region || '',
       city: fields.city || '',
       street: fields.street || '',
@@ -99,10 +109,31 @@
     });
   }
 
+  function hasValidCoordinatePair(fields) {
+    var lat = numberValue(fields.geo_lat);
+    var lon = numberValue(fields.geo_lon);
+    return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && !(lat === 0 && lon === 0);
+  }
+
+  function hasConfirmedOzonCourierAddress(snapshot) {
+    var fields = snapshot && snapshot.fields ? snapshot.fields : {};
+    return !!(
+      snapshot &&
+      snapshot.success === true &&
+      snapshot.service_key === 'ozon_delivery' &&
+      textValue(fields.street) &&
+      (textValue(fields.house) || textValue(fields.stead)) &&
+      textValue(fields.postcode) &&
+      textValue(fields.country) &&
+      textValue(fields.region) &&
+      textValue(fields.city) &&
+      hasValidCoordinatePair(fields)
+    );
+  }
+
   function validateOzonCourierAddress(form) {
     if (!isOzonCourierForm(form)) return true;
-    var snapshot = normalizedAddressSnapshot(form);
-    return !!(snapshot && snapshot.success === true && snapshot.service_key === 'ozon_delivery');
+    return hasConfirmedOzonCourierAddress(normalizedAddressSnapshot(form));
   }
 
   function placeInput(row, suffix) {
@@ -279,6 +310,8 @@
 
   window.wdcOzonDeliveryShipmentLimits = {
     collectViolations: collectViolations,
-    dimensionsFit: dimensionsFit
+    dimensionsFit: dimensionsFit,
+    hasConfirmedOzonCourierAddress: hasConfirmedOzonCourierAddress,
+    validateOzonCourierAddress: validateOzonCourierAddress
   };
 })();

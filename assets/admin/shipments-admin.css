@@ -196,6 +196,21 @@
   background: #fcf0f1;
 }
 
+.wdc-ozon-courier-address-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.wdc-shipment-modal .wdc-ozon-courier-address-grid label {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.wdc-shipment-modal .wdc-ozon-courier-address-grid input {
+  box-sizing: border-box;
+}
+
 .wdc-shipment-modal {
   position: fixed;
   inset: 0;
@@ -616,6 +631,10 @@
   .wdc-place-row,
   .wdc-admin-pickup-picker__search,
   .wdc-admin-pickup-picker__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wdc-ozon-courier-address-grid {
     grid-template-columns: 1fr;
   }
 

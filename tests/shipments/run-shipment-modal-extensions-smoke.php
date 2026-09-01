@@ -219,6 +219,7 @@ $ozon_courier_draft['request']['meta'] = array(
 	'normalization_valid' => true,
 	'courier_address_snapshot' => array(
 		'postcode' => '630099',
+		'country' => 'Россия',
 		'region' => 'Новосибирская область',
 		'city' => 'г Новосибирск',
 		'street' => 'улица Ленина',
@@ -233,6 +234,9 @@ $ozon_courier_context = $ozon->modal_context( $order, $ozon_courier_draft );
 $ozon_courier_html = modal_ext_render( static fn() => $ozon->render_courier_fields( $order, $ozon_courier_draft, $ozon_courier_context ) );
 modal_ext_assert( 'courier' === (string) ( $ozon_courier_context['delivery_type'] ?? '' ) && ! empty( $ozon_courier_context['normalization_valid'] ), 'Ozon courier modal context must expose validated structured recipient address state.' );
 modal_ext_assert( str_contains( $ozon_courier_html, 'data-wdc-normalize-address' ) && str_contains( $ozon_courier_html, 'name="courier_original_address"' ) && str_contains( $ozon_courier_html, 'data-wdc-normalized-address-json' ) && str_contains( $ozon_courier_html, 'data-wdc-ozon-courier-field="postcode"' ) && str_contains( $ozon_courier_html, 'name="ozon_courier_apartment"' ), 'Ozon courier fields must reuse generic server-side address normalization and render manager-editable supported courier details.' );
+modal_ext_assert( str_contains( $ozon_courier_html, 'Проанализировать адрес' ) && ! str_contains( $ozon_courier_html, 'Проверить адрес через DaData' ), 'Ozon courier normalize button must use the manager-facing analyze label.' );
+modal_ext_assert( ! str_contains( $ozon_courier_html, 'Курьерское отправление Ozon создаётся только по подтвержденному структурированному адресу получателя' ), 'Ozon courier modal must not show technical browser/FIAS security commentary.' );
+modal_ext_assert( str_contains( $ozon_courier_html, 'data-wdc-ozon-courier-address-grid' ) && str_contains( $ozon_courier_html, 'data-wdc-ozon-courier-field="country"' ), 'Ozon courier modal must render compact structured address grid markup including country.' );
 modal_ext_assert( ! str_contains( $ozon_courier_html, 'name="geo_lat"' ) && ! str_contains( $ozon_courier_html, 'name="geo_lon"' ) && ! str_contains( $ozon_courier_html, 'name="fias_id"' ), 'Ozon courier modal must not expose coordinates/FIAS as browser-authoritative form fields.' );
 
 $root = dirname( __DIR__, 2 );
@@ -242,6 +246,7 @@ $dpd_source = (string) file_get_contents( $root . '/src/Shipments/Dpd/DpdShipmen
 $rp_source = (string) file_get_contents( $root . '/src/Shipments/RussianPost/RussianPostShipmentModalExtension.php' );
 $yandex_source = (string) file_get_contents( $root . '/src/Shipments/YandexDelivery/YandexShipmentModalExtension.php' );
 $ozon_source = (string) file_get_contents( $root . '/src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentModalExtension.php' );
+$shipment_css = (string) file_get_contents( $root . '/assets/admin/shipments-admin.css' );
 
 modal_ext_assert( str_contains( $metabox_source, 'modal_extensions->get' ) && str_contains( $metabox_source, 'render_fields' ), 'Common metabox must call modal extensions through the registry.' );
 modal_ext_assert( ! str_contains( $metabox_source, "name=\"date_pickup\"" ) && ! str_contains( $metabox_source, "name=\"postoffice_code\"" ) && ! str_contains( $metabox_source, "name=\"yandex_ready_from\"" ), 'Common delivery renderer must not keep DPD/Russian Post/Yandex delivery field markup.' );
@@ -258,6 +263,7 @@ modal_ext_assert( str_contains( $dpd_source, 'data-wdc-dpd-date-pickup' ) && str
 modal_ext_assert( str_contains( $rp_source, 'name="postoffice_code"' ), 'Russian Post extension must own postoffice field.' );
 modal_ext_assert( str_contains( $yandex_source, 'data-wdc-yandex-source-station' ) && str_contains( $yandex_source, 'name="yandex_ready_from"' ) && str_contains( $yandex_source, 'data-wdc-yandex-offer-note' ), 'Yandex extension must own source station/ready interval fields.' );
 modal_ext_assert( str_contains( $ozon_source, 'data-wdc-ozon-place-limits' ) && str_contains( $ozon_source, 'data-wdc-ozon-place-limit-warning' ), 'Ozon extension must own selected point limit markup.' );
+modal_ext_assert( str_contains( $shipment_css, '.wdc-ozon-courier-address-grid' ) && str_contains( $shipment_css, 'grid-template-columns: repeat(2, minmax(0, 1fr))' ) && str_contains( $shipment_css, '@media (max-width: 782px)' ), 'Shipment admin CSS must keep Ozon courier address fields in a responsive two-column grid.' );
 foreach ( array( $cdek_source, $dpd_source, $rp_source, $yandex_source, $ozon_source ) as $source ) {
 	modal_ext_assert( ! str_contains( $source, '$_POST' ) && ! str_contains( $source, 'wp_remote_' ) && ! str_contains( $source, 'create(' ) && ! str_contains( $source, 'cancel' ), 'Modal extensions must not perform HTTP, create/cancel, or read $_POST.' );
 }
