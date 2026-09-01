@@ -80,8 +80,38 @@ final class OzonDeliveryCourierAddressNormalizer {
 		if ( ! $this->valid_coordinates( $fields['geo_lat'] ?? '', $fields['geo_lon'] ?? '' ) ) {
 			$errors[] = 'DaData не вернула корректные координаты.';
 		}
+		if ( ! $this->locality_fias_matches( $fields ) ) {
+			$errors[] = 'Адрес относится к другому населённому пункту. Проверьте город и адрес доставки.';
+		}
 
 		return $errors;
+	}
+
+	/** @param array<string,string> $fields */
+	private function locality_fias_matches( array $fields ): bool {
+		$selected = $this->normalized_fias( $fields['selected_location_fias_id'] ?? '' );
+		if ( '' === $selected ) {
+			return true;
+		}
+		$candidates = array_values(
+			array_filter(
+				array(
+					$this->normalized_fias( $fields['city_fias_id'] ?? '' ),
+					$this->normalized_fias( $fields['settlement_fias_id'] ?? '' ),
+				),
+				static fn( string $value ): bool => '' !== $value
+			)
+		);
+		if ( array() === $candidates ) {
+			return true;
+		}
+
+		return in_array( $selected, $candidates, true );
+	}
+
+	private function normalized_fias( mixed $value ): string {
+		$value = $this->text( $value );
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
 	}
 
 	private function valid_coordinates( string $lat, string $lon ): bool {

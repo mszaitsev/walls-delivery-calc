@@ -94,11 +94,32 @@ function oz_ship_assert( bool $condition, string $message ): void {
 final class OzonShipmentSmokeSuggestionClient implements AddressSuggestionClientInterface {
 	/** @var array<string,string> */
 	public array $last_context = array();
+	/** @var array<string,string> */
+	public array $data = array();
 
 	/** @param array<string,string> $context @return array<string,mixed> */
 	public function suggest( string $stage, string $query, array $context = array() ): array {
 		unset( $stage, $query );
 		$this->last_context = $context;
+		$data = array_merge(
+			array(
+				'fias_level' => '8',
+				'region_with_type' => 'Новосибирская обл',
+				'region_fias_id' => 'region-fias',
+				'city_with_type' => 'г Новосибирск',
+				'city_fias_id' => 'REAL-FIAS',
+				'settlement_with_type' => '',
+				'settlement_fias_id' => '',
+				'street_with_type' => 'ул Ленина',
+				'street_fias_id' => 'street-fias',
+				'house' => '10',
+				'house_fias_id' => 'house-fias',
+				'postal_code' => '630005',
+				'geo_lat' => '55.0415',
+				'geo_lon' => '82.9346',
+			),
+			$this->data
+		);
 		return array(
 			'success' => true,
 			'status_code' => 200,
@@ -106,20 +127,7 @@ final class OzonShipmentSmokeSuggestionClient implements AddressSuggestionClient
 				array(
 					'value' => 'г Новосибирск, ул Ленина, д 10',
 					'unrestricted_value' => '630005, Новосибирская обл, г Новосибирск, ул Ленина, д 10',
-					'data' => array(
-						'fias_level' => '8',
-						'region_with_type' => 'Новосибирская обл',
-						'region_fias_id' => 'region-fias',
-						'city_with_type' => 'г Новосибирск',
-						'city_fias_id' => 'dadata-city-fias',
-						'street_with_type' => 'ул Ленина',
-						'street_fias_id' => 'street-fias',
-						'house' => '10',
-						'house_fias_id' => 'house-fias',
-						'postal_code' => '630005',
-						'geo_lat' => '55.0415',
-						'geo_lon' => '82.9346',
-					),
+					'data' => $data,
 				),
 			),
 		);
@@ -154,6 +162,25 @@ oz_ship_assert( ! empty( $normalized['success'] ), 'Ozon courier address normali
 oz_ship_assert( '123' === (string) ( $normalized_fields['selected_location_id'] ?? '' ) && 'REAL-FIAS' === (string) ( $normalized_fields['selected_location_fias_id'] ?? '' ), 'Ozon courier address normalizer must copy selected location identity from server context.' );
 oz_ship_assert( 'ул Ленина' === (string) ( $normalized_fields['street'] ?? '' ) && '10' === (string) ( $normalized_fields['house'] ?? '' ) && '630005' === (string) ( $normalized_fields['postcode'] ?? '' ) && '55.0415' === (string) ( $normalized_fields['geo_lat'] ?? '' ) && '82.9346' === (string) ( $normalized_fields['geo_lon'] ?? '' ), 'Ozon courier address normalizer must keep exact safe DaData address fields.' );
 oz_ship_assert( 'RU' === (string) ( $suggestion_client->last_context['country_code'] ?? '' ) && '123' === (string) ( $suggestion_client->last_context['selected_location_id'] ?? '' ), 'Ozon courier address normalizer must pass server context to AddressSuggestionService.' );
+
+$suggestion_client->data = array( 'city_fias_id' => 'NOVOSIBIRSK', 'settlement_fias_id' => '' );
+$city_match = $ozon_normalizer->normalize( 'Новосибирск, Ленина, 10', array( 'selected_location_fias_id' => ' novosibirsk ' ) );
+oz_ship_assert( ! empty( $city_match['success'] ), 'Ozon courier address normalizer must accept selected FIAS matching DaData city_fias_id case-insensitively.' );
+$suggestion_client->data = array( 'city_fias_id' => 'PARENT-CITY', 'settlement_fias_id' => 'SETTLEMENT-123' );
+$settlement_match = $ozon_normalizer->normalize( 'посёлок Тестовый, Ленина, 10', array( 'selected_location_fias_id' => 'settlement-123' ) );
+oz_ship_assert( ! empty( $settlement_match['success'] ), 'Ozon courier address normalizer must accept selected FIAS matching DaData settlement_fias_id.' );
+$suggestion_client->data = array( 'city_fias_id' => 'MOSCOW', 'settlement_fias_id' => '' );
+$city_mismatch = $ozon_normalizer->normalize( 'Москва, Тверская, 10', array( 'selected_location_fias_id' => 'NOVOSIBIRSK' ) );
+oz_ship_assert( empty( $city_mismatch['success'] ) && str_contains( (string) ( $city_mismatch['message'] ?? '' ), 'другому населённому пункту' ), 'Ozon courier address normalizer must reject DaData city locality FIAS mismatch with a safe manager-facing message.' );
+$suggestion_client->data = array( 'city_fias_id' => 'LOCATION-B', 'settlement_fias_id' => 'LOCATION-C' );
+$both_mismatch = $ozon_normalizer->normalize( 'Москва, Тверская, 10', array( 'selected_location_fias_id' => 'LOCATION-A' ) );
+oz_ship_assert( empty( $both_mismatch['success'] ), 'Ozon courier address normalizer must reject when both city and settlement FIAS candidates mismatch selected location FIAS.' );
+$suggestion_client->data = array( 'city_fias_id' => 'MOSCOW', 'settlement_fias_id' => '' );
+$selected_absent = $ozon_normalizer->normalize( 'Москва, Тверская, 10', array( 'selected_location_id' => '123' ) );
+oz_ship_assert( ! empty( $selected_absent['success'] ), 'Ozon courier address normalizer must keep legacy compatibility when selected location FIAS is absent.' );
+$suggestion_client->data = array( 'city_fias_id' => '', 'settlement_fias_id' => '' );
+$dadata_absent = $ozon_normalizer->normalize( 'Новосибирск, Ленина, 10', array( 'selected_location_fias_id' => 'LOCATION-A' ) );
+oz_ship_assert( ! empty( $dadata_absent['success'] ), 'Ozon courier address normalizer must not reject only because DaData locality FIAS evidence is absent.' );
 
 final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,body:array<string,mixed>,headers:array<string,mixed>}> */
@@ -330,6 +357,9 @@ final class OzonShipmentSmokeOrder {
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
 	public function save(): void {}
 }
+
+$no_mutation_stack = new OzonShipmentSmokeHttp();
+oz_ship_assert( empty( $city_mismatch['success'] ) && 0 === count( $no_mutation_stack->calls_for( '/v1/order/checkout' ) ) && 0 === count( $no_mutation_stack->calls_for( '/v1/order/create' ) ) && 0 === count( $no_mutation_stack->calls_for( '/v1/posting/approve' ) ), 'Failed Ozon courier locality correlation must happen before shipment preflight/create/approve mutations.' );
 
 /** @return array{http:OzonShipmentSmokeHttp,service:ShipmentCreationService,adapter:OzonDeliveryShipmentAdapter,docs:OzonDeliveryShipmentDocumentProvider,modal:OzonDeliveryShipmentModalExtension,settings:OzonDeliverySettings,mapper:OzonDeliveryShipmentStatusMapper} */
 function oz_ship_stack( OzonShipmentSmokeDb $db ): array {
