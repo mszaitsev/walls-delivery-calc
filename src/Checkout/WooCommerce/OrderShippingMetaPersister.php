@@ -115,7 +115,8 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_pickup_marker_type']        = $pickup['marker_type'] ?? '';
 			$map['_wdc_pickup_point_address']      = $this->pickup_address( $pickup );
 			$map['_wdc_pickup_point_postcode']     = $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' );
-			$map['_wdc_pickup_point_snapshot']     = function_exists( 'wp_json_encode' ) ? wp_json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup );
+			$pickup_snapshot = $this->pickup_snapshot_with_customer_comments( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup, $rate );
+			$map['_wdc_pickup_point_snapshot']     = function_exists( 'wp_json_encode' ) ? wp_json_encode( $pickup_snapshot, JSON_UNESCAPED_UNICODE ) : json_encode( $pickup_snapshot );
 			if ( 'dpd' === (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' ) ) {
 				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 				$map['_wdc_dpd_pickup_terminal_code'] = $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '', $snapshot['terminal_code'] ?? '', $snapshot['point_code'] ?? '' );
@@ -224,7 +225,7 @@ final class OrderShippingMetaPersister {
 		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 		$is_handout = array_key_exists( 'is_handout', $pickup ) ? filter_var( $pickup['is_handout'], FILTER_VALIDATE_BOOLEAN ) : ( array_key_exists( 'is_handout', $snapshot ) ? filter_var( $snapshot['is_handout'], FILTER_VALIDATE_BOOLEAN ) : null );
 
-		return array(
+		$pickup_data = array(
 			'carrier_key'   => (string) ( $pickup['carrier_key'] ?? '' ),
 			'service_key'   => (string) ( $pickup['service_key'] ?? '' ),
 			'pickup_family' => (string) ( $pickup['pickup_family'] ?? '' ),
@@ -250,6 +251,64 @@ final class OrderShippingMetaPersister {
 			'cdek_code'     => (string) ( $pickup['cdek_code'] ?? $snapshot['cdek_code'] ?? '' ),
 			'raw_sanitized' => is_array( $snapshot['raw_sanitized'] ?? null ) ? $snapshot['raw_sanitized'] : ( is_array( $snapshot['raw'] ?? null ) ? $snapshot['raw'] : array() ),
 		);
+		$customer_comments = $this->customer_comments_from_rate( $rate );
+		if ( array() !== $customer_comments ) {
+			$pickup_data['customer_comments'] = $customer_comments;
+		}
+
+		return $pickup_data;
+	}
+
+	/**
+	 * @param array<string,mixed> $snapshot
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function pickup_snapshot_with_customer_comments( array $snapshot, array $rate ): array {
+		$comments = $this->customer_comments_from_rate( $rate );
+		if ( array() === $comments ) {
+			unset( $snapshot['customer_comments'] );
+			return $snapshot;
+		}
+
+		$snapshot['customer_comments'] = $comments;
+		return $snapshot;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<int,string>
+	 */
+	private function customer_comments_from_rate( array $rate ): array {
+		if ( is_array( $rate['customer_comments'] ?? null ) ) {
+			return $this->normalized_customer_comments( $rate['customer_comments'] );
+		}
+		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		return is_array( $rate_meta['customer_comments'] ?? null ) ? $this->normalized_customer_comments( $rate_meta['customer_comments'] ) : array();
+	}
+
+	/**
+	 * @param array<int|string,mixed> $comments
+	 * @return array<int,string>
+	 */
+	private function normalized_customer_comments( array $comments ): array {
+		$result = array();
+		foreach ( $comments as $comment ) {
+			if ( ! is_scalar( $comment ) ) {
+				continue;
+			}
+			$text = trim( (string) $comment );
+			if ( '' === $text ) {
+				continue;
+			}
+			$text = substr( $text, 0, 500 );
+			if ( in_array( $text, $result, true ) ) {
+				continue;
+			}
+			$result[] = $text;
+		}
+
+		return $result;
 	}
 
 	/**

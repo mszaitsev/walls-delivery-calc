@@ -4,7 +4,9 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Runtime;
 
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
+use WallsShop\WDC\Carriers\Contracts\CarrierCustomerCommentProviderInterface;
 use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
+use WallsShop\WDC\Carriers\OzonDelivery\Checkout\OzonDeliveryCustomerCommentProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryQuoteException;
@@ -21,7 +23,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || exit;
 
-final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface {
+final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface, CarrierCustomerCommentProviderInterface {
 	public const KEY = OzonDeliverySettings::CARRIER_KEY;
 	public const RATE_ID = 'ozon_delivery:pickup';
 	public const TARIFF_KEY = 'pickup';
@@ -31,6 +33,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 		private OzonDeliverySettings $settings,
 		private OzonDeliveryCredentials $credentials,
 		private OzonDeliveryQuoteService $quotes,
+		private OzonDeliveryCustomerCommentProvider $customer_comments,
 		private Logger $logger
 	) {}
 
@@ -92,6 +95,11 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 				'package_count' => $result->package_count,
 			)
 		);
+	}
+
+	/** @return array<int,string> */
+	public function customer_comments( DeliveryRate $rate ): array {
+		return $this->customer_comments->customer_comments( $rate );
 	}
 
 	/** @return array<string,mixed> */

@@ -20,6 +20,7 @@ final class PickupPointCardRenderer {
 		$work_time = $data['work_time'];
 		$description = $data['description'];
 		$storage_notice = $data['storage_notice'];
+		$customer_comments = $include_change_button ? array() : $data['customer_comments'];
 		$code = $data['code'];
 		$postcode = $data['postcode'];
 		$show_code = $show_code_postcode_rows && ( $include_change_button ? $data['show_code_on_checkout'] : $data['show_code_on_order'] );
@@ -51,6 +52,9 @@ final class PickupPointCardRenderer {
 		if ( '' !== $storage_notice || $needs_placeholders ) {
 			$parts[] = '<div class="wdc-pickup-point-card__storage" data-wdc-pickup-storage-notice' . ( '' === $storage_notice ? ' hidden' : '' ) . ' style="' . esc_attr( $this->storage_notice_style() ) . '">' . esc_html( $storage_notice ) . '</div>';
 		}
+		foreach ( $customer_comments as $comment ) {
+			$parts[] = '<div class="wdc-pickup-point-card__customer-comment" style="' . esc_attr( $this->customer_comment_style() ) . '">' . esc_html( $comment ) . '</div>';
+		}
 		$parts[] = '</div>';
 
 		if ( $include_change_button ) {
@@ -64,7 +68,7 @@ final class PickupPointCardRenderer {
 
 	/**
 	 * @param array<string,mixed>|object $point
-	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string,code:string,postcode:string,show_code_on_checkout:bool,show_postcode_on_checkout:bool,show_code_on_order:bool,show_postcode_on_order:bool}
+	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string,customer_comments:array<int,string>,code:string,postcode:string,show_code_on_checkout:bool,show_postcode_on_checkout:bool,show_code_on_order:bool,show_postcode_on_order:bool}
 	 */
 	public function normalize( array|object $point ): array {
 		$point    = $this->point_to_array( $point );
@@ -92,6 +96,7 @@ final class PickupPointCardRenderer {
 			'work_time' => $work_time,
 			'description' => $description,
 			'storage_notice' => $storage_notice,
+			'customer_comments' => $this->customer_comments( $point, $snapshot ),
 			'code' => $code,
 			'postcode' => $postcode,
 			'show_code_on_checkout' => $presentation['show_code_on_checkout'],
@@ -146,6 +151,32 @@ final class PickupPointCardRenderer {
 		return '';
 	}
 
+	/**
+	 * @param array<string,mixed> $point
+	 * @param array<string,mixed> $snapshot
+	 * @return array<int,string>
+	 */
+	private function customer_comments( array $point, array $snapshot ): array {
+		$raw = is_array( $point['customer_comments'] ?? null ) ? $point['customer_comments'] : ( is_array( $snapshot['customer_comments'] ?? null ) ? $snapshot['customer_comments'] : array() );
+		$comments = array();
+		foreach ( $raw as $comment ) {
+			if ( ! is_scalar( $comment ) ) {
+				continue;
+			}
+			$text = trim( (string) $comment );
+			if ( '' === $text ) {
+				continue;
+			}
+			$text = substr( $text, 0, 500 );
+			if ( in_array( $text, $comments, true ) ) {
+				continue;
+			}
+			$comments[] = $text;
+		}
+
+		return $comments;
+	}
+
 	private function city_line( string $postcode, string $city ): string {
 		$city = $this->city_with_type( $city );
 		if ( '' !== $postcode && '' !== $city ) {
@@ -193,6 +224,10 @@ final class PickupPointCardRenderer {
 
 	private function storage_notice_style(): string {
 		return 'margin:0 0 6px;color:#b91c1c;font-weight:700;';
+	}
+
+	private function customer_comment_style(): string {
+		return 'margin:6px 0 0;color:#374151;overflow-wrap:anywhere;word-break:normal;';
 	}
 
 	private function muted_style(): string {

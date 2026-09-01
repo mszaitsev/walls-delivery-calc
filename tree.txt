@@ -219,6 +219,7 @@ C:.
 |   |   |
 |   |   +---Contracts
 |   |   |       CarrierAdapterInterface.php
+|   |   |       CarrierCustomerCommentProviderInterface.php
 |   |   |       CarrierQuoteCacheContextProviderInterface.php
 |   |   |
 |   |   +---Dpd
@@ -332,6 +333,9 @@ C:.
 |   |   |   |       OzonDeliveryToken.php
 |   |   |   |       OzonDeliveryTokenCache.php
 |   |   |   |       WpOzonDeliveryHttpClient.php
+|   |   |   |
+|   |   |   +---Checkout
+|   |   |   |       OzonDeliveryCustomerCommentProvider.php
 |   |   |   |
 |   |   |   +---Pickup
 |   |   |   |       OzonDeliveryPickupImportLock.php

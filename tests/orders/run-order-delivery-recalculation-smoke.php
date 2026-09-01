@@ -1610,7 +1610,13 @@ $ozon_save_provider = new WdcRecalcGenericPickupProvider(
 $ozon_save_replacement = wdc_recalc_replacement( new CarrierPickupPointProviderRegistry( array( $ozon_save_provider ) ) );
 $ozon_repriced_rate = $ozon_rate;
 $ozon_repriced_rate['cost'] = 129.0;
+$ozon_repriced_rate['comments'] = array(
+	'Отслеживание посылки - в приложении Ozon, раздел Доставка',
+	'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 129 руб.',
+);
+$ozon_repriced_rate['customer_comments'] = $ozon_repriced_rate['comments'];
 $ozon_repriced_rate['rate_meta']['api_base_price_rub'] = 129.0;
+$ozon_repriced_rate['rate_meta']['customer_comments'] = $ozon_repriced_rate['customer_comments'];
 $ozon_selected_point = array(
 	'carrier_key' => 'ozon_delivery',
 	'service_key' => 'ozon_delivery',
@@ -1646,6 +1652,8 @@ recalc_smoke_assert( 129.0 === (float) ( $ozon_save_order->shipping_items['total
 recalc_smoke_assert( 'ozon_delivery' === (string) ( $ozon_save_order->meta['_wdc_pickup_carrier_key'] ?? '' ) && 'ozon_delivery:pickup' === (string) ( $ozon_save_order->meta['_wdc_pickup_family'] ?? '' ) && '777002' === (string) ( $ozon_save_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Save Ozon pickup must persist canonical Ozon pickup meta and not stale Russian Post selection.' );
 recalc_smoke_assert( is_array( $ozon_save_snapshot ) && '777002' === (string) ( $ozon_save_snapshot['point_code'] ?? '' ) && 'Новосибирск, ул. Ozon, 2' === (string) ( $ozon_save_snapshot['point_address'] ?? '' ) && 'Поддельный Ozon адрес' !== (string) ( $ozon_save_snapshot['point_address'] ?? '' ), 'Saved Ozon pickup snapshot must use provider projection, not forged browser fields.' );
 recalc_smoke_assert( 'ozon_delivery:pickup' === (string) ( $ozon_save_calc['pickup']['pickup_family'] ?? '' ) && '777002' === (string) ( $ozon_save_calc['pickup']['point_code'] ?? '' ), 'Order calculation data must keep the saved Ozon pickup point for calculator reopen.' );
+recalc_smoke_assert( array( 'Отслеживание посылки - в приложении Ozon, раздел Доставка', 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 129 руб.' ) === ( $ozon_save_snapshot['customer_comments'] ?? null ), 'Admin Ozon pickup save must persist customer comments from the fresh repriced rate.' );
+recalc_smoke_assert( array( 'Отслеживание посылки - в приложении Ozon, раздел Доставка', 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 129 руб.' ) === ( $ozon_save_calc['pickup']['customer_comments'] ?? null ), 'Order calculation data must keep Ozon customer comments for calculator reopen and presentation.' );
 $pek_fingerprint = str_repeat( 'a', 64 );
 $pek_query_snapshot = array(
 	'carrier_key' => PekSettings::CARRIER_KEY,

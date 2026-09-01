@@ -404,6 +404,7 @@ $session->save_pickup_selection(
 		'point_address'    => 'Красный проспект, 25',
 		'point_comment'    => 'Тестовый пункт выдачи в центре города',
 		'point_work_time'  => 'Пн-Сб 10:00-20:00',
+		'snapshot'         => array( 'customer_comments' => array( 'Поддельный browser comment 999999 руб.' ) ),
 		'selected_at'      => '2026-05-21T00:00:00+00:00',
 	)
 );
@@ -431,6 +432,10 @@ $session->save_rates(
 			'carrier_key'      => 'demo',
 			'rate_id'          => 'demo:pickup',
 			'delivery_type'    => 'pickup',
+			'customer_comments' => array(
+				'Отслеживание посылки - в приложении Ozon, раздел Доставка',
+				'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.',
+			),
 			'fallback_used'    => false,
 		),
 	)
@@ -452,6 +457,9 @@ $shipping_item = new WdcPickupSmokeShippingItem();
 $persister->persist_shipping_item_meta( $shipping_item, 0, array(), $order );
 pickup_smoke_assert( 'demo-nsk-001' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
 pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
+$pickup_snapshot = json_decode( (string) ( $order->meta['_wdc_pickup_point_snapshot'] ?? '{}' ), true );
+pickup_smoke_assert( array( 'Отслеживание посылки - в приложении Ozon, раздел Доставка', 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.' ) === ( $pickup_snapshot['customer_comments'] ?? null ), 'Order pickup snapshot must persist customer comments from authoritative selected rate.' );
+pickup_smoke_assert( ! str_contains( (string) wp_json_encode( $pickup_snapshot ), '999999' ), 'Browser-supplied pickup customer comments must not be authoritative.' );
 pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shipping['address_1'] ?? '' ), 'Pickup order must write pickup address to shipping address_1.' );
 pickup_smoke_assert( ! isset( $order->shipping['address_2'] ) || '' === (string) $order->shipping['address_2'], 'Pickup order must not write pickup code to shipping address_2.' );
 pickup_smoke_assert( 'Новосибирск' === ( $order->shipping['city'] ?? '' ), 'Pickup order must write normalized city to shipping city.' );
@@ -586,6 +594,13 @@ $rp_card = $card_renderer->render(
 );
 pickup_smoke_assert( str_contains( $rp_card, 'Отделение Почты России' ), 'Russian Post OPS/PVZ card title must remain unchanged.' );
 pickup_smoke_assert( ! str_contains( $rp_card, '0.000000' ), 'Russian Post pickup card must not render numeric zero description.' );
+$comment_card = $card_renderer->render( $pickup_snapshot, false, false );
+pickup_smoke_assert( str_contains( $comment_card, 'Отслеживание посылки - в приложении Ozon, раздел Доставка' ) && str_contains( $comment_card, 'обратной доставки 149 руб.' ), 'Static pickup card must render persisted customer comments.' );
+pickup_smoke_assert( ! str_contains( $comment_card, 'Описание:</span> <span data-wdc-pickup-description-text>Отслеживание' ), 'Customer comments must not be rendered as pickup description.' );
+$checkout_comment_card = $card_renderer->render( $pickup_snapshot, true, false );
+pickup_smoke_assert( ! str_contains( $checkout_comment_card, 'обратной доставки 149 руб.' ), 'Checkout selectable pickup card must not duplicate rate comments inside the card.' );
+$plain_card = $card_renderer->render( array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_type' => 'PVZ', 'point_address' => 'Москва' ), false, false );
+pickup_smoke_assert( ! str_contains( $plain_card, 'Отслеживание посылки' ) && ! str_contains( $plain_card, 'customer-comment' ), 'Other carrier cards without customer_comments must not gain Ozon text or empty comment blocks.' );
 $rp_aps_card = $card_renderer->render(
 	array(
 		'carrier_key' => 'russian_post_domestic',
