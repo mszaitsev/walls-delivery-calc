@@ -231,6 +231,8 @@ final class ShipmentAdminAjaxSmokeAdapter implements \WallsShop\WDC\Shipments\Co
 	public int $status_calls = 0;
 	/** @var array<string,mixed> */
 	public array $status_overrides = array();
+	/** @var array<string,string> */
+	public array $presentation_overrides = array();
 
 	public function __construct(
 		private string $carrier_key,
@@ -258,11 +260,14 @@ final class ShipmentAdminAjaxSmokeAdapter implements \WallsShop\WDC\Shipments\Co
 	}
 
 	public function presentation(): array {
-		return array(
-			'carrier_label' => 'Fake Carrier',
-			'status_title' => 'Fake status',
-			'tracking_label' => 'Tracking',
-			'created_toast' => 'Created',
+		return array_merge(
+			array(
+				'carrier_label' => 'Fake Carrier',
+				'status_title' => 'Fake status',
+				'tracking_label' => 'Tracking',
+				'created_toast' => 'Created',
+			),
+			$this->presentation_overrides
 		);
 	}
 
@@ -577,7 +582,7 @@ shipment_admin_ajax_assert( null === $fallback_clear_status['actual_cost_kopecks
  * @param array<string,mixed> $shipment
  * @param array<string,mixed> $status_overrides
  */
-function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $shipment, array $status_overrides = array() ): string {
+function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $shipment, array $status_overrides = array(), array $presentation_overrides = array() ): string {
 	$repository = new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository();
 	$order = new ShipmentAdminAjaxSmokeOrder(
 		random_int( 700, 999 ),
@@ -592,6 +597,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 	$repository->save_for_carrier( $order, $carrier_key, array_merge( array( 'carrier_key' => $carrier_key, 'status' => 'created' ), $shipment ) );
 	$adapter = new ShipmentAdminAjaxSmokeAdapter( $carrier_key, $repository );
 	$adapter->status_overrides = $status_overrides;
+	$adapter->presentation_overrides = $presentation_overrides;
 	$delivery_services = ( new ReflectionClass( \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository::class ) )->newInstanceWithoutConstructor();
 	$status_updates = ( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
 	$controller = static fn( string $class ): object => ( new ReflectionClass( '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class ) )->newInstanceWithoutConstructor();
@@ -615,7 +621,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.144.2',
+		'0.144.3',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $adapter ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);
@@ -632,6 +638,7 @@ $ozon_no_return_html = shipment_admin_ajax_render_metabox_html(
 	array(
 		'has_shipment' => true,
 		'can_update_status' => true,
+		'can_remove_from_order' => true,
 		'tracking_presentation' => array(
 			'label' => 'Номер Ozon',
 			'display_text' => 'OZON-P1',
@@ -641,6 +648,19 @@ $ozon_no_return_html = shipment_admin_ajax_render_metabox_html(
 );
 shipment_admin_ajax_assert( ! str_contains( $ozon_no_return_html, 'Не удалось подготовить блок отправлений' ) && str_contains( $ozon_no_return_html, 'data-wdc-shipments-metabox' ), 'Metabox render must not fail when return_tracking_presentation is absent.' );
 shipment_admin_ajax_assert( str_contains( $ozon_no_return_html, 'data-wdc-return-tracking-row hidden' ), 'Absent return presentation must keep the return tracking row hidden on initial render.' );
+shipment_admin_ajax_assert( str_contains( $ozon_no_return_html, 'data-wdc-remove-shipment-from-order' ) && str_contains( $ozon_no_return_html, 'Удалить из заказа' ) && ! str_contains( $ozon_no_return_html, '>Удалить заказ<' ), 'Ozon local remove button must use the generic remove-from-order label.' );
+
+$ozon_cancel_html = shipment_admin_ajax_render_metabox_html(
+	'ozon_delivery',
+	array( 'tracking_number' => 'OZON-CANCEL', 'barcode' => 'OZON-CANCEL' ),
+	array(
+		'has_shipment' => true,
+		'can_cancel' => true,
+		'can_remove_from_order' => false,
+	),
+	array( 'cancel_button_label' => 'Отменить заказ' )
+);
+shipment_admin_ajax_assert( str_contains( $ozon_cancel_html, 'data-wdc-cancel-shipment' ) && str_contains( $ozon_cancel_html, 'Отменить заказ' ) && preg_match( '/<button[^>]*data-wdc-remove-shipment-from-order[^>]*hidden[^>]*>/u', $ozon_cancel_html ) && preg_match( '/<button[^>]*data-wdc-remove-shipment-from-order[^>]*disabled/u', $ozon_cancel_html ), 'Carrier cancel label must remain unchanged and local remove must stay hidden when can_remove=false.' );
 
 $ozon_return_html = shipment_admin_ajax_render_metabox_html(
 	'ozon_delivery',
@@ -688,6 +708,7 @@ $cdek_html = shipment_admin_ajax_render_metabox_html(
 	)
 );
 shipment_admin_ajax_assert( ! str_contains( $cdek_html, 'Не удалось подготовить блок отправлений' ) && str_contains( $cdek_html, 'CDEK123' ) && str_contains( $cdek_html, 'data-wdc-return-tracking-row hidden' ), 'Non-Ozon carrier metabox render must keep primary tracking and hide absent return presentation.' );
+shipment_admin_ajax_assert( str_contains( $cdek_html, 'data-wdc-remove-shipment-from-order' ) && str_contains( $cdek_html, 'Удалить из заказа' ) && ! str_contains( $cdek_html, '>Удалить заказ<' ), 'Non-Ozon generic remove button must use the same remove-from-order label.' );
 
 $malformed_return_html = shipment_admin_ajax_render_metabox_html(
 	'ozon_delivery',

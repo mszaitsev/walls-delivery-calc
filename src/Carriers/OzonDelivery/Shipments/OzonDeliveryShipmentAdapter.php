@@ -42,7 +42,7 @@ final class OzonDeliveryShipmentAdapter implements CarrierShipmentAdapterInterfa
 			'manual_attach_placeholder' => 'Номер отправления Ozon',
 			'manual_attach_help' => 'Введите номер отправления из кабинета Ozon.',
 			'cancel_button_label' => 'Отменить заказ',
-			'remove_button_label' => 'Удалить заказ',
+			'remove_button_label' => 'Удалить из заказа',
 			'update_status_button_label' => 'Обновить статус',
 			'created_toast' => 'Отправление Ozon создано и подтверждено.',
 			'cancel_success_toast' => 'Запрос на отмену заказа Ozon отправлен.',
