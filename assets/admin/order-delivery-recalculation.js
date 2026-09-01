@@ -537,7 +537,7 @@
 		const payload = parseJson( rate.dataset.ratePayload || '{}' );
 		payload.id = rate.dataset.rateId || payload.id || input.value || '';
 		payload.delivery_type = rate.dataset.deliveryType || payload.delivery_type || '';
-		payload.requires_pickup_point = '1' === String( rate.dataset.requiresPickup || '' );
+		payload.requires_pickup_point = '1' === String( rate.dataset.requiresPickup || '' ) || true === payload.requires_pickup_point;
 		payload.carrier_key = rate.dataset.carrierKey || payload.carrier_key || '';
 		payload.service_key = rate.dataset.serviceKey || payload.service_key || '';
 		payload.selected_tariff = selectedTariffPayload( rate );
@@ -606,6 +606,20 @@
 			return pickupCodeForCarrier( pickup, carrier ) !== '' && pickupCarrier !== 'dpd' && pickupCarrier !== 'cdek' && pickupFamily !== 'dpd:pickup' && pickupFamily !== 'cdek:pickup' && ( ! pickupCarrier || pickupCarrier.indexOf( 'russian_post' ) === 0 || 'russian_post' === pickupCarrier );
 		}
 		return pickupCodeForCarrier( pickup, carrier ) !== '' && pickupCarrier === carrier;
+	}
+
+	function rateIdentity( rate ) {
+		return {
+			id: String( rate && rate.id || '' ),
+			carrierKey: String( rate && rate.carrier_key || '' ).toLowerCase(),
+			deliveryType: String( rate && rate.delivery_type || '' ).toLowerCase(),
+			pickupFamily: ratePickupFamily( rate ),
+			tariffCode: String( rate && rate.selected_tariff && rate.selected_tariff.object_code || '' )
+		};
+	}
+
+	function ratePickupFamily( rate ) {
+		return String( rate && ( rate.pickup_family || rate.rate_family || rate.family || ( rate.rate_meta && rate.rate_meta.pickup_family ) || ( rate.rate_meta && rate.rate_meta.pickup_provider_query && rate.rate_meta.pickup_provider_query.pickup_family ) || ( rate.carrier_key ? rate.carrier_key + ':pickup' : '' ) ) || '' ).toLowerCase();
 	}
 
 	function selectedTariffPayload( rate ) {
@@ -759,6 +773,9 @@
 				if ( options.restorePekPickup && options.selectedPickupPoint ) {
 					restorePekPickupPreview( box, options.selectedPickupPoint );
 				}
+				if ( options.restorePickupSelection && options.selectedPickupPoint && ! selectedPickupPoints.has( box ) ) {
+					restorePickupPreview( box, options.selectedRateIdentity || {}, options.selectedPickupPoint );
+				}
 				if ( payload.data && payload.data.location && payload.data.location.label ) {
 					setStatus( box, 'Расчет выполнен для: ' + payload.data.location.label, 'success' );
 				} else {
@@ -797,6 +814,78 @@
 		selectedPickupPoints.set( box, point );
 		updatePickupSelectors( box );
 		updateSaveButton( box );
+	}
+
+	function restorePickupPreview( box, identity, point ) {
+		const rate = findEquivalentPickupRate( box, identity, point );
+		const input = rate && rate.querySelector( 'input[name="wdc_order_delivery_preview_rate"]' );
+		if ( ! input ) {
+			return false;
+		}
+		input.checked = true;
+		restoreSelectedTariff( rate, identity );
+		selectedRateChanged( input );
+		const freshRate = selectedRates.get( box );
+		if ( ! pickupMatchesRate( point, freshRate ) ) {
+			selectedPickupPoints.delete( box );
+			updatePickupSelectors( box );
+			updateSaveButton( box );
+			return false;
+		}
+		selectedPickupPoints.set( box, point );
+		updatePickupSelectors( box );
+		updateSaveButton( box );
+		return true;
+	}
+
+	function findEquivalentPickupRate( box, identity, point ) {
+		const content = modalContent( box );
+		if ( ! content ) {
+			return null;
+		}
+		const candidates = Array.prototype.slice.call( content.querySelectorAll( '[data-wdc-order-delivery-rate][data-delivery-type="pickup"]' ) );
+		const pointCarrier = carrierFromPickup( point );
+		const pointFamily = familyFromPickup( point );
+		let fallback = null;
+		for ( let i = 0; i < candidates.length; i += 1 ) {
+			const candidate = candidates[ i ];
+			const payload = parseJson( candidate.dataset.ratePayload || '{}' );
+			payload.id = candidate.dataset.rateId || payload.id || '';
+			payload.delivery_type = candidate.dataset.deliveryType || payload.delivery_type || '';
+			payload.requires_pickup_point = '1' === String( candidate.dataset.requiresPickup || '' ) || true === payload.requires_pickup_point;
+			payload.carrier_key = candidate.dataset.carrierKey || payload.carrier_key || '';
+			payload.service_key = candidate.dataset.serviceKey || payload.service_key || '';
+			payload.selected_tariff = selectedTariffPayload( candidate );
+			if ( ! payload.requires_pickup_point || ! pickupMatchesRate( point, payload ) ) {
+				continue;
+			}
+			if ( identity.id && payload.id === identity.id ) {
+				return candidate;
+			}
+			if (
+				identity.carrierKey
+				&& identity.carrierKey === String( payload.carrier_key || '' ).toLowerCase()
+				&& ( ! identity.pickupFamily || identity.pickupFamily === ratePickupFamily( payload ) || identity.pickupFamily === pointFamily )
+				&& ( ! identity.tariffCode || identity.tariffCode === String( payload.selected_tariff && payload.selected_tariff.object_code || '' ) )
+			) {
+				fallback = fallback || candidate;
+			} else if ( ! identity.carrierKey && pointCarrier && pointCarrier === String( payload.carrier_key || '' ).toLowerCase() ) {
+				fallback = fallback || candidate;
+			}
+		}
+
+		return fallback;
+	}
+
+	function restoreSelectedTariff( rate, identity ) {
+		const tariffCode = String( identity && identity.tariffCode || '' );
+		if ( ! tariffCode ) {
+			return;
+		}
+		const tariff = rate.querySelector( '.wdc-order-delivery-tariff input[value="' + cssEscape( tariffCode ) + '"]' );
+		if ( tariff ) {
+			tariff.checked = true;
+		}
 	}
 
 	function restoreYandexPickupPreview( box, point ) {
@@ -1553,6 +1642,7 @@
 			const tariffCode = rate.selected_tariff && rate.selected_tariff.object_code ? String( rate.selected_tariff.object_code ) : '';
 			const carrier = String( point.carrier_key || point.carrier || rate.carrier_key || '' );
 			const requiresRateRefresh = true === point.requires_rate_refresh || 'true' === String( point.requires_rate_refresh || '' ) || [ 'dpd', 'yandex_delivery' ].indexOf( carrier ) !== -1;
+			const identity = rateIdentity( rate );
 			selectedPickupPoints.set( box, point );
 			normalizedShippingAddresses.delete( box );
 			updatePickupSelectors( box );
@@ -1563,6 +1653,8 @@
 					restoreDpdPickup: 'dpd' === carrier,
 					restoreYandexPickup: 'yandex_delivery' === carrier,
 					restorePekPickup: 'pek' === carrier,
+					restorePickupSelection: true,
+					selectedRateIdentity: identity,
 					selectedTariffCode: tariffCode
 				} );
 			}

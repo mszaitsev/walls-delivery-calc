@@ -2,11 +2,15 @@
 declare(strict_types=1);
 
 define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupRepository;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentModalExtension;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentModalExtension;
@@ -46,15 +50,56 @@ final class ModalExtensionsFakeOrder {
 	public function get_shipping_address_2(): string { return ''; }
 }
 
+final class ModalExtensionsFakeDb {
+	public string $prefix = 'wp_';
+	/** @var array<int,array<string,mixed>> */
+	public array $points = array();
+	public function prepare( string $query, mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$query = preg_replace( '/%[sdf]/', is_numeric( $value ) ? (string) (int) $value : "'" . (string) $value . "'", $query, 1 ) ?? $query;
+		}
+		return $query;
+	}
+	public function get_row( string $query, mixed $output = null ): ?array {
+		unset( $output );
+		if ( str_contains( $query, "state='active'" ) ) {
+			return array( 'id' => 1, 'state' => 'active' );
+		}
+		if ( preg_match( '/point_id=(\d+)/', $query, $matches ) ) {
+			return $this->points[ (int) $matches[1] ] ?? null;
+		}
+		return null;
+	}
+}
+
+$ozon_db = new ModalExtensionsFakeDb();
+$ozon_db->points[777] = array(
+	'generation_id' => 1,
+	'point_id' => 777,
+	'name' => 'ПВЗ Ozon',
+	'type' => 'pvz',
+	'full_address' => 'Новосибирск, Красный проспект 1',
+	'latitude' => 55.03,
+	'longitude' => 82.92,
+	'schedule' => '09:00-21:00',
+	'is_active' => 1,
+	'min_weight_g' => 1,
+	'max_weight_g' => 10000,
+	'max_length_mm' => 500,
+	'max_width_mm' => 500,
+	'max_height_mm' => 300,
+);
+
 $extensions = array(
 	new CdekShipmentModalExtension(),
 	new DpdShipmentModalExtension( static fn(): array => array( 'Иван Петров' ) ),
 	new RussianPostShipmentModalExtension(),
 	new YandexShipmentModalExtension(),
+	new OzonDeliveryShipmentModalExtension( new OzonDeliveryPickupRepository( $ozon_db ) ),
 );
 $registry = new ShipmentModalExtensionRegistry( $extensions );
 modal_ext_assert(
-	array( CdekSettings::CARRIER_KEY, DpdSettings::CARRIER_KEY, RussianPostDomesticSettings::CARRIER_KEY, YandexDeliverySettings::CARRIER_KEY ) === $registry->keys(),
+	array( CdekSettings::CARRIER_KEY, DpdSettings::CARRIER_KEY, RussianPostDomesticSettings::CARRIER_KEY, YandexDeliverySettings::CARRIER_KEY, OzonDeliverySettings::CARRIER_KEY ) === $registry->keys(),
 	'Production modal extension keys must match shipment carriers.'
 );
 modal_ext_assert( $registry->get( 'unknown' ) === null, 'Unknown carrier must resolve to null.' );
@@ -155,12 +200,22 @@ $yandex_fields_html = modal_ext_render( static fn() => $yandex->render_fields( $
 $yandex_courier_html = modal_ext_render( static fn() => $yandex->render_courier_fields( $order, $yandex_draft, $yandex_context ) );
 modal_ext_assert( str_contains( $yandex_fields_html, 'name="yandex_source_platform_station_id"' ) && str_contains( $yandex_fields_html, 'name="yandex_ready_from"' ) && str_contains( $yandex_fields_html, 'data-wdc-yandex-source-station' ) && str_contains( $yandex_courier_html, 'name="courier_original_address"' ), 'Yandex extension must keep source station, ready interval and courier address markup.' );
 
+$ozon = $registry->get( OzonDeliverySettings::CARRIER_KEY );
+modal_ext_assert( $ozon instanceof OzonDeliveryShipmentModalExtension, 'Ozon Delivery extension must be registered.' );
+$ozon_draft = $base_draft;
+$ozon_draft['request']['meta']['pickup_point_code'] = '777';
+$ozon_context = $ozon->modal_context( $order, $ozon_draft );
+modal_ext_assert( true === (bool) ( $ozon_context['point_found'] ?? false ) && 10000 === (int) ( $ozon_context['max_weight_g'] ?? 0 ) && 500 === (int) ( $ozon_context['max_length_mm'] ?? 0 ) && 300 === (int) ( $ozon_context['max_height_mm'] ?? 0 ), 'Ozon modal context must expose selected pickup point limits.' );
+$ozon_pickup_html = modal_ext_render( static fn() => $ozon->render_pickup_fields( $order, $ozon_draft, $ozon_context ) );
+modal_ext_assert( str_contains( $ozon_pickup_html, 'Ограничения выбранного ПВЗ Ozon' ) && str_contains( $ozon_pickup_html, 'data-wdc-ozon-place-limits' ) && str_contains( $ozon_pickup_html, 'data-max-weight-g="10000"' ) && str_contains( $ozon_pickup_html, 'data-max-length-mm="500"' ) && str_contains( $ozon_pickup_html, 'data-max-height-mm="300"' ) && str_contains( $ozon_pickup_html, 'data-wdc-ozon-place-limit-warning' ), 'Ozon pickup fields must render selected point limits and dynamic warning host.' );
+
 $root = dirname( __DIR__, 2 );
 $metabox_source = (string) file_get_contents( $root . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $cdek_source = (string) file_get_contents( $root . '/src/Shipments/Cdek/CdekShipmentModalExtension.php' );
 $dpd_source = (string) file_get_contents( $root . '/src/Shipments/Dpd/DpdShipmentModalExtension.php' );
 $rp_source = (string) file_get_contents( $root . '/src/Shipments/RussianPost/RussianPostShipmentModalExtension.php' );
 $yandex_source = (string) file_get_contents( $root . '/src/Shipments/YandexDelivery/YandexShipmentModalExtension.php' );
+$ozon_source = (string) file_get_contents( $root . '/src/Carriers/OzonDelivery/Shipments/OzonDeliveryShipmentModalExtension.php' );
 
 modal_ext_assert( str_contains( $metabox_source, 'modal_extensions->get' ) && str_contains( $metabox_source, 'render_fields' ), 'Common metabox must call modal extensions through the registry.' );
 modal_ext_assert( ! str_contains( $metabox_source, "name=\"date_pickup\"" ) && ! str_contains( $metabox_source, "name=\"postoffice_code\"" ) && ! str_contains( $metabox_source, "name=\"yandex_ready_from\"" ), 'Common delivery renderer must not keep DPD/Russian Post/Yandex delivery field markup.' );
@@ -176,7 +231,8 @@ modal_ext_assert( str_contains( $cdek_source, 'data-wdc-cdek-sender-door' ) && s
 modal_ext_assert( str_contains( $dpd_source, 'data-wdc-dpd-date-pickup' ) && str_contains( $dpd_source, 'name="pickup_terminal_code"' ) && str_contains( $dpd_source, 'data-wdc-dpd-contact-history' ), 'DPD extension must own terminal/date/contact fields.' );
 modal_ext_assert( str_contains( $rp_source, 'name="postoffice_code"' ), 'Russian Post extension must own postoffice field.' );
 modal_ext_assert( str_contains( $yandex_source, 'data-wdc-yandex-source-station' ) && str_contains( $yandex_source, 'name="yandex_ready_from"' ) && str_contains( $yandex_source, 'data-wdc-yandex-offer-note' ), 'Yandex extension must own source station/ready interval fields.' );
-foreach ( array( $cdek_source, $dpd_source, $rp_source, $yandex_source ) as $source ) {
+modal_ext_assert( str_contains( $ozon_source, 'data-wdc-ozon-place-limits' ) && str_contains( $ozon_source, 'data-wdc-ozon-place-limit-warning' ), 'Ozon extension must own selected point limit markup.' );
+foreach ( array( $cdek_source, $dpd_source, $rp_source, $yandex_source, $ozon_source ) as $source ) {
 	modal_ext_assert( ! str_contains( $source, '$_POST' ) && ! str_contains( $source, 'wp_remote_' ) && ! str_contains( $source, 'create(' ) && ! str_contains( $source, 'cancel' ), 'Modal extensions must not perform HTTP, create/cancel, or read $_POST.' );
 }
 

@@ -18,12 +18,14 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repo
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
@@ -202,6 +204,14 @@ final class OrderDeliveryRecalculationAdminController {
 				wp_send_json_error( array( 'message' => $this->safe_message( $exception->getMessage() ) ), 400 );
 			}
 			wp_send_json_success( array( 'points' => $points ) );
+		}
+		try {
+			$registry_points = $this->registry_pickup_points_from_rate( $order, $rate, $location );
+		} catch ( \RuntimeException $exception ) {
+			wp_send_json_error( array( 'message' => $this->safe_message( $exception->getMessage() ) ), 400 );
+		}
+		if ( null !== $registry_points ) {
+			wp_send_json_success( array( 'points' => $registry_points ) );
 		}
 		$postcode = preg_replace( '/\D+/', '', (string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ) ) ?? '';
 		if ( 'location' === $mode ) {
@@ -775,6 +785,178 @@ final class OrderDeliveryRecalculationAdminController {
 
 	/** @param array<string,mixed> $snapshot */
 	private function pek_provider_fingerprint( array $snapshot ): string {
+		$fingerprint = (string) ( $snapshot['provider_destination_fingerprint'] ?? '' );
+		return '' !== $fingerprint ? $fingerprint : (string) ( $snapshot['destination_fingerprint'] ?? '' );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $location
+	 * @return array<int,array<string,mixed>>|null
+	 */
+	private function registry_pickup_points_from_rate( object $order, array $rate, array $location ): ?array {
+		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		$snapshot = is_array( $meta['pickup_provider_query'] ?? null ) ? $meta['pickup_provider_query'] : array();
+		if ( array() === $snapshot ) {
+			return null;
+		}
+		$carrier = strtolower( trim( (string) ( $snapshot['carrier_key'] ?? '' ) ) );
+		if ( '' === $carrier || ! $this->pickup_providers->has( $carrier ) ) {
+			return null;
+		}
+		$rate_carrier = strtolower( trim( (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) );
+		$family = (string) ( $rate['pickup_family'] ?? $meta['pickup_family'] ?? ( $carrier . ':pickup' ) );
+		if (
+			DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' )
+			|| empty( $rate['requires_pickup_point'] )
+			|| $carrier !== $rate_carrier
+			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
+		) {
+			throw new \RuntimeException( 'Контекст пунктов выдачи устарел. Пересчитайте доставку.' );
+		}
+		$snapshot_location_id = (int) ( $snapshot['location_id'] ?? 0 );
+		$current_location_id = $this->current_location_id_for_pickup( $order, $location );
+		if ( $snapshot_location_id <= 0 || $current_location_id <= 0 || $snapshot_location_id !== $current_location_id ) {
+			throw new \RuntimeException( 'Населенный пункт изменился. Пересчитайте доставку перед выбором пункта выдачи.' );
+		}
+		$snapshot_country = strtoupper( trim( (string) ( $snapshot['country_code'] ?? '' ) ) );
+		if ( '' === $snapshot_country || $snapshot_country !== $this->current_country_code_for_pickup( $order, $location ) ) {
+			throw new \RuntimeException( 'Страна пункта выдачи не соответствует текущему месту доставки. Пересчитайте доставку.' );
+		}
+		$fingerprint = $this->registry_provider_fingerprint( $snapshot );
+		if ( '' === $fingerprint ) {
+			throw new \RuntimeException( 'Контекст пунктов выдачи устарел. Пересчитайте доставку.' );
+		}
+		$provider = $this->pickup_providers->get( $carrier );
+		if ( null === $provider ) {
+			return null;
+		}
+		$query = $this->registry_query_from_snapshot( $snapshot, $carrier );
+		if ( null === $query ) {
+			throw new \RuntimeException( 'Контекст пунктов выдачи устарел. Пересчитайте доставку.' );
+		}
+
+		return array_map(
+			fn( PickupPoint $point ): array => $this->registry_point_payload( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code ),
+			$provider->search( $query )
+		);
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function registry_query_from_snapshot( array $snapshot, string $carrier ): ?CarrierPickupPointQuery {
+		$provider = $this->pickup_providers->get( $carrier );
+		if ( null !== $provider && method_exists( $provider, 'query_from_snapshot' ) ) {
+			$query = $provider->query_from_snapshot( $snapshot );
+			return $query instanceof CarrierPickupPointQuery && array() === $query->validate() && $query->normalized_carrier_key() === $carrier ? $query : null;
+		}
+		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
+		$query = new CarrierPickupPointQuery(
+			(string) ( $snapshot['carrier_key'] ?? $carrier ),
+			(int) ( $snapshot['location_id'] ?? 0 ),
+			(string) ( $snapshot['country_code'] ?? 'RU' ),
+			(string) ( $snapshot['fallback_address'] ?? '' ),
+			is_numeric( $snapshot['latitude'] ?? null ) ? (float) $snapshot['latitude'] : null,
+			is_numeric( $snapshot['longitude'] ?? null ) ? (float) $snapshot['longitude'] : null,
+			new PickupCargoConstraints(
+				(int) ( $cargo['weight_g'] ?? 0 ),
+				(int) ( $cargo['volume_cm3'] ?? 0 ),
+				(int) ( $cargo['max_dimension_cm'] ?? 0 ),
+				(int) ( $cargo['max_place_weight_g'] ?? 0 ),
+				max( 1, (int) ( $cargo['places_count'] ?? 1 ) ),
+				$this->registry_places_from_cargo( $cargo )
+			),
+			(string) ( $snapshot['purpose'] ?? CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP ),
+			max( 1, (int) ( $snapshot['radius_km'] ?? 50 ) ),
+			max( 1, (int) ( $snapshot['limit'] ?? 50 ) )
+		);
+
+		return array() === $query->validate() ? $query : null;
+	}
+
+	/** @param array<string,mixed> $cargo @return array<int,array<string,mixed>> */
+	private function registry_places_from_cargo( array $cargo ): array {
+		$places = is_array( $cargo['places'] ?? null ) ? $cargo['places'] : array();
+		$normalized = array();
+		foreach ( $places as $place ) {
+			if ( ! is_array( $place ) ) {
+				continue;
+			}
+			$normalized[] = array(
+				'weight_g' => max( 0, (int) ( $place['weight_g'] ?? 0 ) ),
+				'length_cm' => max( 0.0, (float) ( $place['length_cm'] ?? $place['length'] ?? 0 ) ),
+				'width_cm' => max( 0.0, (float) ( $place['width_cm'] ?? $place['width'] ?? 0 ) ),
+				'height_cm' => max( 0.0, (float) ( $place['height_cm'] ?? $place['height'] ?? 0 ) ),
+			);
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function registry_point_payload( PickupPoint $point, string $carrier, string $family, string $fingerprint, int $location_id, string $country_code ): array {
+		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
+		$type = $this->registry_presentation_value( $raw, 'presentation_type', $point->type );
+		if ( ! in_array( $type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
+			$type = 'unknown';
+		}
+		$title = $this->registry_presentation_value( $raw, 'presentation_title', 'Пункт выдачи' );
+		$point_name = $this->registry_presentation_value( $raw, 'point_name', '' );
+		$marker_type = $this->registry_presentation_value( $raw, 'marker_type', 'pickup' );
+		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
+			$marker_type = 'pickup';
+		}
+		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', $point->comment );
+		$display_code = $this->registry_presentation_value( $raw, 'display_code', '' );
+		$requires_rate_refresh = $this->registry_boolean_value( $raw, 'requires_rate_refresh' );
+		$snapshot = array(
+			'carrier_key' => $carrier,
+			'service_key' => $carrier,
+			'pickup_family' => $family,
+			'point_code' => $point->code,
+			'point_id' => $point->code,
+			'point_type' => $type,
+			'point_type_label' => $title,
+			'point_title' => $title,
+			'card_title' => $title,
+			'point_name' => $point_name,
+			'point_address' => $point->address,
+			'address' => $point->address,
+			'city_name' => $point->city,
+			'region_name' => $point->region,
+			'lat' => $point->latitude,
+			'lng' => $point->longitude,
+			'work_time' => $point->work_time,
+			'description' => $point->comment,
+			'presentation_comment' => $comment,
+			'marker_type' => $marker_type,
+			'display_code' => $display_code,
+			'display_title' => trim( $title . ( '' !== $display_code ? ' ' . $display_code : '' ) ),
+			'location_id' => $location_id,
+			'country_code' => strtoupper( trim( $country_code ) ),
+			'destination_fingerprint' => $fingerprint,
+			'provider_destination_fingerprint' => $fingerprint,
+			'requires_rate_refresh' => $requires_rate_refresh,
+		);
+
+		return array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_name, 'requires_rate_refresh' => $requires_rate_refresh, 'snapshot' => $snapshot ) );
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_presentation_value( array $raw, string $key, string $default ): string {
+		$value = $raw[ $key ] ?? null;
+		return is_scalar( $value ) && '' !== trim( (string) $value ) ? trim( (string) $value ) : $default;
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function registry_boolean_value( array $raw, string $key ): bool {
+		$value = $raw[ $key ] ?? false;
+		return true === $value || '1' === $value || 1 === $value || 'true' === $value;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function registry_provider_fingerprint( array $snapshot ): string {
 		$fingerprint = (string) ( $snapshot['provider_destination_fingerprint'] ?? '' );
 		return '' !== $fingerprint ? $fingerprint : (string) ( $snapshot['destination_fingerprint'] ?? '' );
 	}

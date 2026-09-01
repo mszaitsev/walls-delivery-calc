@@ -318,6 +318,39 @@ final class WdcRecalcPekPickupProvider implements CarrierPickupPointProviderInte
 	}
 }
 
+final class WdcRecalcGenericPickupProvider implements CarrierPickupPointProviderInterface {
+	public int $search_calls = 0;
+	public int $resolve_calls = 0;
+	public ?CarrierPickupPointQuery $last_search_query = null;
+
+	/** @param array<int,PickupPoint> $points */
+	public function __construct( private string $carrier_key, public array $points ) {
+	}
+
+	public function carrier_key(): string {
+		return $this->carrier_key;
+	}
+
+	/** @return array<int,PickupPoint> */
+	public function search( CarrierPickupPointQuery $query ): array {
+		$this->search_calls++;
+		$this->last_search_query = $query;
+
+		return $this->points;
+	}
+
+	public function resolve_selection( CarrierPickupPointSelectionQuery $query ): ?PickupPoint {
+		$this->resolve_calls++;
+		foreach ( $this->points as $point ) {
+			if ( $point instanceof PickupPoint && $point->code === $query->point_code ) {
+				return $point;
+			}
+		}
+
+		return null;
+	}
+}
+
 final class WdcRecalcProduct {
 	public function __construct(
 		private string $sku,
@@ -1508,6 +1541,111 @@ try {
 	$point_codes = array_column( $points, 'point_code' );
 	recalc_smoke_assert( $response->success && in_array( '101000-OPS', $point_codes, true ) && ! in_array( '125009-OPS', $point_codes, true ), 'Manual pickup endpoint must still allow exact postcode search.' );
 }
+$ozon_query_snapshot = array(
+	'carrier_key' => 'ozon_delivery',
+	'purpose' => CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
+	'location_id' => 650000,
+	'country_code' => 'RU',
+	'latitude' => 55.03,
+	'longitude' => 82.92,
+	'fallback_address' => '',
+	'cargo' => array(
+		'weight_g' => 1000,
+		'volume_cm3' => 6000,
+		'max_dimension_cm' => 30,
+		'max_place_weight_g' => 1000,
+		'places_count' => 1,
+		'places' => array( array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 10 ) ),
+	),
+	'radius_km' => 60,
+	'limit' => 100,
+	'destination_fingerprint' => 'country=RU|location_id=650000',
+	'provider_destination_fingerprint' => 'country=RU|location_id=650000',
+);
+$ozon_rate = array(
+	'id' => 'ozon_delivery:pickup',
+	'rate_id' => 'ozon_delivery:pickup',
+	'carrier_key' => 'ozon_delivery',
+	'service_key' => 'ozon_delivery',
+	'pickup_family' => 'ozon_delivery:pickup',
+	'service_title' => 'Ozon',
+	'label' => 'Ozon до ПВЗ',
+	'delivery_type' => DeliveryType::PICKUP,
+	'cost' => 990.0,
+	'requires_pickup_point' => true,
+	'rate_meta' => array( 'pickup_provider_query' => $ozon_query_snapshot ),
+);
+$ozon_location = array( 'id' => 650000, 'location_id' => 650000, 'country_code' => 'RU', 'display_name' => 'Новосибирск', 'postal_code' => '630099' );
+$ozon_provider = new WdcRecalcGenericPickupProvider(
+	'ozon_delivery',
+	array(
+		new PickupPoint( 'ozon_delivery', '777001', 'Новосибирск, ул. Ozon, 1', 'Новосибирск', 'Новосибирская область', '', 55.03, 82.92, 'pvz', '09:00-21:00', '', null, true, array( 'presentation_title' => 'Пункт выдачи Ozon', 'presentation_type' => 'pvz', 'marker_type' => 'pickup', 'requires_rate_refresh' => true, 'point_name' => 'Ozon ПВЗ' ) ),
+	)
+);
+$ozon_controller = wdc_recalc_admin_controller( $service, $location_ajax, $pickup_repository, $address_normalization, $controller_replacement, null, null, new CarrierPickupPointProviderRegistry( array( $ozon_provider ) ) );
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $ozon_location ), 'selected_rate' => wp_json_encode( $ozon_rate ), 'mode' => 'location', 'query' => '', 'limit' => 2000 );
+try {
+	$ozon_controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'Ozon selected-rate pickup endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$points = $response->data['points'] ?? array();
+	recalc_smoke_assert( $response->success && 1 === $ozon_provider->search_calls && 1 === count( $points ), 'Selected recalculated Ozon rate must use registry-backed Ozon provider exactly once. success=' . ( $response->success ? 'true' : 'false' ) . ' search_calls=' . $ozon_provider->search_calls . ' points=' . count( $points ) . ' message=' . (string) ( $response->data['message'] ?? '' ) );
+	recalc_smoke_assert( 'ozon_delivery' === (string) ( $points[0]['carrier_key'] ?? '' ) && 'ozon_delivery:pickup' === (string) ( $points[0]['pickup_family'] ?? '' ) && '777001' === (string) ( $points[0]['point_code'] ?? '' ), 'Ozon selected-rate pickup endpoint must return Ozon point payload, not stale Russian Post point.' );
+	recalc_smoke_assert( ! in_array( '101000-OPS', array_column( $points, 'point_code' ), true ) && 'country=RU|location_id=650000' === (string) ( $points[0]['provider_destination_fingerprint'] ?? '' ), 'Ozon selected-rate pickup context must ignore old Russian Post selection and keep trusted rate fingerprint.' );
+}
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $rates_by_id['russian_post_domestic:pickup'] ), 'mode' => 'search', 'query' => '101000' );
+try {
+	$ozon_controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'Reverse Russian Post selected-rate pickup endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$points = $response->data['points'] ?? array();
+	recalc_smoke_assert( $response->success && 1 === $ozon_provider->search_calls && in_array( '101000-OPS', array_column( $points, 'point_code' ), true ), 'Selecting Russian Post after Ozon must use Russian Post fallback and must not call the Ozon provider again.' );
+}
+$ozon_save_provider = new WdcRecalcGenericPickupProvider(
+	'ozon_delivery',
+	array(
+		new PickupPoint( 'ozon_delivery', '777002', 'Новосибирск, ул. Ozon, 2', 'Новосибирск', 'Новосибирская область', '', 55.04, 82.93, 'pvz', '10:00-22:00', 'Ozon ПВЗ B', null, true, array( 'presentation_title' => 'Пункт выдачи Ozon', 'presentation_type' => 'pvz', 'marker_type' => 'pickup', 'requires_rate_refresh' => true, 'point_name' => 'Ozon ПВЗ B' ) ),
+	)
+);
+$ozon_save_replacement = wdc_recalc_replacement( new CarrierPickupPointProviderRegistry( array( $ozon_save_provider ) ) );
+$ozon_repriced_rate = $ozon_rate;
+$ozon_repriced_rate['cost'] = 129.0;
+$ozon_repriced_rate['rate_meta']['api_base_price_rub'] = 129.0;
+$ozon_selected_point = array(
+	'carrier_key' => 'ozon_delivery',
+	'service_key' => 'ozon_delivery',
+	'pickup_family' => 'ozon_delivery:pickup',
+	'point_code' => '777002',
+	'point_title' => 'Поддельный Ozon заголовок',
+	'point_address' => 'Поддельный Ozon адрес',
+	'provider_destination_fingerprint' => 'country=RU|location_id=650000',
+	'snapshot' => array(
+		'carrier_key' => 'ozon_delivery',
+		'service_key' => 'ozon_delivery',
+		'pickup_family' => 'ozon_delivery:pickup',
+		'point_code' => '777002',
+		'provider_destination_fingerprint' => 'country=RU|location_id=650000',
+	),
+);
+$ozon_save_order = new WdcRecalcOrder( 133, array() );
+$ozon_save_order->shipping_items = array( 'method_title' => 'Old Russian Post pickup', 'total' => 119.0 );
+$ozon_save_result = $ozon_save_replacement->save(
+	$ozon_save_order,
+	array(
+		'selected_location' => $ozon_location,
+		'selected_rate' => $ozon_repriced_rate,
+		'selected_pickup_point' => $ozon_selected_point,
+		'normalized_shipping_address' => array(),
+	)
+);
+$ozon_save_snapshot = json_decode( (string) ( $ozon_save_order->meta['_wdc_pickup_point_snapshot'] ?? '{}' ), true );
+$ozon_save_calc = $ozon_save_order->meta['_wdc_delivery_calculation_data'] ?? array();
+recalc_smoke_assert( true === $ozon_save_result['success'], 'Save Ozon pickup must succeed after authoritative selected-point repricing.' );
+recalc_smoke_assert( 1 === $ozon_save_provider->resolve_calls, 'Save Ozon pickup must fresh-resolve selected point through provider registry.' );
+recalc_smoke_assert( 129.0 === (float) ( $ozon_save_order->shipping_items['total'] ?? 0 ), 'Save Ozon pickup must persist the fresh repriced rate, not the preliminary price.' );
+recalc_smoke_assert( 'ozon_delivery' === (string) ( $ozon_save_order->meta['_wdc_pickup_carrier_key'] ?? '' ) && 'ozon_delivery:pickup' === (string) ( $ozon_save_order->meta['_wdc_pickup_family'] ?? '' ) && '777002' === (string) ( $ozon_save_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Save Ozon pickup must persist canonical Ozon pickup meta and not stale Russian Post selection.' );
+recalc_smoke_assert( is_array( $ozon_save_snapshot ) && '777002' === (string) ( $ozon_save_snapshot['point_code'] ?? '' ) && 'Новосибирск, ул. Ozon, 2' === (string) ( $ozon_save_snapshot['point_address'] ?? '' ) && 'Поддельный Ozon адрес' !== (string) ( $ozon_save_snapshot['point_address'] ?? '' ), 'Saved Ozon pickup snapshot must use provider projection, not forged browser fields.' );
+recalc_smoke_assert( 'ozon_delivery:pickup' === (string) ( $ozon_save_calc['pickup']['pickup_family'] ?? '' ) && '777002' === (string) ( $ozon_save_calc['pickup']['point_code'] ?? '' ), 'Order calculation data must keep the saved Ozon pickup point for calculator reopen.' );
 $pek_fingerprint = str_repeat( 'a', 64 );
 $pek_query_snapshot = array(
 	'carrier_key' => PekSettings::CARRIER_KEY,
@@ -1696,6 +1834,8 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'funct
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function pickupPointPresentationComment' ) && str_contains( $pickup_js, 'wdc-pickup-popup__title-comment' ) && str_contains( $pickup_js, 'wdc-pickup-list__title-comment' ), 'JS must render Yandex presentation_comment in popup and side card using checkout presentation classes.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'const requiresRateRefresh = true === point.requires_rate_refresh' ) && str_contains( $pickup_js, 'selectedPickupPoint: point' ) && str_contains( $pickup_js, "restorePekPickup: 'pek' === carrier" ), 'Selecting a PEK pickup point with requires_rate_refresh must request a fresh server preview.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function restorePekPickupPreview' ) && str_contains( $pickup_js, '[data-wdc-order-delivery-rate][data-carrier-key="pek"][data-delivery-type="pickup"]' ) && str_contains( $pickup_js, 'selectedPickupPoints.set( box, point );' ), 'Refreshed PEK pickup preview must restore the selected PEK rate and terminal after DOM replacement.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function restorePickupPreview' ) && str_contains( $pickup_js, 'findEquivalentPickupRate( box, identity, point )' ) && str_contains( $pickup_js, 'const freshRate = selectedRates.get( box );' ) && str_contains( $pickup_js, 'pickupMatchesRate( point, freshRate )' ), 'Registry-backed pickup refresh must restore selected points only against the fresh repriced rate payload.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function rateIdentity' ) && str_contains( $pickup_js, 'restorePickupSelection: true' ) && str_contains( $pickup_js, 'selectedRateIdentity: identity' ) && str_contains( $pickup_js, '! selectedPickupPoints.has( box )' ) && ! str_contains( $pickup_js, 'restoreOzonPickupPreview' ), 'Generic pickup refresh must preserve rate identity across preview replacement without an Ozon-specific restore branch.' );
 recalc_smoke_run_node( <<<'JS'
 const fs = require('fs');
 const assert = require('assert');
@@ -1768,8 +1908,11 @@ assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'russian_p
 assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'cdek', point_code: 'CDEK-1'}), {carrier_key: 'cdek'}), false, 'CDEK pickup must not refresh without marker.');
 assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'dpd', point_code: 'DPD-1'}), {carrier_key: 'dpd'}), true, 'DPD compatibility refresh must remain.');
 assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'yandex_delivery', point_code: 'YA-1'}), {carrier_key: 'yandex_delivery'}), true, 'Yandex compatibility refresh must remain.');
+assert.strictEqual(refreshDecision(normalizePickupPoint({carrier_key: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup', point_code: 'OZON-1', requires_rate_refresh: true}), {carrier_key: 'ozon_delivery', pickup_family: 'ozon_delivery:pickup'}), true, 'Ozon registry-backed pickup point must enter the generic preview refresh branch from requires_rate_refresh.');
+assert.ok(source.indexOf("renderPreview( box, payload.data && payload.data.html ? payload.data.html : '' );") < source.indexOf('restorePickupPreview( box, options.selectedRateIdentity || {}, options.selectedPickupPoint );'), 'Generic restore must run after new preview HTML is rendered.');
+assert.ok(source.includes('selectedRates.get( box )'), 'Generic restore must read selectedRates after selectedRateChanged() on the new DOM.');
 JS
-, 'Runtime JS smoke must preserve PEK requires_rate_refresh through normalization and refresh decision.' );
+, 'Runtime JS smoke must preserve registry-backed pickup refresh decisions and restore only after fresh preview rendering.' );
 $heading_pos = is_string( $pickup_js ) ? strpos( $pickup_js, 'class="wdc-order-delivery-pickup-picker__heading"><strong>\' + title + \'</strong>\' + commentHtml' ) : false;
 $address_pos = is_string( $pickup_js ) ? strpos( $pickup_js, '</span><span>\' + escapeHtml( pickupPointLabel( point ) ) + \'</span>' ) : false;
 recalc_smoke_assert( false !== $heading_pos && false !== $address_pos && $heading_pos < $address_pos, 'Pickup side card must render presentation_comment in a vertical heading container before the address.' );

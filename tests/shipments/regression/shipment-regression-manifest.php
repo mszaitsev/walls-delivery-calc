@@ -73,6 +73,7 @@ return array(
 	'ozon-delivery.pickup-schedule' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-schedule-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.pickup-provider' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-pickup-provider-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.returns' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-return-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
+	'ozon-delivery.modal-limits' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-modal-limits-smoke.php', 'groups' => array( 'ozon-delivery' ) ),
 	'ozon-delivery.shipment' => array( 'path' => 'tests/ozon-delivery/run-ozon-delivery-shipment-smoke.php', 'groups' => array( 'ozon-delivery' ), 'timeout' => 120 ),
 	'pek.admin-routing' => array( 'path' => 'tests/pek/run-pek-admin-routing-smoke.php', 'groups' => array( 'pek' ) ),
 	'pek.admin-ui' => array( 'path' => 'tests/pek/run-pek-admin-ui-smoke.php', 'groups' => array( 'pek' ) ),

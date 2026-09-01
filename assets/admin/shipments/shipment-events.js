@@ -43,6 +43,7 @@ function initializeShipmentAdmin() {
       updateRemoveButtons(container);
       if (form) updateShipmentPlaceOptions(form);
       if (form) updateDeclaredValueFields(form);
+      if (form) dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'place_added' });
       if (form) schedulePreview(form);
       return;
     }
@@ -64,6 +65,7 @@ function initializeShipmentAdmin() {
       renumberPlaces(container);
       updateRemoveButtons(container);
       if (form) updateShipmentPlaceOptions(form);
+      if (form) dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'place_removed' });
       if (form) requestPreview(form);
       return;
     }
@@ -88,6 +90,7 @@ function initializeShipmentAdmin() {
       if (row) row.remove();
       if (form) rebalanceShipmentItemGroup(form, groupKey);
       if (form) updateShipmentPlaceOptions(form);
+      if (form) dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'item_split_removed' });
       if (form) schedulePreview(form);
       return;
     }
@@ -104,6 +107,7 @@ function initializeShipmentAdmin() {
       const form = findShipmentForm(removeManualItem);
       if (row) row.remove();
       if (form) updateShipmentPlaceOptions(form);
+      if (form) dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'manual_item_removed' });
       if (form) schedulePreview(form);
       return;
     }
@@ -428,6 +432,7 @@ function requestShipmentActualCost(button, operation) {
       if (integerForm) {
         updateScenarioSections(integerForm);
         updateShipmentPlaceOptions(integerForm);
+        dispatchShipmentCarrierHook('afterPlacesChanged', integerForm, { reason: 'integer_input' });
         schedulePreview(integerForm);
       }
       return;
@@ -437,6 +442,7 @@ function requestShipmentActualCost(button, operation) {
       const decimalForm = findShipmentForm(event.target);
       if (decimalForm) {
         updateShipmentPlaceOptions(decimalForm);
+        dispatchShipmentCarrierHook('afterPlacesChanged', decimalForm, { reason: 'decimal_input' });
         schedulePreview(decimalForm);
       }
       return;
@@ -452,6 +458,7 @@ function requestShipmentActualCost(button, operation) {
     if (form) {
       updateScenarioSections(form);
       updateShipmentPlaceOptions(form);
+      dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'input' });
       schedulePreview(form);
     }
   });
@@ -480,6 +487,7 @@ function requestShipmentActualCost(button, operation) {
     const form = findShipmentForm(event.target);
     if (form) {
       updateScenarioSections(form);
+      dispatchShipmentCarrierHook('afterPlacesChanged', form, { reason: 'paste' });
       schedulePreview(form);
     }
   });
@@ -498,6 +506,7 @@ function requestShipmentActualCost(button, operation) {
       const allocationForm = findShipmentForm(event.target);
       if (allocationForm) {
         refreshShipmentItemsSummary(allocationForm);
+        dispatchShipmentCarrierHook('afterPlacesChanged', allocationForm, { reason: 'item_place_changed' });
         schedulePreview(allocationForm);
       }
       return;

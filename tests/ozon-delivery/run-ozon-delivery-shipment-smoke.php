@@ -170,7 +170,13 @@ final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 			}
 			$postings = array();
 			foreach ( is_array( $body['posting_numbers'] ?? null ) ? $body['posting_numbers'] : array() as $number ) {
-				$postings[] = array( 'posting_number' => (string) $number, 'status' => $this->statuses[ (string) $number ] ?? 'CREATED', 'status_changed_at' => '2026-08-30T12:00:00Z' );
+				$postings[] = array(
+					'posting_number' => (string) $number,
+					'status' => $this->statuses[ (string) $number ] ?? 'CREATED',
+					'status_changed_at' => '2026-08-30T12:00:00Z',
+					'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ),
+					'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ),
+				);
 			}
 			return new OzonDeliveryApiResponse( 200, wp_json_encode( array( 'postings' => $postings ) ) ?: '{}', array( 'content-type' => 'application/json' ) );
 		}
@@ -374,6 +380,77 @@ $status_payload = $stack['adapter']->status_payload( $order, $stored );
 oz_ship_assert( ! empty( $status_payload['has_actual_cost'] ) && 'carrier_api' === (string) ( $status_payload['actual_cost_source'] ?? '' ), 'Ozon status payload must expose actual cost immediately after create.' );
 oz_ship_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status_payload['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $status_payload['shipment_status_label'] ?? '' ) && 'READY_FOR_SHIPPING, READY_FOR_SHIPPING' === (string) ( $status_payload['carrier_status_title'] ?? '' ), 'Ozon create UI payload must immediately show created_in_carrier and raw Ozon statuses without a manual refresh.' );
 oz_ship_assert( 'Номера Ozon' === (string) ( $status_payload['tracking_presentation']['label'] ?? '' ) && 2 === count( $status_payload['tracking_presentation']['items'] ?? array() ) && 'OZON-1' === (string) ( $status_payload['tracking_presentation']['items'][0]['copy_value'] ?? '' ) && 'OZON-2' === (string) ( $status_payload['tracking_presentation']['items'][1]['copy_value'] ?? '' ), 'Ozon multi-box status payload must expose every posting number sorted by place for individual copying.' );
+
+$manual_stack = oz_ship_stack( $db );
+$manual_order = new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 102, 1, '1500.00' ) ) );
+$manual_stack['http']->statuses['MANUAL-OZON-1'] = 'ON_WAY';
+$manual_attach = $manual_stack['adapter']->attach_manual( $manual_order, array( 'barcode' => ' MANUAL-OZON-1 ' ) );
+$manual_stored = ( new OrderShipmentRepository() )->find_by_carrier( $manual_order, OzonDeliverySettings::CARRIER_KEY );
+$manual_payload = $manual_stack['adapter']->status_payload( $manual_order, $manual_stored );
+oz_ship_assert( ! empty( $manual_attach['success'] ) && 'MANUAL-OZON-1' === (string) ( $manual_attach['tracking_number'] ?? '' ), 'Ozon manual attach must accept a posting_number through the existing generic manual attach payload.' );
+oz_ship_assert( 'MANUAL-OZON-1' === (string) ( $manual_stored['ozon_postings'][0]['posting_number'] ?? '' ) && 'ON_WAY' === (string) ( $manual_stored['ozon_statuses'][0]['status'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $manual_stored['universal_status_code'] ?? '' ), 'Ozon manual attach must persist the official posting/info status through the settings-backed mapper.' );
+oz_ship_assert( 11900 === (int) ( $manual_stored['actual_cost_kopecks'] ?? 0 ) && 'RUB' === (string) ( $manual_stored['actual_cost_currency'] ?? '' ) && 'carrier_api' === (string) ( $manual_stored['actual_cost_source'] ?? '' ) && OzonDeliveryShipmentService::MANUAL_ATTACH_ACTUAL_COST_SOURCE_DETAIL === (string) ( $manual_stored['actual_cost_source_detail'] ?? '' ) && ! empty( $manual_payload['has_actual_cost'] ), 'Ozon manual attach must persist posting/info delivery 109 + insurance 10 as canonical actual cost.' );
+oz_ship_assert( 10900 === (int) ( $manual_stored['response_snapshot']['delivery_cost_kopecks'] ?? 0 ) && 1000 === (int) ( $manual_stored['response_snapshot']['insurance_cost_kopecks'] ?? 0 ) && 11900 === (int) ( $manual_stored['response_snapshot']['total_cost_kopecks'] ?? 0 ), 'Ozon manual attach snapshot must keep only safe cost summary fields.' );
+$manual_stack['http']->statuses['MANUAL-OZON-1'] = 'DELIVERED';
+$manual_update = $manual_stack['adapter']->update_status( $manual_order );
+oz_ship_assert( ! empty( $manual_update['success'] ) && DeliveryStatus::DELIVERED === (string) ( $manual_update['shipment']['universal_status_code'] ?? '' ), 'Manual-attached Ozon shipment must use the normal status update path.' );
+
+$decimal_stack = oz_ship_stack( $db );
+$decimal_order = new OzonShipmentSmokeOrder( 85388, '85388', array() );
+$decimal_stack['http']->posting_info_responses[] = array(
+	'postings' => array(
+		array(
+			'posting_number' => 'MANUAL-DECIMAL',
+			'status' => 'READY_FOR_SHIPPING',
+			'status_changed_at' => '2026-08-30T12:00:00Z',
+			'estimated_delivery_cost' => array( 'amount' => '1250.50', 'currency_code' => 'RUB' ),
+			'estimated_insurance_cost' => array( 'amount' => '1250.50', 'currency_code' => 'RUB' ),
+			'recipient' => array( 'phone_number' => '+79990000000' ),
+			'delivery' => array( 'full_address' => 'secret address' ),
+		),
+	),
+);
+$decimal_attach = $decimal_stack['adapter']->attach_manual( $decimal_order, array( 'posting_number' => 'MANUAL-DECIMAL' ) );
+$decimal_stored = ( new OrderShipmentRepository() )->find_by_carrier( $decimal_order, OzonDeliverySettings::CARRIER_KEY );
+$decimal_snapshot_json = wp_json_encode( $decimal_stored['response_snapshot'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '';
+oz_ship_assert( ! empty( $decimal_attach['success'] ) && 250100 === (int) ( $decimal_stored['actual_cost_kopecks'] ?? 0 ), 'Ozon manual attach money parser must sum decimal strings without float drift.' );
+oz_ship_assert( ! str_contains( $decimal_snapshot_json, '+79990000000' ) && ! str_contains( $decimal_snapshot_json, 'secret address' ), 'Ozon manual attach response snapshot must not persist recipient PII or full address.' );
+
+foreach (
+	array(
+		'wrong currency' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'USD' ) ),
+		'missing insurance' => array( 'estimated_delivery_cost' => array( 'amount' => '109.00', 'currency_code' => 'RUB' ) ),
+		'malformed amount' => array( 'estimated_delivery_cost' => array( 'amount' => '109.001', 'currency_code' => 'RUB' ), 'estimated_insurance_cost' => array( 'amount' => '10.00', 'currency_code' => 'RUB' ) ),
+	) as $case_name => $money_case
+) {
+	$invalid_money_stack = oz_ship_stack( $db );
+	$invalid_money_order = new OzonShipmentSmokeOrder( 85410 + strlen( $case_name ), '85410', array() );
+	$invalid_money_stack['http']->posting_info_responses[] = array(
+		'postings' => array(
+			array_merge(
+				array( 'posting_number' => 'MANUAL-BAD-' . strlen( $case_name ), 'status' => 'READY_FOR_SHIPPING', 'status_changed_at' => '2026-08-30T12:00:00Z' ),
+				$money_case
+			),
+		),
+	);
+	$invalid_money_attach = $invalid_money_stack['adapter']->attach_manual( $invalid_money_order, array( 'posting_number' => 'MANUAL-BAD-' . strlen( $case_name ) ) );
+	oz_ship_assert( empty( $invalid_money_attach['success'] ) && str_contains( (string) ( $invalid_money_attach['message'] ?? '' ), 'некорректную стоимость' ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $invalid_money_order, OzonDeliverySettings::CARRIER_KEY ), 'Ozon manual attach must fail closed on invalid posting/info money: ' . $case_name );
+}
+
+$manual_return_order = new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 103, 1, '1500.00' ) ) );
+$manual_return_stack = oz_ship_stack( $db );
+$manual_return_stack['http']->statuses['MANUAL-RETURN-1'] = 'ON_WAY';
+oz_ship_assert( ! empty( $manual_return_stack['adapter']->attach_manual( $manual_return_order, array( 'tracking_number' => 'MANUAL-RETURN-1' ) )['success'] ), 'Ozon manual attach fixture must be saved before return lifecycle regression.' );
+$manual_return_stack['http']->statuses['MANUAL-RETURN-1'] = 'CANCELED';
+$manual_return_stack['http']->return_pages = array( array( 'returns' => array( array( 'return_number' => 'R-MANUAL-1', 'return_external_id' => '85374', 'status' => 'MOVING' ) ), 'next_cursor' => '' ) );
+$manual_return_stack['http']->return_info = array( 'R-MANUAL-1' => array( 'return_number' => 'R-MANUAL-1', 'return_external_id' => '85374', 'status' => 'MOVING' ) );
+$manual_return_status = $manual_return_stack['adapter']->update_status( $manual_return_order );
+oz_ship_assert( ! empty( $manual_return_status['success'] ) && DeliveryStatus::RETURNING_TO_SENDER === (string) ( $manual_return_status['shipment']['universal_status_code'] ?? '' ) && 1 === count( $manual_return_stack['http']->calls_for( '/v1/return/search' ) ), 'Manual-attached Ozon shipment must enter the existing return reconciliation flow after external CANCELED.' );
+$unknown_stack = oz_ship_stack( $db );
+$unknown_order = new OzonShipmentSmokeOrder( 85375, '85375', array() );
+$unknown_stack['http']->posting_info_responses[] = array( 'postings' => array() );
+$unknown_attach = $unknown_stack['adapter']->attach_manual( $unknown_order, array( 'barcode' => 'UNKNOWN-OZON' ) );
+oz_ship_assert( empty( $unknown_attach['success'] ) && array() === ( new OrderShipmentRepository() )->find_by_carrier( $unknown_order, OzonDeliverySettings::CARRIER_KEY ), 'Unknown or malformed Ozon posting/info response must not persist manual shipment.' );
 
 $actions = $stack['docs']->actions( $order, $stored );
 oz_ship_assert( 2 === count( $actions ) && 'Скачать этикетку 1 из 2' === $actions[0]->label && 'Скачать этикетку 2 из 2' === $actions[1]->label, 'Ozon multi-box document actions must use concise label button names.' );
@@ -621,11 +698,32 @@ oz_ship_assert( ! $preflight_failed->success && 'ozon_shipment_preflight_failed'
 $stack = oz_ship_stack( $db );
 $overweight_order = new OzonShipmentSmokeOrder( 85372, '85372', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) );
 $overweight = $stack['service']->create( $overweight_order, oz_ship_request( array( new ShipmentPlace( 1, 12000, 40, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ) ) );
-oz_ship_assert( ! $overweight->success && 'ozon_shipment_validation_failed' === $overweight->error_code && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Overweight actual place must be blocked before /v1/order/create.' );
-$oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85373, '85373' ) );
-oz_ship_assert( ! $oversize->success && str_contains( $oversize->error_message, 'размер' ), '40x40x40 actual place must fail selected Ozon point limits after rotation-aware dimension check: ' . $oversize->error_code . ' ' . $oversize->error_message );
+oz_ship_assert( ! $overweight->success && 'ozon_shipment_validation_failed' === $overweight->error_code && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ) && 0 === count( $stack['http']->calls_for( '/v1/posting/approve' ) ), 'Overweight actual place must be blocked before any Ozon create mutation or preflight.' );
+
+$stack = oz_ship_stack( $db );
+$too_long = $stack['service']->create( new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 51, 30, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85373, '85373' ) );
+oz_ship_assert( ! $too_long->success && 'ozon_shipment_validation_failed' === $too_long->error_code && str_contains( $too_long->error_message, 'размер' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), '51x30x20 actual place must fail selected Ozon point limits before Ozon API preflight.' );
+
+$stack = oz_ship_stack( $db );
+$oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85374, '85374' ) );
+oz_ship_assert( ! $oversize->success && str_contains( $oversize->error_message, 'размер' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), '40x40x40 actual place must fail selected Ozon point limits after rotation-aware dimension check before Ozon API preflight: ' . $oversize->error_code . ' ' . $oversize->error_message );
+
 $rotated = $stack['service']->create( new OzonShipmentSmokeOrder( 85374, '85374', array( new OzonShipmentSmokeOrderItem( 101, 1, '1000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 50, 20, Money::from_kopecks( 0 ) ) ), array( array( 'item_key' => '101', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ), '777', 85374, '85374' ) );
 oz_ship_assert( $rotated->success, '50x30x20 actual place must pass selected point limits with rotation.' );
+
+$stack = oz_ship_stack( $db );
+$multi_overweight = $stack['service']->create( new OzonShipmentSmokeOrder( 85390, '85390', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 30, 20, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 11000, 30, 30, 20, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85390, '85390' ) );
+oz_ship_assert( ! $multi_overweight->success && str_contains( $multi_overweight->error_message, 'Грузоместо 2' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Overweight second Ozon place must block the whole multi-box shipment before Ozon API calls.' );
+
+$stack = oz_ship_stack( $db );
+$multi_oversize = $stack['service']->create( new OzonShipmentSmokeOrder( 85391, '85391', array( new OzonShipmentSmokeOrderItem( 101, 2, '2000.00' ) ) ), oz_ship_request( array( new ShipmentPlace( 1, 8000, 30, 30, 20, Money::from_kopecks( 0 ) ), new ShipmentPlace( 2, 8000, 40, 40, 40, Money::from_kopecks( 0 ) ) ), array(
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+	array( 'item_key' => '101', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+), '777', 85391, '85391' ) );
+oz_ship_assert( ! $multi_oversize->success && str_contains( $multi_oversize->error_message, 'Грузоместо 2' ) && 0 === count( $stack['http']->calls_for( '/v1/order/checkout' ) ) && 0 === count( $stack['http']->calls_for( '/v1/order/create' ) ), 'Oversized second Ozon place must block the whole multi-box shipment before Ozon API calls.' );
 
 $stack = oz_ship_stack( $db );
 $stack['http']->fail_approve = array( 'OZON-1' );

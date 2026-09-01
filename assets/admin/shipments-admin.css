@@ -178,6 +178,24 @@
   display: none !important;
 }
 
+.wdc-ozon-place-limit-warning {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 4px solid #d63638;
+  background: #fcf0f1;
+  color: #1d2327;
+}
+
+.wdc-ozon-place-limit-warning ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.wdc-ozon-place--invalid {
+  border-color: #d63638;
+  background: #fcf0f1;
+}
+
 .wdc-shipment-modal {
   position: fixed;
   inset: 0;
