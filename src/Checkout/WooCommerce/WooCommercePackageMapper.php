@@ -13,7 +13,6 @@ use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
@@ -26,7 +25,8 @@ final class WooCommercePackageMapper {
 		private ?SettingsRepository $settings = null,
 		private ?LocationRepository $location_repository = null,
 		private ?RussianPhoneNormalizer $phones = null,
-		private ?CheckoutLogger $logger = null
+		private ?CheckoutLogger $logger = null,
+		private ?CheckoutLocationSearch $location_search = null
 	) {
 		$this->phones = $phones ?? new RussianPhoneNormalizer();
 	}
@@ -475,11 +475,11 @@ final class WooCommercePackageMapper {
 			$city_text = trim( (string) ( $destination['city'] ?? '' ) );
 		}
 		$region_text = trim( '' !== trim( $address->region_name ) ? $address->region_name : (string) ( $destination['state'] ?? '' ) );
-		if ( '' === $country_code || '' === $city_text || ! $this->location_repository instanceof LocationRepository ) {
+		if ( '' === $country_code || '' === $city_text || ! $this->location_search instanceof CheckoutLocationSearch ) {
 			return $this->location_context_result( '', 'missing', 'not_found', null, array() );
 		}
 
-		$result = ( new CheckoutLocationSearch( new LocationSearchService( $this->location_repository ) ) )->resolve_checkout_fields( $region_text, $city_text, $country_code );
+		$result = $this->location_search->resolve_checkout_fields( $region_text, $city_text, $country_code );
 		$status = (string) ( $result['status'] ?? 'not_found' );
 		$location = $result['location'] instanceof Location ? $result['location'] : null;
 		if ( 'resolved' === $status && $location instanceof Location && null !== $location->id && $location->id > 0 ) {

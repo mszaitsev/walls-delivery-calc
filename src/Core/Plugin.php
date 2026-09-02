@@ -847,7 +847,7 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutAddressValidation::class, fn(): CheckoutAddressValidation => new CheckoutAddressValidation( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( WooCommerceRateMapper::class, fn(): WooCommerceRateMapper => new WooCommerceRateMapper() );
-		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( RussianPhoneNormalizer::class ), $this->container->get( CheckoutLogger::class ) ) );
+		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( RussianPhoneNormalizer::class ), $this->container->get( CheckoutLogger::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register(
 			ShippingMethodRegistrar::class,
 			fn(): ShippingMethodRegistrar => new ShippingMethodRegistrar(

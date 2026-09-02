@@ -974,7 +974,7 @@ $checkout_session = new CheckoutSessionManager();
 $checkout_session->save_selected_city( array( 'id' => 184506, 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'place_name' => 'Атбасар', 'place_type' => 'п', 'place_level' => 5, 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'active' => true ) );
 $checkout_session->save_city_context( array( 'location_id' => '184506', 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'source' => 'local_db' ) );
 $GLOBALS['wdc_wc_logs'] = array();
-$atbasar_request = ( new WooCommercePackageMapper( null, $checkout_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, new CheckoutLogger( new Logger() ) ) )->map(
+$atbasar_request = ( new WooCommercePackageMapper( null, $checkout_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, new CheckoutLogger( new Logger() ), $checkout_search ) )->map(
 	array(
 		'destination' => array( 'country' => 'KZ', 'city' => 'Атбасар' ),
 		'contents_cost' => 1000,
@@ -1123,7 +1123,7 @@ $backend_recovery_orchestrator = new CheckoutOrchestrator(
 );
 $backend_recovery_session = new CheckoutSessionManager();
 $backend_recovery_session->clear_normalized_address();
-$backend_recovery_request = ( new WooCommercePackageMapper( null, $backend_recovery_session, null, new LocationRepository( $GLOBALS['wpdb'] ) ) )->map(
+$backend_recovery_request = ( new WooCommercePackageMapper( null, $backend_recovery_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, null, $checkout_search ) )->map(
 	array(
 		'destination' => array( 'country' => 'KZ', 'state' => 'Акмолинская', 'city' => 'поселок Атбасар' ),
 		'contents_cost' => 19500,

@@ -661,6 +661,7 @@ $coordinate_db = new class extends wpdb {
 	public array $locations = array();
 	public int $location_find_by_id_calls = 0;
 	public int $location_single_lookup_calls = 0;
+	public int $checkout_hierarchy_candidate_calls = 0;
 };
 $coordinate_db->locations = array(
 	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
@@ -673,48 +674,60 @@ $coordinate_db->locations = array(
 	array( 'id' => 184801, 'country_code' => 'KZ', 'region_name' => 'Вторая', 'city_name' => '', 'settlement_name' => 'Ивановка', 'settlement_type' => 'п', 'place_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Вторая обл., п Ивановка', 'active' => 1 ),
 );
 $coordinate_repository = new LocationRepository( $coordinate_db );
+$coordinate_location_search = new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) );
 $coordinate_session = new CheckoutSessionManager();
 $coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
-$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( 54.9833 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.8964 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must prefer trusted session destination coordinates.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->location_find_by_id_calls, 'Package mapper must not query canonical location when session coordinates are already complete.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when selected city/session coordinates are already complete.' );
 
 $coordinate_session_id = new CheckoutSessionManager();
 $coordinate_session_id->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск' ) );
-$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( '650000' === (string) ( $coordinate_request_id->customer_context['selected_location_id'] ?? '' ), 'Package mapper must preserve canonical selected_location_id.' );
 wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request_id->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request_id->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must resolve destination coordinates from canonical selected_location_id.' );
 wc_checkout_smoke_assert( 'session' === (string) ( $coordinate_request_id->customer_context['location_context_source'] ?? '' ), 'Package mapper must keep the session fast path when canonical location_id already exists.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when session location_id already exists.' );
 
 $atbasar_package = wc_checkout_smoke_package( 'KZ' );
 $atbasar_package['destination']['state'] = 'Акмолинская';
 $atbasar_package['destination']['city'] = 'поселок Атбасар';
 $atbasar_session = new CheckoutSessionManager();
 $atbasar_session->clear_normalized_address();
-$atbasar_request = ( new WooCommercePackageMapper( null, $atbasar_session, null, $coordinate_repository ) )->map( $atbasar_package );
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$atbasar_request = ( new WooCommercePackageMapper( null, $atbasar_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $atbasar_package );
 wc_checkout_smoke_assert( '184506' === (string) ( $atbasar_request->customer_context['selected_location_id'] ?? '' ) && '184506' === (string) ( $atbasar_request->customer_context['location_id'] ?? '' ), 'Package mapper must recover canonical KZ поселок Атбасар location_id when frontend hidden ID is missing.' );
 wc_checkout_smoke_assert( 'backend_resolved' === (string) ( $atbasar_request->customer_context['location_context_source'] ?? '' ), 'Recovered checkout location context must be marked as backend_resolved.' );
+wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper backend recovery must call the injected checkout resolver exactly once when canonical ID is missing.' );
 
 $frontend_session = new CheckoutSessionManager();
 $frontend_session->clear_normalized_address();
 $frontend_session->save_selected_city( array( 'id' => 184506, 'display_name' => 'Акмолинская обл., п Атбасар', 'place_name' => 'Атбасар', 'place_type' => 'п' ) );
-$frontend_request = ( new WooCommercePackageMapper( null, $frontend_session, null, $coordinate_repository ) )->map( $atbasar_package );
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$frontend_request = ( new WooCommercePackageMapper( null, $frontend_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $atbasar_package );
 wc_checkout_smoke_assert( '184506' === (string) ( $frontend_request->customer_context['selected_location_id'] ?? '' ) && 'frontend' === (string) ( $frontend_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must prefer existing frontend-selected canonical location_id over backend recovery.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when frontend location_id already exists.' );
 
 $ambiguous_package = wc_checkout_smoke_package( 'KZ' );
 $ambiguous_package['destination']['state'] = '';
 $ambiguous_package['destination']['city'] = 'поселок Ивановка';
 $ambiguous_session = new CheckoutSessionManager();
 $ambiguous_session->clear_normalized_address();
-$ambiguous_request = ( new WooCommercePackageMapper( null, $ambiguous_session, null, $coordinate_repository ) )->map( $ambiguous_package );
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$ambiguous_request = ( new WooCommercePackageMapper( null, $ambiguous_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $ambiguous_package );
 wc_checkout_smoke_assert( '' === (string) ( $ambiguous_request->customer_context['selected_location_id'] ?? '' ) && 'ambiguous' === (string) ( $ambiguous_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must not choose the first location when backend recovery is ambiguous.' );
+wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper ambiguous backend recovery must use the injected checkout resolver once.' );
 
 $missing_package = wc_checkout_smoke_package( 'KZ' );
 $missing_package['destination']['city'] = 'поселок Несуществующий';
 $missing_session = new CheckoutSessionManager();
 $missing_session->clear_normalized_address();
-$missing_request = ( new WooCommercePackageMapper( null, $missing_session, null, $coordinate_repository ) )->map( $missing_package );
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$missing_request = ( new WooCommercePackageMapper( null, $missing_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $missing_package );
 wc_checkout_smoke_assert( '' === (string) ( $missing_request->customer_context['selected_location_id'] ?? '' ) && 'missing' === (string) ( $missing_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must leave location_id empty when backend recovery finds no canonical location.' );
+wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper not-found backend recovery must use the injected checkout resolver once.' );
 
 foreach ( array( 999999, 650001, 650002, 650003 ) as $bad_location_id ) {
 	$bad_session = new CheckoutSessionManager();
