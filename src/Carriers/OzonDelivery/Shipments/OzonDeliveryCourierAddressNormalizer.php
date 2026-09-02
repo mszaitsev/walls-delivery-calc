@@ -26,7 +26,7 @@ final class OzonDeliveryCourierAddressNormalizer {
 			}
 		}
 
-		return $this->failure( 'Адрес распознан недостаточно точно. Уточните улицу и дом.', $original_address );
+		return $this->failure( 'Не удалось распознать адрес, попробуйте исправить его.', $original_address );
 	}
 
 	/** @param array<string,mixed> $item @param array<string,string> $context @return array<string,mixed> */

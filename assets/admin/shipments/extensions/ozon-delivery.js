@@ -26,6 +26,10 @@
     return String(value || '').trim();
   }
 
+  function scalarText(value) {
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+  }
+
   function numberValue(value) {
     var parsed = parseFloat(String(value || '').replace(',', '.'));
     return Number.isFinite(parsed) ? parsed : NaN;
@@ -89,24 +93,32 @@
     }
   }
 
+  function normalizedFields(snapshot) {
+    var fields = snapshot && snapshot.fields;
+    return fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : {};
+  }
+
   function updateOzonCourierFields(form, snapshot) {
     if (!form || !snapshot) return;
-    var fields = snapshot.fields || {};
+    var fields = normalizedFields(snapshot);
     var display = form.querySelector('[data-wdc-normalized-address-display]');
-    if (display) display.value = snapshot.display || fields.normalized_address || '';
+    if (display) display.value = scalarText(snapshot.display) || scalarText(fields.normalized_address);
     var mapped = {
-      postcode: fields.postcode || '',
-      country: fields.country || '',
-      region: fields.region || '',
-      city: fields.city || '',
-      street: fields.street || '',
-      house: fields.house || fields.stead || '',
-      flat: fields.flat || ''
+      postcode: scalarText(fields.postcode),
+      country: scalarText(fields.country),
+      region: scalarText(fields.region),
+      city: scalarText(fields.city),
+      street: scalarText(fields.street),
+      house: scalarText(fields.house) || scalarText(fields.stead)
     };
     Object.keys(mapped).forEach(function (key) {
       var input = form.querySelector('[data-wdc-ozon-courier-field="' + key + '"]');
       if (input) input.value = mapped[key] || '';
     });
+    if (snapshot.success === true && scalarText(fields.flat)) {
+      var flat = form.querySelector('[data-wdc-ozon-courier-field="flat"]');
+      if (flat) flat.value = scalarText(fields.flat);
+    }
   }
 
   function hasValidCoordinatePair(fields) {
@@ -116,7 +128,7 @@
   }
 
   function hasConfirmedOzonCourierAddress(snapshot) {
-    var fields = snapshot && snapshot.fields ? snapshot.fields : {};
+    var fields = normalizedFields(snapshot);
     return !!(
       snapshot &&
       snapshot.success === true &&
@@ -294,6 +306,8 @@
       var form = payload && payload.form;
       var snapshot = payload && payload.snapshot ? payload.snapshot : {};
       if (!isOzonCourierForm(form)) return false;
+      var input = form.querySelector('[data-wdc-normalized-address-json]');
+      if (input) input.value = JSON.stringify(snapshot);
       updateOzonCourierFields(form, snapshot);
       if (payload.status) {
         payload.status.textContent = snapshot.success ? 'Адрес для Ozon подтвержден.' : (snapshot.message || 'Адрес Ozon не подтвержден.');

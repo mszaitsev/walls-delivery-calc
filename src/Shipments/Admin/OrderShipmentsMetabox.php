@@ -302,6 +302,7 @@ final class OrderShipmentsMetabox {
 		if ( array_key_exists( 'modal_create_button_label', $modal_extension_context ) ) {
 			$modal_create_button_label = (string) $modal_extension_context['modal_create_button_label'];
 		}
+		$create_initially_disabled = OzonDeliverySettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type && empty( $modal_extension_context['normalization_valid'] );
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		?>
@@ -442,7 +443,7 @@ final class OrderShipmentsMetabox {
 							<div class="wdc-shipment-errors" data-wdc-shipment-errors></div>
 							<pre class="wdc-shipment-preview" data-wdc-shipment-preview><?php echo esc_html( wp_json_encode( $safe_preview, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></pre>
 							<button type="button" class="button" data-wdc-preview-shipment><?php echo esc_html__( 'Предпросмотр payload', 'walls-delivery-calc' ); ?></button>
-							<button type="button" class="button button-primary" data-wdc-create-shipment><?php echo esc_html( $modal_create_button_label ); ?></button>
+							<button type="button" class="button button-primary" data-wdc-create-shipment <?php disabled( $create_initially_disabled ); ?>><?php echo esc_html( $modal_create_button_label ); ?></button>
 						</section>
 					</div>
 				</div>

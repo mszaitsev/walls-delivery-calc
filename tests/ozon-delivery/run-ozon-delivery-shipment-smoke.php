@@ -181,6 +181,17 @@ oz_ship_assert( ! empty( $selected_absent['success'] ), 'Ozon courier address no
 $suggestion_client->data = array( 'city_fias_id' => '', 'settlement_fias_id' => '' );
 $dadata_absent = $ozon_normalizer->normalize( 'Новосибирск, Ленина, 10', array( 'selected_location_fias_id' => 'LOCATION-A' ) );
 oz_ship_assert( ! empty( $dadata_absent['success'] ), 'Ozon courier address normalizer must not reject only because DaData locality FIAS evidence is absent.' );
+$suggestion_client->data = array(
+	'fias_level' => '7',
+	'house' => '',
+	'house_fias_id' => '',
+	'house_kladr_id' => '',
+	'stead' => '',
+	'flat' => '',
+);
+$not_deliverable = $ozon_normalizer->normalize( 'Новосибирск, Ленина', array( 'selected_location_fias_id' => 'REAL-FIAS' ) );
+oz_ship_assert( empty( $not_deliverable['success'] ) && 'Не удалось распознать адрес, попробуйте исправить его.' === (string) ( $not_deliverable['message'] ?? '' ), 'Ozon courier address normalizer fallback must use the new manager-facing recognition failure message.' );
+oz_ship_assert( ! str_contains( (string) ( $not_deliverable['message'] ?? '' ), 'Адрес распознан недостаточно точно' ), 'Ozon courier address normalizer fallback must not use the old insufficient-precision message.' );
 
 final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,body:array<string,mixed>,headers:array<string,mixed>}> */
