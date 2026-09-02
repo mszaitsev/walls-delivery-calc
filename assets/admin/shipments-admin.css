@@ -196,24 +196,45 @@
   background: #fcf0f1;
 }
 
+.wdc-ozon-courier-analysis,
+.wdc-ozon-courier-address,
+.wdc-ozon-courier-optional-grid {
+  min-width: 0;
+}
+
+.wdc-ozon-courier-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+
 .wdc-ozon-courier-address-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;
 }
 
-.wdc-shipment-modal .wdc-ozon-courier-address-grid label {
+.wdc-ozon-courier-optional-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.wdc-shipment-modal .wdc-ozon-courier-address-grid label,
+.wdc-shipment-modal .wdc-ozon-courier-optional-grid label {
   min-width: 0;
   margin-bottom: 0;
 }
 
-.wdc-shipment-modal .wdc-ozon-courier-address-grid input {
+.wdc-shipment-modal .wdc-ozon-courier-address-grid input,
+.wdc-shipment-modal .wdc-ozon-courier-optional-grid input,
+.wdc-shipment-modal [data-wdc-courier-original-address],
+.wdc-shipment-modal [data-wdc-normalized-address-display] {
   box-sizing: border-box;
-}
-
-.wdc-shipment-delivery-column-courier {
   min-width: 0;
-  margin: 0 0 10px;
+  width: 100%;
 }
 
 .wdc-shipment-modal {
@@ -639,7 +660,8 @@
     grid-template-columns: 1fr;
   }
 
-  .wdc-ozon-courier-address-grid {
+  .wdc-ozon-courier-address-grid,
+  .wdc-ozon-courier-optional-grid {
     grid-template-columns: 1fr;
   }
 

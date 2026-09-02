@@ -43,9 +43,27 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 
 	/** @param array<string,mixed> $draft @param array<string,mixed> $context */
 	public function render_fields( object $order, array $draft, array $context ): void {
-		unset( $order, $draft, $context );
+		unset( $order, $draft );
+		if ( 'courier' !== (string) ( $context['delivery_type'] ?? '' ) ) {
+			return;
+		}
+		$snapshot = is_array( $context['courier_address_snapshot'] ?? null ) ? $context['courier_address_snapshot'] : array();
 		?>
-		<p class="description"><?php echo esc_html__( 'Создание Ozon использует фактические грузоместа и распределение товаров из этой формы.', 'walls-delivery-calc' ); ?></p>
+		<div class="wdc-ozon-courier-analysis" data-wdc-ozon-courier-analysis data-wdc-courier-section>
+			<p class="wdc-ozon-courier-action-row">
+				<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Проанализировать адрес', 'walls-delivery-calc' ); ?></button>
+				<span class="description" data-wdc-normalized-status><?php echo ! empty( $context['normalization_valid'] ) ? esc_html__( 'Адрес для Ozon подтвержден.', 'walls-delivery-calc' ) : esc_html__( 'Адрес нужно подтвердить перед созданием.', 'walls-delivery-calc' ); ?></span>
+			</p>
+			<label><?php echo esc_html__( 'Подтвержденный адрес', 'walls-delivery-calc' ); ?><input readonly data-wdc-normalized-address-display value="<?php echo esc_attr( (string) ( $snapshot['normalized_address'] ?? '' ) ); ?>"></label>
+			<div class="wdc-ozon-courier-address-grid" data-wdc-ozon-courier-address-grid>
+				<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="postcode" value="<?php echo esc_attr( (string) ( $snapshot['postcode'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="country" value="<?php echo esc_attr( (string) ( $snapshot['country'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="region" value="<?php echo esc_attr( (string) ( $snapshot['region'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="city" value="<?php echo esc_attr( (string) ( $snapshot['city'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Улица', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="street" value="<?php echo esc_attr( (string) ( $snapshot['street'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Дом', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="house" value="<?php echo esc_attr( (string) ( $snapshot['house'] ?? $snapshot['stead'] ?? '' ) ); ?>"></label>
+			</div>
+		</div>
 		<?php
 	}
 
@@ -77,6 +95,24 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 	/** @param array<string,mixed> $draft @param array<string,mixed> $context */
 	public function render_courier_fields( object $order, array $draft, array $context ): void {
 		unset( $order, $draft );
+		$encoded = $this->normalized_address_json( $context );
+		$snapshot = is_array( $context['courier_address_snapshot'] ?? null ) ? $context['courier_address_snapshot'] : array();
+		?>
+		<div class="wdc-ozon-courier-address" data-wdc-ozon-courier-address>
+			<label><?php echo esc_html__( 'Адрес получателя', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" data-wdc-courier-original-address rows="2"><?php echo esc_textarea( (string) ( $context['courier_original_address'] ?? '' ) ); ?></textarea></label>
+			<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $encoded ); ?>" data-wdc-normalized-address-json>
+			<div class="wdc-ozon-courier-optional-grid" data-wdc-ozon-courier-optional-grid>
+				<label><?php echo esc_html__( 'Квартира/офис', 'walls-delivery-calc' ); ?><input name="ozon_courier_apartment" data-wdc-ozon-courier-field="flat" value="<?php echo esc_attr( (string) ( $snapshot['flat'] ?? '' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Подъезд', 'walls-delivery-calc' ); ?><input name="ozon_courier_entrance" value=""></label>
+				<label><?php echo esc_html__( 'Этаж', 'walls-delivery-calc' ); ?><input name="ozon_courier_floor" value=""></label>
+				<label><?php echo esc_html__( 'Домофон', 'walls-delivery-calc' ); ?><input name="ozon_courier_intercom" value=""></label>
+			</div>
+		</div>
+		<?php
+	}
+
+	/** @param array<string,mixed> $context */
+	private function normalized_address_json( array $context ): string {
 		$snapshot = is_array( $context['courier_address_snapshot'] ?? null ) ? $context['courier_address_snapshot'] : array();
 		$normalized = array(
 			'success' => ! empty( $context['normalization_valid'] ) && array() !== $snapshot,
@@ -87,29 +123,7 @@ final class OzonDeliveryShipmentModalExtension implements CarrierShipmentModalEx
 			'original_hash' => hash( 'sha256', trim( (string) ( $context['courier_original_address'] ?? '' ) ) ),
 			'service_key' => OzonDeliverySettings::SERVICE_KEY,
 		);
-		$encoded = wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ) ?: '';
-		?>
-		<div data-wdc-ozon-courier-address>
-			<label><?php echo esc_html__( 'Адрес получателя', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" data-wdc-courier-original-address rows="2"><?php echo esc_textarea( (string) ( $context['courier_original_address'] ?? '' ) ); ?></textarea></label>
-			<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $encoded ); ?>" data-wdc-normalized-address-json>
-			<p>
-				<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Проанализировать адрес', 'walls-delivery-calc' ); ?></button>
-				<span class="description" data-wdc-normalized-status><?php echo ! empty( $context['normalization_valid'] ) ? esc_html__( 'Адрес для Ozon подтвержден.', 'walls-delivery-calc' ) : esc_html__( 'Адрес нужно подтвердить перед созданием.', 'walls-delivery-calc' ); ?></span>
-			</p>
-			<label><?php echo esc_html__( 'Подтвержденный адрес', 'walls-delivery-calc' ); ?><input readonly data-wdc-normalized-address-display value="<?php echo esc_attr( (string) ( $snapshot['normalized_address'] ?? '' ) ); ?>"></label>
-			<div class="wdc-ozon-courier-address-grid" data-wdc-ozon-courier-address-grid>
-				<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="postcode" value="<?php echo esc_attr( (string) ( $snapshot['postcode'] ?? '' ) ); ?>"></label>
-				<label><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="country" value="<?php echo esc_attr( (string) ( $snapshot['country'] ?? '' ) ); ?>"></label>
-				<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="region" value="<?php echo esc_attr( (string) ( $snapshot['region'] ?? '' ) ); ?>"></label>
-				<label><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="city" value="<?php echo esc_attr( (string) ( $snapshot['city'] ?? '' ) ); ?>"></label>
-				<label><?php echo esc_html__( 'Улица', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="street" value="<?php echo esc_attr( (string) ( $snapshot['street'] ?? '' ) ); ?>"></label>
-				<label><?php echo esc_html__( 'Дом', 'walls-delivery-calc' ); ?><input readonly data-wdc-ozon-courier-field="house" value="<?php echo esc_attr( (string) ( $snapshot['house'] ?? $snapshot['stead'] ?? '' ) ); ?>"></label>
-				<label><?php echo esc_html__( 'Квартира/офис', 'walls-delivery-calc' ); ?><input name="ozon_courier_apartment" data-wdc-ozon-courier-field="flat" value="<?php echo esc_attr( (string) ( $snapshot['flat'] ?? '' ) ); ?>"></label>
-				<label><?php echo esc_html__( 'Подъезд', 'walls-delivery-calc' ); ?><input name="ozon_courier_entrance" value=""></label>
-				<label><?php echo esc_html__( 'Этаж', 'walls-delivery-calc' ); ?><input name="ozon_courier_floor" value=""></label>
-				<label><?php echo esc_html__( 'Домофон', 'walls-delivery-calc' ); ?><input name="ozon_courier_intercom" value=""></label>
-			</div>
-		</div>
-		<?php
+
+		return wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ) ?: '';
 	}
 }

@@ -421,15 +421,17 @@
     return option ? option.dataset.deliveryType || '' : '';
   }
 
-  function updateScenarioSections(form) {
-    const deliveryType = selectedDeliveryType(form);
-    const pickup = form.querySelector('[data-wdc-pickup-section]');
-    const courier = form.querySelector('[data-wdc-courier-section]');
-    if (pickup) pickup.hidden = deliveryType !== 'pickup';
-    if (courier) courier.hidden = deliveryType !== 'courier';
-    form.querySelectorAll('[data-wdc-dpd-courier-instructions-row]').forEach((row) => {
-      row.hidden = deliveryType !== 'courier';
-    });
+	function updateScenarioSections(form) {
+		const deliveryType = selectedDeliveryType(form);
+		form.querySelectorAll('[data-wdc-pickup-section]').forEach((section) => {
+			section.hidden = deliveryType !== 'pickup';
+		});
+		form.querySelectorAll('[data-wdc-courier-section]').forEach((section) => {
+			section.hidden = deliveryType !== 'courier';
+		});
+		form.querySelectorAll('[data-wdc-dpd-courier-instructions-row]').forEach((row) => {
+			row.hidden = deliveryType !== 'courier';
+		});
     updateCdekDeliveryModeUi(form);
     updateCreateAvailability(form);
   }
