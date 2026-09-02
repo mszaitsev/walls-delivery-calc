@@ -73,9 +73,13 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\PlaceRegionMatchResult;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
+use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentAdapter;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
@@ -101,6 +105,7 @@ function esc_url( mixed $value ): string { return htmlspecialchars( (string) $va
 function esc_html__( string $text, string $domain = 'default' ): string { return $text; }
 function __( string $text, string $domain = 'default' ): string { return $text; }
 function selected( mixed $selected, mixed $current, bool $display = true ): string { $result = (string) $selected === (string) $current ? ' selected="selected"' : ''; if ( $display ) { echo $result; } return $result; }
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string { $result = (bool) $checked === (bool) $current ? ' checked="checked"' : ''; if ( $display ) { echo $result; } return $result; }
 function submit_button( string $text = 'Save', string $type = 'primary', string $name = 'submit', bool $wrap = true ): void { echo '<button class="button button-' . esc_attr( $type ) . '" name="' . esc_attr( $name ) . '">' . esc_html( $text ) . '</button>'; }
 function wp_nonce_field( string $action ): void { echo '<input type="hidden" name="_wpnonce" value="' . esc_attr( $action ) . '">'; }
 function admin_url( string $path = '' ): string { return 'https://example.test/wp-admin/' . ltrim( $path, '/\\' ); }
@@ -485,6 +490,7 @@ $render_notice_start = strpos( $geography_admin_source, 'private function render
 $render_embedded_source = false !== $render_embedded_start && false !== $render_notice_start ? substr( $geography_admin_source, $render_embedded_start, $render_notice_start - $render_embedded_start ) : '';
 jet_assert( str_contains( $render_embedded_source, 'admin_page( $pagination_request' ) && str_contains( $render_embedded_source, '<th class="wdc-row-number">№</th>' ) && str_contains( $render_embedded_source, 'Сопоставленный населённый пункт' ) && str_contains( $render_embedded_source, '( ( $page - 1 ) * $per_page ) + $index + 1' ), 'Jet geography admin table must use paginated rows, continuous row numbers and matched location display names.' );
 jet_assert( str_contains( $geography_admin_source, 'render_pagination' ) && str_contains( $geography_admin_source, 'jet_page' ) && str_contains( $geography_admin_source, 'jet_per_page' ) && str_contains( $geography_admin_source, 'location_display_names_for_rows' ) && str_contains( $geography_admin_source, 'find_map_by_ids( $location_ids )' ) && ! str_contains( $render_embedded_source, 'find_by_id(' ), 'Jet geography admin table must render pagination, preserve page state, batch-load display names and avoid per-row find_by_id calls.' );
+jet_assert( str_contains( $render_embedded_source, 'JetLogisticSettings::INSURANCE_PERCENT_KEY' ) && str_contains( $render_embedded_source, 'JetLogisticSettings::INSURANCE_MIN_RUB_KEY' ) && str_contains( $render_embedded_source, 'JetLogisticSettings::ALMATY_FREE_COURIER_KEY' ) && str_contains( $render_embedded_source, 'Страховка, %' ) && str_contains( $render_embedded_source, 'Минимальная страховка, ₽' ) && str_contains( $render_embedded_source, 'Доставка в Алматы курьером бесплатно' ), 'Jet settings UI must expose insurance and Almaty free courier controls.' );
 jet_assert( str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php' ), 'origin_by_source_identity' ) && str_contains( (string) file_get_contents( $root . '/src/Carriers/Runtime/JetLogisticCarrier.php' ), 'origin_by_source_identity' ), 'Jet origin resolution must use a focused RU origin contract instead of active destination rows.' );
 jet_assert( str_contains( $plugin_source, 'JetLogisticStatusEventResolver::class' ) && str_contains( $plugin_source, 'JetLogisticQuoteResponseParser::class' ) && str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Api/JetLogisticApiDiagnosticService.php' ), 'quote_parser->parse' ), 'Jet diagnostics must reuse production quote parser and shared status event resolver.' );
 jet_assert( ! str_contains( (string) file_get_contents( $root . '/src/Carriers/JetLogistic/Geography/JetLogisticGeographyRepository.php' ), 'return (bool) $this->wpdb->update' ), 'Jet manual override snapshot update must not cast wpdb update result to bool.' );
@@ -636,6 +642,13 @@ jet_assert( 'new-secret' === $credentials->access_token() && $credentials->has_a
 $jet_geo_admin->save_settings_from_post( array( 'jet_logistic_access_token' => 'ignored-secret', 'jet_logistic_clear_access_token' => '1' ) );
 jet_assert( '' === $credentials->access_token() && ! $credentials->has_access_token(), 'Jet clear token checkbox must remove the token and win over a new token value.' );
 $credentials->save_access_token( 'jet-test-token' );
+$jet_geo_admin->save_settings_from_post( array( JetLogisticSettings::INSURANCE_PERCENT_KEY => '0,5', JetLogisticSettings::INSURANCE_MIN_RUB_KEY => '100.25', JetLogisticSettings::ALMATY_FREE_COURIER_KEY => '1' ) );
+jet_assert( 0.5 === $settings->insurance_percent() && 100.25 === $settings->insurance_min_rub() && $settings->almaty_free_courier(), 'Jet settings must accept decimal comma/dot insurance values and save Almaty free courier checkbox.' );
+$jet_geo_admin->save_settings_from_post( array( JetLogisticSettings::INSURANCE_PERCENT_KEY => '999', JetLogisticSettings::INSURANCE_MIN_RUB_KEY => '-10' ) );
+jet_assert( 100.0 === $settings->insurance_percent() && 0.0 === $settings->insurance_min_rub() && ! $settings->almaty_free_courier(), 'Jet settings must clamp insurance values and clear unchecked Almaty free courier setting.' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_PERCENT_KEY, '0.25' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_MIN_RUB_KEY, '65' );
+$settings_repo->set( JetLogisticSettings::ALMATY_FREE_COURIER_KEY, false );
 $override = $jet_geo_admin->save_override_from_post( array( 'source_identity' => 'manual-target', 'location_id' => 77 ) );
 $manual_row = $geo->active_for_location( 77 );
 jet_assert( ! empty( $override['success'] ) && ! empty( $GLOBALS['wpdb']->jet_overrides['manual-target'] ) && 'matched' === (string) ( $manual_row['match_status'] ?? '' ) && 'manual_override' === (string) ( $manual_row['match_source'] ?? '' ) && 'KZ' === (string) ( $manual_row['country_code'] ?? '' ), 'Jet manual override must save override and immediately update the active geography snapshot.' );
@@ -996,11 +1009,20 @@ $GLOBALS['wdc_wc_logs'] = array();
 $carrier = new JetLogisticCarrier( $settings, $api, new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() );
 jet_assert( ! $carrier->supports_country( 'RU' ), 'Jet carrier must keep RU disabled as a destination country.' );
 $package = Package::from_items( array( new PackageItem( 'A', 'Товар', 1, Money::from_rubles( 21000 ), Money::from_rubles( 19500 ), 2000, 100, 50, 40 ) ), 0, Money::from_rubles( 19500 ), Money::from_rubles( 19500 ) );
+$insurance_method = new ReflectionMethod( JetLogisticCarrier::class, 'insurance_cost' );
+$insurance_method->setAccessible( true );
+$insurance_request = static fn( float|int|string $goods ): QuoteRequest => new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), Package::from_items( array( new PackageItem( 'I', 'Товар', 1, Money::from_rubles( $goods ), Money::from_rubles( $goods ), 1000, 10, 10, 10 ) ), 0, Money::from_rubles( $goods ), Money::from_rubles( $goods ) ), 'card', Money::from_rubles( $goods ), '2026-07-28', array( 'location_id' => 10 ) );
+jet_assert( 6500 === $insurance_method->invoke( $carrier, $insurance_request( 10000 ) )->get_kopecks() && 6500 === $insurance_method->invoke( $carrier, $insurance_request( 20000 ) )->get_kopecks() && 6500 === $insurance_method->invoke( $carrier, $insurance_request( 26000 ) )->get_kopecks() && 7500 === $insurance_method->invoke( $carrier, $insurance_request( 30000 ) )->get_kopecks(), 'Jet default insurance must be max(0.25% goods cost, 65 RUB).' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_PERCENT_KEY, '0.5' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_MIN_RUB_KEY, '100' );
+jet_assert( 10000 === $insurance_method->invoke( $carrier, $insurance_request( 10000 ) )->get_kopecks() && 15000 === $insurance_method->invoke( $carrier, $insurance_request( 30000 ) )->get_kopecks(), 'Jet custom insurance must use configured percent and minimum.' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_PERCENT_KEY, '0.25' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_MIN_RUB_KEY, '65' );
 $quote = $carrier->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'location_id' => 10 ) ) );
 jet_assert( $quote->success && 2 === count( $quote->rates ) && 1 === count( $http->requests ), 'Jet quote must use one API call and return two rates.' );
-jet_assert( 105000 === $quote->rates[0]->price->get_kopecks() && 135000 === $quote->rates[1]->price->get_kopecks() && 1000 === (int) ( $quote->rates[0]->meta['jet_price_terminal_rub'] ?? 0 ) && 300 === (int) ( $quote->rates[0]->meta['jet_price_delivery_rub'] ?? 0 ) && 50 === (int) ( $quote->rates[0]->meta['jet_price_dop_rub'] ?? 0 ) && 999 === (int) ( $quote->rates[0]->meta['jet_price_zabor_rub'] ?? 0 ), 'Jet rates must expose price components and keep current pickup=terminal+dop and courier=terminal+delivery+dop formula.' );
+jet_assert( 111500 === $quote->rates[0]->price->get_kopecks() && 141500 === $quote->rates[1]->price->get_kopecks() && 1115.0 === (float) ( $quote->rates[0]->meta['api_base_price_rub'] ?? 0 ) && 1000 === (int) ( $quote->rates[0]->meta['jet_price_terminal_rub'] ?? 0 ) && 300 === (int) ( $quote->rates[0]->meta['jet_price_delivery_rub'] ?? 0 ) && 300.0 === (float) ( $quote->rates[0]->meta['jet_effective_price_delivery_rub'] ?? -1 ) && 50 === (int) ( $quote->rates[0]->meta['jet_price_dop_rub'] ?? 0 ) && 999 === (int) ( $quote->rates[0]->meta['jet_price_zabor_rub'] ?? 0 ) && 65.0 === (float) ( $quote->rates[0]->meta['jet_insurance_rub'] ?? 0 ) && 19500.0 === (float) ( $quote->rates[0]->meta['jet_goods_cost_rub'] ?? 0 ) && 'no' === (string) ( $quote->rates[0]->meta['jet_almaty_free_courier_applied'] ?? '' ), 'Jet rates must expose raw price components and add insurance into api_base_price_rub before rules while keeping courier=terminal+delivery+dop+insurance.' );
 $quote_debug = array_values( array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'debug' === (string) ( $log['level'] ?? '' ) && 'Jet Logistic quote calculated.' === (string) ( $log['message'] ?? '' ) ) )[0] ?? array();
-jet_assert( '1000' === (string) ( $quote_debug['context']['response_price_terminal'] ?? '' ) && '300' === (string) ( $quote_debug['context']['response_price_delivery'] ?? '' ) && '50' === (string) ( $quote_debug['context']['response_price_dop'] ?? '' ) && '1050' === (string) ( $quote_debug['context']['calculated_pickup_rub'] ?? '' ) && '1350' === (string) ( $quote_debug['context']['calculated_courier_rub'] ?? '' ) && ! str_contains( wp_json_encode( $quote_debug, JSON_UNESCAPED_UNICODE ) ?: '', 'jet-test-token' ), 'Jet successful quote diagnostics must log safe request/response price components without token or raw response.' );
+jet_assert( '1000' === (string) ( $quote_debug['context']['response_price_terminal'] ?? '' ) && '300' === (string) ( $quote_debug['context']['response_price_delivery'] ?? '' ) && '50' === (string) ( $quote_debug['context']['response_price_dop'] ?? '' ) && '65' === (string) ( $quote_debug['context']['insurance_rub'] ?? '' ) && '1115' === (string) ( $quote_debug['context']['calculated_pickup_base_rub'] ?? '' ) && '1415' === (string) ( $quote_debug['context']['calculated_courier_base_rub'] ?? '' ) && ! str_contains( wp_json_encode( $quote_debug, JSON_UNESCAPED_UNICODE ) ?: '', 'jet-test-token' ), 'Jet successful quote diagnostics must log safe request/response price components and insurance without token or raw response.' );
 jet_assert( 'Новосибирск' === (string) $http->requests[0]['payload']['cityfrom'], 'Jet quote must send configured RU Jet source city as cityfrom.' );
 jet_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && false === $quote->rates[0]->requires_pickup_point, 'Jet pickup rate must not require a concrete pickup point.' );
 jet_assert( str_contains( $quote->rates[0]->title, 'Karaganda' ) && str_contains( $quote->rates[0]->comments[0] ?? '', 'Karaganda' ), 'Jet non-local terminal city must be in pickup title and comment.' );
@@ -1015,15 +1037,25 @@ $almaty_http = new JetFakeHttp(
 );
 $almaty_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $almaty_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() );
 $almaty_quote = $almaty_carrier->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162695 ) ) );
-jet_assert( $almaty_quote->success && 2 === count( $almaty_quote->rates ) && 1 === count( $almaty_http->requests ) && 'Алматы' === (string) $almaty_http->requests[0]['payload']['cityto'] && 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ' === (string) ( $almaty_quote->rates[0]->meta['jet_city_to'] ?? '' ) && 'yes' === (string) ( $almaty_quote->rates[0]->meta['jet_local_terminal'] ?? '' ) && 'Джет Логистик до склада выдачи' === $almaty_quote->rates[0]->title, 'Jet quote must accept production Алматы provider-zone city_to and treat terminal Алматы as local.' );
+jet_assert( $almaty_quote->success && 2 === count( $almaty_quote->rates ) && 1 === count( $almaty_http->requests ) && 'Алматы' === (string) $almaty_http->requests[0]['payload']['cityto'] && 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ' === (string) ( $almaty_quote->rates[0]->meta['jet_city_to'] ?? '' ) && 'yes' === (string) ( $almaty_quote->rates[0]->meta['jet_local_terminal'] ?? '' ) && 'Джет Логистик до склада выдачи' === $almaty_quote->rates[0]->title && 'Джет Логистик курьером' === $almaty_quote->rates[1]->title && 126500 === $almaty_quote->rates[0]->price->get_kopecks() && 196500 === $almaty_quote->rates[1]->price->get_kopecks() && 700.0 === (float) ( $almaty_quote->rates[1]->meta['jet_effective_price_delivery_rub'] ?? -1 ) && 'no' === (string) ( $almaty_quote->rates[1]->meta['jet_almaty_free_courier_applied'] ?? '' ), 'Jet quote must accept production Алматы provider-zone city_to, treat terminal Алматы as local and keep delivery component when Almaty free courier is off.' );
+
+$settings_repo->set( JetLogisticSettings::ALMATY_FREE_COURIER_KEY, true );
+$almaty_free_http = new JetFakeHttp(
+	array(
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '405', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Алматы', 'city_to' => 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+	)
+);
+$almaty_free_quote = ( new JetLogisticCarrier( $settings, new JetLogisticApiClient( $almaty_free_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() ) )->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), Package::from_items( array( new PackageItem( 'AF', 'Товар', 1, Money::from_rubles( 20000 ), Money::from_rubles( 20000 ), 1000, 10, 10, 10 ) ), 0, Money::from_rubles( 20000 ), Money::from_rubles( 20000 ) ), 'card', Money::from_rubles( 20000 ), '2026-07-28', array( 'selected_location_id' => 162695 ) ) );
+jet_assert( $almaty_free_quote->success && 106500 === $almaty_free_quote->rates[0]->price->get_kopecks() && 106500 === $almaty_free_quote->rates[1]->price->get_kopecks() && 405.0 === (float) ( $almaty_free_quote->rates[1]->meta['jet_price_delivery_rub'] ?? 0 ) && 0.0 === (float) ( $almaty_free_quote->rates[1]->meta['jet_effective_price_delivery_rub'] ?? -1 ) && 'yes' === (string) ( $almaty_free_quote->rates[1]->meta['jet_almaty_free_courier_applied'] ?? '' ) && 65.0 === (float) ( $almaty_free_quote->rates[1]->meta['jet_insurance_rub'] ?? 0 ), 'Jet Almaty free courier setting must zero only the effective city delivery component and keep raw price_delivery metadata.' );
 
 $remote_terminal_http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1300', 'price_delivery' => '800', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар 1 район ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '405', 'price_dop' => '100', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар 1 район ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $remote_terminal_quote = ( new JetLogisticCarrier( $settings, new JetLogisticApiClient( $remote_terminal_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() ) )->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Атбасар' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 184506 ) ) );
-jet_assert( $remote_terminal_quote->success && 'no' === (string) ( $remote_terminal_quote->rates[0]->meta['jet_local_terminal'] ?? '' ) && str_contains( $remote_terminal_quote->rates[0]->title, 'Астана' ) && str_contains( $remote_terminal_quote->rates[0]->comments[0] ?? '', 'Астана' ), 'Jet quote must accept Атбасар provider-zone destination while keeping remote terminal Астана in pickup title.' );
+jet_assert( $remote_terminal_quote->success && 116500 === $remote_terminal_quote->rates[0]->price->get_kopecks() && 157000 === $remote_terminal_quote->rates[1]->price->get_kopecks() && 'no' === (string) ( $remote_terminal_quote->rates[0]->meta['jet_local_terminal'] ?? '' ) && str_contains( $remote_terminal_quote->rates[0]->title, 'Астана' ) && str_contains( $remote_terminal_quote->rates[0]->comments[0] ?? '', 'Астана' ) && 'Джет Логистик курьером в Атбасар' === $remote_terminal_quote->rates[1]->title && 405.0 === (float) ( $remote_terminal_quote->rates[1]->meta['jet_effective_price_delivery_rub'] ?? -1 ) && 'no' === (string) ( $remote_terminal_quote->rates[1]->meta['jet_almaty_free_courier_applied'] ?? '' ), 'Jet quote must keep Атбасар delivery component even when Almaty free courier is on and use destination city in remote courier title.' );
+$settings_repo->set( JetLogisticSettings::ALMATY_FREE_COURIER_KEY, false );
 
 $GLOBALS['wdc_wc_logs'] = array();
 $missing_location_http = new JetFakeHttp( array() );
@@ -1077,6 +1109,44 @@ $orchestrator_rates = $orchestrator->calculate_rates( new QuoteRequest( 'KZ', ne
 $orchestrator_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_rates );
 jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_rate_ids, true ) && 1 === count( $orchestrator_http->requests ) && 'Алматы' === (string) ( $orchestrator_http->requests[0]['payload']['cityto'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Алматы with one calculator call.' );
 
+$rule_order_http = new JetFakeHttp(
+	array(
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1000', 'price_delivery' => '0', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Astana', 'day_from' => '', 'day_to' => '', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+	)
+);
+$rule_order_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $rule_order_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
+$rule_order_registry = new CarrierRegistry();
+$rule_order_registry->register( $rule_order_carrier );
+$rule_order_orchestrator = new CheckoutOrchestrator(
+	$rule_order_registry,
+	new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+	new RateSorter(),
+	new FallbackRateFactory(),
+	new CarrierExecutionGuard( new CheckoutLogger() ),
+	new CheckoutLogger(),
+	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter )
+);
+$rule_order_result = $rule_order_orchestrator->calculate(
+	new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), $insurance_request( 10000 )->package, 'card', Money::from_rubles( 10000 ), '2026-07-28', array( 'selected_location_id' => 10 ) ),
+	array( new Rule( null, 'Jet +10%', true, 10, 'rate', JetLogisticSettings::PICKUP_RATE_KEY, RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY, false, false ) )
+);
+$rule_order_pickup = array_values( array_filter( $rule_order_result->rates, static fn( object $rate ): bool => JetLogisticSettings::PICKUP_RATE_KEY === (string) $rate->rate_id ) )[0] ?? null;
+jet_assert( $rule_order_pickup instanceof \WallsShop\WDC\Domain\Quote\DeliveryRate && 117150 === $rule_order_pickup->price->get_kopecks() && 1065.0 === (float) ( $rule_order_pickup->meta['api_base_price_rub'] ?? 0 ) && 106500 === ( $rule_order_pickup->original_cost?->get_kopecks() ?? 0 ) && 1 === count( $rule_order_http->requests ), 'Full CheckoutOrchestrator rule regression must apply +10% to Jet base price after insurance: 1000 + 65 = 1065, final 1171.50.' );
+
+$cache = new \WallsShop\WDC\Checkout\Cache\QuoteCache();
+$cache_request = new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162695 ) );
+$cache_context_default = $orchestrator_carrier->quote_cache_context( $cache_request );
+$cache_key_default = $cache->cache_key( $cache_request, JetLogisticSettings::CARRIER_KEY, '', JetLogisticSettings::SERVICE_KEY, $cache_context_default );
+$settings_repo->set( JetLogisticSettings::INSURANCE_PERCENT_KEY, '0.5' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_MIN_RUB_KEY, '100' );
+$cache_key_insurance_changed = $cache->cache_key( $cache_request, JetLogisticSettings::CARRIER_KEY, '', JetLogisticSettings::SERVICE_KEY, $orchestrator_carrier->quote_cache_context( $cache_request ) );
+$settings_repo->set( JetLogisticSettings::ALMATY_FREE_COURIER_KEY, true );
+$cache_key_free_changed = $cache->cache_key( $cache_request, JetLogisticSettings::CARRIER_KEY, '', JetLogisticSettings::SERVICE_KEY, $orchestrator_carrier->quote_cache_context( $cache_request ) );
+jet_assert( $cache_key_default !== $cache_key_insurance_changed && $cache_key_insurance_changed !== $cache_key_free_changed && array_key_exists( 'jet_origin_source_identity', $cache_context_default ), 'Jet quote cache context must include origin, insurance and Almaty free courier settings so setting changes invalidate cached quotes.' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_PERCENT_KEY, '0.25' );
+$settings_repo->set( JetLogisticSettings::INSURANCE_MIN_RUB_KEY, '65' );
+$settings_repo->set( JetLogisticSettings::ALMATY_FREE_COURIER_KEY, false );
+
 $orchestrator_atbasar_http = new JetFakeHttp(
 	array(
 		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1300', 'price_delivery' => '800', 'price_dop' => '50', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар 1 район ОПТ', 'day_from' => '', 'day_to' => '', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
@@ -1099,7 +1169,7 @@ $orchestrator_atbasar = new CheckoutOrchestrator(
 );
 $orchestrator_atbasar_rates = $orchestrator_atbasar->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Атбасар' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 184506 ) ) );
 $orchestrator_atbasar_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_atbasar_rates );
-jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && 1 === count( $orchestrator_atbasar_http->requests ) && 'Атбасар' === (string) ( $orchestrator_atbasar_http->requests[0]['payload']['cityto'] ?? '' ) && str_contains( $orchestrator_atbasar_rates[0]->title, 'Астана' ) && 'no' === (string) ( $orchestrator_atbasar_rates[0]->meta['jet_local_terminal'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Атбасар with canonical location_id and remote terminal Астана.' );
+jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && 1 === count( $orchestrator_atbasar_http->requests ) && 'Атбасар' === (string) ( $orchestrator_atbasar_http->requests[0]['payload']['cityto'] ?? '' ) && str_contains( $orchestrator_atbasar_rates[0]->title, 'Астана' ) && 'Джет Логистик курьером в Атбасар' === $orchestrator_atbasar_rates[1]->title && 'no' === (string) ( $orchestrator_atbasar_rates[0]->meta['jet_local_terminal'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Атбасар with canonical location_id, remote terminal Астана and courier destination title.' );
 
 $backend_recovery_http = new JetFakeHttp(
 	array(

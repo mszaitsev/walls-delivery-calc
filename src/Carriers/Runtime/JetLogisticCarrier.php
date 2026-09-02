@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Carriers\Runtime;
 
 use Throwable;
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
+use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiClient;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiException;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCityNameNormalizer;
@@ -24,7 +25,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || exit;
 
-final class JetLogisticCarrier implements CarrierAdapterInterface {
+final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface {
 	public function __construct(
 		private JetLogisticSettings $settings,
 		private JetLogisticApiClient $api,
@@ -48,6 +49,16 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 		return 'RU' !== strtoupper( trim( $countryCode ) );
 	}
 
+	/** @return array<string,mixed> */
+	public function quote_cache_context( QuoteRequest $request ): array {
+		return array(
+			'jet_origin_source_identity' => $this->settings->origin_source_identity(),
+			'jet_insurance_percent' => $this->settings->insurance_percent(),
+			'jet_insurance_min_rub' => $this->settings->insurance_min_rub(),
+			'jet_almaty_free_courier' => $this->settings->almaty_free_courier(),
+		);
+	}
+
 	public function quote( QuoteRequest $request ): DeliveryQuote {
 		try {
 			if ( ! $this->supports_country( $request->country_code ) ) {
@@ -66,12 +77,17 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 			$result = $this->parser->parse( $this->api->calc_transport( $payload ) );
 			$this->assert_destination_city( (string) $payload['cityto'], $result->city_to, $result->city_terminal_to );
 			$local_terminal = $this->normalizer->api_city_matches( (string) $payload['cityto'], $result->city_terminal_to );
-			$pickup_rubles = $result->price_terminal + $result->price_dop;
-			$courier_rubles = $result->price_terminal + $result->price_delivery + $result->price_dop;
-			$this->log_quote_success( $payload, $result, $pickup_rubles, $courier_rubles, $local_terminal );
+			$raw_pickup = Money::from_rubles( $result->price_terminal )->add( Money::from_rubles( $result->price_dop ) );
+			$raw_delivery_component = Money::from_rubles( $result->price_delivery );
+			$effective_delivery_component = $this->effective_delivery_component( $result, $destination );
+			$insurance = $this->insurance_cost( $request );
+			$pickup_base = $raw_pickup->add( $insurance );
+			$courier_base = $raw_pickup->add( $effective_delivery_component )->add( $insurance );
+			$almaty_free_courier_applied = $this->settings->almaty_free_courier() && $this->is_almaty_destination( $destination );
+			$this->log_quote_success( $payload, $result, $pickup_base, $courier_base, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $local_terminal, $request );
 			$rates = array(
-				$this->pickup_rate( $result, $destination, $local_terminal, $pickup_rubles ),
-				$this->courier_rate( $result, $destination, $local_terminal, $courier_rubles ),
+				$this->pickup_rate( $result, $destination, $local_terminal, $pickup_base, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request ),
+				$this->courier_rate( $result, $destination, $local_terminal, $courier_base, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request ),
 			);
 
 			return new DeliveryQuote( $this->quote_id( $request, 'ok' ), JetLogisticSettings::CARRIER_KEY, $request->destination, $request->package, $rates, true, '', '', false, 'api', array( 'jet_request' => $this->safe_payload( $payload ) ) );
@@ -83,19 +99,22 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 		}
 	}
 
-	private function pickup_rate( object $result, array $destination, bool $local_terminal, int $rubles ): DeliveryRate {
+	private function pickup_rate( object $result, array $destination, bool $local_terminal, Money $price, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, QuoteRequest $request ): DeliveryRate {
 		$title = $local_terminal ? 'Джет Логистик до склада выдачи' : 'Джет Логистик до склада выдачи в г. ' . $result->city_terminal_to;
 		$comments = $local_terminal ? array() : array( 'Получение груза на складе Джет Логистик в г. ' . $result->city_terminal_to . '.' );
 
-		return $this->rate( JetLogisticSettings::PICKUP_RATE_KEY, DeliveryType::PICKUP, $title, $rubles, $result, $destination, $local_terminal, $comments, false );
+		return $this->rate( JetLogisticSettings::PICKUP_RATE_KEY, DeliveryType::PICKUP, $title, $price, $result, $destination, $local_terminal, $comments, false, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request );
 	}
 
-	private function courier_rate( object $result, array $destination, bool $local_terminal, int $rubles ): DeliveryRate {
-		return $this->rate( JetLogisticSettings::COURIER_RATE_KEY, DeliveryType::COURIER, 'Джет Логистик курьером', $rubles, $result, $destination, $local_terminal, array(), true );
+	private function courier_rate( object $result, array $destination, bool $local_terminal, Money $price, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, QuoteRequest $request ): DeliveryRate {
+		$destination_city = trim( (string) ( $destination['source_city'] ?? '' ) );
+		$title = $local_terminal || '' === $destination_city ? 'Джет Логистик курьером' : 'Джет Логистик курьером в ' . $destination_city;
+
+		return $this->rate( JetLogisticSettings::COURIER_RATE_KEY, DeliveryType::COURIER, $title, $price, $result, $destination, $local_terminal, array(), true, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request );
 	}
 
 	/** @param array<string,mixed> $destination @param array<int,string> $comments */
-	private function rate( string $rate_id, string $type, string $title, int $rubles, object $result, array $destination, bool $local_terminal, array $comments, bool $requires_address ): DeliveryRate {
+	private function rate( string $rate_id, string $type, string $title, Money $price, object $result, array $destination, bool $local_terminal, array $comments, bool $requires_address, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, QuoteRequest $request ): DeliveryRate {
 		return new DeliveryRate(
 			$rate_id,
 			JetLogisticSettings::CARRIER_KEY,
@@ -106,7 +125,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 			$title,
 			$type,
 			$title,
-			Money::from_rubles( $rubles ),
+			$price,
 			null,
 			null,
 			DateRange::range( $result->day_from, $result->day_to, DateRange::UNIT_WORKING_DAYS ),
@@ -119,20 +138,46 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 			$requires_address,
 			array(
 				'preserve_rate_title' => true,
-				'api_base_price_rub' => $rubles,
+				'api_base_price_rub' => $price->get_rubles(),
 				'jet_price_zabor_rub' => $result->price_zabor,
 				'jet_price_terminal_rub' => $result->price_terminal,
 				'jet_price_delivery_rub' => $result->price_delivery,
 				'jet_price_dop_rub' => $result->price_dop,
+				'jet_effective_price_delivery_rub' => $effective_delivery_component->get_rubles(),
+				'jet_almaty_free_courier_applied' => $almaty_free_courier_applied ? 'yes' : 'no',
+				'jet_insurance_percent' => $this->settings->insurance_percent(),
+				'jet_insurance_min_rub' => $this->settings->insurance_min_rub(),
+				'jet_insurance_rub' => $insurance->get_rubles(),
+				'jet_goods_cost_rub' => $request->package->cart_total->get_rubles(),
 				'requested_city' => (string) ( $destination['source_city'] ?? '' ),
 				'jet_city_to' => $result->city_to,
 				'jet_city_terminal_to' => $result->city_terminal_to,
 				'jet_local_terminal' => $local_terminal ? 'yes' : 'no',
 				'delivery_days_are_working' => true,
 			),
-			Money::from_rubles( $rubles ),
+			$price,
 			DateRange::range( $result->day_from, $result->day_to, DateRange::UNIT_WORKING_DAYS )
 		);
+	}
+
+	private function insurance_cost( QuoteRequest $request ): Money {
+		$percentage = $request->package->cart_total->multiply( $this->settings->insurance_percent() / 100 );
+		$minimum = Money::from_rubles( $this->settings->insurance_min_rub() );
+
+		return $percentage->max( $minimum );
+	}
+
+	private function effective_delivery_component( object $result, array $destination ): Money {
+		if ( $this->settings->almaty_free_courier() && $this->is_almaty_destination( $destination ) ) {
+			return Money::from_rubles( 0 );
+		}
+
+		return Money::from_rubles( $result->price_delivery );
+	}
+
+	/** @param array<string,mixed> $destination */
+	private function is_almaty_destination( array $destination ): bool {
+		return $this->normalizer->normalize( (string) ( $destination['source_city'] ?? '' ) ) === $this->normalizer->normalize( 'Алматы' );
 	}
 
 	/** @return array<string,mixed> */
@@ -215,7 +260,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 	}
 
 	/** @param array<string,mixed> $payload */
-	private function log_quote_success( array $payload, object $result, int $pickup_rubles, int $courier_rubles, bool $local_terminal ): void {
+	private function log_quote_success( array $payload, object $result, Money $pickup_base, Money $courier_base, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, bool $local_terminal, QuoteRequest $request ): void {
 		if ( ! $this->logger instanceof Logger ) {
 			return;
 		}
@@ -242,8 +287,16 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 				'response_day_to' => null === $result->day_to ? '' : (string) $result->day_to,
 				'response_valuta' => $result->valuta,
 				'response_valuta_name' => $result->valuta_name,
-				'calculated_pickup_rub' => (string) $pickup_rubles,
-				'calculated_courier_rub' => (string) $courier_rubles,
+				'insurance_percent' => (string) $this->settings->insurance_percent(),
+				'insurance_min_rub' => (string) $this->settings->insurance_min_rub(),
+				'insurance_rub' => (string) $insurance->get_rubles(),
+				'goods_cost_rub' => (string) $request->package->cart_total->get_rubles(),
+				'effective_price_delivery_rub' => (string) $effective_delivery_component->get_rubles(),
+				'almaty_free_courier_applied' => $almaty_free_courier_applied ? 'yes' : 'no',
+				'calculated_pickup_base_rub' => (string) $pickup_base->get_rubles(),
+				'calculated_courier_base_rub' => (string) $courier_base->get_rubles(),
+				'calculated_pickup_rub' => (string) $pickup_base->get_rubles(),
+				'calculated_courier_rub' => (string) $courier_base->get_rubles(),
 				'local_terminal' => $local_terminal ? 'yes' : 'no',
 			)
 		);
