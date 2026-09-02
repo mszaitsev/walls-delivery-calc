@@ -65,7 +65,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 			}
 			$result = $this->parser->parse( $this->api->calc_transport( $payload ) );
 			$this->assert_destination_city( (string) $payload['cityto'], $result->city_to, $result->city_terminal_to );
-			$local_terminal = $this->normalizer->normalize_api_city( $result->city_terminal_to ) === $this->normalizer->normalize_api_city( $result->city_to );
+			$local_terminal = $this->normalizer->api_city_matches( (string) $payload['cityto'], $result->city_terminal_to );
 			$rates = array(
 				$this->pickup_rate( $result, $destination, $local_terminal ),
 				$this->courier_rate( $result, $destination, $local_terminal ),
@@ -156,7 +156,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 	private function assert_destination_city( string $requested, string $actual, string $terminal ): void {
 		$normalized_requested = $this->normalizer->normalize_api_city( $requested );
 		$normalized_actual = $this->normalizer->normalize_api_city( $actual );
-		if ( $normalized_requested !== $normalized_actual ) {
+		if ( ! $this->normalizer->api_city_matches( $requested, $actual ) ) {
 			throw new JetLogisticApiException(
 				'Jet Logistic response destination city mismatch.',
 				array(

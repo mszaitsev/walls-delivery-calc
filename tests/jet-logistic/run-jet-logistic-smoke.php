@@ -915,6 +915,8 @@ $geo->replace_snapshot(
 jet_assert( 1 === count( $geo->origin_options() ) && 'Новосибирск' === (string) ( $geo->origin_options()[0]['source_city'] ?? '' ) && array() !== $geo->origin_by_source_identity( 'origin' ), 'Jet RU ignored geography row must be available as a configured origin.' );
 jet_assert( array() === $geo->active_for_location( 1 ), 'Jet RU origin row must not become an active RU destination mapping.' );
 jet_assert( 'алматы опт' === $normalizer->normalize( 'Алматы ОПТ' ) && 'алматы' === $normalizer->normalize_api_city( 'Алматы ОПТ' ), 'Jet API city normalization must strip only terminal OPT suffix without changing persisted geography normalization.' );
+jet_assert( $normalizer->api_city_matches( 'Алматы', 'Алматы' ) && $normalizer->api_city_matches( 'Алматы', 'Алматы ОПТ' ) && $normalizer->api_city_matches( 'Алматы', 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ' ) && $normalizer->api_city_matches( 'Минск', 'Минск ОПТ' ) && $normalizer->api_city_matches( 'Атбасар', 'Атбасар район 1 ОПТ' ), 'Jet API city matching must allow exact and city-prefix provider-zone responses with a safe boundary.' );
+jet_assert( ! $normalizer->api_city_matches( 'Алматы', 'Алматинская область' ) && ! $normalizer->api_city_matches( 'Алматы', 'Алматытау' ) && ! $normalizer->api_city_matches( 'Астана', 'Астанай' ) && ! $normalizer->api_city_matches( 'Алматы', 'Астана ОПТ' ), 'Jet API city matching must reject false prefixes and real destination mismatches.' );
 
 $http = new JetFakeHttp(
 	array(
@@ -937,20 +939,20 @@ jet_assert( 19500 === (int) $http->requests[0]['payload']['cost'] && 0 === (int)
 
 $almaty_http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Алматы', 'city_to' => 'Алматы ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Алматы', 'city_to' => 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $almaty_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $almaty_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() );
 $almaty_quote = $almaty_carrier->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162695 ) ) );
-jet_assert( $almaty_quote->success && 2 === count( $almaty_quote->rates ) && 1 === count( $almaty_http->requests ) && 'Алматы' === (string) $almaty_http->requests[0]['payload']['cityto'] && 'Джет Логистик до склада выдачи' === $almaty_quote->rates[0]->title, 'Jet quote must accept Алматы ОПТ as Алматы and treat terminal Алматы as local.' );
+jet_assert( $almaty_quote->success && 2 === count( $almaty_quote->rates ) && 1 === count( $almaty_http->requests ) && 'Алматы' === (string) $almaty_http->requests[0]['payload']['cityto'] && 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ' === (string) ( $almaty_quote->rates[0]->meta['jet_city_to'] ?? '' ) && 'yes' === (string) ( $almaty_quote->rates[0]->meta['jet_local_terminal'] ?? '' ) && 'Джет Логистик до склада выдачи' === $almaty_quote->rates[0]->title, 'Jet quote must accept production Алматы provider-zone city_to and treat terminal Алматы as local.' );
 
 $remote_terminal_http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1300', 'price_delivery' => '800', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1300', 'price_delivery' => '800', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар 1 район ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $remote_terminal_quote = ( new JetLogisticCarrier( $settings, new JetLogisticApiClient( $remote_terminal_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() ) )->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Атбасар' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162696 ) ) );
-jet_assert( $remote_terminal_quote->success && str_contains( $remote_terminal_quote->rates[0]->title, 'Астана' ) && str_contains( $remote_terminal_quote->rates[0]->comments[0] ?? '', 'Астана' ), 'Jet quote must accept Атбасар ОПТ destination while keeping remote terminal Астана in pickup title.' );
+jet_assert( $remote_terminal_quote->success && 'no' === (string) ( $remote_terminal_quote->rates[0]->meta['jet_local_terminal'] ?? '' ) && str_contains( $remote_terminal_quote->rates[0]->title, 'Астана' ) && str_contains( $remote_terminal_quote->rates[0]->comments[0] ?? '', 'Астана' ), 'Jet quote must accept Атбасар provider-zone destination while keeping remote terminal Астана in pickup title.' );
 
 $GLOBALS['wdc_wc_logs'] = array();
 $missing_location_http = new JetFakeHttp( array() );
@@ -976,7 +978,7 @@ $jet_service = $service_repo->find_by_service_key( JetLogisticSettings::SERVICE_
 jet_assert( $jet_service instanceof DeliveryService && $service_manager->service_available_for_country( $jet_service, 'KZ' ) && $service_manager->service_available_for_country( $jet_service, 'BY' ) && ! $service_manager->service_available_for_country( $jet_service, 'RU' ), 'Jet service availability must allow BY/KZ and keep RU destination disabled.' );
 $orchestrator_http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Алматы', 'city_to' => 'Алматы ОПТ', 'day_from' => '', 'day_to' => '', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Алматы', 'city_to' => 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ', 'day_from' => '', 'day_to' => '', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $orchestrator_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $orchestrator_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
@@ -1002,6 +1004,30 @@ $orchestrator = new CheckoutOrchestrator(
 $orchestrator_rates = $orchestrator->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162695 ) ) );
 $orchestrator_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_rates );
 jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_rate_ids, true ) && 1 === count( $orchestrator_http->requests ) && 'Алматы' === (string) ( $orchestrator_http->requests[0]['payload']['cityto'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Алматы with one calculator call.' );
+
+$orchestrator_mismatch_http = new JetFakeHttp(
+	array(
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1200', 'price_delivery' => '700', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Астана ОПТ', 'day_from' => '', 'day_to' => '', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+	)
+);
+$orchestrator_mismatch_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $orchestrator_mismatch_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
+$mismatch_carrier_registry = new CarrierRegistry();
+$mismatch_carrier_registry->register( $orchestrator_mismatch_carrier );
+$orchestrator_mismatch = new CheckoutOrchestrator(
+	$mismatch_carrier_registry,
+	new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+	new RateSorter(),
+	new FallbackRateFactory(),
+	new CarrierExecutionGuard( new CheckoutLogger() ),
+	new CheckoutLogger(),
+	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	null,
+	new DeliveryServiceRegistry( $service_repo, $mismatch_carrier_registry ),
+	$service_manager
+);
+$orchestrator_mismatch_rates = $orchestrator_mismatch->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162695 ) ) );
+$orchestrator_mismatch_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_mismatch_rates );
+jet_assert( ! in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_mismatch_rate_ids, true ) && ! in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_mismatch_rate_ids, true ) && 1 === count( $orchestrator_mismatch_http->requests ), 'CheckoutOrchestrator must return zero Jet rates when API city_to is a real destination mismatch.' );
 
 $payload = ( new JetLogisticQuoteRequestBuilder( $credentials ) )->build(
 	new QuoteRequest( 'KZ', new Address( country_code: 'KZ' ), Package::from_items( array( new PackageItem( 'B', 'Товар', 1, Money::from_rubles( 25000 ), Money::from_rubles( 20000 ), 1000, 10, 10, 10 ) ), 0, Money::from_rubles( 20000 ), Money::from_rubles( 20000 ) ), 'card', Money::from_rubles( 20000 ), '2026-07-28' ),
