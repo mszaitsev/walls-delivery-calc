@@ -4,7 +4,7 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.147.8
+Version: 0.147.9
 
 Delivery-service country synchronization remains owned by `DeliveryServiceCountryRepository`, which is injected into `DeliveryServiceManager` and admin save flows. Version 0.145.1 keeps the `service_country (service_id, country_code)` unique key as the integrity boundary and makes `replace_countries()` write-idempotent: equal sets return without writes, stale rows are deleted by diff, and missing rows are inserted with duplicate-safe UPSERT. `DeliveryServiceManager::ensure_builtin_services()` can therefore keep self-healing fixed country seeds without causing bootstrap DELETE/INSERT churn.
 

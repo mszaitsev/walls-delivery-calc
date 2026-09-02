@@ -64,8 +64,8 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 				throw new JetLogisticApiException( 'Jet Logistic API token is missing.', array( 'error_code' => 'jet_token_missing' ) );
 			}
 			$result = $this->parser->parse( $this->api->calc_transport( $payload ) );
-			$this->assert_destination_city( (string) $payload['cityto'], $result->city_to );
-			$local_terminal = $this->normalizer->normalize( $result->city_terminal_to ) === $this->normalizer->normalize( $result->city_to );
+			$this->assert_destination_city( (string) $payload['cityto'], $result->city_to, $result->city_terminal_to );
+			$local_terminal = $this->normalizer->normalize_api_city( $result->city_terminal_to ) === $this->normalizer->normalize_api_city( $result->city_to );
 			$rates = array(
 				$this->pickup_rate( $result, $destination, $local_terminal ),
 				$this->courier_rate( $result, $destination, $local_terminal ),
@@ -74,7 +74,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 			return new DeliveryQuote( $this->quote_id( $request, 'ok' ), JetLogisticSettings::CARRIER_KEY, $request->destination, $request->package, $rates, true, '', '', false, 'api', array( 'jet_request' => $this->safe_payload( $payload ) ) );
 		} catch ( Throwable $exception ) {
 			$code = $exception instanceof JetLogisticApiException ? $exception->error_code() : 'jet_quote_failed';
-			$this->logger?->warning( 'Jet Logistic quote failed.', array( 'error_code' => $code ) );
+			$this->log_quote_failure( $code, $exception );
 
 			return new DeliveryQuote( $this->quote_id( $request, $code ), JetLogisticSettings::CARRIER_KEY, $request->destination, $request->package, array(), false, $code, 'Jet Logistic quote unavailable.', false, 'api' );
 		}
@@ -153,10 +153,41 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 		return $row;
 	}
 
-	private function assert_destination_city( string $requested, string $actual ): void {
-		if ( $this->normalizer->normalize( $requested ) !== $this->normalizer->normalize( $actual ) ) {
-			throw new JetLogisticApiException( 'Jet Logistic response destination city mismatch.', array( 'error_code' => 'jet_destination_city_mismatch' ) );
+	private function assert_destination_city( string $requested, string $actual, string $terminal ): void {
+		$normalized_requested = $this->normalizer->normalize_api_city( $requested );
+		$normalized_actual = $this->normalizer->normalize_api_city( $actual );
+		if ( $normalized_requested !== $normalized_actual ) {
+			throw new JetLogisticApiException(
+				'Jet Logistic response destination city mismatch.',
+				array(
+					'error_code' => 'jet_destination_city_mismatch',
+					'requested_city' => $requested,
+					'response_city_to' => $actual,
+					'response_city_terminal_to' => $terminal,
+					'normalized_requested_city' => $normalized_requested,
+					'normalized_response_city' => $normalized_actual,
+				)
+			);
 		}
+	}
+
+	private function log_quote_failure( string $code, Throwable $exception ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+		$context = array( 'error_code' => $code );
+		if ( $exception instanceof JetLogisticApiException ) {
+			foreach ( array( 'requested_city', 'response_city_to', 'response_city_terminal_to', 'normalized_requested_city', 'normalized_response_city' ) as $key ) {
+				if ( array_key_exists( $key, $exception->context() ) && is_scalar( $exception->context()[ $key ] ) ) {
+					$context[ $key ] = (string) $exception->context()[ $key ];
+				}
+			}
+		}
+		if ( 'jet_destination_location_missing' === $code ) {
+			$this->logger->debug( 'Jet Logistic quote precondition is incomplete.', $context );
+			return;
+		}
+		$this->logger->warning( 'Jet Logistic quote failed.', $context );
 	}
 
 	private function quote_id( QuoteRequest $request, string $suffix ): string {

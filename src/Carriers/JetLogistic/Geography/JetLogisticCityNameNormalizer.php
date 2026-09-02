@@ -16,6 +16,13 @@ final class JetLogisticCityNameNormalizer {
 		return trim( $value );
 	}
 
+	public function normalize_api_city( string $value ): string {
+		$value = $this->normalize( $value );
+		$value = preg_replace( '/\s+опт\s*$/u', '', $value ) ?? $value;
+
+		return trim( $value );
+	}
+
 	public function identity( string $city, string $region, string $country_code ): string {
 		return hash( 'sha256', strtoupper( trim( $country_code ) ) . '|' . $this->normalize( $region ) . '|' . $this->normalize( $city ) );
 	}
