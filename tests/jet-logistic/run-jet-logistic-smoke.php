@@ -42,6 +42,10 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
@@ -67,6 +71,7 @@ use WallsShop\WDC\Core\Plugin;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\PlaceRegionMatchResult;
+use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -110,6 +115,24 @@ function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; 
 final class WP_Error {
 	public function __construct( private string $code = '' ) {}
 	public function get_error_code(): string { return $this->code; }
+}
+final class JetSmokeSession {
+	/** @var array<string,mixed> */
+	private array $data = array();
+	public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+	public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+}
+final class JetSmokeWooCommerce {
+	public JetSmokeSession $session;
+	public function __construct() { $this->session = new JetSmokeSession(); }
+}
+function WC(): JetSmokeWooCommerce {
+	static $wc = null;
+	if ( null === $wc ) {
+		$wc = new JetSmokeWooCommerce();
+	}
+
+	return $wc;
 }
 function wc_get_logger(): object {
 	return new class {
@@ -701,6 +724,7 @@ $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 163568, 'country_code' => 'KZ', 'region_name' => 'Мангистауская', 'place_name' => 'Актау', 'place_type' => 'г', 'active' => 1 ),
 	array( 'id' => 163569, 'country_code' => 'KZ', 'region_name' => 'Карагандинская', 'place_name' => 'Актау', 'place_type' => 'п', 'active' => 1 ),
 	array( 'id' => 162695, 'country_code' => 'KZ', 'region_name' => 'Алматинская', 'place_name' => 'Алматы', 'place_type' => 'г', 'active' => 1 ),
+	array( 'id' => 184506, 'country_code' => 'KZ', 'region_name' => 'Акмолинская', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Акмолинская обл., п Атбасар', 'active' => 1 ),
 	array( 'id' => 190001, 'country_code' => 'RU', 'region_name' => 'Хакасия', 'place_name' => 'Абакан', 'place_type' => 'г', 'active' => 1 ),
 	array( 'id' => 191001, 'country_code' => 'RU', 'region_name' => 'Новосибирская', 'place_name' => '8 Марта', 'place_type' => 'п', 'active' => 1 ),
 	array( 'id' => 191002, 'country_code' => 'RU', 'region_name' => 'Новосибирская', 'place_name' => '8 Марта', 'place_type' => 'с', 'active' => 1 ),
@@ -903,12 +927,20 @@ $geo->replace_snapshot(
 $second_import_token = (string) ( $GLOBALS['wpdb']->jet_cities['token-b']['import_token'] ?? '' );
 jet_assert( '' !== $first_import_token && '' !== $second_import_token && $first_import_token !== $second_import_token && 0 === (int) ( $GLOBALS['wpdb']->jet_cities['token-a']['active'] ?? 1 ) && 1 === (int) ( $GLOBALS['wpdb']->jet_cities['token-b']['active'] ?? 0 ), 'Jet snapshot import_token must be unique across same-second imports and deactivate stale rows by token.' );
 
+$GLOBALS['wpdb']->locations = array(
+	array( 'id' => 1, 'country_code' => 'RU', 'region_name' => 'Новосибирская', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская обл., г Новосибирск', 'active' => 1 ),
+	array( 'id' => 10, 'country_code' => 'KZ', 'region_name' => 'Астана', 'place_name' => 'Astana', 'place_type' => 'г', 'display_name' => 'Астана, г Astana', 'active' => 1 ),
+	array( 'id' => 77, 'country_code' => 'KZ', 'region_name' => 'Manual Region', 'city_name' => 'Manual Target', 'place_name' => 'Manual Target', 'display_name' => 'Manual Region, Manual Target', 'active' => 1 ),
+	array( 'id' => 162695, 'country_code' => 'KZ', 'region_name' => 'Алматинская', 'place_name' => 'Алматы', 'place_type' => 'г', 'display_name' => 'Алматинская обл., г Алматы', 'active' => 1 ),
+	array( 'id' => 184506, 'country_code' => 'KZ', 'region_name' => 'Акмолинская', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Акмолинская обл., п Атбасар', 'active' => 1 ),
+);
+
 $geo->replace_snapshot(
 	array(
 		array( 'source_identity' => 'origin', 'source_city' => 'Новосибирск', 'source_region' => 'Новосибирская Область', 'normalized_city' => 'новосибирск', 'normalized_region' => 'новосибирская', 'country_code' => 'RU', 'location_id' => 1, 'match_status' => 'ignored', 'match_source' => 'country_ru_inferred_by_region', 'active' => 0 ),
 		array( 'source_identity' => 'dest', 'source_city' => 'Astana', 'source_region' => '', 'normalized_city' => 'astana', 'normalized_region' => '', 'country_code' => 'KZ', 'location_id' => 10, 'match_status' => 'matched', 'match_source' => 'manual', 'active' => 1 ),
 		array( 'source_identity' => 'almaty', 'source_city' => 'Алматы', 'source_region' => 'Алма-Ата', 'normalized_city' => 'алматы', 'normalized_region' => 'алматинская', 'country_code' => 'KZ', 'location_id' => 162695, 'match_status' => 'matched', 'match_source' => 'exact_name_region_inferred_country', 'active' => 1 ),
-		array( 'source_identity' => 'atbasar', 'source_city' => 'Атбасар', 'source_region' => 'Акмолинская Область', 'normalized_city' => 'атбасар', 'normalized_region' => 'акмолинская', 'country_code' => 'KZ', 'location_id' => 162696, 'match_status' => 'matched', 'match_source' => 'exact_name_region_inferred_country', 'active' => 1 ),
+		array( 'source_identity' => 'atbasar', 'source_city' => 'Атбасар', 'source_region' => 'Акмолинская область', 'normalized_city' => 'атбасар', 'normalized_region' => 'акмолинская', 'country_code' => 'KZ', 'location_id' => 184506, 'match_status' => 'matched', 'match_source' => 'exact_name_region_inferred_country', 'active' => 1 ),
 		array( 'source_identity' => 'manual-target', 'source_city' => 'Manual Target', 'source_region' => '', 'normalized_city' => 'manual target', 'normalized_region' => '', 'country_code' => 'KZ', 'location_id' => 77, 'match_status' => 'matched', 'match_source' => 'manual_override', 'active' => 1 ),
 	)
 );
@@ -917,19 +949,48 @@ jet_assert( array() === $geo->active_for_location( 1 ), 'Jet RU origin row must 
 jet_assert( 'алматы опт' === $normalizer->normalize( 'Алматы ОПТ' ) && 'алматы' === $normalizer->normalize_api_city( 'Алматы ОПТ' ), 'Jet API city normalization must strip only terminal OPT suffix without changing persisted geography normalization.' );
 jet_assert( $normalizer->api_city_matches( 'Алматы', 'Алматы' ) && $normalizer->api_city_matches( 'Алматы', 'Алматы ОПТ' ) && $normalizer->api_city_matches( 'Алматы', 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ' ) && $normalizer->api_city_matches( 'Минск', 'Минск ОПТ' ) && $normalizer->api_city_matches( 'Атбасар', 'Атбасар район 1 ОПТ' ), 'Jet API city matching must allow exact and city-prefix provider-zone responses with a safe boundary.' );
 jet_assert( ! $normalizer->api_city_matches( 'Алматы', 'Алматинская область' ) && ! $normalizer->api_city_matches( 'Алматы', 'Алматытау' ) && ! $normalizer->api_city_matches( 'Астана', 'Астанай' ) && ! $normalizer->api_city_matches( 'Алматы', 'Астана ОПТ' ), 'Jet API city matching must reject false prefixes and real destination mismatches.' );
+$checkout_search = new CheckoutLocationSearch( new LocationSearchService( new LocationRepository( $GLOBALS['wpdb'] ) ) );
+$atbasar_search = $checkout_search->search_for_picker( 'Атбасар', 100, 10, '', 'KZ' );
+$atbasar_search_ids = array_map( static fn( object $location ): int => (int) $location->id, $atbasar_search['items'] ?? array() );
+$atbasar_ajax = ( new CheckoutLocationAjax( $checkout_search, new SettingsRepository() ) )->payload( 'Атбасар', '', 'KZ' );
+$atbasar_ajax_ids = array();
+foreach ( $atbasar_ajax['groups'] ?? array() as $group ) {
+	foreach ( $group['items'] ?? array() as $item ) {
+		$atbasar_ajax_ids[] = (int) ( $item['id'] ?? 0 );
+	}
+}
+jet_assert( in_array( 184506, $atbasar_search_ids, true ) && in_array( 184506, $atbasar_ajax_ids, true ), 'Checkout location picker must return selectable KZ Атбасар settlement with canonical location_id=184506.' );
+$checkout_session = new CheckoutSessionManager();
+$checkout_session->save_selected_city( array( 'id' => 184506, 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'place_name' => 'Атбасар', 'place_type' => 'п', 'place_level' => 5, 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'active' => true ) );
+$checkout_session->save_city_context( array( 'location_id' => '184506', 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'source' => 'local_db' ) );
+$GLOBALS['wdc_wc_logs'] = array();
+$atbasar_request = ( new WooCommercePackageMapper( null, $checkout_session, null, new LocationRepository( $GLOBALS['wpdb'] ), null, new CheckoutLogger( new Logger() ) ) )->map(
+	array(
+		'destination' => array( 'country' => 'KZ', 'city' => 'Атбасар' ),
+		'contents_cost' => 1000,
+		'contents_weight' => 1,
+		'contents' => array(),
+	)
+);
+$checkout_context_log = array_values( array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'debug' === (string) ( $log['level'] ?? '' ) && 'Checkout quote request location context resolved.' === (string) ( $log['message'] ?? '' ) ) )[0] ?? array();
+jet_assert( 184506 === (int) ( $atbasar_request->customer_context['selected_location_id'] ?? 0 ) && '184506' === (string) ( $checkout_context_log['context']['resolved_location_id'] ?? '' ) && 'п' === (string) ( $checkout_context_log['context']['resolved_place_type'] ?? '' ), 'WooCommercePackageMapper must carry selected KZ Атбасар location_id into QuoteRequest customer_context and log safe generic location diagnostics.' );
+jet_assert( 'Атбасар' === (string) ( $geo->active_for_location( 184506 )['source_city'] ?? '' ), 'Jet geography repository must resolve mapped Атбасар destination by canonical location_id=184506.' );
 
 $http = new JetFakeHttp(
 	array(
-		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => 999, 'price_terminal' => 1000, 'price_delivery' => 500, 'price_dop' => 100, 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_to' => 'Astana', 'city_terminal_to' => 'Karaganda', 'day_from' => 3, 'day_to' => 5 ) ), JSON_UNESCAPED_UNICODE ) ),
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => 999, 'price_terminal' => 1000, 'price_delivery' => 300, 'price_dop' => 50, 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_to' => 'Astana', 'city_terminal_to' => 'Karaganda', 'day_from' => 3, 'day_to' => 5 ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
 $api = new JetLogisticApiClient( $http, $settings, $credentials );
-$carrier = new JetLogisticCarrier( $settings, $api, new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
+$GLOBALS['wdc_wc_logs'] = array();
+$carrier = new JetLogisticCarrier( $settings, $api, new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() );
 jet_assert( ! $carrier->supports_country( 'RU' ), 'Jet carrier must keep RU disabled as a destination country.' );
 $package = Package::from_items( array( new PackageItem( 'A', 'Товар', 1, Money::from_rubles( 21000 ), Money::from_rubles( 19500 ), 2000, 100, 50, 40 ) ), 0, Money::from_rubles( 19500 ), Money::from_rubles( 19500 ) );
 $quote = $carrier->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Астана' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'location_id' => 10 ) ) );
 jet_assert( $quote->success && 2 === count( $quote->rates ) && 1 === count( $http->requests ), 'Jet quote must use one API call and return two rates.' );
-jet_assert( 110000 === $quote->rates[0]->price->get_kopecks() && 160000 === $quote->rates[1]->price->get_kopecks(), 'Jet rates must ignore pickup price_zabor and calculate terminal/delivery/dop sums.' );
+jet_assert( 105000 === $quote->rates[0]->price->get_kopecks() && 135000 === $quote->rates[1]->price->get_kopecks() && 1000 === (int) ( $quote->rates[0]->meta['jet_price_terminal_rub'] ?? 0 ) && 300 === (int) ( $quote->rates[0]->meta['jet_price_delivery_rub'] ?? 0 ) && 50 === (int) ( $quote->rates[0]->meta['jet_price_dop_rub'] ?? 0 ) && 999 === (int) ( $quote->rates[0]->meta['jet_price_zabor_rub'] ?? 0 ), 'Jet rates must expose price components and keep current pickup=terminal+dop and courier=terminal+delivery+dop formula.' );
+$quote_debug = array_values( array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'debug' === (string) ( $log['level'] ?? '' ) && 'Jet Logistic quote calculated.' === (string) ( $log['message'] ?? '' ) ) )[0] ?? array();
+jet_assert( '1000' === (string) ( $quote_debug['context']['response_price_terminal'] ?? '' ) && '300' === (string) ( $quote_debug['context']['response_price_delivery'] ?? '' ) && '50' === (string) ( $quote_debug['context']['response_price_dop'] ?? '' ) && '1050' === (string) ( $quote_debug['context']['calculated_pickup_rub'] ?? '' ) && '1350' === (string) ( $quote_debug['context']['calculated_courier_rub'] ?? '' ) && ! str_contains( wp_json_encode( $quote_debug, JSON_UNESCAPED_UNICODE ) ?: '', 'jet-test-token' ), 'Jet successful quote diagnostics must log safe request/response price components without token or raw response.' );
 jet_assert( 'Новосибирск' === (string) $http->requests[0]['payload']['cityfrom'], 'Jet quote must send configured RU Jet source city as cityfrom.' );
 jet_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && false === $quote->rates[0]->requires_pickup_point, 'Jet pickup rate must not require a concrete pickup point.' );
 jet_assert( str_contains( $quote->rates[0]->title, 'Karaganda' ) && str_contains( $quote->rates[0]->comments[0] ?? '', 'Karaganda' ), 'Jet non-local terminal city must be in pickup title and comment.' );
@@ -951,13 +1012,14 @@ $remote_terminal_http = new JetFakeHttp(
 		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1300', 'price_delivery' => '800', 'price_dop' => '0', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар 1 район ОПТ', 'day_from' => '3', 'day_to' => '5', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
 	)
 );
-$remote_terminal_quote = ( new JetLogisticCarrier( $settings, new JetLogisticApiClient( $remote_terminal_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() ) )->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Атбасар' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162696 ) ) );
+$remote_terminal_quote = ( new JetLogisticCarrier( $settings, new JetLogisticApiClient( $remote_terminal_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() ) )->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Атбасар' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 184506 ) ) );
 jet_assert( $remote_terminal_quote->success && 'no' === (string) ( $remote_terminal_quote->rates[0]->meta['jet_local_terminal'] ?? '' ) && str_contains( $remote_terminal_quote->rates[0]->title, 'Астана' ) && str_contains( $remote_terminal_quote->rates[0]->comments[0] ?? '', 'Астана' ), 'Jet quote must accept Атбасар provider-zone destination while keeping remote terminal Астана in pickup title.' );
 
 $GLOBALS['wdc_wc_logs'] = array();
 $missing_location_http = new JetFakeHttp( array() );
 $missing_location_quote = ( new JetLogisticCarrier( $settings, new JetLogisticApiClient( $missing_location_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer, new Logger() ) )->quote( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array() ) );
-jet_assert( ! $missing_location_quote->success && 'jet_destination_location_missing' === $missing_location_quote->error_code && 0 === count( $missing_location_http->requests ) && array() === array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'warning' === (string) $log['level'] ), 'Jet transient checkout without canonical location_id must not call API or log a warning.' );
+$missing_location_debug = array_values( array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'debug' === (string) ( $log['level'] ?? '' ) && 'Jet Logistic quote precondition is incomplete.' === (string) ( $log['message'] ?? '' ) ) )[0] ?? array();
+jet_assert( ! $missing_location_quote->success && 'jet_destination_location_missing' === $missing_location_quote->error_code && 0 === count( $missing_location_http->requests ) && array() === array_filter( $GLOBALS['wdc_wc_logs'], static fn( array $log ): bool => 'warning' === (string) $log['level'] ) && 'KZ' === (string) ( $missing_location_debug['context']['country_code'] ?? '' ) && 'Алматы' === (string) ( $missing_location_debug['context']['destination_text'] ?? '' ) && '' === (string) ( $missing_location_debug['context']['selected_location_id'] ?? '' ), 'Jet transient checkout without canonical location_id must not call API, log a warning, or lose safe missing-location context.' );
 
 $GLOBALS['wdc_wc_logs'] = array();
 $mismatch_http = new JetFakeHttp(
@@ -1004,6 +1066,30 @@ $orchestrator = new CheckoutOrchestrator(
 $orchestrator_rates = $orchestrator->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162695 ) ) );
 $orchestrator_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_rates );
 jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_rate_ids, true ) && 1 === count( $orchestrator_http->requests ) && 'Алматы' === (string) ( $orchestrator_http->requests[0]['payload']['cityto'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Алматы with one calculator call.' );
+
+$orchestrator_atbasar_http = new JetFakeHttp(
+	array(
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1300', 'price_delivery' => '800', 'price_dop' => '50', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар 1 район ОПТ', 'day_from' => '', 'day_to' => '', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+	)
+);
+$orchestrator_atbasar_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $orchestrator_atbasar_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
+$atbasar_carrier_registry = new CarrierRegistry();
+$atbasar_carrier_registry->register( $orchestrator_atbasar_carrier );
+$orchestrator_atbasar = new CheckoutOrchestrator(
+	$atbasar_carrier_registry,
+	new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+	new RateSorter(),
+	new FallbackRateFactory(),
+	new CarrierExecutionGuard( new CheckoutLogger() ),
+	new CheckoutLogger(),
+	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	null,
+	new DeliveryServiceRegistry( $service_repo, $atbasar_carrier_registry ),
+	$service_manager
+);
+$orchestrator_atbasar_rates = $orchestrator_atbasar->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Атбасар' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 184506 ) ) );
+$orchestrator_atbasar_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_atbasar_rates );
+jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && 1 === count( $orchestrator_atbasar_http->requests ) && 'Атбасар' === (string) ( $orchestrator_atbasar_http->requests[0]['payload']['cityto'] ?? '' ) && str_contains( $orchestrator_atbasar_rates[0]->title, 'Астана' ) && 'no' === (string) ( $orchestrator_atbasar_rates[0]->meta['jet_local_terminal'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Атбасар with canonical location_id and remote terminal Астана.' );
 
 $orchestrator_mismatch_http = new JetFakeHttp(
 	array(

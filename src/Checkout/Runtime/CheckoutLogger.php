@@ -16,6 +16,13 @@ final class CheckoutLogger {
 	/**
 	 * @param array<string,mixed> $context
 	 */
+	public function debug( string $message, array $context = array() ): void {
+		$this->write( 'debug', $message, $context );
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 */
 	public function info( string $message, array $context = array() ): void {
 		$this->write( 'info', $message, $context );
 	}

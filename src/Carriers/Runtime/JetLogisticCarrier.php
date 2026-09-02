@@ -66,9 +66,12 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 			$result = $this->parser->parse( $this->api->calc_transport( $payload ) );
 			$this->assert_destination_city( (string) $payload['cityto'], $result->city_to, $result->city_terminal_to );
 			$local_terminal = $this->normalizer->api_city_matches( (string) $payload['cityto'], $result->city_terminal_to );
+			$pickup_rubles = $result->price_terminal + $result->price_dop;
+			$courier_rubles = $result->price_terminal + $result->price_delivery + $result->price_dop;
+			$this->log_quote_success( $payload, $result, $pickup_rubles, $courier_rubles, $local_terminal );
 			$rates = array(
-				$this->pickup_rate( $result, $destination, $local_terminal ),
-				$this->courier_rate( $result, $destination, $local_terminal ),
+				$this->pickup_rate( $result, $destination, $local_terminal, $pickup_rubles ),
+				$this->courier_rate( $result, $destination, $local_terminal, $courier_rubles ),
 			);
 
 			return new DeliveryQuote( $this->quote_id( $request, 'ok' ), JetLogisticSettings::CARRIER_KEY, $request->destination, $request->package, $rates, true, '', '', false, 'api', array( 'jet_request' => $this->safe_payload( $payload ) ) );
@@ -80,15 +83,15 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 		}
 	}
 
-	private function pickup_rate( object $result, array $destination, bool $local_terminal ): DeliveryRate {
+	private function pickup_rate( object $result, array $destination, bool $local_terminal, int $rubles ): DeliveryRate {
 		$title = $local_terminal ? 'Джет Логистик до склада выдачи' : 'Джет Логистик до склада выдачи в г. ' . $result->city_terminal_to;
 		$comments = $local_terminal ? array() : array( 'Получение груза на складе Джет Логистик в г. ' . $result->city_terminal_to . '.' );
 
-		return $this->rate( JetLogisticSettings::PICKUP_RATE_KEY, DeliveryType::PICKUP, $title, $result->price_terminal + $result->price_dop, $result, $destination, $local_terminal, $comments, false );
+		return $this->rate( JetLogisticSettings::PICKUP_RATE_KEY, DeliveryType::PICKUP, $title, $rubles, $result, $destination, $local_terminal, $comments, false );
 	}
 
-	private function courier_rate( object $result, array $destination, bool $local_terminal ): DeliveryRate {
-		return $this->rate( JetLogisticSettings::COURIER_RATE_KEY, DeliveryType::COURIER, 'Джет Логистик курьером', $result->price_terminal + $result->price_delivery + $result->price_dop, $result, $destination, $local_terminal, array(), true );
+	private function courier_rate( object $result, array $destination, bool $local_terminal, int $rubles ): DeliveryRate {
+		return $this->rate( JetLogisticSettings::COURIER_RATE_KEY, DeliveryType::COURIER, 'Джет Логистик курьером', $rubles, $result, $destination, $local_terminal, array(), true );
 	}
 
 	/** @param array<string,mixed> $destination @param array<int,string> $comments */
@@ -117,6 +120,10 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 			array(
 				'preserve_rate_title' => true,
 				'api_base_price_rub' => $rubles,
+				'jet_price_zabor_rub' => $result->price_zabor,
+				'jet_price_terminal_rub' => $result->price_terminal,
+				'jet_price_delivery_rub' => $result->price_delivery,
+				'jet_price_dop_rub' => $result->price_dop,
 				'requested_city' => (string) ( $destination['source_city'] ?? '' ),
 				'jet_city_to' => $result->city_to,
 				'jet_city_terminal_to' => $result->city_terminal_to,
@@ -132,7 +139,16 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 	private function destination_mapping( QuoteRequest $request ): array {
 		$location_id = max( 0, (int) ( $request->customer_context['selected_location_id'] ?? $request->customer_context['location_id'] ?? 0 ) );
 		if ( $location_id <= 0 ) {
-			throw new JetLogisticApiException( 'Jet Logistic destination location is missing.', array( 'error_code' => 'jet_destination_location_missing' ) );
+			throw new JetLogisticApiException(
+				'Jet Logistic destination location is missing.',
+				array(
+					'error_code' => 'jet_destination_location_missing',
+					'country_code' => $request->country_code,
+					'destination_text' => $request->destination->city,
+					'selected_location_id' => (string) ( $request->customer_context['selected_location_id'] ?? '' ),
+					'location_id' => (string) ( $request->customer_context['location_id'] ?? '' ),
+				)
+			);
 		}
 		$row = $this->geography->active_for_location( $location_id );
 		if ( array() === $row ) {
@@ -182,12 +198,54 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 					$context[ $key ] = (string) $exception->context()[ $key ];
 				}
 			}
+			if ( 'jet_destination_location_missing' === $code ) {
+				foreach ( array( 'country_code', 'destination_text', 'selected_location_id', 'location_id' ) as $key ) {
+					if ( array_key_exists( $key, $exception->context() ) && is_scalar( $exception->context()[ $key ] ) ) {
+						$context[ $key ] = (string) $exception->context()[ $key ];
+					}
+				}
+			}
 		}
 		if ( 'jet_destination_location_missing' === $code ) {
 			$this->logger->debug( 'Jet Logistic quote precondition is incomplete.', $context );
 			return;
 		}
 		$this->logger->warning( 'Jet Logistic quote failed.', $context );
+	}
+
+	/** @param array<string,mixed> $payload */
+	private function log_quote_success( array $payload, object $result, int $pickup_rubles, int $courier_rubles, bool $local_terminal ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+		$this->logger->debug(
+			'Jet Logistic quote calculated.',
+			array(
+				'request_city_from' => (string) ( $payload['cityfrom'] ?? '' ),
+				'request_city_to' => (string) ( $payload['cityto'] ?? '' ),
+				'request_weight_kg' => (string) ( $payload['ves'] ?? '' ),
+				'request_volume_m3' => (string) ( $payload['obm3'] ?? '' ),
+				'request_max_side_m' => (string) ( $payload['dlina'] ?? '' ),
+				'request_places' => (string) ( $payload['mest'] ?? '' ),
+				'request_goods_cost_rub' => (string) ( $payload['cost'] ?? '' ),
+				'request_sdoc' => (string) ( is_array( $payload['dops'] ?? null ) ? ( $payload['dops']['D_SDOC'] ?? '' ) : '' ),
+				'response_price_zabor' => (string) $result->price_zabor,
+				'response_price_terminal' => (string) $result->price_terminal,
+				'response_price_delivery' => (string) $result->price_delivery,
+				'response_price_dop' => (string) $result->price_dop,
+				'response_city_from' => $result->city_from,
+				'response_city_terminal_from' => $result->city_terminal_from,
+				'response_city_terminal_to' => $result->city_terminal_to,
+				'response_city_to' => $result->city_to,
+				'response_day_from' => null === $result->day_from ? '' : (string) $result->day_from,
+				'response_day_to' => null === $result->day_to ? '' : (string) $result->day_to,
+				'response_valuta' => $result->valuta,
+				'response_valuta_name' => $result->valuta_name,
+				'calculated_pickup_rub' => (string) $pickup_rubles,
+				'calculated_courier_rub' => (string) $courier_rubles,
+				'local_terminal' => $local_terminal ? 'yes' : 'no',
+			)
+		);
 	}
 
 	private function quote_id( QuoteRequest $request, string $suffix ): string {
