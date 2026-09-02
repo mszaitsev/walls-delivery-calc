@@ -21,6 +21,7 @@ class FakeInput {
     this.value = String(value || '');
     this.form = form;
     this.attrs = {};
+    this.dataset = {};
   }
   setAttribute(name, value) { this.attrs[name] = String(value); }
   removeAttribute(name) { delete this.attrs[name]; }
@@ -79,8 +80,13 @@ class FakeNode {
 function makeForm(rows, limits) {
   const form = {
     carrierKey: 'ozon_delivery',
+    deliveryType: 'pickup',
     availabilityUpdates: 0,
     warning: new FakeNode(),
+    normalizedInput: new FakeInput('', null),
+    displayInput: new FakeInput('', null),
+    statusNode: new FakeNode(),
+    courierFields: {},
     limits: { dataset: Object.assign({
       pointFound: '1',
       minWeightG: '0',
@@ -91,8 +97,16 @@ function makeForm(rows, limits) {
     }, limits || {}) },
     querySelector(selector) {
       if (selector === 'input[name="carrier_key"]') return { value: this.carrierKey };
+      if (selector === '[data-wdc-service-select]') {
+        return { selectedIndex: 0, options: [{ value: this.deliveryType, dataset: { deliveryType: this.deliveryType } }] };
+      }
       if (selector === '[data-wdc-ozon-place-limits]') return this.limits;
       if (selector === '[data-wdc-ozon-place-limit-warning]') return this.warning;
+      if (selector === '[data-wdc-normalized-address-json]') return this.normalizedInput;
+      if (selector === '[data-wdc-normalized-address-display]') return this.displayInput;
+      if (selector === '[data-wdc-normalized-status]') return this.statusNode;
+      const courierMatch = selector.match(/\[data-wdc-ozon-courier-field="(.+)"\]/);
+      if (courierMatch) return this.courierFields[courierMatch[1]] || null;
       return null;
     },
     querySelectorAll(selector) {
@@ -102,7 +116,40 @@ function makeForm(rows, limits) {
     }
   };
   form.rows = rows.map((row, index) => new FakeRow(index + 1, row, form));
+  form.normalizedInput.form = form;
+  form.displayInput.form = form;
+  ['postcode', 'country', 'region', 'city', 'street', 'house', 'flat'].forEach((key) => {
+    form.courierFields[key] = new FakeInput('', form);
+  });
   return form;
+}
+
+function makeCourierForm(snapshot) {
+  const form = makeForm([{ weightG: 9000, lengthCm: 50, widthCm: 30, heightCm: 20 }]);
+  form.deliveryType = 'courier';
+  form.normalizedInput.value = snapshot ? JSON.stringify(snapshot) : '';
+  return form;
+}
+
+function validCourierSnapshot(overrides) {
+  return Object.assign({
+    success: true,
+    service_key: 'ozon_delivery',
+    fields: {
+      postcode: '630099',
+      country: 'Россия',
+      region: 'Новосибирская область',
+      city: 'г Новосибирск',
+      street: 'улица Ленина',
+      house: '10',
+      stead: '',
+      flat: '12',
+      geo_lat: '55.0415',
+      geo_lon: '82.9346',
+      normalized_address: '630099, Новосибирская область, г Новосибирск, улица Ленина, 10'
+    },
+    display: '630099, Новосибирская область, г Новосибирск, улица Ленина, 10'
+  }, overrides || {});
 }
 
 global.window = global;
@@ -188,7 +235,267 @@ form.carrierKey = 'cdek';
 assert.strictEqual(hooks.createAvailability(form), true, 'Non-Ozon modal must be a no-op.');
 assert.strictEqual(form.warning.hidden, true, 'Non-Ozon modal must not show Ozon warnings.');
 
-console.log('Ozon Delivery modal limits JS smoke passed.');
+form = makeCourierForm(null);
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier raw/legacy address must block create until normalization succeeds.');
+
+form = makeCourierForm(validCourierSnapshot());
+assert.strictEqual(hooks.createAvailability(form), true, 'Ozon courier valid trusted snapshot may enable create immediately.');
+hooks.afterAddressNormalized({ form, snapshot: validCourierSnapshot(), status: form.statusNode, display: form.displayInput });
+assert.strictEqual(form.statusNode.textContent, 'Адрес для Ozon подтвержден.', 'Successful Ozon courier analysis must use the clearer success wording.');
+
+form = makeCourierForm(validCourierSnapshot({ fields: Object.assign({}, validCourierSnapshot().fields, { house: '', stead: '' }) }));
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier DaData result without house or stead must keep create disabled.');
+
+form = makeCourierForm(validCourierSnapshot({ success: false, message: 'DaData не вернула дом.' }));
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier failed address normalization must keep create disabled.');
+
+form = makeCourierForm(validCourierSnapshot());
+form.courierFields.flat.value = '12';
+hooks.afterAddressNormalized({
+  form,
+  snapshot: {
+    success: false,
+    fields: [],
+    message: 'Не удалось распознать адрес, попробуйте исправить его.',
+    service_key: 'ozon_delivery'
+  },
+  status: form.statusNode,
+  display: form.displayInput
+});
+assert.strictEqual(form.displayInput.value, '', 'Failed Ozon courier normalization must clear confirmed address display.');
+['postcode', 'country', 'region', 'city', 'street', 'house'].forEach((key) => {
+  assert.strictEqual(form.courierFields[key].value, '', 'Failed Ozon courier normalization must clear readonly field: ' + key);
+});
+assert.strictEqual(form.courierFields.flat.value, '12', 'Failed empty snapshot must preserve manager-entered apartment value.');
+assert.doesNotMatch(form.courierFields.flat.value, /function flat\(\)/, 'Failed empty snapshot must not expose Array.prototype.flat in apartment field.');
+assert.strictEqual(form.statusNode.textContent, 'Не удалось распознать адрес, попробуйте исправить его.', 'Failed Ozon courier analysis must show the new generic recognition error.');
+assert.strictEqual(hooks.createAvailability(form), false, 'Failed Ozon courier analysis must keep create disabled.');
+
+form = makeCourierForm(validCourierSnapshot());
+assert.strictEqual(hooks.createAvailability(form), true, 'Ozon courier address starts valid before manager edit.');
+form.normalizedInput.value = '';
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier manager semantic edit reset must make previous normalization stale and disable create.');
+
+form = makeCourierForm(validCourierSnapshot({ service_key: 'cdek', fields: validCourierSnapshot().fields }));
+assert.strictEqual(hooks.createAvailability(form), false, 'Ozon courier create availability must require Ozon-owned normalized address state.');
+
+const vm = require('vm');
+const integrationSource = [
+  fs.readFileSync('assets/admin/shipments/shipment-core.js', 'utf8'),
+  'function updateCdekDeliveryModeUi(form) { return true; }',
+  fs.readFileSync('assets/admin/shipments/shipment-allocation.js', 'utf8'),
+  fs.readFileSync('assets/admin/shipments/shipment-preview.js', 'utf8'),
+  fs.readFileSync('assets/admin/shipments/shipment-events.js', 'utf8'),
+  fs.readFileSync('assets/admin/shipments/extensions/ozon-delivery.js', 'utf8')
+].join('\n');
+
+class LiveButton {
+  constructor(form) {
+    this.form = form;
+    this.disabled = false;
+    this.dataset = {};
+    this.attrs = {};
+    this.classList = new ClassList();
+    this.textContent = 'Создать отправление';
+  }
+  closest(selector) {
+    if (selector === '[data-wdc-create-shipment]') return this;
+    if (selector.includes('[data-wdc-shipment-form]') || selector.includes('.wdc-shipment-form')) return this.form;
+    if (selector === '[data-wdc-shipments-metabox]') return this.form ? this.form.box : null;
+    return null;
+  }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  removeAttribute(name) { delete this.attrs[name]; }
+}
+
+class LiveSection {
+  constructor() {
+    this.hidden = false;
+  }
+}
+
+class LiveSelect {
+  constructor(deliveryType) {
+    this.selectedIndex = deliveryType === 'pickup' ? 1 : 0;
+    this.options = [
+      { value: 'courier', selected: deliveryType === 'courier', dataset: { deliveryType: 'courier', tariffs: '[]' } },
+      { value: 'pickup', selected: deliveryType === 'pickup', dataset: { deliveryType: 'pickup', tariffs: '[]' } }
+    ];
+  }
+  get value() {
+    const option = this.options[this.selectedIndex];
+    return option ? option.value : '';
+  }
+}
+
+class LivePlaceRow extends FakeRow {
+  querySelectorAll(selector) {
+    if (selector === 'input') return Object.values(this.inputs);
+    return super.querySelectorAll(selector);
+  }
+}
+
+class LivePlacesContainer {
+  constructor(rows) {
+    this.rows = rows;
+  }
+  querySelectorAll(selector) {
+    return selector === '[data-wdc-place]' ? this.rows : [];
+  }
+}
+
+function makeLiveForm(snapshot) {
+  const form = {
+    carrierKey: 'ozon_delivery',
+    dataset: { wdcRequiresTariff: '0', wdcRequiresSuccessfulPreview: '0' },
+    createButton: null,
+    serviceSelect: new LiveSelect('courier'),
+    normalizedInput: new FakeInput(snapshot ? JSON.stringify(snapshot) : '', null),
+    displayInput: new FakeInput('', null),
+    statusNode: new FakeNode(),
+    errorsNode: new FakeNode(),
+    toastNode: null,
+    box: { dataset: { carrierKey: 'ozon_delivery' } },
+    pickupSections: [new LiveSection()],
+    courierSections: [new LiveSection(), new LiveSection()],
+    querySelector(selector) {
+      if (selector === 'input[name="carrier_key"]') return { value: this.carrierKey };
+      if (selector === '[data-wdc-create-shipment]') return this.createButton;
+      if (selector === '[data-wdc-service-select]') return this.serviceSelect;
+      if (selector === '[data-wdc-normalized-address-json]') return this.normalizedInput;
+      if (selector === '[data-wdc-normalized-address-display]') return this.displayInput;
+      if (selector === '[data-wdc-normalized-status]') return this.statusNode;
+      if (selector === '[data-wdc-places]') return this.placesContainer;
+      if (selector === '[data-wdc-shipment-errors]') return this.errorsNode;
+      if (selector === '[data-wdc-shipment-preview]') return null;
+      if (selector === '[data-wdc-shipment-toast]') return this.toastNode;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-wdc-place]') return this.rows;
+      if (selector === '[data-wdc-pickup-section]') return this.pickupSections;
+      if (selector === '[data-wdc-courier-section]') return this.courierSections;
+      if (selector === '[data-wdc-declared-value-field]') return [];
+      if (selector === '[data-wdc-shipment-place-select]') return [];
+      if (selector === '[data-wdc-shipment-item-row]') return [];
+      return [];
+    },
+    appendChild(node) {
+      this.toastNode = node;
+      return node;
+    }
+  };
+  form.createButton = new LiveButton(form);
+  form.rows = [new LivePlaceRow(1, { weightG: 9000, lengthCm: 50, widthCm: 30, heightCm: 20 }, form)];
+  form.placesContainer = new LivePlacesContainer(form.rows);
+  form.normalizedInput.form = form;
+  return form;
+}
+
+const integrationContext = {
+  console,
+  window: null,
+  document: {
+    body: null,
+    createElement: () => ({ dataset: {}, value: '', textContent: '', selected: false, hidden: true, setAttribute: function (name, value) { this[name] = String(value); } }),
+    addEventListener: function (name, handler) { this.listeners[name] = handler; },
+    listeners: {},
+    querySelectorAll: () => []
+  },
+  Number,
+  Array,
+  Object,
+  String,
+  parseInt,
+  parseFloat,
+  JSON,
+  WeakMap,
+  Set,
+  Date,
+  Math,
+  RegExp,
+  Error,
+  wdcShipmentsAdmin: { ajaxUrl: '/wp-admin/admin-ajax.php', createAction: 'wdc_create_shipment', nonce: 'nonce' },
+  FormData: function () { this.values = []; this.append = function (key, value) { this.values.push([key, value]); }; },
+  setTimeout: function () { return 1; },
+  clearTimeout: function () {}
+};
+integrationContext.window = integrationContext;
+vm.runInNewContext(integrationSource, integrationContext);
+assert.strictEqual(typeof integrationContext.initializeForm, 'function', 'Live-like smoke must use real initializeForm.');
+assert.strictEqual(typeof integrationContext.updateCreateAvailability, 'function', 'Live-like smoke must use real updateCreateAvailability.');
+
+const liveForm = makeLiveForm(null);
+integrationContext.initializeForm(liveForm, false);
+assert.strictEqual(liveForm.createButton.disabled, true, 'Live-like Ozon courier raw address must disable the actual Create button on modal initialization.');
+
+liveForm.normalizedInput.value = JSON.stringify(validCourierSnapshot());
+integrationContext.updateCreateAvailability(liveForm);
+assert.strictEqual(liveForm.createButton.disabled, false, 'Live-like Ozon courier successful normalization must enable the actual Create button.');
+
+liveForm.normalizedInput.value = '';
+integrationContext.updateCreateAvailability(liveForm);
+assert.strictEqual(liveForm.createButton.disabled, true, 'Live-like Ozon courier original-address reset must disable the actual Create button again.');
+
+liveForm.normalizedInput.value = JSON.stringify(validCourierSnapshot());
+integrationContext.updateCreateAvailability(liveForm);
+liveForm.serviceSelect.selectedIndex = 1;
+integrationContext.updateScenarioSections(liveForm);
+assert.strictEqual(liveForm.createButton.disabled, false, 'Live-like Ozon pickup scenario must not apply courier address gate.');
+liveForm.normalizedInput.value = '';
+liveForm.serviceSelect.selectedIndex = 0;
+integrationContext.updateScenarioSections(liveForm);
+assert.strictEqual(liveForm.createButton.disabled, true, 'Live-like Ozon courier scenario must re-apply courier address gate after scenario transition.');
+
+integrationContext.initializeShipmentAdmin();
+assert.strictEqual(typeof integrationContext.document.listeners.click, 'function', 'Live-like smoke must use real create click handler.');
+
+async function clickCreateAndFlush(form, mutateWhileBusy) {
+  integrationContext.fetch = function () {
+    if (typeof mutateWhileBusy === 'function') mutateWhileBusy();
+    return Promise.resolve({
+      text: () => Promise.resolve(JSON.stringify({ success: false, data: { message: 'Не удалось создать отправление.' } }))
+    });
+  };
+  integrationContext.document.listeners.click({ target: form.createButton });
+  assert.strictEqual(form.createButton.disabled, true, 'Create button must disable while failed create request is busy.');
+  assert.strictEqual(form.createButton.dataset.wdcCreateBusy, '1', 'Create button must expose busy state while failed create request is running.');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function runBusyReleaseSmoke() {
+  const invalidAfterBusyForm = makeLiveForm(validCourierSnapshot());
+  integrationContext.updateCreateAvailability(invalidAfterBusyForm);
+  assert.strictEqual(invalidAfterBusyForm.createButton.disabled, false, 'Ozon courier form must start enabled before failed create busy regression.');
+  await clickCreateAndFlush(invalidAfterBusyForm, function () {
+    invalidAfterBusyForm.normalizedInput.value = '';
+  });
+  assert.strictEqual(invalidAfterBusyForm.createButton.dataset.wdcCreateBusy, undefined, 'Failed create busy release must clear busy dataset state.');
+  assert.strictEqual(invalidAfterBusyForm.createButton.disabled, true, 'Failed create busy release must recalculate invalid Ozon courier availability and keep Create disabled.');
+
+  const validAfterBusyForm = makeLiveForm(validCourierSnapshot());
+  integrationContext.updateCreateAvailability(validAfterBusyForm);
+  await clickCreateAndFlush(validAfterBusyForm);
+  assert.strictEqual(validAfterBusyForm.createButton.disabled, false, 'Failed create busy release must recalculate valid Ozon courier availability and enable Create.');
+
+  const genericForm = makeLiveForm(null);
+  genericForm.carrierKey = 'cdek';
+  genericForm.box.dataset.carrierKey = 'cdek';
+  integrationContext.updateCreateAvailability(genericForm);
+  assert.strictEqual(genericForm.createButton.disabled, false, 'Valid non-Ozon form starts enabled when generic conditions pass.');
+  await clickCreateAndFlush(genericForm);
+  assert.strictEqual(genericForm.createButton.disabled, false, 'Failed create busy release must use generic availability for non-Ozon forms.');
+}
+
+runBusyReleaseSmoke()
+  .then(function () {
+    console.log('Ozon Delivery modal limits JS smoke passed.');
+  })
+  .catch(function (error) {
+    console.error(error && error.stack ? error.stack : error);
+    process.exit(1);
+  });
 JS;
 
 $tmp = tempnam( sys_get_temp_dir(), 'wdc-ozon-modal-limits-' );

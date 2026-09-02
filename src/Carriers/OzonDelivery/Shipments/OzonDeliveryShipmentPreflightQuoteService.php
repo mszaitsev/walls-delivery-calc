@@ -71,8 +71,21 @@ final class OzonDeliveryShipmentPreflightQuoteService {
 			'recipient' => array(
 				'phone_number' => (string) ( $create_body['recipient']['phone_number'] ?? '' ),
 			),
-			'delivery' => is_array( $create_body['delivery'] ?? null ) ? $create_body['delivery'] : array(),
+			'delivery' => $this->checkout_delivery( is_array( $create_body['delivery'] ?? null ) ? $create_body['delivery'] : array() ),
 			'postings' => $postings,
 		);
+	}
+
+	/** @param array<string,mixed> $delivery @return array<string,mixed> */
+	private function checkout_delivery( array $delivery ): array {
+		if ( is_array( $delivery['courier']['coordinates'] ?? null ) ) {
+			return array(
+				'courier' => array(
+					'coordinates' => $delivery['courier']['coordinates'],
+				),
+			);
+		}
+
+		return $delivery;
 	}
 }

@@ -41,6 +41,12 @@ use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentService;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentCreationStatusPolicy;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapping;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapper;
+use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryCourierAddressNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\ShipmentPlace;
@@ -84,6 +90,108 @@ function oz_ship_assert( bool $condition, string $message ): void {
 		throw new RuntimeException( $message );
 	}
 }
+
+final class OzonShipmentSmokeSuggestionClient implements AddressSuggestionClientInterface {
+	/** @var array<string,string> */
+	public array $last_context = array();
+	/** @var array<string,string> */
+	public array $data = array();
+
+	/** @param array<string,string> $context @return array<string,mixed> */
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		unset( $stage, $query );
+		$this->last_context = $context;
+		$data = array_merge(
+			array(
+				'fias_level' => '8',
+				'region_with_type' => 'Новосибирская обл',
+				'region_fias_id' => 'region-fias',
+				'city_with_type' => 'г Новосибирск',
+				'city_fias_id' => 'REAL-FIAS',
+				'settlement_with_type' => '',
+				'settlement_fias_id' => '',
+				'street_with_type' => 'ул Ленина',
+				'street_fias_id' => 'street-fias',
+				'house' => '10',
+				'house_fias_id' => 'house-fias',
+				'postal_code' => '630005',
+				'geo_lat' => '55.0415',
+				'geo_lon' => '82.9346',
+			),
+			$this->data
+		);
+		return array(
+			'success' => true,
+			'status_code' => 200,
+			'suggestions' => array(
+				array(
+					'value' => 'г Новосибирск, ул Ленина, д 10',
+					'unrestricted_value' => '630005, Новосибирская обл, г Новосибирск, ул Ленина, д 10',
+					'data' => $data,
+				),
+			),
+		);
+	}
+}
+
+$GLOBALS['oz_ship_options'] = array(
+	'wdc_core_settings' => array(
+		'dadata_suggestions_enabled' => true,
+		DaDataTokenPool::OPTION_KEY => array(
+			array( 'id' => 'token-1', 'enabled' => true, 'encrypted_token' => 'encrypted' ),
+		),
+	),
+);
+$suggestion_client = new OzonShipmentSmokeSuggestionClient();
+$ozon_normalizer = new OzonDeliveryCourierAddressNormalizer(
+	new AddressSuggestionService(
+		new AddressSuggestionSettings( new SettingsRepository(), new EncryptionService(), new DaDataTokenPool( new SettingsRepository(), new EncryptionService() ) ),
+		$suggestion_client,
+		new AddressSuggestionNormalizer()
+	)
+);
+$normalized = $ozon_normalizer->normalize(
+	'630005, Новосибирск, Ленина, 10',
+	array(
+		'selected_location_id' => '123',
+		'selected_location_fias_id' => 'REAL-FIAS',
+	)
+);
+$normalized_fields = is_array( $normalized['fields'] ?? null ) ? $normalized['fields'] : array();
+oz_ship_assert( ! empty( $normalized['success'] ), 'Ozon courier address normalizer must accept a server-side deliverable DaData suggestion.' );
+oz_ship_assert( '123' === (string) ( $normalized_fields['selected_location_id'] ?? '' ) && 'REAL-FIAS' === (string) ( $normalized_fields['selected_location_fias_id'] ?? '' ), 'Ozon courier address normalizer must copy selected location identity from server context.' );
+oz_ship_assert( 'ул Ленина' === (string) ( $normalized_fields['street'] ?? '' ) && '10' === (string) ( $normalized_fields['house'] ?? '' ) && '630005' === (string) ( $normalized_fields['postcode'] ?? '' ) && '55.0415' === (string) ( $normalized_fields['geo_lat'] ?? '' ) && '82.9346' === (string) ( $normalized_fields['geo_lon'] ?? '' ), 'Ozon courier address normalizer must keep exact safe DaData address fields.' );
+oz_ship_assert( 'RU' === (string) ( $suggestion_client->last_context['country_code'] ?? '' ) && '123' === (string) ( $suggestion_client->last_context['selected_location_id'] ?? '' ), 'Ozon courier address normalizer must pass server context to AddressSuggestionService.' );
+
+$suggestion_client->data = array( 'city_fias_id' => 'NOVOSIBIRSK', 'settlement_fias_id' => '' );
+$city_match = $ozon_normalizer->normalize( 'Новосибирск, Ленина, 10', array( 'selected_location_fias_id' => ' novosibirsk ' ) );
+oz_ship_assert( ! empty( $city_match['success'] ), 'Ozon courier address normalizer must accept selected FIAS matching DaData city_fias_id case-insensitively.' );
+$suggestion_client->data = array( 'city_fias_id' => 'PARENT-CITY', 'settlement_fias_id' => 'SETTLEMENT-123' );
+$settlement_match = $ozon_normalizer->normalize( 'посёлок Тестовый, Ленина, 10', array( 'selected_location_fias_id' => 'settlement-123' ) );
+oz_ship_assert( ! empty( $settlement_match['success'] ), 'Ozon courier address normalizer must accept selected FIAS matching DaData settlement_fias_id.' );
+$suggestion_client->data = array( 'city_fias_id' => 'MOSCOW', 'settlement_fias_id' => '' );
+$city_mismatch = $ozon_normalizer->normalize( 'Москва, Тверская, 10', array( 'selected_location_fias_id' => 'NOVOSIBIRSK' ) );
+oz_ship_assert( empty( $city_mismatch['success'] ) && str_contains( (string) ( $city_mismatch['message'] ?? '' ), 'другому населённому пункту' ), 'Ozon courier address normalizer must reject DaData city locality FIAS mismatch with a safe manager-facing message.' );
+$suggestion_client->data = array( 'city_fias_id' => 'LOCATION-B', 'settlement_fias_id' => 'LOCATION-C' );
+$both_mismatch = $ozon_normalizer->normalize( 'Москва, Тверская, 10', array( 'selected_location_fias_id' => 'LOCATION-A' ) );
+oz_ship_assert( empty( $both_mismatch['success'] ), 'Ozon courier address normalizer must reject when both city and settlement FIAS candidates mismatch selected location FIAS.' );
+$suggestion_client->data = array( 'city_fias_id' => 'MOSCOW', 'settlement_fias_id' => '' );
+$selected_absent = $ozon_normalizer->normalize( 'Москва, Тверская, 10', array( 'selected_location_id' => '123' ) );
+oz_ship_assert( ! empty( $selected_absent['success'] ), 'Ozon courier address normalizer must keep legacy compatibility when selected location FIAS is absent.' );
+$suggestion_client->data = array( 'city_fias_id' => '', 'settlement_fias_id' => '' );
+$dadata_absent = $ozon_normalizer->normalize( 'Новосибирск, Ленина, 10', array( 'selected_location_fias_id' => 'LOCATION-A' ) );
+oz_ship_assert( ! empty( $dadata_absent['success'] ), 'Ozon courier address normalizer must not reject only because DaData locality FIAS evidence is absent.' );
+$suggestion_client->data = array(
+	'fias_level' => '7',
+	'house' => '',
+	'house_fias_id' => '',
+	'house_kladr_id' => '',
+	'stead' => '',
+	'flat' => '',
+);
+$not_deliverable = $ozon_normalizer->normalize( 'Новосибирск, Ленина', array( 'selected_location_fias_id' => 'REAL-FIAS' ) );
+oz_ship_assert( empty( $not_deliverable['success'] ) && 'Не удалось распознать адрес, попробуйте исправить его.' === (string) ( $not_deliverable['message'] ?? '' ), 'Ozon courier address normalizer fallback must use the new manager-facing recognition failure message.' );
+oz_ship_assert( ! str_contains( (string) ( $not_deliverable['message'] ?? '' ), 'Адрес распознан недостаточно точно' ), 'Ozon courier address normalizer fallback must not use the old insufficient-precision message.' );
 
 final class OzonShipmentSmokeHttp implements OzonDeliveryHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,body:array<string,mixed>,headers:array<string,mixed>}> */
@@ -261,6 +369,9 @@ final class OzonShipmentSmokeOrder {
 	public function save(): void {}
 }
 
+$no_mutation_stack = new OzonShipmentSmokeHttp();
+oz_ship_assert( empty( $city_mismatch['success'] ) && 0 === count( $no_mutation_stack->calls_for( '/v1/order/checkout' ) ) && 0 === count( $no_mutation_stack->calls_for( '/v1/order/create' ) ) && 0 === count( $no_mutation_stack->calls_for( '/v1/posting/approve' ) ), 'Failed Ozon courier locality correlation must happen before shipment preflight/create/approve mutations.' );
+
 /** @return array{http:OzonShipmentSmokeHttp,service:ShipmentCreationService,adapter:OzonDeliveryShipmentAdapter,docs:OzonDeliveryShipmentDocumentProvider,modal:OzonDeliveryShipmentModalExtension,settings:OzonDeliverySettings,mapper:OzonDeliveryShipmentStatusMapper} */
 function oz_ship_stack( OzonShipmentSmokeDb $db ): array {
 	$GLOBALS['oz_ship_options'] = array();
@@ -271,6 +382,7 @@ function oz_ship_stack( OzonShipmentSmokeDb $db ): array {
 		OzonDeliverySettings::CLIENT_ID_KEY => 'client',
 		OzonDeliverySettings::CLIENT_SECRET_ENCRYPTED_KEY => $encryption->encrypt( 'secret' ),
 		OzonDeliverySettings::SHIPMENT_METHOD_ID_KEY => 42,
+		OzonDeliverySettings::COURIER_SHIPMENT_METHOD_ID_KEY => 84,
 	) );
 	$settings = new OzonDeliverySettings( $settings_repository );
 	$http = new OzonShipmentSmokeHttp();
@@ -318,6 +430,71 @@ function oz_ship_request( array $places, array $rows, string $point_code = '777'
 			'service_key' => OzonDeliverySettings::SERVICE_KEY,
 			'order_num' => $order_num,
 			'pickup_point_code' => $point_code,
+			'shipment_item_rows' => $rows,
+		)
+	);
+}
+
+/** @param array<int,ShipmentPlace> $places @param array<int,array<string,mixed>> $rows */
+function oz_ship_courier_request( array $places, array $rows, int $order_id = 85410, string $order_num = '85410' ): ShipmentCreateRequest {
+	$courier_snapshot = array(
+		'schema_version' => 1,
+		'source' => 'trusted_order_snapshot',
+		'address_role' => 'shipping',
+		'selected_location_id' => '123',
+		'selected_location_fias_id' => 'CITY-FIAS-123',
+		'region_fias_id' => 'REGION-FIAS-1',
+		'city_fias_id' => 'CITY-FIAS-123',
+		'street' => 'улица Ленина',
+		'street_with_type' => 'улица Ленина',
+		'street_fias_id' => 'STREET-FIAS-1',
+		'house' => '10',
+		'house_fias_id' => 'HOUSE-FIAS-10',
+		'flat' => '12',
+		'postcode' => '630099',
+		'country' => 'Россия',
+		'country_code' => 'RU',
+		'region' => 'Новосибирская область',
+		'city' => 'г Новосибирск',
+		'geo_lat' => '55.0415',
+		'geo_lon' => '82.9346',
+		'normalized_address' => '630099, Новосибирская область, г Новосибирск, улица Ленина, 10, кв 12',
+		'confirmed_at' => '2026-08-30T12:00:00+00:00',
+	);
+
+	return new ShipmentCreateRequest(
+		order_id: $order_id,
+		carrier_key: OzonDeliverySettings::CARRIER_KEY,
+		delivery_type: DeliveryType::COURIER,
+		rate_id: OzonDeliverySettings::SERVICE_KEY . ':courier',
+		recipient_address: new Address(
+			country_code: 'RU',
+			country_name: 'Россия',
+			region_name: 'Новосибирская область',
+			city: 'г Новосибирск',
+			postcode: '630099',
+			street: 'улица Ленина',
+			house: '10',
+			apartment: '12',
+			raw_address: '630099, Новосибирская область, г Новосибирск, улица Ленина, 10, кв 12',
+			normalized: true
+		),
+		pickup_point: null,
+		places: $places,
+		declared_value: Money::from_kopecks( 0 ),
+		insurance_enabled: false,
+		services: array(),
+		recipient: array( 'name' => 'Иван Иванов', 'phone' => '+79132038250', 'email' => 'test@example.test' ),
+		meta: array(
+			'service_key' => OzonDeliverySettings::SERVICE_KEY,
+			'order_num' => $order_num,
+			'delivery_type' => DeliveryType::COURIER,
+			'courier_address_source' => 'trusted_order_snapshot',
+			'courier_address_snapshot' => $courier_snapshot,
+			'ozon_courier_apartment' => '12',
+			'ozon_courier_entrance' => '2',
+			'ozon_courier_floor' => '5',
+			'ozon_courier_intercom' => '55',
 			'shipment_item_rows' => $rows,
 		)
 	);
@@ -380,6 +557,53 @@ $status_payload = $stack['adapter']->status_payload( $order, $stored );
 oz_ship_assert( ! empty( $status_payload['has_actual_cost'] ) && 'carrier_api' === (string) ( $status_payload['actual_cost_source'] ?? '' ), 'Ozon status payload must expose actual cost immediately after create.' );
 oz_ship_assert( DeliveryStatus::CREATED_IN_CARRIER === (string) ( $status_payload['universal_status_code'] ?? '' ) && DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ) === (string) ( $status_payload['shipment_status_label'] ?? '' ) && 'READY_FOR_SHIPPING, READY_FOR_SHIPPING' === (string) ( $status_payload['carrier_status_title'] ?? '' ), 'Ozon create UI payload must immediately show created_in_carrier and raw Ozon statuses without a manual refresh.' );
 oz_ship_assert( 'Номера Ozon' === (string) ( $status_payload['tracking_presentation']['label'] ?? '' ) && 2 === count( $status_payload['tracking_presentation']['items'] ?? array() ) && 'OZON-1' === (string) ( $status_payload['tracking_presentation']['items'][0]['copy_value'] ?? '' ) && 'OZON-2' === (string) ( $status_payload['tracking_presentation']['items'][1]['copy_value'] ?? '' ), 'Ozon multi-box status payload must expose every posting number sorted by place for individual copying.' );
+
+$courier_stack = oz_ship_stack( $db );
+$courier_order = new OzonShipmentSmokeOrder( 85410, '85410', array( new OzonShipmentSmokeOrderItem( 501, 2, '2000.00' ) ) );
+$courier_result = $courier_stack['service']->create(
+	$courier_order,
+	oz_ship_courier_request(
+		array(
+			new ShipmentPlace( 1, 12000, 40, 30, 20, Money::from_kopecks( 0 ) ),
+			new ShipmentPlace( 2, 9000, 50, 30, 20, Money::from_kopecks( 0 ) ),
+		),
+		array(
+			array( 'item_key' => 'courier-a', 'ordered_quantity' => 2, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ),
+			array( 'item_key' => 'courier-b', 'ordered_quantity' => 2, 'place_number' => 2, 'amount' => 1, 'cost' => 1000 ),
+		)
+	)
+);
+oz_ship_assert( $courier_result->success, 'Ozon courier shipment must use existing create+approve lifecycle and must not require pickup point limits.' );
+$courier_checkout_calls = $courier_stack['http']->calls_for( '/v1/order/checkout' );
+$courier_create_calls = $courier_stack['http']->calls_for( '/v1/order/create' );
+oz_ship_assert( 1 === count( $courier_checkout_calls ) && 1 === count( $courier_create_calls ), 'Ozon courier shipment must preflight once and then call order/create once.' );
+$courier_checkout_body = $courier_checkout_calls[0]['body'];
+$courier_create_body = $courier_create_calls[0]['body'];
+oz_ship_assert( ! isset( $courier_create_body['delivery']['delivery_point'] ) && isset( $courier_create_body['delivery']['courier'] ), 'Ozon courier create body must use delivery.courier and must not send a delivery_point.' );
+$courier_delivery = $courier_create_body['delivery']['courier'] ?? array();
+oz_ship_assert( '55.0415' === (string) ( $courier_delivery['coordinates']['latitude'] ?? '' ) && '82.9346' === (string) ( $courier_delivery['coordinates']['longitude'] ?? '' ), 'Ozon courier create coordinates must come from canonical structured courier address snapshot.' );
+oz_ship_assert( '630099' === (string) ( $courier_delivery['zip_code'] ?? '' ) && 'Россия' === (string) ( $courier_delivery['country'] ?? '' ) && 'Новосибирская область' === (string) ( $courier_delivery['region'] ?? '' ) && 'г Новосибирск' === (string) ( $courier_delivery['city'] ?? '' ) && 'улица Ленина' === (string) ( $courier_delivery['street'] ?? '' ) && '10' === (string) ( $courier_delivery['house_number'] ?? '' ), 'Ozon courier create body must contain the official structured address fields required by /v1/order/create.' );
+oz_ship_assert( '12' === (string) ( $courier_delivery['apartment'] ?? '' ) && '2' === (string) ( $courier_delivery['entrance'] ?? '' ) && '5' === (string) ( $courier_delivery['floor'] ?? '' ) && '55' === (string) ( $courier_delivery['intercom'] ?? '' ), 'Ozon courier create body must pass supported optional courier address fields only from server-validated draft/meta.' );
+oz_ship_assert( array( 'courier' => array( 'coordinates' => $courier_delivery['coordinates'] ) ) === ( $courier_checkout_body['delivery'] ?? array() ), 'Ozon courier preflight must be derived from the canonical create body and keep only checkout-supported courier coordinates.' );
+foreach ( $courier_create_body['postings'] as $index => $posting ) {
+	$courier_checkout_posting = $courier_checkout_body['postings'][ $index ] ?? array();
+	oz_ship_assert( 84 === (int) ( $posting['shipment_method_id'] ?? 0 ) && $courier_checkout_posting['shipment_method_id'] === $posting['shipment_method_id'] && $courier_checkout_posting['request_id'] === $posting['request_id'] && $courier_checkout_posting['declared_value'] === $posting['declared_value'] && $courier_checkout_posting['dimensions'] === $posting['dimensions'], 'Ozon courier preflight/create parity must keep shipment method, request id, dimensions and declared value from one canonical create body.' );
+}
+$courier_stored = ( new OrderShipmentRepository() )->find_by_carrier( $courier_order, OzonDeliverySettings::CARRIER_KEY );
+oz_ship_assert( 2 === count( $courier_stack['http']->calls_for( '/v1/posting/approve' ) ) && 'created' === (string) ( $courier_stored['status'] ?? '' ) && 2 === count( $courier_stored['ozon_postings'] ?? array() ), 'Ozon courier shipment must reuse approve and persistence lifecycle after order/create.' );
+
+$courier_unavailable_stack = oz_ship_stack( $db );
+$courier_unavailable_stack['http']->fail_checkout = true;
+$courier_unavailable = $courier_unavailable_stack['service']->create(
+	new OzonShipmentSmokeOrder( 85411, '85411', array( new OzonShipmentSmokeOrderItem( 502, 1, '1000.00' ) ) ),
+	oz_ship_courier_request(
+		array( new ShipmentPlace( 1, 5000, 40, 30, 20, Money::from_kopecks( 0 ) ) ),
+		array( array( 'item_key' => 'courier-fail', 'ordered_quantity' => 1, 'place_number' => 1, 'amount' => 1, 'cost' => 1000 ) ),
+		85411,
+		'85411'
+	)
+);
+oz_ship_assert( ! $courier_unavailable->success && 'ozon_shipment_preflight_failed' === $courier_unavailable->error_code && 0 === count( $courier_unavailable_stack['http']->calls_for( '/v1/order/create' ) ) && 0 === count( $courier_unavailable_stack['http']->calls_for( '/v1/posting/approve' ) ), 'Ozon courier shipment-time checkout availability failure must block order/create and approve.' );
 
 $manual_stack = oz_ship_stack( $db );
 $manual_order = new OzonShipmentSmokeOrder( 85373, '85373', array( new OzonShipmentSmokeOrderItem( 102, 1, '1500.00' ) ) );

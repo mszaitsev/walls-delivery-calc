@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -246,6 +247,7 @@ final class OrderShipmentsMetabox {
 		if ( '' === $selected_delivery_type && array() !== $services ) {
 			$selected_delivery_type = (string) ( $services[0]['delivery_type'] ?? DeliveryType::PICKUP );
 		}
+		$is_ozon = OzonDeliverySettings::CARRIER_KEY === $carrier_key;
 		$selected_tariff_object = '';
 		$selected_service_tariffs = array();
 		$selected_tariff_has_declared_value = false;
@@ -300,6 +302,7 @@ final class OrderShipmentsMetabox {
 		if ( array_key_exists( 'modal_create_button_label', $modal_extension_context ) ) {
 			$modal_create_button_label = (string) $modal_extension_context['modal_create_button_label'];
 		}
+		$create_initially_disabled = OzonDeliverySettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type && empty( $modal_extension_context['normalization_valid'] );
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		?>
@@ -356,7 +359,9 @@ final class OrderShipmentsMetabox {
 								<h3><?php echo esc_html__( 'Получатель', 'walls-delivery-calc' ); ?></h3>
 								<label><?php echo esc_html__( 'ФИО', 'walls-delivery-calc' ); ?><input name="recipient_name" value="<?php echo esc_attr( (string) ( $recipient['name'] ?? '' ) ); ?>"></label>
 								<label><?php echo esc_html__( 'Телефон', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
+								<?php if ( ! $is_ozon ) : ?>
 								<label>Email<input name="recipient_email" value="<?php echo esc_attr( (string) ( $recipient['email'] ?? '' ) ); ?>"></label>
+								<?php endif; ?>
 								<div data-wdc-pickup-section <?php echo DeliveryType::PICKUP === $delivery_type ? '' : 'hidden'; ?>>
 									<?php if ( $modal_extension instanceof CarrierShipmentModalExtensionInterface ) : ?>
 										<?php $modal_extension->render_pickup_fields( $order, $draft, $modal_extension_context ); ?>
@@ -438,7 +443,7 @@ final class OrderShipmentsMetabox {
 							<div class="wdc-shipment-errors" data-wdc-shipment-errors></div>
 							<pre class="wdc-shipment-preview" data-wdc-shipment-preview><?php echo esc_html( wp_json_encode( $safe_preview, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></pre>
 							<button type="button" class="button" data-wdc-preview-shipment><?php echo esc_html__( 'Предпросмотр payload', 'walls-delivery-calc' ); ?></button>
-							<button type="button" class="button button-primary" data-wdc-create-shipment><?php echo esc_html( $modal_create_button_label ); ?></button>
+							<button type="button" class="button button-primary" data-wdc-create-shipment <?php disabled( $create_initially_disabled ); ?>><?php echo esc_html( $modal_create_button_label ); ?></button>
 						</section>
 					</div>
 				</div>
