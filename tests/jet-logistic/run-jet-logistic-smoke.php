@@ -950,16 +950,18 @@ jet_assert( 'алматы опт' === $normalizer->normalize( 'Алматы ОП
 jet_assert( $normalizer->api_city_matches( 'Алматы', 'Алматы' ) && $normalizer->api_city_matches( 'Алматы', 'Алматы ОПТ' ) && $normalizer->api_city_matches( 'Алматы', 'Алматы 2 нижний город (аэропорт, СВХ) ОПТ' ) && $normalizer->api_city_matches( 'Минск', 'Минск ОПТ' ) && $normalizer->api_city_matches( 'Атбасар', 'Атбасар район 1 ОПТ' ), 'Jet API city matching must allow exact and city-prefix provider-zone responses with a safe boundary.' );
 jet_assert( ! $normalizer->api_city_matches( 'Алматы', 'Алматинская область' ) && ! $normalizer->api_city_matches( 'Алматы', 'Алматытау' ) && ! $normalizer->api_city_matches( 'Астана', 'Астанай' ) && ! $normalizer->api_city_matches( 'Алматы', 'Астана ОПТ' ), 'Jet API city matching must reject false prefixes and real destination mismatches.' );
 $checkout_search = new CheckoutLocationSearch( new LocationSearchService( new LocationRepository( $GLOBALS['wpdb'] ) ) );
-$atbasar_search = $checkout_search->search_for_picker( 'Атбасар', 100, 10, '', 'KZ' );
+$atbasar_search = $checkout_search->search_for_picker( 'поселок Атбасар', 100, 10, '', 'KZ' );
 $atbasar_search_ids = array_map( static fn( object $location ): int => (int) $location->id, $atbasar_search['items'] ?? array() );
-$atbasar_ajax = ( new CheckoutLocationAjax( $checkout_search, new SettingsRepository() ) )->payload( 'Атбасар', '', 'KZ' );
+$atbasar_ajax = ( new CheckoutLocationAjax( $checkout_search, new SettingsRepository() ) )->payload( 'поселок Атбасар', '', 'KZ' );
 $atbasar_ajax_ids = array();
 foreach ( $atbasar_ajax['groups'] ?? array() as $group ) {
 	foreach ( $group['items'] ?? array() as $item ) {
 		$atbasar_ajax_ids[] = (int) ( $item['id'] ?? 0 );
 	}
 }
-jet_assert( in_array( 184506, $atbasar_search_ids, true ) && in_array( 184506, $atbasar_ajax_ids, true ), 'Checkout location picker must return selectable KZ Атбасар settlement with canonical location_id=184506.' );
+jet_assert( in_array( 184506, $atbasar_search_ids, true ) && in_array( 184506, $atbasar_ajax_ids, true ), 'Checkout location picker must return selectable KZ поселок Атбасар settlement with canonical location_id=184506.' );
+$atbasar_resolved = $checkout_search->resolve_checkout_fields( '', 'поселок Атбасар', 'KZ' );
+jet_assert( 'resolved' === (string) ( $atbasar_resolved['status'] ?? '' ) && $atbasar_resolved['location'] instanceof \WallsShop\WDC\Locations\ValueObjects\Location && 184506 === (int) $atbasar_resolved['location']->id, 'Checkout resolver must resolve explicit поселок Атбасар to canonical location_id=184506 before Jet carrier runtime.' );
 $checkout_session = new CheckoutSessionManager();
 $checkout_session->save_selected_city( array( 'id' => 184506, 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'place_name' => 'Атбасар', 'place_type' => 'п', 'place_level' => 5, 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'active' => true ) );
 $checkout_session->save_city_context( array( 'location_id' => '184506', 'country_code' => 'KZ', 'city_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'region_name' => 'Акмолинская', 'display_name' => 'Акмолинская обл., п Атбасар', 'source' => 'local_db' ) );
