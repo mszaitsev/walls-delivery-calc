@@ -285,14 +285,27 @@ const integrationSource = [
   'function updateCdekDeliveryModeUi(form) { return true; }',
   fs.readFileSync('assets/admin/shipments/shipment-allocation.js', 'utf8'),
   fs.readFileSync('assets/admin/shipments/shipment-preview.js', 'utf8'),
+  fs.readFileSync('assets/admin/shipments/shipment-events.js', 'utf8'),
   fs.readFileSync('assets/admin/shipments/extensions/ozon-delivery.js', 'utf8')
 ].join('\n');
 
 class LiveButton {
-  constructor() {
+  constructor(form) {
+    this.form = form;
     this.disabled = false;
     this.dataset = {};
+    this.attrs = {};
+    this.classList = new ClassList();
+    this.textContent = 'Создать отправление';
   }
+  closest(selector) {
+    if (selector === '[data-wdc-create-shipment]') return this;
+    if (selector.includes('[data-wdc-shipment-form]') || selector.includes('.wdc-shipment-form')) return this.form;
+    if (selector === '[data-wdc-shipments-metabox]') return this.form ? this.form.box : null;
+    return null;
+  }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  removeAttribute(name) { delete this.attrs[name]; }
 }
 
 class LiveSection {
@@ -332,15 +345,17 @@ class LivePlacesContainer {
 }
 
 function makeLiveForm(snapshot) {
-  const button = new LiveButton();
   const form = {
     carrierKey: 'ozon_delivery',
     dataset: { wdcRequiresTariff: '0', wdcRequiresSuccessfulPreview: '0' },
-    createButton: button,
+    createButton: null,
     serviceSelect: new LiveSelect('courier'),
     normalizedInput: new FakeInput(snapshot ? JSON.stringify(snapshot) : '', null),
     displayInput: new FakeInput('', null),
     statusNode: new FakeNode(),
+    errorsNode: new FakeNode(),
+    toastNode: null,
+    box: { dataset: { carrierKey: 'ozon_delivery' } },
     pickupSections: [new LiveSection()],
     courierSections: [new LiveSection(), new LiveSection()],
     querySelector(selector) {
@@ -351,6 +366,9 @@ function makeLiveForm(snapshot) {
       if (selector === '[data-wdc-normalized-address-display]') return this.displayInput;
       if (selector === '[data-wdc-normalized-status]') return this.statusNode;
       if (selector === '[data-wdc-places]') return this.placesContainer;
+      if (selector === '[data-wdc-shipment-errors]') return this.errorsNode;
+      if (selector === '[data-wdc-shipment-preview]') return null;
+      if (selector === '[data-wdc-shipment-toast]') return this.toastNode;
       return null;
     },
     querySelectorAll(selector) {
@@ -361,8 +379,13 @@ function makeLiveForm(snapshot) {
       if (selector === '[data-wdc-shipment-place-select]') return [];
       if (selector === '[data-wdc-shipment-item-row]') return [];
       return [];
+    },
+    appendChild(node) {
+      this.toastNode = node;
+      return node;
     }
   };
+  form.createButton = new LiveButton(form);
   form.rows = [new LivePlaceRow(1, { weightG: 9000, lengthCm: 50, widthCm: 30, heightCm: 20 }, form)];
   form.placesContainer = new LivePlacesContainer(form.rows);
   form.normalizedInput.form = form;
@@ -372,7 +395,13 @@ function makeLiveForm(snapshot) {
 const integrationContext = {
   console,
   window: null,
-  document: { createElement: () => ({ dataset: {}, value: '', textContent: '', selected: false }) },
+  document: {
+    body: null,
+    createElement: () => ({ dataset: {}, value: '', textContent: '', selected: false, hidden: true, setAttribute: function (name, value) { this[name] = String(value); } }),
+    addEventListener: function (name, handler) { this.listeners[name] = handler; },
+    listeners: {},
+    querySelectorAll: () => []
+  },
   Number,
   Array,
   Object,
@@ -386,7 +415,8 @@ const integrationContext = {
   Math,
   RegExp,
   Error,
-  FormData: function () {},
+  wdcShipmentsAdmin: { ajaxUrl: '/wp-admin/admin-ajax.php', createAction: 'wdc_create_shipment', nonce: 'nonce' },
+  FormData: function () { this.values = []; this.append = function (key, value) { this.values.push([key, value]); }; },
   setTimeout: function () { return 1; },
   clearTimeout: function () {}
 };
@@ -417,7 +447,55 @@ liveForm.serviceSelect.selectedIndex = 0;
 integrationContext.updateScenarioSections(liveForm);
 assert.strictEqual(liveForm.createButton.disabled, true, 'Live-like Ozon courier scenario must re-apply courier address gate after scenario transition.');
 
-console.log('Ozon Delivery modal limits JS smoke passed.');
+integrationContext.initializeShipmentAdmin();
+assert.strictEqual(typeof integrationContext.document.listeners.click, 'function', 'Live-like smoke must use real create click handler.');
+
+async function clickCreateAndFlush(form, mutateWhileBusy) {
+  integrationContext.fetch = function () {
+    if (typeof mutateWhileBusy === 'function') mutateWhileBusy();
+    return Promise.resolve({
+      text: () => Promise.resolve(JSON.stringify({ success: false, data: { message: 'Не удалось создать отправление.' } }))
+    });
+  };
+  integrationContext.document.listeners.click({ target: form.createButton });
+  assert.strictEqual(form.createButton.disabled, true, 'Create button must disable while failed create request is busy.');
+  assert.strictEqual(form.createButton.dataset.wdcCreateBusy, '1', 'Create button must expose busy state while failed create request is running.');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function runBusyReleaseSmoke() {
+  const invalidAfterBusyForm = makeLiveForm(validCourierSnapshot());
+  integrationContext.updateCreateAvailability(invalidAfterBusyForm);
+  assert.strictEqual(invalidAfterBusyForm.createButton.disabled, false, 'Ozon courier form must start enabled before failed create busy regression.');
+  await clickCreateAndFlush(invalidAfterBusyForm, function () {
+    invalidAfterBusyForm.normalizedInput.value = '';
+  });
+  assert.strictEqual(invalidAfterBusyForm.createButton.dataset.wdcCreateBusy, undefined, 'Failed create busy release must clear busy dataset state.');
+  assert.strictEqual(invalidAfterBusyForm.createButton.disabled, true, 'Failed create busy release must recalculate invalid Ozon courier availability and keep Create disabled.');
+
+  const validAfterBusyForm = makeLiveForm(validCourierSnapshot());
+  integrationContext.updateCreateAvailability(validAfterBusyForm);
+  await clickCreateAndFlush(validAfterBusyForm);
+  assert.strictEqual(validAfterBusyForm.createButton.disabled, false, 'Failed create busy release must recalculate valid Ozon courier availability and enable Create.');
+
+  const genericForm = makeLiveForm(null);
+  genericForm.carrierKey = 'cdek';
+  genericForm.box.dataset.carrierKey = 'cdek';
+  integrationContext.updateCreateAvailability(genericForm);
+  assert.strictEqual(genericForm.createButton.disabled, false, 'Valid non-Ozon form starts enabled when generic conditions pass.');
+  await clickCreateAndFlush(genericForm);
+  assert.strictEqual(genericForm.createButton.disabled, false, 'Failed create busy release must use generic availability for non-Ozon forms.');
+}
+
+runBusyReleaseSmoke()
+  .then(function () {
+    console.log('Ozon Delivery modal limits JS smoke passed.');
+  })
+  .catch(function (error) {
+    console.error(error && error.stack ? error.stack : error);
+    process.exit(1);
+  });
 JS;
 
 $tmp = tempnam( sys_get_temp_dir(), 'wdc-ozon-modal-limits-' );

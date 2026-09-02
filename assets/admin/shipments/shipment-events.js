@@ -358,10 +358,15 @@ function setShipmentCreateBusy(button, busy) {
     return;
   }
   button.textContent = button.dataset.wdcCreateOriginalLabel || button.textContent || '';
-  button.disabled = false;
   delete button.dataset.wdcCreateBusy;
   button.removeAttribute('aria-busy');
   button.classList.remove('wdc-shipment-create-busy');
+  const form = findShipmentForm(button);
+  if (form) {
+    updateCreateAvailability(form);
+  } else {
+    button.disabled = false;
+  }
 }
 
 function requestShipmentActualCost(button, operation) {
