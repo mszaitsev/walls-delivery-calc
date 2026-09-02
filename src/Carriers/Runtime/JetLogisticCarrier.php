@@ -147,6 +147,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 					'destination_text' => $request->destination->city,
 					'selected_location_id' => (string) ( $request->customer_context['selected_location_id'] ?? '' ),
 					'location_id' => (string) ( $request->customer_context['location_id'] ?? '' ),
+					'location_context_source' => (string) ( $request->customer_context['location_context_source'] ?? '' ),
 				)
 			);
 		}
@@ -199,7 +200,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface {
 				}
 			}
 			if ( 'jet_destination_location_missing' === $code ) {
-				foreach ( array( 'country_code', 'destination_text', 'selected_location_id', 'location_id' ) as $key ) {
+				foreach ( array( 'country_code', 'destination_text', 'selected_location_id', 'location_id', 'location_context_source' ) as $key ) {
 					if ( array_key_exists( $key, $exception->context() ) && is_scalar( $exception->context()[ $key ] ) ) {
 						$context[ $key ] = (string) $exception->context()[ $key ];
 					}

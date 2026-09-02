@@ -134,6 +134,14 @@ function WC(): JetSmokeWooCommerce {
 
 	return $wc;
 }
+final class JetSmokeProduct {
+	public function get_sku(): string { return 'JET-SMOKE'; }
+	public function get_name(): string { return 'Jet smoke product'; }
+	public function get_weight(): float { return 2.0; }
+	public function get_length(): float { return 100.0; }
+	public function get_width(): float { return 50.0; }
+	public function get_height(): float { return 40.0; }
+}
 function wc_get_logger(): object {
 	return new class {
 		public function log( string $level, string $message, array $context = array() ): void {
@@ -1092,6 +1100,40 @@ $orchestrator_atbasar = new CheckoutOrchestrator(
 $orchestrator_atbasar_rates = $orchestrator_atbasar->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Атбасар' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 184506 ) ) );
 $orchestrator_atbasar_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_atbasar_rates );
 jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_atbasar_rate_ids, true ) && 1 === count( $orchestrator_atbasar_http->requests ) && 'Атбасар' === (string) ( $orchestrator_atbasar_http->requests[0]['payload']['cityto'] ?? '' ) && str_contains( $orchestrator_atbasar_rates[0]->title, 'Астана' ) && 'no' === (string) ( $orchestrator_atbasar_rates[0]->meta['jet_local_terminal'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Атбасар with canonical location_id and remote terminal Астана.' );
+
+$backend_recovery_http = new JetFakeHttp(
+	array(
+		array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'price_zabor' => '0', 'price_terminal' => '1300', 'price_delivery' => '800', 'price_dop' => '50', 'city_from' => 'Новосибирск', 'city_terminal_from' => 'Новосибирск', 'city_terminal_to' => 'Астана', 'city_to' => 'Атбасар 1 район ОПТ', 'day_from' => '', 'day_to' => '', 'valuta' => 1, 'valuta_name' => 'руб' ) ), JSON_UNESCAPED_UNICODE ) ),
+	)
+);
+$backend_recovery_carrier = new JetLogisticCarrier( $settings, new JetLogisticApiClient( $backend_recovery_http, $settings, $credentials ), new JetLogisticQuoteRequestBuilder( $credentials ), new JetLogisticQuoteResponseParser(), $geo, $normalizer );
+$backend_recovery_registry = new CarrierRegistry();
+$backend_recovery_registry->register( $backend_recovery_carrier );
+$backend_recovery_orchestrator = new CheckoutOrchestrator(
+	$backend_recovery_registry,
+	new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+	new RateSorter(),
+	new FallbackRateFactory(),
+	new CarrierExecutionGuard( new CheckoutLogger() ),
+	new CheckoutLogger(),
+	new DeliveryLeadTimeNormalizer( $core_settings, new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ), new DeliveryDateCalculator( $calendar, $timezone, $formatter ), $formatter ),
+	null,
+	new DeliveryServiceRegistry( $service_repo, $backend_recovery_registry ),
+	$service_manager
+);
+$backend_recovery_session = new CheckoutSessionManager();
+$backend_recovery_session->clear_normalized_address();
+$backend_recovery_request = ( new WooCommercePackageMapper( null, $backend_recovery_session, null, new LocationRepository( $GLOBALS['wpdb'] ) ) )->map(
+	array(
+		'destination' => array( 'country' => 'KZ', 'state' => 'Акмолинская', 'city' => 'поселок Атбасар' ),
+		'contents_cost' => 19500,
+		'contents_weight' => 2,
+		'contents' => array( array( 'data' => new JetSmokeProduct(), 'quantity' => 1, 'line_total' => 19500 ) ),
+	)
+);
+$backend_recovery_rates = $backend_recovery_orchestrator->calculate_rates( $backend_recovery_request );
+$backend_recovery_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $backend_recovery_rates );
+jet_assert( 184506 === (int) ( $backend_recovery_request->customer_context['selected_location_id'] ?? 0 ) && 'backend_resolved' === (string) ( $backend_recovery_request->customer_context['location_context_source'] ?? '' ) && in_array( JetLogisticSettings::PICKUP_RATE_KEY, $backend_recovery_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $backend_recovery_rate_ids, true ) && 1 === count( $backend_recovery_http->requests ) && 'Атбасар' === (string) ( $backend_recovery_http->requests[0]['payload']['cityto'] ?? '' ) && str_contains( $backend_recovery_rates[0]->title, 'Астана' ), 'Full Jet checkout path must recover canonical KZ поселок Атбасар location_id without frontend hidden ID and return remote-terminal pickup/courier rates with one calculator call.' );
 
 $orchestrator_mismatch_http = new JetFakeHttp(
 	array(

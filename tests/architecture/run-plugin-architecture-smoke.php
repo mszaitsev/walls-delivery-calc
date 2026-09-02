@@ -1146,6 +1146,8 @@ foreach ( plugin_architecture_js_files( 'assets/admin/shipments' ) as $file ) {
 }
 $plugin_source_for_jet = (string) file_get_contents( plugin_architecture_path( 'src/Core/Plugin.php' ) );
 plugin_architecture_assert( str_contains( $plugin_source_for_jet, 'JetLogisticCarrier::class' ) && str_contains( $plugin_source_for_jet, 'JetLogisticShipmentAdapter::class' ), 'Plugin.php must own Jet Logistic runtime and shipment adapter wiring.' );
+$wc_package_mapper_source = plugin_architecture_source( 'src/Checkout/WooCommerce/WooCommercePackageMapper.php' );
+plugin_architecture_assert( str_contains( $wc_package_mapper_source, 'resolve_checkout_fields' ) && str_contains( $wc_package_mapper_source, 'backend_resolved' ) && ! str_contains( $wc_package_mapper_source, 'jet_logistic' ) && ! str_contains( $wc_package_mapper_source, 'JetLogistic' ), 'WooCommerce checkout backend location recovery must stay generic and must not branch on Jet Logistic.' );
 $plugin_lines_for_jet = preg_split( '/\R/', $plugin_source_for_jet ) ?: array();
 foreach ( $plugin_lines_for_jet as $line ) {
 	if ( str_contains( $line, 'ShipmentDocumentProviderRegistry::class' ) || str_contains( $line, 'ShipmentModalExtensionRegistry::class' ) || str_contains( $line, 'ShipmentCreationService::class' ) ) {
