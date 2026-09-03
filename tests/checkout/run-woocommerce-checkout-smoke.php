@@ -60,6 +60,12 @@ if ( ! function_exists( 'esc_html' ) ) {
 	}
 }
 
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( mixed $value ): string {
+		return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' );
+	}
+}
+
 if ( ! function_exists( 'checked' ) ) {
 	function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
 		$result = (string) $checked === (string) $current ? 'checked="checked"' : '';
@@ -750,6 +756,23 @@ $rate_mapper = new WooCommerceRateMapper();
 $mapped      = $rate_mapper->map( $result->rates[0] );
 wc_checkout_smoke_assert( isset( $mapped['id'], $mapped['label'], $mapped['cost'], $mapped['meta_data'] ), 'WooCommerceRateMapper output must be valid.' );
 wc_checkout_smoke_assert( is_array( $mapped['meta_data']['crossed_price'] ), 'WooCommerceRateMapper must expose crossed price rendering data.' );
+$mapped_link = $rate_mapper->map(
+	wc_checkout_label_rate(
+		'Jet pickup',
+		DateRange::single( 4 ),
+		null,
+		array(
+			'customer_link_comments' => array(
+				array(
+					'text_before' => 'Адрес склада выдачи - ',
+					'label' => 'на сайте Jet Logistic',
+					'url' => 'https://jet.com.kz/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B.html',
+				),
+			),
+		)
+	)
+);
+wc_checkout_smoke_assert( 'на сайте Jet Logistic' === (string) ( $mapped_link['meta_data']['customer_link_comments'][0]['label'] ?? '' ), 'WooCommerceRateMapper must expose structured customer link comments to the checkout renderer.' );
 
 $yandex_pickup_label = $rate_mapper->map( wc_checkout_label_rate( 'Яндекс до ПВЗ - 2 дня', DateRange::single( 4 ), DateRange::single( 2 ) ) )['label'];
 wc_checkout_smoke_assert( 'Яндекс до ПВЗ - 4 дня' === $yandex_pickup_label && ! str_contains( $yandex_pickup_label, '—' ) && ! str_contains( $yandex_pickup_label, '2 дня' ) && 1 === substr_count( $yandex_pickup_label, '4 дня' ) && 1 === substr_count( $yandex_pickup_label, ' - ' ), 'Yandex pickup WC label must replace the original API delivery suffix with the final rule-adjusted delivery days and one shared separator.' );
@@ -806,13 +829,41 @@ $render_method = (object) array(
 		'delivery_type' => DeliveryType::PICKUP,
 		'requires_pickup_point' => false,
 		'planned_delivery_comment' => '4 дня',
-		'comments' => array( 'Пользовательский комментарий' ),
+		'customer_link_comments' => array(
+			array(
+				'text_before' => 'Адрес склада выдачи - ',
+				'label' => 'на сайте Jet Logistic',
+				'url' => 'https://jet.com.kz/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B.html',
+			),
+		),
+		'comments' => array( 'Пользовательский комментарий', '<script>alert(1)</script>' ),
 	),
 );
 ob_start();
 ( new CheckoutRateRenderer() )->render( $render_method );
 $rendered_rate_html = (string) ob_get_clean();
-	wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must output planned_delivery_comment and preserve ordinary meta comments.' );
+wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must output planned_delivery_comment and preserve ordinary meta comments.' );
+$link_position = strpos( $rendered_rate_html, 'Адрес склада выдачи - ' );
+$plain_position = strpos( $rendered_rate_html, 'Пользовательский комментарий' );
+$planned_position = strpos( $rendered_rate_html, '4 дня' );
+wc_checkout_smoke_assert( false !== $link_position && false !== $plain_position && false !== $planned_position && $link_position < $plain_position && $plain_position < $planned_position, 'Structured customer link comments must render before ordinary/rule comments and before planned delivery comments.' );
+wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '<a class="wdc-platform-delivery-comment-link" href="https://jet.com.kz/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B.html" target="_blank" rel="noopener noreferrer">на сайте Jet Logistic</a>' ) && ! str_contains( $rendered_rate_html, '&lt;a class=&quot;wdc-platform-delivery-comment-link&quot;' ), 'Structured customer link comments must render as safe active links with target and rel attributes.' );
+wc_checkout_smoke_assert( ! str_contains( $rendered_rate_html, '<script>alert(1)</script>' ) && str_contains( $rendered_rate_html, '&lt;script&gt;alert(1)&lt;/script&gt;' ), 'Plain rate comments must remain escaped and must not become trusted HTML.' );
+$plain_render_method = (object) array(
+	'id' => 'other:pickup',
+	'meta_data' => array(
+		'carrier_key' => 'other',
+		'rate_id' => 'other:pickup',
+		'delivery_type' => DeliveryType::PICKUP,
+		'requires_pickup_point' => false,
+		'planned_delivery_comment' => '',
+		'comments' => array( 'Обычный комментарий другой службы' ),
+	),
+);
+ob_start();
+( new CheckoutRateRenderer() )->render( $plain_render_method );
+$plain_rendered_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $plain_rendered_html, 'Обычный комментарий другой службы' ) && ! str_contains( $plain_rendered_html, 'на сайте Jet Logistic' ) && ! str_contains( $plain_rendered_html, 'wdc-platform-delivery-comment-link' ), 'Other carrier plain comments must keep previous rendering without injected links.' );
 
 $suggestion_settings_repo = new SettingsRepository();
 $suggestion_settings_repo->set( 'dadata_suggestions_enabled', true );

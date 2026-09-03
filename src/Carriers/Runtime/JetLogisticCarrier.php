@@ -26,6 +26,8 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface {
+	private const WAREHOUSE_CONTACTS_URL = 'https://jet.com.kz/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B.html';
+
 	public function __construct(
 		private JetLogisticSettings $settings,
 		private JetLogisticApiClient $api,
@@ -153,10 +155,20 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 				'jet_city_to' => $result->city_to,
 				'jet_city_terminal_to' => $result->city_terminal_to,
 				'jet_local_terminal' => $local_terminal ? 'yes' : 'no',
+				'customer_link_comments' => DeliveryType::PICKUP === $type ? array( $this->warehouse_link_comment() ) : array(),
 				'delivery_days_are_working' => true,
 			),
 			$price,
 			DateRange::range( $result->day_from, $result->day_to, DateRange::UNIT_WORKING_DAYS )
+		);
+	}
+
+	/** @return array{text_before:string,label:string,url:string} */
+	private function warehouse_link_comment(): array {
+		return array(
+			'text_before' => 'Адрес склада выдачи - ',
+			'label' => 'на сайте Jet Logistic',
+			'url' => self::WAREHOUSE_CONTACTS_URL,
 		);
 	}
 

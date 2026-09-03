@@ -53,6 +53,7 @@ final class CheckoutRateRenderer {
 		$this->render_tariff_selector( $meta );
 		$this->render_pickup_selector( $meta, $method );
 		$this->render_courier_address_summary( $meta );
+		$this->render_customer_link_comments( $meta );
 
 		if ( is_array( $meta['comments'] ?? null ) ) {
 			foreach ( $meta['comments'] as $comment ) {
@@ -68,6 +69,34 @@ final class CheckoutRateRenderer {
 		$this->render_yandex_5post_warning( $meta, $method );
 
 		echo '</div>';
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_customer_link_comments( array $meta ): void {
+		$link_comments = is_array( $meta['customer_link_comments'] ?? null ) ? $meta['customer_link_comments'] : array();
+		foreach ( $link_comments as $comment ) {
+			if ( ! is_array( $comment ) ) {
+				continue;
+			}
+			$url = trim( (string) ( $comment['url'] ?? '' ) );
+			$label = trim( (string) ( $comment['label'] ?? '' ) );
+			if ( '' === $url || '' === $label ) {
+				continue;
+			}
+			$text_before = (string) ( $comment['text_before'] ?? '' );
+			$text_after = (string) ( $comment['text_after'] ?? '' );
+			echo '<div class="wdc-platform-delivery-comment wdc-platform-delivery-link-comment wdc-shipping-rate-comment">';
+			if ( '' !== trim( $text_before ) ) {
+				echo esc_html( $text_before );
+			}
+			echo '<a class="wdc-platform-delivery-comment-link" href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer">' . esc_html( $label ) . '</a>';
+			if ( '' !== trim( $text_after ) ) {
+				echo esc_html( $text_after );
+			}
+			echo '</div>';
+		}
 	}
 
 	private function render_yandex_5post_warning( array $meta, mixed $method ): void {

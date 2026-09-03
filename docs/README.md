@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.15
+Version: 0.147.16
+
+0.147.16 adds a safe structured checkout link comment for Jet Logistic pickup rates: `Адрес склада выдачи - на сайте Jet Logistic` now appears before carrier/rule comments and planned delivery text, with the Jet contacts URL rendered by the generic checkout renderer through escaped structured metadata rather than raw comment HTML. Jet pricing, geography, status runtime, Shipment Framework, and Rule Engine semantics are unchanged.
 
 0.147.15 adds Jet Logistic checkout pricing controls without changing generic checkout or rule-engine architecture. Jet rates now include a local insurance surcharge before service rules run (`max(goods cost after discounts * configured percent, configured minimum)`), preserve raw API transport components in metadata, can optionally zero only the Алматы courier `price_delivery` component, and label remote-terminal courier rates with the Jet destination city, for example `Джет Логистик курьером в Атбасар`. Jet quote cache context now includes origin and the new pricing settings so setting changes invalidate cached quotes. No courier formula reinterpretation, geography change, status runtime change, Shipment Framework change, or generic Rule Engine change was made.
 
