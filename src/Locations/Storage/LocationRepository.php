@@ -1434,6 +1434,9 @@ final class LocationRepository {
 	 * @return array<int,Location>
 	 */
 	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '', string $country_code = '' ): array {
+		if ( property_exists( $this->wpdb, 'checkout_hierarchy_candidate_calls' ) ) {
+			++$this->wpdb->checkout_hierarchy_candidate_calls;
+		}
 		$tokens = array_values( array_unique( array_filter( array_map( fn( string $token ): string => $this->normalize_query( $token ), $tokens ) ) ) );
 		$limit = max( 10, min( 2000, $limit ) );
 		$force_region_code = trim( $force_region_code );

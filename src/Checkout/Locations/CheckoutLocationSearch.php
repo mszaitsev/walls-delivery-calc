@@ -261,7 +261,7 @@ final class CheckoutLocationSearch {
 	}
 
 	/**
-	 * @param array{query:string,real_tokens:array<int,string>,markers:array<string,bool>,region_alias_tokens?:array<int,string>} $parsed
+	 * @param array{query:string,real_tokens:array<int,string>,markers:array<string,bool>,requested_types?:array<string,array<int,string>>,region_alias_tokens?:array<int,string>} $parsed
 	 * @return array{total:int,matched_tokens:int,matched_levels:int,all_tokens:bool,place_match:int,city_match:int,district_match:int,region_match:int,group_strength:int,depth:int}
 	 */
 	private function hierarchy_score( Location $location, array $parsed, CheckoutLocationSearchParser $parser ): array {
@@ -339,6 +339,7 @@ final class CheckoutLocationSearch {
 			3 => 1,
 			default => 0,
 		};
+		$type_match = $this->requested_type_match_strength( $location, $parsed, $parser );
 		$group_strength = 800 - ( $group_rank_bucket * 100 );
 
 		$total = ( $all_tokens ? 100000 : 0 )
@@ -363,6 +364,11 @@ final class CheckoutLocationSearch {
 		if ( isset( $parsed['markers']['region'] ) && $level_matches['region'] > 0 ) {
 			$total += 500;
 		}
+		if ( 2 === $type_match ) {
+			$total += 6000;
+		} elseif ( 1 === $type_match ) {
+			$total += 1500;
+		}
 
 		return array(
 			'total'          => $total,
@@ -380,6 +386,7 @@ final class CheckoutLocationSearch {
 			'own_exact_match' => $own_exact_match,
 			'own_prefix_match' => $own_prefix_match,
 			'parent_context_match' => $parent_context_match && ! $own_exact_match && ! $own_prefix_match,
+			'requested_type_match' => $type_match,
 			'own_sort_name' => $own_name,
 			'group_strength' => $group_strength,
 			'depth'          => $depth,
@@ -390,6 +397,7 @@ final class CheckoutLocationSearch {
 		return (int) $a['score']['group_rank_bucket'] <=> (int) $b['score']['group_rank_bucket']
 			?: (int) $b['score']['own_exact_match'] <=> (int) $a['score']['own_exact_match']
 			?: (int) $b['score']['own_prefix_match'] <=> (int) $a['score']['own_prefix_match']
+			?: (int) $b['score']['requested_type_match'] <=> (int) $a['score']['requested_type_match']
 			?: (int) $b['score']['matched_hierarchy_rank'] <=> (int) $a['score']['matched_hierarchy_rank']
 			?: (int) $a['score']['parent_context_match'] <=> (int) $b['score']['parent_context_match']
 			?: (int) $b['score']['matched_levels'] <=> (int) $a['score']['matched_levels']
@@ -404,7 +412,7 @@ final class CheckoutLocationSearch {
 	}
 
 	/**
-	 * @param array{real_tokens:array<int,string>} $parsed
+	 * @param array{real_tokens:array<int,string>,requested_types?:array<string,array<int,string>>} $parsed
 	 * @return array<int,array{location:Location,score:array<string,mixed>}>
 	 */
 	private function scored_hierarchy_candidates( array $parsed, CheckoutLocationSearchParser $parser, int $limit, string $force_region_code, string $country_code = '' ): array {
@@ -419,20 +427,37 @@ final class CheckoutLocationSearch {
 			$locations
 		);
 
-		return $this->filter_hierarchy_matches( $scored, count( $tokens ) );
+		return $this->filter_hierarchy_matches( $scored, count( $tokens ), $this->has_requested_types( $parsed ) );
 	}
 
 	/**
 	 * @param array<int,array{location:Location,score:array<string,mixed>}> $scored
 	 * @return array<int,array{location:Location,score:array<string,mixed>}>
 	 */
-	private function filter_hierarchy_matches( array $scored, int $token_count ): array {
+	private function filter_hierarchy_matches( array $scored, int $token_count, bool $has_requested_types = false ): array {
 		$scored = array_values(
 			array_filter(
 				$scored,
 				static fn( array $row ): bool => (int) $row['score']['matched_tokens'] === $token_count
 			)
 		);
+		if ( array() === $scored ) {
+			return array();
+		}
+
+		if ( $has_requested_types ) {
+			$exact_type = array_values(
+				array_filter( $scored, static fn( array $row ): bool => 2 === (int) ( $row['score']['requested_type_match'] ?? 0 ) )
+			);
+			if ( array() !== $exact_type ) {
+				$scored = $exact_type;
+			} else {
+				$empty_type = array_values(
+					array_filter( $scored, static fn( array $row ): bool => 1 === (int) ( $row['score']['requested_type_match'] ?? 0 ) )
+				);
+				$scored = array() !== $empty_type ? $empty_type : array();
+			}
+		}
 		if ( array() === $scored ) {
 			return array();
 		}
@@ -481,8 +506,8 @@ final class CheckoutLocationSearch {
 	}
 
 	/**
-	 * @param array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool,region_alias_tokens?:array<int,string>} $parsed
-	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool,region_alias_tokens?:array<int,string>}
+	 * @param array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,requested_types?:array<string,array<int,string>>,has_markers:bool,region_alias_tokens?:array<int,string>} $parsed
+	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,requested_types?:array<string,array<int,string>>,has_markers:bool,region_alias_tokens?:array<int,string>}
 	 */
 	private function remove_forced_region_tokens( array $parsed, string $force_region_code, CheckoutLocationSearchParser $parser, string $country_code = '' ): array {
 		$candidates = $this->search_service->checkout_hierarchy_candidates( array(), 1, $force_region_code, $country_code );
@@ -522,6 +547,62 @@ final class CheckoutLocationSearch {
 	private function should_skip_raw_latin_search( string $query, string $country_code ): bool {
 		$country_code = strtoupper( trim( $country_code ) );
 		return in_array( $country_code, array( 'RU', 'BY', 'KZ' ), true ) && (bool) preg_match( '/[A-Za-z]/', $query );
+	}
+
+	/**
+	 * @param array<string,mixed> $parsed
+	 */
+	private function has_requested_types( array $parsed ): bool {
+		foreach ( $parsed['requested_types'] ?? array() as $types ) {
+			if ( is_array( $types ) && array() !== $types ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param array<string,mixed> $parsed
+	 */
+	private function requested_type_match_strength( Location $location, array $parsed, CheckoutLocationSearchParser $parser ): int {
+		$requested = array();
+		foreach ( $parsed['requested_types'] ?? array() as $scope => $types ) {
+			if ( ! is_array( $types ) ) {
+				continue;
+			}
+			foreach ( $types as $type ) {
+				$type = $parser->canonical_type( (string) $scope, (string) $type );
+				if ( '' !== $type ) {
+					$requested[ $scope ][ $type ] = true;
+				}
+			}
+		}
+		if ( array() === $requested ) {
+			return 0;
+		}
+
+		$candidates = array(
+			'city'  => $parser->canonical_type( 'city', $location->city_type ),
+			'place' => $parser->canonical_type( 'place', $location->resolved_place_type() ),
+		);
+		foreach ( $requested as $scope => $types ) {
+			$type = (string) ( $candidates[ $scope ] ?? '' );
+			if ( '' !== $type && isset( $types[ $type ] ) ) {
+				return 2;
+			}
+			if ( 'city' === $scope ) {
+				$place_type = (string) $candidates['place'];
+				if ( '' !== $place_type && isset( $types[ $place_type ] ) ) {
+					return 2;
+				}
+			}
+			if ( '' === $type ) {
+				return 1;
+			}
+		}
+
+		return -1;
 	}
 
 	/**

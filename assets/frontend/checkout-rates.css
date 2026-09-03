@@ -47,6 +47,11 @@
 	color: #334155;
 }
 
+.wdc-platform-delivery-comment-link {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
 .wdc-courier-address-summary {
 	box-sizing: border-box;
 	flex-basis: 100%;

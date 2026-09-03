@@ -27,6 +27,7 @@ final class WooCommerceRateMapper {
 				'planned_delivery_date' => $rate->planned_delivery_date,
 				'planned_delivery_comment' => $rate->planned_delivery_comment,
 				'comments'        => $rate->comments,
+				'customer_link_comments' => is_array( $rate->meta['customer_link_comments'] ?? null ) ? array_values( $rate->meta['customer_link_comments'] ) : array(),
 				'customer_comments' => is_array( $rate->meta['customer_comments'] ?? null ) ? array_values( $rate->meta['customer_comments'] ) : array(),
 				'disabled'        => $rate->disabled,
 				'disabled_reason' => $rate->disabled_reason,

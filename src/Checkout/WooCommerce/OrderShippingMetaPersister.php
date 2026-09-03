@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentNormalizer;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
@@ -21,8 +22,10 @@ final class OrderShippingMetaPersister {
 		private CheckoutSessionManager $session_manager,
 		private DeliveryDateFormatter $date_formatter,
 		private DeliveryCalculationDataBuilder $calculation_data_builder,
-		private ?LocationRepository $locations = null
+		private ?LocationRepository $locations = null,
+		private ?DeliveryCustomerCommentNormalizer $customer_comment_normalizer = null
 	) {
+		$this->customer_comment_normalizer ??= new DeliveryCustomerCommentNormalizer();
 	}
 
 	public function register(): void {
@@ -121,7 +124,7 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_pickup_marker_type']        = $pickup['marker_type'] ?? '';
 			$map['_wdc_pickup_point_address']      = $this->pickup_address( $pickup );
 			$map['_wdc_pickup_point_postcode']     = $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' );
-			$pickup_snapshot = $this->pickup_snapshot_with_customer_comments( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup, $rate );
+			$pickup_snapshot = $this->pickup_snapshot_without_customer_comments( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup );
 			$map['_wdc_pickup_point_snapshot']     = function_exists( 'wp_json_encode' ) ? wp_json_encode( $pickup_snapshot, JSON_UNESCAPED_UNICODE ) : json_encode( $pickup_snapshot );
 			if ( 'dpd' === (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' ) ) {
 				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
@@ -258,64 +261,28 @@ final class OrderShippingMetaPersister {
 			'cdek_code'     => (string) ( $pickup['cdek_code'] ?? $snapshot['cdek_code'] ?? '' ),
 			'raw_sanitized' => is_array( $snapshot['raw_sanitized'] ?? null ) ? $snapshot['raw_sanitized'] : ( is_array( $snapshot['raw'] ?? null ) ? $snapshot['raw'] : array() ),
 		);
-		$customer_comments = $this->customer_comments_from_rate( $rate );
-		if ( array() !== $customer_comments ) {
-			$pickup_data['customer_comments'] = $customer_comments;
-		}
-
 		return $pickup_data;
 	}
 
 	/**
 	 * @param array<string,mixed> $snapshot
-	 * @param array<string,mixed> $rate
 	 * @return array<string,mixed>
 	 */
-	private function pickup_snapshot_with_customer_comments( array $snapshot, array $rate ): array {
-		$comments = $this->customer_comments_from_rate( $rate );
-		if ( array() === $comments ) {
-			unset( $snapshot['customer_comments'] );
-			return $snapshot;
-		}
-
-		$snapshot['customer_comments'] = $comments;
+	private function pickup_snapshot_without_customer_comments( array $snapshot ): array {
+		unset( $snapshot['customer_comments'] );
 		return $snapshot;
 	}
 
 	/**
 	 * @param array<string,mixed> $rate
-	 * @return array<int,string>
+	 * @return array<int,array<string,string>>
 	 */
 	private function customer_comments_from_rate( array $rate ): array {
 		if ( is_array( $rate['customer_comments'] ?? null ) ) {
-			return $this->normalized_customer_comments( $rate['customer_comments'] );
+			return $this->customer_comment_normalizer->normalize( $rate['customer_comments'] );
 		}
 		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
-		return is_array( $rate_meta['customer_comments'] ?? null ) ? $this->normalized_customer_comments( $rate_meta['customer_comments'] ) : array();
-	}
-
-	/**
-	 * @param array<int|string,mixed> $comments
-	 * @return array<int,string>
-	 */
-	private function normalized_customer_comments( array $comments ): array {
-		$result = array();
-		foreach ( $comments as $comment ) {
-			if ( ! is_scalar( $comment ) ) {
-				continue;
-			}
-			$text = trim( (string) $comment );
-			if ( '' === $text ) {
-				continue;
-			}
-			$text = substr( $text, 0, 500 );
-			if ( in_array( $text, $result, true ) ) {
-				continue;
-			}
-			$result[] = $text;
-		}
-
-		return $result;
+		return is_array( $rate_meta['customer_comments'] ?? null ) ? $this->customer_comment_normalizer->normalize( $rate_meta['customer_comments'] ) : array();
 	}
 
 	/**

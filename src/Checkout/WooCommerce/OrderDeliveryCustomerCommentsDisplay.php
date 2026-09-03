@@ -3,13 +3,21 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
-use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentNormalizer;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentRenderer;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OrderDeliveryCustomerCommentsDisplay {
-	public function __construct( private ?SettingsRepository $settings = null ) {}
+	public function __construct(
+		private ?SettingsRepository $settings = null,
+		private ?DeliveryCustomerCommentRenderer $customer_comment_renderer = null,
+		private ?DeliveryCustomerCommentNormalizer $customer_comment_normalizer = null
+	) {
+		$this->customer_comment_normalizer ??= new DeliveryCustomerCommentNormalizer();
+		$this->customer_comment_renderer ??= new DeliveryCustomerCommentRenderer( $this->customer_comment_normalizer );
+	}
 
 	public function register(): void {
 		add_action( 'woocommerce_order_details_after_order_table', array( $this, 'render' ), 21 );
@@ -29,47 +37,19 @@ final class OrderDeliveryCustomerCommentsDisplay {
 		if ( ! is_object( $order ) || ! method_exists( $order, 'get_meta' ) ) {
 			return;
 		}
-		if ( DeliveryType::PICKUP === (string) $order->get_meta( '_wdc_platform_delivery_type', true ) ) {
-			return;
-		}
 		$comments = $this->comments( $order->get_meta( '_wdc_platform_customer_comments', true ) );
 		if ( array() === $comments ) {
 			return;
 		}
 
 		echo '<section class="wdc-order-delivery-comments" style="margin:16px 0 0;"><h2 style="margin:0 0 8px;">' . esc_html( __( 'Информация о доставке', 'walls-delivery-calc' ) ) . '</h2>';
-		foreach ( $comments as $comment ) {
-			echo '<div class="wdc-order-delivery-comments__item" style="margin:4px 0;">' . esc_html( $comment ) . '</div>';
-		}
+		echo $this->customer_comment_renderer->render_items( $comments );
 		echo '</section>';
 	}
 
-	/** @return array<int,string> */
+	/** @return array<int,array<string,string>> */
 	private function comments( mixed $raw ): array {
-		if ( is_string( $raw ) && '' !== trim( $raw ) ) {
-			$decoded = json_decode( $raw, true );
-			$raw = is_array( $decoded ) ? $decoded : array( $raw );
-		}
-		if ( ! is_array( $raw ) ) {
-			return array();
-		}
-		$result = array();
-		foreach ( $raw as $comment ) {
-			if ( ! is_scalar( $comment ) ) {
-				continue;
-			}
-			$text = trim( (string) $comment );
-			if ( '' === $text ) {
-				continue;
-			}
-			$text = substr( $text, 0, 500 );
-			if ( in_array( $text, $result, true ) ) {
-				continue;
-			}
-			$result[] = $text;
-		}
-
-		return $result;
+		return $this->customer_comment_normalizer->normalize( $raw );
 	}
 
 	private function email_enabled( mixed $email ): bool {

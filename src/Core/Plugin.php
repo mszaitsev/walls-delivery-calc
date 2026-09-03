@@ -119,7 +119,6 @@ use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryHttpClientInterface;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryMessageSanitizer;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\OzonDeliveryTokenCache;
 use WallsShop\WDC\Carriers\OzonDelivery\Api\WpOzonDeliveryHttpClient;
-use WallsShop\WDC\Carriers\OzonDelivery\Checkout\OzonDeliveryCustomerCommentProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Pickup\OzonDeliveryPickupImportLock;
@@ -216,6 +215,9 @@ use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentNormalizer;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentRenderer;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentSnapshotBuilder;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
@@ -522,8 +524,7 @@ final class Plugin {
 		$this->container->register( OzonDeliveryPackagingBuilderFactory::class, fn(): OzonDeliveryPackagingBuilderFactory => new OzonDeliveryPackagingBuilderFactory( $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( OzonDeliveryQuoteService::class, fn(): OzonDeliveryQuoteService => new OzonDeliveryQuoteService( $this->container->get( OzonDeliveryApiClient::class ), $this->container->get( OzonDeliveryQuoteRequestBuilder::class ), $this->container->get( OzonDeliveryQuoteParser::class ), $this->container->get( OzonDeliveryPackagingBuilderFactory::class )->create(), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( OzonDeliveryMessageSanitizer::class ) ) );
 		$this->container->register( OzonDeliveryQuoteDiagnosticService::class, fn(): OzonDeliveryQuoteDiagnosticService => new OzonDeliveryQuoteDiagnosticService( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( RussianPhoneNormalizer::class ) ) );
-		$this->container->register( OzonDeliveryCustomerCommentProvider::class, fn(): OzonDeliveryCustomerCommentProvider => new OzonDeliveryCustomerCommentProvider() );
-		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( OzonDeliveryCustomerCommentProvider::class ), $this->container->get( Logger::class ), $this->container->get( OzonDeliveryCourierAddressMapper::class ), $this->container->get( OzonDeliveryCourierLocationResolver::class ) ) );
+		$this->container->register( OzonDeliveryCarrier::class, fn(): OzonDeliveryCarrier => new OzonDeliveryCarrier( $this->container->get( OzonDeliverySettings::class ), $this->container->get( OzonDeliveryCredentials::class ), $this->container->get( OzonDeliveryQuoteService::class ), $this->container->get( Logger::class ), $this->container->get( OzonDeliveryCourierAddressMapper::class ), $this->container->get( OzonDeliveryCourierLocationResolver::class ) ) );
 		$this->container->register( OzonDeliveryShipmentDescriptionBuilder::class, fn(): OzonDeliveryShipmentDescriptionBuilder => new OzonDeliveryShipmentDescriptionBuilder() );
 		$this->container->register( OzonDeliveryShipmentExternalIdResolver::class, fn(): OzonDeliveryShipmentExternalIdResolver => new OzonDeliveryShipmentExternalIdResolver() );
 		$this->container->register( OzonDeliveryShipmentAllocationValueResolver::class, fn(): OzonDeliveryShipmentAllocationValueResolver => new OzonDeliveryShipmentAllocationValueResolver() );
@@ -769,6 +770,9 @@ final class Plugin {
 		$this->container->register( RateSorter::class, fn(): RateSorter => new RateSorter() );
 		$this->container->register( FallbackRateFactory::class, fn(): FallbackRateFactory => new FallbackRateFactory() );
 		$this->container->register( RuleAppliedRateBuilder::class, fn(): RuleAppliedRateBuilder => new RuleAppliedRateBuilder( $this->container->get( RuleEngine::class ) ) );
+		$this->container->register( DeliveryCustomerCommentNormalizer::class, fn(): DeliveryCustomerCommentNormalizer => new DeliveryCustomerCommentNormalizer() );
+		$this->container->register( DeliveryCustomerCommentSnapshotBuilder::class, fn(): DeliveryCustomerCommentSnapshotBuilder => new DeliveryCustomerCommentSnapshotBuilder( $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
+		$this->container->register( DeliveryCustomerCommentRenderer::class, fn(): DeliveryCustomerCommentRenderer => new DeliveryCustomerCommentRenderer( $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
 		$this->container->register( CheckoutLogger::class, fn(): CheckoutLogger => new CheckoutLogger( $this->container->get( Logger::class ) ) );
 		$this->container->register( CarrierExecutionGuard::class, fn(): CarrierExecutionGuard => new CarrierExecutionGuard( $this->container->get( CheckoutLogger::class ) ) );
 		$this->container->register(
@@ -794,7 +798,8 @@ final class Plugin {
 				$this->container->get( DeliveryServiceRegistry::class ),
 				$this->container->get( DeliveryServiceManager::class ),
 				$this->container->get( PackagingWeightCalculator::class ),
-				$this->container->get( DpdSettings::class )
+				$this->container->get( DpdSettings::class ),
+				$this->container->get( DeliveryCustomerCommentSnapshotBuilder::class )
 			)
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
@@ -847,7 +852,7 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutAddressValidation::class, fn(): CheckoutAddressValidation => new CheckoutAddressValidation( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( WooCommerceRateMapper::class, fn(): WooCommerceRateMapper => new WooCommerceRateMapper() );
-		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( RussianPhoneNormalizer::class ) ) );
+		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ), $this->container->get( LocationRepository::class ), $this->container->get( RussianPhoneNormalizer::class ), $this->container->get( CheckoutLogger::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register(
 			ShippingMethodRegistrar::class,
 			fn(): ShippingMethodRegistrar => new ShippingMethodRegistrar(
@@ -883,11 +888,11 @@ final class Plugin {
 		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ) ) );
 		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( RuleFormulaFormatter::class, fn(): RuleFormulaFormatter => new RuleFormulaFormatter() );
-		$this->container->register( DeliveryCalculationDataBuilder::class, fn(): DeliveryCalculationDataBuilder => new DeliveryCalculationDataBuilder( $this->container->get( RuleFormulaFormatter::class ) ) );
-		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ), $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( DeliveryCalculationDataBuilder::class, fn(): DeliveryCalculationDataBuilder => new DeliveryCalculationDataBuilder( $this->container->get( RuleFormulaFormatter::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
+		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ), $this->container->get( LocationRepository::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
 		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment, $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ) ) );
 		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay( $this->container->get( PickupPointCardRenderer::class ), $this->container->get( SettingsRepository::class ) ) );
-		$this->container->register( OrderDeliveryCustomerCommentsDisplay::class, fn(): OrderDeliveryCustomerCommentsDisplay => new OrderDeliveryCustomerCommentsDisplay( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( OrderDeliveryCustomerCommentsDisplay::class, fn(): OrderDeliveryCustomerCommentsDisplay => new OrderDeliveryCustomerCommentsDisplay( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryCustomerCommentRenderer::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
 		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
@@ -1093,10 +1098,10 @@ final class Plugin {
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( OrderDeliveryRecalculationService::class, fn(): OrderDeliveryRecalculationService => new OrderDeliveryRecalculationService( $this->container->get( OrderQuoteRequestMapper::class ), $this->container->get( CheckoutOrchestrator::class ), $this->container->get( OrderShipmentRepository::class ) ) );
 		$this->container->register( OrderDeliveryAddressNormalizationService::class, fn(): OrderDeliveryAddressNormalizationService => new OrderDeliveryAddressNormalizationService( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionService::class ) ) );
-		$this->container->register( OrderDeliveryReplacementService::class, fn(): OrderDeliveryReplacementService => new OrderDeliveryReplacementService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ), $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( PekCheckoutQuoteContextResolver::class ), $this->container->get( PekCheckoutPickupPointFormatter::class ) ) );
+		$this->container->register( OrderDeliveryReplacementService::class, fn(): OrderDeliveryReplacementService => new OrderDeliveryReplacementService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( DeliveryDateFormatter::class ), $this->container->get( DeliveryCalculationDataBuilder::class ), $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( PekCheckoutQuoteContextResolver::class ), $this->container->get( PekCheckoutPickupPointFormatter::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
 		$this->container->register( OrderDeliveryRateRenderer::class, fn(): OrderDeliveryRateRenderer => new OrderDeliveryRateRenderer() );
 		$this->container->register( OrderDeliveryRecalculationAdminController::class, fn(): OrderDeliveryRecalculationAdminController => new OrderDeliveryRecalculationAdminController( $this->container->get( OrderDeliveryRecalculationService::class ), $this->container->get( OrderDeliveryRateRenderer::class ), $this->container->get( CheckoutLocationAjax::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( OrderDeliveryAddressNormalizationService::class ), $this->container->get( OrderDeliveryReplacementService::class ), $this->container->get( YandexDeliveryCheckoutPickupPointFormatter::class ), $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->container->get( DpdPickupPointScheduleFormatter::class ), $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( PekCheckoutQuoteContextResolver::class ), $this->container->get( PekCheckoutPickupPointFormatter::class ), $this->container->get( PekCountryPolicy::class ), $this->environment->plugin_url(), $this->environment->version(), $this->container->get( CdekDeliveryPointService::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( YandexLocationMappingV2Repository::class ) ) );
-		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox( $this->container->get( OrderShipmentRepository::class ) ) );
+		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( DeliveryCustomerCommentRenderer::class ), $this->container->get( DeliveryCustomerCommentNormalizer::class ) ) );
 		$this->container->register( \WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService::class, fn(): \WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService => new \WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( CdekLocationResolver::class ) ) );
 		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminAjaxService() );
 		$this->container->register( \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder::class, fn(): \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder => new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder( $this->container->get( OrderShipmentRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentActualCostResolver::class ), $this->container->get( CdekOrderStatusService::class ), $this->container->get( ShipmentBacklogService::class ), $this->container->get( CarrierShipmentAdapterRegistry::class ), $this->container->get( ShipmentMetaboxButtonPolicy::class ), $this->container->get( ShipmentDocumentProviderRegistry::class ), $this->container->get( ShipmentDocumentDownloadService::class ) ) );

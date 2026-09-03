@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearchParser;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Core\Autoloader;
@@ -179,6 +180,7 @@ checkout_location_picker_assert( array( 'RU' ) === $country_index->rebuild(), 'L
 $search = new CheckoutLocationSearch( new LocationSearchService( $repository ) );
 $ajax = new CheckoutLocationAjax( $search, $settings, $country_index );
 $formatter = LocationDisplayNameFormatter::from_rules( get_option( 'wdc_location_type_display_rules', array() ) );
+$parser = new CheckoutLocationSearchParser( get_option( 'wdc_location_type_display_rules', array() ) );
 
 checkout_location_picker_assert( 'Новосибирская обл., г Новосибирск' === 'Новосибирская обл., г Новосибирск', 'Initial query includes region when enabled.' );
 $settings->set( 'include_region_in_checkout_city_picker_query', false );
@@ -252,6 +254,14 @@ checkout_location_picker_assert( '54' === (string) ( $ajax->payload( 'новос
 checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'курьинский ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'District plus place ranks Курьинский Ивановка first.' );
 checkout_location_picker_assert( 'fias-lip-ivan' === ( $ajax->payload( 'липецкая область ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Region marker is treated as hierarchy marker, not DB value.' );
 checkout_location_picker_assert( array() === $flatten_fias( $ajax->payload( 'село' ) ), 'Type words alone are not searchable DB values.' );
+$typed_atbasar = $parser->parse( 'поселок Атбасар' );
+checkout_location_picker_assert( array( 'атбасар' ) === $typed_atbasar['real_tokens'] && true === ( $typed_atbasar['markers']['place'] ?? false ) && array( 'п' ) === ( $typed_atbasar['requested_types']['place'] ?? array() ), 'Parser keeps explicit поселок subtype as canonical place type п while removing marker from real tokens.' );
+foreach ( array( 'п Атбасар', 'п. Атбасар', 'посёлок Атбасар', 'пос Атбасар' ) as $alias_query ) {
+	$alias = $parser->parse( $alias_query );
+	checkout_location_picker_assert( array( 'атбасар' ) === $alias['real_tokens'] && array( 'п' ) === ( $alias['requested_types']['place'] ?? array() ), 'Parser aliases for поселок must map to canonical place type п: ' . $alias_query );
+}
+checkout_location_picker_assert( array( 'с' ) === ( $parser->parse( 'село Ивановка' )['requested_types']['place'] ?? array() ) && array( 'д' ) === ( $parser->parse( 'деревня Ивановка' )['requested_types']['place'] ?? array() ) && array( 'г' ) === ( $parser->parse( 'город Алматы' )['requested_types']['city'] ?? array() ), 'Parser must keep explicit село/деревня/город subtypes separately from generic markers.' );
+checkout_location_picker_assert( array( 'пгт' ) === ( $parser->parse( 'поселок городского типа Тестовый' )['requested_types']['place'] ?? array() ) && array( 'рп' ) === ( $parser->parse( 'рабочий поселок Тестовый' )['requested_types']['place'] ?? array() ) && array( 'аул' ) === ( $parser->parse( 'аул Тестовый' )['requested_types']['place'] ?? array() ), 'Parser must support multiword and foreign settlement type aliases.' );
 $settings->set( 'checkout_location_region_limit', 5 );
 $settings->set( 'checkout_location_search_limit', 100 );
 $many_payload = $ajax->payload( 'многообластный' );
@@ -290,10 +300,28 @@ checkout_location_picker_assert( 'resolved' === $resolved['status'] && $resolved
 checkout_location_picker_assert( 'resolved' !== $search->resolve_checkout_fields( 'Алтайский край', '' )['status'], 'Auto-resolve does not select a location for unclear input.' );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'BY', 'gar_object_id' => 990001, 'fias_id' => 'fias-by-minsk', 'region_code' => 'BY-MI', 'region_name' => 'Минская', 'place_name' => 'Минск', 'display_name' => 'Минск' ) ) );
 $repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990002, 'fias_id' => 'fias-kz-almaty', 'region_code' => 'KZ-ALA', 'region_name' => 'Алматы', 'place_name' => 'Алматы', 'display_name' => 'Алматы' ) ) );
+$wpdb->locations[184506] = array( 'id' => 184506, 'country_code' => 'KZ', 'gar_object_id' => 990003, 'gar_id' => '990003', 'fias_id' => 'fias-kz-atbasar-p', 'region_code' => 'KZ-AKM', 'region_name' => 'Акмолинская', 'region_type' => 'обл', 'city_name' => '', 'city_type' => '', 'settlement_name' => 'Атбасар', 'settlement_type' => 'п', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Акмолинская обл., п Атбасар', 'searchable_text' => Location::normalize_search_text( 'Акмолинская обл п Атбасар' ), 'active' => 1 );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990004, 'fias_id' => 'fias-kz-atbasar-g', 'region_code' => 'KZ-AKM', 'region_name' => 'Акмолинская', 'city_name' => 'Атбасар', 'city_type' => 'г', 'place_name' => 'Атбасар', 'place_type' => 'г', 'display_name' => 'Акмолинская обл., г Атбасар' ) ) );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990005, 'fias_id' => 'fias-kz-atbasar-s', 'region_code' => 'KZ-AKM', 'region_name' => 'Акмолинская', 'place_name' => 'Атбасар', 'settlement_name' => 'Атбасар', 'place_type' => 'с', 'display_name' => 'Акмолинская обл., с Атбасар' ) ) );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990006, 'fias_id' => 'fias-kz-ivan-s', 'region_code' => 'KZ-IVN', 'region_name' => 'Тестовая', 'place_name' => 'Ивановка', 'settlement_name' => 'Ивановка', 'place_type' => 'с', 'display_name' => 'Тестовая обл., с Ивановка' ) ) );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990007, 'fias_id' => 'fias-kz-ivan-d', 'region_code' => 'KZ-IVN', 'region_name' => 'Тестовая', 'place_name' => 'Ивановка', 'settlement_name' => 'Ивановка', 'place_type' => 'д', 'display_name' => 'Тестовая обл., д Ивановка' ) ) );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990008, 'fias_id' => 'fias-kz-ivan-p', 'region_code' => 'KZ-IVN', 'region_name' => 'Тестовая', 'place_name' => 'Ивановка', 'settlement_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Тестовая обл., п Ивановка' ) ) );
+$repository->save( checkout_location_picker_location( array( 'country_code' => 'KZ', 'gar_object_id' => 990009, 'fias_id' => 'fias-kz-empty-type', 'region_code' => 'KZ-EMP', 'region_name' => 'Пустая', 'place_name' => 'Пустотипск', 'settlement_name' => 'Пустотипск', 'place_type' => '', 'settlement_type' => '', 'display_name' => 'Пустая обл., Пустотипск' ) ) );
 $country_index->rebuild();
 checkout_location_picker_assert( 'fias-by-minsk' === ( $ajax->payload( 'Минск', '', 'BY' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'country=BY searches only BY local rows.' );
 checkout_location_picker_assert( array() === ( $ajax->payload( 'Новосибирск', '', 'KZ' )['groups'] ?? array( 'unexpected' ) ), 'country=KZ does not return RU Новосибирск.' );
 checkout_location_picker_assert( 'not_found' === $search->resolve_checkout_fields( 'Новосибирская', 'Новосибирск', 'KZ' )['status'], 'Resolve with country=KZ does not resolve RU locations.' );
+$typed_atbasar_payload = $ajax->payload( 'поселок Атбасар', '', 'KZ' );
+checkout_location_picker_assert( 'fias-kz-atbasar-p' === ( $typed_atbasar_payload['groups'][0]['items'][0]['fias_id'] ?? '' ) && 184506 === (int) ( $typed_atbasar_payload['groups'][0]['items'][0]['id'] ?? 0 ) && 'п' === (string) ( $typed_atbasar_payload['groups'][0]['items'][0]['place_type'] ?? '' ), 'Picker must rank explicit поселок Атбасар as KZ place_type п with canonical location_id=184506.' );
+$typed_atbasar_resolved = $search->resolve_checkout_fields( '', 'поселок Атбасар', 'KZ' );
+checkout_location_picker_assert( 'resolved' === $typed_atbasar_resolved['status'] && $typed_atbasar_resolved['location'] instanceof Location && 184506 === (int) $typed_atbasar_resolved['location']->id && 'п' === $typed_atbasar_resolved['location']->resolved_place_type(), 'resolve_checkout_fields must resolve explicit поселок Атбасар to canonical KZ location_id=184506.' );
+foreach ( array( 'село Ивановка' => 'fias-kz-ivan-s', 'деревня Ивановка' => 'fias-kz-ivan-d', 'поселок Ивановка' => 'fias-kz-ivan-p' ) as $query => $expected_fias ) {
+	$resolved = $search->resolve_checkout_fields( '', $query, 'KZ' );
+	checkout_location_picker_assert( 'resolved' === $resolved['status'] && $resolved['location'] instanceof Location && $expected_fias === $resolved['location']->fias_id, 'Explicit same-name locality type must resolve ' . $query . ' to ' . $expected_fias . '.' );
+}
+checkout_location_picker_assert( 'ambiguous' === $search->resolve_checkout_fields( '', 'Ивановка', 'KZ' )['status'], 'Untyped same-name Ивановка with multiple non-empty types must remain ambiguous.' );
+$empty_type_resolved = $search->resolve_checkout_fields( '', 'поселок Пустотипск', 'KZ' );
+checkout_location_picker_assert( 'resolved' === $empty_type_resolved['status'] && $empty_type_resolved['location'] instanceof Location && 'fias-kz-empty-type' === $empty_type_resolved['location']->fias_id, 'Explicit type may fallback to a single exact-name location with empty place_type.' );
 
 $city_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
 $city_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );

@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -12,6 +14,7 @@ use WallsShop\WDC\Domain\Phone\RussianPhoneNormalizer;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -21,7 +24,9 @@ final class WooCommercePackageMapper {
 		private ?CheckoutSessionManager $session_manager = null,
 		private ?SettingsRepository $settings = null,
 		private ?LocationRepository $location_repository = null,
-		private ?RussianPhoneNormalizer $phones = null
+		private ?RussianPhoneNormalizer $phones = null,
+		private ?CheckoutLogger $logger = null,
+		private ?CheckoutLocationSearch $location_search = null
 	) {
 		$this->phones = $phones ?? new RussianPhoneNormalizer();
 	}
@@ -38,38 +43,46 @@ final class WooCommercePackageMapper {
 		$total       = Money::from_rubles( (float) ( $package['contents_cost'] ?? 0 ) );
 		$items       = $this->items_from_contents( is_array( $package['contents'] ?? null ) ? $package['contents'] : array() );
 		$weight_g    = (int) round( max( 0.0, (float) ( $package['contents_weight'] ?? 0 ) ) * 1000 );
-		$location_id = $this->selected_location_id();
-		$coordinates = $this->destination_coordinates( $location_id );
+		$location_context = $this->checkout_location_context( $destination, $address, $request_country );
+		$location_id = (string) $location_context['location_id'];
+		$coordinates = $this->destination_coordinates( $location_id, $location_context['location'] );
 
 		$domain_package = Package::from_items( $items, 0, $total, $total );
 		if ( 0 === $domain_package->total_weight_g && $weight_g > 0 ) {
 			$domain_package = new Package( $items, $total, $total, $weight_g, 0, $weight_g, null, null, null, null, 'cart' );
 		}
 
-		return new QuoteRequest(
+		$context = array_merge(
+			array(
+				'items_quantity' => $domain_package->get_total_quantity(),
+				'source'         => 'woocommerce_checkout',
+				'normalized_address' => $address->normalized,
+				'fallback_address'   => $address->fallback,
+				'selected_location_fias_id' => $this->selected_location_fias_id( $address ),
+				'recipient_phone' => $this->recipient_phone(),
+				'destination_latitude' => $coordinates['latitude'],
+				'destination_longitude' => $coordinates['longitude'],
+				'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
+			),
+			$this->strip_untrusted_dadata_context( $customer_context ),
+			$this->trusted_dadata_address_context( $address )
+		);
+		$context['selected_location_id'] = $location_id;
+		$context['location_id'] = $location_id;
+		$context['location_context_source'] = (string) $location_context['source'];
+
+		$request = new QuoteRequest(
 			$request_country,
 			$address,
 			$domain_package,
 			$this->payment_method(),
 			$total,
 			gmdate( 'Y-m-d' ),
-			array_merge(
-				array(
-					'items_quantity' => $domain_package->get_total_quantity(),
-					'source'         => 'woocommerce_checkout',
-					'normalized_address' => $address->normalized,
-					'fallback_address'   => $address->fallback,
-					'selected_location_id' => $location_id,
-					'selected_location_fias_id' => $this->selected_location_fias_id( $address ),
-					'recipient_phone' => $this->recipient_phone(),
-					'destination_latitude' => $coordinates['latitude'],
-					'destination_longitude' => $coordinates['longitude'],
-					'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
-				),
-				$this->strip_untrusted_dadata_context( $customer_context ),
-				$this->trusted_dadata_address_context( $address )
-			)
+			$context
 		);
+		$this->log_quote_request_context( $request, $location_context );
+
+		return $request;
 	}
 
 	/**
@@ -354,7 +367,7 @@ final class WooCommercePackageMapper {
 	}
 
 	/** @return array{latitude:?float,longitude:?float} */
-	private function destination_coordinates( string $location_id ): array {
+	private function destination_coordinates( string $location_id, ?Location $resolved_location = null ): array {
 		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
 		$session = $this->coordinate_pair_from_contexts( $city, $context );
@@ -367,7 +380,7 @@ final class WooCommercePackageMapper {
 			return array( 'latitude' => null, 'longitude' => null );
 		}
 
-		$location = $this->location_repository->find_by_id( $id );
+		$location = $resolved_location instanceof Location && (int) $resolved_location->id === $id ? $resolved_location : $this->location_repository->find_by_id( $id );
 		if ( null === $location || ! $location->active ) {
 			return array( 'latitude' => null, 'longitude' => null );
 		}
@@ -429,6 +442,95 @@ final class WooCommercePackageMapper {
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
 
 		return (string) ( $context['location_id'] ?? $context['id'] ?? '' );
+	}
+
+	/**
+	 * @param array<string,mixed> $destination
+	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,place_name:string,place_type:string,place_level:string}
+	 */
+	private function checkout_location_context( array $destination, Address $address, string $country_code ): array {
+		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
+		$city_id = $this->positive_location_id( $city['id'] ?? '' );
+		if ( $city_id > 0 ) {
+			return $this->location_context_result( (string) $city_id, 'frontend', 'resolved', null, $city );
+		}
+
+		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
+		$context_id = $this->positive_location_id( $context['location_id'] ?? $context['id'] ?? '' );
+		if ( $context_id > 0 ) {
+			return $this->location_context_result( (string) $context_id, 'session', 'resolved', null, $context );
+		}
+
+		return $this->recover_checkout_location_context( $destination, $address, $country_code );
+	}
+
+	/**
+	 * @param array<string,mixed> $destination
+	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,place_name:string,place_type:string,place_level:string}
+	 */
+	private function recover_checkout_location_context( array $destination, Address $address, string $country_code ): array {
+		$country_code = strtoupper( trim( $country_code ) );
+		$city_text = trim( '' !== trim( $address->settlement ) ? $address->settlement : $address->city );
+		if ( '' === $city_text ) {
+			$city_text = trim( (string) ( $destination['city'] ?? '' ) );
+		}
+		$region_text = trim( '' !== trim( $address->region_name ) ? $address->region_name : (string) ( $destination['state'] ?? '' ) );
+		if ( '' === $country_code || '' === $city_text || ! $this->location_search instanceof CheckoutLocationSearch ) {
+			return $this->location_context_result( '', 'missing', 'not_found', null, array() );
+		}
+
+		$result = $this->location_search->resolve_checkout_fields( $region_text, $city_text, $country_code );
+		$status = (string) ( $result['status'] ?? 'not_found' );
+		$location = $result['location'] instanceof Location ? $result['location'] : null;
+		if ( 'resolved' === $status && $location instanceof Location && null !== $location->id && $location->id > 0 ) {
+			return $this->location_context_result( (string) $location->id, 'backend_resolved', 'resolved', $location, $location->to_array() );
+		}
+
+		return $this->location_context_result( '', 'ambiguous' === $status ? 'ambiguous' : 'missing', $status, null, array() );
+	}
+
+	/** @param array<string,mixed> $source */
+	private function location_context_result( string $location_id, string $source, string $status, ?Location $location, array $source_data ): array {
+		return array(
+			'location_id'   => $location_id,
+			'source'        => $source,
+			'status'        => $status,
+			'location'      => $location,
+			'display_name'  => (string) ( $source_data['display_name'] ?? '' ),
+			'place_name'    => (string) ( $source_data['place_name'] ?? $source_data['settlement_name'] ?? $source_data['city_name'] ?? '' ),
+			'place_type'    => (string) ( $source_data['place_type'] ?? $source_data['settlement_type'] ?? '' ),
+			'place_level'   => (string) ( $source_data['place_level'] ?? '' ),
+		);
+	}
+
+	private function positive_location_id( mixed $value ): int {
+		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
+	}
+
+	/** @param array<string,mixed> $location_context */
+	private function log_quote_request_context( QuoteRequest $request, array $location_context ): void {
+		if ( ! $this->logger instanceof CheckoutLogger ) {
+			return;
+		}
+		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
+		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
+		$location_id = (string) ( $request->customer_context['location_id'] ?? $context['location_id'] ?? $context['id'] ?? '' );
+		$selected_location_id = (string) ( $request->customer_context['selected_location_id'] ?? '' );
+		$this->logger->debug(
+			'Checkout quote request location context resolved.',
+			array(
+				'checkout_country_code' => $request->country_code,
+				'checkout_city_text' => $request->destination->city,
+				'selected_location_id' => $selected_location_id,
+				'location_id' => $location_id,
+				'location_context_source' => (string) ( $location_context['source'] ?? 'missing' ),
+				'resolved_location_id' => '' !== trim( $selected_location_id ) ? $selected_location_id : $location_id,
+				'resolved_display_name' => (string) ( $location_context['display_name'] ?? $city['display_name'] ?? $context['display_name'] ?? '' ),
+				'resolved_place_name' => (string) ( $location_context['place_name'] ?? $city['place_name'] ?? $city['settlement_name'] ?? $context['settlement_name'] ?? $context['city_name'] ?? '' ),
+				'resolved_place_type' => (string) ( $location_context['place_type'] ?? $city['place_type'] ?? $city['settlement_type'] ?? '' ),
+				'resolved_place_level' => (string) ( $location_context['place_level'] ?? $city['place_level'] ?? '' ),
+			)
+		);
 	}
 
 	private function dpd_selected_terminal_code(): string {

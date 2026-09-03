@@ -60,6 +60,12 @@ if ( ! function_exists( 'esc_html' ) ) {
 	}
 }
 
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( mixed $value ): string {
+		return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' );
+	}
+}
+
 if ( ! function_exists( 'checked' ) ) {
 	function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
 		$result = (string) $checked === (string) $current ? 'checked="checked"' : '';
@@ -235,6 +241,7 @@ use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Checkout\JetLogisticCustomerComments;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -661,25 +668,73 @@ $coordinate_db = new class extends wpdb {
 	public array $locations = array();
 	public int $location_find_by_id_calls = 0;
 	public int $location_single_lookup_calls = 0;
+	public int $checkout_hierarchy_candidate_calls = 0;
 };
 $coordinate_db->locations = array(
 	array( 'id' => 650000, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирская область, г Новосибирск', 'latitude' => 55.030199, 'longitude' => 82.92043, 'active' => 1 ),
 	array( 'id' => 650001, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неактивный Новосибирск', 'latitude' => 55.1, 'longitude' => 82.9, 'active' => 0 ),
 	array( 'id' => 650002, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неверные координаты', 'latitude' => 91, 'longitude' => 82.9, 'active' => 1 ),
 	array( 'id' => 650003, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'display_name' => 'Неполные координаты', 'latitude' => 55.03, 'longitude' => null, 'active' => 1 ),
+	array( 'id' => 184506, 'country_code' => 'KZ', 'region_name' => 'Акмолинская', 'city_name' => '', 'settlement_name' => 'Атбасар', 'settlement_type' => 'п', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Акмолинская обл., п Атбасар', 'latitude' => 51.8, 'longitude' => 68.3, 'active' => 1 ),
+	array( 'id' => 184700, 'country_code' => 'RU', 'region_name' => 'Тестовая', 'city_name' => '', 'settlement_name' => 'Атбасар', 'settlement_type' => 'п', 'place_name' => 'Атбасар', 'place_type' => 'п', 'display_name' => 'Тестовая обл., п Атбасар', 'latitude' => 55.0, 'longitude' => 82.0, 'active' => 1 ),
+	array( 'id' => 184800, 'country_code' => 'KZ', 'region_name' => 'Первая', 'city_name' => '', 'settlement_name' => 'Ивановка', 'settlement_type' => 'п', 'place_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Первая обл., п Ивановка', 'active' => 1 ),
+	array( 'id' => 184801, 'country_code' => 'KZ', 'region_name' => 'Вторая', 'city_name' => '', 'settlement_name' => 'Ивановка', 'settlement_type' => 'п', 'place_name' => 'Ивановка', 'place_type' => 'п', 'display_name' => 'Вторая обл., п Ивановка', 'active' => 1 ),
 );
 $coordinate_repository = new LocationRepository( $coordinate_db );
+$coordinate_location_search = new CheckoutLocationSearch( new LocationSearchService( $coordinate_repository ) );
 $coordinate_session = new CheckoutSessionManager();
 $coordinate_session->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск', 'latitude' => 54.9833, 'longitude' => 82.8964 ) );
-$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+$coordinate_request = ( new WooCommercePackageMapper( null, $coordinate_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( 54.9833 === (float) ( $coordinate_request->customer_context['destination_latitude'] ?? 0 ) && 82.8964 === (float) ( $coordinate_request->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must prefer trusted session destination coordinates.' );
 wc_checkout_smoke_assert( 0 === $coordinate_db->location_find_by_id_calls, 'Package mapper must not query canonical location when session coordinates are already complete.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when selected city/session coordinates are already complete.' );
 
 $coordinate_session_id = new CheckoutSessionManager();
 $coordinate_session_id->save_city_context( array( 'location_id' => 650000, 'city_name' => 'Новосибирск' ) );
-$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository ) )->map( wc_checkout_smoke_package() );
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$coordinate_request_id = ( new WooCommercePackageMapper( null, $coordinate_session_id, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( wc_checkout_smoke_package() );
 wc_checkout_smoke_assert( '650000' === (string) ( $coordinate_request_id->customer_context['selected_location_id'] ?? '' ), 'Package mapper must preserve canonical selected_location_id.' );
 wc_checkout_smoke_assert( 55.030199 === (float) ( $coordinate_request_id->customer_context['destination_latitude'] ?? 0 ) && 82.92043 === (float) ( $coordinate_request_id->customer_context['destination_longitude'] ?? 0 ), 'Package mapper must resolve destination coordinates from canonical selected_location_id.' );
+wc_checkout_smoke_assert( 'session' === (string) ( $coordinate_request_id->customer_context['location_context_source'] ?? '' ), 'Package mapper must keep the session fast path when canonical location_id already exists.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when session location_id already exists.' );
+
+$atbasar_package = wc_checkout_smoke_package( 'KZ' );
+$atbasar_package['destination']['state'] = 'Акмолинская';
+$atbasar_package['destination']['city'] = 'поселок Атбасар';
+$atbasar_session = new CheckoutSessionManager();
+$atbasar_session->clear_normalized_address();
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$atbasar_request = ( new WooCommercePackageMapper( null, $atbasar_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $atbasar_package );
+wc_checkout_smoke_assert( '184506' === (string) ( $atbasar_request->customer_context['selected_location_id'] ?? '' ) && '184506' === (string) ( $atbasar_request->customer_context['location_id'] ?? '' ), 'Package mapper must recover canonical KZ поселок Атбасар location_id when frontend hidden ID is missing.' );
+wc_checkout_smoke_assert( 'backend_resolved' === (string) ( $atbasar_request->customer_context['location_context_source'] ?? '' ), 'Recovered checkout location context must be marked as backend_resolved.' );
+wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper backend recovery must call the injected checkout resolver exactly once when canonical ID is missing.' );
+
+$frontend_session = new CheckoutSessionManager();
+$frontend_session->clear_normalized_address();
+$frontend_session->save_selected_city( array( 'id' => 184506, 'display_name' => 'Акмолинская обл., п Атбасар', 'place_name' => 'Атбасар', 'place_type' => 'п' ) );
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$frontend_request = ( new WooCommercePackageMapper( null, $frontend_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $atbasar_package );
+wc_checkout_smoke_assert( '184506' === (string) ( $frontend_request->customer_context['selected_location_id'] ?? '' ) && 'frontend' === (string) ( $frontend_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must prefer existing frontend-selected canonical location_id over backend recovery.' );
+wc_checkout_smoke_assert( 0 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper must not call injected checkout resolver when frontend location_id already exists.' );
+
+$ambiguous_package = wc_checkout_smoke_package( 'KZ' );
+$ambiguous_package['destination']['state'] = '';
+$ambiguous_package['destination']['city'] = 'поселок Ивановка';
+$ambiguous_session = new CheckoutSessionManager();
+$ambiguous_session->clear_normalized_address();
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$ambiguous_request = ( new WooCommercePackageMapper( null, $ambiguous_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $ambiguous_package );
+wc_checkout_smoke_assert( '' === (string) ( $ambiguous_request->customer_context['selected_location_id'] ?? '' ) && 'ambiguous' === (string) ( $ambiguous_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must not choose the first location when backend recovery is ambiguous.' );
+wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper ambiguous backend recovery must use the injected checkout resolver once.' );
+
+$missing_package = wc_checkout_smoke_package( 'KZ' );
+$missing_package['destination']['city'] = 'поселок Несуществующий';
+$missing_session = new CheckoutSessionManager();
+$missing_session->clear_normalized_address();
+$coordinate_db->checkout_hierarchy_candidate_calls = 0;
+$missing_request = ( new WooCommercePackageMapper( null, $missing_session, null, $coordinate_repository, null, null, $coordinate_location_search ) )->map( $missing_package );
+wc_checkout_smoke_assert( '' === (string) ( $missing_request->customer_context['selected_location_id'] ?? '' ) && 'missing' === (string) ( $missing_request->customer_context['location_context_source'] ?? '' ), 'Package mapper must leave location_id empty when backend recovery finds no canonical location.' );
+wc_checkout_smoke_assert( 1 === $coordinate_db->checkout_hierarchy_candidate_calls, 'Package mapper not-found backend recovery must use the injected checkout resolver once.' );
 
 foreach ( array( 999999, 650001, 650002, 650003 ) as $bad_location_id ) {
 	$bad_session = new CheckoutSessionManager();
@@ -702,6 +757,24 @@ $rate_mapper = new WooCommerceRateMapper();
 $mapped      = $rate_mapper->map( $result->rates[0] );
 wc_checkout_smoke_assert( isset( $mapped['id'], $mapped['label'], $mapped['cost'], $mapped['meta_data'] ), 'WooCommerceRateMapper output must be valid.' );
 wc_checkout_smoke_assert( is_array( $mapped['meta_data']['crossed_price'] ), 'WooCommerceRateMapper must expose crossed price rendering data.' );
+$mapped_link = $rate_mapper->map(
+	wc_checkout_label_rate(
+		'Jet pickup',
+		DateRange::single( 4 ),
+		null,
+		array(
+			'customer_link_comments' => array(
+				array(
+					'text_before' => 'Адрес склада выдачи - ',
+					'label' => 'на сайте Jet Logistic',
+					'url' => 'https://jet.com.kz/контакты.html',
+				),
+			),
+		)
+	)
+);
+wc_checkout_smoke_assert( 'на сайте Jet Logistic' === (string) ( $mapped_link['meta_data']['customer_link_comments'][0]['label'] ?? '' ), 'WooCommerceRateMapper must expose structured customer link comments to the checkout renderer.' );
+wc_checkout_smoke_assert( 'https://jet.com.kz/контакты.html' === (string) ( $mapped_link['meta_data']['customer_link_comments'][0]['url'] ?? '' ), 'WooCommerceRateMapper must preserve Unicode URL path semantics for structured customer link comments.' );
 
 $yandex_pickup_label = $rate_mapper->map( wc_checkout_label_rate( 'Яндекс до ПВЗ - 2 дня', DateRange::single( 4 ), DateRange::single( 2 ) ) )['label'];
 wc_checkout_smoke_assert( 'Яндекс до ПВЗ - 4 дня' === $yandex_pickup_label && ! str_contains( $yandex_pickup_label, '—' ) && ! str_contains( $yandex_pickup_label, '2 дня' ) && 1 === substr_count( $yandex_pickup_label, '4 дня' ) && 1 === substr_count( $yandex_pickup_label, ' - ' ), 'Yandex pickup WC label must replace the original API delivery suffix with the final rule-adjusted delivery days and one shared separator.' );
@@ -758,13 +831,43 @@ $render_method = (object) array(
 		'delivery_type' => DeliveryType::PICKUP,
 		'requires_pickup_point' => false,
 		'planned_delivery_comment' => '4 дня',
-		'comments' => array( 'Пользовательский комментарий' ),
+		'customer_link_comments' => array(
+			array(
+				'text_before' => 'Адрес склада выдачи - ',
+				'label' => 'на сайте Jet Logistic',
+				'url' => 'https://jet.com.kz/контакты.html',
+			),
+		),
+		'comments' => array( 'Пользовательский комментарий', '<script>alert(1)</script>' ),
 	),
 );
 ob_start();
 ( new CheckoutRateRenderer() )->render( $render_method );
 $rendered_rate_html = (string) ob_get_clean();
-	wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must output planned_delivery_comment and preserve ordinary meta comments.' );
+wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '4 дня' ) && str_contains( $rendered_rate_html, 'Пользовательский комментарий' ), 'Single-rate renderer must output planned_delivery_comment and preserve ordinary meta comments.' );
+$link_position = strpos( $rendered_rate_html, 'Адрес склада выдачи - ' );
+$plain_position = strpos( $rendered_rate_html, 'Пользовательский комментарий' );
+$planned_position = strpos( $rendered_rate_html, '4 дня' );
+wc_checkout_smoke_assert( false !== $link_position && false !== $plain_position && false !== $planned_position && $link_position < $plain_position && $plain_position < $planned_position, 'Structured customer link comments must render before ordinary/rule comments and before planned delivery comments.' );
+$escaped_unicode_url = esc_url( 'https://jet.com.kz/контакты.html' );
+wc_checkout_smoke_assert( ( str_contains( $escaped_unicode_url, 'контакты.html' ) || str_contains( $escaped_unicode_url, '%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B.html' ) ) && ! str_contains( $escaped_unicode_url, '/.html' ), 'esc_url must preserve Jet contacts URL path semantics for Unicode URLs.' );
+wc_checkout_smoke_assert( str_contains( $rendered_rate_html, '<a class="wdc-platform-delivery-comment-link" href="' . $escaped_unicode_url . '" target="_blank" rel="noopener noreferrer">на сайте Jet Logistic</a>' ) && ! str_contains( $rendered_rate_html, 'https://jet.com.kz/.html' ) && ! str_contains( $rendered_rate_html, '&lt;a class=&quot;wdc-platform-delivery-comment-link&quot;' ), 'Structured customer link comments must render as safe active links with target and rel attributes without losing the Unicode path.' );
+wc_checkout_smoke_assert( ! str_contains( $rendered_rate_html, '<script>alert(1)</script>' ) && str_contains( $rendered_rate_html, '&lt;script&gt;alert(1)&lt;/script&gt;' ), 'Plain rate comments must remain escaped and must not become trusted HTML.' );
+$plain_render_method = (object) array(
+	'id' => 'other:pickup',
+	'meta_data' => array(
+		'carrier_key' => 'other',
+		'rate_id' => 'other:pickup',
+		'delivery_type' => DeliveryType::PICKUP,
+		'requires_pickup_point' => false,
+		'planned_delivery_comment' => '',
+		'comments' => array( 'Обычный комментарий другой службы' ),
+	),
+);
+ob_start();
+( new CheckoutRateRenderer() )->render( $plain_render_method );
+$plain_rendered_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $plain_rendered_html, 'Обычный комментарий другой службы' ) && ! str_contains( $plain_rendered_html, 'на сайте Jet Logistic' ) && ! str_contains( $plain_rendered_html, 'wdc-platform-delivery-comment-link' ), 'Other carrier plain comments must keep previous rendering without injected links.' );
 
 $suggestion_settings_repo = new SettingsRepository();
 $suggestion_settings_repo->set( 'dadata_suggestions_enabled', true );
@@ -1445,6 +1548,12 @@ wc_checkout_smoke_assert( 'courier' === ( $order->meta['_wdc_platform_delivery_t
 
 $ozon_tracking_comment = 'Отслеживание посылки - в приложении Ozon, раздел Доставка';
 $ozon_refusal_comment = 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.';
+$ozon_planned_comment = '5 дней';
+$ozon_customer_comments = array(
+	array( 'type' => 'text', 'text' => $ozon_tracking_comment ),
+	array( 'type' => 'text', 'text' => $ozon_refusal_comment ),
+	array( 'type' => 'text', 'text' => $ozon_planned_comment ),
+);
 $session->save_rates(
 	array(
 		'ozon_delivery:courier' => array(
@@ -1459,7 +1568,7 @@ $session->save_rates(
 			'cost' => 99.0,
 			'crossed_price' => 149.0,
 			'comments' => array( $ozon_tracking_comment, $ozon_refusal_comment ),
-			'customer_comments' => array( $ozon_tracking_comment, $ozon_refusal_comment ),
+			'customer_comments' => $ozon_customer_comments,
 			'rate_meta' => array(
 				'customer_comments' => array( 'forged browser value 999999 руб.' ),
 				'api_base_price_rub' => 149.0,
@@ -1470,8 +1579,8 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:ozon_delivery:courier' ) );
 $ozon_courier_order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $ozon_courier_order );
-wc_checkout_smoke_assert( array( $ozon_tracking_comment, $ozon_refusal_comment ) === ( $ozon_courier_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Ozon courier order must persist authoritative customer comments from the selected rate.' );
-wc_checkout_smoke_assert( array( $ozon_tracking_comment, $ozon_refusal_comment ) === ( $ozon_courier_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['customer_comments'] ?? null ), 'Ozon courier calculation data must freeze the selected-rate customer comments.' );
+wc_checkout_smoke_assert( $ozon_customer_comments === ( $ozon_courier_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Ozon courier order must persist authoritative structured customer comments from the selected rate.' );
+wc_checkout_smoke_assert( $ozon_customer_comments === ( $ozon_courier_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['customer_comments'] ?? null ), 'Ozon courier calculation data must freeze the selected-rate structured customer comments.' );
 wc_checkout_smoke_assert( ! isset( $ozon_courier_order->meta['_wdc_pickup_point_snapshot'] ), 'Ozon courier comments must not be stored through pickup point snapshot.' );
 ob_start();
 ( new OrderDeliveryCustomerCommentsDisplay() )->render( $ozon_courier_order );
@@ -1720,6 +1829,134 @@ wc_checkout_smoke_assert( 'KEM7' === ( $cdek_pickup_calc['pickup']['point_code']
 wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK checkout order create must save pickup description and storage notice.' );
 wc_checkout_smoke_assert( '' === ( $cdek_pickup_calc['pickup']['work_time'] ?? '' ), 'CDEK checkout order create must not save numeric zero work_time as meaningful text.' );
 wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->shipping_address_1 && '' === $cdek_pickup_order->shipping_address_2, 'CDEK checkout order create must write pickup shipping address.' );
+
+$session->clear_pickup_selection();
+$jet_warehouse_link_comment = array(
+	'type' => 'link',
+	'text_before' => JetLogisticCustomerComments::WAREHOUSE_CONTACTS_TEXT_BEFORE,
+	'label' => JetLogisticCustomerComments::WAREHOUSE_CONTACTS_LABEL,
+	'url' => 'https://jet.com.kz/контакты.html',
+	'text_after' => '',
+);
+$jet_warehouse_plain_comment = JetLogisticCustomerComments::WAREHOUSE_CONTACTS_TEXT_BEFORE . JetLogisticCustomerComments::WAREHOUSE_CONTACTS_LABEL;
+$jet_local_planned_comment = '3-5 дней';
+$jet_local_customer_comments = array(
+	$jet_warehouse_link_comment,
+	array( 'type' => 'text', 'text' => $jet_local_planned_comment ),
+);
+$session->save_rates(
+	array(
+		'jet_logistic_pickup' => array(
+			'rate_id' => 'jet_logistic_pickup',
+			'carrier_key' => 'jet_logistic',
+			'service_key' => 'jet_logistic',
+			'service_title' => 'Jet Logistic',
+			'label' => 'Джет Логистик до склада выдачи',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => false,
+			'planned_delivery_comment' => '3-5 дней',
+			'cost' => 1165.0,
+			'api_base_price_rub' => 1165.0,
+			'comments' => array(),
+			'customer_comments' => $jet_local_customer_comments,
+			'rate_meta' => array(
+				'api_base_price_rub' => 1165.0,
+				'jet_local_terminal' => 'yes',
+				'customer_comments' => array( 'forged Jet browser value' ),
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_pickup' ) );
+$jet_pickup_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $jet_pickup_order );
+wc_checkout_smoke_assert( 'jet_logistic_pickup' === (string) ( $jet_pickup_order->meta['_wdc_platform_rate_id'] ?? '' ) && 0 === (int) ( $jet_pickup_order->meta['_wdc_platform_requires_pickup_point'] ?? -1 ), 'Jet Logistic pickup order persistence must keep pickup delivery type without requiring a concrete pickup point.' );
+wc_checkout_smoke_assert( ! array_key_exists( '_wdc_pickup_point_id', $jet_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_code', $jet_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_snapshot', $jet_pickup_order->meta ), 'Jet Logistic pickup order persistence must not create fake pickup point metadata.' );
+wc_checkout_smoke_assert( $jet_local_customer_comments === ( $jet_pickup_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Jet Logistic local pickup must persist the structured warehouse link and planned comment through generic order meta.' );
+wc_checkout_smoke_assert( $jet_local_customer_comments === ( $jet_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['customer_comments'] ?? null ), 'Jet Logistic local pickup calculation snapshot must freeze structured customer comments from the selected rate.' );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay() )->render( $jet_pickup_order );
+$jet_pickup_comments_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $jet_pickup_comments_html, 'Информация о доставке' ) && str_contains( $jet_pickup_comments_html, JetLogisticCustomerComments::WAREHOUSE_CONTACTS_TEXT_BEFORE ) && str_contains( $jet_pickup_comments_html, '<a ' ) && str_contains( $jet_pickup_comments_html, 'контакты.html' ) && str_contains( $jet_pickup_comments_html, $jet_local_planned_comment ) && ! str_contains( $jet_pickup_comments_html, 'forged' ), 'Jet Logistic non-selectable pickup customer comments must render the structured warehouse link and planned comment in standalone order delivery information.' );
+$jet_pickup_email_settings = new SettingsRepository();
+$jet_pickup_email_settings->set( 'pickup_email_card_enabled_emails', array( 'customer_processing_order' ) );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay( $jet_pickup_email_settings ) )->render_email( $jet_pickup_order, false, false, (object) array( 'id' => 'customer_processing_order' ) );
+$jet_pickup_email_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $jet_pickup_email_html, '<a ' ) && str_contains( $jet_pickup_email_html, JetLogisticCustomerComments::WAREHOUSE_CONTACTS_LABEL ), 'Jet Logistic non-selectable pickup customer comments must render structured links through the existing customer email delivery-comments hook.' );
+
+$jet_remote_terminal_comment = JetLogisticCustomerComments::remote_terminal_comment( 'Астана' );
+$jet_remote_planned_comment = '5-7 дней';
+$jet_remote_customer_comments = array(
+	$jet_warehouse_link_comment,
+	array( 'type' => 'text', 'text' => $jet_remote_terminal_comment ),
+	array( 'type' => 'text', 'text' => $jet_remote_planned_comment ),
+);
+$session->clear_pickup_selection();
+$session->save_rates(
+	array(
+		'jet_logistic_pickup_remote' => array(
+			'rate_id' => 'jet_logistic_pickup',
+			'carrier_key' => 'jet_logistic',
+			'service_key' => 'jet_logistic',
+			'service_title' => 'Jet Logistic',
+			'label' => 'Джет Логистик до склада выдачи в г. Астана',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => false,
+			'planned_delivery_comment' => '5-7 дней',
+			'cost' => 1165.0,
+			'api_base_price_rub' => 1165.0,
+			'comments' => array( $jet_remote_terminal_comment ),
+			'customer_comments' => $jet_remote_customer_comments,
+			'rate_meta' => array(
+				'api_base_price_rub' => 1165.0,
+				'jet_local_terminal' => 'no',
+				'jet_pickup_terminal_customer_comment' => $jet_remote_terminal_comment,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_pickup_remote' ) );
+$jet_remote_pickup_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $jet_remote_pickup_order );
+wc_checkout_smoke_assert( $jet_remote_customer_comments === ( $jet_remote_pickup_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Jet Logistic remote pickup must persist warehouse link, terminal comment and planned comment in checkout order.' );
+wc_checkout_smoke_assert( ! array_key_exists( '_wdc_pickup_point_id', $jet_remote_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_snapshot', $jet_remote_pickup_order->meta ), 'Jet Logistic remote pickup must not create a fake pickup point snapshot to persist comments.' );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay() )->render( $jet_remote_pickup_order );
+$jet_remote_comments_html = (string) ob_get_clean();
+$jet_remote_warehouse_position = strpos( $jet_remote_comments_html, JetLogisticCustomerComments::WAREHOUSE_CONTACTS_TEXT_BEFORE );
+wc_checkout_smoke_assert( false !== $jet_remote_warehouse_position && false !== strpos( $jet_remote_comments_html, JetLogisticCustomerComments::WAREHOUSE_CONTACTS_LABEL ) && false !== strpos( $jet_remote_comments_html, $jet_remote_terminal_comment ) && false !== strpos( $jet_remote_comments_html, $jet_remote_planned_comment ) && $jet_remote_warehouse_position < strpos( $jet_remote_comments_html, $jet_remote_terminal_comment ) && strpos( $jet_remote_comments_html, $jet_remote_terminal_comment ) < strpos( $jet_remote_comments_html, $jet_remote_planned_comment ), 'Jet Logistic remote pickup order display must preserve warehouse link before remote terminal comment before planned delivery comment.' );
+
+$session->save_rates(
+	array(
+		'jet_logistic_courier' => array(
+			'rate_id' => 'jet_logistic_courier',
+			'carrier_key' => 'jet_logistic',
+			'service_key' => 'jet_logistic',
+			'service_title' => 'Jet Logistic',
+			'label' => 'Джет Логистик курьером',
+			'delivery_type' => 'courier',
+			'requires_pickup_point' => false,
+			'cost' => 1570.0,
+			'api_base_price_rub' => 1570.0,
+			'comments' => array(),
+			'customer_comments' => array(),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_courier' ) );
+$jet_courier_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $jet_courier_order );
+wc_checkout_smoke_assert( array() === ( $jet_courier_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Jet Logistic courier must not persist warehouse pickup comments.' );
+
+$selectable_pickup_order = new WdcSmokeOrder();
+$selectable_pickup_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::PICKUP );
+$selectable_pickup_order->update_meta_data( '_wdc_platform_requires_pickup_point', 1 );
+$selectable_pickup_order->update_meta_data( '_wdc_platform_customer_comments', array( 'Комментарий карточки ПВЗ' ) );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay() )->render( $selectable_pickup_order );
+$selectable_pickup_comments_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $selectable_pickup_comments_html, 'Информация о доставке' ) && str_contains( $selectable_pickup_comments_html, 'Комментарий карточки ПВЗ' ), 'Selectable pickup customer comments must render through the unified standalone order delivery information block.' );
 
 $session->save_rates(
 	array(

@@ -2,6 +2,9 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentNormalizer;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentRenderer;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentSnapshotBuilder;
 use WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 
@@ -9,6 +12,22 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
 
 function builder_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -59,6 +78,19 @@ function builder_smoke_rate( array $overrides = array() ): array {
 }
 
 $builder = new DeliveryCalculationDataBuilder( new RuleFormulaFormatter() );
+$comment_normalizer = new DeliveryCustomerCommentNormalizer();
+$comment_renderer = new DeliveryCustomerCommentRenderer( $comment_normalizer );
+$comment_snapshot_builder = new DeliveryCustomerCommentSnapshotBuilder( $comment_normalizer );
+
+$legacy_comments = $comment_normalizer->normalize( array( 'Комментарий 1', 'Комментарий 2', 'Комментарий 1' ) );
+builder_smoke_assert( array( array( 'type' => 'text', 'text' => 'Комментарий 1' ), array( 'type' => 'text', 'text' => 'Комментарий 2' ) ) === $legacy_comments, 'Customer comment normalizer must keep legacy array<string> orders readable and deduplicated.' );
+$structured_link = array( 'type' => 'link', 'text_before' => 'Адрес склада выдачи - ', 'label' => 'на сайте Jet Logistic', 'url' => 'https://jet.com.kz/контакты.html', 'text_after' => '' );
+builder_smoke_assert( array( $structured_link ) === $comment_normalizer->normalize( $structured_link ), 'Customer comment normalizer must accept a single structured link item.' );
+$link_html = $comment_renderer->render_items( array( $structured_link ) );
+builder_smoke_assert( str_contains( $link_html, '<a ' ) && str_contains( $link_html, 'target="_blank"' ) && str_contains( $link_html, 'rel="noopener noreferrer"' ) && str_contains( $link_html, 'контакты.html' ), 'Customer comment renderer must render structured links safely with target and rel attributes.' );
+$unsafe_html = $comment_renderer->render_items( array( '<script>alert(1)</script>', array( 'type' => 'link', 'label' => '<b>X</b>', 'url' => 'javascript:alert(1)' ) ) );
+builder_smoke_assert( ! str_contains( $unsafe_html, '<script>' ) && str_contains( $unsafe_html, '&lt;script&gt;' ) && ! str_contains( $unsafe_html, 'href="javascript:' ) && str_contains( $unsafe_html, '&lt;b&gt;X&lt;/b&gt;' ), 'Customer comment renderer must escape stored text and reject executable structured link URLs.' );
+
 $rate = builder_smoke_rate();
 $checkout = $builder->build(
 	$rate,
@@ -76,6 +108,42 @@ $admin = $builder->build(
 );
 builder_smoke_assert( $checkout['api'] === $admin['api'] && $checkout['rules'] === $admin['rules'] && $checkout['result'] === $admin['result'], 'Builder must keep api/rules/result parity for checkout and admin contexts.' );
 builder_smoke_assert( $checkout['package'] === $admin['package'], 'Builder must keep package parity for checkout and admin contexts.' );
+
+$snapshot_rate = new \WallsShop\WDC\Domain\Quote\DeliveryRate(
+	'demo:pickup',
+	'demo',
+	'Demo',
+	'demo',
+	'Demo',
+	'base',
+	'Base',
+	'pickup',
+	'Demo pickup',
+	\WallsShop\WDC\Domain\Common\Money::from_rubles( 100 ),
+	null,
+	null,
+	\WallsShop\WDC\Domain\Common\DateRange::single( 1 ),
+	'',
+	'Доставка планируется* с 10 сентября (четверг).',
+	array( 'Комментарий службы', 'Комментарий правила', 'Доставка планируется* с 10 сентября (четверг).' ),
+	false,
+	'',
+	true,
+	false,
+	array( 'customer_link_comments' => array( $structured_link ) )
+);
+$snapshot = $comment_snapshot_builder->build( $snapshot_rate );
+builder_smoke_assert( array( $structured_link, array( 'type' => 'text', 'text' => 'Комментарий службы' ), array( 'type' => 'text', 'text' => 'Комментарий правила' ), array( 'type' => 'text', 'text' => 'Доставка планируется* с 10 сентября (четверг).' ) ) === $snapshot, 'Unified customer comment snapshot must preserve structured links, carrier/rule comments and one planned delivery comment in order.' );
+$snapshot_data = $builder->build(
+	builder_smoke_rate(
+		array(
+			'customer_comments' => $snapshot,
+			'planned_delivery_comment' => 'Доставка планируется* с 10 сентября (четверг).',
+		)
+	),
+	array( 'customer_comments' => $snapshot )
+);
+builder_smoke_assert( $snapshot === ( $snapshot_data['customer_comments'] ?? null ) && 'Доставка планируется* с 10 сентября (четверг).' === (string) ( $snapshot_data['result']['planned_delivery_comment'] ?? '' ), 'Calculation data must persist canonical structured customer comments while keeping planned delivery technical meta.' );
 
 $zero_package = $builder->build(
 	array(
