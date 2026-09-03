@@ -95,10 +95,36 @@ final class OrderDeliveryRecalculationService {
 		}
 
 		foreach ( $tariff_groups as $group_id => $group_rates ) {
+			if ( 1 === count( $group_rates ) ) {
+				$plain[] = $this->single_tariff_method_payload( $group_rates[0] );
+				continue;
+			}
 			$plain[] = $this->tariff_group_payload( $group_id, $group_rates );
 		}
 
 		return array_values( $plain );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function single_tariff_method_payload( DeliveryRate $rate ): array {
+		$payload = $this->rate_payload( $rate );
+		$method_title = $this->service_method_title( $rate );
+		if ( '' !== $method_title ) {
+			$payload['label'] = $method_title;
+			$payload['compact_title'] = $method_title;
+		}
+
+		$payload['rate_id'] = $rate->rate_id;
+		$payload['selected_tariff_rate_id'] = $rate->rate_id;
+		$payload['selected_tariff_object'] = $rate->tariff_key;
+		$payload['selected_tariff_title'] = $rate->tariff_name;
+		$payload['tariff_key'] = $rate->tariff_key;
+		$payload['tariff_title'] = $rate->tariff_name;
+		$payload['api_base_price_rub'] = $rate->meta['api_base_price_rub'] ?? null;
+
+		return $payload;
 	}
 
 	/**
@@ -117,6 +143,8 @@ final class OrderDeliveryRecalculationService {
 		}
 		$title = trim( (string) ( $first->meta[ $title_key ] ?? '' ) ) ?: $default;
 		usort( $rates, static fn( DeliveryRate $left, DeliveryRate $right ): int => $left->price->get_kopecks() <=> $right->price->get_kopecks() );
+		$cheapest = $rates[0];
+		$cheapest_delivery_comment = $this->delivery_comment( $cheapest );
 
 		return array(
 			'id'                    => $group_id,
@@ -126,11 +154,19 @@ final class OrderDeliveryRecalculationService {
 			'service_title'         => $first->service_name,
 			'delivery_type'         => $delivery_type,
 			'delivery_type_label'   => $this->delivery_type_label( $delivery_type ),
-			'cost'                  => $rates[0]->price->get_rubles(),
-			'price_html'            => 'от ' . $this->format_rubles( $rates[0]->price->get_rubles() ),
-			'crossed_price_html'    => '',
-			'delivery_comment'      => '',
+			'cost'                  => $cheapest->price->get_rubles(),
+			'price_html'            => 'от ' . $this->format_rubles( $cheapest->price->get_rubles() ),
+			'crossed_price_html'    => $this->crossed_price( $cheapest ),
+			'delivery_comment'      => $cheapest_delivery_comment,
+			'delivery_days'         => $cheapest->delivery_days->to_array(),
+			'delivery_days_label'   => $cheapest_delivery_comment,
+			'planned_delivery_date' => $cheapest->planned_delivery_date,
+			'planned_delivery_comment' => $cheapest->planned_delivery_comment,
 			'comments'              => array(),
+			'compact_title'         => $title,
+			'compact_delivery_comment' => $cheapest_delivery_comment,
+			'compact_price_html'    => 'от ' . $this->format_rubles( $cheapest->price->get_rubles() ),
+			'compact_crossed_price_html' => $this->crossed_price( $cheapest ),
 			'requires_pickup_point' => ! empty( $first->requires_pickup_point ),
 			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $first ),
 			'selected'              => false,
@@ -159,6 +195,10 @@ final class OrderDeliveryRecalculationService {
 			'planned_delivery_comment' => $rate->planned_delivery_comment,
 			'comments'              => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
 			'customer_comments'     => is_array( $rate->meta['customer_comments'] ?? null ) ? array_values( $rate->meta['customer_comments'] ) : array(),
+			'compact_title'         => $rate->title,
+			'compact_delivery_comment' => $this->delivery_comment( $rate ),
+			'compact_price_html'    => $this->format_rubles( $rate->price->get_rubles() ),
+			'compact_crossed_price_html' => $this->crossed_price( $rate ),
 			'requires_pickup_point' => $rate->requires_pickup_point,
 			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $rate ),
 			'selected'              => false,

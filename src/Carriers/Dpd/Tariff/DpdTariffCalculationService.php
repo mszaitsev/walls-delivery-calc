@@ -89,6 +89,7 @@ final class DpdTariffCalculationService {
 		if ( $self_delivery ) {
 			$selected_delivery_terminal_code = trim( (string) ( $params['delivery_terminal_code'] ?? '' ) );
 			if ( '' !== $selected_delivery_terminal_code ) {
+				$delivery_terminal_source = 'selected';
 				$selected_point = $this->pickup_points->find_runtime_parcel_shop_by_terminal_code( $selected_delivery_terminal_code, (int) $receiver_city_id );
 				if ( null === $selected_point ) {
 					return DpdTariffResult::failure(
@@ -100,11 +101,12 @@ final class DpdTariffCalculationService {
 							'method' => 'getServiceCostByParcels3',
 							'pickup_terminal_selection' => $pickup_terminal,
 							'delivery_terminal_code' => $selected_delivery_terminal_code,
+							'delivery_terminal_source' => $delivery_terminal_source,
+							'delivery_terminal_selection' => array(),
 						)
 					);
 				}
 				$delivery_terminal_code = $selected_delivery_terminal_code;
-				$delivery_terminal_source = 'selected';
 				$delivery_terminal = array(
 					'point' => $selected_point,
 					'selected_terminal_code' => $delivery_terminal_code,

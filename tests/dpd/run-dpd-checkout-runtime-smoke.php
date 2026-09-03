@@ -23,6 +23,7 @@ use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
@@ -70,6 +71,7 @@ function update_option( string $key, mixed $value, bool|string $autoload = false
 function sanitize_key( string $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $key ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function WC(): object { return (object) array( 'session' => $GLOBALS['wdc_dpd_checkout_session'] ); }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -278,7 +280,7 @@ function dpd_checkout_regular_items_package( int $quantity ): Package {
 	);
 }
 
-function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSettings $settings ): DpdQuoteCarrier {
+function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSettings $settings, ?CheckoutSessionManager $session_manager = null ): DpdQuoteCarrier {
 	$delivery_codes = new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] );
 	$resolver = new DpdCityResolver( $delivery_codes );
 	$locations = new LocationRepository( $GLOBALS['wpdb'] );
@@ -288,7 +290,7 @@ function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSetting
 
 	$dpd_packaging = new DpdPackagingBuilderFactory( new PackagingWeightCalculator( new SettingsRepository() ) );
 
-	return new DpdQuoteCarrier( $settings, $service, $dpd_packaging->create(), new Logger() );
+	return new DpdQuoteCarrier( $settings, $service, $dpd_packaging->create(), new Logger(), $session_manager );
 }
 
 function dpd_checkout_orchestrator( CarrierRegistry $registry, DeliveryServiceRepository $services, DeliveryServiceCountryRepository $countries, DpdSettings $settings ): CheckoutOrchestrator {
@@ -330,6 +332,13 @@ function dpd_checkout_lead_time_normalizer( int $processing_days = 0 ): \WallsSh
 }
 
 $GLOBALS['wdc_dpd_checkout_options'] = array();
+$GLOBALS['wdc_dpd_checkout_session'] = new class {
+	/** @var array<string,mixed> */
+	public array $data = array();
+	public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+	public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+	public function save_data(): void {}
+};
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 100, 'country_code' => 'RU', 'active' => 1, 'region_name' => 'Новосибирская область', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирск' ),
@@ -418,6 +427,22 @@ $base_quote_id = $quote->quote_id;
 $selected_terminal_quote = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Москва', postcode: '101000' ), new Package( array(), Money::from_rubles( 2500 ), Money::from_rubles( 2500 ), 1500, 0, 1500, 30, 20, 10, null, 'cart' ), '', Money::from_rubles( 2500 ), '2026-06-17', array( 'selected_location_id' => '200', 'dpd_selected_terminal_code' => 'MSK-SELECTED' ) ) );
 dpd_checkout_assert( 'MSK-SELECTED' === (string) ( $soap->calls[ count( $soap->calls ) - 1 ]['payload']['delivery']['terminalCode'] ?? '' ), 'DPD pickup payload must use buyer-selected delivery terminalCode after selection.' );
 dpd_checkout_assert( $base_quote_id !== $selected_terminal_quote->quote_id, 'DPD quote_id must change when selected delivery terminalCode changes.' );
+$GLOBALS['wdc_dpd_checkout_session']->data = array();
+$session_manager = new CheckoutSessionManager();
+$session_manager->save_pickup_selection_for_family( DpdSettings::CARRIER_KEY . ':pickup', array( 'carrier_key' => DpdSettings::CARRIER_KEY, 'pickup_family' => DpdSettings::CARRIER_KEY . ':pickup', 'terminal_code' => 'MSK-SELECTED', 'point_code' => 'MSK-SELECTED' ) );
+$session_soap = new DpdCheckoutFakeSoapClient();
+dpd_checkout_fake_services(
+	$session_soap,
+	array(
+		array( 'serviceCode' => 'MAX', 'serviceName' => 'DPD Максимум', 'cost' => 100.25, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 2 ),
+		array( 'serviceCode' => 'NDY', 'serviceName' => 'DPD Экспресс', 'cost' => 220.10, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 1 ),
+	)
+);
+$session_carrier = dpd_checkout_build_carrier( $session_soap, $settings, $session_manager );
+$session_carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( 'MSK-SELECTED' === (string) ( $session_soap->calls[0]['payload']['delivery']['terminalCode'] ?? '' ), 'Customer checkout DPD quote must keep session selected pickup terminal fallback.' );
+$session_carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Москва', postcode: '101000' ), new Package( array(), Money::from_rubles( 2500 ), Money::from_rubles( 2500 ), 1500, 0, 1500, 30, 20, 10, null, 'cart' ), '', Money::from_rubles( 2500 ), '2026-06-17', array( 'source' => 'woocommerce_order_admin_preview', 'selected_location_id' => '200' ) ) );
+dpd_checkout_assert( 'MSK-AUTO' === (string) ( $session_soap->calls[1]['payload']['delivery']['terminalCode'] ?? '' ), 'Order admin DPD preview must ignore checkout session terminal fallback and use auto parcel_shop when context has no explicit terminal.' );
 dpd_checkout_assert( $base_quote_id !== $carrier->quote( dpd_checkout_request( 200, 2200 ) )->quote_id, 'DPD quote_id must change when weight changes.' );
 dpd_checkout_assert( $base_quote_id !== $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Москва', postcode: '101000' ), new Package( array(), Money::from_rubles( 2600 ), Money::from_rubles( 2600 ), 1500, 0, 1500, 40, 20, 10, null, 'cart' ), '', Money::from_rubles( 2600 ), '2026-06-17', array( 'selected_location_id' => '200' ) ) )->quote_id, 'DPD quote_id must change when dimensions or declared value change.' );
 $calls_before_courier_disabled = count( $soap->calls );

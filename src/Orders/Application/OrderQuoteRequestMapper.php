@@ -105,16 +105,17 @@ final class OrderQuoteRequestMapper {
 		$country = strtoupper( $this->order_string( $order, 'get_shipping_country' ) ?: $this->order_string( $order, 'get_billing_country' ) ?: (string) ( $destination['country_code'] ?? 'RU' ) );
 		$city = $this->order_string( $order, 'get_shipping_city' );
 		if ( '' === $city ) {
-			$city = (string) ( $destination['city_display_name'] ?? $this->meta_string( $order, '_wdc_platform_city_display_name' ) );
+			$city = $this->order_string( $order, 'get_billing_city' ) ?: (string) ( $destination['city_display_name'] ?? $this->meta_string( $order, '_wdc_platform_city_display_name' ) );
 		}
 		$postcode = $this->order_string( $order, 'get_shipping_postcode' )
+			?: $this->order_string( $order, 'get_billing_postcode' )
 			?: $this->meta_string( $order, '_wdc_platform_city_postcode' )
 			?: $this->meta_string( $order, '_wdc_platform_resolved_postcode' );
-		$street = $this->order_string( $order, 'get_shipping_address_1' );
-		$house  = $this->order_string( $order, 'get_shipping_address_2' );
+		$street = $this->order_string( $order, 'get_shipping_address_1' ) ?: $this->order_string( $order, 'get_billing_address_1' );
+		$house  = $this->order_string( $order, 'get_shipping_address_2' ) ?: $this->order_string( $order, 'get_billing_address_2' );
 		$region = $this->order_string( $order, 'get_shipping_state' );
 		if ( '' === $region ) {
-			$region = $this->meta_string( $order, '_shipping_state' );
+			$region = $this->order_string( $order, 'get_billing_state' ) ?: $this->meta_string( $order, '_shipping_state' );
 		}
 		$override = $this->normalize_location_override( $selected_location );
 		if ( array() !== $override ) {
@@ -187,7 +188,7 @@ final class OrderQuoteRequestMapper {
 				'fallback_address'          => $address->fallback,
 				'dpd_city_id'               => $override['dpd_city_id'] ?? null,
 				'dpd_receiver_city_id'      => $override['dpd_city_id'] ?? null,
-				'dpd_selected_terminal_code'=> $this->dpd_selected_terminal_code( $order, $selected_pickup_point ),
+				'dpd_selected_terminal_code'=> $this->dpd_selected_terminal_code( $order, $selected_pickup_point, $selected_location ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value && 0 !== $value
 		);
@@ -346,29 +347,133 @@ final class OrderQuoteRequestMapper {
 		return 0;
 	}
 
-	private function dpd_selected_terminal_code( object $order, array $selected_pickup_point = array() ): string {
+	private function dpd_selected_terminal_code( object $order, array $selected_pickup_point = array(), ?array $selected_location = null ): string {
+		if ( $this->is_dpd_pickup_selection( $selected_pickup_point ) ) {
+			return $this->pickup_terminal_code_from_payload( $selected_pickup_point );
+		}
+		if ( $this->selected_location_differs_from_saved( $order, $selected_location ) ) {
+			return '';
+		}
+		if ( ! $this->saved_pickup_belongs_to_dpd( $order ) ) {
+			return '';
+		}
+
+		return $this->saved_dpd_terminal_code( $order );
+	}
+
+	/** @param array<string,mixed> $pickup */
+	private function pickup_terminal_code_from_payload( array $pickup ): string {
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 		foreach ( array( 'terminal_code', 'point_code', 'delivery_point' ) as $key ) {
-			$value = trim( (string) ( $selected_pickup_point[ $key ] ?? '' ) );
-			if ( '' !== $value && DpdSettings::CARRIER_KEY === (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? DpdSettings::CARRIER_KEY ) ) {
-				return $value;
-			}
-		}
-		foreach ( array( '_wdc_dpd_pickup_terminal_code', '_wdc_pickup_point_code', '_wdc_platform_pickup_code' ) as $key ) {
-			$value = $this->meta_string( $order, $key );
-			if ( '' !== $value ) {
-				return $value;
-			}
-		}
-		$calculation = $this->calculation_data( $order );
-		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
-		foreach ( array( 'terminal_code', 'delivery_point', 'point_code' ) as $key ) {
-			$value = trim( (string) ( $pickup[ $key ] ?? '' ) );
+			$value = trim( (string) ( $pickup[ $key ] ?? $snapshot[ $key ] ?? '' ) );
 			if ( '' !== $value ) {
 				return $value;
 			}
 		}
 
 		return '';
+	}
+
+	private function saved_pickup_belongs_to_dpd( object $order ): bool {
+		$carrier = $this->normalized_owner_key( $this->meta_string( $order, '_wdc_pickup_carrier_key' ) );
+		$family  = $this->normalized_owner_key( $this->meta_string( $order, '_wdc_pickup_family' ) );
+		if ( $this->pickup_owner_is_known( $carrier, $family ) ) {
+			return $this->is_dpd_pickup_owner( $carrier, $family );
+		}
+
+		$snapshot = $this->array_meta( $order, '_wdc_pickup_point_snapshot' );
+		if ( $this->pickup_payload_owner_is_known( $snapshot ) ) {
+			return $this->pickup_payload_belongs_to_dpd( $snapshot );
+		}
+
+		$calculation = $this->calculation_data( $order );
+		$pickup      = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		if ( $this->pickup_payload_owner_is_known( $pickup ) ) {
+			return $this->pickup_payload_belongs_to_dpd( $pickup );
+		}
+
+		return DpdSettings::CARRIER_KEY === $this->normalized_owner_key( $this->meta_string( $order, '_wdc_platform_carrier_key' ) )
+			&& '' !== $this->meta_string( $order, '_wdc_dpd_pickup_terminal_code' );
+	}
+
+	private function saved_dpd_terminal_code( object $order ): string {
+		foreach ( array( '_wdc_dpd_pickup_terminal_code', '_wdc_pickup_point_code', '_wdc_platform_pickup_code' ) as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		$snapshot = $this->array_meta( $order, '_wdc_pickup_point_snapshot' );
+		if ( $this->pickup_payload_belongs_to_dpd( $snapshot ) ) {
+			$value = $this->pickup_terminal_code_from_payload( $snapshot );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		$calculation = $this->calculation_data( $order );
+		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		if ( $this->pickup_payload_belongs_to_dpd( $pickup ) ) {
+			$value = $this->pickup_terminal_code_from_payload( $pickup );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
+	}
+
+	/** @param array<string,mixed> $selected_pickup_point */
+	private function is_dpd_pickup_selection( array $selected_pickup_point ): bool {
+		$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+		$carrier = strtolower( trim( (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) ) );
+		$family = strtolower( trim( (string) ( $selected_pickup_point['pickup_family'] ?? $selected_pickup_point['family'] ?? $snapshot['pickup_family'] ?? $snapshot['family'] ?? '' ) ) );
+
+		return DpdSettings::CARRIER_KEY === $carrier || DpdSettings::CARRIER_KEY . ':pickup' === $family;
+	}
+
+	/** @param array<string,mixed> $pickup */
+	private function pickup_payload_belongs_to_dpd( array $pickup ): bool {
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$carrier  = $this->normalized_owner_key( (string) ( $pickup['carrier_key'] ?? $pickup['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) );
+		$family   = $this->normalized_owner_key( (string) ( $pickup['pickup_family'] ?? $pickup['family'] ?? $snapshot['pickup_family'] ?? $snapshot['family'] ?? '' ) );
+
+		return $this->is_dpd_pickup_owner( $carrier, $family );
+	}
+
+	/** @param array<string,mixed> $pickup */
+	private function pickup_payload_owner_is_known( array $pickup ): bool {
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$carrier  = $this->normalized_owner_key( (string) ( $pickup['carrier_key'] ?? $pickup['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) );
+		$family   = $this->normalized_owner_key( (string) ( $pickup['pickup_family'] ?? $pickup['family'] ?? $snapshot['pickup_family'] ?? $snapshot['family'] ?? '' ) );
+
+		return $this->pickup_owner_is_known( $carrier, $family );
+	}
+
+	private function is_dpd_pickup_owner( string $carrier, string $family ): bool {
+		return DpdSettings::CARRIER_KEY === $carrier || DpdSettings::CARRIER_KEY . ':pickup' === $family;
+	}
+
+	private function pickup_owner_is_known( string $carrier, string $family ): bool {
+		return '' !== $carrier || '' !== $family;
+	}
+
+	private function normalized_owner_key( string $value ): string {
+		return strtolower( trim( $value ) );
+	}
+
+	/** @param array<string,mixed>|null $selected_location */
+	private function selected_location_differs_from_saved( object $order, ?array $selected_location ): bool {
+		$override = $this->normalize_location_override( $selected_location );
+		$selected_location_id = $this->positive_int( $override['id'] ?? null );
+		if ( $selected_location_id <= 0 ) {
+			return false;
+		}
+
+		$saved_location_id = $this->saved_location_id( $order );
+
+		return $saved_location_id <= 0 || $selected_location_id !== $saved_location_id;
 	}
 
 	/**
@@ -428,6 +533,22 @@ final class OrderQuoteRequestMapper {
 	 */
 	private function calculation_data( object $order ): array {
 		$value = $this->meta_value( $order, OrderShippingMetaPersister::CALCULATION_META_KEY );
+		if ( is_array( $value ) ) {
+			return $value;
+		}
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return array();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function array_meta( object $order, string $key ): array {
+		$value = $this->meta_value( $order, $key );
 		if ( is_array( $value ) ) {
 			return $value;
 		}

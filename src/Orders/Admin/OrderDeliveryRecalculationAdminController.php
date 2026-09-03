@@ -129,7 +129,12 @@ final class OrderDeliveryRecalculationAdminController {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
 
-		$result = $this->service->preview( $order, $this->selected_location_from_request(), $this->array_from_request( 'selected_pickup_point' ) );
+		$selected_location = $this->selected_location_from_request() ?? array();
+		if ( $this->positive_location_id( $selected_location ) <= 0 ) {
+			wp_send_json_error( array( 'message' => __( 'Выберите населенный пункт из базы перед расчетом доставки.', 'walls-delivery-calc' ) ), 400 );
+		}
+
+		$result = $this->service->preview( $order, $selected_location, $this->array_from_request( 'selected_pickup_point' ) );
 		if ( empty( $result['success'] ) ) {
 			wp_send_json_error( array( 'message' => (string) $result['message'] ), 400 );
 		}

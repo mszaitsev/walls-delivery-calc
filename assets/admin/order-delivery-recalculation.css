@@ -127,10 +127,22 @@
 	border-top: 1px solid #dcdcde;
 	border-bottom: 0;
 	margin-top: auto;
+	flex-wrap: wrap;
+}
+
+.wdc-order-delivery-modal__view-controls {
+	margin-right: auto;
+}
+
+.wdc-order-delivery-modal__actions {
+	display: flex;
+	align-items: center;
+	gap: 10px;
 }
 
 .wdc-order-delivery-modal__save-warning {
 	flex: 1 1 100%;
+	order: -1;
 	color: #b32d2e;
 	font-size: 12px;
 	line-height: 1.4;
@@ -176,6 +188,13 @@
 	white-space: nowrap;
 }
 
+.wdc-order-delivery-rate__prices {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 8px;
+	white-space: nowrap;
+}
+
 .wdc-order-delivery-rate__crossed {
 	color: #646970;
 	text-decoration: line-through;
@@ -184,11 +203,72 @@
 
 .wdc-order-delivery-rate__delivery,
 .wdc-order-delivery-rate__comment,
-.wdc-order-delivery-tariff__delivery,
+.wdc-order-delivery-rate__planned-comment,
 .wdc-order-delivery-rate__pickup-status {
 	margin-top: 5px;
 	color: #646970;
 	font-size: 12px;
+}
+
+.wdc-order-delivery-rate__compact-summary {
+	display: none;
+	align-items: baseline;
+	gap: 20px;
+}
+
+.wdc-order-delivery-rate__compact-title {
+	min-width: 0;
+	font-weight: 600;
+}
+
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rates {
+	width: max-content;
+	max-width: 100%;
+}
+
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rates__group {
+	width: max-content;
+	max-width: 100%;
+}
+
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate {
+	box-sizing: border-box;
+	width: max-content;
+	max-width: 100%;
+}
+
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__compact-summary {
+	display: grid;
+	grid-template-columns: var(--wdc-order-compact-title-width, max-content) var(--wdc-order-compact-price-width, max-content);
+	column-gap: 20px;
+	width: max-content;
+	max-width: 100%;
+}
+
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__prices {
+	justify-content: flex-end;
+}
+
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__header,
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-tariffs,
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__comment,
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__planned-comment,
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__pickup-selector,
+.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-courier-address {
+	display: none;
+}
+
+@media (max-width: 782px) {
+	.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rates,
+	.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rates__group,
+	.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate {
+		width: 100%;
+	}
+
+	.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__compact-summary {
+		grid-template-columns: minmax(0, 1fr) auto;
+		width: 100%;
+	}
 }
 
 .wdc-order-delivery-rate__pickup-selector {
@@ -405,6 +485,15 @@
 	.wdc-order-delivery-modal__footer {
 		align-items: stretch;
 		flex-direction: column-reverse;
+	}
+
+	.wdc-order-delivery-modal__view-controls {
+		margin-right: 0;
+	}
+
+	.wdc-order-delivery-modal__actions {
+		flex-direction: column;
+		align-items: stretch;
 	}
 
 	.wdc-order-delivery-modal__footer .button {

@@ -167,7 +167,7 @@ final class OrderDeliveryMetabox {
 		$current_pickup = $this->current_pickup_payload( $order );
 		$current_shipping_address = $this->current_shipping_address_payload( $order );
 		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
-		echo '<div class="wdc-order-delivery-modal" data-wdc-order-delivery-modal hidden>';
+		echo '<div class="wdc-order-delivery-modal" data-wdc-order-delivery-modal data-view="full" hidden>';
 		echo '<div class="wdc-order-delivery-modal__overlay" data-wdc-order-delivery-modal-close></div>';
 		echo '<div class="wdc-order-delivery-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="wdc-order-delivery-modal-title-' . esc_attr( (string) $order_id ) . '" tabindex="-1">';
 		echo '<header class="wdc-order-delivery-modal__header">';
@@ -193,9 +193,14 @@ final class OrderDeliveryMetabox {
 		echo '<div class="wdc-order-delivery-modal__status" data-wdc-order-delivery-modal-status></div>';
 		echo '<div class="wdc-order-delivery-modal__content" data-wdc-order-delivery-modal-content></div>';
 		echo '<footer class="wdc-order-delivery-modal__footer">';
+		echo '<div class="wdc-order-delivery-modal__view-controls">';
+		echo '<button type="button" class="button" data-wdc-order-delivery-view-toggle aria-expanded="true">' . esc_html__( 'Свернуть', 'walls-delivery-calc' ) . '</button>';
+		echo '</div>';
 		echo '<div class="wdc-order-delivery-modal__save-warning" data-wdc-order-delivery-save-warning hidden></div>';
+		echo '<div class="wdc-order-delivery-modal__actions">';
 		echo '<button type="button" class="button" data-wdc-order-delivery-modal-close>' . esc_html__( 'Закрыть', 'walls-delivery-calc' ) . '</button>';
 		echo '<button type="button" class="button button-primary" data-wdc-order-delivery-save disabled>' . esc_html__( 'Сохранить новый вариант доставки', 'walls-delivery-calc' ) . '</button>';
+		echo '</div>';
 		echo '</footer>';
 		echo '</div>';
 		echo '</div>';
@@ -215,12 +220,24 @@ final class OrderDeliveryMetabox {
 		if ( '' === $name ) {
 			$name = $this->order_string( $order, 'get_shipping_city' );
 		}
+		if ( '' === $name ) {
+			$name = $this->order_string( $order, 'get_billing_city' );
+		}
 		$region = trim( (string) ( $destination['region_name'] ?? $this->order_string( $order, 'get_shipping_state' ) ) );
+		if ( '' === $region ) {
+			$region = $this->order_string( $order, 'get_billing_state' );
+		}
 		$postcode = trim( (string) ( $destination['postal_code'] ?? $destination['postcode'] ?? '' ) );
 		if ( '' === $postcode ) {
 			$postcode = $this->meta_string( $order, '_wdc_platform_city_postcode' ) ?: $this->order_string( $order, 'get_shipping_postcode' );
 		}
-		$country = strtoupper( trim( (string) ( $destination['country_code'] ?? $this->order_string( $order, 'get_shipping_country' ) ?: 'RU' ) ) );
+		if ( '' === $postcode ) {
+			$postcode = $this->order_string( $order, 'get_billing_postcode' );
+		}
+		$country = strtoupper( trim( (string) ( $destination['country_code'] ?? '' ) ) );
+		if ( '' === $country ) {
+			$country = $this->order_string( $order, 'get_shipping_country' ) ?: $this->order_string( $order, 'get_billing_country' ) ?: 'RU';
+		}
 		$label = $this->location_label_without_region_duplicate( $name, $region );
 
 		return array(
@@ -362,13 +379,13 @@ final class OrderDeliveryMetabox {
 	 * @return array<string,string>
 	 */
 	private function current_shipping_address_payload( object $order ): array {
-		$address_1 = $this->order_string( $order, 'get_shipping_address_1' );
-		$address_2 = $this->order_string( $order, 'get_shipping_address_2' );
-		$city = $this->order_string( $order, 'get_shipping_city' );
-		$region = $this->order_string( $order, 'get_shipping_state' );
-		$postcode = $this->order_string( $order, 'get_shipping_postcode' );
+		$address_1 = $this->order_string( $order, 'get_shipping_address_1' ) ?: $this->order_string( $order, 'get_billing_address_1' );
+		$address_2 = $this->order_string( $order, 'get_shipping_address_2' ) ?: $this->order_string( $order, 'get_billing_address_2' );
+		$city = $this->order_string( $order, 'get_shipping_city' ) ?: $this->order_string( $order, 'get_billing_city' );
+		$region = $this->order_string( $order, 'get_shipping_state' ) ?: $this->order_string( $order, 'get_billing_state' );
+		$postcode = $this->order_string( $order, 'get_shipping_postcode' ) ?: $this->order_string( $order, 'get_billing_postcode' );
 		return array(
-			'country' => $this->order_string( $order, 'get_shipping_country' ) ?: 'RU',
+			'country' => $this->order_string( $order, 'get_shipping_country' ) ?: $this->order_string( $order, 'get_billing_country' ) ?: 'RU',
 			'region' => $region,
 			'city' => $city,
 			'postcode' => $postcode,
