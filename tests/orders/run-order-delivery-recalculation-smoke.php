@@ -410,6 +410,16 @@ final class WdcRecalcOrder {
 	private string $shipping_address_1 = 'Красный проспект';
 	private string $shipping_address_2 = '1';
 	private string $shipping_state = 'Новосибирская область';
+	private string $shipping_first_name = '';
+	private string $shipping_last_name = '';
+	private string $billing_country = 'RU';
+	private string $billing_city = 'Новосибирск';
+	private string $billing_postcode = '630099';
+	private string $billing_address_1 = 'Красный проспект';
+	private string $billing_address_2 = '1';
+	private string $billing_state = 'Новосибирская область';
+	private string $billing_first_name = '';
+	private string $billing_last_name = '';
 
 	public function __construct( private int $id, private array $items ) {}
 	public function get_id(): int { return $this->id; }
@@ -418,12 +428,21 @@ final class WdcRecalcOrder {
 	public function get_subtotal(): float { return 5000.0; }
 	public function get_payment_method(): string { return 'cod'; }
 	public function get_shipping_country(): string { return $this->shipping_country; }
-	public function get_billing_country(): string { return 'RU'; }
+	public function get_billing_country(): string { return $this->billing_country; }
 	public function get_shipping_city(): string { return $this->shipping_city; }
+	public function get_billing_city(): string { return $this->billing_city; }
 	public function get_shipping_postcode(): string { return $this->shipping_postcode; }
+	public function get_billing_postcode(): string { return $this->billing_postcode; }
 	public function get_shipping_address_1(): string { return $this->shipping_address_1; }
+	public function get_billing_address_1(): string { return $this->billing_address_1; }
 	public function get_shipping_address_2(): string { return $this->shipping_address_2; }
+	public function get_billing_address_2(): string { return $this->billing_address_2; }
 	public function get_shipping_state(): string { return $this->shipping_state; }
+	public function get_billing_state(): string { return $this->billing_state; }
+	public function get_shipping_first_name(): string { return $this->shipping_first_name; }
+	public function get_billing_first_name(): string { return $this->billing_first_name; }
+	public function get_shipping_last_name(): string { return $this->shipping_last_name; }
+	public function get_billing_last_name(): string { return $this->billing_last_name; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
 	public function set_shipping_country( string $value ): void { $this->shipping_country = $value; }
@@ -432,6 +451,26 @@ final class WdcRecalcOrder {
 	public function set_shipping_postcode( string $value ): void { $this->shipping_postcode = $value; }
 	public function set_shipping_address_1( string $value ): void { $this->shipping_address_1 = $value; }
 	public function set_shipping_address_2( string $value ): void { $this->shipping_address_2 = $value; }
+	public function set_shipping_first_name( string $value ): void { $this->shipping_first_name = $value; }
+	public function set_shipping_last_name( string $value ): void { $this->shipping_last_name = $value; }
+	/** @param array<string,string> $fields */
+	public function set_billing_fields( array $fields ): void {
+		foreach ( $fields as $key => $value ) {
+			$property = 'billing_' . $key;
+			if ( property_exists( $this, $property ) ) {
+				$this->{$property} = $value;
+			}
+		}
+	}
+	/** @param array<string,string> $fields */
+	public function set_shipping_fields( array $fields ): void {
+		foreach ( $fields as $key => $value ) {
+			$property = 'shipping_' . $key;
+			if ( property_exists( $this, $property ) ) {
+				$this->{$property} = $value;
+			}
+		}
+	}
 	public function add_item( object $item ): void { $this->shipping_items[] = $item; }
 	public function calculate_totals( bool $and_taxes = true ): void {
 		$shipping = $this->get_items( 'shipping' )[0] ?? array();
@@ -1471,6 +1510,76 @@ $pickup_article_html = false === $pickup_article_pos ? '' : substr( $html, $pick
 $courier_article_html = false === $courier_article_pos ? '' : substr( $html, $courier_article_pos, false === $courier_article_next ? null : $courier_article_next - $courier_article_pos );
 recalc_smoke_assert( false !== $pickup_article_pos && str_contains( $pickup_article_html, 'data-wdc-pickup-selector' ), 'Pickup rate UI must show pickup selection control markup.' );
 recalc_smoke_assert( false !== $courier_article_pos && ! str_contains( $courier_article_html, 'data-wdc-pickup-selector' ), 'Courier rate UI must not show pickup selection controls.' );
+recalc_smoke_assert( str_contains( $pickup_article_html, 'wdc-order-delivery-rate__title">Почта России до отделения</span>' ) && ! str_contains( $pickup_article_html, 'wdc-order-delivery-rate__title">Почта России до отделения - 3 дня</span>' ), 'Grouped full method header must not append cheapest tariff delivery time.' );
+recalc_smoke_assert( str_contains( $pickup_article_html, 'data-wdc-order-delivery-compact-summary' ) && str_contains( $pickup_article_html, 'Почта России до отделения - 3 дня' ), 'Grouped compact summary must append cheapest tariff delivery time to method title.' );
+recalc_smoke_assert( str_contains( $pickup_article_html, 'Посылка онлайн - 3 дня' ) && ! str_contains( $pickup_article_html, 'wdc-order-delivery-tariff__delivery' ), 'Grouped tariff full row must append delivery time to tariff title without a separate delivery row.' );
+
+$planned_renderer_html = ( new OrderDeliveryRateRenderer() )->render(
+	array(
+		array(
+			'id' => 'plain:promo',
+			'label' => 'Джет Логистик курьером',
+			'delivery_type' => DeliveryType::COURIER,
+			'price_html' => '1 руб.',
+			'crossed_price_html' => '885 руб.',
+			'delivery_comment' => '7 дней',
+			'planned_delivery_comment' => 'Доставка планируется* с 10 сентября (четверг).',
+			'comments' => array( 'Комментарий службы', 'Комментарий правила' ),
+			'tariff_variants' => array(),
+		),
+		array(
+			'id' => 'grouped:pickup',
+			'label' => 'Почта России до отделения',
+			'delivery_type' => DeliveryType::PICKUP,
+			'price_html' => 'от 659 руб.',
+			'crossed_price_html' => '',
+			'delivery_comment' => '3 дня',
+			'is_grouped' => true,
+			'compact_title' => 'Почта России до отделения',
+			'compact_delivery_comment' => '3 дня',
+			'compact_price_html' => 'от 659 руб.',
+			'compact_crossed_price_html' => '700 руб.',
+			'comments' => array(),
+			'tariff_variants' => array(
+				array(
+					'object_code' => '47030',
+					'title' => 'Посылка 1 класса',
+					'price_html' => '659 руб.',
+					'crossed_price_html' => '700 руб.',
+					'delivery_comment' => '3 дня',
+					'planned_delivery_comment' => 'Доставка планируется* с 10 сентября (четверг).',
+					'comments' => array( 'Комментарий тарифа' ),
+				),
+			),
+		),
+	)
+);
+recalc_smoke_assert( 2 === substr_count( $planned_renderer_html, 'wdc-order-delivery-rate__planned-comment' ), 'Renderer must output one visible planned delivery comment row for the plain rate and one for the tariff variant.' );
+recalc_smoke_assert( str_contains( $planned_renderer_html, 'Джет Логистик курьером - 7 дней' ) && ! str_contains( $planned_renderer_html, 'wdc-order-delivery-rate__delivery' ), 'Plain full method header must include short delivery time without a separate delivery row.' );
+recalc_smoke_assert( str_contains( $planned_renderer_html, 'wdc-order-delivery-rate__prices' ) && str_contains( $planned_renderer_html, '1 руб.' ) && str_contains( $planned_renderer_html, '885 руб.' ) && str_contains( $planned_renderer_html, 'wdc-order-delivery-rate__crossed' ), 'Plain promo full method must render final and crossed prices in one price cluster.' );
+recalc_smoke_assert( str_contains( $planned_renderer_html, 'Посылка 1 класса - 3 дня' ) && str_contains( $planned_renderer_html, '659 руб.' ) && str_contains( $planned_renderer_html, '700 руб.' ), 'Tariff full row must render title, delivery time, final price, and crossed price.' );
+recalc_smoke_assert( str_contains( $planned_renderer_html, 'wdc-order-delivery-rate__comment">Комментарий службы</div><div class="wdc-order-delivery-rate__comment">Комментарий правила</div><div class="wdc-order-delivery-rate__planned-comment">Доставка планируется* с 10 сентября (четверг).</div>' ), 'Renderer must keep carrier/service comments, rule comments, then planned delivery comment order.' );
+
+$group_payload_method = new ReflectionMethod( OrderDeliveryRecalculationService::class, 'tariff_group_payload' );
+$group_payload_method->setAccessible( true );
+$group_payload = $group_payload_method->invoke(
+	$service,
+	'demo:pickup',
+	array(
+		new DeliveryRate( 'demo:pickup:a', 'demo', 'Demo', 'demo', 'Demo', 'A', 'A', DeliveryType::PICKUP, 'Demo pickup', Money::from_rubles( 885 ), Money::from_rubles( 885 ), Money::from_rubles( 885 ), DateRange::single( 7 ), '', 'Доставка планируется* с 10 сентября (четверг).', array(), false, '', false, false, array( 'tariff_selector_group' => true, 'pickup_method_title' => 'Demo pickup' ) ),
+		new DeliveryRate( 'demo:pickup:b', 'demo', 'Demo', 'demo', 'Demo', 'B', 'B', DeliveryType::PICKUP, 'Demo pickup', Money::from_rubles( 1200 ), Money::from_rubles( 1200 ), Money::from_rubles( 1200 ), DateRange::single( 3 ), '', 'Доставка планируется* с 6 сентября (воскресенье).', array(), false, '', false, false, array( 'tariff_selector_group' => true, 'pickup_method_title' => 'Demo pickup' ) ),
+	)
+);
+recalc_smoke_assert( '7 дней' === (string) ( $group_payload['compact_delivery_comment'] ?? '' ) && 'от 885 руб.' === (string) ( $group_payload['compact_price_html'] ?? '' ), 'Compact grouped summary must use delivery time and price from the cheapest tariff, not the fastest tariff.' );
+$group_promo_payload = $group_payload_method->invoke(
+	$service,
+	'demo:pickup',
+	array(
+		new DeliveryRate( 'demo:pickup:promo', 'demo', 'Demo', 'demo', 'Demo', 'PROMO', 'Promo', DeliveryType::PICKUP, 'Demo pickup', Money::from_rubles( 1 ), Money::from_rubles( 885 ), Money::from_rubles( 885 ), DateRange::single( 7 ), '', 'Доставка планируется* с 10 сентября (четверг).', array(), false, '', false, false, array( 'tariff_selector_group' => true, 'pickup_method_title' => 'Demo pickup' ) ),
+		new DeliveryRate( 'demo:pickup:regular', 'demo', 'Demo', 'demo', 'Demo', 'REG', 'Regular', DeliveryType::PICKUP, 'Demo pickup', Money::from_rubles( 1200 ), Money::from_rubles( 1200 ), Money::from_rubles( 1200 ), DateRange::single( 3 ), '', '', array(), false, '', false, false, array( 'tariff_selector_group' => true, 'pickup_method_title' => 'Demo pickup' ) ),
+	)
+);
+recalc_smoke_assert( '7 дней' === (string) ( $group_promo_payload['compact_delivery_comment'] ?? '' ) && 'от 1 руб.' === (string) ( $group_promo_payload['compact_price_html'] ?? '' ) && '885 руб.' === (string) ( $group_promo_payload['compact_crossed_price_html'] ?? '' ), 'Compact grouped promo summary must use final price, crossed price, and delivery time from the same cheapest tariff.' );
 
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Preview must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Preview must not change order totals.' );
@@ -2658,6 +2767,82 @@ recalc_smoke_assert( isset( $no_shipping_order->meta['_wdc_delivery_calculation_
 recalc_smoke_assert( array() !== $no_shipping_order->notes && false === $no_shipping_order->notes[0]['customer'], 'Save must add private order note.' );
 recalc_smoke_assert( array( 'Планируемая* дата доставки' => 'с 12 августа 2026' ) === ( $no_shipping_order->shipping_items['meta'] ?? array() ), 'Russian Post domestic admin visible meta must contain only planned delivery date.' );
 
+$first_save_order = new WdcRecalcOrder( 133, array() );
+$first_save_order->shipping_items = array();
+$first_save_order->set_shipping_fields( array( 'country' => '', 'state' => '', 'city' => '', 'postcode' => '', 'address_1' => '', 'address_2' => '', 'first_name' => '', 'last_name' => '' ) );
+$first_save_order->set_billing_fields( array( 'country' => 'RU', 'state' => 'Новосибирская область', 'city' => 'Новосибирск', 'postcode' => '630000', 'address_1' => 'Ленина, 1', 'address_2' => '', 'first_name' => 'Петр', 'last_name' => 'Петров' ) );
+$current_shipping_address_method = new ReflectionMethod( OrderDeliveryMetabox::class, 'current_shipping_address_payload' );
+$current_shipping_address_method->setAccessible( true );
+$current_location_method = new ReflectionMethod( OrderDeliveryMetabox::class, 'current_location_payload' );
+$current_location_method->setAccessible( true );
+$first_save_metabox = new OrderDeliveryMetabox( new OrderShipmentRepository() );
+$first_save_address_payload = $current_shipping_address_method->invoke( $first_save_metabox, $first_save_order );
+$first_save_location_payload = $current_location_method->invoke( $first_save_metabox, $first_save_order );
+recalc_smoke_assert( 'Новосибирск' === (string) ( $first_save_address_payload['city'] ?? '' ) && 'Новосибирская область' === (string) ( $first_save_address_payload['region'] ?? '' ) && 'Ленина, 1' === (string) ( $first_save_address_payload['address_1'] ?? '' ), 'Current shipping address payload must fall back to billing fields for manually created orders.' );
+recalc_smoke_assert( 'Новосибирск' === (string) ( $first_save_location_payload['city_value'] ?? '' ) && 'Новосибирская область' === (string) ( $first_save_location_payload['state_value'] ?? '' ) && '630000' === (string) ( $first_save_location_payload['postal_code'] ?? '' ), 'Current location payload must be usable from billing-backed order fields before first WDC save.' );
+$billing_mapper_request = ( new OrderQuoteRequestMapper() )->map( $first_save_order );
+recalc_smoke_assert( 'Новосибирск' === $billing_mapper_request->destination->city && 'Новосибирская область' === $billing_mapper_request->destination->region_name && '630000' === $billing_mapper_request->destination->postcode && 'Ленина, 1' === $billing_mapper_request->destination->street, 'Order quote request mapper must use billing as initial fallback when shipping fields are empty.' );
+$first_save_result = $replacement->save(
+	$first_save_order,
+	array(
+		'selected_location' => $first_save_location_payload,
+		'selected_rate' => $courier_rate,
+		'selected_tariff' => $courier_rate['selected_tariff'],
+		'normalized_shipping_address' => array_merge( $normalized_address, array( 'country' => 'RU', 'region' => 'Новосибирская область', 'city' => 'Новосибирск', 'postcode' => '630000', 'address_1' => 'Ленина, 1', 'address_2' => '', 'full_address' => 'Новосибирск, Ленина, 1' ) ),
+	)
+);
+recalc_smoke_assert( true === $first_save_result['success'] && 'RU' === $first_save_order->get_shipping_country() && 'Новосибирск' === $first_save_order->get_shipping_city() && 'Новосибирская область' === $first_save_order->get_shipping_state() && '630000' === $first_save_order->get_shipping_postcode() && 'Ленина, 1' === $first_save_order->get_shipping_address_1(), 'First admin delivery save must populate empty shipping location/address fields from the resolved billing-backed context.' );
+recalc_smoke_assert( 'Петр' === $first_save_order->get_shipping_first_name() && 'Петров' === $first_save_order->get_shipping_last_name(), 'First admin delivery save must copy billing first/last name into empty shipping recipient fields.' );
+
+$selected_kz_order = new WdcRecalcOrder( 134, array() );
+$selected_kz_order->shipping_items = array();
+$selected_kz_order->set_shipping_fields( array( 'country' => '', 'state' => '', 'city' => '', 'postcode' => '', 'address_1' => '', 'address_2' => '' ) );
+$selected_kz_order->set_billing_fields( array( 'country' => 'RU', 'state' => 'Новосибирская область', 'city' => 'Новосибирск', 'postcode' => '630000', 'address_1' => 'Ленина, 1' ) );
+$selected_kz_location = array( 'country_code' => 'KZ', 'state_value' => 'Алматинская область', 'region_name' => 'Алматинская область', 'city_value' => 'Алматы', 'display_name' => 'Алматы', 'postal_code' => '050000' );
+$selected_kz_result = $replacement->save(
+	$selected_kz_order,
+	array(
+		'selected_location' => $selected_kz_location,
+		'selected_rate' => $courier_rate,
+		'selected_tariff' => $courier_rate['selected_tariff'],
+		'normalized_shipping_address' => array_merge( $normalized_address, array( 'country' => 'RU', 'region' => 'Новосибирская область', 'city' => 'Новосибирск', 'postcode' => '630000' ) ),
+	)
+);
+recalc_smoke_assert( true === $selected_kz_result['success'] && 'KZ' === $selected_kz_order->get_shipping_country() && 'Алматы' === $selected_kz_order->get_shipping_city() && 'Алматинская область' === $selected_kz_order->get_shipping_state() && '050000' === $selected_kz_order->get_shipping_postcode(), 'Explicit selected location must win over billing and normalized address location fields on first save.' );
+
+$name_partial_order = new WdcRecalcOrder( 135, array() );
+$name_partial_order->shipping_items = array();
+$name_partial_order->set_shipping_fields( array( 'first_name' => 'Иван', 'last_name' => '' ) );
+$name_partial_order->set_billing_fields( array( 'first_name' => 'Петр', 'last_name' => 'Петров' ) );
+$name_partial_result = $replacement->save(
+	$name_partial_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $courier_rate,
+		'selected_tariff' => $courier_rate['selected_tariff'],
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $name_partial_result['success'] && 'Иван' === $name_partial_order->get_shipping_first_name() && 'Петров' === $name_partial_order->get_shipping_last_name(), 'Shipping recipient fallback must preserve existing names and copy billing values only field-by-field into empty fields.' );
+
+$existing_shipping_order = new WdcRecalcOrder( 136, array() );
+$existing_shipping_order->shipping_items = array();
+$existing_shipping_order->set_shipping_fields( array( 'country' => 'RU', 'state' => 'Томская область', 'city' => 'Томск', 'postcode' => '634000', 'address_1' => 'Советская, 2', 'address_2' => '10' ) );
+$existing_shipping_order->set_billing_fields( array( 'country' => 'RU', 'state' => 'Новосибирская область', 'city' => 'Новосибирск', 'postcode' => '630000', 'address_1' => 'Ленина, 1', 'address_2' => '' ) );
+$no_address_required_rate = $courier_rate;
+$no_address_required_rate['order_recalculation_requires_address'] = false;
+$no_address_required_rate['selected_tariff']['order_recalculation_requires_address'] = false;
+$existing_shipping_result = $replacement->save(
+	$existing_shipping_order,
+	array(
+		'selected_location' => array(),
+		'selected_rate' => $no_address_required_rate,
+		'selected_tariff' => $no_address_required_rate['selected_tariff'],
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( true === $existing_shipping_result['success'] && 'Томск' === $existing_shipping_order->get_shipping_city() && 'Томская область' === $existing_shipping_order->get_shipping_state() && 'Советская, 2' === $existing_shipping_order->get_shipping_address_1(), 'Re-saving without a new address must preserve existing populated shipping fields.' );
+
 $unspecified_rate = $courier_rate;
 $unspecified_rate['id'] = 'future:carrier';
 $unspecified_rate['rate_id'] = 'future:carrier';
@@ -3155,6 +3340,7 @@ try {
 }
 
 $admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.js' );
+$admin_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.css' );
 recalc_smoke_assert( str_contains( $admin_js, 'addressSuggestAction' ) && str_contains( $admin_js, 'wdc_order_delivery_recalculate_address_suggest' ), 'Admin courier must call dedicated thin address suggest endpoint.' );
 recalc_smoke_assert( str_contains( $admin_js, 'requestCourierLowerLevelAfterHouse' ) && str_contains( $admin_js, "'address_next'" ) && str_contains( $admin_js, 'lowerLevelCourierItems' ), 'Admin courier must support house to flat suggestion flow.' );
 recalc_smoke_assert( str_contains( $admin_js, 'data-wdc-courier-address-house-finalize' ) && str_contains( $admin_js, 'houseLevelCourierItem' ), 'Admin courier must support normalized house-level finalize link.' );
@@ -3163,6 +3349,14 @@ recalc_smoke_assert( str_contains( $admin_js, 'Использовать этот
 recalc_smoke_assert( ! str_contains( $admin_js, 'console.debug' ), 'Admin courier suggestion flow must not output temporary debug logs.' );
 recalc_smoke_assert( str_contains( $admin_js, 'courierLocationWarning' ) && str_contains( $admin_js, 'населенный пункт в адресе доставки отличается' ) && str_contains( $admin_js, 'Не удалось подтвердить' ), 'Admin courier save flow must expose non-blocking location mismatch warning logic.' );
 recalc_smoke_assert( str_contains( $admin_js, 'button.disabled = ! enabled' ) && str_contains( $admin_js, 'updateCourierLocationWarning' ), 'Courier location mismatch warning must update separately from save button disabling.' );
+recalc_smoke_assert( str_contains( $admin_js, 'data-wdc-order-delivery-view-toggle' ) && str_contains( $admin_js, "node.dataset.view = nextView" ) && str_contains( $admin_js, "toggle.textContent = expanded ? 'Свернуть' : 'Развернуть'" ) && str_contains( $admin_js, "toggle.setAttribute( 'aria-expanded'" ), 'Admin recalculation JS must toggle compact/full modal state with accessible button text.' );
+$toggle_function = '';
+if ( preg_match( '/function toggleDeliveryView[\s\S]*?\n\t}/', $admin_js, $toggle_match ) ) {
+	$toggle_function = $toggle_match[0];
+}
+recalc_smoke_assert( '' !== $toggle_function && ! str_contains( $toggle_function, 'fetch(' ) && ! str_contains( $toggle_function, 'requestPreview' ), 'Admin recalculation compact toggle must not perform AJAX.' );
+recalc_smoke_assert( str_contains( $admin_js, 'const viewStates = new WeakMap()' ) && str_contains( $admin_js, "setDeliveryView( box, 'full' )" ) && str_contains( $admin_js, 'selectedRates.delete( box )' ), 'Admin recalculation compact/full state must stay separate from selected rate state and reset to full on close/reopen.' );
+recalc_smoke_assert( str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__header' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-tariffs' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__comment' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__planned-comment' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__pickup-selector' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-courier-address' ), 'Admin recalculation compact CSS must hide detailed controls/comments while leaving compact summaries visible.' );
 $admin_controller_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Admin/OrderDeliveryRecalculationAdminController.php' );
 $admin_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Application/OrderDeliveryAddressNormalizationService.php' );
 recalc_smoke_assert( str_contains( $admin_controller_source, 'ajax_address_suggest' ) && str_contains( $admin_service_source, 'AddressSuggestionService' ) && str_contains( $admin_service_source, 'AddressLineParser::lower_address_line' ), 'Admin courier must reuse shared AddressSuggestionService and AddressLineParser.' );

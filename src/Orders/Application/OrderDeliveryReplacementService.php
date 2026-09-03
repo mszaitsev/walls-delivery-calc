@@ -79,6 +79,7 @@ final class OrderDeliveryReplacementService {
 		$this->replace_shipping_item( $order, $shipping_items, $rate );
 		$this->write_order_meta( $order, $rate, $location, $pickup, $address );
 		$this->write_shipping_address( $order, $rate, $location, $pickup, $address );
+		$this->copy_billing_recipient_to_empty_shipping_fields( $order );
 		if ( method_exists( $order, 'calculate_totals' ) ) {
 			$order->calculate_totals( false );
 		} elseif ( property_exists( $order, 'total' ) ) {
@@ -454,7 +455,7 @@ final class OrderDeliveryReplacementService {
 	 * @param array<string,mixed> $address
 	 */
 	private function write_shipping_address( object $order, array $rate, array $location, array $pickup, array $address ): void {
-		$location_values = $this->checkout_shipping_location_values( $location, $address );
+		$location_values = $this->checkout_shipping_location_values( $order, $location, $address );
 		$values = array(
 			'set_shipping_country' => $location_values['country'],
 			'set_shipping_state' => $location_values['state'],
@@ -472,6 +473,12 @@ final class OrderDeliveryReplacementService {
 			$values['set_shipping_address_1'] = (string) ( $address['address_1'] ?? $address['full_address'] ?? '' );
 			$values['set_shipping_address_2'] = ! empty( $address['fallback'] ) && 'admin_manual' === (string) ( $address['source'] ?? '' ) ? '' : (string) ( $address['address_2'] ?? '' );
 		}
+		if ( ! isset( $values['set_shipping_address_1'] ) && '' === $this->order_string( $order, 'get_shipping_address_1' ) ) {
+			$values['set_shipping_address_1'] = $this->order_string( $order, 'get_billing_address_1' );
+		}
+		if ( ! isset( $values['set_shipping_address_2'] ) && '' === $this->order_string( $order, 'get_shipping_address_2' ) ) {
+			$values['set_shipping_address_2'] = $this->order_string( $order, 'get_billing_address_2' );
+		}
 		foreach ( $values as $method => $value ) {
 			if ( method_exists( $order, $method ) && ( '' !== $value || 'set_shipping_address_2' === $method ) ) {
 				$order->{$method}( $value );
@@ -484,7 +491,7 @@ final class OrderDeliveryReplacementService {
 	 * @param array<string,mixed> $address
 	 * @return array{country:string,state:string,city:string,postcode:string}
 	 */
-	private function checkout_shipping_location_values( array $location, array $address ): array {
+	private function checkout_shipping_location_values( object $order, array $location, array $address ): array {
 		$state = trim( (string) ( $location['state_value'] ?? '' ) );
 		if ( '' === $state ) {
 			$state = $this->formatted_location_state( $location );
@@ -492,24 +499,55 @@ final class OrderDeliveryReplacementService {
 		if ( '' === $state ) {
 			$state = trim( (string) ( $location['region_name'] ?? $address['region'] ?? '' ) );
 		}
+		if ( '' === $state ) {
+			$state = $this->order_string( $order, 'get_shipping_state' ) ?: $this->order_string( $order, 'get_billing_state' );
+		}
 
 		$city = trim( (string) ( $location['city_value'] ?? '' ) );
 		if ( '' === $city ) {
 			$city = $this->formatted_location_city( $location );
 		}
 		if ( '' === $city ) {
-			$city = trim( (string) ( $address['city'] ?? $location['city_name'] ?? $location['place_name'] ?? '' ) );
+			$city = trim( (string) ( $location['city_name'] ?? $location['place_name'] ?? $address['city'] ?? '' ) );
 		}
 		if ( '' === $city ) {
 			$city = $this->city_from_display_name( (string) ( $location['display_name'] ?? '' ), $state );
 		}
+		if ( '' === $city ) {
+			$city = $this->order_string( $order, 'get_shipping_city' ) ?: $this->order_string( $order, 'get_billing_city' );
+		}
+
+		$country = trim( (string) ( $location['country_code'] ?? $address['country'] ?? '' ) );
+		if ( '' === $country ) {
+			$country = $this->order_string( $order, 'get_shipping_country' ) ?: $this->order_string( $order, 'get_billing_country' ) ?: 'RU';
+		}
+		$postcode = trim( (string) ( $location['postal_code'] ?? $location['postcode'] ?? $address['postcode'] ?? '' ) );
+		if ( '' === $postcode ) {
+			$postcode = $this->order_string( $order, 'get_shipping_postcode' ) ?: $this->order_string( $order, 'get_billing_postcode' );
+		}
 
 		return array(
-			'country' => (string) ( $address['country'] ?? $location['country_code'] ?? 'RU' ),
+			'country' => $country,
 			'state' => $state,
 			'city' => $city,
-			'postcode' => (string) ( $address['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' ),
+			'postcode' => $postcode,
 		);
+	}
+
+	private function copy_billing_recipient_to_empty_shipping_fields( object $order ): void {
+		$map = array(
+			'set_shipping_first_name' => array( 'get_shipping_first_name', 'get_billing_first_name' ),
+			'set_shipping_last_name'  => array( 'get_shipping_last_name', 'get_billing_last_name' ),
+		);
+		foreach ( $map as $setter => $getters ) {
+			if ( ! method_exists( $order, $setter ) || '' !== $this->order_string( $order, $getters[0] ) ) {
+				continue;
+			}
+			$value = $this->order_string( $order, $getters[1] );
+			if ( '' !== $value ) {
+				$order->{$setter}( $value );
+			}
+		}
 	}
 
 	/**
@@ -1285,5 +1323,9 @@ final class OrderDeliveryReplacementService {
 			return trim( (string) ( $order->meta[ $key ] ?? '' ) );
 		}
 		return '';
+	}
+
+	private function order_string( object $order, string $method ): string {
+		return method_exists( $order, $method ) ? trim( (string) $order->{$method}() ) : '';
 	}
 }

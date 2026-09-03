@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.148.01
+Version: 0.148.02
+
+0.148.02 improves the order admin delivery recalculation modal with planned delivery comments in previews, compact/full presentation mode, grouped cheapest-rate summaries, and first-save shipping field fallbacks for manually created orders.
 
 0.148.01 makes grouped domestic Russian Post tariff selector variants use the final delivery-days label for their radio-switch planned comment payload, preventing stale pre-grouping comments from reappearing in checkout.
 

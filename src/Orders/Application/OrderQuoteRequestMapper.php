@@ -105,16 +105,17 @@ final class OrderQuoteRequestMapper {
 		$country = strtoupper( $this->order_string( $order, 'get_shipping_country' ) ?: $this->order_string( $order, 'get_billing_country' ) ?: (string) ( $destination['country_code'] ?? 'RU' ) );
 		$city = $this->order_string( $order, 'get_shipping_city' );
 		if ( '' === $city ) {
-			$city = (string) ( $destination['city_display_name'] ?? $this->meta_string( $order, '_wdc_platform_city_display_name' ) );
+			$city = $this->order_string( $order, 'get_billing_city' ) ?: (string) ( $destination['city_display_name'] ?? $this->meta_string( $order, '_wdc_platform_city_display_name' ) );
 		}
 		$postcode = $this->order_string( $order, 'get_shipping_postcode' )
+			?: $this->order_string( $order, 'get_billing_postcode' )
 			?: $this->meta_string( $order, '_wdc_platform_city_postcode' )
 			?: $this->meta_string( $order, '_wdc_platform_resolved_postcode' );
-		$street = $this->order_string( $order, 'get_shipping_address_1' );
-		$house  = $this->order_string( $order, 'get_shipping_address_2' );
+		$street = $this->order_string( $order, 'get_shipping_address_1' ) ?: $this->order_string( $order, 'get_billing_address_1' );
+		$house  = $this->order_string( $order, 'get_shipping_address_2' ) ?: $this->order_string( $order, 'get_billing_address_2' );
 		$region = $this->order_string( $order, 'get_shipping_state' );
 		if ( '' === $region ) {
-			$region = $this->meta_string( $order, '_shipping_state' );
+			$region = $this->order_string( $order, 'get_billing_state' ) ?: $this->meta_string( $order, '_shipping_state' );
 		}
 		$override = $this->normalize_location_override( $selected_location );
 		if ( array() !== $override ) {

@@ -11,6 +11,7 @@
 	const activeSaveRequests = new WeakSet();
 	const searchTimers = new WeakMap();
 	const courierAddressTimers = new WeakMap();
+	const viewStates = new WeakMap();
 
 	function closestBox( element ) {
 		return element ? element.closest( '[data-wdc-order-delivery-recalculation]' ) : null;
@@ -80,7 +81,11 @@
 		if ( ! node ) {
 			return;
 		}
+		const wasHidden = node.hidden;
 		ensureInitialLocation( box );
+		if ( wasHidden ) {
+			setDeliveryView( box, 'full' );
+		}
 		node.hidden = false;
 		document.body.classList.add( 'wdc-order-delivery-modal-open' );
 		window.setTimeout( function () {
@@ -102,9 +107,32 @@
 			return;
 		}
 		node.hidden = true;
+		setDeliveryView( box, 'full' );
 		if ( ! document.querySelector( '[data-wdc-order-delivery-modal]:not([hidden])' ) ) {
 			document.body.classList.remove( 'wdc-order-delivery-modal-open' );
 		}
+	}
+
+	function setDeliveryView( box, view ) {
+		const node = modal( box );
+		const nextView = view === 'compact' ? 'compact' : 'full';
+		if ( ! node ) {
+			return;
+		}
+		viewStates.set( box, nextView );
+		node.dataset.view = nextView;
+		const toggle = node.querySelector( '[data-wdc-order-delivery-view-toggle]' );
+		if ( toggle ) {
+			const expanded = nextView !== 'compact';
+			toggle.textContent = expanded ? 'Свернуть' : 'Развернуть';
+			toggle.setAttribute( 'aria-expanded', expanded ? 'true' : 'false' );
+		}
+	}
+
+	function toggleDeliveryView( button ) {
+		const box = closestBox( button );
+		const current = viewStates.get( box ) || ( modal( box ) && modal( box ).dataset.view ) || 'full';
+		setDeliveryView( box, current === 'compact' ? 'full' : 'compact' );
 	}
 
 	function resetModal( box ) {
@@ -1910,6 +1938,13 @@
 		if ( previewButton ) {
 			event.preventDefault();
 			requestPreview( closestBox( previewButton ), previewButton );
+			return;
+		}
+
+		const viewToggle = event.target && event.target.closest( '[data-wdc-order-delivery-view-toggle]' );
+		if ( viewToggle ) {
+			event.preventDefault();
+			toggleDeliveryView( viewToggle );
 			return;
 		}
 
