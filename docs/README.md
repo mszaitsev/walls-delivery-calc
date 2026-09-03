@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.148.00
+Version: 0.148.01
+
+0.148.01 makes grouped domestic Russian Post tariff selector variants use the final delivery-days label for their radio-switch planned comment payload, preventing stale pre-grouping comments from reappearing in checkout.
 
 0.148.00 preserves the disabled state for existing international Russian Post services during builtin bootstrap and makes Shipment drafts fail closed unless the order has an explicitly supported carrier.
 

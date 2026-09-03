@@ -267,21 +267,25 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			}
 		}
 		$variants = count( $rates ) > 1 ? array_map(
-			fn ( DeliveryRate $rate ): array => array(
-				'rate_id' => $rate->rate_id,
-				'object_code' => $rate->tariff_key,
-				'title' => $rate->tariff_name,
-				'delivery_type' => $rate->delivery_type,
-				'price_rub' => $rate->price->get_rubles(),
-				'cost' => (string) $rate->price->get_rubles(),
-				'crossed_price' => $rate->crossed_price?->to_array(),
-				'delivery_days' => $rate->delivery_days->to_array(),
-				'delivery_days_label' => DeliveryDaysFormatter::format( $rate->delivery_days ),
-				'planned_delivery_date' => $rate->planned_delivery_date,
-				'planned_delivery_comment' => $rate->planned_delivery_comment,
-				'comments' => $rate->comments,
-				'rate_meta' => $rate->meta,
-			),
+			static function ( DeliveryRate $rate ): array {
+				$delivery_days_label = DeliveryDaysFormatter::format( $rate->delivery_days );
+
+				return array(
+					'rate_id' => $rate->rate_id,
+					'object_code' => $rate->tariff_key,
+					'title' => $rate->tariff_name,
+					'delivery_type' => $rate->delivery_type,
+					'price_rub' => $rate->price->get_rubles(),
+					'cost' => (string) $rate->price->get_rubles(),
+					'crossed_price' => $rate->crossed_price?->to_array(),
+					'delivery_days' => $rate->delivery_days->to_array(),
+					'delivery_days_label' => $delivery_days_label,
+					'planned_delivery_date' => $rate->planned_delivery_date,
+					'planned_delivery_comment' => $delivery_days_label,
+					'comments' => $rate->comments,
+					'rate_meta' => $rate->meta,
+				);
+			},
 			$rates
 		) : array();
 		if ( ! $selected_found ) {
