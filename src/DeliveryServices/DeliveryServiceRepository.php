@@ -156,7 +156,7 @@ final class DeliveryServiceRepository {
 						'carrier_key' => RussianPostSettings::CARRIER_KEY,
 						'service_type' => DeliveryService::TYPE_API,
 						'title' => '' !== trim( $existing->title ) ? $existing->title : RussianPostSettings::TITLE,
-						'enabled' => 1,
+						'enabled' => $existing->enabled ? 1 : 0,
 						'availability_mode' => DeliveryService::AVAILABILITY_CARRIER_DIRECTORY,
 						'deleted' => 0,
 					)

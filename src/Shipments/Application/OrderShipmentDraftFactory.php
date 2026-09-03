@@ -51,8 +51,19 @@ final class OrderShipmentDraftFactory {
 	) {
 	}
 
+	public function supports_order( object $order ): bool {
+		return $this->supports_carrier_key( $this->active_carrier_key( $order ) );
+	}
+
+	public function supports_carrier_key( string $carrier_key ): bool {
+		return in_array( trim( $carrier_key ), $this->supported_carrier_keys(), true );
+	}
+
 	public function create_request_from_order( object $order ): ShipmentCreateRequest {
 		$carrier_key = $this->active_carrier_key( $order );
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier_key ) {
+			return $this->create_russian_post_domestic_request_from_order( $order );
+		}
 		if ( CdekSettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_cdek_request_from_order( $order );
 		}
@@ -71,6 +82,11 @@ final class OrderShipmentDraftFactory {
 		if ( JetLogisticSettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_jet_logistic_request_from_order( $order );
 		}
+
+		throw new \RuntimeException( 'Shipment carrier is not supported for this order.' );
+	}
+
+	private function create_russian_post_domestic_request_from_order( object $order ): ShipmentCreateRequest {
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$delivery_type = $this->delivery_type_from_order( $order );
 		$service = $this->services->find_by_service_key( $service_key );
@@ -215,6 +231,17 @@ final class OrderShipmentDraftFactory {
 				),
 			);
 		}
+		if ( RussianPostDomesticSettings::CARRIER_KEY !== $request->carrier_key ) {
+			throw new \RuntimeException( 'Shipment carrier is not supported for this order.' );
+		}
+
+		return $this->russian_post_domestic_draft( $request );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function russian_post_domestic_draft( ShipmentCreateRequest $request ): array {
 		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 		$service_variants = array();
 		if ( $service instanceof DeliveryService ) {
@@ -256,6 +283,18 @@ final class OrderShipmentDraftFactory {
 		if ( JetLogisticSettings::CARRIER_KEY === $base->carrier_key ) {
 			return $base;
 		}
+
+		if ( RussianPostDomesticSettings::CARRIER_KEY !== $base->carrier_key ) {
+			throw new \RuntimeException( 'Shipment carrier is not supported for this order.' );
+		}
+
+		return $this->create_russian_post_domestic_request_from_admin_data( $base, $data );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function create_russian_post_domestic_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$service = $this->services->find_by_service_key( $service_key );
 		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? $base->delivery_type ) ) );
@@ -2529,6 +2568,21 @@ final class OrderShipmentDraftFactory {
 		return is_scalar( $value ) ? trim( (string) $value ) : '';
 	}
 
+	/**
+	 * @return array<int,string>
+	 */
+	private function supported_carrier_keys(): array {
+		return array(
+			RussianPostDomesticSettings::CARRIER_KEY,
+			CdekSettings::CARRIER_KEY,
+			DpdSettings::CARRIER_KEY,
+			YandexDeliverySettings::CARRIER_KEY,
+			PekSettings::CARRIER_KEY,
+			OzonDeliverySettings::CARRIER_KEY,
+			JetLogisticSettings::CARRIER_KEY,
+		);
+	}
+
 	private function delivery_type_from_order( object $order ): string {
 		$delivery_type = $this->meta_string( $order, '_wdc_platform_delivery_type' );
 		if ( '' !== $delivery_type ) {
@@ -2540,17 +2594,7 @@ final class OrderShipmentDraftFactory {
 	}
 
 	private function active_carrier_key( object $order ): string {
-		$carrier = $this->meta_string( $order, '_wdc_platform_carrier_key' );
-		if ( '' !== $carrier ) {
-			return $carrier;
-		}
-		$calculation = $this->calculation_data( $order );
-		$carrier = (string) ( $calculation['carrier_key'] ?? '' );
-		if ( '' !== $carrier ) {
-			return $carrier;
-		}
-
-		return RussianPostDomesticSettings::CARRIER_KEY;
+		return $this->meta_string( $order, '_wdc_platform_carrier_key' );
 	}
 
 	/**

@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.25
+Version: 0.148.00
 
-0.147.25 adds the complete four-rule Jet Logistic default status mapping set through a new idempotent data migration and removes the unused template placeholder directory. Existing administrator mappings still win; no broad `Доставка груза на склад` default is restored.
+0.148.00 preserves the disabled state for existing international Russian Post services during builtin bootstrap and makes Shipment drafts fail closed unless the order has an explicitly supported carrier.
 
 0.147.18 fixes checkout order validation for pickup rates that do not require a concrete pickup-point selection. `DeliveryType::PICKUP` now means terminal/pickup-style delivery, while `requires_pickup_point=true` is the separate authoritative capability that triggers "Выберите пункт выдачи."; Jet Logistic pickup remains pickup delivery with `requires_pickup_point=false`, so orders can be placed without fake pickup-point metadata. Selectable pickup carriers still require a valid, current pickup selection.
 

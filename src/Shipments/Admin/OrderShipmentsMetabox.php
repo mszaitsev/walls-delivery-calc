@@ -219,6 +219,10 @@ final class OrderShipmentsMetabox {
 			echo '<p>' . esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ) . '</p>';
 			return;
 		}
+		if ( ! $this->drafts->supports_order( $order ) ) {
+			echo '<p>' . esc_html__( 'Добавьте стандартную службу доставки', 'walls-delivery-calc' ) . '</p>';
+			return;
+		}
 		$error = $this->repository->last_error( $order );
 		$draft = $this->drafts->draft_array( $order );
 		$safe_preview = array(

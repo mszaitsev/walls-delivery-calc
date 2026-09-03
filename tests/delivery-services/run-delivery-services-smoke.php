@@ -297,15 +297,19 @@ use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
@@ -344,6 +348,14 @@ wdc_ds_assert( array() === $GLOBALS['wpdb']->rules, 'Russian Post bootstrap must
 $services->ensure_russian_post_service();
 $rp_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostSettings::SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
 wdc_ds_assert( 1 === count( $rp_rows ), 'Repeated Russian Post bootstrap must not create duplicate services.' );
+$services->update_service( (int) $rp->id, array( 'enabled' => 0 ) );
+$services->ensure_russian_post_service();
+$disabled_rp = $services->find_by_service_key( RussianPostSettings::SERVICE_KEY );
+wdc_ds_assert( $disabled_rp instanceof DeliveryService && ! $disabled_rp->enabled, 'International Russian Post bootstrap must preserve an admin-disabled existing service.' );
+$services->update_service( (int) $rp->id, array( 'enabled' => 1 ) );
+$services->ensure_russian_post_service();
+$enabled_rp = $services->find_by_service_key( RussianPostSettings::SERVICE_KEY );
+wdc_ds_assert( $enabled_rp instanceof DeliveryService && $enabled_rp->enabled, 'International Russian Post bootstrap must preserve an admin-enabled existing service.' );
 $services->soft_delete_service( (int) $rp->id );
 wdc_ds_assert( $services->find_by_service_key( RussianPostSettings::SERVICE_KEY ) instanceof DeliveryService, 'Predefined Russian Post service cannot be deleted.' );
 $domestic_service = $services->ensure_russian_post_domestic_service();
@@ -567,6 +579,45 @@ $manager = new DeliveryServiceManager( $services, $countries, new RuleRepository
 $manager->ensure_builtin_services();
 $unified_domestic_service = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 wdc_ds_assert( $unified_domestic_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $unified_domestic_service->id ), true ) && $manager->service_available_for_country( $unified_domestic_service, 'RU' ), 'Unified domestic service must bootstrap RU availability.' );
+$builtin_preserve_enabled = array(
+	CdekSettings::SERVICE_KEY => array(
+		'ensure' => 'ensure_cdek_service',
+		'label' => 'CDEK',
+	),
+	DpdSettings::SERVICE_KEY => array(
+		'ensure' => 'ensure_dpd_service',
+		'label' => 'DPD',
+	),
+	YandexDeliverySettings::SERVICE_KEY => array(
+		'ensure' => 'ensure_yandex_delivery_service',
+		'label' => 'Yandex Delivery',
+	),
+	JetLogisticSettings::SERVICE_KEY => array(
+		'ensure' => 'ensure_jet_logistic_service',
+		'label' => 'Jet Logistic',
+	),
+	PekSettings::SERVICE_KEY => array(
+		'ensure' => 'ensure_pek_service',
+		'label' => 'PEK',
+	),
+	OzonDeliverySettings::SERVICE_KEY => array(
+		'ensure' => 'ensure_ozon_delivery_service',
+		'label' => 'Ozon Delivery',
+	),
+);
+foreach ( $builtin_preserve_enabled as $service_key => $case ) {
+	$service = $services->find_by_service_key( $service_key );
+	wdc_ds_assert( $service instanceof DeliveryService, $case['label'] . ' service must exist before enabled-state regression.' );
+	$services->update_service( (int) $service->id, array( 'enabled' => 0 ) );
+	$services->{$case['ensure']}();
+	$disabled_service = $services->find_by_service_key( $service_key );
+	wdc_ds_assert( $disabled_service instanceof DeliveryService && ! $disabled_service->enabled, $case['label'] . ' bootstrap must preserve disabled existing service.' );
+}
+$services->update_service( (int) $enabled_rp->id, array( 'enabled' => 0 ) );
+$manager->ensure_builtin_services();
+$disabled_checkout_registry = new DeliveryServiceRegistry( $services, new CarrierRegistry() );
+$active_service_keys = array_map( static fn ( DeliveryService $service ): string => $service->service_key, $disabled_checkout_registry->active_services() );
+wdc_ds_assert( ! in_array( RussianPostSettings::SERVICE_KEY, $active_service_keys, true ), 'Disabled international Russian Post service must not participate in checkout service execution.' );
 $GLOBALS['wpdb']->queries = array();
 $manager->ensure_builtin_services();
 $manager->ensure_builtin_services();

@@ -1142,7 +1142,11 @@ foreach ( array( 'src/Shipments/Application', 'src/Shipments/Admin', 'src/Shipme
 }
 foreach ( $generic_shipment_sources as $relative => $source ) {
 	if ( 'src/Shipments/Application/OrderShipmentDraftFactory.php' === $relative ) {
-		plugin_architecture_assert( str_contains( $source, 'JetLogisticSettings::CARRIER_KEY' ) && strpos( $source, 'JetLogisticSettings::CARRIER_KEY' ) < strpos( $source, 'RussianPostDomesticSettings::SERVICE_KEY' ), 'Order shipment draft factory must handle Jet Logistic before the Russian Post fallback.' );
+		plugin_architecture_assert( str_contains( $source, 'function supports_order' ) && str_contains( $source, 'function supports_carrier_key' ), 'Order shipment draft factory must expose the shipment-supported carrier contract.' );
+		plugin_architecture_assert( str_contains( $source, 'if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier_key )' ) && str_contains( $source, 'create_russian_post_domestic_request_from_order' ), 'Order shipment draft factory must handle domestic Russian Post through an explicit carrier branch.' );
+		plugin_architecture_assert( str_contains( $source, "throw new \\RuntimeException( 'Shipment carrier is not supported for this order.' )" ), 'Order shipment draft factory must fail closed for unsupported carriers instead of falling back to Russian Post.' );
+	} elseif ( 'src/Shipments/Admin/OrderShipmentsMetabox.php' === $relative ) {
+		plugin_architecture_assert( str_contains( $source, '! $this->drafts->supports_order( $order )' ) && str_contains( $source, 'Добавьте стандартную службу доставки' ) && ! str_contains( $source, 'custom_delivery' ), 'Order shipments metabox must render the generic unsupported-service empty state through the factory contract.' );
 	} else {
 		plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic Shipment Framework must not branch on Jet Logistic in ' . $relative );
 	}
