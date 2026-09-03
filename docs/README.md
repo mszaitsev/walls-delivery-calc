@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.148.04
+Version: 0.148.05
 
-0.148.04 fixes DPD pickup recalculation in the order admin modal by preventing stale saved receiver terminal codes from leaking into previews for a newly selected canonical location, while preserving explicit DPD pickup selection and checkout session behavior.
+0.148.05 makes DPD order-admin recalculation reuse saved pickup terminal codes only when the saved pickup is explicitly owned by DPD, so same-city Yandex/Ozon/CDEK/PEK pickup codes cannot leak into DPD receiver terminal pricing.
 
 0.148.01 makes grouped domestic Russian Post tariff selector variants use the final delivery-days label for their radio-switch planned comment payload, preventing stale pre-grouping comments from reappearing in checkout.
 

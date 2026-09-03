@@ -349,33 +349,73 @@ final class OrderQuoteRequestMapper {
 
 	private function dpd_selected_terminal_code( object $order, array $selected_pickup_point = array(), ?array $selected_location = null ): string {
 		if ( $this->is_dpd_pickup_selection( $selected_pickup_point ) ) {
-			$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
-			foreach ( array( 'terminal_code', 'point_code', 'delivery_point' ) as $key ) {
-				$value = trim( (string) ( $selected_pickup_point[ $key ] ?? $snapshot[ $key ] ?? '' ) );
-				if ( '' !== $value ) {
-					return $value;
-				}
-			}
+			return $this->pickup_terminal_code_from_payload( $selected_pickup_point );
 		}
 		if ( $this->selected_location_differs_from_saved( $order, $selected_location ) ) {
 			return '';
 		}
+		if ( ! $this->saved_pickup_belongs_to_dpd( $order ) ) {
+			return '';
+		}
+
+		return $this->saved_dpd_terminal_code( $order );
+	}
+
+	/** @param array<string,mixed> $pickup */
+	private function pickup_terminal_code_from_payload( array $pickup ): string {
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 		foreach ( array( 'terminal_code', 'point_code', 'delivery_point' ) as $key ) {
-			$value = trim( (string) ( $selected_pickup_point[ $key ] ?? '' ) );
-			if ( '' !== $value && $this->is_dpd_pickup_selection( $selected_pickup_point ) ) {
+			$value = trim( (string) ( $pickup[ $key ] ?? $snapshot[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
 				return $value;
 			}
 		}
+
+		return '';
+	}
+
+	private function saved_pickup_belongs_to_dpd( object $order ): bool {
+		$carrier = $this->normalized_owner_key( $this->meta_string( $order, '_wdc_pickup_carrier_key' ) );
+		$family  = $this->normalized_owner_key( $this->meta_string( $order, '_wdc_pickup_family' ) );
+		if ( $this->pickup_owner_is_known( $carrier, $family ) ) {
+			return $this->is_dpd_pickup_owner( $carrier, $family );
+		}
+
+		$snapshot = $this->array_meta( $order, '_wdc_pickup_point_snapshot' );
+		if ( $this->pickup_payload_owner_is_known( $snapshot ) ) {
+			return $this->pickup_payload_belongs_to_dpd( $snapshot );
+		}
+
+		$calculation = $this->calculation_data( $order );
+		$pickup      = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		if ( $this->pickup_payload_owner_is_known( $pickup ) ) {
+			return $this->pickup_payload_belongs_to_dpd( $pickup );
+		}
+
+		return DpdSettings::CARRIER_KEY === $this->normalized_owner_key( $this->meta_string( $order, '_wdc_platform_carrier_key' ) )
+			&& '' !== $this->meta_string( $order, '_wdc_dpd_pickup_terminal_code' );
+	}
+
+	private function saved_dpd_terminal_code( object $order ): string {
 		foreach ( array( '_wdc_dpd_pickup_terminal_code', '_wdc_pickup_point_code', '_wdc_platform_pickup_code' ) as $key ) {
 			$value = $this->meta_string( $order, $key );
 			if ( '' !== $value ) {
 				return $value;
 			}
 		}
+
+		$snapshot = $this->array_meta( $order, '_wdc_pickup_point_snapshot' );
+		if ( $this->pickup_payload_belongs_to_dpd( $snapshot ) ) {
+			$value = $this->pickup_terminal_code_from_payload( $snapshot );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
 		$calculation = $this->calculation_data( $order );
 		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
-		foreach ( array( 'terminal_code', 'delivery_point', 'point_code' ) as $key ) {
-			$value = trim( (string) ( $pickup[ $key ] ?? '' ) );
+		if ( $this->pickup_payload_belongs_to_dpd( $pickup ) ) {
+			$value = $this->pickup_terminal_code_from_payload( $pickup );
 			if ( '' !== $value ) {
 				return $value;
 			}
@@ -391,6 +431,36 @@ final class OrderQuoteRequestMapper {
 		$family = strtolower( trim( (string) ( $selected_pickup_point['pickup_family'] ?? $selected_pickup_point['family'] ?? $snapshot['pickup_family'] ?? $snapshot['family'] ?? '' ) ) );
 
 		return DpdSettings::CARRIER_KEY === $carrier || DpdSettings::CARRIER_KEY . ':pickup' === $family;
+	}
+
+	/** @param array<string,mixed> $pickup */
+	private function pickup_payload_belongs_to_dpd( array $pickup ): bool {
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$carrier  = $this->normalized_owner_key( (string) ( $pickup['carrier_key'] ?? $pickup['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) );
+		$family   = $this->normalized_owner_key( (string) ( $pickup['pickup_family'] ?? $pickup['family'] ?? $snapshot['pickup_family'] ?? $snapshot['family'] ?? '' ) );
+
+		return $this->is_dpd_pickup_owner( $carrier, $family );
+	}
+
+	/** @param array<string,mixed> $pickup */
+	private function pickup_payload_owner_is_known( array $pickup ): bool {
+		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+		$carrier  = $this->normalized_owner_key( (string) ( $pickup['carrier_key'] ?? $pickup['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) );
+		$family   = $this->normalized_owner_key( (string) ( $pickup['pickup_family'] ?? $pickup['family'] ?? $snapshot['pickup_family'] ?? $snapshot['family'] ?? '' ) );
+
+		return $this->pickup_owner_is_known( $carrier, $family );
+	}
+
+	private function is_dpd_pickup_owner( string $carrier, string $family ): bool {
+		return DpdSettings::CARRIER_KEY === $carrier || DpdSettings::CARRIER_KEY . ':pickup' === $family;
+	}
+
+	private function pickup_owner_is_known( string $carrier, string $family ): bool {
+		return '' !== $carrier || '' !== $family;
+	}
+
+	private function normalized_owner_key( string $value ): string {
+		return strtolower( trim( $value ) );
 	}
 
 	/** @param array<string,mixed>|null $selected_location */
@@ -463,6 +533,22 @@ final class OrderQuoteRequestMapper {
 	 */
 	private function calculation_data( object $order ): array {
 		$value = $this->meta_value( $order, OrderShippingMetaPersister::CALCULATION_META_KEY );
+		if ( is_array( $value ) ) {
+			return $value;
+		}
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return array();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function array_meta( object $order, string $key ): array {
+		$value = $this->meta_value( $order, $key );
 		if ( is_array( $value ) ) {
 			return $value;
 		}
