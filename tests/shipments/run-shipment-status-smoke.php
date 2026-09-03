@@ -20,6 +20,8 @@ use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
@@ -59,6 +61,16 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 if ( ! function_exists( 'current_time' ) ) {
 	function current_time( string $type ): string { return '2026-06-06 12:34:56'; }
 }
+if ( ! function_exists( 'get_option' ) ) {
+	function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_status_smoke_options'][ $option ] ?? $default; }
+}
+if ( ! function_exists( 'update_option' ) ) {
+	function update_option( string $option, mixed $value, bool|string $autoload = false ): bool {
+		unset( $autoload );
+		$GLOBALS['wdc_status_smoke_options'][ $option ] = $value;
+		return true;
+	}
+}
 if ( ! function_exists( 'wp_salt' ) ) {
 	function wp_salt( string $scheme = 'auth' ): string { return 'shipment-status-smoke-' . $scheme; }
 }
@@ -95,11 +107,42 @@ if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
 if ( ! function_exists( 'wc_get_order' ) ) {
 	function wc_get_order( int $order_id ): ?object { return $GLOBALS['wdc_status_smoke_orders'][ $order_id ] ?? null; }
 }
+if ( ! function_exists( 'wc_get_orders' ) ) {
+	function wc_get_orders( array $args = array() ): array {
+		unset( $args );
+		return array_values( $GLOBALS['wdc_status_smoke_autosync_orders'] ?? array() );
+	}
+}
+if ( ! function_exists( 'wc_get_order_statuses' ) ) {
+	function wc_get_order_statuses(): array {
+		return array(
+			'wc-processing' => 'Processing',
+			'wc-on-hold' => 'On hold',
+			'wc-completed' => 'Completed',
+		);
+	}
+}
 if ( ! function_exists( 'wp_send_json_success' ) ) {
 	function wp_send_json_success( mixed $data = null, int $status_code = 200 ): never { throw new ShipmentStatusAjaxResponse( true, $data, $status_code ); }
 }
 if ( ! function_exists( 'wp_send_json_error' ) ) {
 	function wp_send_json_error( mixed $data = null, int $status_code = 400 ): never { throw new ShipmentStatusAjaxResponse( false, $data, $status_code ); }
+}
+if ( ! function_exists( 'get_transient' ) ) {
+	function get_transient( string $key ): mixed { return $GLOBALS['wdc_status_smoke_transients'][ $key ] ?? false; }
+}
+if ( ! function_exists( 'set_transient' ) ) {
+	function set_transient( string $key, mixed $value, int $expiration = 0 ): bool {
+		unset( $expiration );
+		$GLOBALS['wdc_status_smoke_transients'][ $key ] = $value;
+		return true;
+	}
+}
+if ( ! function_exists( 'delete_transient' ) ) {
+	function delete_transient( string $key ): bool {
+		unset( $GLOBALS['wdc_status_smoke_transients'][ $key ] );
+		return true;
+	}
 }
 
 final class ShipmentStatusAjaxResponse extends RuntimeException {
@@ -167,6 +210,37 @@ final class ShipmentStatusSmokeCancellationAdapter implements CarrierShipmentAda
 	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? '' ); }
 	public function auto_sync_throttle_microseconds(): int { return 0; }
 }
+
+final class ShipmentStatusSmokeJetAutoSyncAdapter implements CarrierShipmentAdapterInterface {
+	public int $update_calls = 0;
+
+	public function __construct( private OrderShipmentRepository $repository ) {
+	}
+
+	public function carrier_key(): string { return 'jet_logistic'; }
+	public function supports( ShipmentCreateRequest $request ): bool { return 'jet_logistic' === $request->carrier_key; }
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { return array(); }
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { return new ShipmentCreateResult( false, error_code: 'not-supported', error_message: 'Jet API creation is unsupported.' ); }
+	public function presentation(): array { return array(); }
+	public function status_payload( object $order, array $shipment ): array { unset( $order ); return $shipment; }
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		++$this->update_calls;
+		$shipment = $this->repository->find_by_carrier( $order, 'jet_logistic' );
+		$shipment['carrier_key'] = 'jet_logistic';
+		$shipment['tracking_number'] = (string) ( $shipment['tracking_number'] ?? 'JET-AUTO' );
+		$shipment['universal_status_code'] = DeliveryStatus::READY_FOR_PICKUP;
+		$shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::READY_FOR_PICKUP );
+		$this->repository->save_for_carrier( $order, 'jet_logistic', $shipment );
+
+		return array( 'success' => true, 'status' => DeliveryStatus::READY_FOR_PICKUP );
+	}
+	public function attach_manual( object $order, array $payload ): array { return array( 'success' => false ); }
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
+	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
+	public function supports_status_auto_sync(): bool { return true; }
+	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? '' ); }
+	public function auto_sync_throttle_microseconds(): int { return 0; }
+}
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
@@ -217,14 +291,16 @@ if ( ! class_exists( 'wpdb' ) ) {
 final class ShipmentStatusSmokeOrder {
 	public array $notes = array();
 
-	public function __construct( private int $id, private array $meta ) {
+	public function __construct( private int $id, private array $meta, private string $status = 'processing' ) {
 	}
 
 	public function get_id(): int { return $this->id; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
 	public function save(): void {}
-	public function add_order_note( string $message ): void { $this->notes[] = $message; }
+	public function get_status(): string { return $this->status; }
+	public function update_status( string $status ): void { $this->status = $status; }
+	public function add_order_note( string $message, bool $is_customer_note = false, bool $added_by_user = false ): void { unset( $is_customer_note, $added_by_user ); $this->notes[] = $message; }
 	public function meta_snapshot(): array { return $this->meta; }
 }
 
@@ -254,6 +330,39 @@ $wpdb->settings[] = array( 'service_id' => 1, 'setting_key' => RussianPostOtprav
 $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), $encryption, new DeliveryServiceRepository( $wpdb ), new DeliveryServiceSettingsRepository( $wpdb ) );
 $client = new RussianPostTrackingApiClient( $settings );
 $mapper = new RussianPostTrackingStatusMapper();
+
+$autosync_settings = new SettingsRepository();
+$autosync_settings->set( ShipmentStatusAutoSyncService::ENABLED_KEY, true );
+$autosync_settings->set( ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY, array( 'wc-processing' ) );
+$autosync_settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
+$autosync_settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::READY_FOR_PICKUP => 'wc-completed' ) );
+$autosync_repository = new OrderShipmentRepository();
+$jet_autosync_adapter = new ShipmentStatusSmokeJetAutoSyncAdapter( $autosync_repository );
+$jet_autosync_order = new ShipmentStatusSmokeOrder( 802, array(), 'processing' );
+$autosync_repository->save_for_carrier(
+	$jet_autosync_order,
+	'jet_logistic',
+	array(
+		'carrier_key' => 'jet_logistic',
+		'tracking_number' => '007483827165',
+		'universal_status_code' => DeliveryStatus::IN_TRANSIT,
+	)
+);
+$GLOBALS['wdc_status_smoke_autosync_orders'] = array( $jet_autosync_order );
+$GLOBALS['wdc_status_smoke_transients'] = array();
+$jet_autosync_result = ( new ShipmentStatusAutoSyncService(
+	$autosync_settings,
+	$autosync_repository,
+	( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(),
+	new ShipmentOrderStatusMappingService( $autosync_settings ),
+	null,
+	null,
+	null,
+	new CarrierShipmentAdapterRegistry( array( $jet_autosync_adapter ) )
+) )->run( 'manual' );
+$jet_autosync_shipment = $autosync_repository->find_by_carrier( $jet_autosync_order, 'jet_logistic' );
+shipment_status_smoke_assert( 1 === $jet_autosync_adapter->update_calls && 1 === (int) ( $jet_autosync_result['shipments_updated'] ?? 0 ) && 1 === (int) ( $jet_autosync_result['updates_by_carrier']['jet_logistic'] ?? 0 ), 'Jet autosync must discover the Jet adapter through the canonical registry and update one shipment.' );
+shipment_status_smoke_assert( DeliveryStatus::READY_FOR_PICKUP === (string) ( $jet_autosync_shipment['universal_status_code'] ?? '' ) && 'completed' === $jet_autosync_order->get_status() && 1 === (int) ( $jet_autosync_result['order_statuses_changed'] ?? 0 ), 'Jet autosync must run generic order-status mapping after the adapter refresh.' );
 
 $universal_statuses = DeliveryStatus::all();
 shipment_status_smoke_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $universal_statuses[0], 'pending_creation_in_carrier must be the first universal shipment status.' );

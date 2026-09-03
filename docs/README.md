@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.20
+Version: 0.147.21
 
-0.147.20 makes customer-facing delivery comments generic and order-owned. The final selected `DeliveryRate` now produces one canonical `_wdc_platform_customer_comments` snapshot containing structured links, plain carrier/service/rule comments, and the planned delivery comment in checkout order. My Account, customer emails, and the admin `Калькулятор доставок` block render that same snapshot through the shared safe normalizer/renderer. Jet and Ozon no longer have carrier-specific order-comment persistence providers, pickup snapshots are no longer the source for new order comments, and legacy string/snapshot comments remain readable without a migration.
+0.147.21 completes the Jet Logistic order-admin runtime on top of the generic Shipment Framework. Order delivery recalculation now distinguishes `delivery_type=pickup` from `requires_pickup_point=true`, and courier admin address recapture is controlled by explicit rate metadata, so Jet pickup/courier recalculated rates can be saved without fake pickup points or repeated address entry. Jet shipment admin capabilities are explicit: manual attach, status update, autosync, local remove, and manual actual-cost entry are available through shared flows, while API prepare/create, cancellation, documents, labels, and Jet-specific cron remain unsupported.
 
 0.147.18 fixes checkout order validation for pickup rates that do not require a concrete pickup-point selection. `DeliveryType::PICKUP` now means terminal/pickup-style delivery, while `requires_pickup_point=true` is the separate authoritative capability that triggers "Выберите пункт выдачи."; Jet Logistic pickup remains pickup delivery with `requires_pickup_point=false`, so orders can be placed without fake pickup-point metadata. Selectable pickup carriers still require a valid, current pickup selection.
 

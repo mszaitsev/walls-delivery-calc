@@ -132,6 +132,7 @@ final class OrderDeliveryRecalculationService {
 			'delivery_comment'      => '',
 			'comments'              => array(),
 			'requires_pickup_point' => ! empty( $first->requires_pickup_point ),
+			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $first ),
 			'selected'              => false,
 			'is_grouped'            => true,
 			'tariff_variants'       => array_map( array( $this, 'tariff_payload' ), $rates ),
@@ -159,6 +160,7 @@ final class OrderDeliveryRecalculationService {
 			'comments'              => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
 			'customer_comments'     => is_array( $rate->meta['customer_comments'] ?? null ) ? array_values( $rate->meta['customer_comments'] ) : array(),
 			'requires_pickup_point' => $rate->requires_pickup_point,
+			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $rate ),
 			'selected'              => false,
 			'is_grouped'            => false,
 			'tariff_variants'       => array(),
@@ -185,10 +187,20 @@ final class OrderDeliveryRecalculationService {
 			'planned_delivery_comment' => $rate->planned_delivery_comment,
 			'comments'            => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
 			'customer_comments'   => is_array( $rate->meta['customer_comments'] ?? null ) ? array_values( $rate->meta['customer_comments'] ) : array(),
+			'order_recalculation_requires_address' => $this->order_recalculation_requires_address( $rate ),
 			'selected'            => false,
 			'rate_meta'           => $rate->meta,
 			'api_base_price_rub'  => $rate->meta['api_base_price_rub'] ?? null,
 		);
+	}
+
+	private function order_recalculation_requires_address( DeliveryRate $rate ): bool {
+		if ( array_key_exists( 'order_recalculation_requires_address', $rate->meta ) ) {
+			$value = $rate->meta['order_recalculation_requires_address'];
+			return true === $value || 1 === $value || '1' === $value || 'true' === $value || 'yes' === $value;
+		}
+
+		return DeliveryType::COURIER === $rate->delivery_type;
 	}
 
 	private function delivery_comment( DeliveryRate $rate ): string {

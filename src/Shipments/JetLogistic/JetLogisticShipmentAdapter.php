@@ -59,6 +59,8 @@ final class JetLogisticShipmentAdapter implements CarrierShipmentAdapterInterfac
 			array(
 				'carrier_key' => JetLogisticSettings::CARRIER_KEY,
 				'has_shipment' => $has,
+				'can_create' => false,
+				'can_attach_manual' => ! $has,
 				'can_update_status' => $has,
 				'can_cancel' => false,
 				'can_remove_from_order' => $has,

@@ -160,6 +160,7 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 				'jet_pickup_terminal_customer_comment' => $terminal_customer_comment,
 				'customer_link_comments' => DeliveryType::PICKUP === $type ? array( $this->warehouse_link_comment() ) : array(),
 				'delivery_days_are_working' => true,
+				'order_recalculation_requires_address' => false,
 			),
 			$price,
 			DateRange::range( $result->day_from, $result->day_to, DateRange::UNIT_WORKING_DAYS )

@@ -85,6 +85,9 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentAdapter;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
+use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
+use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
+use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function jet_assert( bool $condition, string $message ): void {
@@ -1406,12 +1409,20 @@ $currency_error_result = ( new JetLogisticApiDiagnosticService( $credentials, $s
 jet_assert( empty( $currency_error_result['success'] ) && 'jet_currency_not_rub' === (string) $currency_error_result['code'] && '1' === (string) ( $currency_error_result['details']['valuta'] ?? '' ) && 'KZT' === (string) ( $currency_error_result['details']['valuta_name'] ?? '' ), 'Jet connection diagnostic must keep safe valuta/valuta_name evidence when production parser rejects currency.' );
 
 $order = new JetFakeOrder();
-$actual_cost_resolver = ( new ReflectionClass( ShipmentActualCostResolver::class ) )->newInstanceWithoutConstructor();
+$actual_cost_resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
 $shipment_service = new JetLogisticShipmentService( new OrderShipmentRepository(), $status_service );
 $adapter = new JetLogisticShipmentAdapter( $shipment_service, $actual_cost_resolver );
+$empty_payload = $adapter->status_payload( $order, array() );
+$empty_buttons = ( new ShipmentMetaboxButtonPolicy() )->resolve( JetLogisticSettings::CARRIER_KEY, array(), $empty_payload );
+jet_assert( false === (bool) $empty_payload['can_create'] && true === (bool) $empty_payload['can_attach_manual'] && false === (bool) $empty_payload['can_cancel'], 'Jet shipment payload without shipment must explicitly disable API creation/cancellation and allow manual attach.' );
+jet_assert( false === $empty_buttons['show_create'] && true === $empty_buttons['show_manual_attach'] && false === $empty_buttons['show_update'] && false === $empty_buttons['show_cancel'] && false === $empty_buttons['show_remove'], 'Jet button policy without shipment must show only manual attach.' );
 $attached = $adapter->attach_manual( $order, array( 'tracking_number' => 'JET-777' ) );
 $stored = $order->meta[ OrderShipmentRepository::META_KEY ][ JetLogisticSettings::CARRIER_KEY ] ?? array();
 jet_assert( ! empty( $attached['success'] ) && 'JET-777' === $stored['tracking_number'] && DeliveryStatus::IN_TRANSIT === $stored['universal_status_code'] && true === $stored['attached_manually'], 'Jet manual attach must store tracking number and initial in_transit status.' );
+$attached_payload = $adapter->status_payload( $order, $stored );
+$attached_buttons = ( new ShipmentMetaboxButtonPolicy() )->resolve( JetLogisticSettings::CARRIER_KEY, $stored, $attached_payload );
+jet_assert( false === (bool) $attached_payload['can_create'] && false === (bool) $attached_payload['can_attach_manual'] && true === (bool) $attached_payload['can_update_status'] && false === (bool) $attached_payload['can_cancel'] && true === (bool) $attached_payload['can_remove_from_order'], 'Jet shipment payload with shipment must expose update/local-remove only.' );
+jet_assert( false === $attached_buttons['show_create'] && false === $attached_buttons['show_manual_attach'] && true === $attached_buttons['show_update'] && false === $attached_buttons['show_cancel'] && true === $attached_buttons['show_remove'], 'Jet button policy with shipment must hide prepare/cancel and show update/remove.' );
 jet_assert( ! $adapter->create( new \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest( 1, JetLogisticSettings::CARRIER_KEY, DeliveryType::COURIER, '', new Address(), null, array(), Money::from_rubles( 0 ) ) )->success, 'Jet API shipment creation must be unsupported.' );
 $adapter->remove_from_order( $order );
 jet_assert( empty( $order->meta[ OrderShipmentRepository::META_KEY ][ JetLogisticSettings::CARRIER_KEY ] ?? array() ), 'Jet local remove must delete only local shipment record.' );

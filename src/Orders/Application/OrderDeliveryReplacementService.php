@@ -59,7 +59,7 @@ final class OrderDeliveryReplacementService {
 		$location = is_array( $payload['selected_location'] ?? null ) ? $payload['selected_location'] : array();
 		$pickup = is_array( $payload['selected_pickup_point'] ?? null ) ? $payload['selected_pickup_point'] : array();
 		$address = is_array( $payload['normalized_shipping_address'] ?? null ) ? $payload['normalized_shipping_address'] : array();
-		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && $this->requires_pickup_point( $rate ) ) {
 			$pickup = $this->canonical_pickup_for_save( $order, $rate, $pickup, $location );
 			if ( isset( $pickup['_wdc_error'] ) ) {
 				return array( 'success' => false, 'message' => (string) $pickup['_wdc_error'] );
@@ -71,7 +71,7 @@ final class OrderDeliveryReplacementService {
 			if ( '' !== $pickup_country_error ) {
 				return array( 'success' => false, 'message' => $pickup_country_error );
 			}
-		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && ! $this->valid_courier_address( $address ) ) {
+		} elseif ( $this->order_recalculation_requires_address( $rate ) && ! $this->valid_courier_address( $address ) ) {
 			return array( 'success' => false, 'message' => 'Для курьерской доставки проверьте адрес доставки или используйте введенный адрес вручную.' );
 		}
 
@@ -113,6 +113,31 @@ final class OrderDeliveryReplacementService {
 		}
 
 		return false;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function requires_pickup_point( array $rate ): bool {
+		$value = $rate['requires_pickup_point'] ?? false;
+		return true === $value || 1 === $value || '1' === $value || 'true' === $value || 'yes' === $value;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function order_recalculation_requires_address( array $rate ): bool {
+		if ( array_key_exists( 'order_recalculation_requires_address', $rate ) ) {
+			$value = $rate['order_recalculation_requires_address'];
+			return true === $value || 1 === $value || '1' === $value || 'true' === $value || 'yes' === $value;
+		}
+		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		if ( array_key_exists( 'order_recalculation_requires_address', $rate_meta ) ) {
+			$value = $rate_meta['order_recalculation_requires_address'];
+			return true === $value || 1 === $value || '1' === $value || 'true' === $value || 'yes' === $value;
+		}
+
+		return DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' );
 	}
 
 	/**
@@ -173,7 +198,7 @@ final class OrderDeliveryReplacementService {
 			if ( is_array( $tariff['rate_meta'] ?? null ) ) {
 				$rate['rate_meta'] = $tariff['rate_meta'];
 			}
-			foreach ( array( 'api_base_price_rub', 'crossed_price', 'planned_delivery_date', 'planned_delivery_comment', 'rules_source', 'round_up_applied', 'minimum_price_applied' ) as $key ) {
+			foreach ( array( 'api_base_price_rub', 'crossed_price', 'planned_delivery_date', 'planned_delivery_comment', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'order_recalculation_requires_address' ) as $key ) {
 				if ( array_key_exists( $key, $tariff ) ) {
 					$rate[ $key ] = $tariff[ $key ];
 				}
@@ -283,6 +308,7 @@ final class OrderDeliveryReplacementService {
 			'selected_tariff_rate_id',
 			'requires_pickup_point',
 			'requires_courier_address',
+			'order_recalculation_requires_address',
 			'Перевозчик',
 			'Способ доставки',
 			'Тип доставки',
@@ -317,7 +343,7 @@ final class OrderDeliveryReplacementService {
 			'_wdc_platform_comments' => is_array( $rate['comments'] ?? null ) ? $rate['comments'] : array(),
 			'_wdc_platform_customer_comments' => $this->customer_comments_from_rate( $rate ),
 			'_wdc_platform_fallback_used' => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ) ? 1 : 0,
-			'_wdc_platform_requires_pickup_point' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? 1 : 0,
+			'_wdc_platform_requires_pickup_point' => $this->requires_pickup_point( $rate ) ? 1 : 0,
 			'_wdc_platform_service_key' => (string) ( $rate['service_key'] ?? '' ),
 			'_wdc_platform_service_title' => (string) ( $rate['service_title'] ?? $rate['label'] ?? '' ),
 			'_wdc_platform_tariff_object' => (string) ( $rate['selected_tariff_object'] ?? '' ),
@@ -336,7 +362,7 @@ final class OrderDeliveryReplacementService {
 			'_wdc_platform_normalization_source' => (string) ( $address['source'] ?? '' ),
 			OrderShippingMetaPersister::CALCULATION_META_KEY => $this->calculation_data( $rate, $location, $pickup, $address ),
 		);
-		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && $this->requires_pickup_point( $rate ) ) {
 			$pickup_snapshot = $this->pickup_snapshot_without_customer_comments( $pickup );
 			$map['_wdc_platform_pickup_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_platform_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
@@ -435,7 +461,7 @@ final class OrderDeliveryReplacementService {
 			'set_shipping_city' => $location_values['city'],
 			'set_shipping_postcode' => $location_values['postcode'],
 		);
-		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && $this->requires_pickup_point( $rate ) ) {
 			$values['set_shipping_country'] = $location_values['country'];
 			$values['set_shipping_state'] = (string) ( $pickup['region_name'] ?? $pickup['region'] ?? $location_values['state'] );
 			$values['set_shipping_city'] = (string) ( $pickup['city_name'] ?? $pickup['city'] ?? $location_values['city'] );
@@ -555,7 +581,7 @@ final class OrderDeliveryReplacementService {
 					'postcode' => (string) ( $address['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' ),
 					'fias_id' => (string) ( $location['fias_id'] ?? $address['fias_id'] ?? '' ),
 				),
-				'pickup' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? $this->pickup_calculation_data( $rate, $pickup ) : array(),
+				'pickup' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && $this->requires_pickup_point( $rate ) ? $this->pickup_calculation_data( $rate, $pickup ) : array(),
 				'customer_comments' => $this->customer_comments_from_rate( $rate ),
 			)
 		);

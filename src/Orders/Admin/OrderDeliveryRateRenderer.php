@@ -58,9 +58,10 @@ final class OrderDeliveryRateRenderer {
 		$id = (string) ( $rate['id'] ?? '' );
 		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
 		$requires_pickup = ! empty( $rate['requires_pickup_point'] );
+		$requires_admin_address = ! empty( $rate['order_recalculation_requires_address'] );
 		$payload = $this->rate_payload_json( $rate );
 
-		echo '<article class="wdc-order-delivery-rate" data-wdc-order-delivery-rate data-rate-id="' . esc_attr( $id ) . '" data-delivery-type="' . esc_attr( $delivery_type ) . '" data-requires-pickup="' . esc_attr( $requires_pickup ? '1' : '0' ) . '" data-carrier-key="' . esc_attr( (string) ( $rate['carrier_key'] ?? '' ) ) . '" data-service-key="' . esc_attr( (string) ( $rate['service_key'] ?? '' ) ) . '" data-rate-payload="' . esc_attr( $payload ) . '">';
+		echo '<article class="wdc-order-delivery-rate" data-wdc-order-delivery-rate data-rate-id="' . esc_attr( $id ) . '" data-delivery-type="' . esc_attr( $delivery_type ) . '" data-requires-pickup="' . esc_attr( $requires_pickup ? '1' : '0' ) . '" data-requires-admin-address="' . esc_attr( $requires_admin_address ? '1' : '0' ) . '" data-carrier-key="' . esc_attr( (string) ( $rate['carrier_key'] ?? '' ) ) . '" data-service-key="' . esc_attr( (string) ( $rate['service_key'] ?? '' ) ) . '" data-rate-payload="' . esc_attr( $payload ) . '">';
 		echo '<label class="wdc-order-delivery-rate__header">';
 		echo '<input type="radio" name="wdc_order_delivery_preview_rate" value="' . esc_attr( $id ) . '">';
 		echo '<span class="wdc-order-delivery-rate__title">' . esc_html( (string) ( $rate['label'] ?? '' ) ) . '</span>';
