@@ -1357,6 +1357,63 @@ if ( array() !== $short_warehouse_mapping ) {
 }
 $status_repo->create_mapping( 'Доставка груза на склад приемки', DeliveryStatus::IN_TRANSIT );
 $status_repo->create_mapping( 'Отправка груза со склада приемки', DeliveryStatus::IN_TRANSIT );
+$status_repo->create_mapping( 'Событие A', DeliveryStatus::IN_TRANSIT );
+$status_repo->create_mapping( 'Событие B', DeliveryStatus::READY_FOR_PICKUP );
+$status_repo->create_mapping( 'Выдача тестового груза', DeliveryStatus::DELIVERED );
+
+$status_resolver = new JetLogisticStatusEventResolver( new JetLogisticStatusMapper( $status_repo ) );
+$same_day_result = $status_resolver->resolve(
+	array(
+		'02.09.2026 Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)',
+		'02.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)',
+	)
+);
+jet_assert( str_contains( (string) ( $same_day_result['current_event']['message'] ?? '' ), 'Отправка груза со склада приемки' ) && '02.09.2026' === (string) ( $same_day_result['current_event']['date'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $same_day_result['current_event']['universal_status'] ?? '' ), 'Jet same-day production sequence must use later source order as current event.' );
+jet_assert( str_contains( (string) ( $same_day_result['events'][0]['message'] ?? '' ), 'Отправка груза со склада приемки' ) && str_contains( (string) ( $same_day_result['events'][1]['message'] ?? '' ), 'Доставка груза на склад приемки' ), 'Jet same-day diagnostic event list must show later source event before earlier source event.' );
+
+$ready_same_day = $status_resolver->resolve(
+	array(
+		'10.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)',
+		'10.09.2026 Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)',
+	)
+);
+jet_assert( DeliveryStatus::READY_FOR_PICKUP === (string) ( $ready_same_day['current_event']['universal_status'] ?? '' ) && str_contains( (string) ( $ready_same_day['current_event']['message'] ?? '' ), 'Доставка груза на склад выдачи' ), 'Jet same-day sequence must allow a later ready_for_pickup event to win over in_transit.' );
+
+$delivered_same_day = $status_resolver->resolve(
+	array(
+		'12.09.2026 Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)',
+		'Груз выдан : 12 сентября 2026 г.',
+	)
+);
+jet_assert( DeliveryStatus::DELIVERED === (string) ( $delivered_same_day['current_event']['universal_status'] ?? '' ) && str_contains( (string) ( $delivered_same_day['current_event']['message'] ?? '' ), 'Груз выдан' ), 'Jet same-day source order must let a later delivered event win when Jet provides no time.' );
+
+$explicit_time = $status_resolver->resolve(
+	array(
+		'02.09.2026 18:00 Событие A',
+		'02.09.2026 10:00 Событие B',
+	)
+);
+jet_assert( 'Событие A' === (string) ( $explicit_time['current_event']['message'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $explicit_time['current_event']['universal_status'] ?? '' ), 'Jet explicit event time must win over source order.' );
+
+$same_timestamp = $status_resolver->resolve(
+	array(
+		'02.09.2026 12:00 Событие A',
+		'02.09.2026 12:00 Событие B',
+	)
+);
+jet_assert( 'Событие B' === (string) ( $same_timestamp['current_event']['message'] ?? '' ) && DeliveryStatus::READY_FOR_PICKUP === (string) ( $same_timestamp['current_event']['universal_status'] ?? '' ), 'Jet exact same timestamp must use later source order.' );
+
+$unmapped_later = $status_resolver->resolve(
+	array(
+		'02.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)',
+		'03.09.2026 Информационное сообщение Jet',
+	)
+);
+jet_assert( DeliveryStatus::IN_TRANSIT === (string) ( $unmapped_later['current_event']['universal_status'] ?? '' ) && str_contains( (string) ( $unmapped_later['current_event']['message'] ?? '' ), 'Отправка груза' ), 'Jet unmapped later information event must not become current status.' );
+
+$text_order_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => "02.09.2026:\nДоставка груза на склад приемки-Новосибирск-(Новосибирская Область)\nОтправка груза со склада приемки-Новосибирск-(Новосибирская Область)" ), JSON_UNESCAPED_UNICODE ) ) ) );
+$text_order_logs = ( new JetLogisticApiClient( $text_order_http, $settings, $credentials ) )->status( '6333837000' );
+jet_assert( str_contains( (string) ( $text_order_logs['logs'][0]['message'] ?? '' ), 'Доставка груза на склад приемки' ) && str_contains( (string) ( $text_order_logs['logs'][1]['message'] ?? '' ), 'Отправка груза со склада приемки' ), 'Jet API client must preserve raw status log source order for resolver tie-breaks.' );
 
 $status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-07-28 10:00:00', 'message' => 'Неизвестно' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
 $status_service = new JetLogisticStatusService( new JetLogisticApiClient( $status_http, $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) );
