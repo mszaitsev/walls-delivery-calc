@@ -65,7 +65,8 @@ final class JetLogisticStatusEventResolver {
 					return 1;
 				}
 
-				return (int) ( $a['source_index'] ?? 0 ) <=> (int) ( $b['source_index'] ?? 0 );
+				// Jet can return date-only logs. For identical timestamps, later source rows are later same-day events.
+				return (int) ( $b['source_index'] ?? 0 ) <=> (int) ( $a['source_index'] ?? 0 );
 			}
 		);
 
@@ -94,27 +95,15 @@ final class JetLogisticStatusEventResolver {
 
 	/** @param array<int,array<string,mixed>> $events @return array<string,mixed> */
 	private function current_event( array $events ): array {
-		$current = array();
 		foreach ( $events as $event ) {
 			if ( '' === (string) ( $event['universal_status'] ?? '' ) ) {
 				continue;
 			}
-			if ( array() === $current ) {
-				$current = $event;
-				continue;
-			}
-			$event_time = $event['timestamp'];
-			$current_time = $current['timestamp'];
-			if ( null !== $event_time && null === $current_time ) {
-				$current = $event;
-				continue;
-			}
-			if ( null !== $event_time && null !== $current_time && $event_time > $current_time ) {
-				$current = $event;
-			}
+
+			return $event;
 		}
 
-		return $current;
+		return array();
 	}
 
 	private function timestamp( string $date, string $message ): ?int {

@@ -288,6 +288,7 @@
       removeConfirmationMessage: '',
       registrationErrorToast: 'Регистрация завершилась ошибкой.',
       registrationSuccessToast: 'Регистрация завершена успешно.',
+      autoUpdateStatusAfterManualAttach: '0',
       autoPollRegistration: '0',
       registrationPollIntervalMs: '5000',
       registrationPollMaxAttempts: '14'
@@ -431,7 +432,7 @@
     };
   }
 
-  function resetShipmentUi(box) {
+  function resetShipmentUi(box, statusPayload) {
     if (!box) return;
     const fields = {
       '[data-wdc-shipment-summary-status]': 'не создано',
@@ -460,7 +461,12 @@
       message.dataset.status = '';
     }
     setShipmentPollingIndicator(box, false);
-    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, documentActions: [] });
+    updateShipmentButtons(
+      box,
+      statusPayload
+        ? shipmentButtonStateFromStatus(statusPayload)
+        : { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, documentActions: [] }
+    );
     dispatchShipmentCarrierHook('resetStatusUi', { box: box });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;

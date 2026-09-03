@@ -48,6 +48,7 @@ final class JetLogisticShipmentAdapter implements CarrierShipmentAdapterInterfac
 			'update_status_button_label' => 'Обновить статус',
 			'created_toast' => 'Номер Jet Logistic прикреплен.',
 			'error_fallback_message' => 'Не удалось получить статус Jet Logistic.',
+			'auto_update_status_after_manual_attach' => '1',
 		);
 	}
 
@@ -59,6 +60,8 @@ final class JetLogisticShipmentAdapter implements CarrierShipmentAdapterInterfac
 			array(
 				'carrier_key' => JetLogisticSettings::CARRIER_KEY,
 				'has_shipment' => $has,
+				'can_create' => false,
+				'can_attach_manual' => ! $has,
 				'can_update_status' => $has,
 				'can_cancel' => false,
 				'can_remove_from_order' => $has,

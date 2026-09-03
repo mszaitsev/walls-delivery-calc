@@ -85,6 +85,9 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentAdapter;
 use WallsShop\WDC\Shipments\JetLogistic\JetLogisticShipmentService;
 use WallsShop\WDC\Shipments\Application\ShipmentActualCostResolver;
+use WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy;
+use WallsShop\WDC\Shipments\Presentation\ShipmentActualCostComparisonService;
+use WallsShop\WDC\Shipments\Presentation\ShipmentBaseApiCostResolver;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function jet_assert( bool $condition, string $message ): void {
@@ -562,9 +565,22 @@ $GLOBALS['wpdb']->jet_statuses = array(
 	'доставка груза на склад' => array( 'id' => 9001, 'external_status' => 'Доставка груза на склад', 'normalized_external_status' => 'доставка груза на склад', 'universal_status' => DeliveryStatus::READY_FOR_PICKUP, 'active' => 1, 'last_seen' => '2026-07-28 10:00:00', 'occurrence_count' => 5 ),
 );
 $migration_0047();
-jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад выдачи'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['груз выдан'] ), 'Jet migration 0047 must delete broad status default and insert precise defaults.' );
+jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад приемки'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад выдачи'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['груз выдан'] ), 'Jet migration 0047 must delete broad status default and insert precise defaults.' );
 jet_assert( empty( $GLOBALS['wpdb']->jet_status_columns['active'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['last_seen'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['occurrence_count'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['active_status'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['last_seen'] ), 'Jet migration 0047 must drop obsolete active/last_seen/occurrence_count columns and indexes idempotently.' );
 jet_assert( str_contains( $migration_0047_source, '0047' ) || str_contains( $migration_0047_source, 'active_status' ), 'Jet migration 0047 source must be present for migration registration by filename.' );
+$GLOBALS['wpdb']->jet_statuses = array(
+	'доставка груза на склад выдачи' => array( 'id' => 9101, 'external_status' => 'Доставка груза на склад выдачи', 'normalized_external_status' => 'доставка груза на склад выдачи', 'universal_status' => DeliveryStatus::READY_FOR_PICKUP ),
+	'груз выдан' => array( 'id' => 9102, 'external_status' => 'Груз выдан', 'normalized_external_status' => 'груз выдан', 'universal_status' => DeliveryStatus::DELIVERED ),
+	'доставка груза на склад приемки' => array( 'id' => 9103, 'external_status' => 'Доставка груза на склад приемки', 'normalized_external_status' => 'доставка груза на склад приемки', 'universal_status' => DeliveryStatus::HANDED_TO_COURIER ),
+);
+$GLOBALS['wpdb']->status_mapping_insert_calls = 0;
+$migration_0056 = require dirname( __DIR__, 2 ) . '/database/migrations/0056_add_jet_logistic_default_status_mappings.php';
+jet_assert( is_callable( $migration_0056 ) && empty( $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки'] ), 'Jet migration 0056 must return a callable and not execute on require.' );
+$migration_0056();
+$migration_0056();
+jet_assert( 4 === count( $GLOBALS['wpdb']->jet_statuses ) && 1 === $GLOBALS['wpdb']->status_mapping_insert_calls, 'Jet migration 0056 must add only missing defaults and remain idempotent on repeat.' );
+jet_assert( DeliveryStatus::HANDED_TO_COURIER === (string) $GLOBALS['wpdb']->jet_statuses['доставка груза на склад приемки']['universal_status'], 'Jet migration 0056 must not overwrite an existing customized mapping.' );
+jet_assert( DeliveryStatus::IN_TRANSIT === (string) $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки']['universal_status'], 'Jet migration 0056 must add missing in-transit source-departure default.' );
 
 $migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-jet-migration-' . str_replace( '.', '', uniqid( '', true ) );
 mkdir( $migration_dir );
@@ -1313,9 +1329,13 @@ try {
 jet_assert( $timeout_thrown, 'Jet HTTP timeout must be classified safely without exposing token.' );
 
 $GLOBALS['wpdb']->jet_statuses = array();
+$GLOBALS['wpdb']->status_mapping_insert_calls = 0;
 $status_repo = new JetLogisticStatusMappingRepository( $GLOBALS['wpdb'] );
 $status_repo->ensure_default_mappings();
-jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ) && '' === $status_repo->map( 'Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)' ) && '' === $status_repo->map( 'Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)' ), 'Jet status defaults must remove the broad warehouse rule and map only precise pickup warehouse delivery phrases.' );
+jet_assert( 4 === count( $GLOBALS['wpdb']->jet_statuses ) && 4 === $GLOBALS['wpdb']->status_mapping_insert_calls, 'Jet status defaults on an empty store must create exactly four mappings.' );
+$status_repo->ensure_default_mappings();
+jet_assert( 4 === count( $GLOBALS['wpdb']->jet_statuses ) && 4 === $GLOBALS['wpdb']->status_mapping_insert_calls, 'Jet status defaults must remain idempotent on repeated ensure calls.' );
+jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && DeliveryStatus::IN_TRANSIT === $status_repo->map( '02.09.2026 Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)' ) && DeliveryStatus::IN_TRANSIT === $status_repo->map( '02.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)' ) && DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ), 'Jet status defaults must map precise receiving, departure and pickup warehouse phrases without restoring the broad warehouse rule.' );
 jet_assert( DeliveryStatus::DELIVERED === $status_repo->map( 'Груз выдан' ) && DeliveryStatus::DELIVERED === $status_repo->map( 'Груз выдан : 26 июня 2026 г.' ) && DeliveryStatus::DELIVERED === $status_repo->map( 'ГРУЗ ВЫДАН: 26 июня 2026 г.' ) && DeliveryStatus::DELIVERED === $status_repo->map( '  Груз   выдан : 26 июня 2026 г.' ), 'Jet status mapping must use normalized literal substring matching.' );
 $status_repo->create_mapping( 'склад', DeliveryStatus::IN_TRANSIT );
 jet_assert( DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана' ), 'Jet status mapping must apply the longest matching phrase before shorter substring rules.' );
@@ -1354,6 +1374,63 @@ if ( array() !== $short_warehouse_mapping ) {
 }
 $status_repo->create_mapping( 'Доставка груза на склад приемки', DeliveryStatus::IN_TRANSIT );
 $status_repo->create_mapping( 'Отправка груза со склада приемки', DeliveryStatus::IN_TRANSIT );
+$status_repo->create_mapping( 'Событие A', DeliveryStatus::IN_TRANSIT );
+$status_repo->create_mapping( 'Событие B', DeliveryStatus::READY_FOR_PICKUP );
+$status_repo->create_mapping( 'Выдача тестового груза', DeliveryStatus::DELIVERED );
+
+$status_resolver = new JetLogisticStatusEventResolver( new JetLogisticStatusMapper( $status_repo ) );
+$same_day_result = $status_resolver->resolve(
+	array(
+		'02.09.2026 Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)',
+		'02.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)',
+	)
+);
+jet_assert( str_contains( (string) ( $same_day_result['current_event']['message'] ?? '' ), 'Отправка груза со склада приемки' ) && '02.09.2026' === (string) ( $same_day_result['current_event']['date'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $same_day_result['current_event']['universal_status'] ?? '' ), 'Jet same-day production sequence must use later source order as current event.' );
+jet_assert( str_contains( (string) ( $same_day_result['events'][0]['message'] ?? '' ), 'Отправка груза со склада приемки' ) && str_contains( (string) ( $same_day_result['events'][1]['message'] ?? '' ), 'Доставка груза на склад приемки' ), 'Jet same-day diagnostic event list must show later source event before earlier source event.' );
+
+$ready_same_day = $status_resolver->resolve(
+	array(
+		'10.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)',
+		'10.09.2026 Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)',
+	)
+);
+jet_assert( DeliveryStatus::READY_FOR_PICKUP === (string) ( $ready_same_day['current_event']['universal_status'] ?? '' ) && str_contains( (string) ( $ready_same_day['current_event']['message'] ?? '' ), 'Доставка груза на склад выдачи' ), 'Jet same-day sequence must allow a later ready_for_pickup event to win over in_transit.' );
+
+$delivered_same_day = $status_resolver->resolve(
+	array(
+		'12.09.2026 Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)',
+		'Груз выдан : 12 сентября 2026 г.',
+	)
+);
+jet_assert( DeliveryStatus::DELIVERED === (string) ( $delivered_same_day['current_event']['universal_status'] ?? '' ) && str_contains( (string) ( $delivered_same_day['current_event']['message'] ?? '' ), 'Груз выдан' ), 'Jet same-day source order must let a later delivered event win when Jet provides no time.' );
+
+$explicit_time = $status_resolver->resolve(
+	array(
+		'02.09.2026 18:00 Событие A',
+		'02.09.2026 10:00 Событие B',
+	)
+);
+jet_assert( 'Событие A' === (string) ( $explicit_time['current_event']['message'] ?? '' ) && DeliveryStatus::IN_TRANSIT === (string) ( $explicit_time['current_event']['universal_status'] ?? '' ), 'Jet explicit event time must win over source order.' );
+
+$same_timestamp = $status_resolver->resolve(
+	array(
+		'02.09.2026 12:00 Событие A',
+		'02.09.2026 12:00 Событие B',
+	)
+);
+jet_assert( 'Событие B' === (string) ( $same_timestamp['current_event']['message'] ?? '' ) && DeliveryStatus::READY_FOR_PICKUP === (string) ( $same_timestamp['current_event']['universal_status'] ?? '' ), 'Jet exact same timestamp must use later source order.' );
+
+$unmapped_later = $status_resolver->resolve(
+	array(
+		'02.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)',
+		'03.09.2026 Информационное сообщение Jet',
+	)
+);
+jet_assert( DeliveryStatus::IN_TRANSIT === (string) ( $unmapped_later['current_event']['universal_status'] ?? '' ) && str_contains( (string) ( $unmapped_later['current_event']['message'] ?? '' ), 'Отправка груза' ), 'Jet unmapped later information event must not become current status.' );
+
+$text_order_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => "02.09.2026:\nДоставка груза на склад приемки-Новосибирск-(Новосибирская Область)\nОтправка груза со склада приемки-Новосибирск-(Новосибирская Область)" ), JSON_UNESCAPED_UNICODE ) ) ) );
+$text_order_logs = ( new JetLogisticApiClient( $text_order_http, $settings, $credentials ) )->status( '6333837000' );
+jet_assert( str_contains( (string) ( $text_order_logs['logs'][0]['message'] ?? '' ), 'Доставка груза на склад приемки' ) && str_contains( (string) ( $text_order_logs['logs'][1]['message'] ?? '' ), 'Отправка груза со склада приемки' ), 'Jet API client must preserve raw status log source order for resolver tie-breaks.' );
 
 $status_http = new JetFakeHttp( array( array( 'status' => 200, 'body' => json_encode( array( 'success' => true, 'result' => array( 'logs' => array( array( 'date' => '2026-07-28 10:00:00', 'message' => 'Неизвестно' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ), array( 'date' => '2026-07-27 10:00:00', 'message' => 'Груз выдан' ) ) ) ), JSON_UNESCAPED_UNICODE ) ) ) );
 $status_service = new JetLogisticStatusService( new JetLogisticApiClient( $status_http, $settings, $credentials ), new JetLogisticStatusMapper( $status_repo ) );
@@ -1406,14 +1483,26 @@ $currency_error_result = ( new JetLogisticApiDiagnosticService( $credentials, $s
 jet_assert( empty( $currency_error_result['success'] ) && 'jet_currency_not_rub' === (string) $currency_error_result['code'] && '1' === (string) ( $currency_error_result['details']['valuta'] ?? '' ) && 'KZT' === (string) ( $currency_error_result['details']['valuta_name'] ?? '' ), 'Jet connection diagnostic must keep safe valuta/valuta_name evidence when production parser rejects currency.' );
 
 $order = new JetFakeOrder();
-$actual_cost_resolver = ( new ReflectionClass( ShipmentActualCostResolver::class ) )->newInstanceWithoutConstructor();
+$actual_cost_resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
 $shipment_service = new JetLogisticShipmentService( new OrderShipmentRepository(), $status_service );
 $adapter = new JetLogisticShipmentAdapter( $shipment_service, $actual_cost_resolver );
+$presentation = $adapter->presentation();
+jet_assert( '1' === (string) ( $presentation['auto_update_status_after_manual_attach'] ?? '' ), 'Jet admin presentation must request one generic status refresh after manual attach.' );
+$empty_payload = $adapter->status_payload( $order, array() );
+$empty_buttons = ( new ShipmentMetaboxButtonPolicy() )->resolve( JetLogisticSettings::CARRIER_KEY, array(), $empty_payload );
+jet_assert( false === (bool) $empty_payload['can_create'] && true === (bool) $empty_payload['can_attach_manual'] && false === (bool) $empty_payload['can_cancel'], 'Jet shipment payload without shipment must explicitly disable API creation/cancellation and allow manual attach.' );
+jet_assert( false === $empty_buttons['show_create'] && true === $empty_buttons['show_manual_attach'] && false === $empty_buttons['show_update'] && false === $empty_buttons['show_cancel'] && false === $empty_buttons['show_remove'], 'Jet button policy without shipment must show only manual attach.' );
 $attached = $adapter->attach_manual( $order, array( 'tracking_number' => 'JET-777' ) );
 $stored = $order->meta[ OrderShipmentRepository::META_KEY ][ JetLogisticSettings::CARRIER_KEY ] ?? array();
 jet_assert( ! empty( $attached['success'] ) && 'JET-777' === $stored['tracking_number'] && DeliveryStatus::IN_TRANSIT === $stored['universal_status_code'] && true === $stored['attached_manually'], 'Jet manual attach must store tracking number and initial in_transit status.' );
+$attached_payload = $adapter->status_payload( $order, $stored );
+$attached_buttons = ( new ShipmentMetaboxButtonPolicy() )->resolve( JetLogisticSettings::CARRIER_KEY, $stored, $attached_payload );
+jet_assert( false === (bool) $attached_payload['can_create'] && false === (bool) $attached_payload['can_attach_manual'] && true === (bool) $attached_payload['can_update_status'] && false === (bool) $attached_payload['can_cancel'] && true === (bool) $attached_payload['can_remove_from_order'], 'Jet shipment payload with shipment must expose update/local-remove only.' );
+jet_assert( false === $attached_buttons['show_create'] && false === $attached_buttons['show_manual_attach'] && true === $attached_buttons['show_update'] && false === $attached_buttons['show_cancel'] && true === $attached_buttons['show_remove'], 'Jet button policy with shipment must hide prepare/cancel and show update/remove.' );
 jet_assert( ! $adapter->create( new \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest( 1, JetLogisticSettings::CARRIER_KEY, DeliveryType::COURIER, '', new Address(), null, array(), Money::from_rubles( 0 ) ) )->success, 'Jet API shipment creation must be unsupported.' );
 $adapter->remove_from_order( $order );
 jet_assert( empty( $order->meta[ OrderShipmentRepository::META_KEY ][ JetLogisticSettings::CARRIER_KEY ] ?? array() ), 'Jet local remove must delete only local shipment record.' );
+$removed_payload = $adapter->status_payload( $order, array() );
+jet_assert( false === (bool) $removed_payload['can_create'] && true === (bool) $removed_payload['can_attach_manual'] && false === (bool) $removed_payload['can_update_status'] && false === (bool) $removed_payload['can_cancel'] && false === (bool) $removed_payload['can_remove_from_order'], 'Jet payload after local remove must keep prepare hidden and manual attach visible.' );
 
 echo "Jet Logistic smoke passed.\n";

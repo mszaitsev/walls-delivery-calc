@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
@@ -66,6 +67,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( OzonDeliverySettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_ozon_request_from_order( $order );
+		}
+		if ( JetLogisticSettings::CARRIER_KEY === $carrier_key ) {
+			return $this->create_jet_logistic_request_from_order( $order );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$delivery_type = $this->delivery_type_from_order( $order );
@@ -199,6 +203,18 @@ final class OrderShipmentDraftFactory {
 				),
 			);
 		}
+		if ( JetLogisticSettings::CARRIER_KEY === $request->carrier_key ) {
+			return array(
+				'request' => $request->to_array(),
+				'services' => array(),
+				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'requires_tariff' => false,
+					'requires_postoffice' => false,
+					'requires_successful_preview' => false,
+				),
+			);
+		}
 		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 		$service_variants = array();
 		if ( $service instanceof DeliveryService ) {
@@ -236,6 +252,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( OzonDeliverySettings::CARRIER_KEY === $base->carrier_key ) {
 			return $this->create_ozon_request_from_admin_data( $base, $data );
+		}
+		if ( JetLogisticSettings::CARRIER_KEY === $base->carrier_key ) {
+			return $base;
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$service = $this->services->find_by_service_key( $service_key );
@@ -917,6 +936,56 @@ final class OrderShipmentDraftFactory {
 				'rate_meta' => $rate_meta,
 				'shipment_item_rows' => $this->shipment_item_rows_from_order( $order, $items ),
 				'ozon_shipment_source' => 'shipment_modal_actual_places',
+			)
+		);
+	}
+
+	private function create_jet_logistic_request_from_order( object $order ): ShipmentCreateRequest {
+		$delivery_type = $this->delivery_type_from_order( $order );
+		$items = $this->order_items( $order );
+		$weight = $this->default_weight_g( $order, $items );
+		$place = new ShipmentPlace( 1, $weight, 0, 0, 0, Money::from_kopecks( 0 ), $items );
+		$service = $this->services->find_by_service_key( JetLogisticSettings::SERVICE_KEY );
+		$rate_id = $this->meta_string( $order, '_wdc_platform_rate_id' );
+		if ( '' === $rate_id ) {
+			$rate_id = DeliveryType::COURIER === $delivery_type ? JetLogisticSettings::COURIER_RATE_KEY : JetLogisticSettings::PICKUP_RATE_KEY;
+		}
+		$service_title = $service instanceof DeliveryService ? $service->title : $this->meta_string( $order, '_wdc_platform_service_title' );
+		if ( '' === $service_title ) {
+			$service_title = JetLogisticSettings::PUBLIC_TITLE;
+		}
+
+		return new ShipmentCreateRequest(
+			order_id: $this->order_id( $order ),
+			carrier_key: JetLogisticSettings::CARRIER_KEY,
+			delivery_type: $delivery_type,
+			rate_id: $rate_id,
+			recipient_address: $this->recipient_address( $order, $delivery_type ),
+			pickup_point: null,
+			places: array( $place ),
+			declared_value: Money::from_kopecks( 0 ),
+			insurance_enabled: false,
+			services: array(),
+			recipient: array(
+				'name' => $this->recipient_name( $order ),
+				'phone' => $this->phone( $order ),
+				'email' => $this->email( $order ),
+			),
+			meta: array(
+				'carrier_key' => JetLogisticSettings::CARRIER_KEY,
+				'service_key' => JetLogisticSettings::SERVICE_KEY,
+				'delivery_type' => $delivery_type,
+				'service_title' => $service_title,
+				'order_num' => $this->order_number( $order ),
+				'pickup_point_found' => false,
+				'pickup_point_row' => array(),
+				'pickup_point_code' => '',
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : '',
+				'normalization_required' => false,
+				'normalization_valid' => false,
+				'normalization_attempted' => false,
+				'calculation_data' => $this->calculation_data( $order ),
+				'rate_meta' => $this->rate_meta_data( $order ),
 			)
 		);
 	}

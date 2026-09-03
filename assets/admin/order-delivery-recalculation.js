@@ -163,7 +163,7 @@
 		}
 		const selectedRate = selectedRates.get( box );
 		box.querySelectorAll( '[data-wdc-order-delivery-rate]' ).forEach( function ( rateNode ) {
-			const visible = !! ( selectedRate && ! selectedRate.requires_pickup_point && rateNode.dataset.rateId === selectedRate.id );
+			const visible = !! ( selectedRate && rateRequiresAdminAddress( selectedRate ) && rateNode.dataset.rateId === selectedRate.id );
 			let block = rateNode.querySelector( '[data-wdc-courier-address-block]' );
 			if ( visible && ! block ) {
 				block = document.createElement( 'div' );
@@ -214,8 +214,10 @@
 		let enabled = !! rate;
 		if ( enabled && rate.requires_pickup_point ) {
 			enabled = !! selectedPickupPoints.get( box );
-		} else if ( enabled ) {
+		} else if ( enabled && rateRequiresAdminAddress( rate ) ) {
 			enabled = isValidCourierAddress( normalizedShippingAddresses.get( box ) );
+		} else if ( enabled ) {
+			enabled = true;
 		}
 		button.disabled = ! enabled || activeSaveRequests.has( box );
 		updateCourierLocationWarning( box );
@@ -236,7 +238,7 @@
 		}
 		const rate = selectedRates.get( box );
 		const address = normalizedShippingAddresses.get( box );
-		if ( ! rate || rate.requires_pickup_point || ! isValidCourierAddress( address ) ) {
+		if ( ! rate || ! rateRequiresAdminAddress( rate ) || ! isValidCourierAddress( address ) ) {
 			node.hidden = true;
 			node.textContent = '';
 			node.dataset.status = '';
@@ -538,6 +540,7 @@
 		payload.id = rate.dataset.rateId || payload.id || input.value || '';
 		payload.delivery_type = rate.dataset.deliveryType || payload.delivery_type || '';
 		payload.requires_pickup_point = '1' === String( rate.dataset.requiresPickup || '' ) || true === payload.requires_pickup_point;
+		payload.order_recalculation_requires_address = '1' === String( rate.dataset.requiresAdminAddress || '' ) || true === payload.order_recalculation_requires_address;
 		payload.carrier_key = rate.dataset.carrierKey || payload.carrier_key || '';
 		payload.service_key = rate.dataset.serviceKey || payload.service_key || '';
 		payload.selected_tariff = selectedTariffPayload( rate );
@@ -632,6 +635,11 @@
 		const payload = parseJson( input.dataset.tariffPayload || '{}' );
 		payload.object_code = payload.object_code || input.value || '';
 		return payload;
+	}
+
+	function rateRequiresAdminAddress( rate ) {
+		const value = rate && rate.order_recalculation_requires_address;
+		return true === value || '1' === String( value || '' ) || 'true' === String( value || '' ) || 'yes' === String( value || '' );
 	}
 
 	function parseJson( text ) {
@@ -853,6 +861,7 @@
 			payload.id = candidate.dataset.rateId || payload.id || '';
 			payload.delivery_type = candidate.dataset.deliveryType || payload.delivery_type || '';
 			payload.requires_pickup_point = '1' === String( candidate.dataset.requiresPickup || '' ) || true === payload.requires_pickup_point;
+			payload.order_recalculation_requires_address = '1' === String( candidate.dataset.requiresAdminAddress || '' ) || true === payload.order_recalculation_requires_address;
 			payload.carrier_key = candidate.dataset.carrierKey || payload.carrier_key || '';
 			payload.service_key = candidate.dataset.serviceKey || payload.service_key || '';
 			payload.selected_tariff = selectedTariffPayload( candidate );
@@ -1115,7 +1124,7 @@
 		form.append( 'selected_rate', JSON.stringify( rate ) );
 		form.append( 'selected_tariff', JSON.stringify( rate.selected_tariff || {} ) );
 		form.append( 'selected_pickup_point', JSON.stringify( selectedPickupPoints.get( box ) || {} ) );
-		form.append( 'normalized_shipping_address', JSON.stringify( rate.requires_pickup_point ? {} : ( normalizedShippingAddresses.get( box ) || {} ) ) );
+		form.append( 'normalized_shipping_address', JSON.stringify( rateRequiresAdminAddress( rate ) ? ( normalizedShippingAddresses.get( box ) || {} ) : {} ) );
 		activeSaveRequests.add( box );
 		setLoading( button, true );
 		setStatus( box, 'Сохраняем новый вариант доставки...', 'loading' );

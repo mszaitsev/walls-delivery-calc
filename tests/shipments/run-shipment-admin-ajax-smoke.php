@@ -136,6 +136,44 @@ if ( ! function_exists( 'do_action' ) ) {
 		$GLOBALS['wdc_shipment_admin_ajax_actions'][] = array( 'hook' => $hook, 'args' => $args );
 	}
 }
+if ( ! defined( 'ARRAY_A' ) ) {
+	define( 'ARRAY_A', 'ARRAY_A' );
+}
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		/** @var array<int,array<string,mixed>> */
+		public array $delivery_service_rows = array();
+
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$value = is_numeric( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[dfs]/', $value, $query, 1 ) ?? $query;
+			}
+
+			return $query;
+		}
+
+		public function get_results( string $query, mixed $output = null ): array {
+			unset( $output );
+			return str_contains( $query, 'wdc_delivery_services' ) ? $this->delivery_service_rows : array();
+		}
+
+		public function get_row( string $query, mixed $output = null ): ?array {
+			unset( $output );
+			if ( ! str_contains( $query, 'wdc_delivery_services' ) ) {
+				return null;
+			}
+			foreach ( $this->delivery_service_rows as $row ) {
+				if ( str_contains( $query, "'" . (string) ( $row['service_key'] ?? '' ) . "'" ) ) {
+					return $row;
+				}
+			}
+
+			return null;
+		}
+	}
+}
 
 function shipment_admin_ajax_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -664,7 +702,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 	$adapter = new ShipmentAdminAjaxSmokeAdapter( $carrier_key, $repository );
 	$adapter->status_overrides = $status_overrides;
 	$adapter->presentation_overrides = $presentation_overrides;
-	$delivery_services = ( new ReflectionClass( \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository::class ) )->newInstanceWithoutConstructor();
+	$delivery_services = shipment_admin_ajax_delivery_services();
 	$status_updates = ( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
 	$controller = static fn( string $class ): object => ( new ReflectionClass( '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class ) )->newInstanceWithoutConstructor();
 	$metabox = new \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox(
@@ -687,7 +725,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.147.20',
+		'0.147.25',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $adapter ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);
@@ -697,6 +735,165 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 
 	return (string) ob_get_clean();
 }
+
+/** @param array<int,array<string,mixed>> $service_rows */
+function shipment_admin_ajax_delivery_services( array $service_rows = array() ): \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository {
+	$db = new wpdb();
+	$db->delivery_service_rows = $service_rows;
+
+	return new \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository( $db );
+}
+
+/**
+ * @param array<string,mixed> $order_meta
+ * @param array<string,mixed> $shipment
+ * @param array<string,mixed> $status_overrides
+ * @param array<string,string> $presentation_overrides
+ */
+function shipment_admin_ajax_render_custom_metabox_html( array $order_meta, array $shipment, array $status_overrides, array $presentation_overrides, \WallsShop\WDC\DeliveryServices\DeliveryServiceRepository $delivery_services, ShipmentAdminAjaxSmokeAdapter $adapter, \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository $repository, array $additional_adapters = array() ): string {
+	$order = new ShipmentAdminAjaxSmokeOrder( random_int( 700, 999 ), $order_meta );
+	if ( array() !== $shipment ) {
+		$repository->save_for_carrier( $order, $adapter->carrier_key(), array_merge( array( 'carrier_key' => $adapter->carrier_key(), 'status' => 'created' ), $shipment ) );
+	}
+	$adapter->status_overrides = $status_overrides;
+	$adapter->presentation_overrides = $presentation_overrides;
+	$status_updates = ( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
+	$controller = static fn( string $class ): object => ( new ReflectionClass( '\\WallsShop\\WDC\\Shipments\\Admin\\Ajax\\' . $class ) )->newInstanceWithoutConstructor();
+	$metabox = new \WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox(
+		$repository,
+		new \WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory( $delivery_services, new \WallsShop\WDC\Shipments\Application\ShipmentServiceSettings() ),
+		$delivery_services,
+		$status_updates,
+		shipment_test_actual_cost_resolver(),
+		$controller( 'ShipmentCreateAjaxController' ),
+		$controller( 'ShipmentLifecycleAjaxController' ),
+		$controller( 'ShipmentPreviewAjaxController' ),
+		$controller( 'ShipmentStatusAjaxController' ),
+		$controller( 'ShipmentRemovalAjaxController' ),
+		$controller( 'ShipmentManualAttachAjaxController' ),
+		$controller( 'ShipmentAddressAjaxController' ),
+		$controller( 'ShipmentActualCostAjaxController' ),
+		$controller( 'ShipmentDocumentsAjaxController' ),
+		$controller( 'ShipmentProductsAjaxController' ),
+		null,
+		null,
+		null,
+		'https://example.test/wp-content/plugins/wdc/',
+		'0.147.25',
+		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array_merge( array( $adapter ), $additional_adapters ) ),
+		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
+	);
+
+	ob_start();
+	$metabox->render( $order );
+
+	return (string) ob_get_clean();
+}
+
+$jet_delivery_services = shipment_admin_ajax_delivery_services(
+	array(
+		array(
+			'id' => 78,
+			'service_key' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::SERVICE_KEY,
+			'carrier_key' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY,
+			'service_type' => 'api',
+			'title' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::PUBLIC_TITLE,
+			'enabled' => 1,
+			'deleted' => 0,
+		),
+	)
+);
+$jet_order_meta = array(
+	'_wdc_platform_carrier_key' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY,
+	'_wdc_platform_service_key' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::SERVICE_KEY,
+	'_wdc_platform_service_title' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::PUBLIC_TITLE,
+	'_wdc_platform_rate_id' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::PICKUP_RATE_KEY,
+	'_wdc_platform_delivery_type' => \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP,
+);
+$jet_repository = new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository();
+$jet_adapter = new ShipmentAdminAjaxSmokeAdapter( \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY, $jet_repository );
+$russian_post_adapter = new ShipmentAdminAjaxSmokeAdapter( \WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings::CARRIER_KEY, $jet_repository );
+$jet_without_shipment_html = shipment_admin_ajax_render_custom_metabox_html(
+	$jet_order_meta,
+	array(),
+	array(
+		'has_shipment' => false,
+		'can_create' => false,
+		'can_attach_manual' => true,
+		'can_update_status' => false,
+		'can_cancel' => false,
+		'can_remove_from_order' => false,
+	),
+	array(
+		'carrier_label' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::TITLE,
+		'manual_attach_button_label' => 'Прикрепить номер Jet',
+		'manual_attach_field_label' => 'Номер груза Jet Logistic',
+		'manual_attach_placeholder' => 'Номер груза Jet Logistic',
+		'auto_update_status_after_manual_attach' => '1',
+	),
+	$jet_delivery_services,
+	$jet_adapter,
+	$jet_repository,
+	array( $russian_post_adapter )
+);
+shipment_admin_ajax_assert( 1 === $jet_adapter->status_calls && 0 === $russian_post_adapter->status_calls, 'Jet metabox must resolve status payload through Jet adapter, not Russian Post adapter.' );
+shipment_admin_ajax_assert( str_contains( $jet_without_shipment_html, 'data-carrier-key="jet_logistic"' ), 'Jet metabox without shipment must keep Jet carrier key in DOM.' );
+shipment_admin_ajax_assert( str_contains( $jet_without_shipment_html, 'Джет Логистик' ) || str_contains( $jet_without_shipment_html, 'Jet Logistic' ), 'Jet metabox without shipment must display Jet service title.' );
+shipment_admin_ajax_assert( ! str_contains( $jet_without_shipment_html, 'Почта России по РФ' ) && ! str_contains( $jet_without_shipment_html, 'russian_post_domestic' ), 'Jet metabox without shipment must not render Russian Post fallback.' );
+shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-manual-tracking(?![^>]*hidden)/u', $jet_without_shipment_html ) === 1, 'Jet metabox without shipment must show manual attach action.' );
+shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-shipment-modal[^>]*hidden/u', $jet_without_shipment_html ) === 1, 'Jet metabox without shipment must hide prepare action.' );
+shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-cancel-shipment[^>]*hidden/u', $jet_without_shipment_html ) === 1, 'Jet metabox without shipment must hide cancel action.' );
+shipment_admin_ajax_assert( str_contains( $jet_without_shipment_html, 'data-auto-update-status-after-manual-attach="1"' ), 'Jet presentation must request one generic status refresh after manual attach.' );
+
+$jet_with_repository = new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository();
+$jet_with_adapter = new ShipmentAdminAjaxSmokeAdapter( \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY, $jet_with_repository );
+$jet_with_shipment_html = shipment_admin_ajax_render_custom_metabox_html(
+	$jet_order_meta,
+	array( 'tracking_number' => 'JET-007483', 'barcode' => 'JET-007483' ),
+	array(
+		'has_shipment' => true,
+		'can_create' => false,
+		'can_attach_manual' => false,
+		'can_update_status' => true,
+		'can_cancel' => false,
+		'can_remove_from_order' => true,
+		'tracking_presentation' => array(
+			'label' => 'Номер груза Jet Logistic',
+			'display_text' => 'JET-007483',
+			'copy_value' => 'JET-007483',
+		),
+	),
+	array( 'carrier_label' => \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::TITLE ),
+	$jet_delivery_services,
+	$jet_with_adapter,
+	$jet_with_repository
+);
+shipment_admin_ajax_assert( str_contains( $jet_with_shipment_html, 'data-carrier-key="jet_logistic"' ) && str_contains( $jet_with_shipment_html, 'JET-007483' ), 'Jet metabox with shipment must render Jet carrier and tracking number.' );
+shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-update-shipment-status(?![^>]*hidden)/u', $jet_with_shipment_html ) === 1, 'Jet metabox with shipment must show status update action.' );
+shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-remove-shipment-from-order(?![^>]*hidden)/u', $jet_with_shipment_html ) === 1, 'Jet metabox with shipment must show local remove action.' );
+shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-manual-tracking[^>]*hidden/u', $jet_with_shipment_html ) === 1, 'Jet metabox with shipment must hide manual attach action.' );
+shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-shipment-modal[^>]*hidden/u', $jet_with_shipment_html ) === 1 && preg_match( '/<button[^>]*data-wdc-cancel-shipment[^>]*hidden/u', $jet_with_shipment_html ) === 1, 'Jet metabox with shipment must hide prepare and cancel actions.' );
+
+$jet_remove_payload_adapter = new ShipmentAdminAjaxSmokeAdapter( \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY, new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository() );
+$jet_remove_payload_adapter->status_overrides = array(
+	'has_shipment' => false,
+	'can_create' => false,
+	'can_attach_manual' => true,
+	'can_update_status' => false,
+	'can_cancel' => false,
+	'can_remove_from_order' => false,
+);
+$jet_remove_payloads = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder(
+	new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository(),
+	$jet_delivery_services,
+	( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(),
+	shipment_test_actual_cost_resolver(),
+	null,
+	null,
+	new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $jet_remove_payload_adapter ) )
+);
+$jet_remove_payload = $jet_remove_payloads->carrier_ui_payload( new ShipmentAdminAjaxSmokeOrder( 777, $jet_order_meta ), \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY );
+shipment_admin_ajax_assert( false === ( $jet_remove_payload['can_create'] ?? null ) && true === ( $jet_remove_payload['can_attach_manual'] ?? null ) && false === ( $jet_remove_payload['can_update_status'] ?? null ) && false === ( $jet_remove_payload['can_cancel'] ?? null ) && false === ( $jet_remove_payload['can_remove_from_order'] ?? null ), 'Jet remove response payload must keep prepare hidden and manual attach visible without page reload.' );
 
 $ozon_no_return_html = shipment_admin_ajax_render_metabox_html(
 	'ozon_delivery',

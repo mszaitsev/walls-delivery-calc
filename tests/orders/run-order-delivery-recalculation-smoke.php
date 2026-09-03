@@ -2532,6 +2532,65 @@ $invalid_courier_result = $replacement->save(
 );
 recalc_smoke_assert( false === $invalid_courier_result['success'] && $invalid_courier_before === $invalid_courier->shipping_items, 'Save courier must require normalized shipping address and avoid mutation on validation error.' );
 
+$jet_pickup_rate = $pickup_rate;
+$jet_pickup_rate['id'] = 'jet_logistic_pickup';
+$jet_pickup_rate['rate_id'] = 'jet_logistic_pickup';
+$jet_pickup_rate['carrier_key'] = 'jet_logistic';
+$jet_pickup_rate['service_key'] = 'jet_logistic';
+$jet_pickup_rate['service_title'] = 'Jet Logistic';
+$jet_pickup_rate['label'] = 'Джет Логистик до склада выдачи';
+$jet_pickup_rate['delivery_type'] = DeliveryType::PICKUP;
+$jet_pickup_rate['requires_pickup_point'] = false;
+$jet_pickup_rate['order_recalculation_requires_address'] = false;
+$jet_pickup_rate['selected_tariff'] = array();
+$jet_pickup_rate['selected_tariff_title'] = '';
+$jet_pickup_rate['selected_tariff_object'] = '';
+$jet_pickup_order = new WdcRecalcOrder( 113, array() );
+$jet_pickup_order->shipping_items = array( 'method_title' => 'Old Jet delivery', 'total' => 111.0 );
+$jet_pickup_result = $replacement->save(
+	$jet_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $jet_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(),
+		'normalized_shipping_address' => array(),
+	)
+);
+$jet_pickup_calc = is_array( $jet_pickup_order->meta['_wdc_delivery_calculation_data'] ?? null ) ? $jet_pickup_order->meta['_wdc_delivery_calculation_data'] : array();
+recalc_smoke_assert( true === $jet_pickup_result['success'], 'Jet admin pickup save must not require a selectable pickup point.' );
+recalc_smoke_assert( 0 === (int) ( $jet_pickup_order->meta['_wdc_platform_requires_pickup_point'] ?? 1 ) && '' === (string) ( $jet_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ) && '' === (string) ( $jet_pickup_order->meta['_wdc_pickup_point_snapshot'] ?? '' ) && array() === ( $jet_pickup_calc['pickup'] ?? array() ), 'Jet admin pickup save must persist requires_pickup_point=false without fake pickup metadata.' );
+
+$jet_courier_rate = $courier_rate;
+$jet_courier_rate['id'] = 'jet_logistic_courier';
+$jet_courier_rate['rate_id'] = 'jet_logistic_courier';
+$jet_courier_rate['carrier_key'] = 'jet_logistic';
+$jet_courier_rate['service_key'] = 'jet_logistic';
+$jet_courier_rate['service_title'] = 'Jet Logistic';
+$jet_courier_rate['label'] = 'Джет Логистик курьером';
+$jet_courier_rate['delivery_type'] = DeliveryType::COURIER;
+$jet_courier_rate['requires_pickup_point'] = false;
+$jet_courier_rate['requires_courier_address'] = true;
+$jet_courier_rate['order_recalculation_requires_address'] = false;
+$jet_courier_rate['selected_tariff'] = array();
+$jet_courier_rate['selected_tariff_title'] = '';
+$jet_courier_rate['selected_tariff_object'] = '';
+$jet_courier_order = new WdcRecalcOrder( 116, array() );
+$jet_courier_order->shipping_items = array( 'method_title' => 'Old Jet courier', 'total' => 111.0 );
+$jet_courier_address_before = $jet_courier_order->get_shipping_address_1();
+$jet_courier_result = $replacement->save(
+	$jet_courier_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $jet_courier_rate,
+		'selected_tariff' => array(),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( true === $jet_courier_result['success'], 'Jet admin courier save must not require a new normalized address when the selected rate opts out of admin address recapture.' );
+recalc_smoke_assert( $jet_courier_address_before === $jet_courier_order->get_shipping_address_1(), 'Jet admin courier save without address payload must retain the existing order street address.' );
+recalc_smoke_assert( true === (bool) ( $jet_courier_order->meta['_wdc_platform_rate_meta']['requires_courier_address'] ?? false ) && false === (bool) ( $jet_courier_order->meta['_wdc_platform_rate_meta']['order_recalculation_requires_address'] ?? true ), 'Jet admin courier must keep customer checkout address requirement separate from admin recalculation address recapture.' );
+
 $manual_courier_order = new WdcRecalcOrder( 114, array() );
 $manual_courier_address = array(
 	'country' => 'RU',
@@ -2714,6 +2773,20 @@ $cdek_pickup_point = array(
 	'storage_notice' => 'Срок хранения 3 дня',
 	'raw_sanitized' => array( 'code' => 'KEM7', 'type' => 'POSTAMAT' ),
 );
+$cdek_pickup_missing_order = new WdcRecalcOrder( 119, array() );
+$cdek_pickup_missing_order->shipping_items = array( 'method_title' => 'Old CDEK delivery', 'total' => 111.0 );
+$cdek_pickup_missing_result = $replacement->save(
+	$cdek_pickup_missing_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $cdek_pickup_missing_result['success'] && str_contains( (string) $cdek_pickup_missing_result['message'], 'ПВЗ' ), 'Selectable CDEK admin pickup must still require a pickup point.' );
+
 $cdek_pickup_order = new WdcRecalcOrder( 120, array() );
 $cdek_pickup_order->shipping_items = array();
 $cdek_pickup_result = $replacement->save(
@@ -3186,6 +3259,7 @@ $yandex_rate = array(
 	'service_title' => 'Яндекс.Доставка',
 	'label' => 'Яндекс до ПВЗ',
 	'delivery_type' => DeliveryType::PICKUP,
+	'requires_pickup_point' => true,
 	'cost' => 500,
 	'delivery_comment' => '2 дня',
 );

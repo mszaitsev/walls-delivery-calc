@@ -881,6 +881,7 @@ final class OrderShipmentsMetabox {
 			'remove_confirmation_message' => '',
 			'registration_error_toast' => __( 'Регистрация завершилась ошибкой.', 'walls-delivery-calc' ),
 			'registration_success_toast' => __( 'Регистрация завершена успешно.', 'walls-delivery-calc' ),
+			'auto_update_status_after_manual_attach' => '0',
 			'auto_poll_registration' => '0',
 			'registration_poll_interval_ms' => '5000',
 			'registration_poll_max_attempts' => '14',
