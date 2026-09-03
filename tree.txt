@@ -133,6 +133,7 @@ C:.
 |           0053_add_ozon_delivery_pickup_progress_timestamp.php
 |           0054_change_ozon_delivery_pickup_schedule_storage.php
 |           0055_add_ozon_delivery_pickup_geo_lookup_index.php
+|           0056_add_jet_logistic_default_status_mappings.php
 |
 +---docs
 |   |   README.md
@@ -1019,9 +1020,6 @@ C:.
 |   |
 |   \---WooCommerce
 |           HPOSCompatibility.php
-|
-+---templates
-|       .gitkeep
 |
 \---tests
     +---address

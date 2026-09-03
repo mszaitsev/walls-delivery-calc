@@ -8,6 +8,13 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticStatusMappingRepository {
+	private const DEFAULT_MAPPINGS = array(
+		'Доставка груза на склад приемки' => DeliveryStatus::IN_TRANSIT,
+		'Отправка груза со склада приемки' => DeliveryStatus::IN_TRANSIT,
+		'Доставка груза на склад выдачи' => DeliveryStatus::READY_FOR_PICKUP,
+		'Груз выдан' => DeliveryStatus::DELIVERED,
+	);
+
 	private \wpdb $wpdb;
 
 	/** @var array<int,array<string,mixed>>|null */
@@ -32,7 +39,7 @@ final class JetLogisticStatusMappingRepository {
 	}
 
 	public function ensure_default_mappings(): void {
-		foreach ( array( 'Доставка груза на склад выдачи' => DeliveryStatus::READY_FOR_PICKUP, 'Груз выдан' => DeliveryStatus::DELIVERED ) as $external => $universal ) {
+		foreach ( self::DEFAULT_MAPPINGS as $external => $universal ) {
 			if ( array() === $this->find_by_normalized_status( $external ) ) {
 				$this->create_mapping( $external, $universal );
 			}

@@ -565,9 +565,22 @@ $GLOBALS['wpdb']->jet_statuses = array(
 	'доставка груза на склад' => array( 'id' => 9001, 'external_status' => 'Доставка груза на склад', 'normalized_external_status' => 'доставка груза на склад', 'universal_status' => DeliveryStatus::READY_FOR_PICKUP, 'active' => 1, 'last_seen' => '2026-07-28 10:00:00', 'occurrence_count' => 5 ),
 );
 $migration_0047();
-jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад выдачи'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['груз выдан'] ), 'Jet migration 0047 must delete broad status default and insert precise defaults.' );
+jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад приемки'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад выдачи'] ) && ! empty( $GLOBALS['wpdb']->jet_statuses['груз выдан'] ), 'Jet migration 0047 must delete broad status default and insert precise defaults.' );
 jet_assert( empty( $GLOBALS['wpdb']->jet_status_columns['active'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['last_seen'] ) && empty( $GLOBALS['wpdb']->jet_status_columns['occurrence_count'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['active_status'] ) && empty( $GLOBALS['wpdb']->jet_status_indexes['last_seen'] ), 'Jet migration 0047 must drop obsolete active/last_seen/occurrence_count columns and indexes idempotently.' );
 jet_assert( str_contains( $migration_0047_source, '0047' ) || str_contains( $migration_0047_source, 'active_status' ), 'Jet migration 0047 source must be present for migration registration by filename.' );
+$GLOBALS['wpdb']->jet_statuses = array(
+	'доставка груза на склад выдачи' => array( 'id' => 9101, 'external_status' => 'Доставка груза на склад выдачи', 'normalized_external_status' => 'доставка груза на склад выдачи', 'universal_status' => DeliveryStatus::READY_FOR_PICKUP ),
+	'груз выдан' => array( 'id' => 9102, 'external_status' => 'Груз выдан', 'normalized_external_status' => 'груз выдан', 'universal_status' => DeliveryStatus::DELIVERED ),
+	'доставка груза на склад приемки' => array( 'id' => 9103, 'external_status' => 'Доставка груза на склад приемки', 'normalized_external_status' => 'доставка груза на склад приемки', 'universal_status' => DeliveryStatus::HANDED_TO_COURIER ),
+);
+$GLOBALS['wpdb']->status_mapping_insert_calls = 0;
+$migration_0056 = require dirname( __DIR__, 2 ) . '/database/migrations/0056_add_jet_logistic_default_status_mappings.php';
+jet_assert( is_callable( $migration_0056 ) && empty( $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки'] ), 'Jet migration 0056 must return a callable and not execute on require.' );
+$migration_0056();
+$migration_0056();
+jet_assert( 4 === count( $GLOBALS['wpdb']->jet_statuses ) && 1 === $GLOBALS['wpdb']->status_mapping_insert_calls, 'Jet migration 0056 must add only missing defaults and remain idempotent on repeat.' );
+jet_assert( DeliveryStatus::HANDED_TO_COURIER === (string) $GLOBALS['wpdb']->jet_statuses['доставка груза на склад приемки']['universal_status'], 'Jet migration 0056 must not overwrite an existing customized mapping.' );
+jet_assert( DeliveryStatus::IN_TRANSIT === (string) $GLOBALS['wpdb']->jet_statuses['отправка груза со склада приемки']['universal_status'], 'Jet migration 0056 must add missing in-transit source-departure default.' );
 
 $migration_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-jet-migration-' . str_replace( '.', '', uniqid( '', true ) );
 mkdir( $migration_dir );
@@ -1316,9 +1329,13 @@ try {
 jet_assert( $timeout_thrown, 'Jet HTTP timeout must be classified safely without exposing token.' );
 
 $GLOBALS['wpdb']->jet_statuses = array();
+$GLOBALS['wpdb']->status_mapping_insert_calls = 0;
 $status_repo = new JetLogisticStatusMappingRepository( $GLOBALS['wpdb'] );
 $status_repo->ensure_default_mappings();
-jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ) && '' === $status_repo->map( 'Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)' ) && '' === $status_repo->map( 'Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)' ), 'Jet status defaults must remove the broad warehouse rule and map only precise pickup warehouse delivery phrases.' );
+jet_assert( 4 === count( $GLOBALS['wpdb']->jet_statuses ) && 4 === $GLOBALS['wpdb']->status_mapping_insert_calls, 'Jet status defaults on an empty store must create exactly four mappings.' );
+$status_repo->ensure_default_mappings();
+jet_assert( 4 === count( $GLOBALS['wpdb']->jet_statuses ) && 4 === $GLOBALS['wpdb']->status_mapping_insert_calls, 'Jet status defaults must remain idempotent on repeated ensure calls.' );
+jet_assert( empty( $GLOBALS['wpdb']->jet_statuses['доставка груза на склад'] ) && DeliveryStatus::IN_TRANSIT === $status_repo->map( '02.09.2026 Доставка груза на склад приемки-Новосибирск-(Новосибирская Область)' ) && DeliveryStatus::IN_TRANSIT === $status_repo->map( '02.09.2026 Отправка груза со склада приемки-Новосибирск-(Новосибирская Область)' ) && DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана-(Столица Республики Казахстан)' ), 'Jet status defaults must map precise receiving, departure and pickup warehouse phrases without restoring the broad warehouse rule.' );
 jet_assert( DeliveryStatus::DELIVERED === $status_repo->map( 'Груз выдан' ) && DeliveryStatus::DELIVERED === $status_repo->map( 'Груз выдан : 26 июня 2026 г.' ) && DeliveryStatus::DELIVERED === $status_repo->map( 'ГРУЗ ВЫДАН: 26 июня 2026 г.' ) && DeliveryStatus::DELIVERED === $status_repo->map( '  Груз   выдан : 26 июня 2026 г.' ), 'Jet status mapping must use normalized literal substring matching.' );
 $status_repo->create_mapping( 'склад', DeliveryStatus::IN_TRANSIT );
 jet_assert( DeliveryStatus::READY_FOR_PICKUP === $status_repo->map( 'Доставка груза на склад выдачи-Астана' ), 'Jet status mapping must apply the longest matching phrase before shorter substring rules.' );
