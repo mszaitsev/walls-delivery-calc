@@ -1581,6 +1581,33 @@ $group_promo_payload = $group_payload_method->invoke(
 );
 recalc_smoke_assert( '7 дней' === (string) ( $group_promo_payload['compact_delivery_comment'] ?? '' ) && 'от 1 руб.' === (string) ( $group_promo_payload['compact_price_html'] ?? '' ) && '885 руб.' === (string) ( $group_promo_payload['compact_crossed_price_html'] ?? '' ), 'Compact grouped promo summary must use final price, crossed price, and delivery time from the same cheapest tariff.' );
 
+$normalize_rates_method = new ReflectionMethod( OrderDeliveryRecalculationService::class, 'normalize_rates' );
+$normalize_rates_method->setAccessible( true );
+$single_cdek_rate = new DeliveryRate( 'cdek:pickup:136', 'cdek', 'CDEK', 'cdek', 'CDEK', '136', 'Посылка склад-склад', DeliveryType::PICKUP, 'Посылка склад-склад', Money::from_rubles( 355 ), Money::from_rubles( 580.05 ), Money::from_rubles( 580.05 ), DateRange::range( 3, 4 ), '', 'Доставка планируется* с 8 сентября (вторник).', array( 'CDEK rule comment' ), false, '', false, false, array( 'tariff_selector_group' => true, 'checkout_group_id' => 'cdek:pickup', 'pickup_method_title' => 'СДЭК до ПВЗ', 'api_base_price_rub' => 306.16 ) );
+$single_cdek_payloads = $normalize_rates_method->invoke( $service, array( $single_cdek_rate ) );
+$single_cdek_payload = $single_cdek_payloads[0] ?? array();
+recalc_smoke_assert( false === (bool) ( $single_cdek_payload['is_grouped'] ?? true ) && array() === ( $single_cdek_payload['tariff_variants'] ?? null ), 'Single final CDEK tariff group must collapse to a plain method payload.' );
+recalc_smoke_assert( 'СДЭК до ПВЗ' === (string) ( $single_cdek_payload['label'] ?? '' ) && '136' === (string) ( $single_cdek_payload['selected_tariff_object'] ?? '' ) && 'Посылка склад-склад' === (string) ( $single_cdek_payload['selected_tariff_title'] ?? '' ) && 'cdek:pickup:136' === (string) ( $single_cdek_payload['selected_tariff_rate_id'] ?? '' ), 'Collapsed CDEK payload must keep method title and actual tariff identity for save.' );
+$single_cdek_html = ( new OrderDeliveryRateRenderer() )->render( $single_cdek_payloads );
+recalc_smoke_assert( str_contains( $single_cdek_html, 'СДЭК до ПВЗ - 3-4 дня' ) && ! str_contains( $single_cdek_html, 'wdc-order-delivery-tariffs' ) && ! str_contains( $single_cdek_html, 'wdc_order_delivery_preview_tariff_' ), 'Collapsed CDEK HTML must render one plain method row without tariff radio markup.' );
+
+$single_dpd_payloads = $normalize_rates_method->invoke(
+	$service,
+	array(
+		new DeliveryRate( 'dpd:courier:economy', 'dpd', 'DPD', 'dpd', 'DPD', 'economy', 'DPD Эконом', DeliveryType::COURIER, 'DPD Эконом', Money::from_rubles( 304 ), Money::from_rubles( 672 ), Money::from_rubles( 672 ), DateRange::single( 5 ), '', 'Доставка планируется* с 10 сентября (четверг).', array(), false, '', false, false, array( 'tariff_selector_group' => true, 'checkout_group_id' => 'dpd:courier', 'courier_method_title' => 'DPD до двери' ) ),
+	)
+);
+$single_dpd_payload = $single_dpd_payloads[0] ?? array();
+recalc_smoke_assert( false === (bool) ( $single_dpd_payload['is_grouped'] ?? true ) && array() === ( $single_dpd_payload['tariff_variants'] ?? null ) && 'economy' === (string) ( $single_dpd_payload['selected_tariff_object'] ?? '' ), 'Single final DPD tariff group must collapse without losing tariff identity.' );
+$multi_rate_payloads = $normalize_rates_method->invoke(
+	$service,
+	array(
+		$single_cdek_rate,
+		new DeliveryRate( 'cdek:pickup:137', 'cdek', 'CDEK', 'cdek', 'CDEK', '137', 'Посылка склад-дверь', DeliveryType::PICKUP, 'Посылка склад-дверь', Money::from_rubles( 420 ), null, null, DateRange::single( 2 ), '', '', array(), false, '', false, false, array( 'tariff_selector_group' => true, 'checkout_group_id' => 'cdek:pickup', 'pickup_method_title' => 'СДЭК до ПВЗ' ) ),
+	)
+);
+recalc_smoke_assert( true === (bool) ( $multi_rate_payloads[0]['is_grouped'] ?? false ) && 2 === count( $multi_rate_payloads[0]['tariff_variants'] ?? array() ), 'Two or more final tariffs must keep grouped selector payload.' );
+
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Preview must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Preview must not change order totals.' );
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Preview must not change delivery calculation meta.' );
@@ -1611,7 +1638,15 @@ try {
 	$controller->ajax_preview();
 	recalc_smoke_assert( false, 'Controller must send JSON response.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
-	recalc_smoke_assert( $response->success && isset( $response->data['html'], $response->data['rates'], $response->data['request'] ), 'Endpoint must return html, rates and request on success.' );
+	recalc_smoke_assert( ! $response->success && 400 === $response->status && 'Выберите населенный пункт из базы перед расчетом доставки.' === (string) ( $response->data['message'] ?? '' ), 'Preview endpoint must reject requests without canonical selected location before calculation.' );
+}
+
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( array( 'display_name' => 'Березовка' ) ) );
+try {
+	$controller->ajax_preview();
+	recalc_smoke_assert( false, 'Controller must reject text-only location preview.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 400 === $response->status && 'Выберите населенный пункт из базы перед расчетом доставки.' === (string) ( $response->data['message'] ?? '' ), 'Preview endpoint must reject text-only selected location without wp_wdc_locations id.' );
 }
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ) );
@@ -1619,7 +1654,7 @@ try {
 	$controller->ajax_preview();
 	recalc_smoke_assert( false, 'Controller must send JSON response for override preview.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
-	recalc_smoke_assert( $response->success && str_contains( (string) ( $response->data['request']['destination']['city'] ?? '' ), 'Москва' ), 'Endpoint must pass selected location override to preview.' );
+	recalc_smoke_assert( $response->success && isset( $response->data['html'], $response->data['rates'], $response->data['request'] ) && str_contains( (string) ( $response->data['request']['destination']['city'] ?? '' ), 'Москва' ), 'Endpoint must return preview payload and pass selected canonical location override to preview.' );
 }
 
 $_REQUEST = array( 'nonce' => 'ok', 'query' => 'Москва', 'country_code' => 'RU' );
@@ -1949,7 +1984,7 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "'ПВ
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'searchMarkerFromQuery' ), 'JS manual address search must not use the first pickup point as an address marker fallback.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-block' ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestions' ) && ! str_contains( $pickup_js, 'data-wdc-normalize-courier-address' ), 'Courier UI source must render automatic suggestions without old check-address button.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ) );" ), 'Location selection must trigger preview automatically.' );
+recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, "requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ) );" ) && str_contains( $pickup_js, 'updateLocationGate( box )' ), 'Location selection must enable explicit preview without triggering calculation automatically.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function syncPreviewLocation' ) && str_contains( $pickup_js, 'syncPreviewLocation( box, payload.data && payload.data.location );' ) && str_contains( $pickup_js, 'selectedLocations.set( box, mergedLocation );' ) && str_contains( $pickup_js, 'updateLocationSummary( box, mergedLocation );' ), 'JS preview success must sync resolved location payload into selectedLocations.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function mergeMeaningfulFields' ) && str_contains( $pickup_js, 'const currentId = positiveLocationId( currentLocation.id || currentLocation.location_id );' ) && str_contains( $pickup_js, 'const previewId = positiveLocationId( previewLocation.id || previewLocation.location_id );' ), 'JS preview location sync must preserve full selected location payload while filling missing resolved id/location_id.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'function isYandexPickupPoint' ) && str_contains( $pickup_js, "'yandex_delivery:pickup' === family" ) && str_contains( $pickup_js, "return '';" ), 'JS must detect Yandex pickup points and hide their technical display code.' );
@@ -2291,6 +2326,19 @@ recalc_smoke_assert( '8-10 дней' === (string) ( $grouped_dpd_calc['result'][
 recalc_smoke_assert( in_array( 'Итог: 8-10 дней', $grouped_dpd_formula, true ), 'Grouped DPD calculation rules formula must use selected tariff final delivery range.' );
 recalc_smoke_assert( '2026-07-28' === (string) ( $grouped_dpd_calc['result']['planned_delivery_date'] ?? '' ) && 'Доставка планируется* с 28 июля (вторник).' === (string) ( $grouped_dpd_calc['result']['planned_delivery_comment'] ?? '' ), 'Grouped DPD save must use selected tariff planned date/comment.' );
 recalc_smoke_assert( array( 'economy-audit' ) === ( $grouped_dpd_calc['rules']['applied_rules'] ?? null ) && array( 'economy-audit' ) === ( $grouped_dpd_order->meta['_wdc_platform_rate_meta']['rules_audit'] ?? null ), 'Grouped DPD save must use selected tariff rate_meta and rules audit.' );
+
+$single_cdek_order = new WdcRecalcOrder( 138, array() );
+$single_cdek_save = $replacement->save(
+	$single_cdek_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $single_cdek_payload,
+		'selected_tariff' => array(),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( true === $single_cdek_save['success'], 'Collapsed single-tariff CDEK save must succeed without a visible tariff selector.' );
+recalc_smoke_assert( 'cdek:pickup:136' === (string) ( $single_cdek_order->meta['_wdc_platform_rate_id'] ?? '' ) && '136' === (string) ( $single_cdek_order->meta['_wdc_platform_tariff_object'] ?? '' ) && 'Посылка склад-склад' === (string) ( $single_cdek_order->meta['_wdc_platform_tariff_title'] ?? '' ), 'Collapsed single-tariff CDEK save must persist actual tariff identity.' );
 
 $pickup_rate = $rates_by_id['russian_post_domestic:pickup'];
 $pickup_rate['selected_tariff'] = $pickup_rate['tariff_variants'][0] ?? array();
@@ -3356,10 +3404,27 @@ if ( preg_match( '/function toggleDeliveryView[\s\S]*?\n\t}/', $admin_js, $toggl
 }
 recalc_smoke_assert( '' !== $toggle_function && ! str_contains( $toggle_function, 'fetch(' ) && ! str_contains( $toggle_function, 'requestPreview' ), 'Admin recalculation compact toggle must not perform AJAX.' );
 recalc_smoke_assert( str_contains( $admin_js, 'const viewStates = new WeakMap()' ) && str_contains( $admin_js, "setDeliveryView( box, 'full' )" ) && str_contains( $admin_js, 'selectedRates.delete( box )' ), 'Admin recalculation compact/full state must stay separate from selected rate state and reset to full on close/reopen.' );
+recalc_smoke_assert( str_contains( $admin_js, 'function openDeliveryRecalculationModal' ) && str_contains( $admin_js, 'openDeliveryRecalculationModal( closestBox( openButton ) )' ), 'Admin recalculation open button must open the modal through the open-only lifecycle.' );
+$open_button_handler = '';
+if ( preg_match( '/const openButton = event\\.target[\\s\\S]*?return;\\n\\t\\t}/', $admin_js, $open_match ) ) {
+	$open_button_handler = $open_match[0];
+}
+recalc_smoke_assert( '' !== $open_button_handler && str_contains( $open_button_handler, 'openDeliveryRecalculationModal' ) && ! str_contains( $open_button_handler, 'requestPreview' ), 'Opening admin recalculation modal must not start preview AJAX.' );
+$location_option_handler = '';
+if ( preg_match( '/const option = event\\.target[\\s\\S]*?return;\\n\\t\\t}/', $admin_js, $option_match ) ) {
+	$location_option_handler = $option_match[0];
+}
+recalc_smoke_assert( '' !== $location_option_handler && str_contains( $location_option_handler, 'updateLocationGate( box )' ) && ! str_contains( $location_option_handler, 'requestPreview' ), 'Selecting a canonical location must enable explicit preview without auto-calculating.' );
+recalc_smoke_assert( str_contains( $admin_js, 'function updateLocationGate' ) && str_contains( $admin_js, 'positiveLocationId( location.id || location.location_id )' ) && str_contains( $admin_js, 'Выберите населенный пункт из базы перед расчетом доставки.' ) && str_contains( $admin_js, 'previewButton.disabled = ! valid || activeRequests.has( box );' ), 'Admin recalculation JS must gate preview on positive wp_wdc_locations id/location_id.' );
+recalc_smoke_assert( str_contains( $admin_js, 'function requestPreview' ) && str_contains( $admin_js, "if ( ! updateLocationGate( box, { focusInvalid: true } ) )" ), 'Preview AJAX must only start from explicit preview after canonical location validation.' );
+recalc_smoke_assert( str_contains( $admin_js, 'function updateCompactLayout' ) && str_contains( $admin_js, '[data-wdc-order-delivery-compact-summary]' ) && str_contains( $admin_js, '.wdc-order-delivery-rate__compact-title' ) && str_contains( $admin_js, '.wdc-order-delivery-rate__prices' ) && str_contains( $admin_js, 'getBoundingClientRect().width' ) && str_contains( $admin_js, '--wdc-order-compact-title-width' ) && str_contains( $admin_js, '--wdc-order-compact-price-width' ), 'Admin recalculation compact layout must measure max title width and full price-cluster width across all preview rows.' );
+recalc_smoke_assert( str_contains( $admin_js, 'renderPreview( box,' ) && str_contains( $admin_js, 'scheduleCompactLayout( box )' ) && str_contains( $admin_js, "window.addEventListener( 'resize'" ) && str_contains( $admin_js, '[data-wdc-order-delivery-modal]:not([hidden])[data-view="compact"]' ), 'Admin recalculation compact layout must remeasure after preview replacement and window resize.' );
 recalc_smoke_assert( str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__header' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-tariffs' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__comment' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__planned-comment' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-rate__pickup-selector' ) && str_contains( $admin_css, '.wdc-order-delivery-modal[data-view="compact"] .wdc-order-delivery-courier-address' ), 'Admin recalculation compact CSS must hide detailed controls/comments while leaving compact summaries visible.' );
+recalc_smoke_assert( str_contains( $admin_css, 'grid-template-columns: var(--wdc-order-compact-title-width, max-content) var(--wdc-order-compact-price-width, max-content)' ) && str_contains( $admin_css, 'width: max-content' ) && str_contains( $admin_css, 'grid-template-columns: minmax(0, 1fr) auto' ), 'Admin recalculation compact CSS must use shared measured columns with responsive no-overflow fallback.' );
 $admin_controller_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Admin/OrderDeliveryRecalculationAdminController.php' );
 $admin_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Application/OrderDeliveryAddressNormalizationService.php' );
 recalc_smoke_assert( str_contains( $admin_controller_source, 'ajax_address_suggest' ) && str_contains( $admin_service_source, 'AddressSuggestionService' ) && str_contains( $admin_service_source, 'AddressLineParser::lower_address_line' ), 'Admin courier must reuse shared AddressSuggestionService and AddressLineParser.' );
+recalc_smoke_assert( str_contains( $admin_controller_source, 'positive_location_id( $selected_location ) <= 0' ) && str_contains( $admin_controller_source, 'Выберите населенный пункт из базы перед расчетом доставки.' ), 'Preview controller must fail closed before carrier calculation when selected_location has no canonical location id.' );
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Омск, Ленина, 10' );
 try {

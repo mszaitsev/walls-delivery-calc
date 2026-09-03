@@ -1087,13 +1087,19 @@ $preview = ( new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(
 } );
 $preview_cdek_rates = array_values( array_filter( $preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
 cdek_tariff_assert( count( $preview_cdek_rates ) >= 1, 'CDEK rates must appear in admin recalculation preview.' );
-$preview_cdek_tariff_labels = array();
+$preview_cdek_collapsed_single_rate = false;
 foreach ( $preview_cdek_rates as $preview_cdek_rate ) {
-	foreach ( is_array( $preview_cdek_rate['tariff_variants'] ?? null ) ? $preview_cdek_rate['tariff_variants'] : array() as $preview_tariff ) {
-		$preview_cdek_tariff_labels[] = (string) ( $preview_tariff['label'] ?? '' );
+	if (
+		empty( $preview_cdek_rate['is_grouped'] )
+		&& array() === ( $preview_cdek_rate['tariff_variants'] ?? array() )
+		&& '' !== (string) ( $preview_cdek_rate['selected_tariff_object'] ?? '' )
+		&& '' !== (string) ( $preview_cdek_rate['selected_tariff_title'] ?? '' )
+		&& '' !== (string) ( $preview_cdek_rate['delivery_comment'] ?? '' )
+	) {
+		$preview_cdek_collapsed_single_rate = true;
 	}
 }
-cdek_tariff_assert( in_array( 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня', $preview_cdek_tariff_labels, true ) || in_array( 'СДЭК курьер, Посылка склад-дверь - 1 день', $preview_cdek_tariff_labels, true ), 'CDEK admin preview tariff payload label must include method, tariff and delivery days.' );
+cdek_tariff_assert( $preview_cdek_collapsed_single_rate, 'CDEK admin preview single final tariff must render as a plain method while retaining tariff identity and delivery days.' );
 
 $custom_http = new CdekTariffFakeHttpClient();
 $GLOBALS['wpdb'] = new wpdb();
@@ -1161,14 +1167,12 @@ $custom_preview = ( new OrderDeliveryRecalculationService( new OrderQuoteRequest
 $custom_preview_labels = array_map( static fn( array $rate ): string => (string) ( $rate['label'] ?? '' ), array_filter( $custom_preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
 cdek_tariff_assert( in_array( 'Custom CDEK pickup', $custom_preview_labels, true ), 'Custom CDEK pickup title must be applied in admin recalculation preview.' );
 cdek_tariff_assert( in_array( 'Custom CDEK courier', $custom_preview_labels, true ), 'Custom CDEK courier title must be applied in admin recalculation preview.' );
-$custom_preview_tariff_labels = array();
+$custom_preview_selected_tariff_titles = array();
 foreach ( array_filter( $custom_preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) as $custom_preview_rate ) {
-	foreach ( is_array( $custom_preview_rate['tariff_variants'] ?? null ) ? $custom_preview_rate['tariff_variants'] : array() as $custom_preview_tariff ) {
-		$custom_preview_tariff_labels[] = (string) ( $custom_preview_tariff['label'] ?? '' );
-	}
+	$custom_preview_selected_tariff_titles[] = (string) ( $custom_preview_rate['selected_tariff_title'] ?? '' );
 }
-cdek_tariff_assert( in_array( 'Custom CDEK pickup, Посылка склад-склад - 2-4 дня', $custom_preview_tariff_labels, true ), 'Custom CDEK pickup title must be applied to admin preview tariff label.' );
-cdek_tariff_assert( in_array( 'Custom CDEK courier, Посылка склад-дверь - 1 день', $custom_preview_tariff_labels, true ), 'Custom CDEK courier title must be applied to admin preview tariff label.' );
+cdek_tariff_assert( in_array( 'Посылка склад-склад', $custom_preview_selected_tariff_titles, true ), 'Collapsed custom CDEK pickup preview must retain selected tariff title.' );
+cdek_tariff_assert( in_array( 'Посылка склад-дверь', $custom_preview_selected_tariff_titles, true ), 'Collapsed custom CDEK courier preview must retain selected tariff title.' );
 
 $serialized_meta = json_encode( $pickup_rate->meta, JSON_UNESCAPED_UNICODE );
 cdek_tariff_assert( is_string( $serialized_meta ) && ! str_contains( $serialized_meta, 'secure-password' ) && ! str_contains( $serialized_meta, 'runtime-token' ), 'CDEK saved meta/debug must not include secret or token.' );

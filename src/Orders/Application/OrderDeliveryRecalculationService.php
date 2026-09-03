@@ -95,10 +95,36 @@ final class OrderDeliveryRecalculationService {
 		}
 
 		foreach ( $tariff_groups as $group_id => $group_rates ) {
+			if ( 1 === count( $group_rates ) ) {
+				$plain[] = $this->single_tariff_method_payload( $group_rates[0] );
+				continue;
+			}
 			$plain[] = $this->tariff_group_payload( $group_id, $group_rates );
 		}
 
 		return array_values( $plain );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function single_tariff_method_payload( DeliveryRate $rate ): array {
+		$payload = $this->rate_payload( $rate );
+		$method_title = $this->service_method_title( $rate );
+		if ( '' !== $method_title ) {
+			$payload['label'] = $method_title;
+			$payload['compact_title'] = $method_title;
+		}
+
+		$payload['rate_id'] = $rate->rate_id;
+		$payload['selected_tariff_rate_id'] = $rate->rate_id;
+		$payload['selected_tariff_object'] = $rate->tariff_key;
+		$payload['selected_tariff_title'] = $rate->tariff_name;
+		$payload['tariff_key'] = $rate->tariff_key;
+		$payload['tariff_title'] = $rate->tariff_name;
+		$payload['api_base_price_rub'] = $rate->meta['api_base_price_rub'] ?? null;
+
+		return $payload;
 	}
 
 	/**

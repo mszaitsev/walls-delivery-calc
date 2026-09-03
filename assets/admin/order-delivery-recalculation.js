@@ -12,6 +12,7 @@
 	const searchTimers = new WeakMap();
 	const courierAddressTimers = new WeakMap();
 	const viewStates = new WeakMap();
+	let compactLayoutFrame = 0;
 
 	function closestBox( element ) {
 		return element ? element.closest( '[data-wdc-order-delivery-recalculation]' ) : null;
@@ -29,6 +30,11 @@
 	function modalContent( box ) {
 		const node = modal( box );
 		return node ? node.querySelector( '[data-wdc-order-delivery-modal-content]' ) : null;
+	}
+
+	function modalPreviewButton( box ) {
+		const node = modal( box );
+		return node ? node.querySelector( '[data-wdc-order-delivery-modal-preview]' ) : null;
 	}
 
 	function currentLocationNode( box ) {
@@ -74,6 +80,7 @@
 		box.querySelectorAll( '[data-wdc-order-delivery-recalculate], [data-wdc-order-delivery-modal-preview]' ).forEach( function ( button ) {
 			setLoading( button, loading );
 		} );
+		updateLocationGate( box );
 	}
 
 	function openModal( box ) {
@@ -127,12 +134,111 @@
 			toggle.textContent = expanded ? 'Свернуть' : 'Развернуть';
 			toggle.setAttribute( 'aria-expanded', expanded ? 'true' : 'false' );
 		}
+		if ( 'compact' === nextView ) {
+			scheduleCompactLayout( box );
+		}
 	}
 
 	function toggleDeliveryView( button ) {
 		const box = closestBox( button );
 		const current = viewStates.get( box ) || ( modal( box ) && modal( box ).dataset.view ) || 'full';
 		setDeliveryView( box, current === 'compact' ? 'full' : 'compact' );
+	}
+
+	function openDeliveryRecalculationModal( box ) {
+		if ( ! box ) {
+			return;
+		}
+		ensureInitialLocation( box );
+		resetModal( box );
+		openModal( box );
+		setStatus( box, '', '' );
+		updateLocationGate( box, { focusInvalid: true } );
+	}
+
+	function selectedLocationId( box ) {
+		const location = selectedLocations.get( box ) || {};
+		return positiveLocationId( location.id || location.location_id );
+	}
+
+	function hasCanonicalLocation( box ) {
+		return selectedLocationId( box ) > 0;
+	}
+
+	function setLocationSearchOpen( box, open ) {
+		const search = box && box.querySelector( '[data-wdc-order-delivery-location-search]' );
+		if ( ! search ) {
+			return;
+		}
+		search.hidden = ! open;
+	}
+
+	function focusLocationSearch( box ) {
+		const input = box && box.querySelector( '[data-wdc-order-delivery-location-input]' );
+		if ( input && input.focus ) {
+			window.setTimeout( function () {
+				input.focus();
+			}, 0 );
+		}
+	}
+
+	function updateLocationGate( box, options ) {
+		options = options || {};
+		const previewButton = modalPreviewButton( box );
+		if ( ! previewButton ) {
+			return false;
+		}
+		const valid = hasCanonicalLocation( box );
+		previewButton.disabled = ! valid || activeRequests.has( box );
+		if ( valid ) {
+			return true;
+		}
+		setLocationSearchOpen( box, true );
+		setStatus( box, 'Выберите населенный пункт из базы перед расчетом доставки.', 'error' );
+		if ( options.focusInvalid ) {
+			focusLocationSearch( box );
+		}
+		return false;
+	}
+
+	function scheduleCompactLayout( box ) {
+		if ( compactLayoutFrame && window.cancelAnimationFrame ) {
+			window.cancelAnimationFrame( compactLayoutFrame );
+		}
+		if ( ! window.requestAnimationFrame ) {
+			updateCompactLayout( box );
+			return;
+		}
+		compactLayoutFrame = window.requestAnimationFrame( function () {
+			compactLayoutFrame = 0;
+			updateCompactLayout( box );
+		} );
+	}
+
+	function updateCompactLayout( box ) {
+		const content = modalContent( box );
+		const rates = content ? content.querySelector( '.wdc-order-delivery-rates' ) : null;
+		if ( ! rates ) {
+			return;
+		}
+		let titleWidth = 0;
+		let priceWidth = 0;
+		rates.querySelectorAll( '[data-wdc-order-delivery-compact-summary]' ).forEach( function ( summary ) {
+			const title = summary.querySelector( '.wdc-order-delivery-rate__compact-title' );
+			const prices = summary.querySelector( '.wdc-order-delivery-rate__prices' );
+			if ( title && title.getBoundingClientRect ) {
+				titleWidth = Math.max( titleWidth, Math.ceil( title.getBoundingClientRect().width ) );
+			}
+			if ( prices && prices.getBoundingClientRect ) {
+				priceWidth = Math.max( priceWidth, Math.ceil( prices.getBoundingClientRect().width ) );
+			}
+		} );
+		if ( titleWidth > 0 ) {
+			rates.style.setProperty( '--wdc-order-compact-title-width', titleWidth + 'px' );
+		}
+		if ( priceWidth > 0 ) {
+			rates.style.setProperty( '--wdc-order-compact-price-width', priceWidth + 'px' );
+		}
 	}
 
 	function resetModal( box ) {
@@ -146,6 +252,7 @@
 		updatePickupSelectors( box );
 		updateCourierAddressBlocks( box );
 		updateSaveButton( box );
+		updateLocationGate( box );
 	}
 
 	function renderPreview( box, html ) {
@@ -160,6 +267,10 @@
 		updatePickupSelectors( box );
 		updateCourierAddressBlocks( box );
 		updateSaveButton( box );
+		updateLocationGate( box );
+		if ( 'compact' === ( viewStates.get( box ) || ( modal( box ) && modal( box ).dataset.view ) ) ) {
+			scheduleCompactLayout( box );
+		}
 	}
 
 	function updatePickupSelectors( box ) {
@@ -770,6 +881,10 @@
 		if ( ! box || ! orderId || activeRequests.has( box ) ) {
 			return;
 		}
+		openModal( box );
+		if ( ! updateLocationGate( box, { focusInvalid: true } ) ) {
+			return;
+		}
 
 		const form = new FormData();
 		form.append( 'action', config.action || 'wdc_order_delivery_recalculate_preview' );
@@ -781,7 +896,6 @@
 		}
 
 		activeRequests.add( box );
-		openModal( box );
 		resetModal( box );
 		setStatus( box, 'Считаем доступные варианты доставки...', 'loading' );
 		setPreviewButtonsLoading( box, true );
@@ -816,6 +930,9 @@
 					setStatus( box, 'Расчет выполнен для: ' + payload.data.location.label, 'success' );
 				} else {
 					setStatus( box, 'Preview рассчитан. Сохранение доставки будет добавлено следующим шагом.', 'success' );
+				}
+				if ( 'compact' === ( viewStates.get( box ) || ( modal( box ) && modal( box ).dataset.view ) ) ) {
+					scheduleCompactLayout( box );
 				}
 			} )
 			.catch( function ( error ) {
@@ -1930,7 +2047,7 @@
 		const openButton = event.target && event.target.closest( '[data-wdc-order-delivery-recalculate]' );
 		if ( openButton ) {
 			event.preventDefault();
-			requestPreview( closestBox( openButton ), openButton );
+			openDeliveryRecalculationModal( closestBox( openButton ) );
 			return;
 		}
 
@@ -1981,7 +2098,8 @@
 					search.hidden = true;
 				}
 				resetModal( box );
-				requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ) );
+				setStatus( box, '', '' );
+				updateLocationGate( box );
 			}
 			return;
 		}
@@ -2125,6 +2243,12 @@
 			if ( box ) {
 				closeModal( box );
 			}
+		} );
+	} );
+
+	window.addEventListener( 'resize', function () {
+		document.querySelectorAll( '[data-wdc-order-delivery-modal]:not([hidden])[data-view="compact"]' ).forEach( function ( node ) {
+			scheduleCompactLayout( closestBox( node ) );
 		} );
 	} );
 } )();
