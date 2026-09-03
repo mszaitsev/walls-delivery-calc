@@ -304,6 +304,9 @@ final class CheckoutOrchestrator {
 		if ( array() === $customer_comments ) {
 			return $rate;
 		}
+		$checkout_comments = ! empty( $rate->meta['customer_comments_rendered_in_checkout'] )
+			? $rate->comments
+			: $this->normalized_comments( array_merge( $rate->comments, $customer_comments ) );
 
 		return new DeliveryRate(
 			$rate->rate_id,
@@ -321,7 +324,7 @@ final class CheckoutOrchestrator {
 			$rate->delivery_days,
 			$rate->planned_delivery_date,
 			$rate->planned_delivery_comment,
-			$this->normalized_comments( array_merge( $rate->comments, $customer_comments ) ),
+			$checkout_comments,
 			$rate->disabled,
 			$rate->disabled_reason,
 			$rate->requires_pickup_point,

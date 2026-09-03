@@ -292,6 +292,9 @@ C:.
 |   |   |   |       JetLogisticHttpClientInterface.php
 |   |   |   |       WpJetLogisticHttpClient.php
 |   |   |   |
+|   |   |   +---Checkout
+|   |   |   |       JetLogisticCustomerCommentProvider.php
+|   |   |   |
 |   |   |   +---Geography
 |   |   |   |       JetLogisticCitiesCsvClient.php
 |   |   |   |       JetLogisticCitiesCsvParser.php

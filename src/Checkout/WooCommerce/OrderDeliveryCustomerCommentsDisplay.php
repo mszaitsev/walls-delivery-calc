@@ -29,7 +29,9 @@ final class OrderDeliveryCustomerCommentsDisplay {
 		if ( ! is_object( $order ) || ! method_exists( $order, 'get_meta' ) ) {
 			return;
 		}
-		if ( DeliveryType::PICKUP === (string) $order->get_meta( '_wdc_platform_delivery_type', true ) ) {
+		$delivery_type = (string) $order->get_meta( '_wdc_platform_delivery_type', true );
+		$requires_pickup_point = filter_var( $order->get_meta( '_wdc_platform_requires_pickup_point', true ), FILTER_VALIDATE_BOOLEAN );
+		if ( DeliveryType::PICKUP === $delivery_type && $requires_pickup_point ) {
 			return;
 		}
 		$comments = $this->comments( $order->get_meta( '_wdc_platform_customer_comments', true ) );

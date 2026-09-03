@@ -5,9 +5,11 @@ namespace WallsShop\WDC\Carriers\Runtime;
 
 use Throwable;
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
+use WallsShop\WDC\Carriers\Contracts\CarrierCustomerCommentProviderInterface;
 use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiClient;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiException;
+use WallsShop\WDC\Carriers\JetLogistic\Checkout\JetLogisticCustomerCommentProvider;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCityNameNormalizer;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticGeographyRepository;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
@@ -25,7 +27,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || exit;
 
-final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface {
+final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface, CarrierCustomerCommentProviderInterface {
 	private const WAREHOUSE_CONTACTS_URL = 'https://jet.com.kz/контакты.html';
 
 	public function __construct(
@@ -35,8 +37,10 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 		private JetLogisticQuoteResponseParser $parser,
 		private JetLogisticGeographyRepository $geography,
 		private JetLogisticCityNameNormalizer $normalizer,
-		private ?Logger $logger = null
+		private ?Logger $logger = null,
+		private ?JetLogisticCustomerCommentProvider $customer_comments = null
 	) {
+		$this->customer_comments ??= new JetLogisticCustomerCommentProvider();
 	}
 
 	public function get_identity(): CarrierIdentity {
@@ -45,6 +49,11 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 
 	public function get_capabilities(): CarrierCapabilities {
 		return new CarrierCapabilities( supports_quotes: true, supports_courier_delivery: true, supports_pickup_delivery: true, supports_status_sync: true, supports_international: true );
+	}
+
+	/** @return array<int,string> */
+	public function customer_comments( DeliveryRate $rate ): array {
+		return $this->customer_comments->customer_comments( $rate );
 	}
 
 	public function supports_country( string $countryCode ): bool {
@@ -103,20 +112,21 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 
 	private function pickup_rate( object $result, array $destination, bool $local_terminal, Money $price, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, QuoteRequest $request ): DeliveryRate {
 		$title = $local_terminal ? 'Джет Логистик до склада выдачи' : 'Джет Логистик до склада выдачи в г. ' . $result->city_terminal_to;
-		$comments = $local_terminal ? array() : array( 'Получение груза на складе Джет Логистик в г. ' . $result->city_terminal_to . '.' );
+		$terminal_comment = $local_terminal ? '' : JetLogisticCustomerCommentProvider::remote_terminal_comment( $result->city_terminal_to );
+		$comments = '' === $terminal_comment ? array() : array( $terminal_comment );
 
-		return $this->rate( JetLogisticSettings::PICKUP_RATE_KEY, DeliveryType::PICKUP, $title, $price, $result, $destination, $local_terminal, $comments, false, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request );
+		return $this->rate( JetLogisticSettings::PICKUP_RATE_KEY, DeliveryType::PICKUP, $title, $price, $result, $destination, $local_terminal, $comments, false, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request, $terminal_comment );
 	}
 
 	private function courier_rate( object $result, array $destination, bool $local_terminal, Money $price, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, QuoteRequest $request ): DeliveryRate {
 		$destination_city = trim( (string) ( $destination['source_city'] ?? '' ) );
 		$title = $local_terminal || '' === $destination_city ? 'Джет Логистик курьером' : 'Джет Логистик курьером в ' . $destination_city;
 
-		return $this->rate( JetLogisticSettings::COURIER_RATE_KEY, DeliveryType::COURIER, $title, $price, $result, $destination, $local_terminal, array(), true, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request );
+		return $this->rate( JetLogisticSettings::COURIER_RATE_KEY, DeliveryType::COURIER, $title, $price, $result, $destination, $local_terminal, array(), true, $insurance, $effective_delivery_component, $almaty_free_courier_applied, $request, '' );
 	}
 
 	/** @param array<string,mixed> $destination @param array<int,string> $comments */
-	private function rate( string $rate_id, string $type, string $title, Money $price, object $result, array $destination, bool $local_terminal, array $comments, bool $requires_address, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, QuoteRequest $request ): DeliveryRate {
+	private function rate( string $rate_id, string $type, string $title, Money $price, object $result, array $destination, bool $local_terminal, array $comments, bool $requires_address, Money $insurance, Money $effective_delivery_component, bool $almaty_free_courier_applied, QuoteRequest $request, string $terminal_customer_comment ): DeliveryRate {
 		return new DeliveryRate(
 			$rate_id,
 			JetLogisticSettings::CARRIER_KEY,
@@ -155,6 +165,8 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 				'jet_city_to' => $result->city_to,
 				'jet_city_terminal_to' => $result->city_terminal_to,
 				'jet_local_terminal' => $local_terminal ? 'yes' : 'no',
+				'jet_pickup_terminal_customer_comment' => $terminal_customer_comment,
+				'customer_comments_rendered_in_checkout' => DeliveryType::PICKUP === $type,
 				'customer_link_comments' => DeliveryType::PICKUP === $type ? array( $this->warehouse_link_comment() ) : array(),
 				'delivery_days_are_working' => true,
 			),
@@ -166,8 +178,8 @@ final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteC
 	/** @return array{text_before:string,label:string,url:string} */
 	private function warehouse_link_comment(): array {
 		return array(
-			'text_before' => 'Адрес склада выдачи - ',
-			'label' => 'на сайте Jet Logistic',
+			'text_before' => JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_TEXT_BEFORE,
+			'label' => JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_LABEL,
 			'url' => self::WAREHOUSE_CONTACTS_URL,
 		);
 	}

@@ -13,6 +13,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiDiagnosticService;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticApiException;
 use WallsShop\WDC\Carriers\JetLogistic\Api\JetLogisticHttpClientInterface;
 use WallsShop\WDC\Carriers\JetLogistic\Api\WpJetLogisticHttpClient;
+use WallsShop\WDC\Carriers\JetLogistic\Checkout\JetLogisticCustomerCommentProvider;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvClient;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCitiesCsvParser;
 use WallsShop\WDC\Carriers\JetLogistic\Geography\JetLogisticCityNameNormalizer;
@@ -1117,6 +1118,12 @@ $orchestrator = new CheckoutOrchestrator(
 $orchestrator_rates = $orchestrator->calculate_rates( new QuoteRequest( 'KZ', new Address( country_code: 'KZ', city: 'Алматы' ), $package, 'card', Money::from_rubles( 19500 ), '2026-07-28', array( 'selected_location_id' => 162695 ) ) );
 $orchestrator_rate_ids = array_map( static fn( object $rate ): string => (string) $rate->rate_id, $orchestrator_rates );
 jet_assert( in_array( JetLogisticSettings::PICKUP_RATE_KEY, $orchestrator_rate_ids, true ) && in_array( JetLogisticSettings::COURIER_RATE_KEY, $orchestrator_rate_ids, true ) && 1 === count( $orchestrator_http->requests ) && 'Алматы' === (string) ( $orchestrator_http->requests[0]['payload']['cityto'] ?? '' ), 'CheckoutOrchestrator must return Jet pickup/courier rates for mapped KZ Алматы with one calculator call.' );
+$orchestrator_pickup = array_values( array_filter( $orchestrator_rates, static fn( object $rate ): bool => JetLogisticSettings::PICKUP_RATE_KEY === (string) $rate->rate_id ) )[0] ?? null;
+$orchestrator_courier = array_values( array_filter( $orchestrator_rates, static fn( object $rate ): bool => JetLogisticSettings::COURIER_RATE_KEY === (string) $rate->rate_id ) )[0] ?? null;
+jet_assert( $orchestrator_pickup instanceof \WallsShop\WDC\Domain\Quote\DeliveryRate && array( JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ) === ( $orchestrator_pickup->meta['customer_comments'] ?? null ) && array() === $orchestrator_pickup->comments, 'CheckoutOrchestrator must persist Jet local pickup customer comments without duplicating the checkout structured link as plain text.' );
+jet_assert( $orchestrator_courier instanceof \WallsShop\WDC\Domain\Quote\DeliveryRate && ! isset( $orchestrator_courier->meta['customer_comments'] ), 'CheckoutOrchestrator must not add Jet warehouse customer comments to courier rates.' );
+
+jet_assert( array( JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT, JetLogisticCustomerCommentProvider::remote_terminal_comment( 'Астана' ) ) === $orchestrator_carrier->customer_comments( $remote_terminal_quote->rates[0] ) && array() === $orchestrator_carrier->customer_comments( $remote_terminal_quote->rates[1] ), 'Jet customer comment provider must return warehouse plus remote-terminal comments for non-selectable pickup and no warehouse comments for courier.' );
 
 $rule_order_http = new JetFakeHttp(
 	array(

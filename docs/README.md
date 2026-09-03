@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.18
+Version: 0.147.19
+
+0.147.19 persists Jet Logistic pickup customer comments through the existing carrier customer-comment provider pipeline used by Ozon Delivery. Jet pickup keeps its structured checkout warehouse link, but the order/email customer-comments snapshot stores plain text (`Адрес склада выдачи - на сайте Jet Logistic`) and, for remote terminals, the existing Jet terminal notice after it. Standalone order/email delivery comments now skip only selectable pickup rates (`pickup` plus `requires_pickup_point=true`) so Jet terminal pickup comments display without creating fake pickup-point metadata; Ozon/CDEK/Yandex-style pickup card comments remain non-duplicated.
 
 0.147.18 fixes checkout order validation for pickup rates that do not require a concrete pickup-point selection. `DeliveryType::PICKUP` now means terminal/pickup-style delivery, while `requires_pickup_point=true` is the separate authoritative capability that triggers "Выберите пункт выдачи."; Jet Logistic pickup remains pickup delivery with `requires_pickup_point=false`, so orders can be placed without fake pickup-point metadata. Selectable pickup carriers still require a valid, current pickup selection.
 

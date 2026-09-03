@@ -241,6 +241,7 @@ use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
+use WallsShop\WDC\Carriers\JetLogistic\Checkout\JetLogisticCustomerCommentProvider;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -1837,9 +1838,12 @@ $session->save_rates(
 			'planned_delivery_comment' => '3-5 дней',
 			'cost' => 1165.0,
 			'api_base_price_rub' => 1165.0,
+			'comments' => array(),
+			'customer_comments' => array( JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ),
 			'rate_meta' => array(
 				'api_base_price_rub' => 1165.0,
 				'jet_local_terminal' => 'yes',
+				'customer_comments' => array( 'forged Jet browser value' ),
 			),
 		),
 	)
@@ -1849,6 +1853,84 @@ $jet_pickup_order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $jet_pickup_order );
 wc_checkout_smoke_assert( 'jet_logistic_pickup' === (string) ( $jet_pickup_order->meta['_wdc_platform_rate_id'] ?? '' ) && 0 === (int) ( $jet_pickup_order->meta['_wdc_platform_requires_pickup_point'] ?? -1 ), 'Jet Logistic pickup order persistence must keep pickup delivery type without requiring a concrete pickup point.' );
 wc_checkout_smoke_assert( ! array_key_exists( '_wdc_pickup_point_id', $jet_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_code', $jet_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_snapshot', $jet_pickup_order->meta ), 'Jet Logistic pickup order persistence must not create fake pickup point metadata.' );
+wc_checkout_smoke_assert( array( JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ) === ( $jet_pickup_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Jet Logistic local pickup must persist the plain warehouse customer comment through generic order meta.' );
+wc_checkout_smoke_assert( array( JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ) === ( $jet_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['customer_comments'] ?? null ), 'Jet Logistic local pickup calculation snapshot must freeze customer comments from the selected rate.' );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay() )->render( $jet_pickup_order );
+$jet_pickup_comments_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $jet_pickup_comments_html, 'Информация о доставке' ) && str_contains( $jet_pickup_comments_html, JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ) && ! str_contains( $jet_pickup_comments_html, '<a ' ) && ! str_contains( $jet_pickup_comments_html, 'forged' ), 'Jet Logistic non-selectable pickup customer comments must render in standalone order delivery information as escaped plain text.' );
+$jet_pickup_email_settings = new SettingsRepository();
+$jet_pickup_email_settings->set( 'pickup_email_card_enabled_emails', array( 'customer_processing_order' ) );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay( $jet_pickup_email_settings ) )->render_email( $jet_pickup_order, false, false, (object) array( 'id' => 'customer_processing_order' ) );
+$jet_pickup_email_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( str_contains( $jet_pickup_email_html, JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ), 'Jet Logistic non-selectable pickup customer comments must render through the existing customer email delivery-comments hook.' );
+
+$jet_remote_terminal_comment = JetLogisticCustomerCommentProvider::remote_terminal_comment( 'Астана' );
+$session->clear_pickup_selection();
+$session->save_rates(
+	array(
+		'jet_logistic_pickup_remote' => array(
+			'rate_id' => 'jet_logistic_pickup',
+			'carrier_key' => 'jet_logistic',
+			'service_key' => 'jet_logistic',
+			'service_title' => 'Jet Logistic',
+			'label' => 'Джет Логистик до склада выдачи в г. Астана',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => false,
+			'planned_delivery_comment' => '5-7 дней',
+			'cost' => 1165.0,
+			'api_base_price_rub' => 1165.0,
+			'comments' => array( $jet_remote_terminal_comment ),
+			'customer_comments' => array( JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT, $jet_remote_terminal_comment ),
+			'rate_meta' => array(
+				'api_base_price_rub' => 1165.0,
+				'jet_local_terminal' => 'no',
+				'jet_pickup_terminal_customer_comment' => $jet_remote_terminal_comment,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_pickup_remote' ) );
+$jet_remote_pickup_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $jet_remote_pickup_order );
+wc_checkout_smoke_assert( array( JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT, $jet_remote_terminal_comment ) === ( $jet_remote_pickup_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Jet Logistic remote pickup must persist warehouse and terminal comments in checkout order.' );
+wc_checkout_smoke_assert( ! array_key_exists( '_wdc_pickup_point_id', $jet_remote_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_snapshot', $jet_remote_pickup_order->meta ), 'Jet Logistic remote pickup must not create a fake pickup point snapshot to persist comments.' );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay() )->render( $jet_remote_pickup_order );
+$jet_remote_comments_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( false !== strpos( $jet_remote_comments_html, JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ) && false !== strpos( $jet_remote_comments_html, $jet_remote_terminal_comment ) && strpos( $jet_remote_comments_html, JetLogisticCustomerCommentProvider::WAREHOUSE_CONTACTS_COMMENT ) < strpos( $jet_remote_comments_html, $jet_remote_terminal_comment ), 'Jet Logistic remote pickup order display must preserve warehouse comment before remote terminal comment.' );
+
+$session->save_rates(
+	array(
+		'jet_logistic_courier' => array(
+			'rate_id' => 'jet_logistic_courier',
+			'carrier_key' => 'jet_logistic',
+			'service_key' => 'jet_logistic',
+			'service_title' => 'Jet Logistic',
+			'label' => 'Джет Логистик курьером',
+			'delivery_type' => 'courier',
+			'requires_pickup_point' => false,
+			'cost' => 1570.0,
+			'api_base_price_rub' => 1570.0,
+			'comments' => array(),
+			'customer_comments' => array(),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_courier' ) );
+$jet_courier_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $jet_courier_order );
+wc_checkout_smoke_assert( array() === ( $jet_courier_order->meta['_wdc_platform_customer_comments'] ?? null ), 'Jet Logistic courier must not persist warehouse pickup comments.' );
+
+$selectable_pickup_order = new WdcSmokeOrder();
+$selectable_pickup_order->update_meta_data( '_wdc_platform_delivery_type', DeliveryType::PICKUP );
+$selectable_pickup_order->update_meta_data( '_wdc_platform_requires_pickup_point', 1 );
+$selectable_pickup_order->update_meta_data( '_wdc_platform_customer_comments', array( 'Комментарий карточки ПВЗ' ) );
+ob_start();
+( new OrderDeliveryCustomerCommentsDisplay() )->render( $selectable_pickup_order );
+$selectable_pickup_comments_html = (string) ob_get_clean();
+wc_checkout_smoke_assert( '' === $selectable_pickup_comments_html, 'Selectable pickup customer comments must remain hidden from standalone order display to avoid duplicating the pickup card.' );
 
 $session->save_rates(
 	array(
