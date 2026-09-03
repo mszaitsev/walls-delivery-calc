@@ -1,8 +1,14 @@
 <?php
 declare(strict_types=1);
 
-use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
+use WallsShop\WDC\Carriers\Pek\PekSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -17,6 +23,7 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
@@ -35,6 +42,16 @@ require_once __DIR__ . '/actual-cost-test-helpers.php';
 if ( ! function_exists( '__' ) ) {
 	function __( string $text, string $domain = '' ): string {
 		return $text;
+	}
+}
+if ( ! function_exists( 'esc_html__' ) ) {
+	function esc_html__( string $text, string $domain = '' ): string {
+		return $text;
+	}
+}
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
 	}
 }
 if ( ! function_exists( 'sanitize_text_field' ) ) {
@@ -865,6 +882,7 @@ $shipment_order = new ShipmentsSmokeOrder(
 		'address_1' => 'ул. Покупателя 5',
 	),
 	array(
+		'_wdc_platform_carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 		'_wdc_platform_service_key' => RussianPostDomesticSettings::SERVICE_KEY,
 		'_wdc_platform_delivery_type' => DeliveryType::PICKUP,
 		'_wdc_platform_tariff_object' => '23030',
@@ -895,6 +913,10 @@ $selected_pickup_data = array(
 	),
 );
 $selected_request = $draft_factory->create_request_from_admin_data( $shipment_order, $selected_pickup_data );
+shipments_smoke_assert( $draft_factory->supports_order( $shipment_order ), 'Domestic Russian Post order must be supported by shipment draft factory.' );
+shipments_smoke_assert( RussianPostDomesticSettings::CARRIER_KEY === $selected_request->carrier_key && RussianPostDomesticSettings::SERVICE_KEY === (string) ( $selected_request->meta['service_key'] ?? '' ), 'Domestic Russian Post admin-data draft must keep explicit domestic carrier and service keys.' );
+$domestic_draft = $draft_factory->draft_array( $shipment_order );
+shipments_smoke_assert( RussianPostDomesticSettings::CARRIER_KEY === (string) ( $domestic_draft['request']['carrier_key'] ?? '' ) && array() !== (array) ( $domestic_draft['services'] ?? array() ) && in_array( '630005', (array) ( $domestic_draft['postoffice_codes'] ?? array() ), true ), 'Domestic Russian Post draft array must expose domestic service variants and postoffice codes.' );
 shipments_smoke_assert( '630099-new' === $selected_request->pickup_point?->point_code, 'Admin pickup selection must update shipment draft pickup code.' );
 shipments_smoke_assert( '630099' === $selected_request->recipient_address->postcode && 'Красный проспект, 1' === $selected_request->recipient_address->raw_address, 'Admin pickup selection must update draft recipient address.' );
 shipments_smoke_assert( '630099' === (string) ( $selected_request->meta['pickup_point_postcode'] ?? '' ) && ! empty( $selected_request->meta['pickup_point_found'] ), 'Admin pickup selection must update draft pickup meta only.' );
@@ -984,5 +1006,62 @@ shipments_smoke_assert( JetLogisticSettings::CARRIER_KEY === $jet_courier_reques
 shipments_smoke_assert( DeliveryType::COURIER === $jet_courier_request->delivery_type, 'Jet courier draft must keep courier delivery type.' );
 shipments_smoke_assert( JetLogisticSettings::COURIER_RATE_KEY === $jet_courier_request->rate_id, 'Jet courier draft must keep selected Jet courier rate id.' );
 shipments_smoke_assert( RussianPostDomesticSettings::CARRIER_KEY !== $jet_courier_request->carrier_key && RussianPostDomesticSettings::SERVICE_KEY !== (string) ( $jet_courier_request->meta['service_key'] ?? '' ), 'Jet courier draft must not fall back to Russian Post.' );
+
+$known_carrier_cases = array(
+	RussianPostDomesticSettings::CARRIER_KEY,
+	CdekSettings::CARRIER_KEY,
+	DpdSettings::CARRIER_KEY,
+	YandexDeliverySettings::CARRIER_KEY,
+	PekSettings::CARRIER_KEY,
+	OzonDeliverySettings::CARRIER_KEY,
+	JetLogisticSettings::CARRIER_KEY,
+);
+foreach ( $known_carrier_cases as $known_carrier_key ) {
+	shipments_smoke_assert( $draft_factory->supports_carrier_key( $known_carrier_key ), 'Shipment draft factory must support known carrier: ' . $known_carrier_key );
+	shipments_smoke_assert( $draft_factory->supports_order( new ShipmentsSmokeOrder( array( 'id' => 9200 ), array( '_wdc_platform_carrier_key' => $known_carrier_key ) ) ), 'Shipment draft factory must support order carrier: ' . $known_carrier_key );
+}
+
+$unsupported_orders = array(
+	'empty carrier' => new ShipmentsSmokeOrder( array( 'id' => 9301 ) ),
+	'custom carrier' => new ShipmentsSmokeOrder( array( 'id' => 9302 ), array( '_wdc_platform_carrier_key' => 'custom_delivery' ) ),
+	'international Russian Post' => new ShipmentsSmokeOrder(
+		array( 'id' => 9303 ),
+		array(
+			'_wdc_platform_carrier_key' => RussianPostSettings::CARRIER_KEY,
+			'_wdc_platform_service_key' => RussianPostSettings::SERVICE_KEY,
+		)
+	),
+);
+foreach ( $unsupported_orders as $label => $unsupported_order ) {
+	shipments_smoke_assert( ! $draft_factory->supports_order( $unsupported_order ), $label . ' must be unsupported by shipment draft factory.' );
+	try {
+		$draft_factory->create_request_from_order( $unsupported_order );
+		shipments_smoke_assert( false, $label . ' must not silently create a Russian Post shipment request.' );
+	} catch ( RuntimeException $exception ) {
+		shipments_smoke_assert( str_contains( $exception->getMessage(), 'Shipment carrier is not supported' ), $label . ' must fail closed with a support error.' );
+	}
+}
+shipments_smoke_assert( ! $draft_factory->supports_carrier_key( RussianPostSettings::CARRIER_KEY ), 'International Russian Post carrier must not be treated as domestic shipment support.' );
+
+$metabox_reflection = new ReflectionClass( OrderShipmentsMetabox::class );
+$metabox = $metabox_reflection->newInstanceWithoutConstructor();
+$drafts_property = $metabox_reflection->getProperty( 'drafts' );
+$drafts_property->setAccessible( true );
+$drafts_property->setValue( $metabox, $draft_factory );
+$render_inner = $metabox_reflection->getMethod( 'render_inner' );
+$render_inner->setAccessible( true );
+ob_start();
+$render_inner->invoke( $metabox, $unsupported_orders['custom carrier'] );
+$unsupported_metabox_html = trim( (string) ob_get_clean() );
+shipments_smoke_assert( '<p>Добавьте стандартную службу доставки</p>' === $unsupported_metabox_html, 'Unsupported carrier metabox must render only the empty state paragraph.' );
+foreach ( array( 'Почта России', 'data-wdc-open-shipment-modal', 'data-wdc-update-shipment-status', 'data-wdc-attach-shipment-tracking', 'data-wdc-shipment-actual-cost' ) as $forbidden_fragment ) {
+	shipments_smoke_assert( ! str_contains( $unsupported_metabox_html, $forbidden_fragment ), 'Unsupported carrier metabox must not render carrier-specific fragment: ' . $forbidden_fragment );
+}
+
+$factory_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
+$metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+shipments_smoke_assert( str_contains( $factory_source, 'if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier_key )' ) && str_contains( $factory_source, 'create_russian_post_domestic_request_from_order' ), 'Order shipment draft factory must handle domestic Russian Post through an explicit branch.' );
+shipments_smoke_assert( str_contains( $factory_source, 'supports_order' ) && str_contains( $factory_source, 'supports_carrier_key' ) && str_contains( $factory_source, 'throw new \\RuntimeException( \'Shipment carrier is not supported for this order.\' )' ), 'Order shipment draft factory must expose supported-carrier contract and fail closed for unsupported carriers.' );
+shipments_smoke_assert( str_contains( $metabox_source, '! $this->drafts->supports_order( $order )' ) && str_contains( $metabox_source, 'Добавьте стандартную службу доставки' ) && ! str_contains( $metabox_source, 'custom_delivery' ), 'Order shipments metabox must use factory support contract for generic empty state without hardcoded custom carriers.' );
 
 echo "Russian Post shipments smoke OK\n";
