@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.21
+Version: 0.147.22
 
-0.147.21 completes the Jet Logistic order-admin runtime on top of the generic Shipment Framework. Order delivery recalculation now distinguishes `delivery_type=pickup` from `requires_pickup_point=true`, and courier admin address recapture is controlled by explicit rate metadata, so Jet pickup/courier recalculated rates can be saved without fake pickup points or repeated address entry. Jet shipment admin capabilities are explicit: manual attach, status update, autosync, local remove, and manual actual-cost entry are available through shared flows, while API prepare/create, cancellation, documents, labels, and Jet-specific cron remain unsupported.
+0.147.22 fixes Jet Logistic order shipment drafts in the shared order-admin Shipment Framework. `OrderShipmentDraftFactory` now treats Jet Logistic as a known carrier before the legacy Russian Post fallback, so Jet orders keep `carrier_key=jet_logistic`, Jet pickup/courier rate IDs, and the Jet service title in the `Отправления` metabox while continuing to use manual attach/status/remove/actual-cost flows only.
 
 0.147.18 fixes checkout order validation for pickup rates that do not require a concrete pickup-point selection. `DeliveryType::PICKUP` now means terminal/pickup-style delivery, while `requires_pickup_point=true` is the separate authoritative capability that triggers "Выберите пункт выдачи."; Jet Logistic pickup remains pickup delivery with `requires_pickup_point=false`, so orders can be placed without fake pickup-point metadata. Selectable pickup carriers still require a valid, current pickup selection.
 

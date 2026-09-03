@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -131,6 +132,10 @@ class ShipmentsSmokeOrder {
 
 	public function get_shipping_city(): string {
 		return (string) ( $this->data['city'] ?? '' );
+	}
+
+	public function get_shipping_country(): string {
+		return (string) ( $this->data['country'] ?? 'RU' );
 	}
 
 	public function get_billing_city(): string {
@@ -909,5 +914,75 @@ shipments_smoke_assert( $selected_result->success && $selected_adapter->created_
 shipments_smoke_assert( $before_meta === $shipment_order->meta_snapshot(), 'Admin pickup selection must not mutate WooCommerce order meta.' );
 
 shipments_smoke_assert( 1 === count( $pickup_suffix_payload ), 'Normal pickup payload built from one submitted place must contain one order object.' );
+
+$jet_wpdb = new wpdb();
+$jet_wpdb->delivery_service_rows = array(
+	array(
+		'id' => 78,
+		'service_key' => JetLogisticSettings::SERVICE_KEY,
+		'carrier_key' => JetLogisticSettings::CARRIER_KEY,
+		'service_type' => 'api',
+		'title' => JetLogisticSettings::PUBLIC_TITLE,
+		'enabled' => 1,
+		'deleted' => 0,
+	),
+);
+$jet_draft_factory = new OrderShipmentDraftFactory(
+	new DeliveryServiceRepository( $jet_wpdb ),
+	new ShipmentServiceSettings()
+);
+$jet_pickup_order = new ShipmentsSmokeOrder(
+	array(
+		'id' => 9101,
+		'country' => 'KZ',
+		'state' => 'Акмолинская область',
+		'city' => 'Атбасар',
+		'address_1' => 'Адрес покупателя',
+	),
+	array(
+		'_wdc_platform_carrier_key' => JetLogisticSettings::CARRIER_KEY,
+		'_wdc_platform_service_key' => JetLogisticSettings::SERVICE_KEY,
+		'_wdc_platform_service_title' => JetLogisticSettings::PUBLIC_TITLE,
+		'_wdc_platform_rate_id' => JetLogisticSettings::PICKUP_RATE_KEY,
+		'_wdc_platform_delivery_type' => DeliveryType::PICKUP,
+	)
+);
+$jet_pickup_request = $jet_draft_factory->create_request_from_order( $jet_pickup_order );
+shipments_smoke_assert( JetLogisticSettings::CARRIER_KEY === $jet_pickup_request->carrier_key, 'Jet pickup draft must keep Jet carrier key.' );
+shipments_smoke_assert( DeliveryType::PICKUP === $jet_pickup_request->delivery_type, 'Jet pickup draft must keep pickup delivery type.' );
+shipments_smoke_assert( JetLogisticSettings::PICKUP_RATE_KEY === $jet_pickup_request->rate_id, 'Jet pickup draft must keep selected Jet pickup rate id.' );
+shipments_smoke_assert( JetLogisticSettings::SERVICE_KEY === (string) ( $jet_pickup_request->meta['service_key'] ?? '' ), 'Jet pickup draft must keep Jet service key.' );
+shipments_smoke_assert( null === $jet_pickup_request->pickup_point, 'Jet pickup draft must not create a fake pickup point.' );
+shipments_smoke_assert( RussianPostDomesticSettings::CARRIER_KEY !== $jet_pickup_request->carrier_key && RussianPostDomesticSettings::SERVICE_KEY !== (string) ( $jet_pickup_request->meta['service_key'] ?? '' ), 'Jet pickup draft must not fall back to Russian Post.' );
+$jet_pickup_draft = $jet_draft_factory->draft_array( $jet_pickup_order );
+shipments_smoke_assert( JetLogisticSettings::CARRIER_KEY === (string) ( $jet_pickup_draft['request']['carrier_key'] ?? '' ), 'Jet pickup draft array must expose Jet carrier key.' );
+shipments_smoke_assert( array() === (array) ( $jet_pickup_draft['services'] ?? array( 'unexpected' ) ), 'Jet draft array must not expose shipment-create service variants.' );
+shipments_smoke_assert( false === (bool) ( $jet_pickup_draft['modal_capabilities']['requires_tariff'] ?? true ), 'Jet draft modal must not require tariff selection.' );
+shipments_smoke_assert( false === (bool) ( $jet_pickup_draft['modal_capabilities']['requires_postoffice'] ?? true ), 'Jet draft modal must not require postoffice selection.' );
+shipments_smoke_assert( false === (bool) ( $jet_pickup_draft['modal_capabilities']['requires_successful_preview'] ?? true ), 'Jet draft modal must not require successful preview.' );
+$jet_pickup_admin_request = $jet_draft_factory->create_request_from_admin_data( $jet_pickup_order, array( 'delivery_type' => DeliveryType::PICKUP ) );
+shipments_smoke_assert( JetLogisticSettings::CARRIER_KEY === $jet_pickup_admin_request->carrier_key && JetLogisticSettings::PICKUP_RATE_KEY === $jet_pickup_admin_request->rate_id, 'Jet admin-data path must not remap Jet pickup to Russian Post.' );
+
+$jet_courier_order = new ShipmentsSmokeOrder(
+	array(
+		'id' => 9102,
+		'country' => 'KZ',
+		'state' => 'Алматинская область',
+		'city' => 'Алматы',
+		'address_1' => 'ул. Абая, 10',
+	),
+	array(
+		'_wdc_platform_carrier_key' => JetLogisticSettings::CARRIER_KEY,
+		'_wdc_platform_service_key' => JetLogisticSettings::SERVICE_KEY,
+		'_wdc_platform_service_title' => JetLogisticSettings::PUBLIC_TITLE,
+		'_wdc_platform_rate_id' => JetLogisticSettings::COURIER_RATE_KEY,
+		'_wdc_platform_delivery_type' => DeliveryType::COURIER,
+	)
+);
+$jet_courier_request = $jet_draft_factory->create_request_from_order( $jet_courier_order );
+shipments_smoke_assert( JetLogisticSettings::CARRIER_KEY === $jet_courier_request->carrier_key, 'Jet courier draft must keep Jet carrier key.' );
+shipments_smoke_assert( DeliveryType::COURIER === $jet_courier_request->delivery_type, 'Jet courier draft must keep courier delivery type.' );
+shipments_smoke_assert( JetLogisticSettings::COURIER_RATE_KEY === $jet_courier_request->rate_id, 'Jet courier draft must keep selected Jet courier rate id.' );
+shipments_smoke_assert( RussianPostDomesticSettings::CARRIER_KEY !== $jet_courier_request->carrier_key && RussianPostDomesticSettings::SERVICE_KEY !== (string) ( $jet_courier_request->meta['service_key'] ?? '' ), 'Jet courier draft must not fall back to Russian Post.' );
 
 echo "Russian Post shipments smoke OK\n";

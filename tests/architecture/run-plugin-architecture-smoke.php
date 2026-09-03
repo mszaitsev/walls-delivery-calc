@@ -1137,7 +1137,11 @@ foreach ( array( 'src/Shipments/Application', 'src/Shipments/Admin', 'src/Shipme
 	}
 }
 foreach ( $generic_shipment_sources as $relative => $source ) {
-	plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic Shipment Framework must not branch on Jet Logistic in ' . $relative );
+	if ( 'src/Shipments/Application/OrderShipmentDraftFactory.php' === $relative ) {
+		plugin_architecture_assert( str_contains( $source, 'JetLogisticSettings::CARRIER_KEY' ) && strpos( $source, 'JetLogisticSettings::CARRIER_KEY' ) < strpos( $source, 'RussianPostDomesticSettings::SERVICE_KEY' ), 'Order shipment draft factory must handle Jet Logistic before the Russian Post fallback.' );
+	} else {
+		plugin_architecture_assert( ! str_contains( $source, $jet_key ) && ! str_contains( $source, 'JetLogistic' ), 'Generic Shipment Framework must not branch on Jet Logistic in ' . $relative );
+	}
 	if ( in_array( $relative, array( 'src/Shipments/Application/OrderShipmentDraftFactory.php', 'src/Shipments/Admin/Ajax/ShipmentAddressAjaxController.php' ), true ) ) {
 		continue;
 	}
