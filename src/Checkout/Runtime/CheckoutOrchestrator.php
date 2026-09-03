@@ -4,13 +4,13 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\Runtime;
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
-use WallsShop\WDC\Carriers\Contracts\CarrierCustomerCommentProviderInterface;
 use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentSnapshotBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
@@ -40,8 +40,10 @@ final class CheckoutOrchestrator {
 		private ?DeliveryServiceRegistry $service_registry = null,
 		private ?DeliveryServiceManager $service_manager = null,
 		private ?PackagingWeightCalculator $packaging_calculator = null,
-		private ?DpdSettings $dpd_settings = null
+		private ?DpdSettings $dpd_settings = null,
+		private ?DeliveryCustomerCommentSnapshotBuilder $customer_comment_snapshot_builder = null
 	) {
+		$this->customer_comment_snapshot_builder ??= new DeliveryCustomerCommentSnapshotBuilder();
 	}
 
 	/**
@@ -129,6 +131,7 @@ final class CheckoutOrchestrator {
 					$rules_for_rate = is_array( $rules_for_rate ) ? $rules_for_rate : array();
 					$rules_source = array() !== $rules_for_rate ? 'default' : 'none';
 				}
+				$pre_rule_comment_count = count( $rate->comments );
 				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $service_request, $rate ), $rules_for_rate );
 				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager && empty( $applied['rate']->meta['skip_service_post_processing'] )
 					? $this->service_manager->post_process_rate( $applied['rate'], $service )
@@ -143,7 +146,8 @@ final class CheckoutOrchestrator {
 						'original_price_rub' => $rate->price->get_rubles(),
 					)
 				);
-				$processed = $this->rate_with_carrier_customer_comments( $processed, $carrier );
+				$processed = $this->rate_with_materialized_customer_comment_templates( $processed, $pre_rule_comment_count );
+				$processed = $this->rate_with_customer_comment_snapshot( $processed );
 				$rates[] = $processed;
 				$audit[] = array(
 					'rate_id' => $rate->rate_id,
@@ -295,18 +299,11 @@ final class CheckoutOrchestrator {
 		);
 	}
 
-	private function rate_with_carrier_customer_comments( DeliveryRate $rate, object $carrier ): DeliveryRate {
-		if ( ! $carrier instanceof CarrierCustomerCommentProviderInterface ) {
-			return $rate;
-		}
-
-		$customer_comments = $this->normalized_comments( $carrier->customer_comments( $rate ) );
+	private function rate_with_customer_comment_snapshot( DeliveryRate $rate ): DeliveryRate {
+		$customer_comments = $this->customer_comment_snapshot_builder->build( $rate );
 		if ( array() === $customer_comments ) {
 			return $rate;
 		}
-		$checkout_comments = ! empty( $rate->meta['customer_comments_rendered_in_checkout'] )
-			? $rate->comments
-			: $this->normalized_comments( array_merge( $rate->comments, $customer_comments ) );
 
 		return new DeliveryRate(
 			$rate->rate_id,
@@ -324,12 +321,51 @@ final class CheckoutOrchestrator {
 			$rate->delivery_days,
 			$rate->planned_delivery_date,
 			$rate->planned_delivery_comment,
-			$checkout_comments,
+			$rate->comments,
 			$rate->disabled,
 			$rate->disabled_reason,
 			$rate->requires_pickup_point,
 			$rate->requires_courier_address,
 			array_merge( $rate->meta, array( 'customer_comments' => $customer_comments ) ),
+			$rate->original_cost,
+			$rate->original_delivery_days
+		);
+	}
+
+	private function rate_with_materialized_customer_comment_templates( DeliveryRate $rate, int $insert_after_count ): DeliveryRate {
+		$template_comments = $this->customer_comment_snapshot_builder->materialized_template_comments( $rate );
+		if ( array() === $template_comments ) {
+			return $rate;
+		}
+		$insert_after_count = max( 0, min( $insert_after_count, count( $rate->comments ) ) );
+		$comments = array_merge(
+			array_slice( $rate->comments, 0, $insert_after_count ),
+			$template_comments,
+			array_slice( $rate->comments, $insert_after_count )
+		);
+
+		return new DeliveryRate(
+			$rate->rate_id,
+			$rate->carrier_key,
+			$rate->carrier_name,
+			$rate->service_key,
+			$rate->service_name,
+			$rate->tariff_key,
+			$rate->tariff_name,
+			$rate->delivery_type,
+			$rate->title,
+			$rate->price,
+			$rate->original_price,
+			$rate->crossed_price,
+			$rate->delivery_days,
+			$rate->planned_delivery_date,
+			$rate->planned_delivery_comment,
+			$this->normalized_comments( $comments ),
+			$rate->disabled,
+			$rate->disabled_reason,
+			$rate->requires_pickup_point,
+			$rate->requires_courier_address,
+			$rate->meta,
 			$rate->original_cost,
 			$rate->original_delivery_days
 		);

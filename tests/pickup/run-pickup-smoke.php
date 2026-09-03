@@ -433,8 +433,8 @@ $session->save_rates(
 			'rate_id'          => 'demo:pickup',
 			'delivery_type'    => 'pickup',
 			'customer_comments' => array(
-				'Отслеживание посылки - в приложении Ozon, раздел Доставка',
-				'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.',
+				array( 'type' => 'text', 'text' => 'Отслеживание посылки - в приложении Ozon, раздел Доставка' ),
+				array( 'type' => 'text', 'text' => 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.' ),
 			),
 			'fallback_used'    => false,
 		),
@@ -458,7 +458,8 @@ $persister->persist_shipping_item_meta( $shipping_item, 0, array(), $order );
 pickup_smoke_assert( 'demo-nsk-001' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
 pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
 $pickup_snapshot = json_decode( (string) ( $order->meta['_wdc_pickup_point_snapshot'] ?? '{}' ), true );
-pickup_smoke_assert( array( 'Отслеживание посылки - в приложении Ozon, раздел Доставка', 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.' ) === ( $pickup_snapshot['customer_comments'] ?? null ), 'Order pickup snapshot must persist customer comments from authoritative selected rate.' );
+pickup_smoke_assert( array( array( 'type' => 'text', 'text' => 'Отслеживание посылки - в приложении Ozon, раздел Доставка' ), array( 'type' => 'text', 'text' => 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.' ) ) === ( $order->meta['_wdc_platform_customer_comments'] ?? null ), 'Order meta must persist customer comments once in canonical platform customer comments.' );
+pickup_smoke_assert( ! isset( $pickup_snapshot['customer_comments'] ), 'New order pickup snapshot must not duplicate canonical customer comments.' );
 pickup_smoke_assert( ! str_contains( (string) wp_json_encode( $pickup_snapshot ), '999999' ), 'Browser-supplied pickup customer comments must not be authoritative.' );
 pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shipping['address_1'] ?? '' ), 'Pickup order must write pickup address to shipping address_1.' );
 pickup_smoke_assert( ! isset( $order->shipping['address_2'] ) || '' === (string) $order->shipping['address_2'], 'Pickup order must not write pickup code to shipping address_2.' );
@@ -470,6 +471,7 @@ ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
 $metabox_html = (string) ob_get_clean();
 pickup_smoke_assert( str_contains( $metabox_html, 'Код ПВЗ' ) && str_contains( $metabox_html, 'Адрес ПВЗ' ), 'Order metabox must render pickup fields from order meta.' );
+pickup_smoke_assert( str_contains( $metabox_html, 'Комментарии покупателю' ) && str_contains( $metabox_html, 'Отслеживание посылки' ), 'Order metabox must render canonical customer comments.' );
 pickup_smoke_assert( ! str_contains( $metabox_html, 'postmeta' ), 'Order metabox must not expose direct postmeta access.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Admin/OrderDeliveryMetabox.php' );
 pickup_smoke_assert( str_contains( $metabox_source, 'get_meta' ), 'Order metabox must read order meta through WC CRUD get_meta.' );
@@ -594,8 +596,17 @@ $rp_card = $card_renderer->render(
 );
 pickup_smoke_assert( str_contains( $rp_card, 'Отделение Почты России' ), 'Russian Post OPS/PVZ card title must remain unchanged.' );
 pickup_smoke_assert( ! str_contains( $rp_card, '0.000000' ), 'Russian Post pickup card must not render numeric zero description.' );
-$comment_card = $card_renderer->render( $pickup_snapshot, false, false );
-pickup_smoke_assert( str_contains( $comment_card, 'Отслеживание посылки - в приложении Ozon, раздел Доставка' ) && str_contains( $comment_card, 'обратной доставки 149 руб.' ), 'Static pickup card must render persisted customer comments.' );
+$legacy_pickup_snapshot = array_merge(
+	$pickup_snapshot,
+	array(
+		'customer_comments' => array(
+			'Отслеживание посылки - в приложении Ozon, раздел Доставка',
+			'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки 149 руб.',
+		),
+	)
+);
+$comment_card = $card_renderer->render( $legacy_pickup_snapshot, false, false );
+pickup_smoke_assert( str_contains( $comment_card, 'Отслеживание посылки - в приложении Ozon, раздел Доставка' ) && str_contains( $comment_card, 'обратной доставки 149 руб.' ), 'Static pickup card must keep legacy snapshot customer comments readable.' );
 pickup_smoke_assert( ! str_contains( $comment_card, 'Описание:</span> <span data-wdc-pickup-description-text>Отслеживание' ), 'Customer comments must not be rendered as pickup description.' );
 $checkout_comment_card = $card_renderer->render( $pickup_snapshot, true, false );
 pickup_smoke_assert( ! str_contains( $checkout_comment_card, 'обратной доставки 149 руб.' ), 'Checkout selectable pickup card must not duplicate rate comments inside the card.' );

@@ -4,9 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Runtime;
 
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
-use WallsShop\WDC\Carriers\Contracts\CarrierCustomerCommentProviderInterface;
 use WallsShop\WDC\Carriers\Contracts\CarrierQuoteCacheContextProviderInterface;
-use WallsShop\WDC\Carriers\OzonDelivery\Checkout\OzonDeliveryCustomerCommentProvider;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliveryCredentials;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\Quote\OzonDeliveryCourierAddressMapper;
@@ -27,7 +25,7 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
 
-final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface, CarrierCustomerCommentProviderInterface {
+final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface {
 	public const KEY = OzonDeliverySettings::CARRIER_KEY;
 	public const RATE_ID = 'ozon_delivery:pickup';
 	public const PICKUP_RATE_ID = 'ozon_delivery:pickup';
@@ -36,12 +34,14 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 	public const TARIFF_NAME = 'Ozon до ПВЗ';
 	public const COURIER_TARIFF_KEY = 'courier';
 	public const COURIER_TARIFF_NAME = 'Ozon курьером';
+	private const TRACKING_COMMENT = 'Отслеживание посылки - в приложении Ozon, раздел Доставка';
+	private const REFUSAL_PREFIX = 'При отказе от посылки после её отправки покупатель оплачивает полную стоимость обратной доставки ';
+	private const REFUSAL_SUFFIX = ' руб.';
 
 	public function __construct(
 		private OzonDeliverySettings $settings,
 		private OzonDeliveryCredentials $credentials,
 		private OzonDeliveryQuoteService $quotes,
-		private OzonDeliveryCustomerCommentProvider $customer_comments,
 		private Logger $logger,
 		private ?OzonDeliveryCourierAddressMapper $courier_address = null,
 		private ?OzonDeliveryCourierLocationResolver $courier_location = null
@@ -125,11 +125,6 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 				'rate_count' => count( $rates ),
 			)
 		);
-	}
-
-	/** @return array<int,string> */
-	public function customer_comments( DeliveryRate $rate ): array {
-		return $this->customer_comments->customer_comments( $rate );
 	}
 
 	/** @return array<string,mixed> */
@@ -282,7 +277,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			$result->delivery_days,
 			'',
 			'',
-			array(),
+			array( self::TRACKING_COMMENT ),
 			false,
 			'',
 			! $is_courier,
@@ -301,6 +296,14 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 					'ozon_delivery_package_count' => $result->package_count,
 					'ozon_delivery_endpoint' => $result->endpoint,
 					'ozon_delivery_http_status' => $result->http_status,
+					'customer_comment_templates' => array(
+						array(
+							'type' => 'money_text',
+							'text_before' => self::REFUSAL_PREFIX,
+							'money_source' => 'crossed_or_price',
+							'text_after' => self::REFUSAL_SUFFIX,
+						),
+					),
 				),
 				$is_courier ? array() : array(
 					'pickup_family' => OzonDeliverySettings::PICKUP_FAMILY,
@@ -312,6 +315,7 @@ final class OzonDeliveryCarrier implements CarrierAdapterInterface, CarrierQuote
 			$result->delivery_days
 		);
 	}
+
 
 	private function courier_location_fingerprint( QuoteRequest $request ): string {
 		try {

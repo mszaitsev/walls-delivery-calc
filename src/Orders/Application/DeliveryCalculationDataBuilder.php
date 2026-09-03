@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentNormalizer;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 
@@ -11,8 +12,10 @@ defined( 'ABSPATH' ) || exit;
 
 final class DeliveryCalculationDataBuilder {
 	public function __construct(
-		private RuleFormulaFormatter $rule_formula_formatter
+		private RuleFormulaFormatter $rule_formula_formatter,
+		private ?DeliveryCustomerCommentNormalizer $customer_comment_normalizer = null
 	) {
+		$this->customer_comment_normalizer ??= new DeliveryCustomerCommentNormalizer();
 	}
 
 	/**
@@ -55,27 +58,11 @@ final class DeliveryCalculationDataBuilder {
 	 * @param array<string,mixed> $rate
 	 * @param array<string,mixed> $rate_meta
 	 * @param array<string,mixed> $context
-	 * @return array<int,string>
+	 * @return array<int,array<string,string>>
 	 */
 	private function customer_comments( array $rate, array $rate_meta, array $context ): array {
 		$raw = is_array( $context['customer_comments'] ?? null ) ? $context['customer_comments'] : ( is_array( $rate['customer_comments'] ?? null ) ? $rate['customer_comments'] : ( is_array( $rate_meta['customer_comments'] ?? null ) ? $rate_meta['customer_comments'] : array() ) );
-		$result = array();
-		foreach ( $raw as $comment ) {
-			if ( ! is_scalar( $comment ) ) {
-				continue;
-			}
-			$text = trim( (string) $comment );
-			if ( '' === $text ) {
-				continue;
-			}
-			$text = substr( $text, 0, 500 );
-			if ( in_array( $text, $result, true ) ) {
-				continue;
-			}
-			$result[] = $text;
-		}
-
-		return $result;
+		return $this->customer_comment_normalizer->normalize( $raw );
 	}
 
 	/**

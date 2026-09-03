@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Orders\Admin;
 
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentNormalizer;
+use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -18,9 +20,13 @@ final class OrderDeliveryMetabox {
 	);
 
 	public function __construct(
-		private ?OrderShipmentRepository $shipments = null
+		private ?OrderShipmentRepository $shipments = null,
+		private ?DeliveryCustomerCommentRenderer $customer_comment_renderer = null,
+		private ?DeliveryCustomerCommentNormalizer $customer_comment_normalizer = null
 	) {
 		$this->shipments = $this->shipments ?? new OrderShipmentRepository();
+		$this->customer_comment_normalizer ??= new DeliveryCustomerCommentNormalizer();
+		$this->customer_comment_renderer ??= new DeliveryCustomerCommentRenderer( $this->customer_comment_normalizer );
 	}
 
 	public function register(): void {
@@ -53,7 +59,7 @@ final class OrderDeliveryMetabox {
 
 		$calculation = $this->calculation_data( $order );
 		if ( array() !== $calculation ) {
-			$this->render_calculation_data( $calculation );
+			$this->render_calculation_data( $calculation, $order );
 			$this->render_recalculation_preview_block( $order );
 			return;
 		}
@@ -62,7 +68,7 @@ final class OrderDeliveryMetabox {
 		$this->render_recalculation_preview_block( $order );
 	}
 
-	private function render_calculation_data( array $calculation ): void {
+	private function render_calculation_data( array $calculation, object $order ): void {
 		$destination = is_array( $calculation['destination'] ?? null ) ? $calculation['destination'] : array();
 		$pickup      = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
 		$package     = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
@@ -75,6 +81,7 @@ final class OrderDeliveryMetabox {
 			'Служба доставки' => (string) ( $calculation['service_title'] ?? '' ),
 			'Выбранный тариф' => (string) ( $calculation['selected_tariff_title'] ?? '' ),
 			'Тип доставки' => $this->delivery_type_label( (string) ( $calculation['delivery_type'] ?? '' ) ),
+			'Комментарии покупателю' => $this->customer_comments( $this->raw_order_meta( $order, '_wdc_platform_customer_comments' ) ),
 			'Страна назначения' => $this->should_show_country( $destination ) ? $this->country_label( $destination ) : '',
 			'Населенный пункт' => (string) ( $destination['city_display_name'] ?? '' ),
 			'Источник населенного пункта' => $this->city_source_text( (string) ( $destination['city_source'] ?? '' ) ),
@@ -125,6 +132,12 @@ final class OrderDeliveryMetabox {
 	private function render_rows( array $rows ): void {
 		echo '<table class="widefat striped wdc-platform-order-delivery"><tbody>';
 		foreach ( $rows as $label => $value ) {
+			if ( 'Комментарии покупателю' === (string) $label ) {
+				$html = $this->customer_comment_renderer->render_items( $value, 'wdc-platform-order-delivery__customer-comment' );
+				echo '<tr><th style="width:45%;text-align:left;">' . esc_html( (string) $label ) . '</th><td>' . ( '' !== $html ? $html : esc_html( '—' ) ) . '</td></tr>';
+				continue;
+			}
+
 			if ( is_array( $value ) ) {
 				$value = array_values( array_filter( array_map( 'strval', $value ), static fn ( string $line ): bool => '' !== trim( $line ) ) );
 				if ( array() === $value ) {
@@ -442,7 +455,7 @@ final class OrderDeliveryMetabox {
 	}
 
 	/**
-	 * @return array<string,string>
+	 * @return array<string,mixed>
 	 */
 	private function legacy_rows( object $order ): array {
 		$delivery_type = $this->order_meta( $order, '_wdc_platform_delivery_type' );
@@ -450,6 +463,7 @@ final class OrderDeliveryMetabox {
 			'Перевозчик' => $this->order_meta( $order, '_wdc_platform_carrier_key' ),
 			'Способ доставки' => $this->order_meta( $order, '_wdc_platform_service_title' ),
 			'Тип доставки' => $this->delivery_type_label( $delivery_type ),
+			'Комментарии покупателю' => $this->customer_comments( $this->raw_order_meta( $order, '_wdc_platform_customer_comments' ) ),
 			'Планируемая доставка' => $this->order_meta( $order, '_wdc_platform_planned_delivery_comment' ),
 			'Населенный пункт' => $this->city_summary( $order ),
 			'Источник населенного пункта' => $this->city_source_label( $order ),
@@ -480,6 +494,11 @@ final class OrderDeliveryMetabox {
 		}
 
 		return $order->get_meta( $key, true );
+	}
+
+	/** @return array<int,array<string,string>> */
+	private function customer_comments( mixed $raw ): array {
+		return $this->customer_comment_normalizer->normalize( $raw );
 	}
 
 	private function order_meta( object $order, string $key ): string {

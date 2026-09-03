@@ -219,7 +219,6 @@ C:.
 |   |   |
 |   |   +---Contracts
 |   |   |       CarrierAdapterInterface.php
-|   |   |       CarrierCustomerCommentProviderInterface.php
 |   |   |       CarrierQuoteCacheContextProviderInterface.php
 |   |   |
 |   |   +---Dpd
@@ -293,7 +292,7 @@ C:.
 |   |   |   |       WpJetLogisticHttpClient.php
 |   |   |   |
 |   |   |   +---Checkout
-|   |   |   |       JetLogisticCustomerCommentProvider.php
+|   |   |   |       JetLogisticCustomerComments.php
 |   |   |   |
 |   |   |   +---Geography
 |   |   |   |       JetLogisticCitiesCsvClient.php
@@ -336,10 +335,6 @@ C:.
 |   |   |   |       OzonDeliveryToken.php
 |   |   |   |       OzonDeliveryTokenCache.php
 |   |   |   |       WpOzonDeliveryHttpClient.php
-|   |   |   |
-|   |   |   +---Checkout
-|   |   |   |       OzonDeliveryCustomerCommentProvider.php
-|   |   |   |
 |   |   |   +---Pickup
 |   |   |   |       OzonDeliveryPickupImportLock.php
 |   |   |   |       OzonDeliveryPickupImportService.php
@@ -556,6 +551,11 @@ C:.
 |   |   +---Cache
 |   |   |       DeliveryQuoteCacheManager.php
 |   |   |       QuoteCache.php
+|   |   |
+|   |   +---Comments
+|   |   |       DeliveryCustomerCommentNormalizer.php
+|   |   |       DeliveryCustomerCommentRenderer.php
+|   |   |       DeliveryCustomerCommentSnapshotBuilder.php
 |   |   |
 |   |   +---Locations
 |   |   |       CheckoutCityResolver.php
