@@ -977,6 +977,18 @@ $renderer->render( new WdcRuntimeSmokeRate( $yandex_courier_meta ) );
 $yandex_rate_courier_output = (string) ob_get_clean();
 runtime_smoke_assert( ! str_contains( $yandex_rate_courier_output, 'data-wdc-pickup-checkout' ) && ! str_contains( $yandex_rate_courier_output, 'data-wdc-pickup-open' ), 'CheckoutRateRenderer must not render pickup UI for Yandex courier.' );
 
+$jet_pickup_meta = array(
+	'carrier_key'           => 'jet_logistic',
+	'service_key'           => 'jet_logistic',
+	'rate_id'               => 'jet_logistic_pickup',
+	'delivery_type'         => DeliveryType::PICKUP,
+	'requires_pickup_point' => false,
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $jet_pickup_meta ) );
+$jet_pickup_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $jet_pickup_output, 'data-wdc-pickup-checkout' ) && ! str_contains( $jet_pickup_output, 'data-wdc-pickup-open' ), 'CheckoutRateRenderer must not render pickup selector UI for pickup rates with requires_pickup_point=false.' );
+
 $quote_cache = new QuoteCache();
 $service_cache_key_a = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' );
 $service_cache_key_b = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_b' );
@@ -1109,9 +1121,10 @@ $validation_session = new CheckoutSessionManager();
 $validation_session->save_rates(
 	array(
 		'demo:pickup' => array(
-			'carrier_key'   => 'demo',
-			'rate_id'       => 'demo:pickup',
-			'delivery_type' => DeliveryType::PICKUP,
+			'carrier_key'           => 'demo',
+			'rate_id'               => 'demo:pickup',
+			'delivery_type'         => DeliveryType::PICKUP,
+			'requires_pickup_point' => true,
 		),
 	)
 );
@@ -1130,6 +1143,50 @@ $validation_session->save_pickup_selection(
 $errors->errors = array();
 ( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 runtime_smoke_assert( array() === $errors->errors, 'Matching pickup selection must validate.' );
+
+$validation_session->clear_pickup_selection();
+$validation_session->save_pickup_selection(
+	array(
+		'carrier_key'   => 'other',
+		'rate_id'       => 'other:pickup',
+		'point_code'    => 'other-nsk-001',
+		'point_address' => 'Красный проспект, 99',
+	)
+);
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( 'Выберите пункт выдачи.' === ( $errors->errors['wdc_pickup_required'] ?? '' ), 'Stale pickup selection from another family must not satisfy selectable pickup validation.' );
+
+$validation_session->clear_pickup_selection();
+$validation_session->save_rates(
+	array(
+		'jet_logistic_pickup' => array(
+			'carrier_key'           => 'jet_logistic',
+			'rate_id'               => 'jet_logistic_pickup',
+			'delivery_type'         => DeliveryType::PICKUP,
+			'requires_pickup_point' => false,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_pickup' ) );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Алматы' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Pickup validation must pass for pickup rates that do not require a concrete pickup point.' );
+
+$validation_session->save_rates(
+	array(
+		'jet_logistic_courier' => array(
+			'carrier_key'           => 'jet_logistic',
+			'rate_id'               => 'jet_logistic_courier',
+			'delivery_type'         => DeliveryType::COURIER,
+			'requires_pickup_point' => false,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_courier' ) );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Алматы', 'billing_address_1' => 'ул. Абая, д. 1' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must not require pickup selection.' );
 
 $validation_session->save_rates(
 	array(

@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.17
+Version: 0.147.18
+
+0.147.18 fixes checkout order validation for pickup rates that do not require a concrete pickup-point selection. `DeliveryType::PICKUP` now means terminal/pickup-style delivery, while `requires_pickup_point=true` is the separate authoritative capability that triggers "Выберите пункт выдачи."; Jet Logistic pickup remains pickup delivery with `requires_pickup_point=false`, so orders can be placed without fake pickup-point metadata. Selectable pickup carriers still require a valid, current pickup selection.
 
 0.147.17 fixes the Jet Logistic pickup warehouse contacts link URL by storing the canonical Unicode URL `https://jet.com.kz/контакты.html` in carrier metadata and leaving escaping to the checkout renderer. Boundary regressions now verify carrier metadata, WooCommerce rate metadata, and rendered checkout HTML so the Cyrillic path is not reduced to `/.html`.
 

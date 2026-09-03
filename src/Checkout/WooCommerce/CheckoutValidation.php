@@ -84,11 +84,7 @@ final class CheckoutValidation {
 			return;
 		}
 
-		if ( DeliveryType::PICKUP !== $delivery_type ) {
-			return;
-		}
-
-		if ( $this->rate_skips_pickup_selection( $rate ) ) {
+		if ( ! $this->selected_rate_requires_pickup_point( $rate, $delivery_type ) ) {
 			return;
 		}
 
@@ -168,6 +164,37 @@ final class CheckoutValidation {
 		$meta = $rate['rate_meta'] ?? array();
 		if ( is_array( $meta ) && ! empty( $meta['no_pickup_selection'] ) ) {
 			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function selected_rate_requires_pickup_point( array $rate, string $delivery_type ): bool {
+		if ( DeliveryType::PICKUP !== $delivery_type ) {
+			return false;
+		}
+
+		if ( $this->rate_skips_pickup_selection( $rate ) ) {
+			return false;
+		}
+
+		return $this->rate_flag( $rate, 'requires_pickup_point' );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function rate_flag( array $rate, string $key ): bool {
+		if ( array_key_exists( $key, $rate ) ) {
+			return filter_var( $rate[ $key ], FILTER_VALIDATE_BOOLEAN );
+		}
+
+		$meta = $rate['rate_meta'] ?? array();
+		if ( is_array( $meta ) && array_key_exists( $key, $meta ) ) {
+			return filter_var( $meta[ $key ], FILTER_VALIDATE_BOOLEAN );
 		}
 
 		return false;
@@ -272,6 +299,7 @@ final class CheckoutValidation {
 			'service_key' => $carrier,
 			'pickup_family' => $family,
 			'delivery_type' => DeliveryType::PICKUP,
+			'requires_pickup_point' => true,
 			'_selected_rate_id' => $rate_id,
 			'_synthetic' => true,
 		);

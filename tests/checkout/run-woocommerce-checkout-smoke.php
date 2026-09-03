@@ -1823,6 +1823,33 @@ wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['
 wc_checkout_smoke_assert( '' === ( $cdek_pickup_calc['pickup']['work_time'] ?? '' ), 'CDEK checkout order create must not save numeric zero work_time as meaningful text.' );
 wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->shipping_address_1 && '' === $cdek_pickup_order->shipping_address_2, 'CDEK checkout order create must write pickup shipping address.' );
 
+$session->clear_pickup_selection();
+$session->save_rates(
+	array(
+		'jet_logistic_pickup' => array(
+			'rate_id' => 'jet_logistic_pickup',
+			'carrier_key' => 'jet_logistic',
+			'service_key' => 'jet_logistic',
+			'service_title' => 'Jet Logistic',
+			'label' => 'Джет Логистик до склада выдачи',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => false,
+			'planned_delivery_comment' => '3-5 дней',
+			'cost' => 1165.0,
+			'api_base_price_rub' => 1165.0,
+			'rate_meta' => array(
+				'api_base_price_rub' => 1165.0,
+				'jet_local_terminal' => 'yes',
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:jet_logistic_pickup' ) );
+$jet_pickup_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session, new DeliveryDateFormatter(), new \WallsShop\WDC\Orders\Application\DeliveryCalculationDataBuilder( new \WallsShop\WDC\Rules\Services\RuleFormulaFormatter() ) ) )->persist( $jet_pickup_order );
+wc_checkout_smoke_assert( 'jet_logistic_pickup' === (string) ( $jet_pickup_order->meta['_wdc_platform_rate_id'] ?? '' ) && 0 === (int) ( $jet_pickup_order->meta['_wdc_platform_requires_pickup_point'] ?? -1 ), 'Jet Logistic pickup order persistence must keep pickup delivery type without requiring a concrete pickup point.' );
+wc_checkout_smoke_assert( ! array_key_exists( '_wdc_pickup_point_id', $jet_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_code', $jet_pickup_order->meta ) && ! array_key_exists( '_wdc_pickup_point_snapshot', $jet_pickup_order->meta ), 'Jet Logistic pickup order persistence must not create fake pickup point metadata.' );
+
 $session->save_rates(
 	array(
 		'cdek:courier:custom' => array(
