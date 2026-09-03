@@ -574,6 +574,10 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			}
 		}
 
+		if ( 'woocommerce_order_admin_preview' === (string) ( $request->customer_context['source'] ?? '' ) ) {
+			return '';
+		}
+
 		if ( ! $this->session_manager instanceof CheckoutSessionManager ) {
 			return '';
 		}

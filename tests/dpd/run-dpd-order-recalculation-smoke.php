@@ -141,6 +141,47 @@ $location_id_dpd_groups = array_values( array_filter( $location_id_preview['rate
 dpd_order_recalc_assert( count( $location_id_dpd_groups ) >= 2, 'DPD order recalculation preview must keep DPD rates when selected_location uses location_id instead of id.' );
 dpd_order_recalc_assert( 200 === (int) ( $location_id_preview['request']['customer_context']['location_id'] ?? 0 ) && 49694102 === (int) ( $location_id_preview['request']['customer_context']['dpd_receiver_city_id'] ?? 0 ), 'Order recalculation QuoteRequest must preserve location_id and DPD cityId context.' );
 
+$mapper = new OrderQuoteRequestMapper();
+$moscow_location = array( 'id' => 200, 'location_id' => 200, 'dpd_city_id' => 49694102, 'display_name' => 'Москва', 'city_value' => 'Москва', 'region_name' => 'Москва', 'postal_code' => '101000', 'country_code' => 'RU' );
+$stale_pickup_order = new DpdOrderRecalcOrder();
+$stale_pickup_order->meta['_wdc_platform_location_id'] = '100';
+$stale_pickup_order->meta['_wdc_dpd_pickup_terminal_code'] = 'NSK-SENDER';
+$stale_pickup_order->meta['_wdc_pickup_point_code'] = 'NSK-SENDER';
+$stale_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] = array(
+	'destination' => array( 'location_id' => 100, 'city_display_name' => 'Новосибирск' ),
+	'pickup' => array( 'terminal_code' => 'NSK-SENDER', 'point_code' => 'NSK-SENDER' ),
+);
+$stale_moscow_request = $mapper->map( $stale_pickup_order, $moscow_location, array() );
+dpd_order_recalc_assert( 200 === (int) ( $stale_moscow_request->customer_context['selected_location_id'] ?? 0 ) && 49694102 === (int) ( $stale_moscow_request->customer_context['dpd_receiver_city_id'] ?? 0 ), 'DPD mapper must keep explicit Moscow location/city mapping when order has old pickup meta.' );
+dpd_order_recalc_assert( ! isset( $stale_moscow_request->customer_context['dpd_selected_terminal_code'] ), 'DPD mapper must not carry saved terminalCode when selected canonical location differs from saved order location.' );
+$calls_before_stale_preview = count( $soap->calls );
+$stale_moscow_preview = $recalculation->preview( $stale_pickup_order, $moscow_location );
+$stale_moscow_pickup_payload = $soap->calls[ $calls_before_stale_preview ]['payload'] ?? array();
+$stale_moscow_groups = array_values( array_filter( $stale_moscow_preview['rates'], static fn( array $rate ): bool => DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' ) && DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) );
+dpd_order_recalc_assert( array() !== $stale_moscow_groups && 'MSK-AUTO' === (string) ( $stale_moscow_pickup_payload['delivery']['terminalCode'] ?? '' ) && 'NSK-SENDER' !== (string) ( $stale_moscow_pickup_payload['delivery']['terminalCode'] ?? '' ), 'Changed-location DPD recalculation must drop stale saved terminalCode and auto-select a receiver parcel_shop for the new city.' );
+
+$missing_location_order = new DpdOrderRecalcOrder();
+$missing_location_order->meta['_wdc_dpd_pickup_terminal_code'] = 'NSK-SENDER';
+$missing_location_request = $mapper->map( $missing_location_order, $moscow_location, array() );
+dpd_order_recalc_assert( ! isset( $missing_location_request->customer_context['dpd_selected_terminal_code'] ), 'DPD mapper must not reuse saved pickup meta when the order had no canonical saved location and admin selected a new canonical location.' );
+
+$same_location_order = new DpdOrderRecalcOrder();
+$same_location_order->meta['_wdc_platform_location_id'] = '200';
+$same_location_order->meta['_wdc_dpd_pickup_terminal_code'] = 'MSK-SELECTED';
+$same_location_request = $mapper->map( $same_location_order, $moscow_location, array() );
+dpd_order_recalc_assert( 'MSK-SELECTED' === (string) ( $same_location_request->customer_context['dpd_selected_terminal_code'] ?? '' ), 'DPD mapper may reuse saved terminalCode when selected canonical location matches saved order location.' );
+
+$same_text_different_id_order = new DpdOrderRecalcOrder();
+$same_text_different_id_order->meta['_wdc_platform_location_id'] = '100';
+$same_text_different_id_order->meta['_wdc_dpd_pickup_terminal_code'] = 'NSK-SENDER';
+$same_text_different_id_request = $mapper->map( $same_text_different_id_order, array_merge( $moscow_location, array( 'id' => 200, 'display_name' => 'Новосибирск', 'city_value' => 'Новосибирск' ) ), array() );
+dpd_order_recalc_assert( ! isset( $same_text_different_id_request->customer_context['dpd_selected_terminal_code'] ), 'DPD mapper must compare selected destination by canonical id, not display_name.' );
+
+$non_dpd_pickup_request = $mapper->map( new DpdOrderRecalcOrder(), $moscow_location, array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_code' => 'CDEK123' ) );
+dpd_order_recalc_assert( ! isset( $non_dpd_pickup_request->customer_context['dpd_selected_terminal_code'] ), 'DPD mapper must ignore non-DPD selected pickup point_code.' );
+
+$explicit_dpd_request = $mapper->map( $stale_pickup_order, $moscow_location, array( 'carrier_key' => 'dpd', 'pickup_family' => 'dpd:pickup', 'terminal_code' => 'MSK-SELECTED', 'point_code' => 'MSK-SELECTED' ) );
+dpd_order_recalc_assert( 'MSK-SELECTED' === (string) ( $explicit_dpd_request->customer_context['dpd_selected_terminal_code'] ?? '' ), 'Explicit DPD selected pickup must have priority over changed-location stale terminal suppression.' );
 
 $dpd_pickup_order = new DpdOrderRecalcOrder();
 $dpd_pickup_order->meta['_wdc_platform_carrier_key'] = 'dpd';

@@ -188,7 +188,7 @@ final class OrderQuoteRequestMapper {
 				'fallback_address'          => $address->fallback,
 				'dpd_city_id'               => $override['dpd_city_id'] ?? null,
 				'dpd_receiver_city_id'      => $override['dpd_city_id'] ?? null,
-				'dpd_selected_terminal_code'=> $this->dpd_selected_terminal_code( $order, $selected_pickup_point ),
+				'dpd_selected_terminal_code'=> $this->dpd_selected_terminal_code( $order, $selected_pickup_point, $selected_location ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value && 0 !== $value
 		);
@@ -347,10 +347,22 @@ final class OrderQuoteRequestMapper {
 		return 0;
 	}
 
-	private function dpd_selected_terminal_code( object $order, array $selected_pickup_point = array() ): string {
+	private function dpd_selected_terminal_code( object $order, array $selected_pickup_point = array(), ?array $selected_location = null ): string {
+		if ( $this->is_dpd_pickup_selection( $selected_pickup_point ) ) {
+			$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+			foreach ( array( 'terminal_code', 'point_code', 'delivery_point' ) as $key ) {
+				$value = trim( (string) ( $selected_pickup_point[ $key ] ?? $snapshot[ $key ] ?? '' ) );
+				if ( '' !== $value ) {
+					return $value;
+				}
+			}
+		}
+		if ( $this->selected_location_differs_from_saved( $order, $selected_location ) ) {
+			return '';
+		}
 		foreach ( array( 'terminal_code', 'point_code', 'delivery_point' ) as $key ) {
 			$value = trim( (string) ( $selected_pickup_point[ $key ] ?? '' ) );
-			if ( '' !== $value && DpdSettings::CARRIER_KEY === (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? DpdSettings::CARRIER_KEY ) ) {
+			if ( '' !== $value && $this->is_dpd_pickup_selection( $selected_pickup_point ) ) {
 				return $value;
 			}
 		}
@@ -370,6 +382,28 @@ final class OrderQuoteRequestMapper {
 		}
 
 		return '';
+	}
+
+	/** @param array<string,mixed> $selected_pickup_point */
+	private function is_dpd_pickup_selection( array $selected_pickup_point ): bool {
+		$snapshot = is_array( $selected_pickup_point['snapshot'] ?? null ) ? $selected_pickup_point['snapshot'] : array();
+		$carrier = strtolower( trim( (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) ) );
+		$family = strtolower( trim( (string) ( $selected_pickup_point['pickup_family'] ?? $selected_pickup_point['family'] ?? $snapshot['pickup_family'] ?? $snapshot['family'] ?? '' ) ) );
+
+		return DpdSettings::CARRIER_KEY === $carrier || DpdSettings::CARRIER_KEY . ':pickup' === $family;
+	}
+
+	/** @param array<string,mixed>|null $selected_location */
+	private function selected_location_differs_from_saved( object $order, ?array $selected_location ): bool {
+		$override = $this->normalize_location_override( $selected_location );
+		$selected_location_id = $this->positive_int( $override['id'] ?? null );
+		if ( $selected_location_id <= 0 ) {
+			return false;
+		}
+
+		$saved_location_id = $this->saved_location_id( $order );
+
+		return $saved_location_id <= 0 || $selected_location_id !== $saved_location_id;
 	}
 
 	/**

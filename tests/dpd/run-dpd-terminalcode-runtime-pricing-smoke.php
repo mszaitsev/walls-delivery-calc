@@ -186,6 +186,7 @@ dpd_terminal_runtime_assert( $pickup_quote->quote_id !== $selected_quote->quote_
 
 $invalid_selected = $carrier->quote( dpd_terminal_runtime_request( DeliveryType::PICKUP, 'TERM-ONLY' ) );
 dpd_terminal_runtime_assert( array() === $invalid_selected->rates, 'terminal_self_delivery must not be used as runtime delivery terminal.' );
+dpd_terminal_runtime_assert( 'TERM-ONLY' === (string) ( $invalid_selected->raw_reference['delivery_terminal_code'] ?? '' ) && 'selected' === (string) ( $invalid_selected->raw_reference['delivery_terminal_source'] ?? '' ) && array() === ( $invalid_selected->raw_reference['delivery_terminal_selection'] ?? null ), 'Invalid explicit terminal diagnostics must expose selected source and empty selection.' );
 
 $courier_quote = $carrier->quote( dpd_terminal_runtime_request( DeliveryType::COURIER ) );
 $courier_payload = $soap->calls[2]['payload'] ?? array();
