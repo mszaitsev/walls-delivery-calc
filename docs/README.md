@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.16
+Version: 0.147.17
+
+0.147.17 fixes the Jet Logistic pickup warehouse contacts link URL by storing the canonical Unicode URL `https://jet.com.kz/контакты.html` in carrier metadata and leaving escaping to the checkout renderer. Boundary regressions now verify carrier metadata, WooCommerce rate metadata, and rendered checkout HTML so the Cyrillic path is not reduced to `/.html`.
 
 0.147.16 adds a safe structured checkout link comment for Jet Logistic pickup rates: `Адрес склада выдачи - на сайте Jet Logistic` now appears before carrier/rule comments and planned delivery text, with the Jet contacts URL rendered by the generic checkout renderer through escaped structured metadata rather than raw comment HTML. Jet pricing, geography, status runtime, Shipment Framework, and Rule Engine semantics are unchanged.
 

@@ -26,7 +26,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 defined( 'ABSPATH' ) || exit;
 
 final class JetLogisticCarrier implements CarrierAdapterInterface, CarrierQuoteCacheContextProviderInterface {
-	private const WAREHOUSE_CONTACTS_URL = 'https://jet.com.kz/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B.html';
+	private const WAREHOUSE_CONTACTS_URL = 'https://jet.com.kz/контакты.html';
 
 	public function __construct(
 		private JetLogisticSettings $settings,
