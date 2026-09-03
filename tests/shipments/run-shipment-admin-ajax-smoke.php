@@ -725,7 +725,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.147.23',
+		'0.147.24',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $adapter ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);
@@ -779,7 +779,7 @@ function shipment_admin_ajax_render_custom_metabox_html( array $order_meta, arra
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.147.23',
+		'0.147.24',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array_merge( array( $adapter ), $additional_adapters ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);
@@ -829,6 +829,7 @@ $jet_without_shipment_html = shipment_admin_ajax_render_custom_metabox_html(
 		'manual_attach_button_label' => 'Прикрепить номер Jet',
 		'manual_attach_field_label' => 'Номер груза Jet Logistic',
 		'manual_attach_placeholder' => 'Номер груза Jet Logistic',
+		'auto_update_status_after_manual_attach' => '1',
 	),
 	$jet_delivery_services,
 	$jet_adapter,
@@ -842,6 +843,7 @@ shipment_admin_ajax_assert( ! str_contains( $jet_without_shipment_html, 'Поч�
 shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-manual-tracking(?![^>]*hidden)/u', $jet_without_shipment_html ) === 1, 'Jet metabox without shipment must show manual attach action.' );
 shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-shipment-modal[^>]*hidden/u', $jet_without_shipment_html ) === 1, 'Jet metabox without shipment must hide prepare action.' );
 shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-cancel-shipment[^>]*hidden/u', $jet_without_shipment_html ) === 1, 'Jet metabox without shipment must hide cancel action.' );
+shipment_admin_ajax_assert( str_contains( $jet_without_shipment_html, 'data-auto-update-status-after-manual-attach="1"' ), 'Jet presentation must request one generic status refresh after manual attach.' );
 
 $jet_with_repository = new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository();
 $jet_with_adapter = new ShipmentAdminAjaxSmokeAdapter( \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY, $jet_with_repository );
@@ -871,6 +873,27 @@ shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-update-shipment-s
 shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-remove-shipment-from-order(?![^>]*hidden)/u', $jet_with_shipment_html ) === 1, 'Jet metabox with shipment must show local remove action.' );
 shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-manual-tracking[^>]*hidden/u', $jet_with_shipment_html ) === 1, 'Jet metabox with shipment must hide manual attach action.' );
 shipment_admin_ajax_assert( preg_match( '/<button[^>]*data-wdc-open-shipment-modal[^>]*hidden/u', $jet_with_shipment_html ) === 1 && preg_match( '/<button[^>]*data-wdc-cancel-shipment[^>]*hidden/u', $jet_with_shipment_html ) === 1, 'Jet metabox with shipment must hide prepare and cancel actions.' );
+
+$jet_remove_payload_adapter = new ShipmentAdminAjaxSmokeAdapter( \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY, new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository() );
+$jet_remove_payload_adapter->status_overrides = array(
+	'has_shipment' => false,
+	'can_create' => false,
+	'can_attach_manual' => true,
+	'can_update_status' => false,
+	'can_cancel' => false,
+	'can_remove_from_order' => false,
+);
+$jet_remove_payloads = new \WallsShop\WDC\Shipments\Admin\Ajax\ShipmentAdminCarrierUiPayloadBuilder(
+	new \WallsShop\WDC\Shipments\Storage\OrderShipmentRepository(),
+	$jet_delivery_services,
+	( new ReflectionClass( \WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor(),
+	shipment_test_actual_cost_resolver(),
+	null,
+	null,
+	new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $jet_remove_payload_adapter ) )
+);
+$jet_remove_payload = $jet_remove_payloads->carrier_ui_payload( new ShipmentAdminAjaxSmokeOrder( 777, $jet_order_meta ), \WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings::CARRIER_KEY );
+shipment_admin_ajax_assert( false === ( $jet_remove_payload['can_create'] ?? null ) && true === ( $jet_remove_payload['can_attach_manual'] ?? null ) && false === ( $jet_remove_payload['can_update_status'] ?? null ) && false === ( $jet_remove_payload['can_cancel'] ?? null ) && false === ( $jet_remove_payload['can_remove_from_order'] ?? null ), 'Jet remove response payload must keep prepare hidden and manual attach visible without page reload.' );
 
 $ozon_no_return_html = shipment_admin_ajax_render_metabox_html(
 	'ozon_delivery',

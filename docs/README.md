@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.147.23
+Version: 0.147.24
 
-0.147.23 fixes Jet Logistic current-status resolution when several mapped status events share the same calendar date. `JetLogisticStatusEventResolver` now orders events by timestamp descending and, for identical timestamps/date-only Jet logs, by later source order descending; the current status is the first mapped event in that authoritative order. Informational unmapped future events can still appear first in diagnostics but do not become the current status.
+0.147.24 fixes two Jet Logistic order-admin lifecycle details without changing Shipment Framework architecture: remove AJAX now reuses the authoritative server capability payload so Jet keeps "prepare shipment" hidden after local remove, and Jet manual attach opts into one standard best-effort status refresh through the generic status AJAX path.
 
 0.147.18 fixes checkout order validation for pickup rates that do not require a concrete pickup-point selection. `DeliveryType::PICKUP` now means terminal/pickup-style delivery, while `requires_pickup_point=true` is the separate authoritative capability that triggers "Выберите пункт выдачи."; Jet Logistic pickup remains pickup delivery with `requires_pickup_point=false`, so orders can be placed without fake pickup-point metadata. Selectable pickup carriers still require a valid, current pickup selection.
 

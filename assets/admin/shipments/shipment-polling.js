@@ -28,7 +28,7 @@
         }
         if (payload.data && payload.data.cancelled_and_removed) {
           stopShipmentRegistrationPolling(box);
-          resetShipmentUi(box);
+          resetShipmentUi(box, shipmentStatusFromResponse(payload.data));
           const handled = dispatchShipmentCarrierHook('cancelledAndRemoved', {
             box: box,
             button: button,
@@ -375,7 +375,7 @@
         }
         if (payload.data && payload.data.cancelled_and_removed) {
           stopShipmentRegistrationPolling(box);
-          resetShipmentUi(box);
+          resetShipmentUi(box, shipmentStatusFromResponse(payload.data));
           showShipmentToast(box, payload.data.message || getPresentation(box).cancelSuccessToast, 'success');
           return payload;
         }
@@ -425,7 +425,7 @@
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось удалить данные отправления.');
         }
-        resetShipmentUi(box);
+        resetShipmentUi(box, shipmentStatusFromResponse(payload.data));
         showShipmentToast(box, payload.data.message || getPresentation(box).removeSuccessToast, 'success');
         return payload;
       })
@@ -464,7 +464,17 @@
         renderShipmentTechnicalInfo(box, payload.data || {});
         setTrackingDisplay(box, trackingPresentation(statusPayload));
         updateShipmentButtons(box, shipmentButtonStateFromStatus(statusPayload));
-        showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
+        const updateButton = box && box.querySelector ? box.querySelector('[data-wdc-update-shipment-status]') : null;
+        if (
+          updateButton
+          && getPresentation(box).autoUpdateStatusAfterManualAttach === '1'
+          && statusPayload.can_update_status
+        ) {
+          showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
+          requestShipmentStatus(updateButton, { auto: true }).catch(function () {});
+        } else {
+          showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
+        }
         return payload;
       })
       .catch((error) => {

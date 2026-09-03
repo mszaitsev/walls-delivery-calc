@@ -1469,6 +1469,8 @@ $order = new JetFakeOrder();
 $actual_cost_resolver = new ShipmentActualCostResolver( new ShipmentActualCostComparisonService(), new ShipmentBaseApiCostResolver() );
 $shipment_service = new JetLogisticShipmentService( new OrderShipmentRepository(), $status_service );
 $adapter = new JetLogisticShipmentAdapter( $shipment_service, $actual_cost_resolver );
+$presentation = $adapter->presentation();
+jet_assert( '1' === (string) ( $presentation['auto_update_status_after_manual_attach'] ?? '' ), 'Jet admin presentation must request one generic status refresh after manual attach.' );
 $empty_payload = $adapter->status_payload( $order, array() );
 $empty_buttons = ( new ShipmentMetaboxButtonPolicy() )->resolve( JetLogisticSettings::CARRIER_KEY, array(), $empty_payload );
 jet_assert( false === (bool) $empty_payload['can_create'] && true === (bool) $empty_payload['can_attach_manual'] && false === (bool) $empty_payload['can_cancel'], 'Jet shipment payload without shipment must explicitly disable API creation/cancellation and allow manual attach.' );
@@ -1483,5 +1485,7 @@ jet_assert( false === $attached_buttons['show_create'] && false === $attached_bu
 jet_assert( ! $adapter->create( new \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest( 1, JetLogisticSettings::CARRIER_KEY, DeliveryType::COURIER, '', new Address(), null, array(), Money::from_rubles( 0 ) ) )->success, 'Jet API shipment creation must be unsupported.' );
 $adapter->remove_from_order( $order );
 jet_assert( empty( $order->meta[ OrderShipmentRepository::META_KEY ][ JetLogisticSettings::CARRIER_KEY ] ?? array() ), 'Jet local remove must delete only local shipment record.' );
+$removed_payload = $adapter->status_payload( $order, array() );
+jet_assert( false === (bool) $removed_payload['can_create'] && true === (bool) $removed_payload['can_attach_manual'] && false === (bool) $removed_payload['can_update_status'] && false === (bool) $removed_payload['can_cancel'] && false === (bool) $removed_payload['can_remove_from_order'], 'Jet payload after local remove must keep prepare hidden and manual attach visible.' );
 
 echo "Jet Logistic smoke passed.\n";
