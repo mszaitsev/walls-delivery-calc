@@ -1,6 +1,12 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.148.07
+Version: 0.149.2
+
+0.149.2 hardens the final Ozon Delivery two-phase pickup import boundary. Enrichment completion now uses a guarded repository transition from `building/enrichment` to `ready`; the same check verifies zero pending staging IDs, conflict-free counters, non-empty discovery, and exact `accepted + rejected == discovered == processed` before activation. If manual cancellation wins the race, the generation remains `cancelled` and cannot become `ready` or `active`; real incomplete/corrupt counters still fail safely.
+
+0.149.1 hardens the Ozon Delivery two-phase pickup import cancellation race. Each new generation now stores the scheduler lock owner token so manual stop unschedules/releases only that exact owner; if a newer import already owns the lock, the old cancellation does not release it. In-flight discovery/enrichment requests that return after cancellation now finish as harmless terminal completion instead of recording retry/failure state, while real persistence failures with the generation still building in the same phase remain permanent failures. Discovery counters continue to be authoritative from the staging table after `INSERT IGNORE`.
+
+0.149.0 changes the Ozon Delivery pickup catalog import to a two-phase generation build. Discovery first walks `/v1/delivery-point/list` quickly and stores a relational frozen ID snapshot in `wdc_ozon_delivery_pickup_ids`; enrichment then reads that frozen set in pending batches, calls `/v1/delivery-point/info`, writes full point rows only after successful parsing/persistence, and activates the new generation only after every frozen ID is terminal (`enriched` or `rejected`). `/info` HTTP 404 is salvaged by bounded binary split so IDs that disappeared after discovery become `not_found_404` rejects instead of failing the whole generation. Managers can stop a building import from the `ПВЗ Ozon` tab; the generation becomes `cancelled`, staging/full partial rows are cleaned, stale scheduled steps become harmless, and the previous active catalog remains available.
 
 0.148.07 hardens the Ozon Delivery pickup import resilience diagnostics: valid same-host HTTPS DDoS redirect chains that exceed the bounded redirect limit now fail as retryable `redirect_limit`, while missing or unsafe redirects remain permanent `redirect_rejected`. Delivery API transport and redirect exceptions are now rethrown with the concrete API path operation, such as `v1/delivery-point/list` or `v1/delivery-point/info`, while preserving the original safe code, HTTP status, retryable flag, message, and metadata.
 
