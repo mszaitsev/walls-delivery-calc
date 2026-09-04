@@ -122,7 +122,10 @@ final class OzonPickupActivationWpdb {
 		return null;
 	}
 
-	public function get_var( string $query ): int {
+	public function get_var( string $query ): int|string {
+		if ( preg_match( '/SELECT state FROM .*WHERE id=(\d+)/', $query, $matches ) ) {
+			return (string) ( $this->generations[ (int) $matches[1] ]['state'] ?? '' );
+		}
 		if ( str_contains( $query, 'COUNT(*)' ) && str_contains( $query, 'wdc_ozon_delivery_pickup_generations' ) ) {
 			return isset( $this->failures['postcondition_count'] ) ? (int) $this->failures['postcondition_count'] : count( array_filter( $this->generations, static fn( array $generation ): bool => 'active' === $generation['state'] ) );
 		}

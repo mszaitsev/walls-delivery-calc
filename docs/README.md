@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.149.0
+Version: 0.149.1
+
+0.149.1 hardens the Ozon Delivery two-phase pickup import cancellation race. Each new generation now stores the scheduler lock owner token so manual stop unschedules/releases only that exact owner; if a newer import already owns the lock, the old cancellation does not release it. In-flight discovery/enrichment requests that return after cancellation now finish as harmless terminal completion instead of recording retry/failure state, while real persistence failures with the generation still building in the same phase remain permanent failures. Discovery counters continue to be authoritative from the staging table after `INSERT IGNORE`.
 
 0.149.0 changes the Ozon Delivery pickup catalog import to a two-phase generation build. Discovery first walks `/v1/delivery-point/list` quickly and stores a relational frozen ID snapshot in `wdc_ozon_delivery_pickup_ids`; enrichment then reads that frozen set in pending batches, calls `/v1/delivery-point/info`, writes full point rows only after successful parsing/persistence, and activates the new generation only after every frozen ID is terminal (`enriched` or `rejected`). `/info` HTTP 404 is salvaged by bounded binary split so IDs that disappeared after discovery become `not_found_404` rejects instead of failing the whole generation. Managers can stop a building import from the `ПВЗ Ozon` tab; the generation becomes `cancelled`, staging/full partial rows are cleaned, stale scheduled steps become harmless, and the previous active catalog remains available.
 

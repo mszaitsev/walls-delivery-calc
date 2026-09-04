@@ -27,7 +27,7 @@ final class OzonDeliveryPickupRepository {
 		return $this->wpdb->prefix . 'wdc_ozon_delivery_pickup_ids';
 	}
 
-	public function start( string $job_id ): ?int {
+	public function start( string $job_id, ?string $lock_owner = null ): ?int {
 		$now = current_time( 'mysql', true );
 		if ( false === $this->wpdb->insert(
 			$this->generations_table(),
@@ -35,6 +35,7 @@ final class OzonDeliveryPickupRepository {
 				'state'               => 'building',
 				'phase'               => 'discovery',
 				'job_id'              => $job_id,
+				'lock_owner'          => null === $lock_owner ? null : substr( $lock_owner, 0, 64 ),
 				'started_at'          => $now,
 				'progress_updated_at' => $now,
 			)
@@ -56,6 +57,16 @@ final class OzonDeliveryPickupRepository {
 	public function building_generation(): ?array {
 		$row = $this->wpdb->get_row( "SELECT * FROM {$this->generations_table()} WHERE state='building' ORDER BY id DESC LIMIT 1", ARRAY_A );
 		return is_array( $row ) ? $row : null;
+	}
+
+	public function generation_state( int $generation_id ): ?string {
+		$state = $this->wpdb->get_var( $this->wpdb->prepare( "SELECT state FROM {$this->generations_table()} WHERE id=%d", $generation_id ) );
+		return is_scalar( $state ) && '' !== (string) $state ? (string) $state : null;
+	}
+
+	public function building_phase_matches( int $generation_id, string $phase ): bool {
+		$generation = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT state,phase FROM {$this->generations_table()} WHERE id=%d", $generation_id ), ARRAY_A );
+		return is_array( $generation ) && 'building' === (string) ( $generation['state'] ?? '' ) && $phase === (string) ( $generation['phase'] ?? 'discovery' );
 	}
 
 	/** @return array<string,mixed>|null */
@@ -331,13 +342,11 @@ final class OzonDeliveryPickupRepository {
 	}
 
 	private function generation_is_building( int $generation_id ): bool {
-		$generation = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT state FROM {$this->generations_table()} WHERE id=%d", $generation_id ), ARRAY_A );
-		return is_array( $generation ) && 'building' === (string) ( $generation['state'] ?? '' );
+		return 'building' === $this->generation_state( $generation_id );
 	}
 
 	private function generation_can_fail( int $generation_id ): bool {
-		$generation = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT state FROM {$this->generations_table()} WHERE id=%d", $generation_id ), ARRAY_A );
-		return is_array( $generation ) && in_array( (string) ( $generation['state'] ?? '' ), array( 'building', 'ready' ), true );
+		return in_array( $this->generation_state( $generation_id ), array( 'building', 'ready' ), true );
 	}
 
 	private function rollback(): bool {

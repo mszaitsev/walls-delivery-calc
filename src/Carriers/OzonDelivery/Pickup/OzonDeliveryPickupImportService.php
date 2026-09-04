@@ -18,8 +18,8 @@ final class OzonDeliveryPickupImportService {
 
 	public function __construct( private OzonDeliveryApiClient $api, private OzonDeliveryPickupParser $parser, private OzonDeliveryPickupRepository $repository ) {}
 
-	public function start( string $job_id ): ?int {
-		return $this->repository->start( $job_id );
+	public function start( string $job_id, ?string $lock_owner = null ): ?int {
+		return $this->repository->start( $job_id, $lock_owner );
 	}
 
 	/** @return array<string,mixed>|null */
@@ -52,6 +52,10 @@ final class OzonDeliveryPickupImportService {
 				: $this->run_discovery_step( $generation, $handled_ids_count );
 			return $result;
 		} catch ( \Throwable $exception ) {
+			$terminal = $this->terminal_result_if_not_current_building_phase( (int) $generation['id'], (string) ( $generation['phase'] ?? 'discovery' ) );
+			if ( null !== $terminal ) {
+				return $terminal;
+			}
 			$attempt = (int) ( $generation['retry_count'] ?? 0 ) + 1;
 			$code = $exception instanceof OzonDeliveryApiException ? $exception->safe_code : ( preg_replace( '/[^a-z0-9_]/', '', strtolower( $exception->getMessage() ) ) ?: 'pickup_import_failed' );
 			$diagnostics = $this->diagnostics( $generation, $code, $exception->getMessage(), $exception, $attempt, $handled_ids_count );
@@ -84,7 +88,6 @@ final class OzonDeliveryPickupImportService {
 			array(
 				'cursor_value'            => $page['next_cursor'],
 				'page_count'              => $current_pages + 1,
-				'downloaded_count'        => $current_discovered,
 				'discovery_page_count'    => $current_pages + 1,
 				'retry_count'             => 0,
 			)
@@ -96,6 +99,10 @@ final class OzonDeliveryPickupImportService {
 		}
 
 		if ( ! $this->repository->commit_discovery_page( (int) $generation['id'], $page['ids'], $patch ) ) {
+			$terminal = $this->terminal_result_if_not_current_building_phase( (int) $generation['id'], 'discovery' );
+			if ( null !== $terminal ) {
+				return $terminal;
+			}
 			throw new \RuntimeException( 'pickup_persistence_failed' );
 		}
 
@@ -143,6 +150,10 @@ final class OzonDeliveryPickupImportService {
 		}
 
 		if ( ! $this->repository->commit_enrichment_batch( (int) $generation['id'], $points, $rejects ) ) {
+			$terminal = $this->terminal_result_if_not_current_building_phase( (int) $generation['id'], 'enrichment' );
+			if ( null !== $terminal ) {
+				return $terminal;
+			}
 			throw new \RuntimeException( 'pickup_persistence_failed' );
 		}
 
@@ -183,6 +194,18 @@ final class OzonDeliveryPickupImportService {
 
 	private function is_info_not_found( OzonDeliveryApiException $exception ): bool {
 		return 'v1/delivery-point/info' === $exception->operation && 404 === $exception->http_status;
+	}
+
+	/** @return array{complete:bool,failed:bool}|null */
+	private function terminal_result_if_not_current_building_phase( int $generation_id, string $phase ): ?array {
+		if ( $this->repository->building_phase_matches( $generation_id, $phase ) ) {
+			return null;
+		}
+		$state = $this->repository->generation_state( $generation_id );
+		if ( null === $state ) {
+			return null;
+		}
+		return array( 'complete' => true, 'failed' => 'failed' === $state );
 	}
 
 	/** @param array<string,mixed> $generation @return array<string,mixed> */
