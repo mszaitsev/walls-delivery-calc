@@ -22,6 +22,8 @@ return array(
 	'framework.adapter-registry' => array( 'path' => 'tests/shipments/run-carrier-adapter-registry-smoke.php', 'groups' => array( 'framework' ) ),
 	'framework.pickup-provider-registry' => array( 'path' => 'tests/pickup/run-carrier-pickup-provider-registry-smoke.php', 'groups' => array( 'framework' ) ),
 
+	'manual-delivery.foundation' => array( 'path' => 'tests/manual-delivery/run-manual-delivery-foundation-smoke.php', 'groups' => array( 'manual-delivery' ) ),
+
 	'russian-post.shipments' => array( 'path' => 'tests/shipments/run-russian-post-shipments-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.price' => array( 'path' => 'tests/shipments/run-russian-post-shipment-price-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.cancel' => array( 'path' => 'tests/shipments/run-russian-post-cancel-shipment-smoke.php', 'groups' => array( 'russian-post' ) ),

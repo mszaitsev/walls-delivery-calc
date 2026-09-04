@@ -24,6 +24,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnostic
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryAdminPage;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
@@ -102,6 +103,7 @@ final class DeliveryServicesAdminPage {
 		private RulesAdminPage $rules_admin,
 		private RuleRepository $rules,
 		private RussianPostPickupDiagnosticsTab $russian_post_pickup_diagnostics,
+		private ManualDeliverySettings $manual_delivery_settings,
 		private ?DeliveryServiceSettingsRepository $settings = null,
 		private ?RussianPostSettings $russian_post_settings = null,
 		private ?RussianPostCountriesAdminPage $russian_post_countries = null,
@@ -878,6 +880,13 @@ final class DeliveryServicesAdminPage {
 			} else {
 				if ( array() !== $data ) {
 					$id = $this->services->create_service( $data );
+				}
+			}
+			if ( in_array( $action, array( 'save', 'save_main', 'save_calculation' ), true ) ) {
+				$service = $id > 0 ? $this->services->find_by_id( $id ) : null;
+				if ( $this->is_manual_service( $service ) && null !== $service->id ) {
+					$this->save_manual_delivery_settings( (int) $service->id );
+					$this->clear_delivery_quote_cache();
 				}
 			}
 			if ( in_array( $action, array( 'save', 'save_main', 'save_availability' ), true ) ) {
@@ -1765,9 +1774,15 @@ final class DeliveryServicesAdminPage {
 					<?php $this->readonly_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), $service->carrier_key ); ?>
 					<input type="hidden" name="carrier_key" value="<?php echo esc_attr( $service->carrier_key ); ?>">
 				<?php else : ?>
-					<?php $this->text_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), $service->carrier_key ); ?>
+					<?php $this->readonly_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), ManualDeliverySettings::CARRIER_KEY ); ?>
+					<input type="hidden" name="carrier_key" value="<?php echo esc_attr( ManualDeliverySettings::CARRIER_KEY ); ?>">
 				<?php endif; ?>
-				<?php $this->select_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), $service->service_type, array( DeliveryService::TYPE_API, DeliveryService::TYPE_FIXED, DeliveryService::TYPE_WEIGHT_BASED ) ); ?>
+				<?php if ( $this->services->is_predefined_service_key( $service->service_key ) ) : ?>
+					<?php $this->select_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), $service->service_type, array( DeliveryService::TYPE_API, DeliveryService::TYPE_MANUAL, DeliveryService::TYPE_FIXED, DeliveryService::TYPE_WEIGHT_BASED ) ); ?>
+				<?php else : ?>
+					<?php $this->readonly_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), DeliveryService::TYPE_MANUAL ); ?>
+					<input type="hidden" name="service_type" value="<?php echo esc_attr( DeliveryService::TYPE_MANUAL ); ?>">
+				<?php endif; ?>
 				<?php $this->text_row( 'sort_order', __( 'Sort order', 'walls-delivery-calc' ), (string) $service->sort_order ); ?>
 				<?php $this->checkbox_row( 'enabled', __( 'Включена', 'walls-delivery-calc' ), $service->enabled ); ?>
 				<?php $this->checkbox_row( 'use_default_rules_when_no_service_rules', __( 'Fallback на default rules', 'walls-delivery-calc' ), $service->use_default_rules_when_no_service_rules ); ?>
@@ -1855,6 +1870,15 @@ final class DeliveryServicesAdminPage {
 				<?php endif; ?>
 				<?php if ( $this->is_yandex_delivery_service( $service ) ) : ?>
 					<?php $this->render_yandex_delivery_source_station_rows( $yandex_delivery ); ?>
+				<?php endif; ?>
+				<?php if ( $this->is_manual_service( $service ) ) : ?>
+					<?php $manual_pricing = $this->manual_pricing_values( $service ); ?>
+					<tr><th colspan="2"><h3><?php echo esc_html__( 'Ручная фиксированная цена', 'walls-delivery-calc' ); ?></h3></th></tr>
+					<?php $this->readonly_row( 'manual_pricing_mode', __( 'Pricing mode', 'walls-delivery-calc' ), ManualDeliverySettings::PRICING_MODE_FLAT ); ?>
+					<input type="hidden" name="manual_pricing_mode" value="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_FLAT ); ?>">
+					<?php $this->text_row( 'manual_flat_price_rub', __( 'Фиксированная цена, руб.', 'walls-delivery-calc' ), (string) $manual_pricing['flat_price_rub'] ); ?>
+					<?php $this->text_row( 'manual_delivery_min_days', __( 'Срок доставки от, дней', 'walls-delivery-calc' ), $manual_pricing['min_days'] ); ?>
+					<?php $this->text_row( 'manual_delivery_max_days', __( 'Срок доставки до, дней', 'walls-delivery-calc' ), $manual_pricing['max_days'] ); ?>
 				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить расчет', 'walls-delivery-calc' ) ); ?>
@@ -4554,10 +4578,15 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			<table class="form-table" role="presentation">
 				<?php $this->text_row( 'service_key', __( 'Service key', 'walls-delivery-calc' ), $service->service_key ?? '' ); ?>
 				<?php $this->text_row( 'title', __( 'Название', 'walls-delivery-calc' ), $service->title ?? '' ); ?>
-				<?php $this->text_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), $service->carrier_key ?? '' ); ?>
-				<?php $this->select_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), $service->service_type ?? DeliveryService::TYPE_FIXED, array( DeliveryService::TYPE_API, DeliveryService::TYPE_FIXED, DeliveryService::TYPE_WEIGHT_BASED ) ); ?>
+				<?php $this->readonly_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), ManualDeliverySettings::CARRIER_KEY ); ?>
+				<input type="hidden" name="carrier_key" value="<?php echo esc_attr( ManualDeliverySettings::CARRIER_KEY ); ?>">
+				<?php $this->readonly_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), DeliveryService::TYPE_MANUAL ); ?>
+				<input type="hidden" name="service_type" value="<?php echo esc_attr( DeliveryService::TYPE_MANUAL ); ?>">
 				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, $this->availability_mode_options() ); ?>
 				<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), $service instanceof DeliveryService ? implode( ',', $this->countries->countries( (int) $service->id ) ) : '' ); ?>
+				<?php $this->readonly_row( 'manual_pricing_mode', __( 'Pricing mode', 'walls-delivery-calc' ), ManualDeliverySettings::PRICING_MODE_FLAT ); ?>
+				<input type="hidden" name="manual_pricing_mode" value="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_FLAT ); ?>">
+				<?php $this->text_row( 'manual_flat_price_rub', __( 'Фиксированная цена, руб.', 'walls-delivery-calc' ), $service instanceof DeliveryService ? (string) $this->manual_pricing_values( $service )['flat_price_rub'] : '0' ); ?>
 				<?php $this->text_row( 'minimum_price_rub', __( 'Минимальная цена, руб.', 'walls-delivery-calc' ), (string) ( $service->minimum_price_rub ?? 1 ) ); ?>
 				<?php $this->text_row( 'sort_order', __( 'Sort order', 'walls-delivery-calc' ), (string) ( $service->sort_order ?? 100 ) ); ?>
 				<?php $this->checkbox_row( 'enabled', __( 'Включена', 'walls-delivery-calc' ), $service->enabled ?? true ); ?>
@@ -4644,11 +4673,12 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 * @return array<string,mixed>
 	 */
 	private function sanitize_service_data(): array {
+		$is_predefined = $this->services->is_predefined_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 		return array(
 			'service_key' => sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ),
 			'title' => sanitize_text_field( wp_unslash( $_POST['title'] ?? '' ) ),
-			'carrier_key' => sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) ),
-			'service_type' => sanitize_key( wp_unslash( $_POST['service_type'] ?? DeliveryService::TYPE_FIXED ) ),
+			'carrier_key' => $is_predefined ? sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) ) : ManualDeliverySettings::CARRIER_KEY,
+			'service_type' => $is_predefined ? sanitize_key( wp_unslash( $_POST['service_type'] ?? DeliveryService::TYPE_API ) ) : DeliveryService::TYPE_MANUAL,
 			'availability_mode' => sanitize_key( wp_unslash( $_POST['availability_mode'] ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) ),
 			'minimum_price_rub' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $_POST['minimum_price_rub'] ?? '1' ) ) ),
 			'sort_order' => (int) ( $_POST['sort_order'] ?? 100 ),
@@ -4659,15 +4689,53 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		);
 	}
 
+	private function is_manual_service( mixed $service ): bool {
+		return $service instanceof DeliveryService
+			&& ManualDeliverySettings::CARRIER_KEY === $service->carrier_key
+			&& DeliveryService::TYPE_MANUAL === $service->service_type;
+	}
+
+	private function save_manual_delivery_settings( int $service_id ): void {
+		if ( array_key_exists( 'manual_flat_price_rub', $_POST ) ) {
+			$this->manual_delivery_settings->save_flat_pricing( $service_id, wp_unslash( $_POST['manual_flat_price_rub'] ) );
+		}
+		if ( array_key_exists( 'manual_delivery_min_days', $_POST ) || array_key_exists( 'manual_delivery_max_days', $_POST ) ) {
+			$this->manual_delivery_settings->save_delivery_days(
+				$service_id,
+				wp_unslash( $_POST['manual_delivery_min_days'] ?? '' ),
+				wp_unslash( $_POST['manual_delivery_max_days'] ?? '' )
+			);
+		}
+	}
+
+	/**
+	 * @return array{flat_price_rub:string,min_days:string,max_days:string}
+	 */
+	private function manual_pricing_values( DeliveryService $service ): array {
+		if ( null === $service->id ) {
+			return array( 'flat_price_rub' => '0', 'min_days' => '', 'max_days' => '' );
+		}
+
+		$pricing = $this->manual_delivery_settings->pricing( (int) $service->id );
+		$days = $this->manual_delivery_settings->delivery_days( (int) $service->id );
+
+		return array(
+			'flat_price_rub' => (string) Money::from_kopecks( max( 0, $pricing['flat_price_kopecks'] ) )->get_rubles(),
+			'min_days' => null === $days['min_days'] ? '' : (string) $days['min_days'],
+			'max_days' => null === $days['max_days'] ? '' : (string) $days['max_days'],
+		);
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
 	private function sanitize_main_data(): array {
+		$is_predefined = $this->services->is_predefined_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 		return array(
 			'service_key' => sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ),
 			'title' => sanitize_text_field( wp_unslash( $_POST['title'] ?? '' ) ),
-			'carrier_key' => sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) ),
-			'service_type' => sanitize_key( wp_unslash( $_POST['service_type'] ?? DeliveryService::TYPE_FIXED ) ),
+			'carrier_key' => $is_predefined ? sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) ) : ManualDeliverySettings::CARRIER_KEY,
+			'service_type' => $is_predefined ? sanitize_key( wp_unslash( $_POST['service_type'] ?? DeliveryService::TYPE_API ) ) : DeliveryService::TYPE_MANUAL,
 			'availability_mode' => sanitize_key( wp_unslash( $_POST['availability_mode'] ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) ),
 			'sort_order' => (int) ( $_POST['sort_order'] ?? 100 ),
 			'enabled' => isset( $_POST['enabled'] ) ? 1 : 0,

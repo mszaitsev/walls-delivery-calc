@@ -152,6 +152,7 @@ use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentPersistenc
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentPreflightQuoteService;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentService;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapper;
+use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
@@ -198,6 +199,7 @@ use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
 use WallsShop\WDC\Carriers\Runtime\JetLogisticCarrier;
+use WallsShop\WDC\Carriers\Runtime\ManualDeliveryCarrier;
 use WallsShop\WDC\Carriers\Runtime\OzonDeliveryCarrier;
 use WallsShop\WDC\Carriers\Runtime\PekCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
@@ -747,6 +749,8 @@ final class Plugin {
 		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( DpdPackagingBuilderFactory::class )->create(), $this->container->get( Logger::class ), $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( YandexDeliveryCarrier::class, fn(): YandexDeliveryCarrier => new YandexDeliveryCarrier( $this->container->get( YandexDeliverySettings::class ), $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexLocationMappingV2Repository::class ), $this->container->get( YandexDeliveryPickupPointV2Repository::class ), $this->container->get( Logger::class ), $this->container->get( YandexDeliveryPricingRequestBuilder::class ), $this->container->get( YandexDeliveryPricingResponseParser::class ) ) );
 		$this->container->register( JetLogisticCarrier::class, fn(): JetLogisticCarrier => new JetLogisticCarrier( $this->container->get( JetLogisticSettings::class ), $this->container->get( JetLogisticApiClient::class ), $this->container->get( JetLogisticQuoteRequestBuilder::class ), $this->container->get( JetLogisticQuoteResponseParser::class ), $this->container->get( JetLogisticGeographyRepository::class ), $this->container->get( JetLogisticCityNameNormalizer::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( ManualDeliverySettings::class, fn(): ManualDeliverySettings => new ManualDeliverySettings( $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
+		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -757,6 +761,7 @@ final class Plugin {
 				$registry->register( $this->container->get( DpdQuoteCarrier::class ) );
 				$registry->register( $this->container->get( YandexDeliveryCarrier::class ) );
 				$registry->register( $this->container->get( JetLogisticCarrier::class ) );
+				$registry->register( $this->container->get( ManualDeliveryCarrier::class ) );
 				$registry->register( $this->container->get( PekCarrier::class ) );
 				$registry->register( $this->container->get( OzonDeliveryCarrier::class ) );
 
@@ -1038,6 +1043,7 @@ final class Plugin {
 				$this->container->get( RulesAdminPage::class ),
 				$this->container->get( RuleRepository::class ),
 				$this->container->get( RussianPostPickupDiagnosticsTab::class ),
+				$this->container->get( ManualDeliverySettings::class ),
 				$this->container->get( DeliveryServiceSettingsRepository::class ),
 				$this->container->get( RussianPostSettings::class ),
 				$this->container->get( RussianPostCountriesAdminPage::class ),

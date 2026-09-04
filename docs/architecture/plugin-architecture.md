@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.137.3
+Version: 0.150.0
+
+Manual delivery services are dynamic DeliveryService rows, not per-service PHP carriers. The platform registers one generic `manual` runtime carrier in the composition root, and each manual row is selected by its trusted `service_key` from the existing checkout service pipeline. New custom Delivery Services admin entries are normalized to `service_type=manual` and `carrier_key=manual`, while legacy `fixed`/`weight_based` values remain storage compatibility values rather than runtime carrier types. This stage does not change Shipment Framework contracts and does not register manual document providers, modal extensions, persistence mappers, or shipment create/cancel/status behavior.
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 

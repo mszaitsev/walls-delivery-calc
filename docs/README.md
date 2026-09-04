@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.149.2
+Version: 0.150.0
+
+0.150.0 adds the manual delivery services foundation. Admin-created services use one technical `manual` carrier key with a stable per-service `service_key`; the single generic manual runtime carrier loads the trusted service from checkout context and currently supports only `pricing_mode=flat` with integer kopeck pricing. Legacy `fixed` and `weight_based` service types remain bounded storage compatibility values, but new custom services are normalized to `manual`. Manual services use the existing DeliveryService country availability, Rule Engine fallback, customer comment, lead-time, and order calculation snapshot pipelines; no Shipment Framework lifecycle, document provider, modal extension, or persistence mapper is added.
 
 0.149.2 hardens the final Ozon Delivery two-phase pickup import boundary. Enrichment completion now uses a guarded repository transition from `building/enrichment` to `ready`; the same check verifies zero pending staging IDs, conflict-free counters, non-empty discovery, and exact `accepted + rejected == discovered == processed` before activation. If manual cancellation wins the race, the generation remains `cancelled` and cannot become `ready` or `active`; real incomplete/corrupt counters still fail safely.
 
