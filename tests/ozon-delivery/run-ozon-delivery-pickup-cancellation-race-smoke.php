@@ -131,7 +131,7 @@ namespace WallsShop\WDC\Carriers\OzonDelivery\Pickup {
 			return true;
 		}
 
-		public function ready_for_activation( int $generation_id ): bool { return true; }
+		public function mark_ready_if_complete( int $generation_id ): bool { $this->generation['state'] = 'ready'; return true; }
 		public function update_generation( int $id, array $patch ): void { $this->generation = array_merge( $this->generation, $patch ); }
 		public function activate( int $id ): bool { ++$this->activate_calls; return true; }
 		public function record_retry( int $id, int $retry_count, array $diagnostics ): void { ++$this->retry_calls; }

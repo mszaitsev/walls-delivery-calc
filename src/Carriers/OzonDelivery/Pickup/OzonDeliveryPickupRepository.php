@@ -228,6 +228,42 @@ final class OzonDeliveryPickupRepository {
 			&& (int) $generation['enrichment_processed_count'] === $discovered;
 	}
 
+	public function mark_ready_if_complete( int $generation_id ): bool {
+		if ( false === $this->wpdb->query( 'START TRANSACTION' ) ) {
+			return false;
+		}
+
+		try {
+			$generation = $this->wpdb->get_row( $this->wpdb->prepare( "SELECT state,phase,discovered_count,accepted_count,rejected_count,enrichment_processed_count,conflict_count FROM {$this->generations_table()} WHERE id=%d", $generation_id ), ARRAY_A );
+			if ( ! is_array( $generation ) || 'building' !== (string) $generation['state'] || 'enrichment' !== (string) ( $generation['phase'] ?? '' ) || (int) $generation['conflict_count'] > 0 || $this->pending_count( $generation_id ) > 0 ) {
+				return $this->rollback();
+			}
+
+			$discovered = (int) $generation['discovered_count'];
+			if ( $discovered <= 0 || (int) $generation['accepted_count'] + (int) $generation['rejected_count'] !== $discovered || (int) $generation['enrichment_processed_count'] !== $discovered ) {
+				return $this->rollback();
+			}
+
+			$updated = $this->wpdb->query(
+				$this->wpdb->prepare(
+					"UPDATE {$this->generations_table()} SET state='ready', progress_updated_at=%s WHERE id=%d AND state='building' AND phase='enrichment' AND conflict_count=0 AND discovered_count>0 AND accepted_count + rejected_count = discovered_count AND enrichment_processed_count = discovered_count",
+					current_time( 'mysql', true ),
+					$generation_id
+				)
+			);
+			if ( false === $updated || 1 !== (int) $updated ) {
+				return $this->rollback();
+			}
+
+			if ( false === $this->wpdb->query( 'COMMIT' ) ) {
+				return $this->rollback();
+			}
+			return true;
+		} catch ( \Throwable ) {
+			return $this->rollback();
+		}
+	}
+
 	/** @param array<string,mixed> $diagnostics */
 	public function record_retry( int $id, int $retry_count, array $diagnostics ): void {
 		if ( ! $this->generation_is_building( $id ) ) {

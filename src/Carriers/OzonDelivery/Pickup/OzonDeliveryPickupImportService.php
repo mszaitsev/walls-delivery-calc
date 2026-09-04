@@ -52,7 +52,7 @@ final class OzonDeliveryPickupImportService {
 				: $this->run_discovery_step( $generation, $handled_ids_count );
 			return $result;
 		} catch ( \Throwable $exception ) {
-			$terminal = $this->terminal_result_if_not_current_building_phase( (int) $generation['id'], (string) ( $generation['phase'] ?? 'discovery' ) );
+			$terminal = $this->terminal_result_if_cancelled( (int) $generation['id'] );
 			if ( null !== $terminal ) {
 				return $terminal;
 			}
@@ -121,10 +121,13 @@ final class OzonDeliveryPickupImportService {
 	private function run_enrichment_step( array $generation, int &$handled_ids_count ): array {
 		$ids = $this->repository->pending_ids( (int) $generation['id'], self::INFO_BATCH_SIZE );
 		if ( array() === $ids ) {
-			if ( ! $this->repository->ready_for_activation( (int) $generation['id'] ) ) {
+			if ( ! $this->repository->mark_ready_if_complete( (int) $generation['id'] ) ) {
+				$terminal = $this->terminal_result_if_not_current_building_phase( (int) $generation['id'], 'enrichment' );
+				if ( null !== $terminal ) {
+					return $terminal;
+				}
 				throw new \RuntimeException( 'pickup_enrichment_incomplete' );
 			}
-			$this->repository->update_generation( (int) $generation['id'], array( 'state' => 'ready' ) );
 			if ( ! $this->repository->activate( (int) $generation['id'] ) ) {
 				throw new \RuntimeException( 'pickup_activation_rejected' );
 			}
@@ -194,6 +197,11 @@ final class OzonDeliveryPickupImportService {
 
 	private function is_info_not_found( OzonDeliveryApiException $exception ): bool {
 		return 'v1/delivery-point/info' === $exception->operation && 404 === $exception->http_status;
+	}
+
+	/** @return array{complete:bool,failed:bool}|null */
+	private function terminal_result_if_cancelled( int $generation_id ): ?array {
+		return 'cancelled' === $this->repository->generation_state( $generation_id ) ? array( 'complete' => true, 'failed' => false ) : null;
 	}
 
 	/** @return array{complete:bool,failed:bool}|null */

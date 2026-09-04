@@ -725,7 +725,7 @@ function shipment_admin_ajax_render_metabox_html( string $carrier_key, array $sh
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.149.1',
+		'0.149.2',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array( $adapter ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);
@@ -779,7 +779,7 @@ function shipment_admin_ajax_render_custom_metabox_html( array $order_meta, arra
 		null,
 		null,
 		'https://example.test/wp-content/plugins/wdc/',
-		'0.149.1',
+		'0.149.2',
 		new \WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry( array_merge( array( $adapter ), $additional_adapters ) ),
 		new \WallsShop\WDC\Shipments\Application\ShipmentMetaboxButtonPolicy()
 	);
