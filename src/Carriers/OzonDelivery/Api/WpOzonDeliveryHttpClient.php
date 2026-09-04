@@ -3,7 +3,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\OzonDelivery\Api;
 defined( 'ABSPATH' ) || exit;
 final class WpOzonDeliveryHttpClient implements OzonDeliveryHttpClientInterface {
-	private const MAX_REDIRECTS = 3;
+	private const MAX_REDIRECTS = 12;
 	public function __construct( private int $timeout, private OzonDeliveryMessageSanitizer $sanitizer ) {}
 	/** @param array<string,mixed> $args */
 	public function request( string $method, string $url, array $args = array() ): OzonDeliveryApiResponse {

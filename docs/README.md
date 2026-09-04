@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.148.05
+Version: 0.148.06
+
+0.148.06 makes the Ozon Delivery pickup catalog import resilient to transient Ozon API and transport failures. Retryable page failures from `/v1/delivery-point/list` or `/v1/delivery-point/info` keep the generation building, retain the same cursor and counters, store safe diagnostics on the generation row, and reschedule the same Action Scheduler step with bounded 2/5/10 second backoff before final failure. Ozon HTTP defaults now use a 30 second timeout for new/default settings and accept same-host HTTPS DDoS redirect chains up to 12 hops without relaxing host validation.
 
 0.148.05 makes DPD order-admin recalculation reuse saved pickup terminal codes only when the saved pickup is explicitly owned by DPD, so same-city Yandex/Ozon/CDEK/PEK pickup codes cannot leak into DPD receiver terminal pricing.
 
