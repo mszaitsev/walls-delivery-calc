@@ -50,7 +50,11 @@ final class OzonDeliveryApiClient {
 	/** @param array<string,mixed> $body @param array<string,string> $headers */ private function authorized_response( string $method, string $path, array $body, array $headers = array() ): OzonDeliveryApiResponse {
 		$token = $this->tokens->get_token(); $json = wp_json_encode( $body );
 		if ( ! is_string( $json ) || ! str_starts_with( $path, '/' ) ) { throw new OzonDeliveryApiException( 'api', 'request_invalid', 0, false, 'Некорректный запрос Ozon Delivery.' ); }
-		return $this->http->request( $method, OzonDeliverySettings::API_BASE_URL . $path, array( 'headers' => array_merge( array( 'Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'Accept' => 'application/json' ), $headers ), 'body' => $json ) );
+		try {
+			return $this->http->request( $method, OzonDeliverySettings::API_BASE_URL . $path, array( 'headers' => array_merge( array( 'Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json', 'Accept' => 'application/json' ), $headers ), 'body' => $json ) );
+		} catch ( OzonDeliveryApiException $exception ) {
+			throw new OzonDeliveryApiException( trim( $path, '/' ), $exception->safe_code, $exception->http_status, $exception->retryable, $exception->getMessage(), $exception->metadata );
+		}
 	}
 	private function api_error( string $path, OzonDeliveryApiResponse $response, mixed $data ): OzonDeliveryApiException {
 		$error = is_array( $data ) && isset( $data['error'] ) && is_array( $data['error'] ) ? $data['error'] : ( is_array( $data ) && ! array_is_list( $data ) ? $data : array() );

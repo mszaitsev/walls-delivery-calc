@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.148.06
+Version: 0.148.07
+
+0.148.07 hardens the Ozon Delivery pickup import resilience diagnostics: valid same-host HTTPS DDoS redirect chains that exceed the bounded redirect limit now fail as retryable `redirect_limit`, while missing or unsafe redirects remain permanent `redirect_rejected`. Delivery API transport and redirect exceptions are now rethrown with the concrete API path operation, such as `v1/delivery-point/list` or `v1/delivery-point/info`, while preserving the original safe code, HTTP status, retryable flag, message, and metadata.
 
 0.148.06 makes the Ozon Delivery pickup catalog import resilient to transient Ozon API and transport failures. Retryable page failures from `/v1/delivery-point/list` or `/v1/delivery-point/info` keep the generation building, retain the same cursor and counters, store safe diagnostics on the generation row, and reschedule the same Action Scheduler step with bounded 2/5/10 second backoff before final failure. Ozon HTTP defaults now use a 30 second timeout for new/default settings and accept same-host HTTPS DDoS redirect chains up to 12 hops without relaxing host validation.
 
