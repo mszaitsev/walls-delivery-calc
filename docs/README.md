@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.148.07
+Version: 0.149.0
+
+0.149.0 changes the Ozon Delivery pickup catalog import to a two-phase generation build. Discovery first walks `/v1/delivery-point/list` quickly and stores a relational frozen ID snapshot in `wdc_ozon_delivery_pickup_ids`; enrichment then reads that frozen set in pending batches, calls `/v1/delivery-point/info`, writes full point rows only after successful parsing/persistence, and activates the new generation only after every frozen ID is terminal (`enriched` or `rejected`). `/info` HTTP 404 is salvaged by bounded binary split so IDs that disappeared after discovery become `not_found_404` rejects instead of failing the whole generation. Managers can stop a building import from the `ПВЗ Ozon` tab; the generation becomes `cancelled`, staging/full partial rows are cleaned, stale scheduled steps become harmless, and the previous active catalog remains available.
 
 0.148.07 hardens the Ozon Delivery pickup import resilience diagnostics: valid same-host HTTPS DDoS redirect chains that exceed the bounded redirect limit now fail as retryable `redirect_limit`, while missing or unsafe redirects remain permanent `redirect_rejected`. Delivery API transport and redirect exceptions are now rethrown with the concrete API path operation, such as `v1/delivery-point/list` or `v1/delivery-point/info`, while preserving the original safe code, HTTP status, retryable flag, message, and metadata.
 
