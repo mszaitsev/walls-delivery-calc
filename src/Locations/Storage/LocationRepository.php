@@ -1303,6 +1303,74 @@ final class LocationRepository {
 		return $this->search_paginated( $query, 1, $limit, $country_code )['items'];
 	}
 
+	/** @return array<int,string> */
+	public function unique_active_ru_region_names( string $query = '', int $limit = 100 ): array {
+		$query = trim( $query );
+		$limit = max( 1, min( 300, $limit ) );
+		if ( $this->has_test_location_rows() ) {
+			$query_key = $this->normalize_query( $query );
+			$regions = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) || 'RU' !== strtoupper( (string) ( $row['country_code'] ?? 'RU' ) ) ) {
+					continue;
+				}
+				$region = trim( (string) ( $row['region_name'] ?? '' ) );
+				if ( '' === $region ) {
+					continue;
+				}
+				if ( '' !== $query_key && ! str_contains( $this->normalize_query( $region ), $query_key ) ) {
+					continue;
+				}
+				$regions[ $region ] = $region;
+			}
+			ksort( $regions, SORT_STRING );
+
+			return array_slice( array_values( $regions ), 0, $limit );
+		}
+
+		$where = array( "active = 1", "country_code = 'RU'", "region_name <> ''" );
+		$args = array();
+		if ( '' !== $query ) {
+			$where[] = 'region_name LIKE %s';
+			$args[] = '%' . $this->wpdb->esc_like( $query ) . '%';
+		}
+		$args[] = $limit;
+
+		$rows = $this->wpdb->get_col(
+			$this->wpdb->prepare(
+				'SELECT DISTINCT region_name FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY region_name ASC LIMIT %d',
+				...$args
+			)
+		);
+
+		return is_array( $rows ) ? array_values( array_filter( array_map( 'strval', $rows ), static fn( string $value ): bool => '' !== trim( $value ) ) ) : array();
+	}
+
+	/** @return array<int,Location> */
+	public function search_active_ru_locations_for_manual_delivery( string $query, int $limit = 20 ): array {
+		$query = trim( $query );
+		if ( '' === $query ) {
+			return array();
+		}
+		$limit = max( 1, min( 50, $limit ) );
+		$locations = $this->search( $query, max( 10, $limit ), 'RU' );
+		$filtered = array();
+		foreach ( $locations as $location ) {
+			if ( ! $location instanceof Location || ! $location->active || 'RU' !== strtoupper( trim( $location->country_code ) ) ) {
+				continue;
+			}
+			if ( '' === trim( $location->region_name ) || '' === trim( $location->resolved_place_name() ) ) {
+				continue;
+			}
+			$filtered[] = $location;
+			if ( count( $filtered ) >= $limit ) {
+				break;
+			}
+		}
+
+		return $filtered;
+	}
+
 	/**
 	 * @return array<int,Location>
 	 */

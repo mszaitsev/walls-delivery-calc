@@ -24,6 +24,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnostic
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryAdminPage;
@@ -104,6 +105,7 @@ final class DeliveryServicesAdminPage {
 		private RuleRepository $rules,
 		private RussianPostPickupDiagnosticsTab $russian_post_pickup_diagnostics,
 		private ManualDeliverySettings $manual_delivery_settings,
+		private ManualDeliveryGeographyRepository $manual_delivery_geography,
 		private ?DeliveryServiceSettingsRepository $settings = null,
 		private ?RussianPostSettings $russian_post_settings = null,
 		private ?RussianPostCountriesAdminPage $russian_post_countries = null,
@@ -195,12 +197,31 @@ final class DeliveryServicesAdminPage {
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_pipeline_v2_reset', array( $this, 'ajax_yandex_delivery_geo_pipeline_v2_reset' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_source_station', array( $this, 'ajax_yandex_delivery_source_station' ) );
 		add_action( 'wp_ajax_wdc_ozon_delivery_pickup_status', array( $this, 'ajax_ozon_delivery_pickup_status' ) );
+		add_action( 'wp_ajax_wdc_manual_delivery_region_search', array( $this, 'ajax_manual_delivery_region_search' ) );
+		add_action( 'wp_ajax_wdc_manual_delivery_location_search', array( $this, 'ajax_manual_delivery_location_search' ) );
 	}
 
 	public function enqueue_assets(): void {
 		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
 		$service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+		if ( self::MENU_SLUG === $page ) {
+			wp_enqueue_script(
+				'wdc-manual-delivery-admin',
+				$this->asset_url( 'assets/admin/manual-delivery-services.js' ),
+				array(),
+				$this->asset_version(),
+				true
+			);
+			wp_localize_script(
+				'wdc-manual-delivery-admin',
+				'wdcManualDeliveryAdmin',
+				array(
+					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'wdc_manual_delivery_geography' ),
+				)
+			);
+		}
 		if ( self::MENU_SLUG === $page && RussianPostDomesticSettings::SERVICE_KEY === $service && 'russian_post_pickup' === $tab ) {
 			wp_enqueue_script(
 				'wdc-russian-post-pickup-import-admin',
@@ -267,6 +288,52 @@ final class DeliveryServicesAdminPage {
 	}
 
 	public function ajax_ozon_delivery_pickup_status(): void { if ( ! current_user_can( AdminMenu::CAPABILITY ) ) { wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 ); } if ( ! check_ajax_referer( 'wdc_ozon_delivery_pickup_status', 'nonce', false ) ) { wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 ); } wp_send_json_success( $this->ozon_delivery_admin instanceof OzonDeliveryAdminPage ? $this->ozon_delivery_admin->pickup_status() : array( 'state' => 'idle', 'is_running' => false, 'is_terminal' => true ) ); }
+
+	public function ajax_manual_delivery_region_search(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! check_ajax_referer( 'wdc_manual_delivery_geography', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! $this->locations instanceof LocationRepository ) {
+			wp_send_json_success( array( 'items' => array() ) );
+		}
+
+		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
+		$items = array_map(
+			static fn( string $region ): array => array( 'region_name' => $region, 'label' => $region ),
+			$this->locations->unique_active_ru_region_names( $query, 30 )
+		);
+
+		wp_send_json_success( array( 'items' => $items ) );
+	}
+
+	public function ajax_manual_delivery_location_search(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! check_ajax_referer( 'wdc_manual_delivery_geography', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! $this->locations instanceof LocationRepository ) {
+			wp_send_json_success( array( 'items' => array() ) );
+		}
+
+		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
+		$items = array();
+		foreach ( $this->locations->search_active_ru_locations_for_manual_delivery( $query, 30 ) as $location ) {
+			$place = $location->resolved_place_name();
+			$region = trim( $location->region_name );
+			$items[] = array(
+				'location_name' => $place,
+				'region_name' => $region,
+				'label' => $place . ' — ' . $region,
+			);
+		}
+
+		wp_send_json_success( array( 'items' => $items ) );
+	}
 
 	public function add_menu_page(): void {
 		add_submenu_page(
@@ -897,6 +964,10 @@ final class DeliveryServicesAdminPage {
 					$countries = array_values( array_intersect( array_map( 'strtoupper', $countries ), CdekSettings::SUPPORTED_COUNTRIES ) );
 				}
 				$this->countries->replace_countries( $id, $countries );
+				if ( $current_service instanceof DeliveryService && $this->is_manual_service( $current_service ) && null !== $current_service->id ) {
+					$this->save_manual_delivery_geography( (int) $current_service->id );
+					$this->clear_delivery_quote_cache();
+				}
 			}
 			if ( 'save_main' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
@@ -1816,6 +1887,9 @@ final class DeliveryServicesAdminPage {
 					<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), implode( ',', $this->countries->countries( (int) $service->id ) ) ); ?>
 				<?php else : ?>
 					<input type="hidden" name="countries" value="<?php echo esc_attr( implode( ',', $this->countries->countries( (int) $service->id ) ) ); ?>">
+				<?php endif; ?>
+				<?php if ( $this->is_manual_service( $service ) ) : ?>
+					<?php $this->render_manual_geography_rows( $service ); ?>
 				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить службу', 'walls-delivery-calc' ) ); ?>
@@ -4584,6 +4658,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				<input type="hidden" name="service_type" value="<?php echo esc_attr( DeliveryService::TYPE_MANUAL ); ?>">
 				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, $this->availability_mode_options() ); ?>
 				<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), $service instanceof DeliveryService ? implode( ',', $this->countries->countries( (int) $service->id ) ) : '' ); ?>
+				<?php $this->render_manual_geography_rows( $service ); ?>
 				<?php $this->readonly_row( 'manual_pricing_mode', __( 'Pricing mode', 'walls-delivery-calc' ), ManualDeliverySettings::PRICING_MODE_FLAT ); ?>
 				<input type="hidden" name="manual_pricing_mode" value="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_FLAT ); ?>">
 				<?php $this->text_row( 'manual_flat_price_rub', __( 'Фиксированная цена, руб.', 'walls-delivery-calc' ), $service instanceof DeliveryService ? (string) $this->manual_pricing_values( $service )['flat_price_rub'] : '0' ); ?>
@@ -4708,6 +4783,11 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 	}
 
+	private function save_manual_delivery_geography( int $service_id ): void {
+		$this->manual_delivery_geography->replace_regions( $service_id, $this->manual_regions_from_post() );
+		$this->manual_delivery_geography->replace_locations( $service_id, $this->manual_locations_from_post() );
+	}
+
 	/**
 	 * @return array{flat_price_rub:string,min_days:string,max_days:string}
 	 */
@@ -4724,6 +4804,118 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			'min_days' => null === $days['min_days'] ? '' : (string) $days['min_days'],
 			'max_days' => null === $days['max_days'] ? '' : (string) $days['max_days'],
 		);
+	}
+
+	private function render_manual_geography_rows( ?DeliveryService $service ): void {
+		$service_id = $service instanceof DeliveryService && null !== $service->id ? (int) $service->id : 0;
+		$regions = $service_id > 0 ? $this->manual_delivery_geography->regions( $service_id ) : array();
+		$locations = $service_id > 0 ? $this->manual_delivery_geography->locations( $service_id ) : array();
+		?>
+		<tr><th colspan="2"><h3><?php echo esc_html__( 'География ручной службы', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<tr>
+			<th scope="row"><?php echo esc_html__( 'Регионы РФ', 'walls-delivery-calc' ); ?></th>
+			<td>
+				<div data-wdc-manual-regions>
+					<input type="search" data-wdc-manual-region-query class="regular-text" autocomplete="off" placeholder="<?php echo esc_attr__( 'Найти регион', 'walls-delivery-calc' ); ?>">
+					<button type="button" class="button" data-wdc-manual-region-search><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
+					<div data-wdc-manual-region-results style="margin-top:8px;"></div>
+					<ul data-wdc-manual-region-list style="margin-top:8px;">
+						<?php foreach ( $regions as $region ) : ?>
+							<li data-value="<?php echo esc_attr( $region ); ?>">
+								<?php echo esc_html( $region ); ?>
+								<input type="hidden" name="manual_regions[]" value="<?php echo esc_attr( $region ); ?>">
+								<button type="button" class="button-link-delete" data-wdc-manual-remove><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
+							</li>
+						<?php endforeach; ?>
+					</ul>
+				</div>
+				<p class="description"><?php echo esc_html__( 'Пустой список регионов и населённых пунктов означает всю разрешённую страну. Если выбран регион, служба доступна во всех населённых пунктах этого региона.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
+		<tr>
+			<th scope="row"><?php echo esc_html__( 'Населённые пункты РФ', 'walls-delivery-calc' ); ?></th>
+			<td>
+				<div data-wdc-manual-locations>
+					<input type="search" data-wdc-manual-location-query class="regular-text" autocomplete="off" placeholder="<?php echo esc_attr__( 'Найти населённый пункт', 'walls-delivery-calc' ); ?>">
+					<button type="button" class="button" data-wdc-manual-location-search><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
+					<div data-wdc-manual-location-results style="margin-top:8px;"></div>
+					<ul data-wdc-manual-location-list style="margin-top:8px;">
+						<?php foreach ( $locations as $location ) : ?>
+							<?php $encoded = wp_json_encode( $location ) ?: '{}'; ?>
+							<li data-value="<?php echo esc_attr( $location['location_name'] . '|' . $location['region_name'] ); ?>">
+								<?php echo esc_html( $location['location_name'] . ' — ' . $location['region_name'] ); ?>
+								<input type="hidden" name="manual_locations[]" value="<?php echo esc_attr( $encoded ); ?>">
+								<button type="button" class="button-link-delete" data-wdc-manual-remove><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
+							</li>
+						<?php endforeach; ?>
+					</ul>
+				</div>
+				<p class="description"><?php echo esc_html__( 'Сохраняется текстовая пара: населённый пункт + region_name. ID локации не используется как постоянная identity.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
+		<?php
+	}
+
+	/** @return array<int,string> */
+	private function manual_regions_from_post(): array {
+		$raw = wp_unslash( $_POST['manual_regions'] ?? array() );
+		$values = is_array( $raw ) ? array_map( 'strval', $raw ) : array_filter( array_map( 'trim', explode( ',', (string) $raw ) ) );
+		if ( ! $this->locations instanceof LocationRepository ) {
+			return array();
+		}
+		$known = array();
+		foreach ( $this->locations->unique_active_ru_region_names( '', 200 ) as $region ) {
+			$known[ $this->manual_geography_key( $region ) ] = $region;
+		}
+		$result = array();
+		foreach ( $values as $value ) {
+			$key = $this->manual_geography_key( sanitize_text_field( $value ) );
+			if ( isset( $known[ $key ] ) ) {
+				$result[] = $known[ $key ];
+			}
+		}
+
+		return array_values( array_unique( $result ) );
+	}
+
+	/** @return array<int,array{location_name:string,region_name:string}> */
+	private function manual_locations_from_post(): array {
+		$raw = wp_unslash( $_POST['manual_locations'] ?? array() );
+		$values = is_array( $raw ) ? $raw : array_filter( array_map( 'trim', explode( "\n", (string) $raw ) ) );
+		if ( ! $this->locations instanceof LocationRepository ) {
+			return array();
+		}
+		$result = array();
+		foreach ( $values as $value ) {
+			$row = is_array( $value ) ? $value : json_decode( (string) $value, true );
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$location_name = sanitize_text_field( (string) ( $row['location_name'] ?? '' ) );
+			$region_name = sanitize_text_field( (string) ( $row['region_name'] ?? '' ) );
+			if ( '' === trim( $location_name ) || '' === trim( $region_name ) ) {
+				continue;
+			}
+			$match = $this->locations->resolve_active_by_place_and_region( $location_name, $region_name, '', 'RU' );
+			if ( array() === $match->matches ) {
+				continue;
+			}
+			$canonical = $match->matches[0];
+			$result[] = array(
+				'location_name' => $canonical->resolved_place_name(),
+				'region_name' => $canonical->region_name,
+			);
+		}
+
+		return $result;
+	}
+
+	private function manual_geography_key( string $value ): string {
+		$value = str_replace( array( 'Ё', 'ё' ), array( 'Е', 'е' ), trim( $value ) );
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
+		$value = preg_replace( '/\s+/u', ' ', $value );
+
+		return is_string( $value ) ? $value : '';
 	}
 
 	/**

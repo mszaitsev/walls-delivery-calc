@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Runtime;
 
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyMatcher;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -21,7 +22,8 @@ defined( 'ABSPATH' ) || exit;
 final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 	public function __construct(
 		private DeliveryServiceRepository $services,
-		private ManualDeliverySettings $settings
+		private ManualDeliverySettings $settings,
+		private ManualDeliveryGeographyMatcher $geography
 	) {
 	}
 
@@ -42,6 +44,10 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 		$service = '' !== $service_key ? $this->services->find_by_service_key( $service_key ) : null;
 		if ( ! $this->service_can_quote( $service ) ) {
 			return $this->failed_quote( $request, 'manual_service_unavailable' );
+		}
+		$geography = $this->geography->match( $service, $request );
+		if ( ! $geography['available'] ) {
+			return $this->failed_quote( $request, $geography['reason'] );
 		}
 
 		$pricing = $this->settings->pricing( (int) $service->id );
@@ -76,6 +82,7 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 				'api_base_price_rub' => $price->get_rubles(),
 				'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
 				'manual_flat_price_kopecks' => $price->get_kopecks(),
+				'manual_geography_match' => $geography['reason'],
 				'order_recalculation_requires_address' => false,
 			),
 			$price,

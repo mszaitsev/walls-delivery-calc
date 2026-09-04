@@ -63,6 +63,10 @@ final class WooCommercePackageMapper {
 				'destination_latitude' => $coordinates['latitude'],
 				'destination_longitude' => $coordinates['longitude'],
 				'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
+				'region_name' => (string) $location_context['region_name'],
+				'city_name' => (string) $location_context['city_name'],
+				'settlement_name' => (string) $location_context['settlement_name'],
+				'place_name' => (string) $location_context['place_name'],
 			),
 			$this->strip_untrusted_dadata_context( $customer_context ),
 			$this->trusted_dadata_address_context( $address )
@@ -446,7 +450,7 @@ final class WooCommercePackageMapper {
 
 	/**
 	 * @param array<string,mixed> $destination
-	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,place_name:string,place_type:string,place_level:string}
+	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,region_name:string,city_name:string,settlement_name:string,place_name:string,place_type:string,place_level:string}
 	 */
 	private function checkout_location_context( array $destination, Address $address, string $country_code ): array {
 		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
@@ -466,7 +470,7 @@ final class WooCommercePackageMapper {
 
 	/**
 	 * @param array<string,mixed> $destination
-	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,place_name:string,place_type:string,place_level:string}
+	 * @return array{location_id:string,source:string,status:string,location:?Location,display_name:string,region_name:string,city_name:string,settlement_name:string,place_name:string,place_type:string,place_level:string}
 	 */
 	private function recover_checkout_location_context( array $destination, Address $address, string $country_code ): array {
 		$country_code = strtoupper( trim( $country_code ) );
@@ -497,9 +501,12 @@ final class WooCommercePackageMapper {
 			'status'        => $status,
 			'location'      => $location,
 			'display_name'  => (string) ( $source_data['display_name'] ?? '' ),
-			'place_name'    => (string) ( $source_data['place_name'] ?? $source_data['settlement_name'] ?? $source_data['city_name'] ?? '' ),
-			'place_type'    => (string) ( $source_data['place_type'] ?? $source_data['settlement_type'] ?? '' ),
-			'place_level'   => (string) ( $source_data['place_level'] ?? '' ),
+			'region_name'   => $location instanceof Location ? $location->region_name : (string) ( $source_data['region_name'] ?? $source_data['state_value'] ?? '' ),
+			'city_name'     => $location instanceof Location ? $location->city_name : (string) ( $source_data['city_name'] ?? '' ),
+			'settlement_name' => $location instanceof Location ? $location->settlement_name : (string) ( $source_data['settlement_name'] ?? '' ),
+			'place_name'    => $location instanceof Location ? $location->resolved_place_name() : (string) ( $source_data['place_name'] ?? $source_data['settlement_name'] ?? $source_data['city_name'] ?? '' ),
+			'place_type'    => $location instanceof Location ? $location->resolved_place_type() : (string) ( $source_data['place_type'] ?? $source_data['settlement_type'] ?? '' ),
+			'place_level'   => $location instanceof Location ? (string) $location->place_level : (string) ( $source_data['place_level'] ?? '' ),
 		);
 	}
 

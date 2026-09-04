@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000A9 A0AC:74BD
+Volume serial number is 0000003B A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -15,6 +15,7 @@ C:.
 |   |   |   calendar-admin.js
 |   |   |   dpd-geography-import.js
 |   |   |   locations-admin.css
+|   |   |   manual-delivery-services.js
 |   |   |   order-delivery-recalculation.css
 |   |   |   order-delivery-recalculation.js
 |   |   |   ozon-delivery-pickup-sync.js
@@ -137,6 +138,7 @@ C:.
 |           0057_add_ozon_pickup_import_resilience_diagnostics.php
 |           0058_add_ozon_pickup_two_phase_import.php
 |           0059_add_ozon_pickup_generation_lock_owner.php
+|           0060_create_manual_delivery_geography.php
 |
 +---docs
 |   |   README.md
@@ -321,6 +323,8 @@ C:.
 |   |   |           JetLogisticStatusService.php
 |   |   |
 |   |   +---Manual
+|   |   |       ManualDeliveryGeographyMatcher.php
+|   |   |       ManualDeliveryGeographyRepository.php
 |   |   |       ManualDeliverySettings.php
 |   |   |
 |   |   +---OzonDelivery

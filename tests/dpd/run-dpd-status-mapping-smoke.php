@@ -10,6 +10,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
@@ -193,6 +194,7 @@ $page = new DeliveryServicesAdminPage(
 		)
 	),
 	manual_delivery_settings: new ManualDeliverySettings( new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ) ),
+	manual_delivery_geography: new ManualDeliveryGeographyRepository( $GLOBALS['wpdb'] ),
 	dpd_status_mapping: $mapping
 );
 $service = $GLOBALS['wpdb']->get_row( "SELECT * FROM wp_wdc_delivery_services WHERE service_key = 'dpd' AND deleted = 0 LIMIT 1", ARRAY_A );

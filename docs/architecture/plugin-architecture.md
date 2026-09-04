@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.150.0
+Version: 0.150.1
+
+0.150.1 keeps manual delivery as one runtime carrier and adds only carrier-owned geography storage/matching for manual services. `CheckoutOrchestrator` remains generic: country availability is resolved by `DeliveryServiceManager`, then `ManualDeliveryCarrier` checks optional RU `region_name` and `location_name + region_name` restrictions before returning the flat base rate. The Shipment Framework remains untouched: no manual document provider, modal extension, persistence mapper, fake shipment record, or generic shipment JS branch is registered.
 
 Manual delivery services are dynamic DeliveryService rows, not per-service PHP carriers. The platform registers one generic `manual` runtime carrier in the composition root, and each manual row is selected by its trusted `service_key` from the existing checkout service pipeline. New custom Delivery Services admin entries are normalized to `service_type=manual` and `carrier_key=manual`, while legacy `fixed`/`weight_based` values remain storage compatibility values rather than runtime carrier types. This stage does not change Shipment Framework contracts and does not register manual document providers, modal extensions, persistence mappers, or shipment create/cancel/status behavior.
 
