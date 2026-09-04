@@ -40,7 +40,7 @@ final class OzonDeliverySettings {
 		return array(
 			self::CLIENT_ID_KEY => '',
 			self::CLIENT_SECRET_ENCRYPTED_KEY => '',
-			self::REQUEST_TIMEOUT_KEY => 15,
+			self::REQUEST_TIMEOUT_KEY => 30,
 			self::LAST_DIAGNOSTIC_KEY => array(),
 			self::LAST_QUOTE_DIAGNOSTIC_KEY => array(),
 			self::SHIPMENT_METHOD_ID_KEY => 0,
@@ -53,7 +53,7 @@ final class OzonDeliverySettings {
 	}
 
 	public function request_timeout(): int {
-		return max( 1, min( 30, $this->settings->get_int( self::REQUEST_TIMEOUT_KEY, 15 ) ) );
+		return max( 1, min( 30, $this->settings->get_int( self::REQUEST_TIMEOUT_KEY, 30 ) ) );
 	}
 
 	/** @return array<string,mixed> */

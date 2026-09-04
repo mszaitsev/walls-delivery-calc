@@ -3,14 +3,14 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\OzonDelivery\Api;
 defined( 'ABSPATH' ) || exit;
 final class WpOzonDeliveryHttpClient implements OzonDeliveryHttpClientInterface {
-	private const MAX_REDIRECTS = 3;
+	private const MAX_REDIRECTS = 12;
 	public function __construct( private int $timeout, private OzonDeliveryMessageSanitizer $sanitizer ) {}
 	/** @param array<string,mixed> $args */
 	public function request( string $method, string $url, array $args = array() ): OzonDeliveryApiResponse {
 		$origin_host = strtolower( (string) parse_url( $url, PHP_URL_HOST ) );
 		if ( ! $this->is_https_ozon_host( $url, $origin_host ) ) { throw new OzonDeliveryApiException( 'http', 'invalid_url', 0, false, 'Недопустимый URL Ozon Delivery.' ); }
-		$cookie_jar = array();
-		for ( $hop = 0; $hop <= self::MAX_REDIRECTS; $hop++ ) {
+		$cookie_jar = array(); $redirects_followed = 0;
+		while ( true ) {
 			$request = array_merge( array( 'method' => strtoupper( $method ), 'timeout' => $this->timeout, 'redirection' => 0 ), $args );
 			$cookie_header = $this->cookie_header( $cookie_jar ); if ( '' !== $cookie_header ) { $request['headers'] = array_merge( is_array( $request['headers'] ?? null ) ? $request['headers'] : array(), array( 'Cookie' => $cookie_header ) ); }
 			$response = wp_remote_request( $url, $request );
@@ -18,11 +18,11 @@ final class WpOzonDeliveryHttpClient implements OzonDeliveryHttpClientInterface 
 			$status = (int) wp_remote_retrieve_response_code( $response ); $headers = wp_remote_retrieve_headers( $response );
 			if ( ! in_array( $status, array( 302, 307 ), true ) ) { return new OzonDeliveryApiResponse( $status, (string) wp_remote_retrieve_body( $response ), $this->response_headers( $headers ) ); }
 			$location = $this->header_value( $headers, 'location' );
-			if ( self::MAX_REDIRECTS === $hop || '' === $location || ! $this->is_https_ozon_host( $location, $origin_host ) ) { throw new OzonDeliveryApiException( 'http', 'redirect_rejected', $status, false, 'Ozon Delivery вернул недопустимый redirect.' ); }
+			if ( '' === $location || ! $this->is_https_ozon_host( $location, $origin_host ) ) { throw new OzonDeliveryApiException( 'http', 'redirect_rejected', $status, false, 'Ozon Delivery вернул недопустимый redirect.' ); }
+			if ( $redirects_followed >= self::MAX_REDIRECTS ) { throw new OzonDeliveryApiException( 'http', 'redirect_limit', $status, true, 'Превышен лимит redirect Ozon Delivery.' ); }
 			$this->store_cookies( $cookie_jar, $this->header_values( $headers, 'set-cookie' ) );
-			$url = $location;
+			$url = $location; ++$redirects_followed;
 		}
-		throw new OzonDeliveryApiException( 'http', 'redirect_limit', 0, false, 'Превышен лимит redirect Ozon Delivery.' );
 	}
 	/** @param array<string,string> $jar */ private function cookie_header( array $jar ): string { ksort( $jar, SORT_STRING ); $pairs = array(); foreach ( $jar as $name => $value ) { $pairs[] = $name . '=' . $value; } return implode( '; ', $pairs ); }
 	/** @param array<string,string> $jar @param array<int,string> $set_cookies */ private function store_cookies( array &$jar, array $set_cookies ): void { foreach ( $set_cookies as $set_cookie ) { $pair = trim( explode( ';', $set_cookie, 2 )[0] ); $position = strpos( $pair, '=' ); if ( false === $position ) { continue; } $name = trim( substr( $pair, 0, $position ) ); $value = trim( substr( $pair, $position + 1 ) ); if ( '' !== $name && preg_match( '/^[^=;\\s]+$/', $name ) ) { $jar[$name] = $value; } } }
