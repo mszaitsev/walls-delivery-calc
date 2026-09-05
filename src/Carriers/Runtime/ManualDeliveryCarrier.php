@@ -168,6 +168,7 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 			'limit' => 50,
 			'destination_fingerprint' => $fingerprint,
 			'provider_destination_fingerprint' => $fingerprint,
+			'reload_on_viewport_change' => false,
 			'cargo' => array(
 				'weight_g' => max( 0, $request->package->get_total_weight_g() ),
 				'volume_cm3' => max( 0, $request->package->get_total_volume_cm3() ),

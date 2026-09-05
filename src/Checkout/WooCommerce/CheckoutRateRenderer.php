@@ -159,6 +159,7 @@ final class CheckoutRateRenderer {
 		echo '<input type="hidden" name="wdc_pickup_city_name" data-wdc-pickup-city-name value="' . esc_attr( (string) ( $selection['city_name'] ?? $selection['city'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_region_name" data-wdc-pickup-region-name value="' . esc_attr( (string) ( $selection['region_name'] ?? $selection['region'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_work_time" data-wdc-pickup-work-time-field value="' . esc_attr( (string) ( $selection['point_work_time'] ?? $selection['work_time'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_comment" data-wdc-pickup-point-comment-field value="' . esc_attr( (string) ( $selection['point_comment'] ?? $selection['snapshot']['point_comment'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_description" data-wdc-pickup-description-field value="' . esc_attr( (string) ( $selection['description'] ?? $selection['point_comment'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_storage_notice" data-wdc-pickup-storage-notice-field value="' . esc_attr( (string) ( $selection['storage_notice'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_marker_type" data-wdc-pickup-marker-type value="' . esc_attr( (string) ( $selection['marker_type'] ?? '' ) ) . '">';

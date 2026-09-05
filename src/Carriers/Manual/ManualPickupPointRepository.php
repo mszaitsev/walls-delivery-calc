@@ -154,9 +154,9 @@ final class ManualPickupPointRepository {
 				'country_code' => $row['country_code'],
 				'presentation_type' => 'pvz',
 				'presentation_title' => 'Пункт выдачи',
-				'presentation_comment' => $row['comment'],
 				'marker_type' => 'pickup',
-				'display_code' => $row['code'],
+				'display_code' => '',
+				'reload_on_viewport_change' => false,
 				'requires_rate_refresh' => true,
 			)
 		);

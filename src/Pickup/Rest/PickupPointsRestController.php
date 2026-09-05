@@ -461,15 +461,21 @@ final class PickupPointsRestController {
 		if ( ! in_array( $type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
 			$type = 'unknown';
 		}
-		$title = $this->registry_presentation_value( $raw, 'presentation_title', 'Пункт выдачи' );
+		$type_label = $this->registry_presentation_value( $raw, 'presentation_title', 'Пункт выдачи' );
 		$point_name = $this->registry_presentation_value( $raw, 'point_name', '' );
+		$point_title = $this->registry_presentation_value( $raw, 'point_title', $type_label );
+		$card_title = $this->registry_presentation_value( $raw, 'card_title', $point_title );
 		$marker_type = $this->registry_presentation_value( $raw, 'marker_type', 'pickup' );
 		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
 			$marker_type = 'pickup';
 		}
-		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', $point->comment );
+		$point_comment = trim( (string) $point->comment );
+		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', '' );
 		$display_code = $this->registry_presentation_value( $raw, 'display_code', '' );
+		$display_title = $this->registry_presentation_value( $raw, 'display_title', trim( $card_title . ( '' !== $display_code ? ' ' . $display_code : '' ) ) );
 		$requires_rate_refresh = $this->registry_boolean_value( $raw, 'requires_rate_refresh' );
+		$has_reload_on_viewport_change = array_key_exists( 'reload_on_viewport_change', $raw );
+		$reload_on_viewport_change = $has_reload_on_viewport_change ? $this->registry_boolean_value( $raw, 'reload_on_viewport_change' ) : null;
 		$snapshot = array(
 			'carrier_key' => $carrier,
 			'service_key' => '' !== trim( $service_key ) ? $service_key : $carrier,
@@ -477,9 +483,9 @@ final class PickupPointsRestController {
 			'point_code' => $point->code,
 			'point_id' => $point->code,
 			'point_type' => $type,
-			'point_type_label' => $title,
-			'point_title' => $title,
-			'card_title' => $title,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'card_title' => $card_title,
 			'point_name' => $point_name,
 			'point_address' => $point->address,
 			'address' => $point->address,
@@ -488,19 +494,28 @@ final class PickupPointsRestController {
 			'lat' => $point->latitude,
 			'lng' => $point->longitude,
 			'work_time' => $point->work_time,
-			'description' => $point->comment,
+			'description' => $point_comment,
+			'point_comment' => $point_comment,
 			'presentation_comment' => $comment,
 			'marker_type' => $marker_type,
 			'display_code' => $display_code,
-			'display_title' => trim( $title . ( '' !== $display_code ? ' ' . $display_code : '' ) ),
+			'display_title' => $display_title,
 			'location_id' => $location_id,
 			'country_code' => strtoupper( trim( $country_code ) ),
 			'destination_fingerprint' => $fingerprint,
 			'provider_destination_fingerprint' => $fingerprint,
 			'requires_rate_refresh' => $requires_rate_refresh,
 		);
+		if ( $has_reload_on_viewport_change ) {
+			$snapshot['reload_on_viewport_change'] = $reload_on_viewport_change;
+		}
 
-		return array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_name, 'requires_rate_refresh' => $requires_rate_refresh, 'snapshot' => $snapshot ) );
+		$payload = array_merge( $snapshot, array( 'id' => $point->code, 'carrier' => $carrier, 'title' => $point_title, 'requires_rate_refresh' => $requires_rate_refresh, 'snapshot' => $snapshot ) );
+		if ( $has_reload_on_viewport_change ) {
+			$payload['reload_on_viewport_change'] = $reload_on_viewport_change;
+		}
+
+		return $payload;
 	}
 
 	/** @param array<string,mixed> $raw */

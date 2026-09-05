@@ -337,6 +337,7 @@ final class PickupMapCheckout {
 				'lng' => $selection['lng'] ?? $snapshot['lng'] ?? null,
 				'work_time' => $selection['work_time'] ?? $selection['point_work_time'] ?? $snapshot['work_time'] ?? null,
 				'point_work_time' => $selection['point_work_time'] ?? $selection['work_time'] ?? $snapshot['work_time'] ?? null,
+				'point_comment' => $selection['point_comment'] ?? $snapshot['point_comment'] ?? null,
 				'description' => $selection['description'] ?? $selection['point_comment'] ?? $snapshot['description'] ?? null,
 				'storage_notice' => $selection['storage_notice'] ?? $snapshot['storage_notice'] ?? null,
 				'marker_type' => $selection['marker_type'] ?? $snapshot['marker_type'] ?? null,

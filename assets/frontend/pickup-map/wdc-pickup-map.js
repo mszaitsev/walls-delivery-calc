@@ -153,6 +153,10 @@
 			var title = pointDisplayTitle(point);
 			var workTime = meaningfulText(point.work_time);
 			var description = cleanDescription(point.description);
+			var comment = pointComment(point);
+			if (comment && sameText(description, comment)) {
+				description = '';
+			}
 			var titleComment = presentationComment(point);
 			if (title) {
 				rows.push('<h3 class="wdc-pickup-popup__title">' + escapeHtml(title) + '</h3>');
@@ -172,6 +176,9 @@
 			}
 			if (workTime) {
 				rows.push('<div class="wdc-pickup-popup__section"><strong>График:</strong><span>' + escapeHtml(workTime) + '</span></div>');
+			}
+			if (comment) {
+				rows.push('<div class="wdc-pickup-popup__section wdc-pickup-popup__comment"><strong>Комментарий:</strong><span>' + escapeHtml(comment) + '</span></div>');
 			}
 			if (description) {
 				rows.push('<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml(description) + '</span></div>');
@@ -427,6 +434,7 @@
 			var previewed = previewPoint && pointId(previewPoint) === pointId(point);
 			var active = previewed;
 			var titleComment = presentationComment(point);
+			var comment = pointComment(point);
 			return [
 				'<div role="button" tabindex="0" class="wdc-pickup-list__item' + (active ? ' active' : '') + (selected ? ' selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
 				'<span class="wdc-pickup-list__index">' + (index + 1) + '</span>',
@@ -435,6 +443,7 @@
 				titleComment ? '<span class="wdc-pickup-list__title-comment">' + escapeHtml(titleComment) + '</span>' : '',
 				point.address ? '<span class="wdc-pickup-list__address">' + escapeHtml(point.address) + '</span>' : '',
 				point.work_time ? '<span class="wdc-pickup-list__time">' + escapeHtml(point.work_time) + '</span>' : '',
+				comment ? '<span class="wdc-pickup-list__comment"><strong>Комментарий:</strong> ' + escapeHtml(comment) + '</span>' : '',
 				storageNotice(point) ? '<span class="wdc-pickup-list__storage">' + escapeHtml(storageNotice(point)) + '</span>' : '',
 				'</span>',
 				'</div>'
@@ -1052,6 +1061,7 @@
 		var haystack = [
 			pointDisplayTitle(point),
 			presentationComment(point),
+			pointComment(point),
 			point && point.address,
 			point && point.work_time,
 			point && point.point_code,
@@ -1244,6 +1254,7 @@
 		normalized.lat = normalized.lat !== undefined && normalized.lat !== null ? normalized.lat : snapshot.lat;
 		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;
 		normalized.work_time = firstMeaningfulText(normalized.work_time, snapshot.work_time);
+		normalized.point_comment = firstCleanDescription(normalized.point_comment, snapshot.point_comment);
 		normalized.description = firstCleanDescription(normalized.description, snapshot.description);
 		normalized.storage_notice = firstCleanDescription(normalized.storage_notice, snapshot.storage_notice);
 		normalized.marker_type = normalized.marker_type || snapshot.marker_type;
@@ -1270,12 +1281,26 @@
 	}
 
 	function selectedSummary(point) {
-		return 'Выбран: ' + [pointDisplayCode(point), point.address || ''].filter(Boolean).join(', ');
+		return 'Выбран: ' + [pointDisplayTitle(point), point.address || ''].filter(Boolean).join(', ');
 	}
 
 	function presentationComment(point) {
 		var snapshot = pointSnapshot(point);
-		return meaningfulText(point && point.presentation_comment) || meaningfulText(snapshot.presentation_comment);
+		var presentation = meaningfulText(point && point.presentation_comment) || meaningfulText(snapshot.presentation_comment);
+		if (!presentation) {
+			return '';
+		}
+		var comment = pointComment(point);
+		var description = cleanDescription(point && point.description) || cleanDescription(snapshot.description);
+		if (sameText(presentation, comment) || sameText(presentation, description)) {
+			return '';
+		}
+		return presentation;
+	}
+
+	function pointComment(point) {
+		var snapshot = pointSnapshot(point);
+		return firstCleanDescription(point && point.point_comment, snapshot.point_comment);
 	}
 
 	function carrierTitle(point) {
@@ -1488,6 +1513,12 @@
 			}
 		}
 		return '';
+	}
+
+	function sameText(left, right) {
+		left = String(left || '').trim();
+		right = String(right || '').trim();
+		return !!left && !!right && left === right;
 	}
 
 	function listMeta(total, shown) {

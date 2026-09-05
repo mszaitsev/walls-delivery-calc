@@ -494,6 +494,7 @@ use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
 use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
@@ -602,7 +603,7 @@ wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Н
 $manual_pickup_points->replace_points(
 	$pickup_a_id,
 	array(
-		array( 'code' => 'manual-a-1', 'title' => 'ПВЗ A', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'active' => 1 ),
+		array( 'code' => 'manual-a-1', 'title' => 'Тестовый ПВЗ', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'comment' => 'Отличный ПВЗ', 'active' => 1 ),
 	)
 );
 $manual_pickup_points->replace_points(
@@ -691,14 +692,21 @@ $pickup_rest = new PickupPointsRestController(
 );
 $rest_points_without_coords = $pickup_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
 wdc_manual_assert( is_array( $rest_points_without_coords ) && 1 === count( $rest_points_without_coords ) && 'manual-a-1' === (string) ( $rest_points_without_coords[0]['point_code'] ?? '' ), 'PickupPointsRestController must return a manual point through resolver/provider when location_id is 0 and textual locality is present.' );
+$manual_rest_point = $rest_points_without_coords[0];
+wdc_manual_assert( 'Тестовый ПВЗ' === (string) ( $manual_rest_point['point_title'] ?? '' ) && 'Тестовый ПВЗ' === (string) ( $manual_rest_point['card_title'] ?? '' ) && 'Тестовый ПВЗ' === (string) ( $manual_rest_point['display_title'] ?? '' ) && 'Пункт выдачи' === (string) ( $manual_rest_point['point_type_label'] ?? '' ), 'Manual pickup REST must keep customer-facing point title separate from the generic point type label.' );
+wdc_manual_assert( '' === (string) ( $manual_rest_point['display_code'] ?? 'not-empty' ) && ! str_contains( (string) ( $manual_rest_point['display_title'] ?? '' ), 'manual-a-1' ), 'Manual pickup REST must keep the stable point code out of customer-facing title/display_code fields.' );
+wdc_manual_assert( 'Отличный ПВЗ' === (string) ( $manual_rest_point['point_comment'] ?? '' ) && 'Отличный ПВЗ' === (string) ( $manual_rest_point['description'] ?? '' ) && '' === (string) ( $manual_rest_point['presentation_comment'] ?? 'not-empty' ), 'Manual pickup REST must expose the normal admin comment once as point_comment/description without using presentation_comment.' );
+wdc_manual_assert( false === ( $manual_rest_point['reload_on_viewport_change'] ?? true ) && false === ( $manual_rest_point['snapshot']['reload_on_viewport_change'] ?? true ), 'Manual pickup REST payload must expose the generic fixed-dataset capability so the map does not reload local points on viewport changes.' );
+$manual_card_html = ( new PickupPointCardRenderer() )->render( $manual_rest_point, true, false, false );
+wdc_manual_assert( str_contains( $manual_card_html, 'Тестовый ПВЗ' ) && 1 === substr_count( $manual_card_html, 'Отличный ПВЗ' ) && str_contains( $manual_card_html, 'Комментарий:' ) && ! str_contains( $manual_card_html, 'Описание:</span> <span data-wdc-pickup-description-text>Отличный ПВЗ' ), 'Selected manual pickup card must render the admin comment once with the semantic Comment label.' );
 $manual_pickup_points->replace_points(
 	$pickup_a_id,
 	array(
-		array( 'code' => 'manual-a-1', 'title' => 'ПВЗ A', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'latitude' => 55.0302, 'longitude' => 82.9204, 'active' => 1 ),
+		array( 'code' => 'manual-a-1', 'title' => 'Тестовый ПВЗ', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'comment' => 'Отличный ПВЗ', 'latitude' => 55.0302, 'longitude' => 82.9204, 'active' => 1 ),
 	)
 );
 $rest_points_with_coords = $pickup_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
-wdc_manual_assert( is_array( $rest_points_with_coords ) && 1 === count( $rest_points_with_coords ) && 'manual-a-1' === (string) ( $rest_points_with_coords[0]['point_code'] ?? '' ) && 55.0302 === (float) $rest_points_with_coords[0]['lat'], 'Manual pickup REST must return points with coordinates through the same generic resolver path.' );
+wdc_manual_assert( is_array( $rest_points_with_coords ) && 1 === count( $rest_points_with_coords ) && 'manual-a-1' === (string) ( $rest_points_with_coords[0]['point_code'] ?? '' ) && 'Тестовый ПВЗ' === (string) ( $rest_points_with_coords[0]['display_title'] ?? '' ) && 55.0302 === (float) $rest_points_with_coords[0]['lat'], 'Manual pickup REST must return titled points with coordinates through the same generic resolver path.' );
 $cached_wc_rate = new WC_Shipping_Rate( $wc_rate['id'], (string) $wc_rate['label'], (string) $wc_rate['cost'], $wc_rate['meta_data'] );
 WC()->shipping()->set_packages(
 	array(
@@ -995,7 +1003,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.5' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.6' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1059,7 +1067,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.5' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.6' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

@@ -318,7 +318,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var selectedPoint = normalizeSelectedPoint(point);
 		selectedPoint = withDestinationIdentity(selectedPoint);
 		var workTime = firstMeaningfulText(point.point_work_time, point.work_time, snapshot.work_time);
+		var pointComment = firstMeaningfulText(point.point_comment, snapshot.point_comment);
 		var description = firstMeaningfulText(point.description, snapshot.description);
+		if (pointComment && description === pointComment) {
+			description = '';
+		}
 		var presentation = pickupPresentation(point);
 		var storage = firstMeaningfulText(point.storage_notice, snapshot.storage_notice, presentation.storage_notice);
 		var code = selectedPointCode(point);
@@ -337,6 +341,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		setHiddenField(container, '[data-wdc-pickup-city-name]', point.city_name || point.city || snapshot.city_name || snapshot.city || '');
 		setHiddenField(container, '[data-wdc-pickup-region-name]', point.region_name || point.region || snapshot.region_name || snapshot.region || '');
 		setHiddenField(container, '[data-wdc-pickup-work-time-field]', workTime);
+		setHiddenField(container, '[data-wdc-pickup-point-comment-field]', pointComment);
 		setHiddenField(container, '[data-wdc-pickup-description-field]', description);
 		setHiddenField(container, '[data-wdc-pickup-storage-notice-field]', storage);
 		setHiddenField(container, '[data-wdc-pickup-marker-type]', point.marker_type || snapshot.marker_type || presentation.marker_type || '');
@@ -350,6 +355,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		setText(container, '[data-wdc-pickup-code]', code);
 		setText(container, '[data-wdc-pickup-postcode]', postcode);
 		setText(container, '[data-wdc-pickup-work-time]', workTime);
+		setText(container, '[data-wdc-pickup-comment-text]', pointComment);
 		setText(container, '[data-wdc-pickup-description-text]', description);
 		setText(container, '[data-wdc-pickup-storage-notice]', storage);
 		toggleBlock(container, '[data-wdc-pickup-code-block]', false);
@@ -361,6 +367,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var descriptionBlock = container.querySelector('[data-wdc-pickup-description]');
 		if (descriptionBlock) {
 			setHidden(descriptionBlock, !description);
+		}
+		var commentBlock = container.querySelector('[data-wdc-pickup-comment]');
+		if (commentBlock) {
+			setHidden(commentBlock, !pointComment);
 		}
 		var storageBlock = container.querySelector('[data-wdc-pickup-storage-notice]');
 		if (storageBlock) {
@@ -1328,7 +1338,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			lng: point.lng !== undefined && point.lng !== null ? point.lng : snapshot.lng,
 			work_time: point.point_work_time || point.work_time || snapshot.work_time || '',
 			point_work_time: point.point_work_time || point.work_time || snapshot.work_time || '',
-			description: point.description || point.point_comment || snapshot.description || '',
+			point_comment: point.point_comment || snapshot.point_comment || '',
+			description: point.description || snapshot.description || '',
 			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
 			presentation_comment: point.presentation_comment || snapshot.presentation_comment || '',
 			marker_type: point.marker_type || snapshot.marker_type || pickupPresentation(point).marker_type || '',
@@ -1594,6 +1605,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			cdek_city_code: point.cdek_city_code || snapshot.cdek_city_code || '',
 			is_handout: point.is_handout !== undefined && point.is_handout !== null ? !!point.is_handout : (snapshot.is_handout !== undefined && snapshot.is_handout !== null ? !!snapshot.is_handout : undefined),
 			work_time: point.work_time || snapshot.work_time || '',
+			point_comment: point.point_comment || snapshot.point_comment || '',
 			description: point.description || snapshot.description || '',
 			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
 			presentation_comment: point.presentation_comment || snapshot.presentation_comment || '',
@@ -2426,13 +2438,16 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function clearContainerSelection(container) {
-		container.querySelectorAll('[data-wdc-pickup-point-id],[data-wdc-pickup-point-code],[data-wdc-pickup-carrier-key],[data-wdc-pickup-service-key],[data-wdc-pickup-family],[data-wdc-pickup-point-type],[data-wdc-pickup-point-type-label],[data-wdc-pickup-point-title],[data-wdc-pickup-point-name],[data-wdc-pickup-point-address],[data-wdc-pickup-point-postcode],[data-wdc-pickup-city-name],[data-wdc-pickup-region-name],[data-wdc-pickup-work-time-field],[data-wdc-pickup-description-field],[data-wdc-pickup-storage-notice-field],[data-wdc-pickup-marker-type],[data-wdc-pickup-cdek-code],[data-wdc-pickup-location-id],[data-wdc-pickup-fias-id],[data-wdc-pickup-gar-object-id],[data-wdc-pickup-destination-fingerprint]').forEach(function (field) {
+		container.querySelectorAll('[data-wdc-pickup-point-id],[data-wdc-pickup-point-code],[data-wdc-pickup-carrier-key],[data-wdc-pickup-service-key],[data-wdc-pickup-family],[data-wdc-pickup-point-type],[data-wdc-pickup-point-type-label],[data-wdc-pickup-point-title],[data-wdc-pickup-point-name],[data-wdc-pickup-point-address],[data-wdc-pickup-point-postcode],[data-wdc-pickup-city-name],[data-wdc-pickup-region-name],[data-wdc-pickup-work-time-field],[data-wdc-pickup-point-comment-field],[data-wdc-pickup-description-field],[data-wdc-pickup-storage-notice-field],[data-wdc-pickup-marker-type],[data-wdc-pickup-cdek-code],[data-wdc-pickup-location-id],[data-wdc-pickup-fias-id],[data-wdc-pickup-gar-object-id],[data-wdc-pickup-destination-fingerprint]').forEach(function (field) {
 			field.value = '';
 		});
 		setText(container, '[data-wdc-pickup-address]', '');
 		setText(container, '[data-wdc-pickup-work-time]', '');
+		setText(container, '[data-wdc-pickup-comment-text]', '');
 		setText(container, '[data-wdc-pickup-description-text]', '');
 		setText(container, '[data-wdc-pickup-storage-notice]', '');
+		toggleBlock(container, '[data-wdc-pickup-comment]', false);
+		toggleBlock(container, '[data-wdc-pickup-description]', false);
 		container.querySelectorAll('[data-wdc-pickup-card]').forEach(function (card) {
 			setHidden(card, true);
 		});

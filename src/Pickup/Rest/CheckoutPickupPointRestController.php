@@ -347,7 +347,7 @@ final class CheckoutPickupPointRestController {
 			'cdek_city_code' => $selection['cdek_city_code'] ?? $snapshot['cdek_city_code'] ?? 0,
 			'is_handout' => $selection['is_handout'] ?? $snapshot['is_handout'] ?? false,
 			'description' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
-			'point_comment' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
+			'point_comment' => (string) ( $selection['point_comment'] ?? $selection['snapshot']['point_comment'] ?? $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
 			'work_time' => (string) ( $selection['work_time'] ?? $selection['point_work_time'] ?? $selection['snapshot']['work_time'] ?? '' ),
 			'point_work_time' => (string) ( $selection['point_work_time'] ?? $selection['work_time'] ?? $selection['snapshot']['work_time'] ?? '' ),
 			'storage_notice' => (string) ( $selection['storage_notice'] ?? $selection['snapshot']['storage_notice'] ?? '' ),
@@ -430,7 +430,6 @@ final class CheckoutPickupPointRestController {
 		$source = (string) ( $raw['source'] ?? '' );
 		$type = 'paid' === $source ? 'pvz' : ( 'free' === $source || 'terminal' === $point->type ? 'terminal' : 'pvz' );
 		$title = 'terminal' === $type ? 'Собственный пункт выдачи ПЭК' : 'Партнерский пункт выдачи ПЭК';
-		$comment = 'paid' === $source ? 'Возможна небольшая доплата за доставку в этот пункт' : '';
 		$presentation_type = $this->provider_presentation_value( $raw, 'presentation_type' );
 		if ( in_array( $presentation_type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
 			$type = $presentation_type;
@@ -440,14 +439,28 @@ final class CheckoutPickupPointRestController {
 			$title = $presentation_title;
 		}
 		$presentation_comment = $this->provider_presentation_value( $raw, 'presentation_comment' );
-		if ( '' !== $presentation_comment ) {
-			$comment = $presentation_comment;
+		if ( '' === $presentation_comment && 'paid' === $source ) {
+			$presentation_comment = 'Возможна небольшая доплата за доставку в этот пункт';
 		}
 		$marker_type = $this->provider_presentation_value( $raw, 'marker_type' );
 		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
 			$marker_type = 'terminal' === $type ? 'terminal' : 'pickup';
 		}
 		$point_name = $this->public_provider_point_name( $point, $raw );
+		$point_title = $this->provider_presentation_value( $raw, 'point_title' );
+		if ( '' === $point_title ) {
+			$point_title = $title;
+		}
+		$card_title = $this->provider_presentation_value( $raw, 'card_title' );
+		if ( '' === $card_title ) {
+			$card_title = $point_title;
+		}
+		$display_code = $this->provider_presentation_value( $raw, 'display_code' );
+		$display_title = $this->provider_presentation_value( $raw, 'display_title' );
+		if ( '' === $display_title ) {
+			$display_title = trim( $card_title . ( '' !== $display_code ? ' ' . $display_code : '' ) );
+		}
+		$point_comment = trim( (string) $point->comment );
 		$snapshot = array(
 			'carrier_key' => $carrier,
 			'service_key' => '' !== trim( $service_key ) ? $service_key : $carrier,
@@ -456,8 +469,8 @@ final class CheckoutPickupPointRestController {
 			'point_id' => $point->code,
 			'point_type' => $type,
 			'point_type_label' => $title,
-			'point_title' => $title,
-			'card_title' => $title,
+			'point_title' => $point_title,
+			'card_title' => $card_title,
 			'point_name' => $point_name,
 			'point_address' => $point->address,
 			'address' => $point->address,
@@ -468,9 +481,12 @@ final class CheckoutPickupPointRestController {
 			'latitude' => $point->latitude,
 			'longitude' => $point->longitude,
 			'work_time' => $point->work_time,
-			'description' => $point->comment,
-			'presentation_comment' => $comment,
+			'description' => $point_comment,
+			'point_comment' => $point_comment,
+			'presentation_comment' => $presentation_comment,
 			'marker_type' => $marker_type,
+			'display_code' => $display_code,
+			'display_title' => $display_title,
 			'source' => in_array( $source, array( 'free', 'paid' ), true ) ? $source : '',
 			'location_id' => $location_id,
 			'country_code' => strtoupper( trim( $country_code ) ),
@@ -834,7 +850,8 @@ final class CheckoutPickupPointRestController {
 			'lat' => $point['lat'] ?? null,
 			'lng' => $point['lng'] ?? null,
 			'work_time' => (string) ( $point['work_time'] ?? '' ),
-			'description' => (string) ( $point['description'] ?? $point['point_comment'] ?? '' ),
+			'point_comment' => (string) ( $point['point_comment'] ?? '' ),
+			'description' => (string) ( $point['description'] ?? '' ),
 			'storage_notice' => (string) ( $point['storage_notice'] ?? '' ),
 		);
 
@@ -858,6 +875,7 @@ final class CheckoutPickupPointRestController {
 			'gar_object_id' => $snapshot['gar_object_id'],
 			'destination_fingerprint' => $snapshot['destination_fingerprint'],
 			'work_time' => $snapshot['work_time'],
+			'point_comment' => $snapshot['point_comment'],
 			'description' => $snapshot['description'],
 			'storage_notice' => $snapshot['storage_notice'],
 			'postcode' => $snapshot['postcode'],

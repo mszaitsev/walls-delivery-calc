@@ -511,6 +511,7 @@ final class CheckoutValidation {
 			'gar_object_id' => $this->posted_string( $data, 'wdc_pickup_gar_object_id' ),
 			'destination_fingerprint' => $this->posted_string( $data, 'wdc_pickup_destination_fingerprint' ),
 			'work_time' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_work_time' ) ),
+			'point_comment' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_point_comment' ) ),
 			'description' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_description' ) ),
 			'storage_notice' => $storage_notice,
 			'cdek_code' => $this->posted_string( $data, 'wdc_pickup_cdek_code' ) ?: $point_code,

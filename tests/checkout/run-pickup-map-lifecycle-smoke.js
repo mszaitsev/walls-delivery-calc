@@ -228,7 +228,9 @@ function createHarness(api) {
 							setActivePoint(pointId) {
 								calls.push(['setActivePoint', pointId]);
 							},
-							openPointPopup() {},
+							openPointPopup(point, html) {
+								calls.push(['openPointPopup', point, html]);
+							},
 							closePopup() {},
 							onPointClick(callback) {
 								this.pointClick = callback;
@@ -908,6 +910,98 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	await harness.map.search('Address p06403');
 	assert.strictEqual(pointRequests, 1, 'fixed-area local search must use the loaded source array');
 	assert(harness.list.innerHTML.includes('p06403'), 'fixed-area local search must find points outside the initially rendered DOM window');
+	harness.map.destroy();
+}
+
+async function manualFixedDatasetKeepsTitleCommentAndSingleRequest() {
+	let pointRequests = 0;
+	const manualPoint = {
+		id: 'manual-a-1',
+		point_code: 'manual-a-1',
+		point_title: 'Тестовый ПВЗ',
+		card_title: 'Тестовый ПВЗ',
+		point_name: 'Тестовый ПВЗ',
+		point_type_label: 'Пункт выдачи',
+		display_title: 'Тестовый ПВЗ',
+		display_code: '',
+		address: 'Красный проспект, 1',
+		work_time: '10:00-20:00',
+		point_comment: 'Отличный ПВЗ',
+		description: 'Отличный ПВЗ',
+		presentation_comment: '',
+		snapshot: {
+			point_code: 'manual-a-1',
+			point_title: 'Тестовый ПВЗ',
+			card_title: 'Тестовый ПВЗ',
+			point_type_label: 'Пункт выдачи',
+			display_title: 'Тестовый ПВЗ',
+			display_code: '',
+			point_comment: 'Отличный ПВЗ',
+			description: 'Отличный ПВЗ',
+			presentation_comment: ''
+		}
+	};
+	const api = {
+		context: {
+			carrier: 'manual',
+			pickup_family: 'manual:manual_pickup_a:pickup',
+			reload_on_viewport_change: false
+		},
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve([manualPoint]);
+		}
+	};
+	const harness = createHarness(api);
+	await wait(120);
+	assert.strictEqual(pointRequests, 1, 'manual fixed pickup dataset must perform exactly one initial points request');
+	assert(harness.list.innerHTML.includes('Тестовый ПВЗ'), 'manual point list must use the admin title as the customer-facing title');
+	assert(!harness.list.innerHTML.includes('Пункт выдачи manual-a-1'), 'manual point list must not expose the stable technical code as title');
+	assert.strictEqual((harness.list.innerHTML.match(/Отличный ПВЗ/g) || []).length, 1, 'manual point list must render the ordinary comment exactly once');
+	assert(harness.list.innerHTML.includes('wdc-pickup-list__comment') && harness.list.innerHTML.includes('Комментарий:'), 'manual point list must render the ordinary comment with a semantic label');
+	harness.provider().fireBounds('37.1,55.1,38.1,56.1');
+	harness.provider().fireBounds('37.0,55.0,38.2,56.2');
+	await wait(320);
+	assert.strictEqual(pointRequests, 1, 'manual fixed pickup dataset must not be reloaded after viewport changes');
+	harness.provider().pointClick(manualPoint);
+	await wait(20);
+	const popupHtml = (harness.calls.filter((call) => call[0] === 'openPointPopup').pop() || [])[2] || '';
+	assert(popupHtml.includes('Тестовый ПВЗ'), 'manual point popup must use the admin title');
+	assert(!popupHtml.includes('Пункт выдачи manual-a-1'), 'manual point popup must not expose the stable technical code as title');
+	assert.strictEqual((popupHtml.match(/Отличный ПВЗ/g) || []).length, 1, 'manual point popup must render the ordinary comment exactly once');
+	assert(popupHtml.includes('Комментарий:'), 'manual point popup must label ordinary comments as comments');
+	assert(!popupHtml.includes('Описание:</strong><span>Отличный ПВЗ'), 'manual point popup must not duplicate ordinary comments as description');
+	await harness.map.search('Отличный');
+	assert.strictEqual(pointRequests, 1, 'manual fixed pickup dataset search must use the loaded local array instead of address search or duplicate points calls');
+	assert(harness.list.innerHTML.includes('Тестовый ПВЗ'), 'manual fixed dataset local search must keep the matching point in the list');
+	harness.map.destroy();
+}
+
+async function presentationCommentStaysSeparateWhenDistinct() {
+	const genericPoint = {
+		id: 'warning-1',
+		point_code: 'warning-1',
+		point_title: 'ПВЗ с предупреждением',
+		display_title: 'ПВЗ с предупреждением',
+		address: 'Адрес',
+		lat: 55.75,
+		lng: 37.61,
+		point_comment: 'Обычный комментарий',
+		description: 'Обычный комментарий',
+		presentation_comment: 'Важное предупреждение'
+	};
+	const api = {
+		context: { carrier: 'generic', reload_on_viewport_change: false },
+		points: () => Promise.resolve([genericPoint])
+	};
+	const harness = createHarness(api);
+	await wait(120);
+	harness.provider().pointClick(genericPoint);
+	await wait(20);
+	const popupHtml = (harness.calls.filter((call) => call[0] === 'openPointPopup').pop() || [])[2] || '';
+	assert(popupHtml.includes('Важное предупреждение'), 'distinct presentation_comment must remain available as an accent message');
+	assert(popupHtml.includes('Обычный комментарий'), 'ordinary point_comment must remain available alongside a distinct presentation comment');
+	assert.strictEqual((popupHtml.match(/Обычный комментарий/g) || []).length, 1, 'ordinary point_comment must not duplicate as description when point_comment is present');
 	harness.map.destroy();
 }
 
@@ -1790,7 +1884,7 @@ async function run() {
 		&& checkoutSource.includes('function withRateCapabilities(context, method)')
 		&& checkoutSource.includes('var contextPromise = refreshCheckoutContextOnce(700, { returnContext: true })')
 		&& checkoutSource.includes('return freshContext || initialContext();')
-		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method)')
+		&& checkoutSource.includes('withRateCapabilities(withPrefetch(withCarrierContext(baseContext, method), method), method)')
 		&& checkoutSource.includes('function prefetchIdentity(context, method)')
 		&& checkoutSource.includes('function prefetchIdentityMatches(cached, current)')
 		&& checkoutSource.includes('function pointPrefetchAllowed(method)')
@@ -1853,6 +1947,8 @@ async function run() {
 	await geolocationResponseDoesNotAutoFit();
 	await destroyAfterAddressSearchPreventsLatePointsMutation();
 	await fixedAreaLargeDatasetDoesNotReloadOnViewportChange();
+	await manualFixedDatasetKeepsTitleCommentAndSingleRequest();
+	await presentationCommentStaysSeparateWhenDistinct();
 	await viewportFilteredFixedDatasetUpdatesListWithoutLoader();
 	console.log('Pickup map lifecycle smoke OK');
 }
