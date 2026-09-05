@@ -105,12 +105,11 @@ final class CheckoutPickupPointRestController {
 		$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
 		$carrier = $this->carrier_from_request( $request, $method_id );
 		$selection_intent = $this->selection_intent( $request );
-		if ( ! $this->is_supported_shipping_method( $method_id, $carrier ) ) {
-			return $this->error( 'unsupported_shipping_method', 'Pickup point can only be saved for supported pickup rates.', 400 );
-		}
-
 		if ( $this->is_registry_backed_carrier( $carrier ) ) {
 			return $this->save_registry_backed_selection( $request, $method_id, $carrier, $selection_intent );
+		}
+		if ( ! $this->is_supported_shipping_method( $method_id, $carrier ) ) {
+			return $this->error( 'unsupported_shipping_method', 'Pickup point can only be saved for supported pickup rates.', 400 );
 		}
 
 		if ( 'cdek' === $carrier && $this->cdek_points instanceof CdekDeliveryPointService ) {
@@ -389,17 +388,16 @@ final class CheckoutPickupPointRestController {
 
 	private function save_registry_backed_selection( mixed $request, string $method_id, string $carrier, string $selection_intent ): mixed {
 		$family = $this->session_manager->normalize_pickup_family( $this->param( $request, 'pickup_family' ) );
-		if ( '' === $family ) {
-			$family = $this->session_manager->shipping_method_family( $method_id );
-		}
 		try {
-			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );
+			$context = $this->provider_query_resolver->resolve_context( $method_id, $carrier, $family );
 		} catch ( \RuntimeException $exception ) {
 			$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
 			return $this->error( $code, 'Pickup rate context is invalid.', 400 );
 		} catch ( \Throwable ) {
 			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is invalid.', 400 );
 		}
+		$query = $context['query'];
+		$family = $context['pickup_family'];
 		$provider = $this->provider_registry?->get( $carrier );
 		if ( null === $provider ) {
 			return $this->error( 'pickup_provider_unavailable', 'Pickup provider is unavailable.', 503 );
@@ -415,7 +413,7 @@ final class CheckoutPickupPointRestController {
 		if ( ! $point instanceof PickupPoint || $point->code !== $code ) {
 			return $this->error( 'not_found', 'Pickup point not found.', 404 );
 		}
-		$fingerprint = $this->provider_query_resolver->destination_fingerprint( $method_id );
+		$fingerprint = (string) $context['destination_fingerprint'];
 		if ( '' === trim( $fingerprint ) ) {
 			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
 		}

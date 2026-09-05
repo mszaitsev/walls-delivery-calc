@@ -71,9 +71,11 @@
 				point = pointId;
 			}
 			if (point && typeof point === 'object') {
+				var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
 				payload.point = point;
 				payload.point_code = point.point_code || '';
 				payload.carrier = point.carrier_key || point.carrier || currentCarrier();
+				payload.pickup_family = point.pickup_family || snapshot.pickup_family || '';
 				payload.selection_intent = point.selection_intent || '';
 			} else {
 				payload.carrier = currentCarrier();

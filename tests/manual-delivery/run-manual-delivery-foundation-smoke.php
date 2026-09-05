@@ -495,6 +495,7 @@ use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
 use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
@@ -745,6 +746,29 @@ $cached_wc_rest = new PickupPointsRestController(
 );
 $cached_wc_points = $cached_wc_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
 wdc_manual_assert( is_array( $cached_wc_points ) && 1 === count( $cached_wc_points ) && 'manual-a-1' === (string) ( $cached_wc_points[0]['point_code'] ?? '' ), 'Pickup REST must return manual points from an authoritative cached WC rate even when wdc_platform_rates is empty.' );
+$cached_wc_selection_rest = new CheckoutPickupPointRestController(
+	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+	$empty_wdc_rates_session,
+	null,
+	null,
+	null,
+	null,
+	null,
+	$pickup_provider_registry,
+	$cached_wc_resolver,
+	new WooCommerceSessionBootstrapper()
+);
+$missing_family_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'point_id' => 'manual-a-1', 'point_code' => 'manual-a-1', 'selection_intent' => 'checkout' ) );
+wdc_manual_assert( is_array( $missing_family_save ) && 'manual:manual_pickup_a:pickup' === (string) ( $missing_family_save['active_pickup_family'] ?? '' ) && 'manual-a-1' === (string) ( $missing_family_save['pickup_selections']['manual:manual_pickup_a:pickup']['point_code'] ?? '' ), 'Manual pickup selection save must resolve the service-specific pickup family from authoritative rate metadata when the browser omits pickup_family.' );
+wdc_manual_assert( array() === $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a' ) && 'manual-a-1' === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['point_code'] ?? '' ), 'Manual pickup selection must be stored only under the canonical manual:<service>:pickup family, never the shipping method id bucket.' );
+$family_assertion_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual', 'shipping_method_id' => NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'point_id' => 'manual-a-1', 'point_code' => 'manual-a-1', 'selection_intent' => 'checkout' ) );
+wdc_manual_assert( is_array( $family_assertion_save ) && 'manual:manual_pickup_a:pickup' === (string) ( $family_assertion_save['active_pickup_family'] ?? '' ), 'Manual pickup selection save must accept a browser pickup_family assertion when it matches authoritative rate metadata.' );
+$wrong_family_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:other_service:pickup', 'point_id' => 'manual-a-1', 'point_code' => 'manual-a-1', 'selection_intent' => 'checkout' ) );
+wdc_manual_assert( is_array( $wrong_family_save ) && 'provider_rate_context_mismatch' === (string) ( $wrong_family_save['code'] ?? '' ), 'Manual pickup selection save must reject a browser pickup_family assertion for another manual service.' );
+$wrong_point_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'point_id' => 'manual-b-1', 'point_code' => 'manual-b-1', 'selection_intent' => 'checkout' ) );
+wdc_manual_assert( is_array( $wrong_point_save ) && 'not_found' === (string) ( $wrong_point_save['code'] ?? '' ), 'Manual pickup selection save must re-resolve the stable point code server-side and reject points owned by another manual service.' );
+$saved_state = $cached_wc_selection_rest->state( array( 'pickup_family' => 'manual:manual_pickup_a:pickup' ) );
+wdc_manual_assert( is_array( $saved_state ) && 'manual-a-1' === (string) ( $saved_state['selected_pickup_point']['point_code'] ?? '' ) && 'manual:manual_pickup_a:pickup' === (string) ( $saved_state['active_pickup_family'] ?? '' ), 'Checkout state must expose the manual point saved under the authoritative service-specific family.' );
 WC()->session = new WdcManualSmokeSession();
 $stale_wdc_rates_session = new CheckoutSessionManager();
 $stale_wdc_rates_session->save_rates(
@@ -1003,7 +1027,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.6' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.7' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1067,7 +1091,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.6' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.7' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1302,7 +1326,7 @@ wdc_manual_assert( ! str_contains( $manual_geo_source, 'location_id' ) && ! str_
 wdc_manual_assert( str_contains( $manual_pricing_source, 'billing_weight_g' ) && str_contains( $manual_pricing_source, 'price_per_kg_kopecks * $billing_weight_g' ) && ! str_contains( $manual_pricing_source, 'zone_id' ) && ! str_contains( $manual_pricing_source, 'dbDelta' ), 'Manual pricing must be carrier-owned, integer based, zone-free, and must not create runtime schema.' );
 wdc_manual_assert( str_contains( $manual_pickup_source, 'wdc_manual_delivery_pickup_points' ) && str_contains( $manual_pickup_source, 'service_key' ) && ! str_contains( $manual_pickup_source, 'manual_service_key' ) && ! str_contains( $manual_pickup_source, 'dbDelta' ), 'Manual pickup storage/provider must be manual-owned, service-key aware, and must not create runtime schema.' );
 wdc_manual_assert( str_contains( $pickup_query_source, 'service_key' ) && str_contains( $pickup_query_source, 'normalized_service_key' ) && ! str_contains( $pickup_query_source, 'manual_service_key' ), 'Pickup provider query must expose generic service_key context, not a manual-specific browser authority.' );
-wdc_manual_assert( str_contains( $pickup_rest_source, "\$this->param( \$request, 'pickup_family' )" ) && str_contains( $pickup_rest_source, '$this->provider_query_resolver->resolve( $method_id, $carrier, $family )' ), 'Checkout pickup selection save must use the trusted rate pickup family context for service-specific provider queries.' );
+wdc_manual_assert( str_contains( $pickup_rest_source, "\$this->param( \$request, 'pickup_family' )" ) && str_contains( $pickup_rest_source, '$this->provider_query_resolver->resolve_context( $method_id, $carrier, $family )' ), 'Checkout pickup selection save must derive service-specific provider family from trusted rate metadata, not the shipping method id heuristic.' );
 wdc_manual_assert( str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_region_search" ) && str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_location_search" ) && str_contains( $admin_source, "current_user_can( AdminMenu::CAPABILITY )" ) && str_contains( $admin_source, "check_ajax_referer( 'wdc_manual_delivery_geography', 'nonce', false )" ), 'Manual geography admin search must use capability and nonce protected AJAX.' );
 wdc_manual_assert( str_contains( $admin_source, 'manual_pricing_mode_options' ) && str_contains( $admin_source, 'manual_weight_ranges_from_post' ) && str_contains( $admin_source, 'manual_delivery_weight_ranges->validate_ranges' ) && str_contains( $admin_source, 'wdc_manual_pricing_notice' ), 'Manual pricing admin UI/save must expose typed modes and validate ranges before replacing stored rows.' );
 wdc_manual_assert( str_contains( $admin_source, 'resolve_active_by_place_and_region' ) && str_contains( $admin_source, "'country_code' => strtoupper( trim( \$canonical->country_code ) )" ) && str_contains( $admin_source, "'location_name' => \$canonical->resolved_place_name()" ) && str_contains( $admin_source, "'region_name' => \$canonical->region_name" ) && str_contains( $admin_source, 'name="manual_locations[]"' ) && ! str_contains( $admin_source, 'name="manual_location_ids[]"' ), 'Manual geography admin save must canonicalize locations server-side as country_code plus location_name plus region_name, not location ID.' );

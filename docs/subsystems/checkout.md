@@ -2,7 +2,7 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.152.6
+Version: 0.152.7
 
 Manual pickup points use the shared registry-backed pickup picker. Registry payloads keep `point_title/card_title/display_title` as the customer-facing point name, `point_type_label` as the point type, `point_code` as stable selection identity, and `point_comment` as the ordinary customer comment. `presentation_comment` remains reserved for distinct carrier-specific accent messages. Manual pickup rates declare `reload_on_viewport_change=false` through the existing pickup capability metadata because their local DB dataset is fixed by service and canonical locality.
 

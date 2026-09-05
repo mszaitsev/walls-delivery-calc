@@ -1,8 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.6
+Version: 0.152.7
 
-0.152.6 keeps the pickup framework generic while fixing manual pickup presentation. Registry provider payloads must not collapse point type label, customer-facing title, display code, and comment into one field. Manual pickup repositories keep the stable code as provider selection identity, expose the admin title as `point_title/card_title/display_title`, leave `display_code` empty unless a carrier deliberately wants a customer-visible code, and use ordinary `point_comment`/`description` without duplicating it as `presentation_comment`.
+0.152.7 keeps the pickup framework generic while fixing manual pickup selection persistence. Registry-backed save flows must derive `pickup_family`, provider query, and destination fingerprint from authoritative rate metadata instead of parsing the shipping method id; browser family/carrier values are assertions and mismatches fail closed.
 
 0.152.4 keeps the fix generic in Pickup Framework boundaries: `CarrierPickupPointQuery` owns destination locator validity, checkout provider resolution reuses that contract, and cold checkout pickup capability discovery reads rendered rate DOM before hiding selectors. No manual-specific renderer, REST endpoint, fake location ID, or Shipment Framework branch is added.
 

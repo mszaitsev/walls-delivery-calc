@@ -17,6 +17,13 @@ final class CheckoutPickupPointProviderQueryResolver {
 	}
 
 	public function resolve( string $shipping_method_id, string $carrier_key, string $pickup_family ): CarrierPickupPointQuery {
+		return $this->resolve_context( $shipping_method_id, $carrier_key, $pickup_family )['query'];
+	}
+
+	/**
+	 * @return array{query:CarrierPickupPointQuery,pickup_family:string,destination_fingerprint:string}
+	 */
+	public function resolve_context( string $shipping_method_id, string $carrier_key, string $pickup_family = '' ): array {
 		$rate = $this->rate( $shipping_method_id );
 		if ( array() === $rate ) {
 			throw new RuntimeException( 'provider_rate_context_missing' );
@@ -24,7 +31,8 @@ final class CheckoutPickupPointProviderQueryResolver {
 		$meta = $this->rate_meta( $rate );
 		$rate_carrier = (string) ( $rate['carrier_key'] ?? $meta['carrier_key'] ?? '' );
 		$rate_service = (string) ( $rate['service_key'] ?? $meta['service_key'] ?? '' );
-		$rate_family = (string) ( $rate['pickup_family'] ?? $meta['pickup_family'] ?? '' );
+		$rate_family = $this->session_manager->normalize_pickup_family( (string) ( $rate['pickup_family'] ?? $meta['pickup_family'] ?? '' ) );
+		$requested_family = $this->session_manager->normalize_pickup_family( $pickup_family );
 		$rate_delivery_type = (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' );
 		$requires_pickup = $rate['requires_pickup_point'] ?? ( $meta['requires_pickup_point'] ?? false );
 		$root_service_normalized = strtolower( preg_replace( '/[^a-z0-9_\-]+/', '', trim( (string) ( $rate['service_key'] ?? '' ) ) ) ?? '' );
@@ -35,7 +43,9 @@ final class CheckoutPickupPointProviderQueryResolver {
 			|| 'pickup' !== $rate_delivery_type
 			|| $rate_carrier !== $carrier_key
 			|| '' === $rate_service_normalized
-			|| $rate_family !== $pickup_family
+			|| '' === $rate_family
+			|| ! str_ends_with( $rate_family, ':pickup' )
+			|| ( '' !== $requested_family && $rate_family !== $requested_family )
 		) {
 			throw new RuntimeException( 'provider_rate_context_mismatch' );
 		}
@@ -55,7 +65,11 @@ final class CheckoutPickupPointProviderQueryResolver {
 			if ( ! $query instanceof CarrierPickupPointQuery || array() !== $query->validate() || $query->normalized_carrier_key() !== $carrier_key ) {
 				throw new RuntimeException( 'provider_rate_context_missing' );
 			}
-			return $query;
+			return array(
+				'query' => $query,
+				'pickup_family' => $rate_family,
+				'destination_fingerprint' => (string) ( $snapshot['destination_fingerprint'] ?? '' ),
+			);
 		}
 		if ( ! $this->valid_snapshot( $snapshot, $rate_carrier, $carrier_key ) ) {
 			throw new RuntimeException( 'provider_rate_context_missing' );
@@ -86,7 +100,11 @@ final class CheckoutPickupPointProviderQueryResolver {
 			throw new RuntimeException( 'provider_rate_context_missing' );
 		}
 
-		return $query;
+		return array(
+			'query' => $query,
+			'pickup_family' => $rate_family,
+			'destination_fingerprint' => (string) ( $snapshot['destination_fingerprint'] ?? '' ),
+		);
 	}
 
 	public function destination_fingerprint( string $shipping_method_id ): string {
