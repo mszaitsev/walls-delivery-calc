@@ -460,6 +460,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
+use WallsShop\WDC\Checkout\WooCommerce\PickupFamilyResolver;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
@@ -473,9 +474,11 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -735,6 +738,12 @@ WC()->shipping()->set_packages(
 	)
 );
 wdc_manual_assert( 'manual:manual_pickup_a:pickup' === (string) ( WooCommerceRateMetaNormalizer::meta( $cached_wc_rate )['pickup_family'] ?? '' ), 'Reusable WooCommerce rate meta normalizer must unwrap real WC meta objects for manual pickup family context.' );
+$implicit_family_rate = new DeliveryRate( 'manual:manual_pickup_implicit', 'manual', 'Manual', 'manual_pickup_implicit', 'Manual implicit', 'manual', 'Manual implicit', DeliveryType::PICKUP, 'Manual implicit', Money::from_rubles( 400 ), null, null, DateRange::range( 1, 1 ), '', '', array(), false, '', true );
+$implicit_family_wc_rate = $rate_mapper->map( $implicit_family_rate );
+wdc_manual_assert( 'manual:manual_pickup_implicit:pickup' === (string) ( $implicit_family_wc_rate['meta_data']['pickup_family'] ?? '' ) && 'manual:manual_pickup_implicit:pickup' === PickupFamilyResolver::from_delivery_rate( $implicit_family_rate ), 'WooCommerceRateMapper must derive multi-service pickup family from carrier_key + service_key when explicit pickup_family metadata is absent.' );
+$explicit_family_rate = new DeliveryRate( 'x:y', 'x', 'Carrier X', 'y', 'Service Y', 'pickup', 'Pickup', DeliveryType::PICKUP, 'Pickup', Money::from_rubles( 400 ), null, null, DateRange::range( 1, 1 ), '', '', array(), false, '', true, false, array( 'pickup_family' => 'x:special:pickup' ) );
+wdc_manual_assert( 'x:special:pickup' === (string) ( $rate_mapper->map( $explicit_family_rate )['meta_data']['pickup_family'] ?? '' ), 'Explicit pickup_family metadata must win over carrier_key + service_key fallback.' );
+wdc_manual_assert( 'cdek:pickup' === PickupFamilyResolver::from_meta( array( 'carrier_key' => 'cdek', 'service_key' => 'cdek', 'delivery_type' => DeliveryType::PICKUP, 'requires_pickup_point' => true ), 'cdek:pickup' ), 'Single-service pickup carriers must keep carrier:pickup family fallback.' );
 WC()->session = new WdcManualSmokeSession();
 $empty_wdc_rates_session = new CheckoutSessionManager();
 $empty_wdc_rates_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 10, 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) );
@@ -808,9 +817,33 @@ wdc_manual_assert( str_contains( $updated_checkout_manual_pickup_html, 'Тест
 wdc_manual_assert( true === $empty_wdc_rates_session->valid_pickup_selection_for_checkout( 'manual:manual_pickup_a:pickup' ) && 'manual-a-1' === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['point_code'] ?? '' ), 'Manual same-destination updated_checkout simulation must not clear the saved pickup selection.' );
 $post_update_state = $cached_wc_selection_rest->state( array( 'pickup_family' => 'manual:manual_pickup_a:pickup' ) );
 wdc_manual_assert( is_array( $post_update_state ) && 'manual-a-1' === (string) ( $post_update_state['selected_pickup_point']['point_code'] ?? '' ), 'Checkout state must still return the selected manual pickup point after same-destination updated_checkout simulation.' );
+$wc_rate_without_explicit_family_meta = $wc_rate['meta_data'];
+unset( $wc_rate_without_explicit_family_meta['pickup_family'] );
+if ( is_array( $wc_rate_without_explicit_family_meta['rate_meta'] ?? null ) ) {
+	unset( $wc_rate_without_explicit_family_meta['rate_meta']['pickup_family'] );
+}
+$cached_wc_rate_without_explicit_family = new WC_Shipping_Rate( $wc_rate['id'], (string) $wc_rate['label'], (string) $wc_rate['cost'], $wc_rate_without_explicit_family_meta );
+WC()->shipping()->set_packages(
+	array(
+		array(
+			'rates' => array(
+				NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'] => $cached_wc_rate_without_explicit_family,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'] ) );
+wdc_manual_assert( 'manual:manual_pickup_a:pickup' === PickupFamilyResolver::from_meta( WooCommerceRateMetaNormalizer::meta( $cached_wc_rate_without_explicit_family ), $wc_rate['id'] ), 'Canonical pickup family resolver must rebuild manual service-specific family from cached WC rate carrier/service metadata when explicit pickup_family is absent.' );
+ob_start();
+( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate_without_explicit_family, 0 );
+$missing_family_reload_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $missing_family_reload_html, 'Тестовый ПВЗ' ) && str_contains( $missing_family_reload_html, 'Изменить пункт выдачи' ) && ! str_contains( $missing_family_reload_html, 'manual:pickup' ), 'CheckoutRateRenderer must show the selected manual card after reload from carrier/service pickup capability without using manual:pickup.' );
+$missing_family_state = $cached_wc_selection_rest->state();
+wdc_manual_assert( is_array( $missing_family_state ) && 'manual:manual_pickup_a:pickup' === (string) ( $missing_family_state['active_pickup_family'] ?? '' ) && 'manual-a-1' === (string) ( $missing_family_state['selected_pickup_point']['point_code'] ?? '' ), 'Checkout state after reload must resolve active manual pickup family from actual WC rate metadata and return the existing selected point.' );
+wdc_manual_assert( 'manual-a-1' === (string) ( $missing_family_state['pickup_selections']['manual:manual_pickup_a:pickup']['point_code'] ?? '' ) && ! array_key_exists( 'manual:pickup', $missing_family_state['pickup_selections'] ?? array() ), 'Picker/card/state must agree on the exact service-specific manual pickup family without creating a manual:pickup bucket.' );
 $reload_session_manager = new CheckoutSessionManager( $location_fingerprint );
 ob_start();
-( new CheckoutRateRenderer( $reload_session_manager ) )->render( $cached_wc_rate, 0 );
+( new CheckoutRateRenderer( $reload_session_manager ) )->render( $cached_wc_rate_without_explicit_family, 0 );
 $reloaded_manual_pickup_html = (string) ob_get_clean();
 wdc_manual_assert( str_contains( $reloaded_manual_pickup_html, 'Тестовый ПВЗ' ) && str_contains( $reloaded_manual_pickup_html, 'Изменить пункт выдачи' ), 'Manual pickup card must survive a same-session page reload with the same checkout destination.' );
 wdc_manual_assert( true === $reload_session_manager->valid_pickup_selection_for_checkout( 'manual:manual_pickup_a:pickup' ), 'Manual pickup selection must remain valid after a same-session page reload.' );
@@ -1096,7 +1129,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.10' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.11' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1160,7 +1193,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.10' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.11' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

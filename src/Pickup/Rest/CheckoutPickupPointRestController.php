@@ -13,6 +13,8 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPoi
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\PickupFamilyResolver;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMetaNormalizer;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
@@ -915,7 +917,12 @@ final class CheckoutPickupPointRestController {
 			return '';
 		}
 		foreach ( $chosen as $method ) {
-			$family = $this->session_manager->shipping_method_family( (string) $method );
+			$method_id = $this->normalize_shipping_method_id( (string) $method );
+			$rate = $this->rate_for_shipping_method( $method_id );
+			$family = array() !== $rate ? PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $method_id ) : '';
+			if ( '' === $family ) {
+				$family = $this->session_manager->shipping_method_family( $method_id );
+			}
 			if ( str_ends_with( $family, ':pickup' ) ) {
 				return $family;
 			}
@@ -1146,7 +1153,9 @@ final class CheckoutPickupPointRestController {
 	private function is_supported_shipping_method( string $method_id, string $carrier ): bool {
 		if ( 'cdek' === $carrier ) {
 			if ( ! $this->cdek_points instanceof CdekDeliveryPointService ) {
-				return str_ends_with( $this->session_manager->shipping_method_family( $method_id ), ':pickup' );
+				$rate = $this->rate_for_shipping_method( $method_id );
+				$family = array() !== $rate ? PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $method_id ) : $this->session_manager->shipping_method_family( $method_id );
+				return str_ends_with( $family, ':pickup' );
 			}
 			return $this->is_cdek_pickup_rate( $this->rate_for_shipping_method( $method_id ), $method_id );
 		}
@@ -1154,7 +1163,9 @@ final class CheckoutPickupPointRestController {
 			return RussianPostDomesticSettings::is_pickup_rate_id( $method_id );
 		}
 
-		return str_ends_with( $this->session_manager->shipping_method_family( $method_id ), ':pickup' );
+		$rate = $this->rate_for_shipping_method( $method_id );
+		$family = array() !== $rate ? PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $method_id ) : $this->session_manager->shipping_method_family( $method_id );
+		return str_ends_with( $family, ':pickup' );
 	}
 
 	/**
@@ -1162,6 +1173,10 @@ final class CheckoutPickupPointRestController {
 	 */
 	private function rate_for_shipping_method( string $method_id ): array {
 		$method_id = $this->session_manager->normalize_rate_id( $method_id );
+		$woocommerce_rate = $this->woocommerce_rate( $method_id );
+		if ( array() !== $woocommerce_rate ) {
+			return $woocommerce_rate;
+		}
 		$rates = $this->session_manager->rates();
 		if ( isset( $rates[ $method_id ] ) && is_array( $rates[ $method_id ] ) ) {
 			return $rates[ $method_id ];
@@ -1173,6 +1188,34 @@ final class CheckoutPickupPointRestController {
 			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
 			if ( $rate_id === $method_id ) {
 				return $rate;
+			}
+		}
+
+		return array();
+	}
+
+	/** @return array<string,mixed> */
+	private function woocommerce_rate( string $normalized_rate_id ): array {
+		if ( '' === $normalized_rate_id || ! function_exists( 'WC' ) || ! is_object( WC() ) || ! method_exists( WC(), 'shipping' ) ) {
+			return array();
+		}
+		$shipping = WC()->shipping();
+		if ( ! is_object( $shipping ) || ! method_exists( $shipping, 'get_packages' ) ) {
+			return array();
+		}
+		$packages = $shipping->get_packages();
+		if ( ! is_array( $packages ) ) {
+			return array();
+		}
+		foreach ( $packages as $package ) {
+			if ( ! is_array( $package ) || ! is_array( $package['rates'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $package['rates'] as $key => $rate ) {
+				$rate_id = $this->session_manager->normalize_rate_id( WooCommerceRateMetaNormalizer::rate_id( $rate, (string) $key ) );
+				if ( $rate_id === $normalized_rate_id ) {
+					return WooCommerceRateMetaNormalizer::rate_snapshot( $rate, (string) $key );
+				}
 			}
 		}
 
@@ -1192,7 +1235,7 @@ final class CheckoutPickupPointRestController {
 			&& CdekSettings::SERVICE_KEY === (string) ( $rate['service_key'] ?? $meta['service_key'] ?? CdekSettings::SERVICE_KEY )
 			&& 'pickup' === (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' )
 			&& ! empty( $rate['requires_pickup_point'] )
-			&& CdekSettings::CARRIER_KEY . ':pickup' === $this->session_manager->shipping_method_family( $method_id );
+			&& CdekSettings::CARRIER_KEY . ':pickup' === PickupFamilyResolver::from_meta( array_replace( $meta, $rate ), $method_id );
 	}
 
 	/**

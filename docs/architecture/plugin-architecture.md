@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.10
+Version: 0.152.11
+
+0.152.11 adds one generic pickup-family resolver for rate metadata. Presentation, WooCommerce mapping, provider context, and checkout state use explicit `pickup_family` first, then `carrier_key + service_key` for multi-service pickup carriers, with the legacy rate-id parser only as fallback.
 
 0.152.10 keeps post-selection recalculation generic and provider-owned. `CheckoutPickupPointRestController` reads `requires_rate_refresh` only from the server-resolved provider `PickupPoint::raw_reference`, defaults missing capability to `true`, and manual pickup declares `false` because selecting a manual point does not affect pricing.
 

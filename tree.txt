@@ -617,6 +617,7 @@ C:.
 |   |           NewShippingMethod.php
 |   |           OrderDeliveryCustomerCommentsDisplay.php
 |   |           OrderShippingMetaPersister.php
+|   |           PickupFamilyResolver.php
 |   |           PickupMapCheckout.php
 |   |           PickupPointOrderDisplay.php
 |   |           PickupPointRenderer.php

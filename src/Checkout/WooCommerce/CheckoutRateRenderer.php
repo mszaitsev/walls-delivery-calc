@@ -101,7 +101,7 @@ final class CheckoutRateRenderer {
 
 	private function render_yandex_5post_warning( array $meta, mixed $method ): void {
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
-		$family = $this->session_manager->normalize_pickup_family( (string) ( $meta['pickup_family'] ?? $this->session_manager->shipping_method_family( $rate_id ) ) );
+		$family = PickupFamilyResolver::from_meta( $meta, $rate_id );
 		if ( 'yandex_pickup' !== $this->session_manager->normalize_rate_id( $rate_id ) || 'yandex_delivery:pickup' !== $family ) {
 			return;
 		}
@@ -133,8 +133,7 @@ final class CheckoutRateRenderer {
 		}
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
-		$family = trim( (string) ( $meta['pickup_family'] ?? '' ) );
-		$family = '' !== $family ? $this->session_manager->normalize_pickup_family( $family ) : $this->session_manager->shipping_method_family( $rate_id );
+		$family = PickupFamilyResolver::from_meta( $meta, $rate_id );
 		$selection = $this->session_manager->checkout_pickup_point_for_family( $family );
 		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id, $family );
 		$has_selection = $matches

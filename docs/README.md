@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.10
+Version: 0.152.11
+
+0.152.11 centralizes pickup-family derivation for rendered WooCommerce rates. Multi-service pickup carriers now rebuild canonical families from `carrier_key + service_key` when explicit `pickup_family` metadata is missing, so manual selections saved under `manual:<service_key>:pickup` rehydrate consistently after checkout reloads.
 
 0.152.10 makes registry-backed pickup rate refresh provider-owned. Manual pickup points explicitly declare `requires_rate_refresh=false`, so selecting a manual point does not force an immediate WooCommerce checkout recalculation; providers that omit the flag keep the backward-compatible `true` default.
 

@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Pickup\Providers;
 
 use RuntimeException;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\PickupFamilyResolver;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMetaNormalizer;
 
 defined( 'ABSPATH' ) || exit;
@@ -31,7 +32,7 @@ final class CheckoutPickupPointProviderQueryResolver {
 		$meta = $this->rate_meta( $rate );
 		$rate_carrier = (string) ( $rate['carrier_key'] ?? $meta['carrier_key'] ?? '' );
 		$rate_service = (string) ( $rate['service_key'] ?? $meta['service_key'] ?? '' );
-		$rate_family = $this->session_manager->normalize_pickup_family( (string) ( $rate['pickup_family'] ?? $meta['pickup_family'] ?? '' ) );
+		$rate_family = PickupFamilyResolver::from_meta( array_replace( $meta, $rate ), $shipping_method_id );
 		$requested_family = $this->session_manager->normalize_pickup_family( $pickup_family );
 		$rate_delivery_type = (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' );
 		$requires_pickup = $rate['requires_pickup_point'] ?? ( $meta['requires_pickup_point'] ?? false );

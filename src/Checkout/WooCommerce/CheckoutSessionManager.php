@@ -477,42 +477,15 @@ final class CheckoutSessionManager {
 	}
 
 	public function shipping_method_family( string $rate_id ): string {
-		$rate_id = $this->normalize_rate_id( $rate_id );
-		$parts = explode( ':', $rate_id );
-		$pickup_index = array_search( 'pickup', $parts, true );
-		if ( false !== $pickup_index && $pickup_index > 0 ) {
-			return $this->normalize_pickup_family( $parts[0] . ':pickup' );
-		}
-
-		if ( YandexDeliveryCarrier::PICKUP_RATE_ID === $rate_id ) {
-			return YandexDeliverySettings::CARRIER_KEY . ':pickup';
-		}
-		return $this->normalize_pickup_family( $rate_id );
+		return PickupFamilyResolver::legacy_from_rate_id( $rate_id );
 	}
 
 	public function normalize_carrier_key_for_pickup( string $carrier_key ): string {
-		$carrier_key = trim( $carrier_key );
-		if ( 'russian_post' === $carrier_key ) {
-			return RussianPostDomesticSettings::CARRIER_KEY;
-		}
-
-		return $carrier_key;
+		return PickupFamilyResolver::normalize_carrier( $carrier_key );
 	}
 
 	public function normalize_pickup_family( string $pickup_family ): string {
-		$pickup_family = trim( $pickup_family );
-		if ( '' === $pickup_family ) {
-			return '';
-		}
-		$parts = explode( ':', $pickup_family );
-		$carrier = $this->normalize_carrier_key_for_pickup( (string) ( $parts[0] ?? '' ) );
-		if ( '' === $carrier ) {
-			return $pickup_family;
-		}
-
-		$parts[0] = $carrier;
-
-		return implode( ':', $parts );
+		return PickupFamilyResolver::normalize_family( $pickup_family );
 	}
 
 	public function is_russian_post_pickup_family( string $rate_id ): bool {
