@@ -98,11 +98,7 @@ final class ManualDeliverySettings {
 		$minimum = array_key_exists( 'minimum_price_rub', $values )
 			? $this->optional_kopecks( $values['minimum_price_rub'], 'manual_tariff_minimum_invalid' )
 			: $existing['minimum_price_kopecks'];
-		$step_raw = (int) ( $values['billing_weight_step_g'] ?? $this->default_billing_weight_step( $mode ) );
-		if ( ! in_array( $step_raw, array( self::BILLING_STEP_NONE_G, self::BILLING_STEP_100_G, self::BILLING_STEP_500_G, self::BILLING_STEP_1_KG ), true ) ) {
-			throw new \InvalidArgumentException( 'manual_billing_weight_step_invalid' );
-		}
-		$step = $this->normalize_billing_weight_step( $step_raw, $mode );
+		$step = $this->billing_weight_step_from_values( $values, $mode );
 
 		if ( self::PRICING_MODE_FLAT === $mode && $flat < 0 ) {
 			throw new \InvalidArgumentException( 'manual_flat_price_invalid' );
@@ -179,6 +175,25 @@ final class ManualDeliverySettings {
 
 	public function default_billing_weight_step( string $mode ): int {
 		return self::PRICING_MODE_PER_KG === $mode ? self::BILLING_STEP_1_KG : self::BILLING_STEP_NONE_G;
+	}
+
+	/** @param array<string,mixed> $values */
+	private function billing_weight_step_from_values( array $values, string $mode ): int {
+		if ( self::PRICING_MODE_FLAT === $mode ) {
+			return $this->default_billing_weight_step( $mode );
+		}
+
+		$raw = $values['billing_weight_step_g'] ?? 0;
+		if ( '' === trim( (string) $raw ) || 0 === (int) $raw ) {
+			return $this->default_billing_weight_step( $mode );
+		}
+
+		$step = (int) $raw;
+		if ( ! in_array( $step, array( self::BILLING_STEP_NONE_G, self::BILLING_STEP_100_G, self::BILLING_STEP_500_G, self::BILLING_STEP_1_KG ), true ) ) {
+			throw new \InvalidArgumentException( 'manual_billing_weight_step_invalid' );
+		}
+
+		return $step;
 	}
 
 	private function required_kopecks( mixed $value, string $error_code ): int {

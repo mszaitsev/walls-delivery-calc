@@ -484,6 +484,7 @@ use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
@@ -535,11 +536,15 @@ function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsA
 	);
 }
 
-function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
+function runtime_smoke_request( string $delivery_type = '', int $weight_g = 0 ): QuoteRequest {
+	$items = $weight_g > 0
+		? array( new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight_g, 10, 10, 10 ) )
+		: array();
+
 	return new QuoteRequest(
 		'RU',
 		new Address( country_code: 'RU', city: 'Новосибирск' ),
-		Package::from_items( array(), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
+		Package::from_items( $items, 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
 		'',
 		Money::from_rubles( 1000 ),
 		'2026-05-21',
@@ -994,6 +999,7 @@ $service_cache_key_a = $quote_cache->cache_key( runtime_smoke_request(), 'demo',
 $service_cache_key_b = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_b' );
 runtime_smoke_assert( $service_cache_key_a !== $service_cache_key_b, 'Quote cache key must include service_key.' );
 runtime_smoke_assert( $service_cache_key_a === $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Quote cache key must remain stable per service.' );
+runtime_smoke_assert( $service_cache_key_a !== $quote_cache->cache_key( runtime_smoke_request( '', 2400 ), 'demo', '', 'service_a' ), 'Quote cache key must include package total weight so weight-based tariffs cannot reuse another weight.' );
 $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-a', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
 $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-b', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_b' );
 runtime_smoke_assert( 'quote-a' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' )?->quote_id, 'Quote cache hit must stay isolated for service_a.' );
@@ -1015,6 +1021,21 @@ runtime_smoke_assert( 2 === $deleted_quote_cache, 'DeliveryQuoteCacheManager mus
 runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_aaa', $GLOBALS['wpdb']->options ) && ! array_key_exists( '_transient_wdc_rp_tariff_bbb', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must delete WDC Russian Post quote/tariff cache transients.' );
 runtime_smoke_assert( array_key_exists( '_transient_wdc_pickup_search_ccc', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_dadata_ddd', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_foreign_quote', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must leave pickup, DaData, and foreign transients untouched.' );
 runtime_smoke_assert( null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'DeliveryQuoteCacheManager must invalidate runtime quote memory namespace.' );
+$GLOBALS['wdc_test_actions'] = array();
+$quote_cache_manager->register();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_cart_shipping_packages'] ), 'DeliveryQuoteCacheManager must add the global cache version to WooCommerce shipping packages.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_update_product'] ) && isset( $GLOBALS['wdc_test_actions']['woocommerce_update_product_variation'] ), 'DeliveryQuoteCacheManager must invalidate delivery cache after simple product and variation updates.' );
+$package_before_bump = $quote_cache_manager->add_cache_version_to_packages( array( array( 'contents' => array() ) ) );
+$version_before_product_update = $quote_cache_manager->delivery_rates_cache_version();
+$quote_cache_manager->invalidate_after_product_update( 123 );
+$version_after_product_update = $quote_cache_manager->delivery_rates_cache_version();
+runtime_smoke_assert( $version_before_product_update !== $version_after_product_update, 'Product update must bump the global delivery rates cache version.' );
+$package_after_product_update = $quote_cache_manager->add_cache_version_to_packages( array( array( 'contents' => array() ) ) );
+runtime_smoke_assert( ( $package_before_bump[0]['wdc_delivery_rates_cache_version'] ?? '' ) !== ( $package_after_product_update[0]['wdc_delivery_rates_cache_version'] ?? '' ), 'Package cache identity must change after delivery rates cache version bump.' );
+$quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-c', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
+$version_before_variation_update = $quote_cache_manager->delivery_rates_cache_version();
+$quote_cache_manager->invalidate_after_product_update( 456 );
+runtime_smoke_assert( $version_before_variation_update !== $quote_cache_manager->delivery_rates_cache_version() && null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Variation update must use the same carrier-neutral invalidation boundary and clear runtime quote cache.' );
 
 $admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager, runtime_smoke_shipment_cost_analytics_section() );
 $_SERVER['REQUEST_METHOD'] = 'GET';

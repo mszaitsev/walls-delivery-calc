@@ -389,6 +389,18 @@ wdc_manual_assert( 22500 === $carrier->quote( $request_for( 'manual_per_kg', 'RU
 wdc_manual_assert( array( 1000, 1000, 2000 ) === array( $manual_pricing_calculator->billing_weight_g( 999, 1000 ), $manual_pricing_calculator->billing_weight_g( 1000, 1000 ), $manual_pricing_calculator->billing_weight_g( 1001, 1000 ) ), 'Manual billing step 1000 g boundaries must round up with integer arithmetic.' );
 wdc_manual_assert( array( 500, 500, 1000 ) === array( $manual_pricing_calculator->billing_weight_g( 499, 500 ), $manual_pricing_calculator->billing_weight_g( 500, 500 ), $manual_pricing_calculator->billing_weight_g( 501, 500 ) ), 'Manual billing step 500 g boundaries must round up with integer arithmetic.' );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_per_kg', 'RU', 'Новосибирск', 'Новосибирская область', array(), 0 ) )->success, 'Manual per-kg pricing must fail closed when chargeable weight is zero.' );
+$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '321.45' ) );
+wdc_manual_assert( ManualDeliverySettings::PRICING_MODE_FLAT === $manual_settings->pricing( $per_kg_id )['pricing_mode'] && 32145 === $manual_settings->pricing( $per_kg_id )['flat_price_kopecks'], 'Manual flat save must not require a billing step field.' );
+$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'minimum_price_rub' => '', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_500_G ) );
+$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '322', 'billing_weight_step_g' => 0 ) );
+wdc_manual_assert( ManualDeliverySettings::PRICING_MODE_FLAT === $manual_settings->pricing( $per_kg_id )['pricing_mode'] && 32200 === $manual_settings->pricing( $per_kg_id )['flat_price_kopecks'], 'Manual flat save after per-kg must accept hidden zero billing step and persist the new flat price.' );
+try {
+	$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'billing_weight_step_g' => 250 ) );
+	wdc_manual_assert( false, 'Manual active per-kg mode must reject unsupported positive billing step.' );
+} catch ( InvalidArgumentException ) {
+	wdc_manual_assert( ManualDeliverySettings::PRICING_MODE_FLAT === $manual_settings->pricing( $per_kg_id )['pricing_mode'], 'Rejected per-kg billing step must not partially switch the active pricing mode.' );
+}
+$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'minimum_price_rub' => '', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG ) );
 
 $ranges_id = $services->create_service( array( 'service_key' => 'manual_ranges', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Ranges', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'deleted' => 0 ) );
 $countries->replace_countries( $ranges_id, array( 'RU' ) );
@@ -405,6 +417,15 @@ wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Но
 $manual_weight_ranges->replace_ranges( $ranges_id, array( new ManualDeliveryWeightRange( 0, 2000, 35000, 1 ), new ManualDeliveryWeightRange( 2000, 5000, 50000, 2 ) ) );
 $manual_settings->save_pricing( $ranges_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES, 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_500_G ) );
 wdc_manual_assert( 35000 === $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), 1901 ) )->rates[0]->price->get_kopecks() && 50000 === $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), 2001 ) )->rates[0]->price->get_kopecks(), 'Manual weight ranges must apply billing step before range matching.' );
+$manual_settings->save_pricing( $ranges_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '333', 'billing_weight_step_g' => 0 ) );
+wdc_manual_assert( ManualDeliverySettings::PRICING_MODE_FLAT === $manual_settings->pricing( $ranges_id )['pricing_mode'] && 33300 === $manual_settings->pricing( $ranges_id )['flat_price_kopecks'], 'Manual flat save after weight ranges must accept stale hidden billing step and persist the new flat price.' );
+try {
+	$manual_settings->save_pricing( $ranges_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES, 'billing_weight_step_g' => 250 ) );
+	wdc_manual_assert( false, 'Manual active weight-ranges mode must reject unsupported positive billing step.' );
+} catch ( InvalidArgumentException ) {
+	wdc_manual_assert( ManualDeliverySettings::PRICING_MODE_FLAT === $manual_settings->pricing( $ranges_id )['pricing_mode'], 'Rejected ranges billing step must not partially switch the active pricing mode.' );
+}
+$manual_settings->save_pricing( $ranges_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES, 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_NONE_G ) );
 $before_invalid_ranges = $manual_weight_ranges->ranges( $ranges_id );
 foreach ( array(
 	array( new ManualDeliveryWeightRange( 0, 2000, 10000 ), new ManualDeliveryWeightRange( 1000, 3000, 20000 ) ),

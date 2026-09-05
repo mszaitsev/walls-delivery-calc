@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.151.0
+Version: 0.151.1
+
+0.151.1 hardens the manual delivery pricing engine after live testing. Flat pricing ignores hidden or stale billing-step POST values and validates only the flat price, while active `per_kg` and `weight_ranges` modes still reject unsupported positive billing steps. WooCommerce simple product and variation updates now bump the shared delivery rates cache version, so package/session shipping caches become stale after product weight or dimension changes without adding manual-specific cache logic.
 
 0.151.0 adds the manual delivery pricing engine. Manual services still use one `manual` runtime carrier and country-aware geography, but pricing now supports `flat`, `per_kg`, and `weight_ranges`. Scalar tariff config remains in the existing `manual_pricing` JSON setting; weight ranges live in `wdc_manual_delivery_weight_ranges` with integer grams and integer kopecks. Billing weight is rounded up by `billing_weight_step_g`; per-kg pricing uses `price_per_kg_kopecks` per 1000 g and rounds to the nearest kopeck with integer arithmetic. Weight ranges use upper-inclusive boundaries (`from < billing_weight <= to`); gaps and zero weight make weight-based manual tariffs unavailable. The runtime order remains manual pricing engine -> Rule Engine -> DeliveryService post-processing.
 
