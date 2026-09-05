@@ -1915,7 +1915,12 @@ async function run() {
 	assert(checkoutSource.includes("Object.prototype.hasOwnProperty.call(point, 'requires_rate_refresh')")
 		&& checkoutSource.includes("Object.prototype.hasOwnProperty.call(snapshot, 'requires_rate_refresh')")
 		&& checkoutSource.includes("point.requires_rate_refresh === true")
+		&& checkoutSource.includes('if (true === options.updateCheckoutAfterSave) {')
+		&& checkoutSource.includes('commitPoint(point, method, { updateCheckoutAfterSave: requiresRateRefreshAfterPickupSave(point) });')
 		&& !checkoutSource.includes("family === 'ozon_delivery:pickup'"), 'pickup checkout refresh after save must use generic requires_rate_refresh capability without an Ozon-specific branch.');
+	assert(!checkoutSource.includes("carrier === 'manual'")
+		&& !checkoutSource.includes("carrier_key === 'manual'")
+		&& !checkoutSource.includes("pickupFamily(point) === 'manual:"), 'Manual pickup must rely on generic requires_rate_refresh metadata and must not add a frontend carrier branch.');
 	await checkoutInlineNoticeLatchLifecycle();
 	await destinationFingerprintChangeResetsLocalSelection();
 	await pickupRateCapabilitySurvivesCheckoutStateRefresh();

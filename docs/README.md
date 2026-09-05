@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.9
+Version: 0.152.10
+
+0.152.10 makes registry-backed pickup rate refresh provider-owned. Manual pickup points explicitly declare `requires_rate_refresh=false`, so selecting a manual point does not force an immediate WooCommerce checkout recalculation; providers that omit the flag keep the backward-compatible `true` default.
 
 0.152.9 makes manual pickup destination fingerprints use the same canonical checkout destination identity as `CheckoutSessionManager`. Manual pickup selections saved under `manual:<service_key>:pickup` now survive same-destination checkout refreshes and page reloads, while destination changes still invalidate stale selections.
 

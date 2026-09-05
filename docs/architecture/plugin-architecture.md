@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.9
+Version: 0.152.10
+
+0.152.10 keeps post-selection recalculation generic and provider-owned. `CheckoutPickupPointRestController` reads `requires_rate_refresh` only from the server-resolved provider `PickupPoint::raw_reference`, defaults missing capability to `true`, and manual pickup declares `false` because selecting a manual point does not affect pricing.
 
 0.152.9 keeps pickup destination identity generic by moving checkout location fingerprinting into `CheckoutLocationFingerprint`. `CheckoutSessionManager` and manual pickup rates use the same owner for `destination_fingerprint`; carriers must not invent their own stale-selection fingerprint algorithms.
 

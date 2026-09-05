@@ -157,7 +157,7 @@ final class ManualPickupPointRepository {
 				'marker_type' => 'pickup',
 				'display_code' => '',
 				'reload_on_viewport_change' => false,
-				'requires_rate_refresh' => true,
+				'requires_rate_refresh' => false,
 			)
 		);
 	}

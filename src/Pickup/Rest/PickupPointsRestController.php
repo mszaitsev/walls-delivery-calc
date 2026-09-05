@@ -473,7 +473,7 @@ final class PickupPointsRestController {
 		$comment = $this->registry_presentation_value( $raw, 'presentation_comment', '' );
 		$display_code = $this->registry_presentation_value( $raw, 'display_code', '' );
 		$display_title = $this->registry_presentation_value( $raw, 'display_title', trim( $card_title . ( '' !== $display_code ? ' ' . $display_code : '' ) ) );
-		$requires_rate_refresh = $this->registry_boolean_value( $raw, 'requires_rate_refresh' );
+		$requires_rate_refresh = array_key_exists( 'requires_rate_refresh', $raw ) ? $this->registry_boolean_value( $raw, 'requires_rate_refresh' ) : true;
 		$has_reload_on_viewport_change = array_key_exists( 'reload_on_viewport_change', $raw );
 		$reload_on_viewport_change = $has_reload_on_viewport_change ? $this->registry_boolean_value( $raw, 'reload_on_viewport_change' ) : null;
 		$snapshot = array(

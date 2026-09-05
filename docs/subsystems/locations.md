@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.152.9
+Version: 0.152.10
 
 Manual pickup provider lookup can be restored from the current WooCommerce shipping-rate metadata even when `wdc_platform_rates` has not been written on the same request. The locality identity is still textual and server-owned for manual point storage, while checkout selection freshness uses the shared canonical `CheckoutLocationFingerprint`: positive `location_id` wins when known, and `location_id=0` falls back to normalized `country + region + place`.
 

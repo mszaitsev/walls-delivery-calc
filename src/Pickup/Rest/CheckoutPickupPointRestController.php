@@ -310,6 +310,12 @@ final class CheckoutPickupPointRestController {
 		$operator_id = $this->first_text_value( $selection['operator_id'] ?? null, $snapshot['operator_id'] ?? null, $existing['operator_id'] ?? null, $existing_snapshot['operator_id'] ?? null );
 		$platform_station_id = $this->first_text_value( $selection['platform_station_id'] ?? null, $snapshot['platform_station_id'] ?? null, $existing['platform_station_id'] ?? null, $existing_snapshot['platform_station_id'] ?? null );
 		$selected_at = 'explicit' === $selection_intent ? gmdate( 'c' ) : $this->first_text_value( $existing['selected_at'] ?? null, $existing_snapshot['selected_at'] ?? null, $selection['selected_at'] ?? null, $snapshot['selected_at'] ?? null );
+		$requires_rate_refresh = true;
+		if ( array_key_exists( 'requires_rate_refresh', $selection ) ) {
+			$requires_rate_refresh = $this->payload_boolean_value( $selection['requires_rate_refresh'] );
+		} elseif ( array_key_exists( 'requires_rate_refresh', $snapshot ) ) {
+			$requires_rate_refresh = $this->payload_boolean_value( $snapshot['requires_rate_refresh'] );
+		}
 		$payload = array(
 			'carrier_key' => $carrier,
 			'carrier' => $carrier,
@@ -355,8 +361,10 @@ final class CheckoutPickupPointRestController {
 			'dpd_source' => (string) ( $selection['dpd_source'] ?? $selection['snapshot']['dpd_source'] ?? '' ),
 			'lat' => $selection['lat'] ?? null,
 			'lng' => $selection['lng'] ?? null,
+			'requires_rate_refresh' => $requires_rate_refresh,
 			'snapshot' => $snapshot ?: $selection,
 		);
+		$payload['snapshot']['requires_rate_refresh'] = $requires_rate_refresh;
 		if ( '' !== $selected_at ) {
 			$payload['selected_at'] = $selected_at;
 		}
@@ -459,6 +467,10 @@ final class CheckoutPickupPointRestController {
 			$display_title = trim( $card_title . ( '' !== $display_code ? ' ' . $display_code : '' ) );
 		}
 		$point_comment = trim( (string) $point->comment );
+		$requires_rate_refresh = true;
+		if ( array_key_exists( 'requires_rate_refresh', $raw ) ) {
+			$requires_rate_refresh = $this->provider_boolean_value( $raw, 'requires_rate_refresh' );
+		}
 		$snapshot = array(
 			'carrier_key' => $carrier,
 			'service_key' => '' !== trim( $service_key ) ? $service_key : $carrier,
@@ -490,12 +502,22 @@ final class CheckoutPickupPointRestController {
 			'country_code' => strtoupper( trim( $country_code ) ),
 			'destination_fingerprint' => $destination_fingerprint,
 			'provider_destination_fingerprint' => $destination_fingerprint,
-			'requires_rate_refresh' => true,
+			'requires_rate_refresh' => $requires_rate_refresh,
 			'validation_source' => 'provider_resolve_selection',
 			'selected_at' => gmdate( 'c' ),
 		);
 
 		return array_merge( $snapshot, array( 'id' => $point->code, 'snapshot' => $snapshot ) );
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function provider_boolean_value( array $raw, string $key ): bool {
+		$value = $raw[ $key ] ?? false;
+		return $this->payload_boolean_value( $value );
+	}
+
+	private function payload_boolean_value( mixed $value ): bool {
+		return true === $value || '1' === $value || 1 === $value || 'true' === $value;
 	}
 
 	/**

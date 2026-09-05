@@ -710,8 +710,12 @@ wdc_manual_assert( 'Тестовый ПВЗ' === (string) ( $manual_rest_point['
 wdc_manual_assert( '' === (string) ( $manual_rest_point['display_code'] ?? 'not-empty' ) && ! str_contains( (string) ( $manual_rest_point['display_title'] ?? '' ), 'manual-a-1' ), 'Manual pickup REST must keep the stable point code out of customer-facing title/display_code fields.' );
 wdc_manual_assert( 'Отличный ПВЗ' === (string) ( $manual_rest_point['point_comment'] ?? '' ) && 'Отличный ПВЗ' === (string) ( $manual_rest_point['description'] ?? '' ) && '' === (string) ( $manual_rest_point['presentation_comment'] ?? 'not-empty' ), 'Manual pickup REST must expose the normal admin comment once as point_comment/description without using presentation_comment.' );
 wdc_manual_assert( false === ( $manual_rest_point['reload_on_viewport_change'] ?? true ) && false === ( $manual_rest_point['snapshot']['reload_on_viewport_change'] ?? true ), 'Manual pickup REST payload must expose the generic fixed-dataset capability so the map does not reload local points on viewport changes.' );
+wdc_manual_assert( false === ( $manual_rest_point['requires_rate_refresh'] ?? true ) && false === ( $manual_rest_point['snapshot']['requires_rate_refresh'] ?? true ), 'Manual pickup REST payload must declare that selected manual points do not require checkout rate refresh.' );
 $manual_card_html = ( new PickupPointCardRenderer() )->render( $manual_rest_point, true, false, false );
 wdc_manual_assert( str_contains( $manual_card_html, 'Тестовый ПВЗ' ) && 1 === substr_count( $manual_card_html, 'Отличный ПВЗ' ) && str_contains( $manual_card_html, 'Комментарий:' ) && ! str_contains( $manual_card_html, 'Описание:</span> <span data-wdc-pickup-description-text>Отличный ПВЗ' ), 'Selected manual pickup card must render the admin comment once with the semantic Comment label.' );
+$registry_payload_reflector = new ReflectionMethod( PickupPointsRestController::class, 'registry_point_payload' );
+$default_refresh_rest_point = $registry_payload_reflector->invoke( $pickup_rest, new \WallsShop\WDC\Domain\Pickup\PickupPoint( 'demo', 'demo-1', 'Demo address', 'Новосибирск', 'Новосибирская область', '', null, null, 'pvz', '', '', null, true, array() ), 'demo', 'demo:pickup', 'country=RU|location_id=10', 10, 'RU' );
+wdc_manual_assert( true === ( $default_refresh_rest_point['requires_rate_refresh'] ?? false ) && true === ( $default_refresh_rest_point['snapshot']['requires_rate_refresh'] ?? false ), 'Registry-backed point REST payload must keep backward-compatible requires_rate_refresh=true when provider raw_reference omits the capability.' );
 $manual_pickup_points->replace_points(
 	$pickup_a_id,
 	array(
@@ -773,7 +777,12 @@ $cached_wc_selection_rest = new CheckoutPickupPointRestController(
 );
 $missing_family_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'point_id' => 'manual-a-1', 'point_code' => 'manual-a-1', 'selection_intent' => 'checkout' ) );
 wdc_manual_assert( is_array( $missing_family_save ) && 'manual:manual_pickup_a:pickup' === (string) ( $missing_family_save['active_pickup_family'] ?? '' ) && 'manual-a-1' === (string) ( $missing_family_save['pickup_selections']['manual:manual_pickup_a:pickup']['point_code'] ?? '' ), 'Manual pickup selection save must resolve the service-specific pickup family from authoritative rate metadata when the browser omits pickup_family.' );
+wdc_manual_assert( false === ( $missing_family_save['pickup_point']['requires_rate_refresh'] ?? true ) && false === ( $missing_family_save['pickup_point']['snapshot']['requires_rate_refresh'] ?? true ), 'Manual pickup selection response must preserve provider-owned requires_rate_refresh=false so frontend does not force update_checkout after save.' );
+wdc_manual_assert( false === ( $missing_family_save['pickup_selections']['manual:manual_pickup_a:pickup']['requires_rate_refresh'] ?? true ), 'Manual pickup saved session snapshot must keep requires_rate_refresh=false under the exact service-specific family.' );
 wdc_manual_assert( array() === $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a' ) && 'manual-a-1' === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['point_code'] ?? '' ), 'Manual pickup selection must be stored only under the canonical manual:<service>:pickup family, never the shipping method id bucket.' );
+$selection_reflector = new ReflectionMethod( CheckoutPickupPointRestController::class, 'selection_from_provider_point' );
+$default_refresh_selection = $selection_reflector->invoke( $cached_wc_selection_rest, new \WallsShop\WDC\Domain\Pickup\PickupPoint( 'demo', 'demo-1', 'Demo address', 'Новосибирск', 'Новосибирская область', '', null, null, 'pvz', '', '', null, true, array() ), 'demo', 'demo:pickup', 'country=RU|location_id=10', 10, 'RU', 'demo' );
+wdc_manual_assert( true === ( $default_refresh_selection['requires_rate_refresh'] ?? false ) && true === ( $default_refresh_selection['snapshot']['requires_rate_refresh'] ?? false ), 'Registry-backed selection save must keep backward-compatible requires_rate_refresh=true when provider raw_reference omits the capability.' );
 $family_assertion_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual', 'shipping_method_id' => NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'point_id' => 'manual-a-1', 'point_code' => 'manual-a-1', 'selection_intent' => 'checkout' ) );
 wdc_manual_assert( is_array( $family_assertion_save ) && 'manual:manual_pickup_a:pickup' === (string) ( $family_assertion_save['active_pickup_family'] ?? '' ), 'Manual pickup selection save must accept a browser pickup_family assertion when it matches authoritative rate metadata.' );
 $wrong_family_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:other_service:pickup', 'point_id' => 'manual-a-1', 'point_code' => 'manual-a-1', 'selection_intent' => 'checkout' ) );
@@ -796,11 +805,15 @@ ob_start();
 ( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate, 0 );
 $updated_checkout_manual_pickup_html = (string) ob_get_clean();
 wdc_manual_assert( str_contains( $updated_checkout_manual_pickup_html, 'Тестовый ПВЗ' ) && str_contains( $updated_checkout_manual_pickup_html, 'Изменить пункт выдачи' ), 'Manual pickup card must survive a same-destination updated_checkout render.' );
+wdc_manual_assert( true === $empty_wdc_rates_session->valid_pickup_selection_for_checkout( 'manual:manual_pickup_a:pickup' ) && 'manual-a-1' === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['point_code'] ?? '' ), 'Manual same-destination updated_checkout simulation must not clear the saved pickup selection.' );
+$post_update_state = $cached_wc_selection_rest->state( array( 'pickup_family' => 'manual:manual_pickup_a:pickup' ) );
+wdc_manual_assert( is_array( $post_update_state ) && 'manual-a-1' === (string) ( $post_update_state['selected_pickup_point']['point_code'] ?? '' ), 'Checkout state must still return the selected manual pickup point after same-destination updated_checkout simulation.' );
 $reload_session_manager = new CheckoutSessionManager( $location_fingerprint );
 ob_start();
 ( new CheckoutRateRenderer( $reload_session_manager ) )->render( $cached_wc_rate, 0 );
 $reloaded_manual_pickup_html = (string) ob_get_clean();
 wdc_manual_assert( str_contains( $reloaded_manual_pickup_html, 'Тестовый ПВЗ' ) && str_contains( $reloaded_manual_pickup_html, 'Изменить пункт выдачи' ), 'Manual pickup card must survive a same-session page reload with the same checkout destination.' );
+wdc_manual_assert( true === $reload_session_manager->valid_pickup_selection_for_checkout( 'manual:manual_pickup_a:pickup' ), 'Manual pickup selection must remain valid after a same-session page reload.' );
 $pickup_rate_b = $carrier->quote( $request_for( 'manual_pickup_b', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->rates[0] ?? null;
 $wc_rate_b = $pickup_rate_b ? $rate_mapper->map( $pickup_rate_b ) : array();
 $cached_wc_rate_b = new WC_Shipping_Rate( (string) ( $wc_rate_b['id'] ?? '' ), (string) ( $wc_rate_b['label'] ?? '' ), (string) ( $wc_rate_b['cost'] ?? '' ), is_array( $wc_rate_b['meta_data'] ?? null ) ? $wc_rate_b['meta_data'] : array() );
@@ -1083,7 +1096,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.9' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.10' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1147,7 +1160,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.9' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.10' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
