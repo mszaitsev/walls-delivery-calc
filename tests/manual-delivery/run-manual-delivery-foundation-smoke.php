@@ -21,6 +21,8 @@ function sanitize_text_field( mixed $value ): string { return trim( strip_tags( 
 function sanitize_key( mixed $value ): string { return strtolower( preg_replace( '/[^a-z0-9_\\-]/i', '', (string) $value ) ?? '' ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
+function trailingslashit( string $value ): string { return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR; }
+function __( string $text, string $domain = '' ): string { return $text; }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -228,6 +230,98 @@ if ( ! class_exists( 'wpdb' ) ) {
 	}
 }
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {
+		public string $id = '';
+		public int $instance_id = 0;
+		public string $method_title = '';
+		public string $method_description = '';
+		public string $enabled = 'yes';
+		public string $title = '';
+		/** @var array<int,string> */
+		public array $supports = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rates = array();
+
+		public function add_rate( array $rate ): void {
+			$this->rates[] = $rate;
+		}
+	}
+}
+
+final class WdcManualSmokeSession {
+	/** @var array<string,mixed> */
+	private array $data = array();
+
+	public function set( string $key, mixed $value ): void {
+		$this->data[ $key ] = $value;
+	}
+
+	public function get( string $key, mixed $default = null ): mixed {
+		return $this->data[ $key ] ?? $default;
+	}
+
+	public function __unset( string $key ): void {
+		unset( $this->data[ $key ] );
+	}
+
+	public function save_data(): void {
+	}
+}
+
+final class WdcManualSmokeWooCommerce {
+	public WdcManualSmokeSession $session;
+
+	public function __construct() {
+		$this->session = new WdcManualSmokeSession();
+	}
+}
+
+if ( ! function_exists( 'WC' ) ) {
+	function WC(): WdcManualSmokeWooCommerce {
+		static $woocommerce = null;
+		if ( null === $woocommerce ) {
+			$woocommerce = new WdcManualSmokeWooCommerce();
+		}
+
+		return $woocommerce;
+	}
+}
+
+final class WdcManualZeroWeightProduct {
+	public function get_sku(): string {
+		return 'ZERO-WEIGHT';
+	}
+
+	public function get_name(): string {
+		return 'Zero weight physical product';
+	}
+
+	public function get_weight(): string {
+		return '';
+	}
+
+	public function get_length(): int {
+		return 0;
+	}
+
+	public function get_width(): int {
+		return 0;
+	}
+
+	public function get_height(): int {
+		return 0;
+	}
+
+	public function needs_shipping(): bool {
+		return true;
+	}
+
+	public function is_virtual(): bool {
+		return false;
+	}
+}
+
 use WallsShop\WDC\Calendar\Services\CalendarService;
 use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
@@ -252,6 +346,11 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
@@ -491,6 +590,44 @@ $per_kg_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): b
 $range_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool => 'manual_ranges' === $rate->service_key ) )[0] ?? null;
 wdc_manual_assert( null !== $per_kg_rate && 20000 === $per_kg_rate->price->get_kopecks() && 150.0 === (float) $per_kg_rate->meta['api_base_price_rub'] && 150.0 === (float) $per_kg_rate->meta['original_price_rub'], 'Manual per-kg base price must pass through default rules and existing post-processing without a manual Rule Engine branch.' );
 wdc_manual_assert( null !== $range_rate && 40000 === $range_rate->price->get_kopecks() && 350.0 === (float) $range_rate->meta['api_base_price_rub'] && ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === (string) $range_rate->meta['manual_pricing_mode'], 'Manual weight range base price must pass through default rules and existing post-processing.' );
+
+$zero_flat_id = $services->create_service( array( 'service_key' => 'manual_zero_flat', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Zero flat', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'include_packaging_weight' => 0, 'deleted' => 0 ) );
+$zero_per_kg_id = $services->create_service( array( 'service_key' => 'manual_zero_per_kg', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Zero per kg', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'include_packaging_weight' => 0, 'deleted' => 0 ) );
+$zero_ranges_id = $services->create_service( array( 'service_key' => 'manual_zero_ranges', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Zero ranges', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'include_packaging_weight' => 0, 'deleted' => 0 ) );
+$countries->replace_countries( $zero_flat_id, array( 'RU' ) );
+$countries->replace_countries( $zero_per_kg_id, array( 'RU' ) );
+$countries->replace_countries( $zero_ranges_id, array( 'RU' ) );
+$manual_settings->save_pricing( $zero_flat_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '400' ) );
+$manual_settings->save_pricing( $zero_per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG ) );
+$manual_settings->save_pricing( $zero_ranges_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES, 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_NONE_G ) );
+$manual_weight_ranges->replace_ranges( $zero_ranges_id, array( new ManualDeliveryWeightRange( 0, 2000, 35000, 1 ) ) );
+$zero_wc_package = array(
+	'destination' => array( 'country' => 'RU', 'city' => 'Новосибирск', 'state' => 'Новосибирская область', 'postcode' => '630000', 'address_1' => 'Советская', 'address_2' => '1' ),
+	'contents_cost' => 400,
+	'contents_weight' => 0,
+	'contents' => array( array( 'data' => new WdcManualZeroWeightProduct(), 'quantity' => 1, 'line_total' => 400 ) ),
+);
+$zero_mapper = new WooCommercePackageMapper();
+$zero_request = $zero_mapper->map( $zero_wc_package );
+wdc_manual_assert( 1 === count( $zero_request->package->items ) && 1 === $zero_request->package->get_total_quantity() && 0 === $zero_request->package->weight_g && 0 === $zero_request->package->get_total_weight_g(), 'WooCommerce package mapper must preserve zero-weight physical items without substituting 1 g or dropping the item.' );
+$zero_result = $orchestrator->calculate( $zero_request, array(), RateSorter::CHEAPEST, false );
+$zero_keys = array_values( array_map( static fn ( $rate ): string => $rate->service_key, array_filter( $zero_result->rates, static fn ( $rate ): bool => ManualDeliverySettings::CARRIER_KEY === $rate->carrier_key && str_starts_with( $rate->service_key, 'manual_zero_' ) ) ) );
+wdc_manual_assert( array( 'manual_zero_flat' ) === $zero_keys, 'CheckoutOrchestrator path must keep flat manual service available for a zero-weight physical package while weight-based manual services fail closed.' );
+NewShippingMethod::configure(
+	$orchestrator,
+	$zero_mapper,
+	new WooCommerceRateMapper(),
+	new CheckoutSessionManager(),
+	$rules,
+	new SettingsRepository(),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.151.2' ),
+	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
+	$manager
+);
+$zero_method = new NewShippingMethod();
+$zero_method->calculate_shipping( $zero_wc_package );
+$zero_wc_keys = array_values( array_map( static fn ( array $rate ): string => (string) ( $rate['meta_data']['service_key'] ?? '' ), array_filter( $zero_method->rates, static fn ( array $rate ): bool => ManualDeliverySettings::CARRIER_KEY === (string) ( $rate['meta_data']['carrier_key'] ?? '' ) && str_starts_with( (string) ( $rate['meta_data']['service_key'] ?? '' ), 'manual_zero_' ) ) ) );
+wdc_manual_assert( array( 'manual_zero_flat' ) === $zero_wc_keys, 'NewShippingMethod must render only the flat manual rate for a zero-weight physical WooCommerce product.' );
 
 wdc_manual_assert( $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'RU' ), 'Selected-country manual service must be available for selected country.' );
 wdc_manual_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'KZ' ), 'Selected-country manual service must not be available for an unselected country.' );

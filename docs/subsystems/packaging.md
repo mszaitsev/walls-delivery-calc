@@ -1,10 +1,10 @@
 # Packaging
 
-Version: 0.151.1
+Version: 0.151.2
 
 Packaging code lives in `src/Packaging`. `PackagingBuilder` and `PackagingWeightCalculator` build shipment places from order/package data. Shipment allocation tests protect the bridge into shipment creation.
 
-Manual delivery pricing does not duplicate packaging calculation. `CheckoutOrchestrator` applies the existing `PackagingWeightCalculator` for each `DeliveryService` before runtime carrier quoting; manual per-kg and weight-range modes use the resulting `Package::total_weight_g` as chargeable weight. When `include_packaging_weight=false`, the package keeps product weight semantics; when it is enabled, the existing service packaging policy decides whether packaging weight is included as total weight or a package item.
+Manual delivery pricing does not duplicate packaging calculation. `CheckoutOrchestrator` applies the existing `PackagingWeightCalculator` for each `DeliveryService` before runtime carrier quoting; manual per-kg and weight-range modes use the resulting `Package::total_weight_g` as chargeable weight. When `include_packaging_weight=false`, the package keeps product weight semantics, including `0 g` for a physical zero-weight product; when it is enabled, the existing service packaging policy decides whether packaging weight is included as total weight or a package item.
 
 WooCommerce product and variation saves bump the shared delivery rates cache version, so product weight and dimension updates cannot keep stale package-sensitive delivery calculations alive in checkout sessions.
 

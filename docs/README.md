@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.151.1
+Version: 0.151.2
+
+0.151.2 hardens zero-weight checkout behavior. A physical WooCommerce package with items and `0 g` weight remains valid package data: manual `flat` pricing can quote it, while manual `per_kg` and `weight_ranges` still fail closed on non-positive chargeable weight. The quote cache now includes item quantity and a package item signature, so an empty package cannot share a cache key with a zero-weight physical package.
 
 0.151.1 hardens the manual delivery pricing engine after live testing. Flat pricing ignores hidden or stale billing-step POST values and validates only the flat price, while active `per_kg` and `weight_ranges` modes still reject unsupported positive billing steps. WooCommerce simple product and variation updates now bump the shared delivery rates cache version, so package/session shipping caches become stale after product weight or dimension changes without adding manual-specific cache logic.
 

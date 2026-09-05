@@ -536,8 +536,8 @@ function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsA
 	);
 }
 
-function runtime_smoke_request( string $delivery_type = '', int $weight_g = 0 ): QuoteRequest {
-	$items = $weight_g > 0
+function runtime_smoke_request( string $delivery_type = '', ?int $weight_g = null ): QuoteRequest {
+	$items = null !== $weight_g
 		? array( new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight_g, 10, 10, 10 ) )
 		: array();
 
@@ -1000,6 +1000,7 @@ $service_cache_key_b = $quote_cache->cache_key( runtime_smoke_request(), 'demo',
 runtime_smoke_assert( $service_cache_key_a !== $service_cache_key_b, 'Quote cache key must include service_key.' );
 runtime_smoke_assert( $service_cache_key_a === $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Quote cache key must remain stable per service.' );
 runtime_smoke_assert( $service_cache_key_a !== $quote_cache->cache_key( runtime_smoke_request( '', 2400 ), 'demo', '', 'service_a' ), 'Quote cache key must include package total weight so weight-based tariffs cannot reuse another weight.' );
+runtime_smoke_assert( $service_cache_key_a !== $quote_cache->cache_key( runtime_smoke_request( '', 0 ), 'demo', '', 'service_a' ), 'Quote cache key must distinguish an empty package from a physical package whose item weight is zero.' );
 $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-a', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
 $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-b', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_b' );
 runtime_smoke_assert( 'quote-a' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' )?->quote_id, 'Quote cache hit must stay isolated for service_a.' );

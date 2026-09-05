@@ -2,7 +2,9 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.151.1
+Version: 0.151.2
+
+WDC distinguishes an empty package from a physical package whose items have zero product weight. `WooCommercePackageMapper` preserves package items and `items_quantity` with `0 g` total weight, and `QuoteCache` includes item quantity plus a package item signature in the cache key. Manual flat delivery can quote such packages; weight-based manual modes remain unavailable because their own pricing contract requires positive chargeable weight.
 
 The shared delivery cache manager bumps the global WooCommerce shipping-package cache version after simple product and variation updates. Product weight and dimension changes therefore invalidate future checkout delivery calculations for all carriers through the existing package cache identity; manual pricing does not add a separate cache key or carrier-specific invalidation branch.
 

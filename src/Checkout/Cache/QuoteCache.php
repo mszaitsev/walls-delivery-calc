@@ -70,6 +70,8 @@ final class QuoteCache {
 			$destination->raw_address,
 			$destination->normalized ? 'normalized' : '',
 			$destination->fallback ? 'fallback' : '',
+			(string) $request->package->get_total_quantity(),
+			$this->package_items_signature( $request->package->items ),
 			(string) $request->package->weight_g,
 			(string) $request->package->packaging_weight_g,
 			(string) $request->package->total_weight_g,
@@ -92,6 +94,27 @@ final class QuoteCache {
 		);
 
 		return 'quote_' . sha1( implode( '|', array_map( 'strtolower', $parts ) ) );
+	}
+
+	/** @param array<int,mixed> $items */
+	private function package_items_signature( array $items ): string {
+		$rows = array();
+		foreach ( $items as $item ) {
+			if ( ! is_object( $item ) ) {
+				continue;
+			}
+			$rows[] = array(
+				'sku' => (string) ( $item->sku ?? '' ),
+				'name' => (string) ( $item->name ?? '' ),
+				'quantity' => (int) ( $item->quantity ?? 0 ),
+				'weight_g' => (int) ( $item->weight_g ?? 0 ),
+				'length_cm' => (int) ( $item->length_cm ?? 0 ),
+				'width_cm' => (int) ( $item->width_cm ?? 0 ),
+				'height_cm' => (int) ( $item->height_cm ?? 0 ),
+			);
+		}
+
+		return $this->hash_context( $rows );
 	}
 
 	/** @param array<string,mixed> $selections @return array<string,mixed> */
