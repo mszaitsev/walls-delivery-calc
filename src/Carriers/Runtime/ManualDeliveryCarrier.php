@@ -77,6 +77,9 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 			'manual_delivery_type_label' => $manual_delivery_type['label'],
 			'order_recalculation_requires_address' => false,
 		);
+		if ( ManualDeliverySettings::DELIVERY_TYPE_CUSTOM === $manual_delivery_type['type'] ) {
+			$pricing_meta['preserve_rate_title'] = true;
+		}
 		if ( $requires_pickup_point ) {
 			$pricing_meta = array_merge( $pricing_meta, $this->pickup_rate_meta( $service, $request ) );
 		}
@@ -179,7 +182,6 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 			'pickup_provider_query' => $snapshot,
 			'destination_fingerprint' => $fingerprint,
 			'provider_destination_fingerprint' => $fingerprint,
-			'no_pickup_selection' => true,
 		);
 	}
 

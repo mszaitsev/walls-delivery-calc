@@ -24,6 +24,9 @@ function get_option( string $option, mixed $default = false ): mixed { return $G
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
 function trailingslashit( string $value ): string { return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR; }
 function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
+function esc_attr( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
+function esc_url( mixed $value ): string { return (string) $value; }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -371,6 +374,7 @@ use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -627,6 +631,10 @@ $no_own = $create_manual( 'manual_default_fallback', 'Fallback manual', '100', a
 wdc_manual_assert( 'default' === $manager->rules_for_service( $no_own )['source'], 'Default rules must apply only when own service rules are absent and fallback is enabled.' );
 $services->update_service( (int) $no_own->id, array( 'use_default_rules_when_no_service_rules' => 0 ) );
 wdc_manual_assert( 'none' === $manager->rules_for_service( $services->find_by_service_key( 'manual_default_fallback' ) )['source'], 'Rules must not apply when fallback is disabled and own rules are absent.' );
+$custom_display_id = $services->create_service( array( 'service_key' => 'manual_custom_display', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual Test', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'deleted' => 0 ) );
+$countries->replace_countries( $custom_display_id, array( 'RU' ) );
+$manual_settings->save_flat_pricing( $custom_display_id, '300' );
+$manual_settings->save_delivery_type( $custom_display_id, ManualDeliverySettings::DELIVERY_TYPE_CUSTOM, 'До склада ТК' );
 
 $registry = new CarrierRegistry();
 $registry->register( $carrier );
@@ -660,9 +668,34 @@ $nsk_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool
 wdc_manual_assert( null !== $nsk_rate && 37600 === $nsk_rate->price->get_kopecks() && ! empty( $nsk_rate->meta['round_up_applied'] ), 'Manual base rate must pass through Rule Engine before service post-processing.' );
 wdc_manual_assert( 35025 === (int) round( (float) $nsk_rate->meta['original_price_rub'] * 100 ) && 376.0 === (float) $nsk_rate->meta['final_price_rub'], 'Manual rate must preserve base/original and final price metadata.' );
 wdc_manual_assert( 'Комментарий Курьер НСК' === (string) ( $nsk_rate->meta['customer_comments'][0]['text'] ?? '' ), 'Manual service customer comment must use the canonical comment pipeline.' );
+$custom_display_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool => 'manual_custom_display' === $rate->service_key ) )[0] ?? null;
+wdc_manual_assert( null !== $custom_display_rate && DeliveryType::UNKNOWN === $custom_display_rate->delivery_type && ! empty( $custom_display_rate->meta['preserve_rate_title'] ), 'Manual custom delivery type must preserve the carrier-owned display title through service decoration.' );
+$custom_display_wc_rate = ( new WooCommerceRateMapper() )->map( $custom_display_rate );
+wdc_manual_assert( str_contains( $custom_display_wc_rate['label'], 'Manual Test' ) && str_contains( $custom_display_wc_rate['label'], 'До склада ТК' ), 'Manual custom type label must survive ManualDeliveryCarrier -> CheckoutOrchestrator -> WooCommerceRateMapper presentation flow.' );
 wdc_manual_assert( 'manual_pricing' === ManualDeliverySettings::PRICING_SETTING_KEY && ! str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Services/RuleEngine.php' ), 'manual_rules_enabled' ), 'Manual delivery must not add a manual-specific rule-engine branch.' );
 $per_kg_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool => 'manual_per_kg' === $rate->service_key ) )[0] ?? null;
 $range_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool => 'manual_ranges' === $rate->service_key ) )[0] ?? null;
+$pickup_display_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool => 'manual_pickup_b' === $rate->service_key ) )[0] ?? null;
+wdc_manual_assert( null !== $pickup_display_rate && 'Manual pickup B' === $pickup_display_rate->title && empty( $pickup_display_rate->meta['preserve_rate_title'] ), 'Manual pickup title must stay on the normal service-title presentation path.' );
+$pickup_display_wc_rate = ( new WooCommerceRateMapper() )->map( $pickup_display_rate );
+wdc_manual_assert( 'pickup' === (string) $pickup_display_wc_rate['meta_data']['delivery_type'] && ! empty( $pickup_display_wc_rate['meta_data']['requires_pickup_point'] ) && 'manual:manual_pickup_b:pickup' === (string) $pickup_display_wc_rate['meta_data']['pickup_family'] && is_array( $pickup_display_wc_rate['meta_data']['rate_meta']['pickup_provider_query'] ?? null ) && empty( $pickup_display_wc_rate['meta_data']['no_pickup_selection'] ) && empty( $pickup_display_wc_rate['meta_data']['rate_meta']['no_pickup_selection'] ?? false ), 'Manual pickup WooCommerce rate metadata must require pickup selection without suppressing the selector.' );
+$renderer = new CheckoutRateRenderer( new CheckoutSessionManager() );
+$pickup_method = (object) array( 'id' => $pickup_display_wc_rate['id'], 'meta_data' => $pickup_display_wc_rate['meta_data'] );
+ob_start();
+$renderer->render( $pickup_method, 0 );
+$pickup_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $pickup_html, 'data-wdc-pickup-open' ) && str_contains( $pickup_html, 'Выбрать пункт выдачи' ), 'CheckoutRateRenderer must render the generic pickup selector button for manual pickup rates without a selection.' );
+$suppressed_method = (object) array(
+	'id' => 'synthetic:pickup',
+	'meta_data' => array_merge(
+		$pickup_display_wc_rate['meta_data'],
+		array( 'rate_id' => 'synthetic:pickup', 'carrier_key' => 'synthetic', 'service_key' => 'synthetic', 'pickup_family' => 'synthetic:pickup', 'no_pickup_selection' => true )
+	),
+);
+ob_start();
+$renderer->render( $suppressed_method, 0 );
+$suppressed_html = (string) ob_get_clean();
+wdc_manual_assert( ! str_contains( $suppressed_html, 'data-wdc-pickup-open' ), 'Existing no_pickup_selection suppression contract must continue to hide the pickup selector.' );
 wdc_manual_assert( null !== $per_kg_rate && 20000 === $per_kg_rate->price->get_kopecks() && 150.0 === (float) $per_kg_rate->meta['api_base_price_rub'] && 150.0 === (float) $per_kg_rate->meta['original_price_rub'], 'Manual per-kg base price must pass through default rules and existing post-processing without a manual Rule Engine branch.' );
 wdc_manual_assert( null !== $range_rate && 40000 === $range_rate->price->get_kopecks() && 350.0 === (float) $range_rate->meta['api_base_price_rub'] && ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === (string) $range_rate->meta['manual_pricing_mode'], 'Manual weight range base price must pass through default rules and existing post-processing.' );
 
@@ -695,7 +728,7 @@ NewShippingMethod::configure(
 	new CheckoutSessionManager(),
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.0' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.1' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

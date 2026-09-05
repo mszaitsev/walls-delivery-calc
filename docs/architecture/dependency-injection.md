@@ -4,7 +4,9 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.152.0
+Version: 0.152.1
+
+Version 0.152.1 does not change DI. The bugfix stays inside manual rate metadata and reuses the existing checkout title-preservation and pickup-selector contracts.
 
 Version 0.152.0 wires manual pickup through the composition root. `ManualPickupPointRepository` owns the manual pickup table, `ManualPickupPointProvider` implements `CarrierPickupPointProviderInterface`, and `CarrierPickupPointProviderRegistry` receives exactly one provider for the `manual` carrier. `ManualDeliveryCarrier` receives the pickup repository as a required collaborator so pickup-type rates can fail closed when no eligible point exists, while pricing, geography, rules, checkout validation, order snapshots, and Shipment Framework services remain separate. `DeliveryServicesAdminPage` receives the same repository for admin CRUD and uses the existing shared delivery quote cache invalidation after type/point changes.
 

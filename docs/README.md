@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.0
+Version: 0.152.1
+
+0.152.1 fixes manual delivery type presentation after live checkout testing. Custom manual delivery types now mark the carrier-owned title with `preserve_rate_title`, so `CheckoutOrchestrator` service decoration does not hide the custom label. Normal manual pickup rates no longer set `no_pickup_selection`; that flag remains a generic suppression contract, not a "pickup not selected yet" marker, so manual pickup uses the existing checkout pickup selector button, session selection, validation, and provider-backed point search.
 
 0.152.0 adds manual delivery type selection and manual pickup points. Existing manual services default to courier without resaving; new manual settings support `courier`, `pickup`, and `custom`, where custom uses the neutral `DeliveryType::UNKNOWN` plus a display label. Manual pickup services use the existing Pickup Framework: one `manual` pickup provider is registered, provider queries receive trusted `service_key` and locality metadata from stored rate context, selections are re-resolved server-side, and order pickup snapshots stay generic. Manual pickup points live in `wdc_manual_delivery_pickup_points` with per-service stable `code` and textual locality identity `country_code + resolved_place_name() + region_name`; `wp_wdc_locations.id` is only a transient admin lookup key.
 

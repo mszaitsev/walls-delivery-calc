@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.0
+Version: 0.152.1
+
+0.152.1 keeps the architecture unchanged and fixes manual delivery presentation using existing generic contracts: custom manual rates set `preserve_rate_title`, while pickup rates omit `no_pickup_selection` so the standard pickup selector renders.
 
 0.152.0 keeps manual delivery on one runtime carrier and adds one registry-backed manual pickup provider. `ManualDeliveryCarrier` remains an orchestration layer: it resolves the trusted manual service, checks country/geography, checks pickup-point availability only for pickup-type services, delegates base pricing to `ManualDeliveryPricingService`, and returns canonical `DeliveryRate` metadata. Generic pickup contracts now carry a trusted `service_key` so multi-service carriers can isolate provider searches without reading browser-supplied service identity. Manual pickup storage/provider classes stay under `src/Carriers/Manual`; CheckoutOrchestrator, Rule Engine, Packaging, and Shipment Framework stay free of manual pickup branches.
 

@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.152.0
+Version: 0.152.1
 
 Manual pickup points use the same textual locality identity as manual geography: `country_code + resolved_place_name() + region_name`. Admin UI may use a current `wp_wdc_locations.id` only to reload the canonical `Location` during save; persisted manual pickup rows store `country_code`, `location_name`, and `region_name`, never the location ID. Point codes are stable per manual service and survive title/address edits so saved checkout/order pickup snapshots remain meaningful.
 
