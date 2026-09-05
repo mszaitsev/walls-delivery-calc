@@ -26,6 +26,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
 use WallsShop\WDC\Carriers\OzonDelivery\Admin\OzonDeliveryAdminPage;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
@@ -107,6 +108,7 @@ final class DeliveryServicesAdminPage {
 		private RussianPostPickupDiagnosticsTab $russian_post_pickup_diagnostics,
 		private ManualDeliverySettings $manual_delivery_settings,
 		private ManualDeliveryGeographyRepository $manual_delivery_geography,
+		private ManualDeliveryWeightRangeRepository $manual_delivery_weight_ranges,
 		private DeliveryServiceKeyRenameService $delivery_service_key_rename,
 		private ?DeliveryServiceSettingsRepository $settings = null,
 		private ?RussianPostSettings $russian_post_settings = null,
@@ -974,7 +976,12 @@ final class DeliveryServicesAdminPage {
 			if ( in_array( $action, array( 'save', 'save_main', 'save_calculation' ), true ) ) {
 				$service = $id > 0 ? $this->services->find_by_id( $id ) : null;
 				if ( $this->is_manual_service( $service ) && null !== $service->id ) {
-					$this->save_manual_delivery_settings( (int) $service->id );
+					try {
+						$this->save_manual_delivery_settings( (int) $service->id );
+					} catch ( \InvalidArgumentException $exception ) {
+						wp_safe_redirect( add_query_arg( 'wdc_manual_pricing_notice', $exception->getMessage(), $this->service_tab_url_by_key( $service->service_key, 'calculation' ) ) );
+						exit;
+					}
 					$this->clear_delivery_quote_cache();
 				}
 			}
@@ -1971,13 +1978,7 @@ final class DeliveryServicesAdminPage {
 					<?php $this->render_yandex_delivery_source_station_rows( $yandex_delivery ); ?>
 				<?php endif; ?>
 				<?php if ( $this->is_manual_service( $service ) ) : ?>
-					<?php $manual_pricing = $this->manual_pricing_values( $service ); ?>
-					<tr><th colspan="2"><h3><?php echo esc_html__( 'Ручная фиксированная цена', 'walls-delivery-calc' ); ?></h3></th></tr>
-					<?php $this->readonly_row( 'manual_pricing_mode', __( 'Pricing mode', 'walls-delivery-calc' ), ManualDeliverySettings::PRICING_MODE_FLAT ); ?>
-					<input type="hidden" name="manual_pricing_mode" value="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_FLAT ); ?>">
-					<?php $this->text_row( 'manual_flat_price_rub', __( 'Фиксированная цена, руб.', 'walls-delivery-calc' ), (string) $manual_pricing['flat_price_rub'] ); ?>
-					<?php $this->text_row( 'manual_delivery_min_days', __( 'Срок доставки от, дней', 'walls-delivery-calc' ), $manual_pricing['min_days'] ); ?>
-					<?php $this->text_row( 'manual_delivery_max_days', __( 'Срок доставки до, дней', 'walls-delivery-calc' ), $manual_pricing['max_days'] ); ?>
+					<?php $this->render_manual_pricing_rows( $service ); ?>
 				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить расчет', 'walls-delivery-calc' ) ); ?>
@@ -4684,9 +4685,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, $this->availability_mode_options() ); ?>
 				<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), $service instanceof DeliveryService ? implode( ',', $this->countries->countries( (int) $service->id ) ) : '' ); ?>
 				<?php $this->render_manual_geography_rows( $service ); ?>
-				<?php $this->readonly_row( 'manual_pricing_mode', __( 'Pricing mode', 'walls-delivery-calc' ), ManualDeliverySettings::PRICING_MODE_FLAT ); ?>
-				<input type="hidden" name="manual_pricing_mode" value="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_FLAT ); ?>">
-				<?php $this->text_row( 'manual_flat_price_rub', __( 'Фиксированная цена, руб.', 'walls-delivery-calc' ), $service instanceof DeliveryService ? (string) $this->manual_pricing_values( $service )['flat_price_rub'] : '0' ); ?>
+				<?php $this->render_manual_pricing_rows( $service ); ?>
 				<?php $this->text_row( 'minimum_price_rub', __( 'Минимальная цена, руб.', 'walls-delivery-calc' ), (string) ( $service->minimum_price_rub ?? 1 ) ); ?>
 				<?php $this->text_row( 'sort_order', __( 'Sort order', 'walls-delivery-calc' ), (string) ( $service->sort_order ?? 100 ) ); ?>
 				<?php $this->checkbox_row( 'enabled', __( 'Включена', 'walls-delivery-calc' ), $service->enabled ?? true ); ?>
@@ -4798,7 +4797,26 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	}
 
 	private function save_manual_delivery_settings( int $service_id ): void {
-		if ( array_key_exists( 'manual_flat_price_rub', $_POST ) ) {
+		if ( array_key_exists( 'manual_pricing_mode', $_POST ) ) {
+			$mode = sanitize_key( wp_unslash( $_POST['manual_pricing_mode'] ?? ManualDeliverySettings::PRICING_MODE_FLAT ) );
+			$ranges = ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ? $this->manual_weight_ranges_from_post() : array();
+			if ( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ) {
+				$this->manual_delivery_weight_ranges->validate_ranges( $ranges );
+			}
+			$this->manual_delivery_settings->save_pricing(
+				$service_id,
+				array(
+					'pricing_mode' => $mode,
+					'flat_price_rub' => wp_unslash( $_POST['manual_flat_price_rub'] ?? '' ),
+					'price_per_kg_rub' => wp_unslash( $_POST['manual_price_per_kg_rub'] ?? '' ),
+					'minimum_price_rub' => wp_unslash( $_POST['manual_tariff_minimum_price_rub'] ?? '' ),
+					'billing_weight_step_g' => (int) wp_unslash( $_POST['manual_billing_weight_step_g'] ?? 0 ),
+				)
+			);
+			if ( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ) {
+				$this->manual_delivery_weight_ranges->replace_ranges( $service_id, $ranges );
+			}
+		} elseif ( array_key_exists( 'manual_flat_price_rub', $_POST ) ) {
 			$this->manual_delivery_settings->save_flat_pricing( $service_id, wp_unslash( $_POST['manual_flat_price_rub'] ) );
 		}
 		if ( array_key_exists( 'manual_delivery_min_days', $_POST ) || array_key_exists( 'manual_delivery_max_days', $_POST ) ) {
@@ -4817,21 +4835,187 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	}
 
 	/**
-	 * @return array{flat_price_rub:string,min_days:string,max_days:string}
+	 * @return array{pricing_mode:string,flat_price_rub:string,price_per_kg_rub:string,tariff_minimum_price_rub:string,billing_weight_step_g:int,min_days:string,max_days:string,ranges:array<int,array{from_weight_kg:string,to_weight_kg:string,price_rub:string}>}
 	 */
 	private function manual_pricing_values( DeliveryService $service ): array {
 		if ( null === $service->id ) {
-			return array( 'flat_price_rub' => '0', 'min_days' => '', 'max_days' => '' );
+			return array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '0', 'price_per_kg_rub' => '', 'tariff_minimum_price_rub' => '', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG, 'min_days' => '', 'max_days' => '', 'ranges' => array() );
 		}
 
 		$pricing = $this->manual_delivery_settings->pricing( (int) $service->id );
 		$days = $this->manual_delivery_settings->delivery_days( (int) $service->id );
+		$ranges = array_map(
+			fn( $range ): array => array(
+				'from_weight_kg' => $this->grams_to_admin_kg( $range->from_weight_g ),
+				'to_weight_kg' => $this->grams_to_admin_kg( $range->to_weight_g ),
+				'price_rub' => (string) Money::from_kopecks( $range->price_kopecks )->get_rubles(),
+			),
+			$this->manual_delivery_weight_ranges->ranges( (int) $service->id )
+		);
 
 		return array(
+			'pricing_mode' => '' !== $pricing['pricing_mode'] ? $pricing['pricing_mode'] : ManualDeliverySettings::PRICING_MODE_FLAT,
 			'flat_price_rub' => (string) Money::from_kopecks( max( 0, $pricing['flat_price_kopecks'] ) )->get_rubles(),
+			'price_per_kg_rub' => $pricing['price_per_kg_kopecks'] >= 0 ? (string) Money::from_kopecks( $pricing['price_per_kg_kopecks'] )->get_rubles() : '',
+			'tariff_minimum_price_rub' => null === $pricing['minimum_price_kopecks'] ? '' : (string) Money::from_kopecks( $pricing['minimum_price_kopecks'] )->get_rubles(),
+			'billing_weight_step_g' => $pricing['billing_weight_step_g'],
 			'min_days' => null === $days['min_days'] ? '' : (string) $days['min_days'],
 			'max_days' => null === $days['max_days'] ? '' : (string) $days['max_days'],
+			'ranges' => $ranges,
 		);
+	}
+
+	private function render_manual_pricing_rows( ?DeliveryService $service ): void {
+		$values = $service instanceof DeliveryService ? $this->manual_pricing_values( $service ) : array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '0', 'price_per_kg_rub' => '', 'tariff_minimum_price_rub' => '', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG, 'min_days' => '', 'max_days' => '', 'ranges' => array() );
+		$ranges = is_array( $values['ranges'] ?? null ) ? $values['ranges'] : array();
+		?>
+		<tr><th colspan="2"><h3><?php echo esc_html__( 'Тариф ручной службы', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<?php $this->render_manual_pricing_notice(); ?>
+		<?php $this->select_assoc_row( 'manual_pricing_mode', __( 'Тип тарифа', 'walls-delivery-calc' ), (string) $values['pricing_mode'], $this->manual_pricing_mode_options() ); ?>
+		<tbody data-wdc-manual-pricing-section="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_FLAT ); ?>">
+			<?php $this->text_row( 'manual_flat_price_rub', __( 'Стоимость, ₽', 'walls-delivery-calc' ), (string) $values['flat_price_rub'] ); ?>
+		</tbody>
+		<tbody data-wdc-manual-pricing-section="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_PER_KG ); ?>">
+			<?php $this->text_row( 'manual_price_per_kg_rub', __( 'Цена за 1 кг, ₽', 'walls-delivery-calc' ), (string) $values['price_per_kg_rub'] ); ?>
+			<?php $this->text_row_with_description( 'manual_tariff_minimum_price_rub', __( 'Минимальная стоимость тарифа, ₽', 'walls-delivery-calc' ), (string) $values['tariff_minimum_price_rub'], __( 'Опциональный минимум тарифа применяется до Rule Engine и отдельно от общей минимальной цены службы.', 'walls-delivery-calc' ) ); ?>
+			<?php $this->select_assoc_row( 'manual_billing_weight_step_g', __( 'Шаг тарификации веса', 'walls-delivery-calc' ), (string) $values['billing_weight_step_g'], $this->manual_billing_weight_step_options() ); ?>
+			<tr><th></th><td><p class="description"><?php echo esc_html__( 'Например: 1 кг = 150 ₽, минимум 500 ₽. При весе 2,4 кг и шаге 1 кг тарифицируется 3 кг.', 'walls-delivery-calc' ); ?></p></td></tr>
+		</tbody>
+		<tbody data-wdc-manual-pricing-section="<?php echo esc_attr( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES ); ?>" data-wdc-manual-weight-ranges>
+			<?php $this->select_assoc_row( 'manual_billing_weight_step_g', __( 'Шаг тарификации веса', 'walls-delivery-calc' ), (string) $values['billing_weight_step_g'], $this->manual_billing_weight_step_options() ); ?>
+			<tr>
+				<th scope="row"><?php echo esc_html__( 'Диапазоны веса', 'walls-delivery-calc' ); ?></th>
+				<td>
+					<table class="widefat striped" style="max-width:720px;">
+						<thead><tr><th><?php echo esc_html__( 'От, кг', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'До, кг включительно', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Цена, ₽', 'walls-delivery-calc' ); ?></th><th></th></tr></thead>
+						<tbody data-wdc-manual-weight-range-list>
+							<?php foreach ( $ranges as $range ) : ?>
+								<?php $this->render_manual_weight_range_row( (string) ( $range['from_weight_kg'] ?? '' ), (string) ( $range['to_weight_kg'] ?? '' ), (string) ( $range['price_rub'] ?? '' ) ); ?>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+					<p><button type="button" class="button" data-wdc-manual-add-weight-range><?php echo esc_html__( 'Добавить диапазон', 'walls-delivery-calc' ); ?></button></p>
+					<p class="description"><?php echo esc_html__( 'Верхняя граница диапазона включается. Диапазоны 0–2 и 2–5 означают: ровно 2 кг относится к первому диапазону, вес более 2 кг — ко второму. Незакрытый диапазон делает службу недоступной для такого веса.', 'walls-delivery-calc' ); ?></p>
+				</td>
+			</tr>
+		</tbody>
+		<?php $this->text_row( 'manual_delivery_min_days', __( 'Срок доставки от, дней', 'walls-delivery-calc' ), (string) $values['min_days'] ); ?>
+		<?php $this->text_row( 'manual_delivery_max_days', __( 'Срок доставки до, дней', 'walls-delivery-calc' ), (string) $values['max_days'] ); ?>
+		<?php
+	}
+
+	private function render_manual_weight_range_row( string $from, string $to, string $price ): void {
+		?>
+		<tr data-wdc-manual-weight-range-row>
+			<td><input class="small-text" name="manual_weight_range_from_kg[]" value="<?php echo esc_attr( $from ); ?>"></td>
+			<td><input class="small-text" name="manual_weight_range_to_kg[]" value="<?php echo esc_attr( $to ); ?>"></td>
+			<td><input class="regular-text" name="manual_weight_range_price_rub[]" value="<?php echo esc_attr( $price ); ?>"></td>
+			<td><button type="button" class="button-link-delete" data-wdc-manual-remove-range><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button></td>
+		</tr>
+		<?php
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function manual_pricing_mode_options(): array {
+		return array(
+			ManualDeliverySettings::PRICING_MODE_FLAT => __( 'Фиксированная стоимость', 'walls-delivery-calc' ),
+			ManualDeliverySettings::PRICING_MODE_PER_KG => __( 'Цена за 1 кг', 'walls-delivery-calc' ),
+			ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES => __( 'Диапазоны веса', 'walls-delivery-calc' ),
+		);
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function manual_billing_weight_step_options(): array {
+		return array(
+			(string) ManualDeliverySettings::BILLING_STEP_NONE_G => __( 'без округления', 'walls-delivery-calc' ),
+			(string) ManualDeliverySettings::BILLING_STEP_100_G => __( '100 г', 'walls-delivery-calc' ),
+			(string) ManualDeliverySettings::BILLING_STEP_500_G => __( '500 г', 'walls-delivery-calc' ),
+			(string) ManualDeliverySettings::BILLING_STEP_1_KG => __( '1 кг', 'walls-delivery-calc' ),
+		);
+	}
+
+	/**
+	 * @return array<int,\WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRange>
+	 */
+	private function manual_weight_ranges_from_post(): array {
+		$from_values = wp_unslash( $_POST['manual_weight_range_from_kg'] ?? array() );
+		$to_values = wp_unslash( $_POST['manual_weight_range_to_kg'] ?? array() );
+		$price_values = wp_unslash( $_POST['manual_weight_range_price_rub'] ?? array() );
+		$from_values = is_array( $from_values ) ? array_values( $from_values ) : array();
+		$to_values = is_array( $to_values ) ? array_values( $to_values ) : array();
+		$price_values = is_array( $price_values ) ? array_values( $price_values ) : array();
+		$ranges = array();
+		$count = max( count( $from_values ), count( $to_values ), count( $price_values ) );
+		for ( $index = 0; $index < $count; ++$index ) {
+			$from_raw = trim( (string) ( $from_values[ $index ] ?? '' ) );
+			$to_raw = trim( (string) ( $to_values[ $index ] ?? '' ) );
+			$price_raw = trim( (string) ( $price_values[ $index ] ?? '' ) );
+			if ( '' === $from_raw && '' === $to_raw && '' === $price_raw ) {
+				continue;
+			}
+			$from = $this->admin_kg_to_grams( $from_raw, 'manual_weight_range_weight_invalid' );
+			$to = $this->admin_kg_to_grams( $to_raw, 'manual_weight_range_weight_invalid' );
+			$price = \WallsShop\WDC\Domain\Common\MoneyParser::numeric_to_kopecks( $price_raw );
+			if ( null === $price || $price < 0 || '' === $price_raw ) {
+				throw new \InvalidArgumentException( 'manual_weight_range_price_invalid' );
+			}
+			$ranges[] = new \WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRange( $from, $to, $price, $index + 1 );
+		}
+
+		return $ranges;
+	}
+
+	private function admin_kg_to_grams( string $value, string $error_code ): int {
+		$value = trim( str_replace( array( "\xc2\xa0", ' ' ), '', $value ) );
+		$value = str_replace( ',', '.', $value );
+		if ( '' === $value || 1 !== preg_match( '/^\d+(?:\.\d+)?$/', $value ) ) {
+			throw new \InvalidArgumentException( $error_code );
+		}
+		list( $kg, $fraction ) = array_pad( explode( '.', $value, 2 ), 2, '' );
+		$grams = (int) $kg * 1000 + (int) substr( str_pad( $fraction, 3, '0' ), 0, 3 );
+		if ( isset( $fraction[3] ) && (int) $fraction[3] >= 5 ) {
+			++$grams;
+		}
+
+		return $grams;
+	}
+
+	private function grams_to_admin_kg( int $grams ): string {
+		$grams = max( 0, $grams );
+		$kg = intdiv( $grams, 1000 );
+		$fraction = $grams % 1000;
+		if ( 0 === $fraction ) {
+			return (string) $kg;
+		}
+
+		return rtrim( rtrim( $kg . '.' . str_pad( (string) $fraction, 3, '0', STR_PAD_LEFT ), '0' ), '.' );
+	}
+
+	private function render_manual_pricing_notice(): void {
+		$notice = sanitize_key( wp_unslash( $_GET['wdc_manual_pricing_notice'] ?? '' ) );
+		if ( '' === $notice ) {
+			return;
+		}
+		$message = match ( $notice ) {
+			'manual_flat_price_invalid' => __( 'Фиксированная стоимость должна быть числом больше либо равным 0.', 'walls-delivery-calc' ),
+			'manual_price_per_kg_invalid' => __( 'Цена за 1 кг должна быть числом больше либо равным 0.', 'walls-delivery-calc' ),
+			'manual_tariff_minimum_invalid' => __( 'Минимальная стоимость тарифа должна быть пустой или числом больше либо равным 0.', 'walls-delivery-calc' ),
+			'manual_billing_weight_step_invalid' => __( 'Шаг тарификации веса недопустим.', 'walls-delivery-calc' ),
+			'manual_weight_range_weight_invalid' => __( 'Весовые границы диапазонов должны быть числами в килограммах.', 'walls-delivery-calc' ),
+			'manual_weight_range_negative_weight' => __( 'Весовые границы диапазонов не могут быть отрицательными.', 'walls-delivery-calc' ),
+			'manual_weight_range_to_lte_from' => __( 'Верхняя граница диапазона должна быть больше нижней.', 'walls-delivery-calc' ),
+			'manual_weight_range_price_invalid' => __( 'Цена диапазона должна быть заполнена и быть числом больше либо равным 0.', 'walls-delivery-calc' ),
+			'manual_weight_range_duplicate' => __( 'В таблице есть повторяющиеся диапазоны веса.', 'walls-delivery-calc' ),
+			'manual_weight_range_overlap' => __( 'Диапазоны веса пересекаются. Границы могут соприкасаться, но не перекрываться.', 'walls-delivery-calc' ),
+			default => __( 'Тариф ручной службы не сохранён. Проверьте значения и повторите попытку.', 'walls-delivery-calc' ),
+		};
+		?>
+		<tr><th></th><td><div class="notice notice-error inline"><p><?php echo esc_html( $message ); ?></p></div></td></tr>
+		<?php
 	}
 
 	private function render_manual_geography_rows( ?DeliveryService $service ): void {

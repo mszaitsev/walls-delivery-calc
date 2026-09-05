@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.150.3
+Version: 0.151.0
 
 Manual delivery geography reads active regions and locations from the shared `wp_wdc_locations` table but does not write to it. The region identity is textual `country_code + region_name`. The manual city identity is textual `country_code + resolved_place_name() + region_name`, where `resolved_place_name()` prefers `place_name`, then `settlement_name`, then `city_name` from the existing `Location` value object. Manual geography persistence deliberately avoids `wp_wdc_locations.id` as permanent identity because the location table may be rebuilt.
 

@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000083 A0AC:74BD
+Volume serial number is 0000004B A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -140,6 +140,7 @@ C:.
 |           0059_add_ozon_pickup_generation_lock_owner.php
 |           0060_create_manual_delivery_geography.php
 |           0061_make_manual_delivery_geography_country_aware.php
+|           0062_create_manual_delivery_weight_ranges.php
 |
 +---docs
 |   |   README.md
@@ -326,7 +327,13 @@ C:.
 |   |   +---Manual
 |   |   |       ManualDeliveryGeographyMatcher.php
 |   |   |       ManualDeliveryGeographyRepository.php
+|   |   |       ManualDeliveryPricingCalculator.php
+|   |   |       ManualDeliveryPricingConfig.php
+|   |   |       ManualDeliveryPricingResult.php
+|   |   |       ManualDeliveryPricingService.php
 |   |   |       ManualDeliverySettings.php
+|   |   |       ManualDeliveryWeightRange.php
+|   |   |       ManualDeliveryWeightRangeRepository.php
 |   |   |
 |   |   +---OzonDelivery
 |   |   |   |   OzonDeliveryCredentials.php

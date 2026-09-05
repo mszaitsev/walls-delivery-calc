@@ -92,7 +92,74 @@
 		return button;
 	}
 
+	function syncPricingSections() {
+		const select = document.querySelector( 'select[name="manual_pricing_mode"]' );
+		if ( ! select ) {
+			return;
+		}
+		document.querySelectorAll( '[data-wdc-manual-pricing-section]' ).forEach( function ( section ) {
+			const active = section.dataset.wdcManualPricingSection === select.value;
+			section.style.display = active ? '' : 'none';
+			section.querySelectorAll( 'input, select, textarea, button' ).forEach( function ( field ) {
+				field.disabled = ! active;
+			} );
+		} );
+	}
+
+	function addWeightRangeRow( list ) {
+		const row = document.createElement( 'tr' );
+		row.dataset.wdcManualWeightRangeRow = '1';
+		[
+			[ 'manual_weight_range_from_kg[]', 'small-text' ],
+			[ 'manual_weight_range_to_kg[]', 'small-text' ],
+			[ 'manual_weight_range_price_rub[]', 'regular-text' ]
+		].forEach( function ( spec ) {
+			const cell = document.createElement( 'td' );
+			const input = document.createElement( 'input' );
+			input.name = spec[0];
+			input.className = spec[1];
+			cell.appendChild( input );
+			row.appendChild( cell );
+		} );
+		const actions = document.createElement( 'td' );
+		const remove = document.createElement( 'button' );
+		remove.type = 'button';
+		remove.className = 'button-link-delete';
+		remove.dataset.wdcManualRemoveRange = '1';
+		remove.textContent = 'Удалить';
+		actions.appendChild( remove );
+		row.appendChild( actions );
+		list.appendChild( row );
+	}
+
+	document.addEventListener( 'change', function ( event ) {
+		if ( event.target && event.target.matches( 'select[name="manual_pricing_mode"]' ) ) {
+			syncPricingSections();
+		}
+	} );
+
 	document.addEventListener( 'click', function ( event ) {
+		const removeRange = event.target && event.target.closest( '[data-wdc-manual-remove-range]' );
+		if ( removeRange ) {
+			event.preventDefault();
+			const row = removeRange.closest( '[data-wdc-manual-weight-range-row]' );
+			if ( row ) {
+				row.remove();
+			}
+			return;
+		}
+
+		const addRange = event.target && event.target.closest( '[data-wdc-manual-add-weight-range]' );
+		if ( addRange ) {
+			event.preventDefault();
+			const box = addRange.closest( '[data-wdc-manual-weight-ranges]' );
+			const list = box ? box.querySelector( '[data-wdc-manual-weight-range-list]' ) : null;
+			if ( list ) {
+				addWeightRangeRow( list );
+			}
+			return;
+		}
+
 		const remove = event.target && event.target.closest( '[data-wdc-manual-remove]' );
 		if ( remove ) {
 			event.preventDefault();
@@ -144,4 +211,10 @@
 			} );
 		}
 	} );
+
+	if ( 'loading' === document.readyState ) {
+		document.addEventListener( 'DOMContentLoaded', syncPricingSections );
+	} else {
+		syncPricingSections();
+	}
 }() );

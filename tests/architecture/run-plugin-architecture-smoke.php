@@ -951,6 +951,10 @@ plugin_architecture_assert( str_contains( $delivery_services_admin_source, 'save
 
 $location_repository_source = plugin_architecture_source( 'src/Locations/Storage/LocationRepository.php' );
 plugin_architecture_assert( ! str_contains( $location_repository_source, 'unique_active_ru_region_names' ) && ! str_contains( $location_repository_source, 'search_active_ru_locations_for_manual_delivery' ), 'Manual delivery location search must use country-aware LocationRepository methods without RU-only compatibility wrappers.' );
+$manual_carrier_source = plugin_architecture_source( 'src/Carriers/Runtime/ManualDeliveryCarrier.php' );
+$manual_pricing_calculator_source = plugin_architecture_source( 'src/Carriers/Manual/ManualDeliveryPricingCalculator.php' );
+plugin_architecture_assert( str_contains( $manual_carrier_source, 'ManualDeliveryPricingService' ) && ! str_contains( $checkout_orchestrator_source, 'ManualDeliveryPricing' ) && ! str_contains( plugin_architecture_source( 'src/Rules/Services/RuleEngine.php' ), 'ManualDeliveryPricing' ), 'Manual pricing must stay carrier-owned and outside CheckoutOrchestrator and Rule Engine.' );
+plugin_architecture_assert( str_contains( $manual_pricing_calculator_source, 'price_per_kg_kopecks * $billing_weight_g' ) && ! str_contains( $manual_pricing_calculator_source, 'float' ) && ! str_contains( $manual_pricing_calculator_source, 'zone_id' ), 'Manual pricing calculator must use integer arithmetic and remain zone-free.' );
 
 $actual_cost_ajax_source = plugin_architecture_source( 'src/Shipments/Admin/Ajax/ShipmentActualCostAjaxController.php' );
 $shipment_metabox_source = plugin_architecture_source( 'src/Shipments/Admin/OrderShipmentsMetabox.php' );

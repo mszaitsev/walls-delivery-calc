@@ -154,7 +154,10 @@ use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentService;
 use WallsShop\WDC\Carriers\OzonDelivery\Shipments\OzonDeliveryShipmentStatusMapper;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyMatcher;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingCalculator;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingService;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
@@ -756,7 +759,10 @@ final class Plugin {
 		$this->container->register( ManualDeliverySettings::class, fn(): ManualDeliverySettings => new ManualDeliverySettings( $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( ManualDeliveryGeographyRepository::class, fn(): ManualDeliveryGeographyRepository => new ManualDeliveryGeographyRepository() );
 		$this->container->register( ManualDeliveryGeographyMatcher::class, fn(): ManualDeliveryGeographyMatcher => new ManualDeliveryGeographyMatcher( $this->container->get( ManualDeliveryGeographyRepository::class ) ) );
-		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryGeographyMatcher::class ) ) );
+		$this->container->register( ManualDeliveryWeightRangeRepository::class, fn(): ManualDeliveryWeightRangeRepository => new ManualDeliveryWeightRangeRepository() );
+		$this->container->register( ManualDeliveryPricingCalculator::class, fn(): ManualDeliveryPricingCalculator => new ManualDeliveryPricingCalculator() );
+		$this->container->register( ManualDeliveryPricingService::class, fn(): ManualDeliveryPricingService => new ManualDeliveryPricingService( $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryWeightRangeRepository::class ), $this->container->get( ManualDeliveryPricingCalculator::class ) ) );
+		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryGeographyMatcher::class ), $this->container->get( ManualDeliveryPricingService::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -1051,6 +1057,7 @@ final class Plugin {
 				$this->container->get( RussianPostPickupDiagnosticsTab::class ),
 				$this->container->get( ManualDeliverySettings::class ),
 				$this->container->get( ManualDeliveryGeographyRepository::class ),
+				$this->container->get( ManualDeliveryWeightRangeRepository::class ),
 				$this->container->get( DeliveryServiceKeyRenameService::class ),
 				$this->container->get( DeliveryServiceSettingsRepository::class ),
 				$this->container->get( RussianPostSettings::class ),

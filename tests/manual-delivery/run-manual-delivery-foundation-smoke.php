@@ -37,6 +37,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		/** @var array<int,array<string,mixed>> */
 		public array $manual_locations = array();
 		/** @var array<int,array<string,mixed>> */
+		public array $manual_weight_ranges = array();
+		/** @var array<int,array<string,mixed>> */
 		public array $locations = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $rules = array();
@@ -182,6 +184,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 				usort( $rows, static fn ( array $left, array $right ): int => strcmp( (string) ( $left['country_code'] ?? 'RU' ), (string) ( $right['country_code'] ?? 'RU' ) ) ?: strcmp( (string) $left['region_name'], (string) $right['region_name'] ) );
 				return $rows;
 			}
+			if ( str_contains( $query, 'wdc_manual_delivery_weight_ranges' ) && preg_match( '/service_id = ([0-9]+)/', $query, $matches ) ) {
+				$rows = array_values( array_filter( $this->manual_weight_ranges, static fn ( array $row ): bool => (int) $row['service_id'] === (int) $matches[1] ) );
+				usort( $rows, static fn ( array $left, array $right ): int => ( (int) $left['from_weight_g'] <=> (int) $right['from_weight_g'] ) ?: ( (int) $left['to_weight_g'] <=> (int) $right['to_weight_g'] ) );
+				return $rows;
+			}
 			return array();
 		}
 
@@ -210,6 +217,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( str_contains( $table, 'wdc_manual_delivery_locations' ) ) {
 				return $this->manual_locations;
 			}
+			if ( str_contains( $table, 'wdc_manual_delivery_weight_ranges' ) ) {
+				return $this->manual_weight_ranges;
+			}
 			if ( str_contains( $table, 'wdc_rules' ) ) {
 				return $this->rules;
 			}
@@ -226,7 +236,11 @@ use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyMatcher;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingCalculator;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingService;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRange;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\ManualDeliveryCarrier;
 use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentSnapshotBuilder;
@@ -255,6 +269,7 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -271,6 +286,9 @@ $settings_repo = new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
 $manual_settings = new ManualDeliverySettings( $settings_repo );
 $manual_geography = new ManualDeliveryGeographyRepository( $GLOBALS['wpdb'] );
 $manual_matcher = new ManualDeliveryGeographyMatcher( $manual_geography );
+$manual_weight_ranges = new ManualDeliveryWeightRangeRepository( $GLOBALS['wpdb'] );
+$manual_pricing_calculator = new ManualDeliveryPricingCalculator();
+$manual_pricing_service = new ManualDeliveryPricingService( $manual_settings, $manual_weight_ranges, $manual_pricing_calculator );
 $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
 $rules = new RuleRepository( $GLOBALS['wpdb'] );
 $rp_directory = ( new ReflectionClass( \WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor();
@@ -319,11 +337,11 @@ $services->update_service( (int) $nsk->id, array( 'enabled' => 1 ) );
 $services->soft_delete_service( (int) $pickup->id );
 wdc_manual_assert( null === $services->find_by_service_key( 'manual_pickup_store' ), 'Manual service soft delete must hide service from runtime lookup.' );
 
-$carrier = new ManualDeliveryCarrier( $services, $manual_settings, $manual_matcher );
+$carrier = new ManualDeliveryCarrier( $services, $manual_settings, $manual_matcher, $manual_pricing_service );
 wdc_manual_assert( ManualDeliverySettings::CARRIER_KEY === $carrier->get_identity()->key && 'manual' === $carrier->get_identity()->type, 'Manual runtime carrier identity must be stable.' );
 
-$request_for = static function ( string $service_key, string $country = 'RU', string $city = 'Новосибирск', string $region = 'Новосибирская область', array $context = array() ): QuoteRequest {
-	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000, 10, 10, 10 );
+$request_for = static function ( string $service_key, string $country = 'RU', string $city = 'Новосибирск', string $region = 'Новосибирская область', array $context = array(), int $weight_g = 1000 ): QuoteRequest {
+	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), max( 0, $weight_g ), 10, 10, 10 );
 	$context = array_merge(
 		array(
 			'service_key' => $service_key,
@@ -347,6 +365,7 @@ $request_for = static function ( string $service_key, string $country = 'RU', st
 $quote = $carrier->quote( $request_for( 'manual_nsk_courier' ) );
 wdc_manual_assert( $quote->success && 1 === count( $quote->rates), 'Manual flat runtime must return one rate for an active manual service.' );
 wdc_manual_assert( 35025 === $quote->rates[0]->price->get_kopecks() && DeliveryType::COURIER === $quote->rates[0]->delivery_type, 'Manual flat price must use integer kopecks and canonical courier type.' );
+wdc_manual_assert( $carrier->quote( $request_for( 'manual_nsk_courier', 'RU', 'Новосибирск', 'Новосибирская область', array(), 0 ) )->success, 'Manual flat pricing must stay available when chargeable weight is zero.' );
 wdc_manual_assert( ! $carrier->quote( $request_for( '' ) )->success, 'Manual runtime must fail closed without service_key.' );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'unknown_manual' ) )->success, 'Manual runtime must fail closed for unknown service_key.' );
 $wrong_id = $services->create_service( array( 'service_key' => 'wrong_owner', 'carrier_key' => 'cdek', 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Wrong', 'enabled' => 1, 'deleted' => 0 ) );
@@ -357,6 +376,51 @@ $manual_settings->save_flat_pricing( $legacy_id, '100' );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'legacy_fixed_manual' ) )->success, 'Legacy fixed type must not quote without explicit manual normalization.' );
 $missing_pricing_id = $services->create_service( array( 'service_key' => 'manual_missing_pricing', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Missing pricing', 'enabled' => 1, 'deleted' => 0 ) );
 wdc_manual_assert( $missing_pricing_id > 0 && ! $carrier->quote( $request_for( 'manual_missing_pricing' ) )->success, 'Manual runtime must fail closed when pricing config is absent.' );
+
+$per_kg_id = $services->create_service( array( 'service_key' => 'manual_per_kg', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Per kg', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'deleted' => 0 ) );
+$countries->replace_countries( $per_kg_id, array( 'RU' ) );
+$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'minimum_price_rub' => '500', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG ) );
+$per_kg_quote = $carrier->quote( $request_for( 'manual_per_kg', 'RU', 'Новосибирск', 'Новосибирская область', array(), 2400 ) );
+wdc_manual_assert( $per_kg_quote->success && 50000 === $per_kg_quote->rates[0]->price->get_kopecks() && 3000 === (int) $per_kg_quote->rates[0]->meta['manual_billing_weight_g'], 'Manual per-kg pricing must round billing weight up by step and apply tariff minimum before rules.' );
+$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'minimum_price_rub' => '', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG ) );
+wdc_manual_assert( 45000 === $carrier->quote( $request_for( 'manual_per_kg', 'RU', 'Новосибирск', 'Новосибирская область', array(), 2400 ) )->rates[0]->price->get_kopecks(), 'Manual per-kg pricing without tariff minimum must use rounded billing weight times price per 1000 g.' );
+$manual_settings->save_pricing( $per_kg_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'minimum_price_rub' => '', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_500_G ) );
+wdc_manual_assert( 22500 === $carrier->quote( $request_for( 'manual_per_kg', 'RU', 'Новосибирск', 'Новосибирская область', array(), 1201 ) )->rates[0]->price->get_kopecks(), 'Manual per-kg pricing must keep price_per_kg as price per 1000 g when billing step is 500 g.' );
+wdc_manual_assert( array( 1000, 1000, 2000 ) === array( $manual_pricing_calculator->billing_weight_g( 999, 1000 ), $manual_pricing_calculator->billing_weight_g( 1000, 1000 ), $manual_pricing_calculator->billing_weight_g( 1001, 1000 ) ), 'Manual billing step 1000 g boundaries must round up with integer arithmetic.' );
+wdc_manual_assert( array( 500, 500, 1000 ) === array( $manual_pricing_calculator->billing_weight_g( 499, 500 ), $manual_pricing_calculator->billing_weight_g( 500, 500 ), $manual_pricing_calculator->billing_weight_g( 501, 500 ) ), 'Manual billing step 500 g boundaries must round up with integer arithmetic.' );
+wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_per_kg', 'RU', 'Новосибирск', 'Новосибирская область', array(), 0 ) )->success, 'Manual per-kg pricing must fail closed when chargeable weight is zero.' );
+
+$ranges_id = $services->create_service( array( 'service_key' => 'manual_ranges', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Ranges', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'deleted' => 0 ) );
+$countries->replace_countries( $ranges_id, array( 'RU' ) );
+$manual_settings->save_pricing( $ranges_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES, 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_NONE_G, 'flat_price_rub' => '999', 'price_per_kg_rub' => '150' ) );
+$manual_weight_ranges->replace_ranges( $ranges_id, array( new ManualDeliveryWeightRange( 0, 2000, 35000, 1 ), new ManualDeliveryWeightRange( 2000, 5000, 50000, 2 ), new ManualDeliveryWeightRange( 5000, 10000, 75000, 3 ) ) );
+foreach ( array( 1 => 35000, 1999 => 35000, 2000 => 35000, 2001 => 50000, 5000 => 50000, 5001 => 75000, 10000 => 75000 ) as $weight => $expected_kopecks ) {
+	$range_quote = $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), (int) $weight ) );
+	wdc_manual_assert( $range_quote->success && $expected_kopecks === $range_quote->rates[0]->price->get_kopecks(), 'Manual weight ranges must use upper-inclusive boundaries.' );
+}
+wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), 10001 ) )->success, 'Manual weight ranges must fail closed when weight is outside configured ranges.' );
+wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), 0 ) )->success, 'Manual weight ranges must fail closed when chargeable weight is zero.' );
+$manual_weight_ranges->replace_ranges( $ranges_id, array( new ManualDeliveryWeightRange( 0, 2000, 35000, 1 ), new ManualDeliveryWeightRange( 5000, 10000, 75000, 2 ) ) );
+wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), 3000 ) )->success, 'Manual weight range gaps must make the tariff unavailable for that billing weight.' );
+$manual_weight_ranges->replace_ranges( $ranges_id, array( new ManualDeliveryWeightRange( 0, 2000, 35000, 1 ), new ManualDeliveryWeightRange( 2000, 5000, 50000, 2 ) ) );
+$manual_settings->save_pricing( $ranges_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES, 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_500_G ) );
+wdc_manual_assert( 35000 === $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), 1901 ) )->rates[0]->price->get_kopecks() && 50000 === $carrier->quote( $request_for( 'manual_ranges', 'RU', 'Новосибирск', 'Новосибирская область', array(), 2001 ) )->rates[0]->price->get_kopecks(), 'Manual weight ranges must apply billing step before range matching.' );
+$before_invalid_ranges = $manual_weight_ranges->ranges( $ranges_id );
+foreach ( array(
+	array( new ManualDeliveryWeightRange( 0, 2000, 10000 ), new ManualDeliveryWeightRange( 1000, 3000, 20000 ) ),
+	array( new ManualDeliveryWeightRange( 0, 2000, 10000 ), new ManualDeliveryWeightRange( 0, 2000, 20000 ) ),
+	array( new ManualDeliveryWeightRange( 2000, 2000, 10000 ) ),
+	array( new ManualDeliveryWeightRange( -1, 2000, 10000 ) ),
+	array( new ManualDeliveryWeightRange( 0, 2000, -1 ) ),
+) as $invalid_ranges ) {
+	try {
+		$manual_weight_ranges->replace_ranges( $ranges_id, $invalid_ranges );
+		wdc_manual_assert( false, 'Invalid manual weight range config must be rejected.' );
+	} catch ( InvalidArgumentException ) {
+		wdc_manual_assert( $before_invalid_ranges == $manual_weight_ranges->ranges( $ranges_id ), 'Rejected manual weight ranges must leave the previous valid config intact.' );
+	}
+}
+
 $services->update_service( (int) $nsk->id, array( 'enabled' => 0 ) );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_nsk_courier' ) )->success, 'Manual runtime must fail closed for disabled service.' );
 $services->update_service( (int) $nsk->id, array( 'enabled' => 1 ) );
@@ -372,6 +436,7 @@ wdc_manual_assert( 'none' === $manager->rules_for_service( $services->find_by_se
 $registry = new CarrierRegistry();
 $registry->register( $carrier );
 $service_registry = new DeliveryServiceRegistry( $services, $registry );
+$packaging_calculator = new PackagingWeightCalculator( new SettingsRepository() );
 $lead_time = new DeliveryLeadTimeNormalizer(
 	new SettingsRepository(),
 	$settings_repo,
@@ -389,7 +454,7 @@ $orchestrator = new CheckoutOrchestrator(
 	null,
 	$service_registry,
 	$manager,
-	null,
+	$packaging_calculator,
 	null,
 	new DeliveryCustomerCommentSnapshotBuilder( new DeliveryCustomerCommentNormalizer() )
 );
@@ -401,6 +466,10 @@ wdc_manual_assert( null !== $nsk_rate && 37600 === $nsk_rate->price->get_kopecks
 wdc_manual_assert( 35025 === (int) round( (float) $nsk_rate->meta['original_price_rub'] * 100 ) && 376.0 === (float) $nsk_rate->meta['final_price_rub'], 'Manual rate must preserve base/original and final price metadata.' );
 wdc_manual_assert( 'Комментарий Курьер НСК' === (string) ( $nsk_rate->meta['customer_comments'][0]['text'] ?? '' ), 'Manual service customer comment must use the canonical comment pipeline.' );
 wdc_manual_assert( 'manual_pricing' === ManualDeliverySettings::PRICING_SETTING_KEY && ! str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Services/RuleEngine.php' ), 'manual_rules_enabled' ), 'Manual delivery must not add a manual-specific rule-engine branch.' );
+$per_kg_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool => 'manual_per_kg' === $rate->service_key ) )[0] ?? null;
+$range_rate = array_values( array_filter( $manual_rates, static fn ( $rate ): bool => 'manual_ranges' === $rate->service_key ) )[0] ?? null;
+wdc_manual_assert( null !== $per_kg_rate && 20000 === $per_kg_rate->price->get_kopecks() && 150.0 === (float) $per_kg_rate->meta['api_base_price_rub'] && 150.0 === (float) $per_kg_rate->meta['original_price_rub'], 'Manual per-kg base price must pass through default rules and existing post-processing without a manual Rule Engine branch.' );
+wdc_manual_assert( null !== $range_rate && 40000 === $range_rate->price->get_kopecks() && 350.0 === (float) $range_rate->meta['api_base_price_rub'] && ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === (string) $range_rate->meta['manual_pricing_mode'], 'Manual weight range base price must pass through default rules and existing post-processing.' );
 
 wdc_manual_assert( $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'RU' ), 'Selected-country manual service must be available for selected country.' );
 wdc_manual_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'KZ' ), 'Selected-country manual service must not be available for an unselected country.' );
@@ -409,6 +478,19 @@ $except_id = $services->create_service( array( 'service_key' => 'manual_except',
 $countries->replace_countries( $except_id, array( 'KZ' ) );
 wdc_manual_assert( $manager->service_available_for_country( $services->find_by_service_key( 'manual_all' ), 'AM' ), 'Manual all-countries mode must use shared availability infrastructure.' );
 wdc_manual_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'manual_except' ), 'KZ' ) && $manager->service_available_for_country( $services->find_by_service_key( 'manual_except' ), 'RU' ), 'Manual all-except-selected mode must use shared availability infrastructure.' );
+
+$GLOBALS['wdc_options']['wdc_core_settings'][ PackagingWeightCalculator::SETTINGS_KEY ] = array( array( 'cart_weight_from_g' => 1, 'cart_weight_to_g' => 2000, 'packaging_weight_g' => 500 ) );
+$pack_no_id = $services->create_service( array( 'service_key' => 'manual_packaging_no', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'No packaging', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'include_packaging_weight' => 0, 'deleted' => 0 ) );
+$pack_yes_id = $services->create_service( array( 'service_key' => 'manual_packaging_yes', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'With packaging', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'include_packaging_weight' => 1, 'deleted' => 0 ) );
+$countries->replace_countries( $pack_no_id, array( 'RU' ) );
+$countries->replace_countries( $pack_yes_id, array( 'RU' ) );
+$manual_settings->save_pricing( $pack_no_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG ) );
+$manual_settings->save_pricing( $pack_yes_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_PER_KG, 'price_per_kg_rub' => '150', 'billing_weight_step_g' => ManualDeliverySettings::BILLING_STEP_1_KG ) );
+$packaging_result = $orchestrator->calculate( $request_for( 'ignored', 'RU', 'Новосибирск', 'Новосибирская область', array(), 1000 ) );
+$packaging_rates = array_column( array_map( static fn ( $rate ): array => array( 'key' => $rate->service_key, 'rate' => $rate ), $packaging_result->rates ), 'rate', 'key' );
+wdc_manual_assert( 15000 === $packaging_rates['manual_packaging_no']->price->get_kopecks() && 1000 === (int) $packaging_rates['manual_packaging_no']->meta['manual_chargeable_weight_g'], 'Manual per-kg pricing must respect include_packaging_weight=false through the existing packaging pipeline.' );
+wdc_manual_assert( 30000 === $packaging_rates['manual_packaging_yes']->price->get_kopecks() && 1500 === (int) $packaging_rates['manual_packaging_yes']->meta['manual_chargeable_weight_g'], 'Manual per-kg pricing must use existing packaging-aware package weight when include_packaging_weight=true.' );
+$GLOBALS['wdc_options']['wdc_core_settings'][ PackagingWeightCalculator::SETTINGS_KEY ] = array();
 
 $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 10, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'settlement_name' => '', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирск — Новосибирская область', 'searchable_text' => Location::normalize_search_text( 'Новосибирск Новосибирская область' ), 'active' => 1 ),
@@ -573,18 +655,23 @@ $checkout_orchestrator_source = (string) file_get_contents( $root . '/src/Checko
 $order_mapper_source = (string) file_get_contents( $root . '/src/Orders/Application/OrderQuoteRequestMapper.php' );
 $admin_source = (string) file_get_contents( $root . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $manual_geo_source = (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryGeographyRepository.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryGeographyMatcher.php' );
+$manual_pricing_source = (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryPricingCalculator.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryPricingService.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryWeightRangeRepository.php' );
 $migration_0061_source = (string) file_get_contents( $root . '/database/migrations/0061_make_manual_delivery_geography_country_aware.php' );
+$migration_0062_source = (string) file_get_contents( $root . '/database/migrations/0062_create_manual_delivery_weight_ranges.php' );
 wdc_manual_assert( ! str_contains( $shipment_creation, 'ManualDelivery' ) && ! str_contains( $shipment_creation, "carrier_key' => 'manual" ), 'Manual delivery foundation must not add a ShipmentCreationService branch.' );
 wdc_manual_assert( ! str_contains( $shipments_metabox, 'ManualDelivery' ) && ! str_contains( $shipments_metabox, "carrier_key' => 'manual" ), 'Manual delivery foundation must not add an OrderShipmentsMetabox branch.' );
 wdc_manual_assert( ! str_contains( $shipment_js, 'ManualDelivery' ) && ! str_contains( $shipment_js, "manual-delivery" ), 'Manual delivery foundation must not add generic shipment JS logic.' );
 wdc_manual_assert( ! str_contains( $plugin, 'ManualDeliveryShipmentDocumentProvider' ) && ! str_contains( $plugin, 'ManualDeliveryShipmentModalExtension' ) && ! str_contains( $plugin, 'ManualDeliveryShipmentPersistenceMapper' ), 'Manual delivery foundation must not register shipment document/modal/persistence extensions.' );
 wdc_manual_assert( str_contains( $plugin, 'ManualDeliveryCarrier::class' ) && str_contains( $plugin, '$registry->register( $this->container->get( ManualDeliveryCarrier::class ) );' ), 'Manual runtime carrier must be registered only through CarrierRegistry.' );
-wdc_manual_assert( ! str_contains( $checkout_orchestrator_source, 'ManualDeliveryGeography' ) && ! str_contains( $checkout_orchestrator_source, 'wdc_manual_delivery_' ), 'CheckoutOrchestrator must not contain manual geography SQL or carrier-specific branches.' );
+wdc_manual_assert( ! str_contains( $checkout_orchestrator_source, 'ManualDeliveryGeography' ) && ! str_contains( $checkout_orchestrator_source, 'ManualDeliveryPricing' ) && ! str_contains( $checkout_orchestrator_source, 'wdc_manual_delivery_' ), 'CheckoutOrchestrator must not contain manual geography/pricing SQL or carrier-specific branches.' );
 wdc_manual_assert( ! str_contains( $manual_geo_source, 'location_id' ) && ! str_contains( $manual_geo_source, 'wp_wdc_locations.id' ), 'Manual geography must not depend on permanent location IDs.' );
+wdc_manual_assert( str_contains( $manual_pricing_source, 'billing_weight_g' ) && str_contains( $manual_pricing_source, 'price_per_kg_kopecks * $billing_weight_g' ) && ! str_contains( $manual_pricing_source, 'zone_id' ) && ! str_contains( $manual_pricing_source, 'dbDelta' ), 'Manual pricing must be carrier-owned, integer based, zone-free, and must not create runtime schema.' );
 wdc_manual_assert( str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_region_search" ) && str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_location_search" ) && str_contains( $admin_source, "current_user_can( AdminMenu::CAPABILITY )" ) && str_contains( $admin_source, "check_ajax_referer( 'wdc_manual_delivery_geography', 'nonce', false )" ), 'Manual geography admin search must use capability and nonce protected AJAX.' );
+wdc_manual_assert( str_contains( $admin_source, 'manual_pricing_mode_options' ) && str_contains( $admin_source, 'manual_weight_ranges_from_post' ) && str_contains( $admin_source, 'manual_delivery_weight_ranges->validate_ranges' ) && str_contains( $admin_source, 'wdc_manual_pricing_notice' ), 'Manual pricing admin UI/save must expose typed modes and validate ranges before replacing stored rows.' );
 wdc_manual_assert( str_contains( $admin_source, 'resolve_active_by_place_and_region' ) && str_contains( $admin_source, "'country_code' => strtoupper( trim( \$canonical->country_code ) )" ) && str_contains( $admin_source, "'location_name' => \$canonical->resolved_place_name()" ) && str_contains( $admin_source, "'region_name' => \$canonical->region_name" ) && str_contains( $admin_source, 'name="manual_locations[]"' ) && ! str_contains( $admin_source, 'name="manual_location_ids[]"' ), 'Manual geography admin save must canonicalize locations server-side as country_code plus location_name plus region_name, not location ID.' );
 wdc_manual_assert( str_contains( $admin_source, 'save_manual_delivery_geography' ) && substr_count( $admin_source, 'clear_delivery_quote_cache();' ) >= 4, 'Manual geography saves must invalidate the shared delivery quote cache.' );
 wdc_manual_assert( str_contains( $order_mapper_source, 'canonical_location' ) && str_contains( $order_mapper_source, 'resolved_place_name()' ) && str_contains( $order_mapper_source, "'place_name'" ) && str_contains( $order_mapper_source, '$address->settlement ?: $address->city' ), 'Order-admin quote mapping must build trusted region_name and place_name from canonical Location when a location id is selected.' );
 wdc_manual_assert( str_contains( $migration_0061_source, 'country_code' ) && str_contains( $migration_0061_source, "country_code = 'RU'" ) && str_contains( $migration_0061_source, 'ux_manual_region_country' ) && str_contains( $migration_0061_source, 'ux_manual_location_country' ), 'Migration 0061 must add/backfill country-aware manual geography identity and unique indexes.' );
+wdc_manual_assert( str_contains( $migration_0062_source, 'wdc_manual_delivery_weight_ranges' ) && str_contains( $migration_0062_source, 'ux_manual_weight_range' ) && str_contains( $migration_0062_source, 'from_weight_g' ) && str_contains( $migration_0062_source, 'price_kopecks' ), 'Migration 0062 must create manual delivery weight ranges with grams, kopecks, and unique range identity.' );
 
 echo "Manual delivery foundation smoke test passed.\n";

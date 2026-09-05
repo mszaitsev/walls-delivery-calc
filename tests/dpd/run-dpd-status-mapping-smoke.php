@@ -12,6 +12,7 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -196,6 +197,7 @@ $page = new DeliveryServicesAdminPage(
 	),
 	manual_delivery_settings: new ManualDeliverySettings( new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ) ),
 	manual_delivery_geography: new ManualDeliveryGeographyRepository( $GLOBALS['wpdb'] ),
+	manual_delivery_weight_ranges: new ManualDeliveryWeightRangeRepository( $GLOBALS['wpdb'] ),
 	delivery_service_key_rename: new DeliveryServiceKeyRenameService( new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new RuleRepository( $GLOBALS['wpdb'] ) ),
 	dpd_status_mapping: $mapping
 );

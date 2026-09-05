@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Carriers\Runtime;
 
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyMatcher;
+use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingService;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -23,7 +24,8 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 	public function __construct(
 		private DeliveryServiceRepository $services,
 		private ManualDeliverySettings $settings,
-		private ManualDeliveryGeographyMatcher $geography
+		private ManualDeliveryGeographyMatcher $geography,
+		private ManualDeliveryPricingService $pricing
 	) {
 	}
 
@@ -50,13 +52,24 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 			return $this->failed_quote( $request, $geography['reason'] );
 		}
 
-		$pricing = $this->settings->pricing( (int) $service->id );
-		if ( ManualDeliverySettings::PRICING_MODE_FLAT !== $pricing['pricing_mode'] || $pricing['flat_price_kopecks'] < 0 ) {
-			return $this->failed_quote( $request, 'manual_pricing_invalid' );
+		$pricing = $this->pricing->calculate_for_service( (int) $service->id, max( 0, $request->package->get_total_weight_g() ) );
+		if ( ! $pricing->available || ! $pricing->price instanceof Money ) {
+			return $this->failed_quote( $request, $pricing->reason ?: 'manual_pricing_invalid' );
 		}
 
-		$price = Money::from_kopecks( $pricing['flat_price_kopecks'] );
+		$price = $pricing->price;
 		$days = $this->settings->delivery_days( (int) $service->id );
+		$pricing_meta = array(
+			'api_base_price_rub' => $price->get_rubles(),
+			'manual_pricing_mode' => $pricing->pricing_mode,
+			'manual_chargeable_weight_g' => $pricing->chargeable_weight_g,
+			'manual_billing_weight_g' => $pricing->billing_weight_g,
+			'manual_geography_match' => $geography['reason'],
+			'order_recalculation_requires_address' => false,
+		);
+		if ( null !== $pricing->matched_range ) {
+			$pricing_meta['manual_weight_range'] = $pricing->matched_range->to_array();
+		}
 		$rate = new DeliveryRate(
 			ManualDeliverySettings::CARRIER_KEY . ':' . $service->service_key,
 			ManualDeliverySettings::CARRIER_KEY,
@@ -78,13 +91,7 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 			'',
 			false,
 			false,
-			array(
-				'api_base_price_rub' => $price->get_rubles(),
-				'manual_pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT,
-				'manual_flat_price_kopecks' => $price->get_kopecks(),
-				'manual_geography_match' => $geography['reason'],
-				'order_recalculation_requires_address' => false,
-			),
+			$pricing_meta,
 			$price,
 			DateRange::range( $days['min_days'], $days['max_days'] )
 		);
