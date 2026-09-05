@@ -778,13 +778,14 @@ foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup 
 $delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout delivery type selector must not auto-render courier customer comment.' );
 $rate_renderer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
+$rate_meta_normalizer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/WooCommerceRateMetaNormalizer.php' );
 $rate_mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/WooCommerceRateMapper.php' );
 $checkout_orchestrator_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Runtime/CheckoutOrchestrator.php' );
 $new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
 $checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'render_pickup_selector( $meta, $method )' ) && str_contains( $rate_renderer_source, 'data-wdc-pickup-checkout' ), 'Rate renderer must render checkout pickup UI for pickup-point rates.' );
-runtime_smoke_assert( str_contains( $rate_renderer_source, 'normalize_meta_data' ) && str_contains( $rate_renderer_source, "array_key_exists( 'key', \$entry )" ), 'Rate renderer must normalize real WooCommerce meta-data entries before checking pickup flags.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'WooCommerceRateMetaNormalizer::meta' ) && str_contains( $rate_meta_normalizer_source, 'normalize_meta_data' ) && str_contains( $rate_meta_normalizer_source, "array_key_exists( 'key', \$entry )" ), 'Rate renderer must normalize real WooCommerce meta-data entries before checking pickup flags.' );
 runtime_smoke_assert( str_contains( $rate_mapper_source, "'pickup_family'" ) && str_contains( $rate_mapper_source, 'function pickup_family' ), 'WooCommerce rate mapper must expose pickup_family in top-level WC rate meta.' );
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, "woocommerce_after_shipping_rate', array( \$this, 'render'" ), 'Delivery type selector must not register a duplicate checkout pickup UI renderer.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "'planned_delivery_comment'" ) && str_contains( $rate_renderer_source, 'wdc-platform-planned-delivery-comment' ), 'Rate renderer must output planned_delivery_comment from rate meta as the checkout planned-date block.' );

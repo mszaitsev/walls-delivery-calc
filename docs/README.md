@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.4
+Version: 0.152.5
+
+0.152.5 fixes the remaining manual pickup first-load/provider-context race. Pickup provider resolution now treats the actual WooCommerce `WC_Shipping_Rate` in current shipping packages as the authoritative rate context and falls back to `wdc_platform_rates` only when no current WC rate is available. This lets cached WooCommerce pickup rates open the generic picker and return manual points without requiring a second page load or a prior `NewShippingMethod::calculate_shipping()` snapshot.
 
 0.152.4 hardens manual pickup integration on the first checkout load. The pickup frontend now learns current pickup families from rendered rate DOM before toggling visibility, so a cold session does not hide the manual selector until a reload. Registry-backed pickup query validation now accepts canonical textual locality (`country_code + region_name + location_name`) when `location_id=0`, and multi-place cargo follows the shared `places_count >= 1` contract.
 

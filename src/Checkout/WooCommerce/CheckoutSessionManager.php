@@ -496,7 +496,9 @@ final class CheckoutSessionManager {
 			return $pickup_family;
 		}
 
-		return str_ends_with( $pickup_family, ':pickup' ) ? $carrier . ':pickup' : $pickup_family;
+		$parts[0] = $carrier;
+
+		return implode( ':', $parts );
 	}
 
 	public function is_russian_post_pickup_family( string $rate_id ): bool {

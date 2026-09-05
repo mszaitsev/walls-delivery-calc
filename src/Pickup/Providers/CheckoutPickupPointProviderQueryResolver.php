@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Pickup\Providers;
 
 use RuntimeException;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMetaNormalizer;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -185,6 +186,11 @@ final class CheckoutPickupPointProviderQueryResolver {
 	/** @return array<string,mixed> */
 	private function rate( string $shipping_method_id ): array {
 		$id = $this->session_manager->normalize_rate_id( $shipping_method_id );
+		$woocommerce_rate = $this->woocommerce_rate( $id );
+		if ( array() !== $woocommerce_rate ) {
+			return $woocommerce_rate;
+		}
+
 		foreach ( $this->session_manager->rates() as $key => $rate ) {
 			if ( ! is_array( $rate ) ) {
 				continue;
@@ -192,6 +198,35 @@ final class CheckoutPickupPointProviderQueryResolver {
 			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $key ) );
 			if ( $rate_id === $id ) {
 				return $rate;
+			}
+		}
+
+		return array();
+	}
+
+	/** @return array<string,mixed> */
+	private function woocommerce_rate( string $normalized_rate_id ): array {
+		if ( '' === $normalized_rate_id || ! function_exists( 'WC' ) || ! is_object( WC() ) || ! method_exists( WC(), 'shipping' ) ) {
+			return array();
+		}
+		$shipping = WC()->shipping();
+		if ( ! is_object( $shipping ) || ! method_exists( $shipping, 'get_packages' ) ) {
+			return array();
+		}
+		$packages = $shipping->get_packages();
+		if ( ! is_array( $packages ) ) {
+			return array();
+		}
+		foreach ( $packages as $package ) {
+			if ( ! is_array( $package ) || ! is_array( $package['rates'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $package['rates'] as $key => $rate ) {
+				$rate_id = $this->session_manager->normalize_rate_id( WooCommerceRateMetaNormalizer::rate_id( $rate, (string) $key ) );
+				if ( $rate_id !== $normalized_rate_id ) {
+					continue;
+				}
+				return WooCommerceRateMetaNormalizer::rate_snapshot( $rate, (string) $key );
 			}
 		}
 

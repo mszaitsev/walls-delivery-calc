@@ -285,6 +285,18 @@ if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 			}
 		}
 
+		public function get_id(): string {
+			return $this->id;
+		}
+
+		public function get_label(): string {
+			return $this->label;
+		}
+
+		public function get_cost(): string {
+			return $this->cost;
+		}
+
 		public function get_meta( string $key, bool $single = true ): mixed {
 			unset( $single );
 			foreach ( $this->meta_data as $meta ) {
@@ -324,6 +336,21 @@ if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 	}
 }
 
+final class WdcManualSmokeShipping {
+	/** @var array<int,array<string,mixed>> */
+	private array $packages = array();
+
+	/** @param array<int,array<string,mixed>> $packages */
+	public function set_packages( array $packages ): void {
+		$this->packages = $packages;
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	public function get_packages(): array {
+		return $this->packages;
+	}
+}
+
 final class WdcManualSmokeSession {
 	/** @var array<string,mixed> */
 	private array $data = array();
@@ -346,9 +373,15 @@ final class WdcManualSmokeSession {
 
 final class WdcManualSmokeWooCommerce {
 	public WdcManualSmokeSession $session;
+	private WdcManualSmokeShipping $shipping;
 
 	public function __construct() {
 		$this->session = new WdcManualSmokeSession();
+		$this->shipping = new WdcManualSmokeShipping();
+	}
+
+	public function shipping(): WdcManualSmokeShipping {
+		return $this->shipping;
 	}
 }
 
@@ -429,6 +462,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMetaNormalizer;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
@@ -583,6 +617,7 @@ $provider = new ManualPickupPointProvider( $services, $manual_pickup_points );
 $pickup_provider_registry = new CarrierPickupPointProviderRegistry( array( $provider ) );
 wdc_manual_assert( $pickup_provider_registry->has( ManualDeliverySettings::CARRIER_KEY ) && 1 === count( $pickup_provider_registry->all() ), 'Manual pickup provider must be registered once for the manual carrier.' );
 $session_manager = new CheckoutSessionManager();
+wdc_manual_assert( 'manual:manual_pickup_a:pickup' === $session_manager->normalize_pickup_family( 'manual:manual_pickup_a:pickup' ), 'Checkout pickup family normalization must preserve service-specific manual pickup families.' );
 $rate_mapper = new WooCommerceRateMapper();
 $wc_rate = $rate_mapper->map( $pickup_rate_a );
 $session_manager->save_rates( array( $wc_rate['id'] => array_merge( $wc_rate['meta_data'], array( 'rate_id' => $wc_rate['id'] ) ) ) );
@@ -664,6 +699,90 @@ $manual_pickup_points->replace_points(
 );
 $rest_points_with_coords = $pickup_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
 wdc_manual_assert( is_array( $rest_points_with_coords ) && 1 === count( $rest_points_with_coords ) && 'manual-a-1' === (string) ( $rest_points_with_coords[0]['point_code'] ?? '' ) && 55.0302 === (float) $rest_points_with_coords[0]['lat'], 'Manual pickup REST must return points with coordinates through the same generic resolver path.' );
+$cached_wc_rate = new WC_Shipping_Rate( $wc_rate['id'], (string) $wc_rate['label'], (string) $wc_rate['cost'], $wc_rate['meta_data'] );
+WC()->shipping()->set_packages(
+	array(
+		array(
+			'rates' => array(
+				NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'] => $cached_wc_rate,
+			),
+		),
+	)
+);
+wdc_manual_assert( 'manual:manual_pickup_a:pickup' === (string) ( WooCommerceRateMetaNormalizer::meta( $cached_wc_rate )['pickup_family'] ?? '' ), 'Reusable WooCommerce rate meta normalizer must unwrap real WC meta objects for manual pickup family context.' );
+WC()->session = new WdcManualSmokeSession();
+$empty_wdc_rates_session = new CheckoutSessionManager();
+wdc_manual_assert( array() === $empty_wdc_rates_session->rates(), 'Regression setup must start with an empty WDC duplicate rates snapshot.' );
+ob_start();
+( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate, 0 );
+$cached_rate_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $cached_rate_html, 'data-wdc-pickup-checkout' ) && str_contains( $cached_rate_html, 'data-wdc-pickup-open' ) && str_contains( $cached_rate_html, 'Выбрать пункт выдачи' ), 'CheckoutRateRenderer must render selector from the actual cached WC_Shipping_Rate without requiring a prior WDC rates snapshot.' );
+$cached_wc_resolver = new CheckoutPickupPointProviderQueryResolver( $empty_wdc_rates_session );
+$cached_wc_query = $cached_wc_resolver->resolve( NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], ManualDeliverySettings::CARRIER_KEY, 'manual:manual_pickup_a:pickup' );
+wdc_manual_assert( 'manual_pickup_a' === $cached_wc_query->normalized_service_key() && 'Новосибирск' === $cached_wc_query->location_name, 'Provider resolver must use the authoritative cached WooCommerce rate when WDC rates are empty.' );
+$_SERVER['HTTP_X_WP_NONCE'] = 'nonce';
+$cached_wc_rest = new PickupPointsRestController(
+	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	$pickup_provider_registry,
+	$cached_wc_resolver,
+	null,
+	new WooCommerceSessionBootstrapper()
+);
+$cached_wc_points = $cached_wc_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
+wdc_manual_assert( is_array( $cached_wc_points ) && 1 === count( $cached_wc_points ) && 'manual-a-1' === (string) ( $cached_wc_points[0]['point_code'] ?? '' ), 'Pickup REST must return manual points from an authoritative cached WC rate even when wdc_platform_rates is empty.' );
+WC()->session = new WdcManualSmokeSession();
+$stale_wdc_rates_session = new CheckoutSessionManager();
+$stale_wdc_rates_session->save_rates(
+	array(
+		$wc_rate['id'] => array_merge(
+			$wc_rate['meta_data'],
+			array(
+				'rate_id' => $wc_rate['id'],
+				'delivery_type' => DeliveryType::COURIER,
+				'requires_pickup_point' => false,
+				'pickup_family' => 'manual:manual_pickup_a:courier',
+				'rate_meta' => array_merge(
+					is_array( $wc_rate['meta_data']['rate_meta'] ?? null ) ? $wc_rate['meta_data']['rate_meta'] : array(),
+					array(
+						'delivery_type' => DeliveryType::COURIER,
+						'requires_pickup_point' => false,
+						'pickup_family' => 'manual:manual_pickup_a:courier',
+					)
+				),
+			)
+		),
+	)
+);
+$stale_snapshot_rest = new PickupPointsRestController(
+	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	$pickup_provider_registry,
+	new CheckoutPickupPointProviderQueryResolver( $stale_wdc_rates_session ),
+	null,
+	new WooCommerceSessionBootstrapper()
+);
+$stale_snapshot_points = $stale_snapshot_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
+wdc_manual_assert( is_array( $stale_snapshot_points ) && 1 === count( $stale_snapshot_points ) && 'manual-a-1' === (string) ( $stale_snapshot_points[0]['point_code'] ?? '' ), 'Authoritative WooCommerce pickup rate must win over a stale WDC courier snapshot for the same rate id.' );
+$mismatched_context = $stale_snapshot_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'russian_post:pickup', 'limit' => 50 ) );
+wdc_manual_assert( is_array( $mismatched_context ) && 'provider_rate_context_mismatch' === (string) ( $mismatched_context['code'] ?? '' ), 'Browser carrier/family mismatch must still fail closed even when an authoritative WooCommerce rate exists.' );
+unset( $_SERVER['HTTP_X_WP_NONCE'] );
+$missing_nonce = $cached_wc_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
+wdc_manual_assert( is_array( $missing_nonce ) && 'wdc_forbidden' === (string) ( $missing_nonce['code'] ?? '' ), 'Registry-backed pickup REST must keep rejecting missing nonce for manual pickup requests.' );
+$_SERVER['HTTP_X_WP_NONCE'] = 'nonce';
+WC()->shipping()->set_packages( array() );
 $manual_pickup_points->replace_points( $pickup_a_id, array( array( 'code' => 'manual-a-1', 'title' => 'ПВЗ A', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'active' => 0 ) ) );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->success, 'Manual pickup rate must disappear after deactivating the last eligible pickup point.' );
 
@@ -876,7 +995,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.4' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.5' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -940,7 +1059,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.4' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.5' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

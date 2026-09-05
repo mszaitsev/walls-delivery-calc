@@ -88,7 +88,7 @@ final class PickupPointsRestController {
 		);
 	}
 
-	public function check_nonce( mixed $request ): bool|object {
+	public function check_nonce( mixed $request ): mixed {
 		$nonce = '';
 		if ( is_object( $request ) && method_exists( $request, 'get_header' ) ) {
 			$nonce = (string) $request->get_header( 'X-WP-Nonce' );
@@ -405,7 +405,7 @@ final class PickupPointsRestController {
 		return $this->response( $this->filter_generic_points( $formatted, $query_text ) );
 	}
 
-	private function checkout_rate_context_guard( mixed $request, string $carrier ): bool|object {
+	private function checkout_rate_context_guard( mixed $request, string $carrier ): mixed {
 		$method_id = $this->param( $request, 'shipping_method_id' );
 		$family = $this->param( $request, 'pickup_family' );
 		if ( '' === $method_id && '' === $family ) {

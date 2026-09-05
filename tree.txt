@@ -621,6 +621,7 @@ C:.
 |   |           PickupPointRenderer.php
 |   |           ShippingMethodRegistrar.php
 |   |           WooCommercePackageMapper.php
+|   |           WooCommerceRateMetaNormalizer.php
 |   |           WooCommerceRateMapper.php
 |   |           WooCommerceSessionBootstrapper.php
 |   |
