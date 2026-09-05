@@ -2,7 +2,7 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.150.2
+Version: 0.150.3
 
 Manual delivery geography is evaluated inside the existing manual runtime after shared DeliveryService country availability. Availability is `country availability AND (no manual geography restrictions for destination country OR region match within destination country OR city+region match within destination country)`. Regions use textual `country_code + region_name` from `wp_wdc_locations`; city identity uses `country_code + resolved_place_name() + region_name`, never the mutable location row ID. If both regions and cities are selected for the destination country, matching is OR. Region-only restrictions require trusted `region_name`; exact city restrictions require trusted `region_name` plus canonical location name.
 

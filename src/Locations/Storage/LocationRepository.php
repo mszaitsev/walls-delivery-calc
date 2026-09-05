@@ -1355,14 +1355,6 @@ final class LocationRepository {
 			: array();
 	}
 
-	/** @return array<int,string> */
-	public function unique_active_ru_region_names( string $query = '', int $limit = 100 ): array {
-		return array_map(
-			static fn( array $region ): string => $region['region_name'],
-			$this->unique_active_region_names( $query, $limit, 'RU' )
-		);
-	}
-
 	/** @return array<int,Location> */
 	public function search_active_locations_for_manual_delivery( string $query, int $limit = 20, string $country_code = '' ): array {
 		$query = trim( $query );
@@ -1387,11 +1379,6 @@ final class LocationRepository {
 		}
 
 		return $filtered;
-	}
-
-	/** @return array<int,Location> */
-	public function search_active_ru_locations_for_manual_delivery( string $query, int $limit = 20 ): array {
-		return $this->search_active_locations_for_manual_delivery( $query, $limit, 'RU' );
 	}
 
 	/**

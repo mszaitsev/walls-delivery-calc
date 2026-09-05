@@ -949,6 +949,9 @@ $delivery_services_admin_source = plugin_architecture_source( 'src/DeliveryServi
 plugin_architecture_assert( str_contains( $delivery_services_admin_source, 'simulate_runtime_carrier_service_rules' ) && str_contains( $delivery_services_admin_source, 'DpdQuoteCarrier' ) && str_contains( $delivery_services_admin_source, 'YandexDeliveryCarrier' ), 'DPD and Yandex rule simulation must be wired through the shared service simulation runner.' );
 plugin_architecture_assert( str_contains( $delivery_services_admin_source, 'save_pek_statuses' ) && str_contains( $delivery_services_admin_source, 'PekStatusAdminPage::TAB_KEY' ) && str_contains( $delivery_services_admin_source, 'render_pek_statuses_tab' ), 'Delivery services admin must expose the PEK statuses tab, save action and redirect wiring.' );
 
+$location_repository_source = plugin_architecture_source( 'src/Locations/Storage/LocationRepository.php' );
+plugin_architecture_assert( ! str_contains( $location_repository_source, 'unique_active_ru_region_names' ) && ! str_contains( $location_repository_source, 'search_active_ru_locations_for_manual_delivery' ), 'Manual delivery location search must use country-aware LocationRepository methods without RU-only compatibility wrappers.' );
+
 $actual_cost_ajax_source = plugin_architecture_source( 'src/Shipments/Admin/Ajax/ShipmentActualCostAjaxController.php' );
 $shipment_metabox_source = plugin_architecture_source( 'src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $shipment_events_source = plugin_architecture_source( 'assets/admin/shipments/shipment-events.js' );

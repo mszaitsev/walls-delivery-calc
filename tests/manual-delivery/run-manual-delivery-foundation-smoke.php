@@ -419,9 +419,9 @@ $GLOBALS['wpdb']->locations = array(
 );
 
 $location_repo = new LocationRepository( $GLOBALS['wpdb'] );
-$known_regions = $location_repo->unique_active_ru_region_names( 'ново', 20 );
-wdc_manual_assert( array( 'Новосибирская область' ) === $known_regions, 'Manual admin region search must use known active RU region_name values.' );
-$soviet_locations = $location_repo->search_active_ru_locations_for_manual_delivery( 'Советский', 20 );
+$known_regions = $location_repo->unique_active_region_names( 'ново', 20, 'RU' );
+wdc_manual_assert( array( array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область' ) ) === $known_regions, 'Manual admin region search must use known active country-aware region_name values.' );
+$soviet_locations = $location_repo->search_active_locations_for_manual_delivery( 'Советский', 20, 'RU' );
 $soviet_regions = array_values( array_unique( array_map( static fn ( Location $location ): string => $location->region_name, $soviet_locations ) ) );
 sort( $soviet_regions, SORT_STRING );
 wdc_manual_assert( array( 'Московская область', 'Ханты-Мансийский автономный округ — Югра' ) === $soviet_regions, 'Manual admin location search must distinguish same place names by textual region_name.' );
