@@ -1,6 +1,30 @@
 # Plugin Architecture
 
-Version: 0.137.3
+Version: 0.153.0
+
+0.153.0 wires manual delivery into the existing Shipment Framework through one `ManualShipmentAdapter` and one `ManualShipmentService`. Manual shipments use `OrderShipmentRepository`, preserve the concrete historical `service_key` and service title from the order delivery snapshot, delegate actual cost to `ShipmentActualCostService`, and do not add API-create branches, document providers, autosync, modal providers, fake persistence mappers, or manual shipment tables.
+
+0.152.11 adds one generic pickup-family resolver for rate metadata. Presentation, WooCommerce mapping, provider context, and checkout state use explicit `pickup_family` first, then `carrier_key + service_key` for multi-service pickup carriers, with the legacy rate-id parser only as fallback.
+
+0.152.10 keeps post-selection recalculation generic and provider-owned. `CheckoutPickupPointRestController` reads `requires_rate_refresh` only from the server-resolved provider `PickupPoint::raw_reference`, defaults missing capability to `true`, and manual pickup declares `false` because selecting a manual point does not affect pricing.
+
+0.152.9 keeps pickup destination identity generic by moving checkout location fingerprinting into `CheckoutLocationFingerprint`. `CheckoutSessionManager` and manual pickup rates use the same owner for `destination_fingerprint`; carriers must not invent their own stale-selection fingerprint algorithms.
+
+0.152.8 keeps the pickup framework generic while fixing selected pickup card rendering for service-specific pickup families. Presentation layers that already have rate metadata must pass the explicit authoritative `pickup_family` into session matching; `shipping_method_family(rate_id)` remains only the fallback for legacy callers without metadata.
+
+0.152.4 keeps the fix generic in Pickup Framework boundaries: `CarrierPickupPointQuery` owns destination locator validity, checkout provider resolution reuses that contract, and cold checkout pickup capability discovery reads rendered rate DOM before hiding selectors. No manual-specific renderer, REST endpoint, fake location ID, or Shipment Framework branch is added.
+
+0.152.3 keeps pickup routing generic: multi-segment pickup families route by the first carrier segment and final `pickup` marker, REST points routes validate carrier/family/method consistency, and no manual-specific frontend/provider branch is introduced.
+
+0.152.2 keeps the fix generic in checkout presentation: `CheckoutRateRenderer` accepts keyed WooCommerce meta-entry arrays and no manual-specific renderer branch is added.
+
+0.152.1 keeps the architecture unchanged and fixes manual delivery presentation using existing generic contracts: custom manual rates set `preserve_rate_title`, while pickup rates omit `no_pickup_selection` so the standard pickup selector renders.
+
+0.152.0 keeps manual delivery on one runtime carrier and adds one registry-backed manual pickup provider. `ManualDeliveryCarrier` remains an orchestration layer: it resolves the trusted manual service, checks country/geography, checks pickup-point availability only for pickup-type services, delegates base pricing to `ManualDeliveryPricingService`, and returns canonical `DeliveryRate` metadata. Generic pickup contracts now carry a trusted `service_key` so multi-service carriers can isolate provider searches without reading browser-supplied service identity. Manual pickup storage/provider classes stay under `src/Carriers/Manual`; CheckoutOrchestrator, Rule Engine, Packaging, and Shipment Framework stay free of manual pickup branches.
+
+0.151.2 keeps manual delivery as one runtime carrier and keeps zero-weight package handling generic. `CheckoutOrchestrator` stays generic: service country availability and packaging policy are applied before carrier execution, then `ManualDeliveryCarrier` resolves the service, checks manual geography, delegates base-price calculation to `ManualDeliveryPricingService`, and returns a canonical `DeliveryRate`. The quote cache distinguishes zero-weight physical packages from empty packages through generic package item identity, not manual-specific branches. The pricing calculator knows only typed manual config, integer grams, and integer kopecks; it does not apply Rule Engine rules, service minimum/rounding, lead time, comments, order snapshots, geography, WooCommerce product hooks, or cache invalidation. The Shipment Framework remains untouched: no manual document provider, modal extension, persistence mapper, fake shipment record, or generic shipment JS branch is registered.
+
+Manual delivery services are dynamic DeliveryService rows, not per-service PHP carriers. The platform registers one generic `manual` runtime carrier in the composition root, and each manual row is selected by its trusted `service_key` from the existing checkout service pipeline. New custom Delivery Services admin entries are normalized to `service_type=manual` and `carrier_key=manual`, while legacy `fixed`/`weight_based` values remain storage compatibility values rather than runtime carrier types. This stage does not change Shipment Framework contracts and does not register manual document providers, modal extensions, persistence mappers, or shipment create/cancel/status behavior.
 
 The plugin is a WooCommerce delivery platform. Production ownership is split by layer:
 

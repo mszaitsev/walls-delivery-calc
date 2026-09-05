@@ -484,6 +484,7 @@ use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
@@ -535,11 +536,15 @@ function runtime_smoke_shipment_cost_analytics_section(): ShipmentCostAnalyticsA
 	);
 }
 
-function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
+function runtime_smoke_request( string $delivery_type = '', ?int $weight_g = null ): QuoteRequest {
+	$items = null !== $weight_g
+		? array( new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight_g, 10, 10, 10 ) )
+		: array();
+
 	return new QuoteRequest(
 		'RU',
 		new Address( country_code: 'RU', city: 'Новосибирск' ),
-		Package::from_items( array(), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
+		Package::from_items( $items, 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
 		'',
 		Money::from_rubles( 1000 ),
 		'2026-05-21',
@@ -773,14 +778,15 @@ foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup 
 $delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout delivery type selector must not auto-render courier customer comment.' );
 $rate_renderer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
+$rate_meta_normalizer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/WooCommerceRateMetaNormalizer.php' );
 $rate_mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/WooCommerceRateMapper.php' );
 $checkout_orchestrator_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Runtime/CheckoutOrchestrator.php' );
 $new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
 $checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'render_pickup_selector( $meta, $method )' ) && str_contains( $rate_renderer_source, 'data-wdc-pickup-checkout' ), 'Rate renderer must render checkout pickup UI for pickup-point rates.' );
-runtime_smoke_assert( str_contains( $rate_renderer_source, 'normalize_meta_data' ) && str_contains( $rate_renderer_source, "array_key_exists( 'key', \$entry )" ), 'Rate renderer must normalize real WooCommerce meta-data entries before checking pickup flags.' );
-runtime_smoke_assert( str_contains( $rate_mapper_source, "'pickup_family'" ) && str_contains( $rate_mapper_source, 'function pickup_family' ), 'WooCommerce rate mapper must expose pickup_family in top-level WC rate meta.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'WooCommerceRateMetaNormalizer::meta' ) && str_contains( $rate_meta_normalizer_source, 'normalize_meta_data' ) && str_contains( $rate_meta_normalizer_source, "array_key_exists( 'key', \$entry )" ), 'Rate renderer must normalize real WooCommerce meta-data entries before checking pickup flags.' );
+runtime_smoke_assert( str_contains( $rate_mapper_source, "'pickup_family'" ) && str_contains( $rate_mapper_source, 'PickupFamilyResolver::from_delivery_rate' ), 'WooCommerce rate mapper must expose pickup_family in top-level WC rate meta through the generic family resolver.' );
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, "woocommerce_after_shipping_rate', array( \$this, 'render'" ), 'Delivery type selector must not register a duplicate checkout pickup UI renderer.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "'planned_delivery_comment'" ) && str_contains( $rate_renderer_source, 'wdc-platform-planned-delivery-comment' ), 'Rate renderer must output planned_delivery_comment from rate meta as the checkout planned-date block.' );
 runtime_smoke_assert( str_contains( $checkout_orchestrator_source, 'private DeliveryLeadTimeNormalizer $lead_time_normalizer' ) && ! str_contains( $checkout_orchestrator_source, '?Delivery' . 'LeadTimeNormalizer' ) && ! str_contains( $checkout_orchestrator_source, 'lead_time_normalizer ' . 'instanceof' ), 'CheckoutOrchestrator must require DeliveryLeadTimeNormalizer and must not fall back to the legacy lead-time pipeline.' );
@@ -994,6 +1000,8 @@ $service_cache_key_a = $quote_cache->cache_key( runtime_smoke_request(), 'demo',
 $service_cache_key_b = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_b' );
 runtime_smoke_assert( $service_cache_key_a !== $service_cache_key_b, 'Quote cache key must include service_key.' );
 runtime_smoke_assert( $service_cache_key_a === $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Quote cache key must remain stable per service.' );
+runtime_smoke_assert( $service_cache_key_a !== $quote_cache->cache_key( runtime_smoke_request( '', 2400 ), 'demo', '', 'service_a' ), 'Quote cache key must include package total weight so weight-based tariffs cannot reuse another weight.' );
+runtime_smoke_assert( $service_cache_key_a !== $quote_cache->cache_key( runtime_smoke_request( '', 0 ), 'demo', '', 'service_a' ), 'Quote cache key must distinguish an empty package from a physical package whose item weight is zero.' );
 $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-a', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
 $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-b', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_b' );
 runtime_smoke_assert( 'quote-a' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' )?->quote_id, 'Quote cache hit must stay isolated for service_a.' );
@@ -1015,6 +1023,21 @@ runtime_smoke_assert( 2 === $deleted_quote_cache, 'DeliveryQuoteCacheManager mus
 runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_aaa', $GLOBALS['wpdb']->options ) && ! array_key_exists( '_transient_wdc_rp_tariff_bbb', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must delete WDC Russian Post quote/tariff cache transients.' );
 runtime_smoke_assert( array_key_exists( '_transient_wdc_pickup_search_ccc', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_dadata_ddd', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_foreign_quote', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must leave pickup, DaData, and foreign transients untouched.' );
 runtime_smoke_assert( null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'DeliveryQuoteCacheManager must invalidate runtime quote memory namespace.' );
+$GLOBALS['wdc_test_actions'] = array();
+$quote_cache_manager->register();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_cart_shipping_packages'] ), 'DeliveryQuoteCacheManager must add the global cache version to WooCommerce shipping packages.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['woocommerce_update_product'] ) && isset( $GLOBALS['wdc_test_actions']['woocommerce_update_product_variation'] ), 'DeliveryQuoteCacheManager must invalidate delivery cache after simple product and variation updates.' );
+$package_before_bump = $quote_cache_manager->add_cache_version_to_packages( array( array( 'contents' => array() ) ) );
+$version_before_product_update = $quote_cache_manager->delivery_rates_cache_version();
+$quote_cache_manager->invalidate_after_product_update( 123 );
+$version_after_product_update = $quote_cache_manager->delivery_rates_cache_version();
+runtime_smoke_assert( $version_before_product_update !== $version_after_product_update, 'Product update must bump the global delivery rates cache version.' );
+$package_after_product_update = $quote_cache_manager->add_cache_version_to_packages( array( array( 'contents' => array() ) ) );
+runtime_smoke_assert( ( $package_before_bump[0]['wdc_delivery_rates_cache_version'] ?? '' ) !== ( $package_after_product_update[0]['wdc_delivery_rates_cache_version'] ?? '' ), 'Package cache identity must change after delivery rates cache version bump.' );
+$quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-c', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
+$version_before_variation_update = $quote_cache_manager->delivery_rates_cache_version();
+$quote_cache_manager->invalidate_after_product_update( 456 );
+runtime_smoke_assert( $version_before_variation_update !== $quote_cache_manager->delivery_rates_cache_version() && null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Variation update must use the same carrier-neutral invalidation boundary and clear runtime quote cache.' );
 
 $admin_menu = new AdminMenu( runtime_smoke_environment(), $quote_cache_manager, runtime_smoke_shipment_cost_analytics_section() );
 $_SERVER['REQUEST_METHOD'] = 'GET';

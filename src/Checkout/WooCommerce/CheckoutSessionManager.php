@@ -30,6 +30,12 @@ final class CheckoutSessionManager {
 	private const TRUSTED_ADDRESS_EVIDENCE_KEY = 'wdc_platform_trusted_address_evidence';
 	private const DADATA_SUGGESTION_CACHE_LIMIT = 40;
 
+	private CheckoutLocationFingerprint $location_fingerprint;
+
+	public function __construct( ?CheckoutLocationFingerprint $location_fingerprint = null ) {
+		$this->location_fingerprint = $location_fingerprint ?? new CheckoutLocationFingerprint();
+	}
+
 	public function save_selected_delivery_type( string $delivery_type ): void {
 		$this->set( self::DELIVERY_TYPE_KEY, $delivery_type );
 	}
@@ -371,8 +377,12 @@ final class CheckoutSessionManager {
 		return array();
 	}
 
-	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
-		$rate_family = $this->shipping_method_family( $rateId );
+	public function pickup_selection_matches( string $carrierKey, string $rateId, string $pickupFamily = '' ): bool {
+		$explicit_family = $this->normalize_pickup_family( $pickupFamily );
+		if ( '' !== $explicit_family && ! str_ends_with( $explicit_family, ':pickup' ) ) {
+			return false;
+		}
+		$rate_family = '' !== $explicit_family ? $explicit_family : $this->shipping_method_family( $rateId );
 		$selection = str_ends_with( $rate_family, ':pickup' ) ? $this->pickup_selection_for_family( $rate_family ) : $this->pickup_selection();
 		if ( array() === $selection || ! $this->selection_has_point_identity( $selection ) ) {
 			return false;
@@ -430,8 +440,12 @@ final class CheckoutSessionManager {
 		return $selection_carrier === $carrierKey;
 	}
 
-	public function update_pickup_selection_rate_id( string $rateId ): void {
-		$family = $this->shipping_method_family( $rateId );
+	public function update_pickup_selection_rate_id( string $rateId, string $pickupFamily = '' ): void {
+		$explicit_family = $this->normalize_pickup_family( $pickupFamily );
+		if ( '' !== $explicit_family && ! str_ends_with( $explicit_family, ':pickup' ) ) {
+			return;
+		}
+		$family = '' !== $explicit_family ? $explicit_family : $this->shipping_method_family( $rateId );
 		$selection = str_ends_with( $family, ':pickup' ) ? $this->pickup_selection_for_family( $family ) : $this->pickup_selection();
 		if ( array() === $selection ) {
 			return;
@@ -463,40 +477,15 @@ final class CheckoutSessionManager {
 	}
 
 	public function shipping_method_family( string $rate_id ): string {
-		$rate_id = $this->normalize_rate_id( $rate_id );
-		$parts = explode( ':', $rate_id );
-		$pickup_index = array_search( 'pickup', $parts, true );
-		if ( false !== $pickup_index && $pickup_index > 0 ) {
-			return $this->normalize_pickup_family( $parts[0] . ':pickup' );
-		}
-
-		if ( YandexDeliveryCarrier::PICKUP_RATE_ID === $rate_id ) {
-			return YandexDeliverySettings::CARRIER_KEY . ':pickup';
-		}
-		return $this->normalize_pickup_family( $rate_id );
+		return PickupFamilyResolver::legacy_from_rate_id( $rate_id );
 	}
 
 	public function normalize_carrier_key_for_pickup( string $carrier_key ): string {
-		$carrier_key = trim( $carrier_key );
-		if ( 'russian_post' === $carrier_key ) {
-			return RussianPostDomesticSettings::CARRIER_KEY;
-		}
-
-		return $carrier_key;
+		return PickupFamilyResolver::normalize_carrier( $carrier_key );
 	}
 
 	public function normalize_pickup_family( string $pickup_family ): string {
-		$pickup_family = trim( $pickup_family );
-		if ( '' === $pickup_family ) {
-			return '';
-		}
-		$parts = explode( ':', $pickup_family );
-		$carrier = $this->normalize_carrier_key_for_pickup( (string) ( $parts[0] ?? '' ) );
-		if ( '' === $carrier ) {
-			return $pickup_family;
-		}
-
-		return str_ends_with( $pickup_family, ':pickup' ) ? $carrier . ':pickup' : $pickup_family;
+		return PickupFamilyResolver::normalize_family( $pickup_family );
 	}
 
 	public function is_russian_post_pickup_family( string $rate_id ): bool {
@@ -675,24 +664,7 @@ final class CheckoutSessionManager {
 	 * @param array<string,mixed> $context
 	 */
 	private function location_fingerprint( array $context ): string {
-		$context = $this->normalize_location_aliases( $context );
-		$country = $this->normalized_location_value( $context['country_code'] ?? '' );
-		$prefix = '' !== $country ? 'country=' . strtoupper( $country ) . '|' : '';
-		foreach ( array( 'location_id', 'fias_id', 'gar_object_id' ) as $key ) {
-			$value = $this->normalized_location_value( $context[ $key ] ?? '' );
-			if ( '' !== $value ) {
-				return $prefix . $key . '=' . $value;
-			}
-		}
-
-		$city = $this->normalized_location_value( $context['city_name'] ?? '' );
-		$region = $this->normalized_location_value( $context['region_name'] ?? '' );
-		if ( '' !== $city || '' !== $region ) {
-			return $prefix . 'place=' . $region . '|' . $city;
-		}
-
-		$postcode = $this->normalized_location_value( $context['postcode'] ?? '' );
-		return '' !== $postcode ? $prefix . 'postcode=' . $postcode : '';
+		return $this->location_fingerprint->fingerprint( $context );
 	}
 
 	/**
@@ -700,38 +672,7 @@ final class CheckoutSessionManager {
 	 * @return array<string,mixed>
 	 */
 	private function normalize_location_aliases( array $context ): array {
-		$aliases = array(
-			'country_code' => array( 'country_code', 'country' ),
-			'fias_id' => array( 'fias_id', 'city_fias_id', 'fias_location_guid' ),
-			'gar_object_id' => array( 'gar_object_id', 'gar_id' ),
-			'city_name' => array( 'city_name', 'settlement_name', 'place_name', 'city' ),
-			'region_name' => array( 'region_name', 'state_value', 'region' ),
-			'postcode' => array( 'postcode', 'postal_code' ),
-		);
-		foreach ( $aliases as $target => $sources ) {
-			if ( '' !== trim( (string) ( $context[ $target ] ?? '' ) ) ) {
-				continue;
-			}
-			foreach ( $sources as $source ) {
-				$value = trim( (string) ( $context[ $source ] ?? '' ) );
-				if ( '' !== $value ) {
-					$context[ $target ] = $value;
-					break;
-				}
-			}
-		}
-
-		return $context;
-	}
-
-	private function normalized_location_value( mixed $value ): string {
-		$value = trim( (string) $value );
-		if ( '' === $value ) {
-			return '';
-		}
-		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
-
-		return preg_replace( '/\s+/u', ' ', $value ) ?: $value;
+		return $this->location_fingerprint->normalize_location_aliases( $context );
 	}
 
 	/**

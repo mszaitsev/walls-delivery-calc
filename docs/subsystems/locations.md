@@ -1,6 +1,16 @@
 # Locations And Pickup
 
-Version: 0.133.9
+Version: 0.153.0
+
+0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
+
+Manual pickup provider lookup can be restored from the current WooCommerce shipping-rate metadata even when `wdc_platform_rates` has not been written on the same request. The locality identity is still textual and server-owned for manual point storage, while checkout selection freshness uses the shared canonical `CheckoutLocationFingerprint`: positive `location_id` wins when known, and `location_id=0` falls back to normalized `country + region + place`.
+
+Manual pickup provider queries do not require a persistent `wp_wdc_locations.id`. A checkout/provider snapshot with `location_id=0` remains valid when it carries canonical textual locality: `country_code + region_name + location_name`. This is the same durable identity used by manual geography and manual pickup point storage.
+
+Manual pickup points use the same textual locality identity as manual geography: `country_code + resolved_place_name() + region_name`. Admin UI may use a current `wp_wdc_locations.id` only to reload the canonical `Location` during save; persisted manual pickup rows store `country_code`, `location_name`, and `region_name`, never the location ID. Point codes are stable per manual service and survive title/address edits so saved checkout/order pickup snapshots remain meaningful.
+
+Manual delivery geography reads active regions and locations from the shared `wp_wdc_locations` table but does not write to it. The region identity is textual `country_code + region_name`. The manual city identity is textual `country_code + resolved_place_name() + region_name`, where `resolved_place_name()` prefers `place_name`, then `settlement_name`, then `city_name` from the existing `Location` value object. Manual geography persistence deliberately avoids `wp_wdc_locations.id` as permanent identity because the location table may be rebuilt.
 
 Locations, aliases, delivery codes, FIAS/GAR import, postcode enrichment, pickup repositories, and pickup REST live under `src/Locations`, `src/Pickup`, and carrier pickup namespaces.
 

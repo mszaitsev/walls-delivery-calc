@@ -98,7 +98,7 @@ final class CheckoutValidation {
 		$this->stale_yandex_5post_post_blocked = false;
 		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
 		if ( array() !== $active_selection && $this->session_manager->valid_pickup_selection_for_checkout( $active_family ) ) {
-			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id, $active_family );
 			return;
 		}
 		if ( PekSettings::PICKUP_FAMILY === $active_family && array() !== $active_selection ) {
@@ -106,12 +106,12 @@ final class CheckoutValidation {
 		}
 		$matches_before_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		if ( $matches_before_restore ) {
-			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id, $active_family );
 			return;
 		}
 		$restored = $this->restore_posted_pickup_selection( $data, $rate );
 		if ( $restored ) {
-			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id, $active_family );
 			return;
 		}
 
@@ -511,6 +511,7 @@ final class CheckoutValidation {
 			'gar_object_id' => $this->posted_string( $data, 'wdc_pickup_gar_object_id' ),
 			'destination_fingerprint' => $this->posted_string( $data, 'wdc_pickup_destination_fingerprint' ),
 			'work_time' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_work_time' ) ),
+			'point_comment' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_point_comment' ) ),
 			'description' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_description' ) ),
 			'storage_notice' => $storage_notice,
 			'cdek_code' => $this->posted_string( $data, 'wdc_pickup_cdek_code' ) ?: $point_code,

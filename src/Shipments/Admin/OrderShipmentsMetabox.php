@@ -340,6 +340,7 @@ final class OrderShipmentsMetabox {
 			</p>
 			<div class="wdc-manual-tracking" data-wdc-manual-tracking-form hidden>
 				<label><span data-wdc-manual-attach-label><?php echo esc_html( $presentation['manual_attach_field_label'] ?? $presentation['manual_attach_placeholder'] ); ?></span><input type="text" data-wdc-manual-tracking-input autocomplete="off" placeholder="<?php echo esc_attr( $presentation['manual_attach_placeholder'] ); ?>"></label>
+				<p data-wdc-manual-attach-actual-cost-wrap <?php echo '1' === (string) ( $presentation['manual_attach_actual_cost_enabled'] ?? '0' ) ? '' : 'hidden'; ?>><label><span data-wdc-manual-attach-actual-cost-label><?php echo esc_html( (string) ( $presentation['manual_attach_actual_cost_label'] ?? __( 'Фактическая стоимость, ₽', 'walls-delivery-calc' ) ) ); ?></span><input type="text" inputmode="decimal" data-wdc-manual-attach-actual-cost-input autocomplete="off" placeholder="<?php echo esc_attr( (string) ( $presentation['manual_attach_actual_cost_placeholder'] ?? __( 'Например: 550.50', 'walls-delivery-calc' ) ) ); ?>"></label></p>
 				<p class="description" data-wdc-manual-attach-help><?php echo esc_html( $presentation['manual_attach_help'] ); ?></p>
 				<p>
 					<button type="button" class="button button-primary" data-wdc-attach-tracking data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>"><?php echo esc_html__( 'Найти и сохранить', 'walls-delivery-calc' ); ?></button>
@@ -876,6 +877,9 @@ final class OrderShipmentsMetabox {
 			'manual_attach_field_label' => __( 'Номер отслеживания', 'walls-delivery-calc' ),
 			'manual_attach_placeholder' => __( 'Номер отслеживания', 'walls-delivery-calc' ),
 			'manual_attach_help' => __( 'Введите номер отслеживания для поиска и привязки отправления.', 'walls-delivery-calc' ),
+			'manual_attach_actual_cost_enabled' => '0',
+			'manual_attach_actual_cost_label' => __( 'Фактическая стоимость, ₽', 'walls-delivery-calc' ),
+			'manual_attach_actual_cost_placeholder' => __( 'Например: 550.50', 'walls-delivery-calc' ),
 			'created_toast' => __( 'Отправление создано.', 'walls-delivery-calc' ),
 			'updated_toast' => __( 'Статус отправления обновлен.', 'walls-delivery-calc' ),
 			'cancel_success_toast' => __( 'Отправление отменено.', 'walls-delivery-calc' ),

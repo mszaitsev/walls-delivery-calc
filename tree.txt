@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000011 A0AC:74BD
+Volume serial number is 00000052 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -15,6 +15,7 @@ C:.
 |   |   |   calendar-admin.js
 |   |   |   dpd-geography-import.js
 |   |   |   locations-admin.css
+|   |   |   manual-delivery-services.js
 |   |   |   order-delivery-recalculation.css
 |   |   |   order-delivery-recalculation.js
 |   |   |   ozon-delivery-pickup-sync.js
@@ -134,6 +135,13 @@ C:.
 |           0054_change_ozon_delivery_pickup_schedule_storage.php
 |           0055_add_ozon_delivery_pickup_geo_lookup_index.php
 |           0056_add_jet_logistic_default_status_mappings.php
+|           0057_add_ozon_pickup_import_resilience_diagnostics.php
+|           0058_add_ozon_pickup_two_phase_import.php
+|           0059_add_ozon_pickup_generation_lock_owner.php
+|           0060_create_manual_delivery_geography.php
+|           0061_make_manual_delivery_geography_country_aware.php
+|           0062_create_manual_delivery_weight_ranges.php
+|           0063_create_manual_delivery_pickup_points.php
 |
 +---docs
 |   |   README.md
@@ -317,6 +325,19 @@ C:.
 |   |   |           JetLogisticStatusMappingRepository.php
 |   |   |           JetLogisticStatusService.php
 |   |   |
+|   |   +---Manual
+|   |   |       ManualDeliveryGeographyMatcher.php
+|   |   |       ManualDeliveryGeographyRepository.php
+|   |   |       ManualDeliveryPricingCalculator.php
+|   |   |       ManualDeliveryPricingConfig.php
+|   |   |       ManualDeliveryPricingResult.php
+|   |   |       ManualDeliveryPricingService.php
+|   |   |       ManualDeliverySettings.php
+|   |   |       ManualDeliveryWeightRange.php
+|   |   |       ManualDeliveryWeightRangeRepository.php
+|   |   |       ManualPickupPointProvider.php
+|   |   |       ManualPickupPointRepository.php
+|   |   |
 |   |   +---OzonDelivery
 |   |   |   |   OzonDeliveryCredentials.php
 |   |   |   |   OzonDeliverySettings.php
@@ -336,6 +357,7 @@ C:.
 |   |   |   |       OzonDeliveryToken.php
 |   |   |   |       OzonDeliveryTokenCache.php
 |   |   |   |       WpOzonDeliveryHttpClient.php
+|   |   |   |
 |   |   |   +---Pickup
 |   |   |   |       OzonDeliveryPickupImportLock.php
 |   |   |   |       OzonDeliveryPickupImportService.php
@@ -346,16 +368,16 @@ C:.
 |   |   |   |       OzonDeliveryPickupScheduler.php
 |   |   |   |
 |   |   |   +---Quote
-|   |   |           OzonDeliveryCourierAddressMapper.php
-|   |   |           OzonDeliveryCourierLocation.php
-|   |   |           OzonDeliveryCourierLocationResolver.php
-|   |   |           OzonDeliveryPackagingBuilderFactory.php
-|   |   |           OzonDeliveryQuoteException.php
-|   |   |           OzonDeliveryQuoteParser.php
-|   |   |           OzonDeliveryQuoteRequestBuilder.php
-|   |   |           OzonDeliveryQuoteResult.php
-|   |   |           OzonDeliveryQuoteService.php
-|   |   |
+|   |   |   |       OzonDeliveryCourierAddressMapper.php
+|   |   |   |       OzonDeliveryCourierLocation.php
+|   |   |   |       OzonDeliveryCourierLocationResolver.php
+|   |   |   |       OzonDeliveryPackagingBuilderFactory.php
+|   |   |   |       OzonDeliveryQuoteException.php
+|   |   |   |       OzonDeliveryQuoteParser.php
+|   |   |   |       OzonDeliveryQuoteRequestBuilder.php
+|   |   |   |       OzonDeliveryQuoteResult.php
+|   |   |   |       OzonDeliveryQuoteService.php
+|   |   |   |
 |   |   |   +---Returns
 |   |   |   |       OzonDeliveryReturnInfoParser.php
 |   |   |   |       OzonDeliveryReturnLifecycleResolver.php
@@ -363,10 +385,10 @@ C:.
 |   |   |   |       OzonDeliveryReturnService.php
 |   |   |   |
 |   |   |   \---Shipments
-|   |   |           OzonDeliveryShipmentAdapter.php
-|   |   |           OzonDeliveryShipmentActionPolicy.php
-|   |   |           OzonDeliveryShipmentAllocationValueResolver.php
 |   |   |           OzonDeliveryCourierAddressNormalizer.php
+|   |   |           OzonDeliveryShipmentActionPolicy.php
+|   |   |           OzonDeliveryShipmentAdapter.php
+|   |   |           OzonDeliveryShipmentAllocationValueResolver.php
 |   |   |           OzonDeliveryShipmentCreateRequestBuilder.php
 |   |   |           OzonDeliveryShipmentCreateResponseParser.php
 |   |   |           OzonDeliveryShipmentCreationStatusPolicy.php
@@ -378,8 +400,8 @@ C:.
 |   |   |           OzonDeliveryShipmentPersistenceMapper.php
 |   |   |           OzonDeliveryShipmentPreflightQuoteService.php
 |   |   |           OzonDeliveryShipmentService.php
-|   |   |           OzonDeliveryShipmentStatusMapping.php
 |   |   |           OzonDeliveryShipmentStatusMapper.php
+|   |   |           OzonDeliveryShipmentStatusMapping.php
 |   |   |
 |   |   +---Pek
 |   |   |   |   PekCountryPolicy.php
@@ -446,6 +468,7 @@ C:.
 |   |   |       CdekCarrier.php
 |   |   |       DpdQuoteCarrier.php
 |   |   |       JetLogisticCarrier.php
+|   |   |       ManualDeliveryCarrier.php
 |   |   |       OzonDeliveryCarrier.php
 |   |   |       PekCarrier.php
 |   |   |       RussianPostDomesticCarrier.php
@@ -585,6 +608,7 @@ C:.
 |   |           CheckoutDebugPanel.php
 |   |           CheckoutDeliveryTypeSelector.php
 |   |           CheckoutFeatureGate.php
+|   |           CheckoutLocationFingerprint.php
 |   |           CheckoutRateRenderer.php
 |   |           CheckoutSessionManager.php
 |   |           CheckoutSortSelector.php
@@ -593,12 +617,14 @@ C:.
 |   |           NewShippingMethod.php
 |   |           OrderDeliveryCustomerCommentsDisplay.php
 |   |           OrderShippingMetaPersister.php
+|   |           PickupFamilyResolver.php
 |   |           PickupMapCheckout.php
 |   |           PickupPointOrderDisplay.php
 |   |           PickupPointRenderer.php
 |   |           ShippingMethodRegistrar.php
 |   |           WooCommercePackageMapper.php
 |   |           WooCommerceRateMapper.php
+|   |           WooCommerceRateMetaNormalizer.php
 |   |           WooCommerceSessionBootstrapper.php
 |   |
 |   +---Core
@@ -618,8 +644,11 @@ C:.
 |   |   |   DeliveryServiceRepository.php
 |   |   |   DeliveryServiceSettingsRepository.php
 |   |   |
-|   |   \---Admin
-|   |           DeliveryServicesAdminPage.php
+|   |   +---Admin
+|   |   |       DeliveryServicesAdminPage.php
+|   |   |
+|   |   \---Application
+|   |           DeliveryServiceKeyRenameService.php
 |   |
 |   +---Domain
 |   |   |   .gitkeep
@@ -956,6 +985,10 @@ C:.
 |   |   +---Lifecycle
 |   |   |       ShipmentLifecycleResult.php
 |   |   |
+|   |   +---Manual
+|   |   |       ManualShipmentAdapter.php
+|   |   |       ManualShipmentService.php
+|   |   |
 |   |   +---Modal
 |   |   |       CarrierShipmentModalExtensionInterface.php
 |   |   |       ShipmentModalExtensionRegistry.php
@@ -1051,6 +1084,8 @@ C:.
     |       run-checkout-location-picker-smoke.php
     |       run-checkout-smoke.php
     |       run-pickup-map-lifecycle-smoke.js
+    |       run-pickup-provider-routing-smoke.js
+    |       run-pickup-provider-routing-smoke.php
     |       run-runtime-stabilization-smoke.php
     |       run-woocommerce-checkout-smoke.php
     |
@@ -1111,6 +1146,10 @@ C:.
     |       run-locations-smoke.php
     |       run-russianpost-courier-postcode-fill-smoke.php
     |
+    +---manual-delivery
+    |       run-manual-delivery-foundation-smoke.php
+    |       run-manual-delivery-shipments-smoke.php
+    |
     +---orders
     |       run-delivery-calculation-data-builder-smoke.php
     |       run-order-delivery-calculation-meta-smoke.php
@@ -1123,12 +1162,18 @@ C:.
     |       run-ozon-delivery-foundation-smoke.php
     |       run-ozon-delivery-modal-limits-smoke.php
     |       run-ozon-delivery-pickup-admin-smoke.php
+    |       run-ozon-delivery-pickup-cancellation-race-smoke.php
     |       run-ozon-delivery-pickup-import-smoke.php
+    |       run-ozon-delivery-pickup-owner-smoke.php
     |       run-ozon-delivery-pickup-progress-smoke.php
     |       run-ozon-delivery-pickup-provider-smoke.php
+    |       run-ozon-delivery-pickup-ready-transition-race-smoke.php
     |       run-ozon-delivery-pickup-schedule-smoke.php
     |       run-ozon-delivery-pickup-scheduler-smoke.php
+    |       run-ozon-delivery-pickup-two-phase-smoke.php
     |       run-ozon-delivery-quote-smoke.php
+    |       run-ozon-delivery-return-smoke.php
+    |       run-ozon-delivery-shipment-smoke.php
     |
     +---packaging
     |       run-packaging-smoke.php

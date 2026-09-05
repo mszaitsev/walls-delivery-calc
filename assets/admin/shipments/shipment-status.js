@@ -279,6 +279,9 @@
       manualAttachFieldLabel: 'Номер отслеживания',
       manualAttachPlaceholder: 'Номер отслеживания',
       manualAttachHelp: 'Введите номер отслеживания для поиска и привязки отправления.',
+      manualAttachActualCostEnabled: '0',
+      manualAttachActualCostLabel: 'Фактическая стоимость, ₽',
+      manualAttachActualCostPlaceholder: 'Например: 550.50',
       createdToast: 'Отправление создано.',
       updatedToast: 'Статус отправления обновлен.',
       cancelSuccessToast: 'Отправление отменено.',
@@ -319,6 +322,7 @@
       ['[data-wdc-remove-shipment-from-order]', text.removeButtonLabel],
       ['[data-wdc-update-shipment-status]', text.updateStatusButtonLabel],
       ['[data-wdc-manual-attach-label]', text.manualAttachFieldLabel],
+      ['[data-wdc-manual-attach-actual-cost-label]', text.manualAttachActualCostLabel],
       ['[data-wdc-manual-attach-help]', text.manualAttachHelp]
     ];
     pairs.forEach(function (pair) {
@@ -327,6 +331,10 @@
     });
     const input = box.querySelector('[data-wdc-manual-tracking-input]');
     if (input) input.placeholder = text.manualAttachPlaceholder;
+    const costWrap = box.querySelector('[data-wdc-manual-attach-actual-cost-wrap]');
+    setVisible(costWrap, text.manualAttachActualCostEnabled === '1');
+    const costInput = box.querySelector('[data-wdc-manual-attach-actual-cost-input]');
+    if (costInput) costInput.placeholder = text.manualAttachActualCostPlaceholder;
   }
 
   function updateShipmentButtons(box, state) {

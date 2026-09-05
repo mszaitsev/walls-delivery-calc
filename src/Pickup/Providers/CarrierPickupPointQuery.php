@@ -18,7 +18,10 @@ final class CarrierPickupPointQuery {
 		public readonly PickupCargoConstraints $cargo,
 		public readonly string $purpose = self::PURPOSE_DESTINATION_PICKUP,
 		public readonly int $radius_km = 50,
-		public readonly int $limit = 50
+		public readonly int $limit = 50,
+		public readonly string $service_key = '',
+		public readonly string $region_name = '',
+		public readonly string $location_name = ''
 	) {
 	}
 
@@ -28,6 +31,46 @@ final class CarrierPickupPointQuery {
 
 	public function normalized_country_code(): string {
 		return strtoupper( trim( $this->country_code ) );
+	}
+
+	public function normalized_service_key(): string {
+		return strtolower( preg_replace( '/[^a-z0-9_\-]+/', '', trim( $this->service_key ) ) ?? '' );
+	}
+
+	public function has_valid_destination_locator(): bool {
+		return self::valid_destination_locator(
+			$this->location_id,
+			$this->normalized_country_code(),
+			$this->region_name,
+			$this->location_name,
+			$this->fallback_address,
+			$this->latitude,
+			$this->longitude
+		);
+	}
+
+	public static function valid_destination_locator( int $location_id, string $country_code, string $region_name, string $location_name, string $fallback_address, mixed $latitude, mixed $longitude ): bool {
+		if ( $location_id > 0 ) {
+			return true;
+		}
+		if ( '' !== trim( $country_code ) && '' !== trim( $region_name ) && '' !== trim( $location_name ) ) {
+			return true;
+		}
+		if ( '' !== trim( $fallback_address ) ) {
+			return true;
+		}
+		if ( ! is_numeric( $latitude ) || ! is_numeric( $longitude ) ) {
+			return false;
+		}
+		$latitude = (float) $latitude;
+		$longitude = (float) $longitude;
+
+		return is_finite( $latitude )
+			&& is_finite( $longitude )
+			&& $latitude >= -90
+			&& $latitude <= 90
+			&& $longitude >= -180
+			&& $longitude <= 180;
 	}
 
 	/** @return array<int,string> */
@@ -42,8 +85,8 @@ final class CarrierPickupPointQuery {
 		if ( self::PURPOSE_DESTINATION_PICKUP !== $this->purpose ) {
 			$errors[] = 'purpose is unsupported';
 		}
-		if ( $this->location_id <= 0 && '' === trim( $this->fallback_address ) && ( null === $this->latitude || null === $this->longitude ) ) {
-			$errors[] = 'location_id or fallback address/coordinates are required';
+		if ( ! $this->has_valid_destination_locator() ) {
+			$errors[] = 'location_id, textual locality, fallback address, or coordinates are required';
 		}
 		if ( ( null === $this->latitude ) !== ( null === $this->longitude ) ) {
 			$errors[] = 'coordinates must contain both latitude and longitude';

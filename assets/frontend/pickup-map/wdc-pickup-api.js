@@ -18,7 +18,10 @@
 
 	window.WDCPickupApi = {
 		points: function (bbox, signal, context) {
-			var params = contextParams(context);
+			var params = safeContextParams(context);
+			if (!params) {
+				return Promise.reject(new Error('pickup_carrier_context_missing'));
+			}
 			params.set('limit', '500');
 			if (bbox) {
 				params.set('bbox', bbox);
@@ -26,13 +29,19 @@
 			return request('points?' + params.toString(), { signal: signal }).then(normalizePoints);
 		},
 		search: function (query, signal, context) {
-			var params = contextParams(context);
+			var params = safeContextParams(context);
+			if (!params) {
+				return Promise.reject(new Error('pickup_carrier_context_missing'));
+			}
 			params.set('limit', '25');
 			params.set('q', query || '');
 			return request('points/search?' + params.toString(), { signal: signal }).then(normalizePoints);
 		},
 		searchInitial: function (query, signal, context) {
-			var params = contextParams(context);
+			var params = safeContextParams(context);
+			if (!params) {
+				return Promise.reject(new Error('pickup_carrier_context_missing'));
+			}
 			params.set('limit', '10');
 			params.set('q', query || '');
 			return request('points/search?' + params.toString(), { signal: signal }).then(normalizePoints);
@@ -62,9 +71,11 @@
 				point = pointId;
 			}
 			if (point && typeof point === 'object') {
+				var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
 				payload.point = point;
 				payload.point_code = point.point_code || '';
 				payload.carrier = point.carrier_key || point.carrier || currentCarrier();
+				payload.pickup_family = point.pickup_family || snapshot.pickup_family || '';
 				payload.selection_intent = point.selection_intent || '';
 			} else {
 				payload.carrier = currentCarrier();
@@ -103,13 +114,21 @@
 
 	function currentCarrier() {
 		var config = window.wdcPickupCheckout || {};
-		return config.carrier || 'russian_post';
+		return config.carrier || '';
+	}
+
+	function safeContextParams(context) {
+		var params = contextParams(context);
+		return params.get('carrier') ? params : null;
 	}
 
 	function contextParams(context) {
 		context = context || {};
 		var params = new URLSearchParams();
-		params.set('carrier', context.carrier || context.carrier_key || currentCarrier());
+		var carrier = context.carrier || context.carrier_key || currentCarrier();
+		if (carrier) {
+			params.set('carrier', carrier);
+		}
 		if (!context.city_code && context.cdek_to_city_code) {
 			params.set('city_code', context.cdek_to_city_code);
 		}

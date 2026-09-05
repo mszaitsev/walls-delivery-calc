@@ -18,6 +18,7 @@ final class PickupPointCardRenderer {
 	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false, bool $show_code_postcode_rows = true ): string {
 		$data      = $this->normalize( $point );
 		$work_time = $data['work_time'];
+		$point_comment = $data['point_comment'];
 		$description = $data['description'];
 		$storage_notice = $data['storage_notice'];
 		$customer_comments = $include_change_button ? array() : $data['customer_comments'];
@@ -46,6 +47,9 @@ final class PickupPointCardRenderer {
 			$parts[] = '<span data-wdc-pickup-work-time>' . esc_html( $work_time ) . '</span>';
 			$parts[] = '</div>';
 		}
+		if ( '' !== $point_comment || $needs_placeholders ) {
+			$parts[] = '<div class="wdc-pickup-point-card__comment" data-wdc-pickup-comment' . ( '' === $point_comment ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Комментарий:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-comment-text>' . esc_html( $point_comment ) . '</span></div>';
+		}
 		if ( '' !== $description || $needs_placeholders ) {
 			$parts[] = '<div class="wdc-pickup-point-card__description" data-wdc-pickup-description' . ( '' === $description ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Описание:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-description-text>' . esc_html( $description ) . '</span></div>';
 		}
@@ -68,7 +72,7 @@ final class PickupPointCardRenderer {
 
 	/**
 	 * @param array<string,mixed>|object $point
-	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string,customer_comments:array<int,string>,code:string,postcode:string,show_code_on_checkout:bool,show_postcode_on_checkout:bool,show_code_on_order:bool,show_postcode_on_order:bool}
+	 * @return array{title:string,address_line:string,work_time:string,point_comment:string,description:string,storage_notice:string,customer_comments:array<int,string>,code:string,postcode:string,show_code_on_checkout:bool,show_postcode_on_checkout:bool,show_code_on_order:bool,show_postcode_on_order:bool}
 	 */
 	public function normalize( array|object $point ): array {
 		$point    = $this->point_to_array( $point );
@@ -81,11 +85,17 @@ final class PickupPointCardRenderer {
 			$point['work_time'] ?? '',
 			$snapshot['work_time'] ?? ''
 		);
+		$point_comment = $this->first_meaningful(
+			$point['point_comment'] ?? '',
+			$snapshot['point_comment'] ?? ''
+		);
 		$description = $this->first_meaningful(
 			$point['description'] ?? '',
-			$point['point_comment'] ?? '',
 			$snapshot['description'] ?? ''
 		);
+		if ( '' !== $point_comment && $this->same_text( $description, $point_comment ) ) {
+			$description = '';
+		}
 		$presentation = $this->presentation->resolve( $point );
 		$storage_notice = $presentation['storage_notice'];
 		$code = trim( (string) ( $point['point_code'] ?? $point['code'] ?? $point['cdek_code'] ?? $snapshot['point_code'] ?? $snapshot['code'] ?? $snapshot['cdek_code'] ?? '' ) );
@@ -94,6 +104,7 @@ final class PickupPointCardRenderer {
 			'title'     => $presentation['card_title'],
 			'address_line' => '' !== $address ? $address : $this->city_line( $postcode, $city ),
 			'work_time' => $work_time,
+			'point_comment' => $point_comment,
 			'description' => $description,
 			'storage_notice' => $storage_notice,
 			'customer_comments' => $this->customer_comments( $point, $snapshot ),
@@ -149,6 +160,10 @@ final class PickupPointCardRenderer {
 		}
 
 		return '';
+	}
+
+	private function same_text( string $left, string $right ): bool {
+		return '' !== $left && '' !== $right && trim( $left ) === trim( $right );
 	}
 
 	/**

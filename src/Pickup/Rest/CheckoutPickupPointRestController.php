@@ -13,6 +13,8 @@ use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryCheckoutPickupPoi
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\PickupFamilyResolver;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMetaNormalizer;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
@@ -105,12 +107,11 @@ final class CheckoutPickupPointRestController {
 		$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
 		$carrier = $this->carrier_from_request( $request, $method_id );
 		$selection_intent = $this->selection_intent( $request );
-		if ( ! $this->is_supported_shipping_method( $method_id, $carrier ) ) {
-			return $this->error( 'unsupported_shipping_method', 'Pickup point can only be saved for supported pickup rates.', 400 );
-		}
-
 		if ( $this->is_registry_backed_carrier( $carrier ) ) {
 			return $this->save_registry_backed_selection( $request, $method_id, $carrier, $selection_intent );
+		}
+		if ( ! $this->is_supported_shipping_method( $method_id, $carrier ) ) {
+			return $this->error( 'unsupported_shipping_method', 'Pickup point can only be saved for supported pickup rates.', 400 );
 		}
 
 		if ( 'cdek' === $carrier && $this->cdek_points instanceof CdekDeliveryPointService ) {
@@ -311,6 +312,12 @@ final class CheckoutPickupPointRestController {
 		$operator_id = $this->first_text_value( $selection['operator_id'] ?? null, $snapshot['operator_id'] ?? null, $existing['operator_id'] ?? null, $existing_snapshot['operator_id'] ?? null );
 		$platform_station_id = $this->first_text_value( $selection['platform_station_id'] ?? null, $snapshot['platform_station_id'] ?? null, $existing['platform_station_id'] ?? null, $existing_snapshot['platform_station_id'] ?? null );
 		$selected_at = 'explicit' === $selection_intent ? gmdate( 'c' ) : $this->first_text_value( $existing['selected_at'] ?? null, $existing_snapshot['selected_at'] ?? null, $selection['selected_at'] ?? null, $snapshot['selected_at'] ?? null );
+		$requires_rate_refresh = true;
+		if ( array_key_exists( 'requires_rate_refresh', $selection ) ) {
+			$requires_rate_refresh = $this->payload_boolean_value( $selection['requires_rate_refresh'] );
+		} elseif ( array_key_exists( 'requires_rate_refresh', $snapshot ) ) {
+			$requires_rate_refresh = $this->payload_boolean_value( $snapshot['requires_rate_refresh'] );
+		}
 		$payload = array(
 			'carrier_key' => $carrier,
 			'carrier' => $carrier,
@@ -347,7 +354,7 @@ final class CheckoutPickupPointRestController {
 			'cdek_city_code' => $selection['cdek_city_code'] ?? $snapshot['cdek_city_code'] ?? 0,
 			'is_handout' => $selection['is_handout'] ?? $snapshot['is_handout'] ?? false,
 			'description' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
-			'point_comment' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
+			'point_comment' => (string) ( $selection['point_comment'] ?? $selection['snapshot']['point_comment'] ?? $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
 			'work_time' => (string) ( $selection['work_time'] ?? $selection['point_work_time'] ?? $selection['snapshot']['work_time'] ?? '' ),
 			'point_work_time' => (string) ( $selection['point_work_time'] ?? $selection['work_time'] ?? $selection['snapshot']['work_time'] ?? '' ),
 			'storage_notice' => (string) ( $selection['storage_notice'] ?? $selection['snapshot']['storage_notice'] ?? '' ),
@@ -356,8 +363,10 @@ final class CheckoutPickupPointRestController {
 			'dpd_source' => (string) ( $selection['dpd_source'] ?? $selection['snapshot']['dpd_source'] ?? '' ),
 			'lat' => $selection['lat'] ?? null,
 			'lng' => $selection['lng'] ?? null,
+			'requires_rate_refresh' => $requires_rate_refresh,
 			'snapshot' => $snapshot ?: $selection,
 		);
+		$payload['snapshot']['requires_rate_refresh'] = $requires_rate_refresh;
 		if ( '' !== $selected_at ) {
 			$payload['selected_at'] = $selected_at;
 		}
@@ -388,15 +397,17 @@ final class CheckoutPickupPointRestController {
 	}
 
 	private function save_registry_backed_selection( mixed $request, string $method_id, string $carrier, string $selection_intent ): mixed {
-		$family = $this->session_manager->shipping_method_family( $method_id );
+		$family = $this->session_manager->normalize_pickup_family( $this->param( $request, 'pickup_family' ) );
 		try {
-			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );
+			$context = $this->provider_query_resolver->resolve_context( $method_id, $carrier, $family );
 		} catch ( \RuntimeException $exception ) {
 			$code = in_array( $exception->getMessage(), array( 'provider_rate_context_missing', 'provider_rate_context_mismatch' ), true ) ? $exception->getMessage() : 'provider_rate_context_missing';
 			return $this->error( $code, 'Pickup rate context is invalid.', 400 );
 		} catch ( \Throwable ) {
 			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is invalid.', 400 );
 		}
+		$query = $context['query'];
+		$family = $context['pickup_family'];
 		$provider = $this->provider_registry?->get( $carrier );
 		if ( null === $provider ) {
 			return $this->error( 'pickup_provider_unavailable', 'Pickup provider is unavailable.', 503 );
@@ -412,22 +423,21 @@ final class CheckoutPickupPointRestController {
 		if ( ! $point instanceof PickupPoint || $point->code !== $code ) {
 			return $this->error( 'not_found', 'Pickup point not found.', 404 );
 		}
-		$fingerprint = $this->provider_query_resolver->destination_fingerprint( $method_id );
+		$fingerprint = (string) $context['destination_fingerprint'];
 		if ( '' === trim( $fingerprint ) ) {
 			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
 		}
-		$selection = $this->selection_from_provider_point( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code );
+		$selection = $this->selection_from_provider_point( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code, $query->service_key );
 		$this->save_selection( $selection, $carrier, $method_id, $selection_intent );
 
 		return $this->selection_response( $selection, $method_id );
 	}
 
-	private function selection_from_provider_point( PickupPoint $point, string $carrier, string $family, string $destination_fingerprint, int $location_id, string $country_code ): array {
+	private function selection_from_provider_point( PickupPoint $point, string $carrier, string $family, string $destination_fingerprint, int $location_id, string $country_code, string $service_key = '' ): array {
 		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
 		$source = (string) ( $raw['source'] ?? '' );
 		$type = 'paid' === $source ? 'pvz' : ( 'free' === $source || 'terminal' === $point->type ? 'terminal' : 'pvz' );
 		$title = 'terminal' === $type ? 'Собственный пункт выдачи ПЭК' : 'Партнерский пункт выдачи ПЭК';
-		$comment = 'paid' === $source ? 'Возможна небольшая доплата за доставку в этот пункт' : '';
 		$presentation_type = $this->provider_presentation_value( $raw, 'presentation_type' );
 		if ( in_array( $presentation_type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
 			$type = $presentation_type;
@@ -437,24 +447,42 @@ final class CheckoutPickupPointRestController {
 			$title = $presentation_title;
 		}
 		$presentation_comment = $this->provider_presentation_value( $raw, 'presentation_comment' );
-		if ( '' !== $presentation_comment ) {
-			$comment = $presentation_comment;
+		if ( '' === $presentation_comment && 'paid' === $source ) {
+			$presentation_comment = 'Возможна небольшая доплата за доставку в этот пункт';
 		}
 		$marker_type = $this->provider_presentation_value( $raw, 'marker_type' );
 		if ( ! in_array( $marker_type, array( 'pickup', 'postamat', 'terminal' ), true ) ) {
 			$marker_type = 'terminal' === $type ? 'terminal' : 'pickup';
 		}
 		$point_name = $this->public_provider_point_name( $point, $raw );
+		$point_title = $this->provider_presentation_value( $raw, 'point_title' );
+		if ( '' === $point_title ) {
+			$point_title = $title;
+		}
+		$card_title = $this->provider_presentation_value( $raw, 'card_title' );
+		if ( '' === $card_title ) {
+			$card_title = $point_title;
+		}
+		$display_code = $this->provider_presentation_value( $raw, 'display_code' );
+		$display_title = $this->provider_presentation_value( $raw, 'display_title' );
+		if ( '' === $display_title ) {
+			$display_title = trim( $card_title . ( '' !== $display_code ? ' ' . $display_code : '' ) );
+		}
+		$point_comment = trim( (string) $point->comment );
+		$requires_rate_refresh = true;
+		if ( array_key_exists( 'requires_rate_refresh', $raw ) ) {
+			$requires_rate_refresh = $this->provider_boolean_value( $raw, 'requires_rate_refresh' );
+		}
 		$snapshot = array(
 			'carrier_key' => $carrier,
-			'service_key' => $carrier,
+			'service_key' => '' !== trim( $service_key ) ? $service_key : $carrier,
 			'pickup_family' => $family,
 			'point_code' => $point->code,
 			'point_id' => $point->code,
 			'point_type' => $type,
 			'point_type_label' => $title,
-			'point_title' => $title,
-			'card_title' => $title,
+			'point_title' => $point_title,
+			'card_title' => $card_title,
 			'point_name' => $point_name,
 			'point_address' => $point->address,
 			'address' => $point->address,
@@ -465,20 +493,33 @@ final class CheckoutPickupPointRestController {
 			'latitude' => $point->latitude,
 			'longitude' => $point->longitude,
 			'work_time' => $point->work_time,
-			'description' => $point->comment,
-			'presentation_comment' => $comment,
+			'description' => $point_comment,
+			'point_comment' => $point_comment,
+			'presentation_comment' => $presentation_comment,
 			'marker_type' => $marker_type,
+			'display_code' => $display_code,
+			'display_title' => $display_title,
 			'source' => in_array( $source, array( 'free', 'paid' ), true ) ? $source : '',
 			'location_id' => $location_id,
 			'country_code' => strtoupper( trim( $country_code ) ),
 			'destination_fingerprint' => $destination_fingerprint,
 			'provider_destination_fingerprint' => $destination_fingerprint,
-			'requires_rate_refresh' => true,
+			'requires_rate_refresh' => $requires_rate_refresh,
 			'validation_source' => 'provider_resolve_selection',
 			'selected_at' => gmdate( 'c' ),
 		);
 
 		return array_merge( $snapshot, array( 'id' => $point->code, 'snapshot' => $snapshot ) );
+	}
+
+	/** @param array<string,mixed> $raw */
+	private function provider_boolean_value( array $raw, string $key ): bool {
+		$value = $raw[ $key ] ?? false;
+		return $this->payload_boolean_value( $value );
+	}
+
+	private function payload_boolean_value( mixed $value ): bool {
+		return true === $value || '1' === $value || 1 === $value || 'true' === $value;
 	}
 
 	/**
@@ -831,7 +872,8 @@ final class CheckoutPickupPointRestController {
 			'lat' => $point['lat'] ?? null,
 			'lng' => $point['lng'] ?? null,
 			'work_time' => (string) ( $point['work_time'] ?? '' ),
-			'description' => (string) ( $point['description'] ?? $point['point_comment'] ?? '' ),
+			'point_comment' => (string) ( $point['point_comment'] ?? '' ),
+			'description' => (string) ( $point['description'] ?? '' ),
 			'storage_notice' => (string) ( $point['storage_notice'] ?? '' ),
 		);
 
@@ -855,6 +897,7 @@ final class CheckoutPickupPointRestController {
 			'gar_object_id' => $snapshot['gar_object_id'],
 			'destination_fingerprint' => $snapshot['destination_fingerprint'],
 			'work_time' => $snapshot['work_time'],
+			'point_comment' => $snapshot['point_comment'],
 			'description' => $snapshot['description'],
 			'storage_notice' => $snapshot['storage_notice'],
 			'postcode' => $snapshot['postcode'],
@@ -874,7 +917,12 @@ final class CheckoutPickupPointRestController {
 			return '';
 		}
 		foreach ( $chosen as $method ) {
-			$family = $this->session_manager->shipping_method_family( (string) $method );
+			$method_id = $this->normalize_shipping_method_id( (string) $method );
+			$rate = $this->rate_for_shipping_method( $method_id );
+			$family = array() !== $rate ? PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $method_id ) : '';
+			if ( '' === $family ) {
+				$family = $this->session_manager->shipping_method_family( $method_id );
+			}
 			if ( str_ends_with( $family, ':pickup' ) ) {
 				return $family;
 			}
@@ -1105,7 +1153,9 @@ final class CheckoutPickupPointRestController {
 	private function is_supported_shipping_method( string $method_id, string $carrier ): bool {
 		if ( 'cdek' === $carrier ) {
 			if ( ! $this->cdek_points instanceof CdekDeliveryPointService ) {
-				return str_ends_with( $this->session_manager->shipping_method_family( $method_id ), ':pickup' );
+				$rate = $this->rate_for_shipping_method( $method_id );
+				$family = array() !== $rate ? PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $method_id ) : $this->session_manager->shipping_method_family( $method_id );
+				return str_ends_with( $family, ':pickup' );
 			}
 			return $this->is_cdek_pickup_rate( $this->rate_for_shipping_method( $method_id ), $method_id );
 		}
@@ -1113,7 +1163,9 @@ final class CheckoutPickupPointRestController {
 			return RussianPostDomesticSettings::is_pickup_rate_id( $method_id );
 		}
 
-		return str_ends_with( $this->session_manager->shipping_method_family( $method_id ), ':pickup' );
+		$rate = $this->rate_for_shipping_method( $method_id );
+		$family = array() !== $rate ? PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $method_id ) : $this->session_manager->shipping_method_family( $method_id );
+		return str_ends_with( $family, ':pickup' );
 	}
 
 	/**
@@ -1121,6 +1173,10 @@ final class CheckoutPickupPointRestController {
 	 */
 	private function rate_for_shipping_method( string $method_id ): array {
 		$method_id = $this->session_manager->normalize_rate_id( $method_id );
+		$woocommerce_rate = $this->woocommerce_rate( $method_id );
+		if ( array() !== $woocommerce_rate ) {
+			return $woocommerce_rate;
+		}
 		$rates = $this->session_manager->rates();
 		if ( isset( $rates[ $method_id ] ) && is_array( $rates[ $method_id ] ) ) {
 			return $rates[ $method_id ];
@@ -1132,6 +1188,34 @@ final class CheckoutPickupPointRestController {
 			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
 			if ( $rate_id === $method_id ) {
 				return $rate;
+			}
+		}
+
+		return array();
+	}
+
+	/** @return array<string,mixed> */
+	private function woocommerce_rate( string $normalized_rate_id ): array {
+		if ( '' === $normalized_rate_id || ! function_exists( 'WC' ) || ! is_object( WC() ) || ! method_exists( WC(), 'shipping' ) ) {
+			return array();
+		}
+		$shipping = WC()->shipping();
+		if ( ! is_object( $shipping ) || ! method_exists( $shipping, 'get_packages' ) ) {
+			return array();
+		}
+		$packages = $shipping->get_packages();
+		if ( ! is_array( $packages ) ) {
+			return array();
+		}
+		foreach ( $packages as $package ) {
+			if ( ! is_array( $package ) || ! is_array( $package['rates'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $package['rates'] as $key => $rate ) {
+				$rate_id = $this->session_manager->normalize_rate_id( WooCommerceRateMetaNormalizer::rate_id( $rate, (string) $key ) );
+				if ( $rate_id === $normalized_rate_id ) {
+					return WooCommerceRateMetaNormalizer::rate_snapshot( $rate, (string) $key );
+				}
 			}
 		}
 
@@ -1151,7 +1235,7 @@ final class CheckoutPickupPointRestController {
 			&& CdekSettings::SERVICE_KEY === (string) ( $rate['service_key'] ?? $meta['service_key'] ?? CdekSettings::SERVICE_KEY )
 			&& 'pickup' === (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' )
 			&& ! empty( $rate['requires_pickup_point'] )
-			&& CdekSettings::CARRIER_KEY . ':pickup' === $this->session_manager->shipping_method_family( $method_id );
+			&& CdekSettings::CARRIER_KEY . ':pickup' === PickupFamilyResolver::from_meta( array_replace( $meta, $rate ), $method_id );
 	}
 
 	/**

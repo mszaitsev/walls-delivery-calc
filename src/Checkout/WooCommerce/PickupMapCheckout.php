@@ -121,6 +121,11 @@ final class PickupMapCheckout {
 	}
 
 	private function first_pickup_carrier(): string {
+		foreach ( $this->woocommerce_rates() as $rate ) {
+			if ( $this->is_pickup_rate( $rate ) ) {
+				return (string) ( $rate['carrier_key'] ?? $this->rate_meta( $rate )['carrier_key'] ?? '' );
+			}
+		}
 		foreach ( $this->session_manager->rates() as $rate ) {
 			if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && ! empty( $rate['requires_pickup_point'] ) ) {
 				return (string) ( $rate['carrier_key'] ?? '' );
@@ -131,6 +136,11 @@ final class PickupMapCheckout {
 	}
 
 	private function first_pickup_rate_id(): string {
+		foreach ( $this->woocommerce_rates() as $rate ) {
+			if ( $this->is_pickup_rate( $rate ) ) {
+				return (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' );
+			}
+		}
 		foreach ( $this->session_manager->rates() as $rate ) {
 			if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && ! empty( $rate['requires_pickup_point'] ) ) {
 				return (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' );
@@ -337,6 +347,7 @@ final class PickupMapCheckout {
 				'lng' => $selection['lng'] ?? $snapshot['lng'] ?? null,
 				'work_time' => $selection['work_time'] ?? $selection['point_work_time'] ?? $snapshot['work_time'] ?? null,
 				'point_work_time' => $selection['point_work_time'] ?? $selection['work_time'] ?? $snapshot['work_time'] ?? null,
+				'point_comment' => $selection['point_comment'] ?? $snapshot['point_comment'] ?? null,
 				'description' => $selection['description'] ?? $selection['point_comment'] ?? $snapshot['description'] ?? null,
 				'storage_notice' => $selection['storage_notice'] ?? $snapshot['storage_notice'] ?? null,
 				'marker_type' => $selection['marker_type'] ?? $snapshot['marker_type'] ?? null,
@@ -419,11 +430,12 @@ final class PickupMapCheckout {
 	 */
 	private function pickup_families(): array {
 		$families = array();
-		foreach ( $this->session_manager->rates() as $rate ) {
-			if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) || empty( $rate['requires_pickup_point'] ) ) {
+		foreach ( array_merge( $this->woocommerce_rates(), array_values( $this->session_manager->rates() ) ) as $rate ) {
+			if ( ! is_array( $rate ) || ! $this->is_pickup_rate( $rate ) ) {
 				continue;
 			}
-			$family = $this->session_manager->shipping_method_family( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			$family = PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $rate_id );
 			if ( '' !== $family && ! in_array( $family, $families, true ) ) {
 				$families[] = $family;
 			}
@@ -542,7 +554,11 @@ final class PickupMapCheckout {
 
 	private function active_pickup_family(): string {
 		$chosen = $this->active_shipping_method_id();
-		$family = '' !== $chosen ? $this->session_manager->shipping_method_family( $chosen ) : '';
+		$rate = $this->active_pickup_rate();
+		$family = array() !== $rate ? PickupFamilyResolver::from_meta( array_replace( $this->rate_meta( $rate ), $rate ), $chosen ) : '';
+		if ( '' === $family ) {
+			$family = '' !== $chosen ? $this->session_manager->shipping_method_family( $chosen ) : '';
+		}
 		return str_ends_with( $family, ':pickup' ) ? $family : '';
 	}
 
@@ -563,6 +579,10 @@ final class PickupMapCheckout {
 		if ( '' === $method_id ) {
 			return array();
 		}
+		$woocommerce_rate = $this->woocommerce_rate( $method_id );
+		if ( array() !== $woocommerce_rate && $this->is_pickup_rate( $woocommerce_rate ) ) {
+			return $woocommerce_rate;
+		}
 		$rates = $this->session_manager->rates();
 		if ( isset( $rates[ $method_id ] ) && is_array( $rates[ $method_id ] ) ) {
 			$rate = $rates[ $method_id ];
@@ -581,11 +601,54 @@ final class PickupMapCheckout {
 		return array();
 	}
 
+	/** @return array<int,array<string,mixed>> */
+	private function woocommerce_rates(): array {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! method_exists( WC(), 'shipping' ) ) {
+			return array();
+		}
+		$shipping = WC()->shipping();
+		if ( ! is_object( $shipping ) || ! method_exists( $shipping, 'get_packages' ) ) {
+			return array();
+		}
+		$packages = $shipping->get_packages();
+		if ( ! is_array( $packages ) ) {
+			return array();
+		}
+		$rates = array();
+		foreach ( $packages as $package ) {
+			if ( ! is_array( $package ) || ! is_array( $package['rates'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $package['rates'] as $key => $rate ) {
+				$snapshot = WooCommerceRateMetaNormalizer::rate_snapshot( $rate, (string) $key );
+				if ( array() !== $snapshot ) {
+					$rates[] = $snapshot;
+				}
+			}
+		}
+
+		return $rates;
+	}
+
+	/** @return array<string,mixed> */
+	private function woocommerce_rate( string $normalized_rate_id ): array {
+		$normalized_rate_id = $this->session_manager->normalize_rate_id( $normalized_rate_id );
+		foreach ( $this->woocommerce_rates() as $rate ) {
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			if ( $rate_id === $normalized_rate_id ) {
+				return $rate;
+			}
+		}
+
+		return array();
+	}
+
 	/**
 	 * @param array<string,mixed> $rate
 	 */
 	private function is_pickup_rate( array $rate ): bool {
-		return DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && ! empty( $rate['requires_pickup_point'] );
+		$meta = $this->rate_meta( $rate );
+		return DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? $meta['delivery_type'] ?? '' ) && ! empty( $rate['requires_pickup_point'] ?? $meta['requires_pickup_point'] ?? false );
 	}
 
 	private function active_pickup_rate_country_code(): string {

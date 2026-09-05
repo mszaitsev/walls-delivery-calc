@@ -99,9 +99,10 @@ final class CheckoutDeliveryTypeSelector {
 	 * @param array<string,mixed> $meta
 	 */
 	private function render_pickup_map_selector( string $carrier_key, string $rate_id, array $meta = array() ): void {
-		$family = $this->session_manager->shipping_method_family( $rate_id );
+		$family = trim( (string) ( $meta['pickup_family'] ?? '' ) );
+		$family = '' !== $family ? $this->session_manager->normalize_pickup_family( $family ) : $this->session_manager->shipping_method_family( $rate_id );
 		$selection = $this->session_manager->checkout_pickup_point_for_family( $family );
-		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id );
+		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id, $family );
 		$has_selection = $matches
 			&& array() !== $selection
 			&& '' !== trim( (string) ( $selection['point_code'] ?? '' ) )
@@ -124,6 +125,7 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<input type="hidden" name="wdc_pickup_city_name" data-wdc-pickup-city-name value="' . esc_attr( (string) ( $selection['city_name'] ?? $selection['city'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_region_name" data-wdc-pickup-region-name value="' . esc_attr( (string) ( $selection['region_name'] ?? $selection['region'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_work_time" data-wdc-pickup-work-time-field value="' . esc_attr( (string) ( $selection['point_work_time'] ?? $selection['work_time'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_comment" data-wdc-pickup-point-comment-field value="' . esc_attr( (string) ( $selection['point_comment'] ?? $selection['snapshot']['point_comment'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_description" data-wdc-pickup-description-field value="' . esc_attr( (string) ( $selection['description'] ?? $selection['point_comment'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_storage_notice" data-wdc-pickup-storage-notice-field value="' . esc_attr( (string) ( $selection['storage_notice'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_marker_type" data-wdc-pickup-marker-type value="' . esc_attr( (string) ( $selection['marker_type'] ?? '' ) ) . '">';

@@ -34,6 +34,10 @@ final class DeliveryQuoteCacheManager {
 		if ( function_exists( 'add_filter' ) ) {
 			add_filter( 'woocommerce_cart_shipping_packages', array( $this, 'add_cache_version_to_packages' ), PHP_INT_MAX );
 		}
+		if ( function_exists( 'add_action' ) ) {
+			add_action( 'woocommerce_update_product', array( $this, 'invalidate_after_product_update' ), 10, 1 );
+			add_action( 'woocommerce_update_product_variation', array( $this, 'invalidate_after_product_update' ), 10, 1 );
+		}
 	}
 
 	/**
@@ -83,6 +87,16 @@ final class DeliveryQuoteCacheManager {
 		}
 
 		return $version;
+	}
+
+	public function invalidate_after_product_update( int $product_id = 0 ): string {
+		unset( $product_id );
+
+		if ( $this->quote_cache instanceof QuoteCache ) {
+			$this->quote_cache->invalidate_all();
+		}
+
+		return $this->bump_delivery_rates_cache_version();
 	}
 
 	/**

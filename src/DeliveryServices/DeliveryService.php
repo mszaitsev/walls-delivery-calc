@@ -7,6 +7,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DeliveryService {
 	public const TYPE_API = 'api';
+	public const TYPE_MANUAL = 'manual';
 	public const TYPE_FIXED = 'fixed';
 	public const TYPE_WEIGHT_BASED = 'weight_based';
 

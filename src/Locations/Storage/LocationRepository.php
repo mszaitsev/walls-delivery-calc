@@ -1303,6 +1303,84 @@ final class LocationRepository {
 		return $this->search_paginated( $query, 1, $limit, $country_code )['items'];
 	}
 
+	/** @return array<int,array{country_code:string,region_name:string}> */
+	public function unique_active_region_names( string $query = '', int $limit = 100, string $country_code = '' ): array {
+		$query = trim( $query );
+		$limit = max( 1, min( 300, $limit ) );
+		$country_code = $this->normalize_country_code( $country_code );
+		if ( $this->has_test_location_rows() ) {
+			$query_key = $this->normalize_query( $query );
+			$regions = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				$row_country = $this->normalize_country_code( (string) ( $row['country_code'] ?? 'RU' ) );
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) || ( '' !== $country_code && $country_code !== $row_country ) ) {
+					continue;
+				}
+				$region = trim( (string) ( $row['region_name'] ?? '' ) );
+				if ( '' === $region ) {
+					continue;
+				}
+				if ( '' !== $query_key && ! str_contains( $this->normalize_query( $region ), $query_key ) ) {
+					continue;
+				}
+				$regions[ $row_country . '|' . $region ] = array( 'country_code' => $row_country, 'region_name' => $region );
+			}
+			ksort( $regions, SORT_STRING );
+
+			return array_slice( array_values( $regions ), 0, $limit );
+		}
+
+		$where = array( 'active = 1', "region_name <> ''" );
+		$args = array();
+		if ( '' !== $country_code ) {
+			$where[] = 'country_code = %s';
+			$args[] = $country_code;
+		}
+		if ( '' !== $query ) {
+			$where[] = 'region_name LIKE %s';
+			$args[] = '%' . $this->wpdb->esc_like( $query ) . '%';
+		}
+		$args[] = $limit;
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				'SELECT DISTINCT country_code, region_name FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY country_code ASC, region_name ASC LIMIT %d',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows )
+			? array_values( array_filter( array_map( fn( array $row ): array => array( 'country_code' => $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ), 'region_name' => trim( (string) ( $row['region_name'] ?? '' ) ) ), $rows ), static fn( array $row ): bool => '' !== $row['country_code'] && '' !== $row['region_name'] ) )
+			: array();
+	}
+
+	/** @return array<int,Location> */
+	public function search_active_locations_for_manual_delivery( string $query, int $limit = 20, string $country_code = '' ): array {
+		$query = trim( $query );
+		if ( '' === $query ) {
+			return array();
+		}
+		$limit = max( 1, min( 50, $limit ) );
+		$country_code = $this->normalize_country_code( $country_code );
+		$locations = $this->search( $query, max( 10, $limit ), $country_code );
+		$filtered = array();
+		foreach ( $locations as $location ) {
+			if ( ! $location instanceof Location || ! $location->active || ( '' !== $country_code && $country_code !== $this->normalize_country_code( $location->country_code ) ) ) {
+				continue;
+			}
+			if ( '' === trim( $location->region_name ) || '' === trim( $location->resolved_place_name() ) ) {
+				continue;
+			}
+			$filtered[] = $location;
+			if ( count( $filtered ) >= $limit ) {
+				break;
+			}
+		}
+
+		return $filtered;
+	}
+
 	/**
 	 * @return array<int,Location>
 	 */

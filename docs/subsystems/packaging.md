@@ -1,8 +1,12 @@
 # Packaging
 
-Version: 0.143.2
+Version: 0.151.2
 
 Packaging code lives in `src/Packaging`. `PackagingBuilder` and `PackagingWeightCalculator` build shipment places from order/package data. Shipment allocation tests protect the bridge into shipment creation.
+
+Manual delivery pricing does not duplicate packaging calculation. `CheckoutOrchestrator` applies the existing `PackagingWeightCalculator` for each `DeliveryService` before runtime carrier quoting; manual per-kg and weight-range modes use the resulting `Package::total_weight_g` as chargeable weight. When `include_packaging_weight=false`, the package keeps product weight semantics, including `0 g` for a physical zero-weight product; when it is enabled, the existing service packaging policy decides whether packaging weight is included as total weight or a package item.
+
+WooCommerce product and variation saves bump the shared delivery rates cache version, so product weight and dimension updates cannot keep stale package-sensitive delivery calculations alive in checkout sessions.
 
 Carrier-specific parcel conversions belong in carrier request builders, not in the generic packaging builder. A carrier may, however, supply optional generic `PackagingBuilderConfig` parcel limits through a carrier-owned factory. Without limits, all historical packing behavior remains unchanged. With limits, box formats are filtered by rotated fit, and the builder uses a deterministic bounded N-box path rather than emitting an oversized stacked fallback. An indivisible item outside the configured limit fails closed.
 

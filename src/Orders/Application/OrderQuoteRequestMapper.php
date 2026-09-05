@@ -14,6 +14,7 @@ use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -124,19 +125,26 @@ final class OrderQuoteRequestMapper {
 			$postcode = (string) ( $override['postcode'] ?? $postcode );
 			$region = (string) ( $override['region_name'] ?? $region );
 		}
+		$canonical_location = $this->canonical_location( $order, $selected_location );
+		if ( $canonical_location instanceof Location ) {
+			$country = strtoupper( trim( $canonical_location->country_code ) ) ?: $country;
+			$city = $canonical_location->resolved_place_name() ?: $city;
+			$region = $canonical_location->region_name ?: $region;
+			$postcode = $canonical_location->postal_code ?: $postcode;
+		}
 
 		return new Address(
 			country_code: '' !== $country ? $country : 'RU',
 			country_name: (string) ( $destination['country_name'] ?? '' ),
 			region_name: $region,
-			region_code: (string) ( $override['region_code'] ?? '' ),
+			region_code: $canonical_location instanceof Location ? $canonical_location->region_code : (string) ( $override['region_code'] ?? '' ),
 			city: $city,
 			postcode: $postcode,
 			street: $street,
 			house: $house,
 			raw_address: trim( $street . ' ' . $house ),
-			fias_id: (string) ( $override['fias_id'] ?? ( $destination['fias_id'] ?? $this->meta_string( $order, '_wdc_platform_fias_id' ) ?: $this->meta_string( $order, '_wdc_platform_city_fias_id' ) ) ),
-			gar_id: (string) ( $override['gar_id'] ?? ( $this->meta_string( $order, '_wdc_platform_gar_id' ) ?: $this->meta_string( $order, '_wdc_platform_city_gar_id' ) ) ),
+			fias_id: $canonical_location instanceof Location ? $canonical_location->fias_id : (string) ( $override['fias_id'] ?? ( $destination['fias_id'] ?? $this->meta_string( $order, '_wdc_platform_fias_id' ) ?: $this->meta_string( $order, '_wdc_platform_city_fias_id' ) ) ),
+			gar_id: $canonical_location instanceof Location ? $canonical_location->gar_id : (string) ( $override['gar_id'] ?? ( $this->meta_string( $order, '_wdc_platform_gar_id' ) ?: $this->meta_string( $order, '_wdc_platform_city_gar_id' ) ) ),
 			normalized: (bool) $this->meta_value( $order, '_wdc_platform_normalized' ),
 			fallback: (bool) $this->meta_value( $order, '_wdc_platform_address_fallback_used' )
 		);
@@ -149,6 +157,24 @@ final class OrderQuoteRequestMapper {
 	 */
 	private function customer_context( object $order, Address $address, ?array $selected_location = null, array $selected_pickup_point = array() ): array {
 		$resolved_location_id = $this->resolved_location_id( $order, $address, $selected_location );
+		$canonical_location = $resolved_location_id > 0 && $this->location_repository instanceof LocationRepository ? $this->location_repository->find_by_id( $resolved_location_id ) : null;
+		if ( $canonical_location instanceof Location && $canonical_location->active ) {
+			$address = new Address(
+				country_code: strtoupper( trim( $canonical_location->country_code ) ) ?: $address->country_code,
+				country_name: $address->country_name,
+				region_name: $canonical_location->region_name,
+				region_code: $canonical_location->region_code,
+				city: $canonical_location->resolved_place_name(),
+				postcode: $canonical_location->postal_code ?: $address->postcode,
+				street: $address->street,
+				house: $address->house,
+				raw_address: $address->raw_address,
+				fias_id: $canonical_location->fias_id,
+				gar_id: $canonical_location->gar_id,
+				normalized: $address->normalized,
+				fallback: $address->fallback
+			);
+		}
 		$city_display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
 		if ( '' === $city_display ) {
 			$city_display = $address->city ?: $address->settlement;
@@ -173,6 +199,9 @@ final class OrderQuoteRequestMapper {
 				'city_postcode'             => array() !== $override ? $address->postcode : ( $this->meta_string( $order, '_wdc_platform_city_postcode' ) ?: $address->postcode ),
 				'selected_location_postcode'=> $address->postcode,
 				'city_name'                 => $address->city ?: $address->settlement,
+				'region_name'               => $address->region_name,
+				'settlement_name'           => $address->settlement,
+				'place_name'                => $address->settlement ?: $address->city,
 				'display_name'              => $city_display,
 				'selected_location_name'    => $city_display,
 				'selected_location_country' => $address->country_code,
@@ -215,6 +244,24 @@ final class OrderQuoteRequestMapper {
 		}
 
 		return $context;
+	}
+
+	/** @param array<string,mixed>|null $selected_location */
+	private function canonical_location( object $order, ?array $selected_location ): ?Location {
+		if ( ! $this->location_repository instanceof LocationRepository ) {
+			return null;
+		}
+		$override = $this->normalize_location_override( $selected_location );
+		$id = (int) ( $override['id'] ?? 0 );
+		if ( $id <= 0 ) {
+			$id = $this->saved_location_id( $order );
+		}
+		if ( $id > 0 ) {
+			$location = $this->location_repository->find_by_id( $id );
+			return $location instanceof Location && $location->active ? $location : null;
+		}
+
+		return null;
 	}
 
 	private function resolved_location_id( object $order, Address $address, ?array $selected_location ): int {
@@ -502,6 +549,7 @@ final class OrderQuoteRequestMapper {
 				'region_name'  => trim( (string) ( $selected_location['state_value'] ?? $selected_location['region_name'] ?? $selected_location['selected_location_region'] ?? '' ) ),
 				'region_code'  => trim( (string) ( $selected_location['region_code'] ?? '' ) ),
 				'city'         => $city,
+				'place_name'   => trim( (string) ( $selected_location['place_name'] ?? $selected_location['settlement_name'] ?? $city ) ),
 				'postcode'     => trim( (string) ( $selected_location['postal_code'] ?? $selected_location['postcode'] ?? $selected_location['selected_location_postcode'] ?? '' ) ),
 				'display_name' => $display,
 				'dpd_city_id'  => $dpd_city_id > 0 ? $dpd_city_id : null,

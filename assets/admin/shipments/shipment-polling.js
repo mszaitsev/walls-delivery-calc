@@ -440,12 +440,16 @@
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
     const form = box && box.querySelector('[data-wdc-manual-tracking-form]');
     const input = form && form.querySelector('[data-wdc-manual-tracking-input]');
+    const actualCostInput = form && form.querySelector('[data-wdc-manual-attach-actual-cost-input]');
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.attachTrackingAction);
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
     data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
     data.append('shipment_key', button && button.dataset ? button.dataset.shipmentKey || '' : '');
     data.append('barcode', input ? input.value || '' : '');
+    if (actualCostInput) {
+      data.append('actual_cost', actualCostInput.value || '');
+    }
     if (button) button.disabled = true;
     return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
       method: 'POST',
@@ -459,6 +463,7 @@
         }
         if (form) form.hidden = true;
         if (input) input.value = '';
+        if (actualCostInput) actualCostInput.value = '';
         const statusPayload = shipmentStatusFromResponse(payload.data);
         renderShipmentStatus(box, statusPayload);
         renderShipmentTechnicalInfo(box, payload.data || {});

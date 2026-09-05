@@ -546,11 +546,17 @@
 }
 
 .wdc-pickup-list__address,
-.wdc-pickup-list__time {
+.wdc-pickup-list__time,
+.wdc-pickup-list__comment {
 	color: #475569;
 	font-size: 13px;
 	line-height: 1.35;
 	overflow-wrap: anywhere;
+}
+
+.wdc-pickup-list__comment strong {
+	color: #334155;
+	font-weight: 600;
 }
 
 .wdc-pickup-list__empty {
