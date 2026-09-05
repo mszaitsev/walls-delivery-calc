@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.2
+Version: 0.152.3
+
+0.152.3 fixes manual pickup provider routing in the existing pickup picker. Pickup family parsing now treats the first family segment as the carrier and the final segment as the `pickup` marker, so `manual:<service_key>:pickup` routes to the single manual provider. Generic pickup requests without a trusted carrier context fail closed instead of silently falling back to Russian Post points.
 
 0.152.2 fixes the manual pickup selector integration against the real WooCommerce shipping-rate metadata shape. `CheckoutRateRenderer` now normalizes keyed `WC_Meta_Data` entries instead of treating any associative array from `WC_Shipping_Rate::get_meta_data()` as already-normalized metadata, so manual pickup rates produced through `NewShippingMethod::add_rate()` render the existing "Выбрать пункт выдачи" control.
 

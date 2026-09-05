@@ -2,7 +2,9 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.152.2
+Version: 0.152.3
+
+Pickup provider routing uses the current rate family as the primary carrier context. Family strings are parsed generically as `carrier[:service identity...]:pickup`: the carrier is the first segment and `pickup` must be the last segment. The frontend no longer falls back from an unknown generic pickup context to Russian Post, and the REST points endpoints reject carrier/family/method mismatches before routing to a provider.
 
 Checkout pickup rendering must normalize both plain associative metadata arrays and keyed WooCommerce meta-entry arrays returned by `WC_Shipping_Rate::get_meta_data()`. A selectable pickup rate renders the generic selector when `delivery_type=pickup`, `requires_pickup_point=true`, and `no_pickup_selection` is not truthy, regardless of carrier, service, selected point state, or pickup-point coordinates.
 

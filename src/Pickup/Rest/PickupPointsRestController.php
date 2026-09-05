@@ -105,6 +105,10 @@ final class PickupPointsRestController {
 
 	public function points( mixed $request ): mixed {
 		$carrier = $this->carrier( $request );
+		$context_guard = $this->checkout_rate_context_guard( $request, $carrier );
+		if ( true !== $context_guard ) {
+			return $context_guard;
+		}
 		if ( 'cdek' === $carrier ) {
 			return $this->response( $this->cdek_points( $request ) );
 		}
@@ -202,6 +206,10 @@ final class PickupPointsRestController {
 	public function search( mixed $request ): mixed {
 		$query = trim( $this->param( $request, 'q' ) );
 		$carrier = $this->carrier( $request );
+		$context_guard = $this->checkout_rate_context_guard( $request, $carrier );
+		if ( true !== $context_guard ) {
+			return $context_guard;
+		}
 		if ( 'cdek' === $carrier ) {
 			return $this->response( $this->filter_cdek_points( $this->cdek_points( $request ), $query ) );
 		}
@@ -395,6 +403,53 @@ final class PickupPointsRestController {
 		}
 
 		return $this->response( $this->filter_generic_points( $formatted, $query_text ) );
+	}
+
+	private function checkout_rate_context_guard( mixed $request, string $carrier ): bool|object {
+		$method_id = $this->param( $request, 'shipping_method_id' );
+		$family = $this->param( $request, 'pickup_family' );
+		if ( '' === $method_id && '' === $family ) {
+			return true;
+		}
+		$normalized_carrier = $this->normalize_checkout_carrier_key( $carrier );
+		if ( '' === $normalized_carrier ) {
+			return $this->error( 'provider_rate_context_missing', 'Pickup carrier context is missing.', 400 );
+		}
+		$family_carrier = $this->pickup_family_carrier( $family );
+		if ( '' !== $family_carrier && $this->normalize_checkout_carrier_key( $family_carrier ) !== $normalized_carrier ) {
+			return $this->error( 'provider_rate_context_mismatch', 'Pickup rate context is invalid.', 400 );
+		}
+		$method_carrier = $this->shipping_method_carrier( $method_id );
+		if ( '' !== $method_carrier && $this->normalize_checkout_carrier_key( $method_carrier ) !== $normalized_carrier ) {
+			return $this->error( 'provider_rate_context_mismatch', 'Pickup rate context is invalid.', 400 );
+		}
+
+		return true;
+	}
+
+	private function pickup_family_carrier( string $family ): string {
+		$parts = array_values( array_filter( explode( ':', trim( $family ) ), static fn( string $part ): bool => '' !== $part ) );
+		if ( count( $parts ) < 2 || 'pickup' !== end( $parts ) ) {
+			return '';
+		}
+
+		return sanitize_key( (string) $parts[0] );
+	}
+
+	private function shipping_method_carrier( string $method_id ): string {
+		$method_id = preg_replace( '/^wdc_platform(?:_delivery)?:/', '', trim( $method_id ) ) ?? trim( $method_id );
+		$parts = array_values( array_filter( explode( ':', $method_id ), static fn( string $part ): bool => '' !== $part ) );
+		if ( count( $parts ) < 2 ) {
+			return '';
+		}
+
+		return sanitize_key( (string) $parts[0] );
+	}
+
+	private function normalize_checkout_carrier_key( string $carrier ): string {
+		$carrier = sanitize_key( $carrier );
+
+		return 'russian_post_domestic' === $carrier ? 'russian_post' : $carrier;
 	}
 
 	/**

@@ -799,7 +799,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.2' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.3' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.2
+Version: 0.152.3
+
+0.152.3 keeps pickup routing generic: multi-segment pickup families route by the first carrier segment and final `pickup` marker, REST points routes validate carrier/family/method consistency, and no manual-specific frontend/provider branch is introduced.
 
 0.152.2 keeps the fix generic in checkout presentation: `CheckoutRateRenderer` accepts keyed WooCommerce meta-entry arrays and no manual-specific renderer branch is added.
 

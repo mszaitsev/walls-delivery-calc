@@ -76,7 +76,12 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			var search = modal.root.querySelector('[data-wdc-search]');
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
-			var context = withRateCapabilities(withPrefetch(withCarrierContext(resolvedContext, method), method), method);
+			var baseContext = Object.assign({}, resolvedContext || {});
+			var containerFamily = containerSelectedPickupFamily(container);
+			if (containerFamily) {
+				baseContext.pickup_family = containerFamily;
+			}
+			var context = withRateCapabilities(withPrefetch(withCarrierContext(baseContext, method), method), method);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
 			var loadingText = '';
@@ -707,7 +712,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return 'yandex_delivery:pickup';
 		}
 		for (var i = 0; i < pickupFamilies.length; i++) {
-			if (method.indexOf(pickupFamilies[i]) === 0) {
+			if (method.indexOf(pickupFamilies[i]) === 0 || pickupFamilies[i].indexOf(method + ':') === 0) {
 				return pickupFamilies[i];
 			}
 		}
@@ -1113,8 +1118,8 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function withCarrierContext(context, method) {
 		context = Object.assign({}, context || {});
-		var family = shippingMethodFamily(method || activeMethod || currentShippingMethod());
-		var carrier = pickupCarrierFromFamily(family) || context.carrier_key || context.carrier || 'russian_post';
+		var family = String(context.pickup_family || '').trim() || shippingMethodFamily(method || activeMethod || currentShippingMethod());
+		var carrier = pickupCarrierFromFamily(family) || context.carrier_key || context.carrier || '';
 		if (carrier === 'russian_post_domestic') {
 			carrier = 'russian_post';
 		}
@@ -1637,8 +1642,12 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function pickupCarrierFromFamily(family) {
-		var parts = String(family || '').split(':');
-		return parts.length > 1 && parts[1] === 'pickup' ? parts[0] : '';
+		var parts = String(family || '').split(':').filter(Boolean);
+		if (parts.length < 2 || parts[parts.length - 1] !== 'pickup') {
+			return '';
+		}
+
+		return parts[0] || '';
 	}
 
 	function meaningfulText(value) {
@@ -2107,6 +2116,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			key: key,
 			method: normalizedMethod,
 			pickup_family: family,
+			carrier: context.carrier || '',
 			destination_fingerprint: fingerprint,
 			location_id: normalizeText(context.location_id || ''),
 			country_code: String(context.country_code || '').trim().toUpperCase()
@@ -2119,6 +2129,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 		return cached.method === current.method
 			&& cached.pickup_family === current.pickup_family
+			&& cached.carrier === current.carrier
 			&& cached.destination_fingerprint === current.destination_fingerprint
 			&& cached.location_id === current.location_id
 			&& cached.country_code === current.country_code;
