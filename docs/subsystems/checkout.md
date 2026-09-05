@@ -2,7 +2,9 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.152.11
+Version: 0.153.0
+
+0.153.0 does not change checkout quoting or pickup selection. Manual delivery checkout behavior remains the 0.152.11 contract; the new stage only lets completed manual order delivery snapshots participate in local Shipment Framework attach/remove/actual-cost flows.
 
 0.152.11 makes pickup-family rehydration rate-metadata driven. Checkout state, renderer, provider query resolution, and WooCommerce rate mapping share the same resolver: explicit `pickup_family` wins, multi-service pickup rates derive `<carrier_key>:<service_key>:pickup`, and legacy rate-id parsing remains only a fallback.
 

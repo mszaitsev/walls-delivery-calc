@@ -1129,7 +1129,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.11' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.0' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1193,7 +1193,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.11' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.0' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

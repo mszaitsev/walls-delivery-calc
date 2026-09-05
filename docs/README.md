@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.11
+Version: 0.153.0
+
+0.153.0 connects manual delivery services to the existing Shipment Framework. The single `manual` shipment adapter supports manual attach, local remove, and generic manual actual cost for the concrete historical manual service saved on the order; preview/create, carrier cancellation, status API, autosync, documents, returns, and manual shipment storage tables remain unsupported.
 
 0.152.11 centralizes pickup-family derivation for rendered WooCommerce rates. Multi-service pickup carriers now rebuild canonical families from `carrier_key + service_key` when explicit `pickup_family` metadata is missing, so manual selections saved under `manual:<service_key>:pickup` rehydrate consistently after checkout reloads.
 

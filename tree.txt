@@ -1,5 +1,5 @@
-﻿Folder PATH listing
-Volume serial number is 00000026 A0AC:74BD
+Folder PATH listing
+Volume serial number is 00000052 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -604,13 +604,13 @@ C:.
 |   |   |       CheckoutAddressValidation.php
 |   |   |
 |   |   \---WooCommerce
-  |   |           CheckoutAddressRenderer.php
-  |   |           CheckoutDebugPanel.php
-  |   |           CheckoutDeliveryTypeSelector.php
-  |   |           CheckoutFeatureGate.php
-  |   |           CheckoutLocationFingerprint.php
-  |   |           CheckoutRateRenderer.php
-  |   |           CheckoutSessionManager.php
+|   |           CheckoutAddressRenderer.php
+|   |           CheckoutDebugPanel.php
+|   |           CheckoutDeliveryTypeSelector.php
+|   |           CheckoutFeatureGate.php
+|   |           CheckoutLocationFingerprint.php
+|   |           CheckoutRateRenderer.php
+|   |           CheckoutSessionManager.php
 |   |           CheckoutSortSelector.php
 |   |           CheckoutValidation.php
 |   |           CourierRateSupport.php
@@ -623,8 +623,8 @@ C:.
 |   |           PickupPointRenderer.php
 |   |           ShippingMethodRegistrar.php
 |   |           WooCommercePackageMapper.php
-|   |           WooCommerceRateMetaNormalizer.php
 |   |           WooCommerceRateMapper.php
+|   |           WooCommerceRateMetaNormalizer.php
 |   |           WooCommerceSessionBootstrapper.php
 |   |
 |   +---Core
@@ -985,6 +985,10 @@ C:.
 |   |   +---Lifecycle
 |   |   |       ShipmentLifecycleResult.php
 |   |   |
+|   |   +---Manual
+|   |   |       ManualShipmentAdapter.php
+|   |   |       ManualShipmentService.php
+|   |   |
 |   |   +---Modal
 |   |   |       CarrierShipmentModalExtensionInterface.php
 |   |   |       ShipmentModalExtensionRegistry.php
@@ -1144,6 +1148,7 @@ C:.
     |
     +---manual-delivery
     |       run-manual-delivery-foundation-smoke.php
+    |       run-manual-delivery-shipments-smoke.php
     |
     +---orders
     |       run-delivery-calculation-data-builder-smoke.php

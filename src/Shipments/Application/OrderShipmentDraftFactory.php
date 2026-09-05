@@ -9,6 +9,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
+use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\OzonDelivery\OzonDeliverySettings;
 use WallsShop\WDC\Carriers\Pek\PekSettings;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
@@ -81,6 +82,9 @@ final class OrderShipmentDraftFactory {
 		}
 		if ( JetLogisticSettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_jet_logistic_request_from_order( $order );
+		}
+		if ( ManualDeliverySettings::CARRIER_KEY === $carrier_key ) {
+			return $this->create_manual_request_from_order( $order );
 		}
 
 		throw new \RuntimeException( 'Shipment carrier is not supported for this order.' );
@@ -231,6 +235,18 @@ final class OrderShipmentDraftFactory {
 				),
 			);
 		}
+		if ( ManualDeliverySettings::CARRIER_KEY === $request->carrier_key ) {
+			return array(
+				'request' => $request->to_array(),
+				'services' => array(),
+				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'requires_tariff' => false,
+					'requires_postoffice' => false,
+					'requires_successful_preview' => false,
+				),
+			);
+		}
 		if ( RussianPostDomesticSettings::CARRIER_KEY !== $request->carrier_key ) {
 			throw new \RuntimeException( 'Shipment carrier is not supported for this order.' );
 		}
@@ -281,6 +297,9 @@ final class OrderShipmentDraftFactory {
 			return $this->create_ozon_request_from_admin_data( $base, $data );
 		}
 		if ( JetLogisticSettings::CARRIER_KEY === $base->carrier_key ) {
+			return $base;
+		}
+		if ( ManualDeliverySettings::CARRIER_KEY === $base->carrier_key ) {
 			return $base;
 		}
 
@@ -1025,6 +1044,66 @@ final class OrderShipmentDraftFactory {
 				'normalization_attempted' => false,
 				'calculation_data' => $this->calculation_data( $order ),
 				'rate_meta' => $this->rate_meta_data( $order ),
+			)
+		);
+	}
+
+	private function create_manual_request_from_order( object $order ): ShipmentCreateRequest {
+		$delivery_type = $this->manual_delivery_type_from_order( $order );
+		$items = $this->order_items( $order );
+		$weight = $this->default_weight_g( $order, $items );
+		$place = new ShipmentPlace( 1, $weight, 0, 0, 0, Money::from_kopecks( 0 ), $items );
+		$calculation = $this->calculation_data( $order );
+		$rate_meta = $this->rate_meta_data( $order );
+		$service_key = $this->manual_service_key_from_order( $order, $calculation, $rate_meta );
+		$rate_id = $this->first_non_empty(
+			$this->meta_string( $order, '_wdc_platform_rate_id' ),
+			$calculation['rate_id'] ?? '',
+			$calculation['rate']['rate_id'] ?? '',
+			$calculation['result']['rate_id'] ?? '',
+			'' !== $service_key ? ManualDeliverySettings::CARRIER_KEY . ':' . $service_key : ManualDeliverySettings::CARRIER_KEY
+		);
+		$service_title = $this->first_non_empty(
+			$this->meta_string( $order, '_wdc_platform_service_title' ),
+			$calculation['service_title'] ?? '',
+			$calculation['service']['title'] ?? '',
+			$calculation['rate']['service_title'] ?? '',
+			$calculation['result']['service_title'] ?? '',
+			$service_key,
+			'Ручная доставка'
+		);
+
+		return new ShipmentCreateRequest(
+			order_id: $this->order_id( $order ),
+			carrier_key: ManualDeliverySettings::CARRIER_KEY,
+			delivery_type: $delivery_type,
+			rate_id: $rate_id,
+			recipient_address: $this->recipient_address( $order, $delivery_type ),
+			pickup_point: null,
+			places: array( $place ),
+			declared_value: Money::from_kopecks( 0 ),
+			insurance_enabled: false,
+			services: array(),
+			recipient: array(
+				'name' => $this->recipient_name( $order ),
+				'phone' => $this->phone( $order ),
+				'email' => $this->email( $order ),
+			),
+			meta: array(
+				'carrier_key' => ManualDeliverySettings::CARRIER_KEY,
+				'service_key' => $service_key,
+				'delivery_type' => $delivery_type,
+				'service_title' => $service_title,
+				'order_num' => $this->order_number( $order ),
+				'pickup_point_found' => false,
+				'pickup_point_row' => array(),
+				'pickup_point_code' => '',
+				'courier_original_address' => DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : '',
+				'normalization_required' => false,
+				'normalization_valid' => false,
+				'normalization_attempted' => false,
+				'calculation_data' => $calculation,
+				'rate_meta' => $rate_meta,
 			)
 		);
 	}
@@ -2102,6 +2181,34 @@ final class OrderShipmentDraftFactory {
 		return '';
 	}
 
+	/**
+	 * @param array<string,mixed> $calculation
+	 * @param array<string,mixed> $rate_meta
+	 */
+	private function manual_service_key_from_order( object $order, array $calculation, array $rate_meta ): string {
+		return sanitize_key(
+			$this->first_non_empty(
+				$this->meta_string( $order, '_wdc_platform_service_key' ),
+				$rate_meta['service_key'] ?? '',
+				$calculation['service_key'] ?? '',
+				$calculation['carrier']['service_key'] ?? '',
+				$calculation['service']['service_key'] ?? '',
+				$calculation['service']['key'] ?? '',
+				$calculation['rate']['service_key'] ?? '',
+				$calculation['result']['service_key'] ?? ''
+			)
+		);
+	}
+
+	private function manual_delivery_type_from_order( object $order ): string {
+		$value = $this->meta_string( $order, '_wdc_platform_delivery_type' );
+		if ( DeliveryType::is_valid( $value ) ) {
+			return $value;
+		}
+
+		return DeliveryType::UNKNOWN;
+	}
+
 	private function first_positive_int( mixed ...$values ): int {
 		foreach ( $values as $value ) {
 			if ( is_numeric( $value ) && (int) $value > 0 ) {
@@ -2580,6 +2687,7 @@ final class OrderShipmentDraftFactory {
 			PekSettings::CARRIER_KEY,
 			OzonDeliverySettings::CARRIER_KEY,
 			JetLogisticSettings::CARRIER_KEY,
+			ManualDeliverySettings::CARRIER_KEY,
 		);
 	}
 

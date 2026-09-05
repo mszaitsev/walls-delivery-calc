@@ -66,11 +66,12 @@ final class ShipmentManualAttachAjaxController {
 			}
 			$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
 			$barcode = sanitize_text_field( wp_unslash( $_POST['barcode'] ?? '' ) );
+			$actual_cost = sanitize_text_field( wp_unslash( $_POST['actual_cost'] ?? '' ) );
 			$adapter = $this->payloads->carrier_adapter( $shipment_key );
 			if ( null === $adapter ) {
 				throw new \InvalidArgumentException( __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) );
 			}
-			$result = $adapter->attach_manual( $order, array( 'barcode' => $barcode, 'request_id' => $barcode, 'tracking_number' => $barcode ) );
+			$result = $adapter->attach_manual( $order, array( 'barcode' => $barcode, 'request_id' => $barcode, 'tracking_number' => $barcode, 'actual_cost' => $actual_cost ) );
 			if ( ! (bool) ( $result['success'] ?? false ) ) {
 				throw new \InvalidArgumentException( (string) ( $result['message'] ?? __( 'Не удалось сохранить номер отслеживания.', 'walls-delivery-calc' ) ) );
 			}

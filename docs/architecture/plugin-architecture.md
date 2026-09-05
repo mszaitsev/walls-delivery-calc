@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.11
+Version: 0.153.0
+
+0.153.0 wires manual delivery into the existing Shipment Framework through one `ManualShipmentAdapter` and one `ManualShipmentService`. Manual shipments use `OrderShipmentRepository`, preserve the concrete historical `service_key` and service title from the order delivery snapshot, delegate actual cost to `ShipmentActualCostService`, and do not add API-create branches, document providers, autosync, modal providers, fake persistence mappers, or manual shipment tables.
 
 0.152.11 adds one generic pickup-family resolver for rate metadata. Presentation, WooCommerce mapping, provider context, and checkout state use explicit `pickup_family` first, then `carrier_key + service_key` for multi-service pickup carriers, with the legacy rate-id parser only as fallback.
 
