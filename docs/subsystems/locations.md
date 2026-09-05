@@ -1,6 +1,8 @@
 # Locations And Pickup
 
-Version: 0.153.0
+Version: 0.153.1
+
+0.153.1 removes the obsolete manual flat-only save fallback and unreachable/dead cleanup code; no runtime behavior change is intended.
 
 0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
 

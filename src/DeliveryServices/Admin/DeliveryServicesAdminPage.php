@@ -4823,8 +4823,6 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			if ( ManualDeliverySettings::PRICING_MODE_WEIGHT_RANGES === $mode ) {
 				$this->manual_delivery_weight_ranges->replace_ranges( $service_id, $ranges );
 			}
-		} elseif ( array_key_exists( 'manual_flat_price_rub', $_POST ) ) {
-			$this->manual_delivery_settings->save_flat_pricing( $service_id, wp_unslash( $_POST['manual_flat_price_rub'] ) );
 		}
 		if ( array_key_exists( 'manual_delivery_type', $_POST ) ) {
 			$this->manual_delivery_settings->save_delivery_type(

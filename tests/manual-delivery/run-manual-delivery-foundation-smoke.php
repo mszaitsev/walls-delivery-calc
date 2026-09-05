@@ -537,7 +537,7 @@ $create_manual = static function ( string $key, string $title, string $price, ar
 			'deleted' => 0,
 		)
 	);
-	$manual_settings->save_flat_pricing( $id, $price );
+	$manual_settings->save_pricing( $id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => $price ) );
 	$manual_settings->save_delivery_days( $id, '1', '2' );
 	$countries->replace_countries( $id, $country_list );
 
@@ -599,8 +599,8 @@ $manual_settings->save_delivery_type( (int) $nsk->id, ManualDeliverySettings::DE
 
 $pickup_a_id = $services->create_service( array( 'service_key' => 'manual_pickup_a', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual pickup A', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'deleted' => 0 ) );
 $pickup_b_id = $services->create_service( array( 'service_key' => 'manual_pickup_b', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual pickup B', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'deleted' => 0 ) );
-$manual_settings->save_flat_pricing( $pickup_a_id, '410' );
-$manual_settings->save_flat_pricing( $pickup_b_id, '420' );
+$manual_settings->save_pricing( $pickup_a_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '410' ) );
+$manual_settings->save_pricing( $pickup_b_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '420' ) );
 $manual_settings->save_delivery_type( $pickup_a_id, ManualDeliverySettings::DELIVERY_TYPE_PICKUP );
 $manual_settings->save_delivery_type( $pickup_b_id, ManualDeliverySettings::DELIVERY_TYPE_PICKUP );
 $countries->replace_countries( $pickup_a_id, array( 'RU' ) );
@@ -927,10 +927,10 @@ wdc_manual_assert( $carrier->quote( $request_for( 'manual_nsk_courier', 'RU', '�
 wdc_manual_assert( ! $carrier->quote( $request_for( '' ) )->success, 'Manual runtime must fail closed without service_key.' );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'unknown_manual' ) )->success, 'Manual runtime must fail closed for unknown service_key.' );
 $wrong_id = $services->create_service( array( 'service_key' => 'wrong_owner', 'carrier_key' => 'cdek', 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Wrong', 'enabled' => 1, 'deleted' => 0 ) );
-$manual_settings->save_flat_pricing( $wrong_id, '100' );
+$manual_settings->save_pricing( $wrong_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '100' ) );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'wrong_owner' ) )->success, 'Manual runtime must fail closed for wrong carrier ownership.' );
 $legacy_id = $services->create_service( array( 'service_key' => 'legacy_fixed_manual', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_FIXED, 'title' => 'Legacy', 'enabled' => 1, 'deleted' => 0 ) );
-$manual_settings->save_flat_pricing( $legacy_id, '100' );
+$manual_settings->save_pricing( $legacy_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '100' ) );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'legacy_fixed_manual' ) )->success, 'Legacy fixed type must not quote without explicit manual normalization.' );
 $missing_pricing_id = $services->create_service( array( 'service_key' => 'manual_missing_pricing', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Missing pricing', 'enabled' => 1, 'deleted' => 0 ) );
 wdc_manual_assert( $missing_pricing_id > 0 && ! $carrier->quote( $request_for( 'manual_missing_pricing' ) )->success, 'Manual runtime must fail closed when pricing config is absent.' );
@@ -1013,7 +1013,7 @@ $services->update_service( (int) $no_own->id, array( 'use_default_rules_when_no_
 wdc_manual_assert( 'none' === $manager->rules_for_service( $services->find_by_service_key( 'manual_default_fallback' ) )['source'], 'Rules must not apply when fallback is disabled and own rules are absent.' );
 $custom_display_id = $services->create_service( array( 'service_key' => 'manual_custom_display', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual Test', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'deleted' => 0 ) );
 $countries->replace_countries( $custom_display_id, array( 'RU' ) );
-$manual_settings->save_flat_pricing( $custom_display_id, '300' );
+$manual_settings->save_pricing( $custom_display_id, array( 'pricing_mode' => ManualDeliverySettings::PRICING_MODE_FLAT, 'flat_price_rub' => '300' ) );
 $manual_settings->save_delivery_type( $custom_display_id, ManualDeliverySettings::DELIVERY_TYPE_CUSTOM, 'До склада ТК' );
 
 $registry = new CarrierRegistry();
@@ -1129,7 +1129,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.0' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.1' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1193,7 +1193,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.0' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.1' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

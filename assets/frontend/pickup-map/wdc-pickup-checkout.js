@@ -23,8 +23,6 @@
 	var placeOrderResetGuardUntil = 0;
 	var pickupInlineNotices = {};
 	var authoritativePickupSelections = {};
-	var authoritativePickupStateLoaded = false;
-	var authoritativePickupStateRevision = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
 	var pickupRateCapabilities = normalizePickupRateCapabilities(checkoutConfig.pickupRateCapabilities || checkoutConfig.pickup_rate_capabilities || {});
 	var selectedPickupPoints = extractPickupSelections(checkoutConfig);
@@ -1448,8 +1446,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			: mergeSelectedPickupPoints(selectedPickupPoints, extractPickupSelections(response));
 		if (true === options.authoritativeState && hasAuthoritativeSelections) {
 			authoritativePickupSelections = Object.assign({}, selectedPickupPoints);
-			authoritativePickupStateLoaded = true;
-			authoritativePickupStateRevision++;
 		}
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
