@@ -142,6 +142,28 @@ final class RuleRepository {
 		return $this->get_rules_for_target( self::TARGET_SERVICE, $service_key );
 	}
 
+	public function rename_service_target( string $old_service_key, string $new_service_key ): void {
+		$old_service_key = sanitize_key( $old_service_key );
+		$new_service_key = sanitize_key( $new_service_key );
+		if ( '' === $old_service_key || '' === $new_service_key || $old_service_key === $new_service_key ) {
+			return;
+		}
+
+		$this->wpdb->update(
+			$this->rules_table(),
+			array(
+				'target_value' => $new_service_key,
+				'updated_at'   => current_time( 'mysql' ),
+			),
+			array(
+				'target_type'  => self::TARGET_SERVICE,
+				'target_value' => $old_service_key,
+			),
+			array( '%s', '%s' ),
+			array( '%s', '%s' )
+		);
+	}
+
 	/**
 	 * @return array{rules:array<int,Rule>,source:string}
 	 */

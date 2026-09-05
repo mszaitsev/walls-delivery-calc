@@ -58,6 +58,7 @@ use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -106,6 +107,7 @@ final class DeliveryServicesAdminPage {
 		private RussianPostPickupDiagnosticsTab $russian_post_pickup_diagnostics,
 		private ManualDeliverySettings $manual_delivery_settings,
 		private ManualDeliveryGeographyRepository $manual_delivery_geography,
+		private DeliveryServiceKeyRenameService $delivery_service_key_rename,
 		private ?DeliveryServiceSettingsRepository $settings = null,
 		private ?RussianPostSettings $russian_post_settings = null,
 		private ?RussianPostCountriesAdminPage $russian_post_countries = null,
@@ -302,8 +304,12 @@ final class DeliveryServicesAdminPage {
 
 		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
 		$items = array_map(
-			static fn( string $region ): array => array( 'region_name' => $region, 'label' => $region ),
-			$this->locations->unique_active_ru_region_names( $query, 30 )
+			fn( array $region ): array => array(
+				'country_code' => $region['country_code'],
+				'region_name' => $region['region_name'],
+				'label' => $region['region_name'] . ' — ' . $this->manual_country_label( $region['country_code'] ),
+			),
+			$this->locations->unique_active_region_names( $query, 30 )
 		);
 
 		wp_send_json_success( array( 'items' => $items ) );
@@ -322,13 +328,15 @@ final class DeliveryServicesAdminPage {
 
 		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
 		$items = array();
-		foreach ( $this->locations->search_active_ru_locations_for_manual_delivery( $query, 30 ) as $location ) {
+		foreach ( $this->locations->search_active_locations_for_manual_delivery( $query, 30 ) as $location ) {
 			$place = $location->resolved_place_name();
 			$region = trim( $location->region_name );
+			$country = strtoupper( trim( $location->country_code ) );
 			$items[] = array(
+				'country_code' => $country,
 				'location_name' => $place,
 				'region_name' => $region,
-				'label' => $place . ' — ' . $region,
+				'label' => $place . ' — ' . $region . ' — ' . $this->manual_country_label( $country ),
 			);
 		}
 
@@ -891,11 +899,12 @@ final class DeliveryServicesAdminPage {
 				exit;
 			}
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
+			$existing_service = $id > 0 ? $this->services->find_by_id( $id ) : null;
 			$data = match ( $action ) {
-				'save_main' => $this->sanitize_main_data(),
+				'save_main' => $this->sanitize_main_data( $existing_service ),
 				'save_availability' => $this->sanitize_availability_data(),
 				'save_calculation' => $this->sanitize_calculation_data(),
-				default => $this->sanitize_service_data(),
+				default => $this->sanitize_service_data( $existing_service ),
 			};
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
@@ -943,6 +952,19 @@ final class DeliveryServicesAdminPage {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
+				if ( 'save_main' === $action && $this->is_manual_service( $existing_service ) ) {
+					$posted_service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+					unset( $data['service_key'] );
+					if ( '' !== $posted_service_key && $posted_service_key !== $existing_service->service_key ) {
+						try {
+							$this->delivery_service_key_rename->rename_manual_service( $id, $posted_service_key );
+							$this->clear_delivery_quote_cache();
+						} catch ( \InvalidArgumentException $exception ) {
+							wp_safe_redirect( add_query_arg( 'wdc_service_key_notice', $exception->getMessage(), $this->service_tab_url_by_key( $existing_service->service_key, 'main' ) ) );
+							exit;
+						}
+					}
+				}
 				$this->services->update_service( $id, $data );
 			} else {
 				if ( array() !== $data ) {
@@ -958,8 +980,8 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( in_array( $action, array( 'save', 'save_main', 'save_availability' ), true ) ) {
 				$countries = $this->countries_from_post();
-				$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 				$current_service = $id > 0 ? $this->services->find_by_id( $id ) : null;
+				$service_key = $current_service instanceof DeliveryService ? $current_service->service_key : sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 				if ( CdekSettings::SERVICE_KEY === $service_key || ( $current_service instanceof DeliveryService && CdekSettings::SERVICE_KEY === $current_service->service_key ) ) {
 					$countries = array_values( array_intersect( array_map( 'strtoupper', $countries ), CdekSettings::SUPPORTED_COUNTRIES ) );
 				}
@@ -970,7 +992,7 @@ final class DeliveryServicesAdminPage {
 				}
 			}
 			if ( 'save_main' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
-				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				$service = $id > 0 ? $this->services->find_by_id( $id ) : $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 				if ( $service instanceof DeliveryService && null !== $service->id ) {
 					$this->settings->set_setting( (int) $service->id, DeliveryServiceSettingsRepository::DELIVERY_DAYS_ARE_WORKING_KEY, isset( $_POST[ DeliveryServiceSettingsRepository::DELIVERY_DAYS_ARE_WORKING_KEY ] ), 'bool' );
 					$this->clear_delivery_quote_cache();
@@ -990,7 +1012,7 @@ final class DeliveryServicesAdminPage {
 				}
 			}
 			if ( 'save_calculation' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
-				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				$service = $id > 0 ? $this->services->find_by_id( $id ) : $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 				if ( $service instanceof DeliveryService && RussianPostSettings::SERVICE_KEY === $service->service_key && null !== $service->id ) {
 					$this->save_russian_post_settings( (int) $service->id );
 				}
@@ -1317,7 +1339,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array(
+			if ( in_array( $action, array(
 			'save_main',
 			'save_availability',
 			'save_calculation',
@@ -1361,7 +1383,9 @@ final class DeliveryServicesAdminPage {
 			'save_yandex_delivery_settings',
 			'check_yandex_delivery_connection'
 		), true ) ) {
-			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
+			$persisted_service = $id > 0 ? $this->services->find_by_id( $id ) : null;
+			$service_key = $persisted_service instanceof DeliveryService ? $persisted_service->service_key : sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
 				'save_calculation' => 'calculation',
@@ -1637,6 +1661,7 @@ final class DeliveryServicesAdminPage {
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Службы доставки', 'walls-delivery-calc' ); ?></h1>
+			<?php $this->render_service_key_notice(); ?>
 			<?php if ( $service instanceof DeliveryService ) : ?>
 				<?php $this->render_edit_page( $service ); ?>
 			<?php else : ?>
@@ -4747,8 +4772,10 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function sanitize_service_data(): array {
-		$is_predefined = $this->services->is_predefined_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+	private function sanitize_service_data( ?DeliveryService $existing_service = null ): array {
+		$is_predefined = $existing_service instanceof DeliveryService
+			? $this->services->is_predefined_service_key( $existing_service->service_key )
+			: $this->services->is_predefined_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 		return array(
 			'service_key' => sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ),
 			'title' => sanitize_text_field( wp_unslash( $_POST['title'] ?? '' ) ),
@@ -4783,9 +4810,10 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 	}
 
-	private function save_manual_delivery_geography( int $service_id ): void {
-		$this->manual_delivery_geography->replace_regions( $service_id, $this->manual_regions_from_post() );
-		$this->manual_delivery_geography->replace_locations( $service_id, $this->manual_locations_from_post() );
+	/** @param array<int,string> $allowed_countries */
+	private function save_manual_delivery_geography( int $service_id, array $allowed_countries = array() ): void {
+		$this->manual_delivery_geography->replace_regions( $service_id, $this->manual_regions_from_post( $allowed_countries ) );
+		$this->manual_delivery_geography->replace_locations( $service_id, $this->manual_locations_from_post( $allowed_countries ) );
 	}
 
 	/**
@@ -4813,7 +4841,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		?>
 		<tr><th colspan="2"><h3><?php echo esc_html__( 'География ручной службы', 'walls-delivery-calc' ); ?></h3></th></tr>
 		<tr>
-			<th scope="row"><?php echo esc_html__( 'Регионы РФ', 'walls-delivery-calc' ); ?></th>
+			<th scope="row"><?php echo esc_html__( 'Регионы', 'walls-delivery-calc' ); ?></th>
 			<td>
 				<div data-wdc-manual-regions>
 					<input type="search" data-wdc-manual-region-query class="regular-text" autocomplete="off" placeholder="<?php echo esc_attr__( 'Найти регион', 'walls-delivery-calc' ); ?>">
@@ -4821,19 +4849,21 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 					<div data-wdc-manual-region-results style="margin-top:8px;"></div>
 					<ul data-wdc-manual-region-list style="margin-top:8px;">
 						<?php foreach ( $regions as $region ) : ?>
-							<li data-value="<?php echo esc_attr( $region ); ?>">
-								<?php echo esc_html( $region ); ?>
-								<input type="hidden" name="manual_regions[]" value="<?php echo esc_attr( $region ); ?>">
+							<?php $encoded = wp_json_encode( $region ) ?: '{}'; ?>
+							<?php $value = $region['country_code'] . '|' . $region['region_name']; ?>
+							<li data-value="<?php echo esc_attr( $value ); ?>">
+								<?php echo esc_html( $region['region_name'] . ' — ' . $this->manual_country_label( $region['country_code'] ) ); ?>
+								<input type="hidden" name="manual_regions[]" value="<?php echo esc_attr( $encoded ); ?>">
 								<button type="button" class="button-link-delete" data-wdc-manual-remove><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
 							</li>
 						<?php endforeach; ?>
 					</ul>
 				</div>
-				<p class="description"><?php echo esc_html__( 'Пустой список регионов и населённых пунктов означает всю разрешённую страну. Если выбран регион, служба доступна во всех населённых пунктах этого региона.', 'walls-delivery-calc' ); ?></p>
+				<p class="description"><?php echo esc_html__( 'Пустой список регионов и населённых пунктов для страны означает всю разрешённую страну. Если выбран регион, служба доступна во всех населённых пунктах этого региона.', 'walls-delivery-calc' ); ?></p>
 			</td>
 		</tr>
 		<tr>
-			<th scope="row"><?php echo esc_html__( 'Населённые пункты РФ', 'walls-delivery-calc' ); ?></th>
+			<th scope="row"><?php echo esc_html__( 'Населённые пункты', 'walls-delivery-calc' ); ?></th>
 			<td>
 				<div data-wdc-manual-locations>
 					<input type="search" data-wdc-manual-location-query class="regular-text" autocomplete="off" placeholder="<?php echo esc_attr__( 'Найти населённый пункт', 'walls-delivery-calc' ); ?>">
@@ -4842,44 +4872,53 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 					<ul data-wdc-manual-location-list style="margin-top:8px;">
 						<?php foreach ( $locations as $location ) : ?>
 							<?php $encoded = wp_json_encode( $location ) ?: '{}'; ?>
-							<li data-value="<?php echo esc_attr( $location['location_name'] . '|' . $location['region_name'] ); ?>">
-								<?php echo esc_html( $location['location_name'] . ' — ' . $location['region_name'] ); ?>
+							<li data-value="<?php echo esc_attr( $location['country_code'] . '|' . $location['location_name'] . '|' . $location['region_name'] ); ?>">
+								<?php echo esc_html( $location['location_name'] . ' — ' . $location['region_name'] . ' — ' . $this->manual_country_label( $location['country_code'] ) ); ?>
 								<input type="hidden" name="manual_locations[]" value="<?php echo esc_attr( $encoded ); ?>">
 								<button type="button" class="button-link-delete" data-wdc-manual-remove><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
 							</li>
 						<?php endforeach; ?>
 					</ul>
 				</div>
-				<p class="description"><?php echo esc_html__( 'Сохраняется текстовая пара: населённый пункт + region_name. ID локации не используется как постоянная identity.', 'walls-delivery-calc' ); ?></p>
+				<p class="description"><?php echo esc_html__( 'Сохраняется текстовая identity: country_code + населённый пункт + region_name. ID локации используется только как временный ключ поиска.', 'walls-delivery-calc' ); ?></p>
 			</td>
 		</tr>
 		<?php
 	}
 
-	/** @return array<int,string> */
-	private function manual_regions_from_post(): array {
+	/** @param array<int,string> $allowed_countries @return array<int,array{country_code:string,region_name:string}> */
+	private function manual_regions_from_post( array $allowed_countries = array() ): array {
 		$raw = wp_unslash( $_POST['manual_regions'] ?? array() );
-		$values = is_array( $raw ) ? array_map( 'strval', $raw ) : array_filter( array_map( 'trim', explode( ',', (string) $raw ) ) );
+		$values = is_array( $raw ) ? $raw : array_filter( array_map( 'trim', explode( ',', (string) $raw ) ) );
 		if ( ! $this->locations instanceof LocationRepository ) {
 			return array();
 		}
 		$known = array();
-		foreach ( $this->locations->unique_active_ru_region_names( '', 200 ) as $region ) {
-			$known[ $this->manual_geography_key( $region ) ] = $region;
+		foreach ( $this->locations->unique_active_region_names( '', 300 ) as $region ) {
+			if ( ! $this->manual_country_allowed_for_save( $region['country_code'], $allowed_countries ) ) {
+				continue;
+			}
+			$known[ $this->manual_geography_key( $region['country_code'] . '|' . $region['region_name'] ) ] = $region;
 		}
 		$result = array();
 		foreach ( $values as $value ) {
-			$key = $this->manual_geography_key( sanitize_text_field( $value ) );
+			$row = is_array( $value ) ? $value : json_decode( (string) $value, true );
+			if ( ! is_array( $row ) ) {
+				$row = array( 'country_code' => 'RU', 'region_name' => (string) $value );
+			}
+			$country = $this->normalize_manual_country_code( (string) ( $row['country_code'] ?? 'RU' ) );
+			$region = sanitize_text_field( (string) ( $row['region_name'] ?? '' ) );
+			$key = $this->manual_geography_key( $country . '|' . $region );
 			if ( isset( $known[ $key ] ) ) {
 				$result[] = $known[ $key ];
 			}
 		}
 
-		return array_values( array_unique( $result ) );
+		return array_values( array_unique( $result, SORT_REGULAR ) );
 	}
 
-	/** @return array<int,array{location_name:string,region_name:string}> */
-	private function manual_locations_from_post(): array {
+	/** @param array<int,string> $allowed_countries @return array<int,array{country_code:string,location_name:string,region_name:string}> */
+	private function manual_locations_from_post( array $allowed_countries = array() ): array {
 		$raw = wp_unslash( $_POST['manual_locations'] ?? array() );
 		$values = is_array( $raw ) ? $raw : array_filter( array_map( 'trim', explode( "\n", (string) $raw ) ) );
 		if ( ! $this->locations instanceof LocationRepository ) {
@@ -4891,17 +4930,19 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			if ( ! is_array( $row ) ) {
 				continue;
 			}
+			$country = $this->normalize_manual_country_code( (string) ( $row['country_code'] ?? 'RU' ) );
 			$location_name = sanitize_text_field( (string) ( $row['location_name'] ?? '' ) );
 			$region_name = sanitize_text_field( (string) ( $row['region_name'] ?? '' ) );
-			if ( '' === trim( $location_name ) || '' === trim( $region_name ) ) {
+			if ( '' === $country || ! $this->manual_country_allowed_for_save( $country, $allowed_countries ) || '' === trim( $location_name ) || '' === trim( $region_name ) ) {
 				continue;
 			}
-			$match = $this->locations->resolve_active_by_place_and_region( $location_name, $region_name, '', 'RU' );
+			$match = $this->locations->resolve_active_by_place_and_region( $location_name, $region_name, '', $country );
 			if ( array() === $match->matches ) {
 				continue;
 			}
 			$canonical = $match->matches[0];
 			$result[] = array(
+				'country_code' => strtoupper( trim( $canonical->country_code ) ),
 				'location_name' => $canonical->resolved_place_name(),
 				'region_name' => $canonical->region_name,
 			);
@@ -4918,11 +4959,60 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		return is_string( $value ) ? $value : '';
 	}
 
+	private function normalize_manual_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( sanitize_key( wp_unslash( $country_code ) ) ) );
+		$country_code = preg_replace( '/[^A-Z]/', '', $country_code ) ?? '';
+
+		return preg_match( '/^[A-Z]{2}$/', $country_code ) ? $country_code : '';
+	}
+
+	/** @param array<int,string> $allowed_countries */
+	private function manual_country_allowed_for_save( string $country_code, array $allowed_countries ): bool {
+		$country_code = $this->normalize_manual_country_code( $country_code );
+		if ( '' === $country_code || array() === $allowed_countries ) {
+			return '' !== $country_code;
+		}
+
+		return in_array( $country_code, array_map( fn( string $value ): string => $this->normalize_manual_country_code( $value ), $allowed_countries ), true );
+	}
+
+	private function manual_country_label( string $country_code ): string {
+		$country_code = $this->normalize_manual_country_code( $country_code );
+		$labels = array(
+			'RU' => __( 'Россия', 'walls-delivery-calc' ),
+			'KZ' => __( 'Казахстан', 'walls-delivery-calc' ),
+			'BY' => __( 'Беларусь', 'walls-delivery-calc' ),
+			'AM' => __( 'Армения', 'walls-delivery-calc' ),
+			'KG' => __( 'Киргизия', 'walls-delivery-calc' ),
+		);
+
+		return ( $labels[ $country_code ] ?? $country_code ) . ( '' !== $country_code ? ' (' . $country_code . ')' : '' );
+	}
+
+	private function render_service_key_notice(): void {
+		$notice = sanitize_key( wp_unslash( $_GET['wdc_service_key_notice'] ?? '' ) );
+		if ( '' === $notice ) {
+			return;
+		}
+		$message = match ( $notice ) {
+			'delivery_service_key_duplicate' => __( 'Service key уже используется другой службой доставки.', 'walls-delivery-calc' ),
+			'delivery_service_key_empty' => __( 'Service key не может быть пустым.', 'walls-delivery-calc' ),
+			'delivery_service_key_predefined' => __( 'Service key конфликтует с предустановленной службой доставки.', 'walls-delivery-calc' ),
+			'delivery_service_key_locked' => __( 'Service key можно менять только у ручных служб доставки.', 'walls-delivery-calc' ),
+			default => __( 'Service key не сохранён. Проверьте значение и повторите попытку.', 'walls-delivery-calc' ),
+		};
+		?>
+		<div class="notice notice-error"><p><?php echo esc_html( $message ); ?></p></div>
+		<?php
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function sanitize_main_data(): array {
-		$is_predefined = $this->services->is_predefined_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+	private function sanitize_main_data( ?DeliveryService $existing_service = null ): array {
+		$is_predefined = $existing_service instanceof DeliveryService
+			? $this->services->is_predefined_service_key( $existing_service->service_key )
+			: $this->services->is_predefined_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 		return array(
 			'service_key' => sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ),
 			'title' => sanitize_text_field( wp_unslash( $_POST['title'] ?? '' ) ),

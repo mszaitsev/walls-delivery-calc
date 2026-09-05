@@ -124,6 +124,11 @@ final class DeliveryServiceRepository {
 		);
 	}
 
+	public function service_key_exists_for_other_service( string $service_key, int $service_id ): bool {
+		$existing = $this->find_any_by_service_key( $service_key );
+		return $existing instanceof DeliveryService && null !== $existing->id && (int) $existing->id !== $service_id;
+	}
+
 	/**
 	 * @param array<int,int|string> $ordered_ids
 	 */

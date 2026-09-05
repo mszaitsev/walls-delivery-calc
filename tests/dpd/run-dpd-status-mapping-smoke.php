@@ -15,6 +15,7 @@ use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostPickupDiagnosticsTab;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
@@ -195,6 +196,7 @@ $page = new DeliveryServicesAdminPage(
 	),
 	manual_delivery_settings: new ManualDeliverySettings( new DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] ) ),
 	manual_delivery_geography: new ManualDeliveryGeographyRepository( $GLOBALS['wpdb'] ),
+	delivery_service_key_rename: new DeliveryServiceKeyRenameService( new DeliveryServiceRepository( $GLOBALS['wpdb'] ), new RuleRepository( $GLOBALS['wpdb'] ) ),
 	dpd_status_mapping: $mapping
 );
 $service = $GLOBALS['wpdb']->get_row( "SELECT * FROM wp_wdc_delivery_services WHERE service_key = 'dpd' AND deleted = 0 LIMIT 1", ARRAY_A );

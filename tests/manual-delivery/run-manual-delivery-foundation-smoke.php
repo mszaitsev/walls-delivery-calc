@@ -18,6 +18,7 @@ function current_time( string $type ): string { return '2026-09-04 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_key( mixed $value ): string { return strtolower( preg_replace( '/[^a-z0-9_\\-]/i', '', (string) $value ) ?? '' ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
 
@@ -96,21 +97,21 @@ if ( ! class_exists( 'wpdb' ) ) {
 					$this->countries[] = array( 'id' => ++$this->insert_id, 'service_id' => (int) $match[1], 'country_code' => $match[2], 'created_at' => $match[3] );
 				}
 			}
-			if ( str_contains( $query, 'wdc_manual_delivery_regions' ) && preg_match( "/VALUES \\(([0-9]+), '([^']+)', '([^']+)'\\)/", $query, $match ) ) {
+			if ( str_contains( $query, 'wdc_manual_delivery_regions' ) && preg_match( "/VALUES \\(([0-9]+), '([^']+)', '([^']+)', '([^']+)'\\)/", $query, $match ) ) {
 				foreach ( $this->manual_regions as $row ) {
-					if ( (int) $row['service_id'] === (int) $match[1] && $row['region_name'] === $match[2] ) {
+					if ( (int) $row['service_id'] === (int) $match[1] && (string) ( $row['country_code'] ?? 'RU' ) === $match[2] && $row['region_name'] === $match[3] ) {
 						return true;
 					}
 				}
-				$this->manual_regions[] = array( 'id' => ++$this->insert_id, 'service_id' => (int) $match[1], 'region_name' => $match[2], 'created_at' => $match[3] );
+				$this->manual_regions[] = array( 'id' => ++$this->insert_id, 'service_id' => (int) $match[1], 'country_code' => $match[2], 'region_name' => $match[3], 'created_at' => $match[4] );
 			}
-			if ( str_contains( $query, 'wdc_manual_delivery_locations' ) && preg_match( "/VALUES \\(([0-9]+), '([^']+)', '([^']+)', '([^']+)'\\)/", $query, $match ) ) {
+			if ( str_contains( $query, 'wdc_manual_delivery_locations' ) && preg_match( "/VALUES \\(([0-9]+), '([^']+)', '([^']+)', '([^']+)', '([^']+)'\\)/", $query, $match ) ) {
 				foreach ( $this->manual_locations as $row ) {
-					if ( (int) $row['service_id'] === (int) $match[1] && $row['location_name'] === $match[2] && $row['region_name'] === $match[3] ) {
+					if ( (int) $row['service_id'] === (int) $match[1] && (string) ( $row['country_code'] ?? 'RU' ) === $match[2] && $row['location_name'] === $match[3] && $row['region_name'] === $match[4] ) {
 						return true;
 					}
 				}
-				$this->manual_locations[] = array( 'id' => ++$this->insert_id, 'service_id' => (int) $match[1], 'location_name' => $match[2], 'region_name' => $match[3], 'created_at' => $match[4] );
+				$this->manual_locations[] = array( 'id' => ++$this->insert_id, 'service_id' => (int) $match[1], 'country_code' => $match[2], 'location_name' => $match[3], 'region_name' => $match[4], 'created_at' => $match[5] );
 			}
 			return true;
 		}
@@ -170,8 +171,15 @@ if ( ! class_exists( 'wpdb' ) ) {
 				return $rows;
 			}
 			if ( str_contains( $query, 'wdc_manual_delivery_locations' ) && preg_match( '/service_id = ([0-9]+)/', $query, $matches ) ) {
-				$rows = array_values( array_filter( $this->manual_locations, static fn ( array $row ): bool => (int) $row['service_id'] === (int) $matches[1] ) );
-				usort( $rows, static fn ( array $left, array $right ): int => strcmp( (string) $left['region_name'], (string) $right['region_name'] ) ?: strcmp( (string) $left['location_name'], (string) $right['location_name'] ) );
+				$country = preg_match( "/country_code = '([^']+)'/", $query, $country_match ) ? $country_match[1] : '';
+				$rows = array_values( array_filter( $this->manual_locations, static fn ( array $row ): bool => (int) $row['service_id'] === (int) $matches[1] && ( '' === $country || (string) ( $row['country_code'] ?? 'RU' ) === $country ) ) );
+				usort( $rows, static fn ( array $left, array $right ): int => strcmp( (string) ( $left['country_code'] ?? 'RU' ), (string) ( $right['country_code'] ?? 'RU' ) ) ?: strcmp( (string) $left['region_name'], (string) $right['region_name'] ) ?: strcmp( (string) $left['location_name'], (string) $right['location_name'] ) );
+				return $rows;
+			}
+			if ( str_contains( $query, 'wdc_manual_delivery_regions' ) && preg_match( '/service_id = ([0-9]+)/', $query, $matches ) ) {
+				$country = preg_match( "/country_code = '([^']+)'/", $query, $country_match ) ? $country_match[1] : '';
+				$rows = array_values( array_filter( $this->manual_regions, static fn ( array $row ): bool => (int) $row['service_id'] === (int) $matches[1] && ( '' === $country || (string) ( $row['country_code'] ?? 'RU' ) === $country ) ) );
+				usort( $rows, static fn ( array $left, array $right ): int => strcmp( (string) ( $left['country_code'] ?? 'RU' ), (string) ( $right['country_code'] ?? 'RU' ) ) ?: strcmp( (string) $left['region_name'], (string) $right['region_name'] ) );
 				return $rows;
 			}
 			return array();
@@ -231,6 +239,7 @@ use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\Application\DeliveryServiceKeyRenameService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -245,6 +254,7 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
+use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -417,10 +427,10 @@ sort( $soviet_regions, SORT_STRING );
 wdc_manual_assert( array( 'Московская область', 'Ханты-Мансийский автономный округ — Югра' ) === $soviet_regions, 'Manual admin location search must distinguish same place names by textual region_name.' );
 
 $manual_geography->replace_regions( (int) $nsk->id, array( 'Новосибирская область', 'Алтайский край', 'Новосибирская область' ) );
-wdc_manual_assert( array( 'Алтайский край', 'Новосибирская область' ) === $manual_geography->regions( (int) $nsk->id ), 'Manual region repository must save multiple regions duplicate-safe.' );
+wdc_manual_assert( array( array( 'country_code' => 'RU', 'region_name' => 'Алтайский край' ), array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область' ) ) === $manual_geography->regions( (int) $nsk->id ), 'Manual region repository must save multiple regions duplicate-safe.' );
 $manual_geography->replace_regions( (int) $pickup->id, array( 'Московская область' ) );
 $manual_geography->replace_regions( (int) $nsk->id, array( 'Новосибирская область' ) );
-wdc_manual_assert( array( 'Новосибирская область' ) === $manual_geography->regions( (int) $nsk->id ) && array( 'Московская область' ) === $manual_geography->regions( (int) $pickup->id ), 'Manual region replace semantics must remove stale rows while keeping service isolation.' );
+wdc_manual_assert( array( array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область' ) ) === $manual_geography->regions( (int) $nsk->id ) && array( array( 'country_code' => 'RU', 'region_name' => 'Московская область' ) ) === $manual_geography->regions( (int) $pickup->id ), 'Manual region replace semantics must remove stale rows while keeping service isolation.' );
 
 $manual_geography->replace_locations(
 	(int) $nsk->id,
@@ -447,7 +457,7 @@ $manual_geography->replace_regions( (int) $geo_region->id, array( 'Новоси�
 $manual_geography->replace_locations( (int) $geo_city->id, array( array( 'location_name' => 'Барнаул', 'region_name' => 'Алтайский край' ) ) );
 $manual_geography->replace_regions( (int) $geo_or->id, array( 'Новосибирская область' ) );
 $manual_geography->replace_locations( (int) $geo_or->id, array( array( 'location_name' => 'Барнаул', 'region_name' => 'Алтайский край' ) ) );
-$manual_geography->replace_regions( (int) $geo_kz->id, array( 'Новосибирская область' ) );
+$manual_geography->replace_regions( (int) $geo_kz->id, array( array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область' ) ) );
 
 wdc_manual_assert( $manual_matcher->match( $geo_all, $request_for( 'manual_geo_all_ru', 'RU', 'Омск', 'Омская область' ) )['available'], 'Manual matcher must allow RU destinations when no region/city restrictions exist.' );
 wdc_manual_assert( $manual_matcher->match( $geo_region, $request_for( 'manual_geo_nsk_region', 'RU', 'Бердск', 'Новосибирская область' ) )['available'], 'Manual matcher must allow a matching selected region.' );
@@ -457,6 +467,63 @@ wdc_manual_assert( ! $manual_matcher->match( $geo_city, $request_for( 'manual_ge
 wdc_manual_assert( $manual_matcher->match( $geo_or, $request_for( 'manual_geo_region_or_city', 'RU', 'Бердск', 'Новосибирская область' ) )['available'] && $manual_matcher->match( $geo_or, $request_for( 'manual_geo_region_or_city', 'RU', 'Барнаул', 'Алтайский край' ) )['available'], 'Manual matcher must use OR semantics for selected regions and explicit cities.' );
 wdc_manual_assert( $manual_matcher->match( $geo_kz, $request_for( 'manual_geo_kz', 'KZ', 'Алматы', 'Алматы' ) )['available'], 'Manual matcher must not apply RU region restrictions to non-RU destinations.' );
 wdc_manual_assert( ! $manual_matcher->match( $geo_region, $request_for( 'manual_geo_nsk_region', 'RU', '', '', array( 'region_name' => '', 'city_name' => '', 'place_name' => '' ) ) )['available'], 'Manual matcher must fail closed for restricted RU services when trusted region/location identity is missing.' );
+wdc_manual_assert( $manual_matcher->match( $geo_region, $request_for( 'manual_geo_nsk_region', 'RU', '', 'Новосибирская область', array( 'region_name' => 'Новосибирская область', 'city_name' => '', 'place_name' => '' ) ) )['available'], 'Manual region-only matching must not require trusted city identity.' );
+
+$geo_countries = $create_manual( 'manual_geo_countries', 'Страны', '606', array( 'RU', 'KZ' ) );
+$manual_geography->replace_regions(
+	(int) $geo_countries->id,
+	array(
+		array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область' ),
+		array( 'country_code' => 'KZ', 'region_name' => 'Алматы' ),
+	)
+);
+wdc_manual_assert( $manual_matcher->match( $geo_countries, $request_for( 'manual_geo_countries', 'RU', 'Бердск', 'Новосибирская область' ) )['available'], 'RU country-scoped region restriction must match RU destination.' );
+wdc_manual_assert( ! $manual_matcher->match( $geo_countries, $request_for( 'manual_geo_countries', 'RU', 'Москва', 'Москва' ) )['available'], 'RU country-scoped region restriction must reject other RU regions.' );
+wdc_manual_assert( $manual_matcher->match( $geo_countries, $request_for( 'manual_geo_countries', 'KZ', 'Алматы', 'Алматы' ) )['available'], 'KZ country-scoped region restriction must match KZ destination.' );
+wdc_manual_assert( ! $manual_matcher->match( $geo_countries, $request_for( 'manual_geo_countries', 'KZ', 'Астана', 'Астана' ) )['available'], 'KZ country-scoped region restriction must reject other KZ regions.' );
+
+$geo_city_countries = $create_manual( 'manual_geo_city_countries', 'Города стран', '707', array( 'RU', 'KZ' ) );
+$manual_geography->replace_locations(
+	(int) $geo_city_countries->id,
+	array(
+		array( 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область' ),
+		array( 'country_code' => 'KZ', 'location_name' => 'Алматы', 'region_name' => 'Алматы' ),
+	)
+);
+wdc_manual_assert( $manual_matcher->match( $geo_city_countries, $request_for( 'manual_geo_city_countries', 'RU', 'Новосибирск', 'Новосибирская область' ) )['available'], 'RU country-scoped city restriction must match RU city pair.' );
+wdc_manual_assert( ! $manual_matcher->match( $geo_city_countries, $request_for( 'manual_geo_city_countries', 'RU', 'Москва', 'Москва' ) )['available'], 'RU country-scoped city restriction must reject other RU cities.' );
+wdc_manual_assert( $manual_matcher->match( $geo_city_countries, $request_for( 'manual_geo_city_countries', 'KZ', 'Алматы', 'Алматы' ) )['available'], 'KZ country-scoped city restriction must match KZ city pair.' );
+wdc_manual_assert( ! $manual_matcher->match( $geo_city_countries, $request_for( 'manual_geo_city_countries', 'KZ', 'Астана', 'Астана' ) )['available'], 'KZ country-scoped city restriction must reject other KZ cities.' );
+
+$same_name = $create_manual( 'manual_geo_same_name', 'Same names', '808', array( 'RU', 'KZ' ) );
+$manual_geography->replace_locations(
+	(int) $same_name->id,
+	array(
+		array( 'country_code' => 'RU', 'location_name' => 'Алматы', 'region_name' => 'Алматы' ),
+		array( 'country_code' => 'KZ', 'location_name' => 'Алматы', 'region_name' => 'Алматы' ),
+	)
+);
+wdc_manual_assert( 2 === count( $manual_geography->locations( (int) $same_name->id ) ), 'Manual location identity must distinguish same location and region names across countries.' );
+
+$ru_only = $create_manual( 'manual_geo_ru_boundary', 'RU only', '909', array( 'RU' ) );
+$manual_geography->replace_locations( (int) $ru_only->id, array( array( 'country_code' => 'KZ', 'location_name' => 'Алматы', 'region_name' => 'Алматы' ) ) );
+wdc_manual_assert( ! $manager->service_available_for_country( $ru_only, 'KZ' ), 'Country availability must remain the authoritative upper boundary before manual geography.' );
+
+$rename = $create_manual( 'manual_old', 'Rename', '111', array( 'RU' ) );
+$manual_geography->replace_locations( (int) $rename->id, array( array( 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область' ) ) );
+$GLOBALS['wpdb']->rules[] = array( 'id' => 20, 'name' => 'Rename own rule', 'enabled' => 1, 'priority' => 10, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'manual_old', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::INCREASE, 'operation_value' => 10, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => array(), 'condition_group_expression' => 'condition_1' );
+$rename_service = new DeliveryServiceKeyRenameService( $services, $rules );
+$renamed = $rename_service->rename_manual_service( (int) $rename->id, 'manual_new' );
+wdc_manual_assert( (int) $renamed->id === (int) $rename->id && null === $services->find_by_service_key( 'manual_old' ) && $services->find_by_service_key( 'manual_new' ) instanceof DeliveryService, 'Manual service key rename must update the same service row by immutable service_id.' );
+wdc_manual_assert( array() !== $manual_geography->locations( (int) $renamed->id, 'RU' ) && array( 'RU' ) === $countries->countries( (int) $renamed->id ), 'Manual geography and countries must survive service_key rename because they are service_id scoped.' );
+wdc_manual_assert( array() === $rules->get_all_rules_for_target( RuleRepository::TARGET_SERVICE, 'manual_old' ) && array() !== $rules->get_all_rules_for_target( RuleRepository::TARGET_SERVICE, 'manual_new' ), 'Manual service key rename must re-key current service rules.' );
+wdc_manual_assert( $carrier->quote( $request_for( 'manual_new', 'RU', 'Новосибирск', 'Новосибирская область' ) )->success, 'Manual checkout quote must use the persisted new service_key after rename.' );
+try {
+	$rename_service->rename_manual_service( (int) $renamed->id, 'manual_geo_all_ru' );
+	wdc_manual_assert( false, 'Duplicate manual service key rename must be rejected.' );
+} catch ( InvalidArgumentException ) {
+	wdc_manual_assert( $services->find_by_service_key( 'manual_new' ) instanceof DeliveryService && $services->find_by_service_key( 'manual_geo_all_ru' ) instanceof DeliveryService, 'Duplicate rename rejection must avoid partial migration.' );
+}
 
 $nsk_result = $orchestrator->calculate( $request_for( 'ignored', 'RU', 'Бердск', 'Новосибирская область' ) );
 $nsk_keys = array_values( array_map( static fn ( $rate ): string => $rate->service_key, array_filter( $nsk_result->rates, static fn ( $rate ): bool => ManualDeliverySettings::CARRIER_KEY === $rate->carrier_key ) ) );
@@ -464,6 +531,38 @@ wdc_manual_assert( in_array( 'manual_geo_all_ru', $nsk_keys, true ) && in_array(
 $barnaul_result = $orchestrator->calculate( $request_for( 'ignored', 'RU', 'Барнаул', 'Алтайский край' ) );
 $barnaul_keys = array_values( array_map( static fn ( $rate ): string => $rate->service_key, array_filter( $barnaul_result->rates, static fn ( $rate ): bool => ManualDeliverySettings::CARRIER_KEY === $rate->carrier_key ) ) );
 wdc_manual_assert( in_array( 'manual_geo_all_ru', $barnaul_keys, true ) && in_array( 'manual_geo_barnaul_city', $barnaul_keys, true ) && ! in_array( 'manual_geo_nsk_region', $barnaul_keys, true ), 'Checkout runtime must return only manual services available for the destination city pair.' );
+
+$order_mapper = new OrderQuoteRequestMapper( $location_repo );
+$order = new class {
+	public function get_items(): array { return array(); }
+	public function get_subtotal(): float { return 1000.0; }
+	public function get_payment_method(): string { return ''; }
+	public function get_shipping_country(): string { return 'RU'; }
+	public function get_billing_country(): string { return 'RU'; }
+	public function get_shipping_city(): string { return ''; }
+	public function get_billing_city(): string { return ''; }
+	public function get_shipping_postcode(): string { return ''; }
+	public function get_billing_postcode(): string { return ''; }
+	public function get_shipping_address_1(): string { return ''; }
+	public function get_billing_address_1(): string { return ''; }
+	public function get_shipping_address_2(): string { return ''; }
+	public function get_billing_address_2(): string { return ''; }
+	public function get_shipping_state(): string { return ''; }
+	public function get_billing_state(): string { return ''; }
+	public function get_item_count(): int { return 1; }
+	public function get_id(): int { return 1502; }
+	public function get_billing_phone(): string { return ''; }
+	public function get_meta( string $key, bool $single = true ): mixed { return ''; }
+};
+$order_request = $order_mapper->map(
+	$order,
+	array(
+		'id' => 10,
+		'display_name' => 'Новосибирская область, г Новосибирск',
+	)
+);
+wdc_manual_assert( 'Новосибирск' === (string) ( $order_request->customer_context['place_name'] ?? '' ) && 'Новосибирская область' === (string) ( $order_request->customer_context['region_name'] ?? '' ), 'OrderQuoteRequestMapper must resolve selected location id to canonical resolved_place_name and region_name instead of using presentation label.' );
+wdc_manual_assert( $carrier->quote( new QuoteRequest( 'RU', $order_request->destination, $order_request->package, '', $order_request->order_total, $order_request->calculation_date, array_merge( $order_request->customer_context, array( 'service_key' => 'manual_new' ) ) ) )->success, 'Manual carrier must return the same city-restricted rate for order-admin recalculation as for checkout.' );
 
 $root = dirname( __DIR__, 2 );
 $shipment_creation = (string) file_get_contents( $root . '/src/Shipments/Application/ShipmentCreationService.php' );
@@ -474,6 +573,7 @@ $checkout_orchestrator_source = (string) file_get_contents( $root . '/src/Checko
 $order_mapper_source = (string) file_get_contents( $root . '/src/Orders/Application/OrderQuoteRequestMapper.php' );
 $admin_source = (string) file_get_contents( $root . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $manual_geo_source = (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryGeographyRepository.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryGeographyMatcher.php' );
+$migration_0061_source = (string) file_get_contents( $root . '/database/migrations/0061_make_manual_delivery_geography_country_aware.php' );
 wdc_manual_assert( ! str_contains( $shipment_creation, 'ManualDelivery' ) && ! str_contains( $shipment_creation, "carrier_key' => 'manual" ), 'Manual delivery foundation must not add a ShipmentCreationService branch.' );
 wdc_manual_assert( ! str_contains( $shipments_metabox, 'ManualDelivery' ) && ! str_contains( $shipments_metabox, "carrier_key' => 'manual" ), 'Manual delivery foundation must not add an OrderShipmentsMetabox branch.' );
 wdc_manual_assert( ! str_contains( $shipment_js, 'ManualDelivery' ) && ! str_contains( $shipment_js, "manual-delivery" ), 'Manual delivery foundation must not add generic shipment JS logic.' );
@@ -482,8 +582,9 @@ wdc_manual_assert( str_contains( $plugin, 'ManualDeliveryCarrier::class' ) && st
 wdc_manual_assert( ! str_contains( $checkout_orchestrator_source, 'ManualDeliveryGeography' ) && ! str_contains( $checkout_orchestrator_source, 'wdc_manual_delivery_' ), 'CheckoutOrchestrator must not contain manual geography SQL or carrier-specific branches.' );
 wdc_manual_assert( ! str_contains( $manual_geo_source, 'location_id' ) && ! str_contains( $manual_geo_source, 'wp_wdc_locations.id' ), 'Manual geography must not depend on permanent location IDs.' );
 wdc_manual_assert( str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_region_search" ) && str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_location_search" ) && str_contains( $admin_source, "current_user_can( AdminMenu::CAPABILITY )" ) && str_contains( $admin_source, "check_ajax_referer( 'wdc_manual_delivery_geography', 'nonce', false )" ), 'Manual geography admin search must use capability and nonce protected AJAX.' );
-wdc_manual_assert( str_contains( $admin_source, 'resolve_active_by_place_and_region' ) && str_contains( $admin_source, "'location_name' => \$canonical->resolved_place_name()" ) && str_contains( $admin_source, "'region_name' => \$canonical->region_name" ) && str_contains( $admin_source, 'name="manual_locations[]"' ) && ! str_contains( $admin_source, 'name="manual_location_ids[]"' ), 'Manual geography admin save must canonicalize locations server-side as location_name plus region_name, not location ID.' );
+wdc_manual_assert( str_contains( $admin_source, 'resolve_active_by_place_and_region' ) && str_contains( $admin_source, "'country_code' => strtoupper( trim( \$canonical->country_code ) )" ) && str_contains( $admin_source, "'location_name' => \$canonical->resolved_place_name()" ) && str_contains( $admin_source, "'region_name' => \$canonical->region_name" ) && str_contains( $admin_source, 'name="manual_locations[]"' ) && ! str_contains( $admin_source, 'name="manual_location_ids[]"' ), 'Manual geography admin save must canonicalize locations server-side as country_code plus location_name plus region_name, not location ID.' );
 wdc_manual_assert( str_contains( $admin_source, 'save_manual_delivery_geography' ) && substr_count( $admin_source, 'clear_delivery_quote_cache();' ) >= 4, 'Manual geography saves must invalidate the shared delivery quote cache.' );
-wdc_manual_assert( str_contains( $order_mapper_source, "'region_name'" ) && str_contains( $order_mapper_source, '$address->region_name' ) && str_contains( $order_mapper_source, "'place_name'" ) && str_contains( $order_mapper_source, "\$override['place_name']" ), 'Order-admin quote mapping must preserve trusted region_name and place_name for the shared manual runtime path.' );
+wdc_manual_assert( str_contains( $order_mapper_source, 'canonical_location' ) && str_contains( $order_mapper_source, 'resolved_place_name()' ) && str_contains( $order_mapper_source, "'place_name'" ) && str_contains( $order_mapper_source, '$address->settlement ?: $address->city' ), 'Order-admin quote mapping must build trusted region_name and place_name from canonical Location when a location id is selected.' );
+wdc_manual_assert( str_contains( $migration_0061_source, 'country_code' ) && str_contains( $migration_0061_source, "country_code = 'RU'" ) && str_contains( $migration_0061_source, 'ux_manual_region_country' ) && str_contains( $migration_0061_source, 'ux_manual_location_country' ), 'Migration 0061 must add/backfill country-aware manual geography identity and unique indexes.' );
 
 echo "Manual delivery foundation smoke test passed.\n";

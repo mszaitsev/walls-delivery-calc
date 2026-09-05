@@ -21,34 +21,34 @@ final class ManualDeliveryGeographyMatcher {
 		}
 
 		$country = strtoupper( trim( $request->country_code ?: $request->destination->country_code ) );
-		if ( 'RU' !== $country ) {
-			return array( 'available' => true, 'reason' => 'manual_non_ru_country_scope' );
-		}
-
-		$regions = $this->geography->regions( (int) $service->id );
-		$locations = $this->geography->locations( (int) $service->id );
+		$regions = $this->geography->regions( (int) $service->id, $country );
+		$locations = $this->geography->locations( (int) $service->id, $country );
 		if ( array() === $regions && array() === $locations ) {
-			return array( 'available' => true, 'reason' => 'manual_no_ru_restrictions' );
+			return array( 'available' => true, 'reason' => 'manual_no_country_restrictions' );
 		}
 
 		$region = $this->destination_region_name( $request );
 		$location = $this->destination_location_name( $request );
-		if ( '' === $region || '' === $location ) {
-			return array( 'available' => false, 'reason' => 'manual_destination_identity_missing' );
-		}
-
 		$region_key = $this->key( $region );
-		foreach ( $regions as $allowed_region ) {
-			if ( $this->key( $allowed_region ) === $region_key ) {
-				return array( 'available' => true, 'reason' => 'manual_region_match' );
+		if ( '' !== $region_key ) {
+			foreach ( $regions as $allowed_region ) {
+				if ( $this->key( $allowed_region['region_name'] ) === $region_key ) {
+					return array( 'available' => true, 'reason' => 'manual_region_match' );
+				}
 			}
 		}
 
 		$location_key = $this->key( $location );
-		foreach ( $locations as $allowed_location ) {
-			if ( $this->key( $allowed_location['region_name'] ) === $region_key && $this->key( $allowed_location['location_name'] ) === $location_key ) {
-				return array( 'available' => true, 'reason' => 'manual_location_match' );
+		if ( '' !== $region_key && '' !== $location_key ) {
+			foreach ( $locations as $allowed_location ) {
+				if ( $this->key( $allowed_location['region_name'] ) === $region_key && $this->key( $allowed_location['location_name'] ) === $location_key ) {
+					return array( 'available' => true, 'reason' => 'manual_location_match' );
+				}
 			}
+		}
+
+		if ( ( array() !== $regions && '' === $region_key ) || ( array() !== $locations && ( '' === $region_key || '' === $location_key ) ) ) {
+			return array( 'available' => false, 'reason' => 'manual_destination_identity_missing' );
 		}
 
 		return array( 'available' => false, 'reason' => 'manual_geography_restricted' );

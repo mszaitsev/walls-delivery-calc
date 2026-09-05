@@ -45,35 +45,39 @@
 	}
 
 	function appendRegion( list, region ) {
-		if ( ! region || hasItem( list, region ) ) {
+		const country = String( region.country_code || 'RU' ).toUpperCase();
+		const name = String( region.region_name || '' );
+		const value = country + '|' + name;
+		if ( ! name || hasItem( list, value ) ) {
 			return;
 		}
 		const item = document.createElement( 'li' );
-		item.dataset.value = region;
-		item.textContent = region + ' ';
+		item.dataset.value = value;
+		item.textContent = ( region.label || ( name + ' — ' + country ) ) + ' ';
 		const input = document.createElement( 'input' );
 		input.type = 'hidden';
 		input.name = 'manual_regions[]';
-		input.value = region;
+		input.value = JSON.stringify( { country_code: country, region_name: name } );
 		item.appendChild( input );
 		item.appendChild( removeButton() );
 		list.appendChild( item );
 	}
 
 	function appendLocation( list, location ) {
+		const country = String( location.country_code || 'RU' ).toUpperCase();
 		const name = String( location.location_name || '' );
 		const region = String( location.region_name || '' );
-		const value = name + '|' + region;
+		const value = country + '|' + name + '|' + region;
 		if ( ! name || ! region || hasItem( list, value ) ) {
 			return;
 		}
 		const item = document.createElement( 'li' );
 		item.dataset.value = value;
-		item.textContent = name + ' — ' + region + ' ';
+		item.textContent = ( location.label || ( name + ' — ' + region + ' — ' + country ) ) + ' ';
 		const input = document.createElement( 'input' );
 		input.type = 'hidden';
 		input.name = 'manual_locations[]';
-		input.value = JSON.stringify( { location_name: name, region_name: region } );
+		input.value = JSON.stringify( { country_code: country, location_name: name, region_name: region } );
 		item.appendChild( input );
 		item.appendChild( removeButton() );
 		list.appendChild( item );
@@ -113,7 +117,7 @@
 			postSearch( 'wdc_manual_delivery_region_search', query.value ).then( function ( items ) {
 				items.forEach( function ( item ) {
 					addButton( results, item.label || item.region_name, function () {
-						appendRegion( list, item.region_name || item.label || '' );
+						appendRegion( list, item );
 					} );
 				} );
 			} );

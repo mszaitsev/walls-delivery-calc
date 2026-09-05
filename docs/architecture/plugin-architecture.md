@@ -1,8 +1,8 @@
 # Plugin Architecture
 
-Version: 0.150.1
+Version: 0.150.2
 
-0.150.1 keeps manual delivery as one runtime carrier and adds only carrier-owned geography storage/matching for manual services. `CheckoutOrchestrator` remains generic: country availability is resolved by `DeliveryServiceManager`, then `ManualDeliveryCarrier` checks optional RU `region_name` and `location_name + region_name` restrictions before returning the flat base rate. The Shipment Framework remains untouched: no manual document provider, modal extension, persistence mapper, fake shipment record, or generic shipment JS branch is registered.
+0.150.2 keeps manual delivery as one runtime carrier and hardens carrier-owned geography/key-management around it. `CheckoutOrchestrator` remains generic: country availability is resolved by `DeliveryServiceManager`, then `ManualDeliveryCarrier` checks optional `country_code + region_name` and `country_code + location_name + region_name` restrictions for the destination country before returning the flat base rate. Manual service-key rename is handled by an application service that updates the DeliveryService row by id and re-keys current service rules. The Shipment Framework remains untouched: no manual document provider, modal extension, persistence mapper, fake shipment record, or generic shipment JS branch is registered.
 
 Manual delivery services are dynamic DeliveryService rows, not per-service PHP carriers. The platform registers one generic `manual` runtime carrier in the composition root, and each manual row is selected by its trusted `service_key` from the existing checkout service pipeline. New custom Delivery Services admin entries are normalized to `service_type=manual` and `carrier_key=manual`, while legacy `fixed`/`weight_based` values remain storage compatibility values rather than runtime carrier types. This stage does not change Shipment Framework contracts and does not register manual document providers, modal extensions, persistence mappers, or shipment create/cancel/status behavior.
 
