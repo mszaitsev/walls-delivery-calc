@@ -141,6 +141,7 @@ C:.
 |           0060_create_manual_delivery_geography.php
 |           0061_make_manual_delivery_geography_country_aware.php
 |           0062_create_manual_delivery_weight_ranges.php
+|           0063_create_manual_delivery_pickup_points.php
 |
 +---docs
 |   |   README.md
@@ -334,6 +335,8 @@ C:.
 |   |   |       ManualDeliverySettings.php
 |   |   |       ManualDeliveryWeightRange.php
 |   |   |       ManualDeliveryWeightRangeRepository.php
+|   |   |       ManualPickupPointProvider.php
+|   |   |       ManualPickupPointRepository.php
 |   |   |
 |   |   +---OzonDelivery
 |   |   |   |   OzonDeliveryCredentials.php

@@ -18,6 +18,7 @@ function current_time( string $type ): string { return '2026-09-04 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_textarea_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function sanitize_key( mixed $value ): string { return strtolower( preg_replace( '/[^a-z0-9_\\-]/i', '', (string) $value ) ?? '' ); }
 function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 function update_option( string $option, mixed $value, bool $autoload = true ): bool { $GLOBALS['wdc_options'][ $option ] = $value; return true; }
@@ -40,6 +41,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $manual_locations = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $manual_weight_ranges = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $manual_pickup_points = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $locations = array();
 		/** @var array<int,array<string,mixed>> */
@@ -142,6 +145,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 					}
 				}
 			}
+			if ( str_contains( $query, 'wdc_manual_delivery_pickup_points' ) && preg_match( '/service_id = ([0-9]+).*code = \'([^\']+)\'/', $query, $matches ) ) {
+				foreach ( $this->manual_pickup_points as $row ) {
+					if ( (int) $row['service_id'] === (int) $matches[1] && (string) $row['code'] === $matches[2] && ! empty( $row['active'] ) ) {
+						return $row;
+					}
+				}
+			}
 			return null;
 		}
 
@@ -191,6 +201,14 @@ if ( ! class_exists( 'wpdb' ) ) {
 				usort( $rows, static fn ( array $left, array $right ): int => ( (int) $left['from_weight_g'] <=> (int) $right['from_weight_g'] ) ?: ( (int) $left['to_weight_g'] <=> (int) $right['to_weight_g'] ) );
 				return $rows;
 			}
+			if ( str_contains( $query, 'wdc_manual_delivery_pickup_points' ) && preg_match( '/service_id = ([0-9]+)/', $query, $matches ) ) {
+				$country = preg_match( "/country_code = '([^']+)'/", $query, $country_match ) ? $country_match[1] : '';
+				$region = preg_match( "/region_name = '([^']+)'/", $query, $region_match ) ? $region_match[1] : '';
+				$location = preg_match( "/location_name = '([^']+)'/", $query, $location_match ) ? $location_match[1] : '';
+				$rows = array_values( array_filter( $this->manual_pickup_points, static fn ( array $row ): bool => (int) $row['service_id'] === (int) $matches[1] && ( '' === $country || (string) $row['country_code'] === $country ) && ( '' === $region || (string) $row['region_name'] === $region ) && ( '' === $location || (string) $row['location_name'] === $location ) && ( ! str_contains( $query, 'active = 1' ) || ! empty( $row['active'] ) ) ) );
+				usort( $rows, static fn ( array $left, array $right ): int => ( (int) $left['sort_order'] <=> (int) $right['sort_order'] ) ?: ( (int) $left['id'] <=> (int) $right['id'] ) );
+				return str_contains( $query, 'LIMIT 1' ) ? array_slice( $rows, 0, 1 ) : $rows;
+			}
 			return array();
 		}
 
@@ -221,6 +239,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			if ( str_contains( $table, 'wdc_manual_delivery_weight_ranges' ) ) {
 				return $this->manual_weight_ranges;
+			}
+			if ( str_contains( $table, 'wdc_manual_delivery_pickup_points' ) ) {
+				return $this->manual_pickup_points;
 			}
 			if ( str_contains( $table, 'wdc_rules' ) ) {
 				return $this->rules;
@@ -335,6 +356,8 @@ use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingService;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRange;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
+use WallsShop\WDC\Carriers\Manual\ManualPickupPointProvider;
+use WallsShop\WDC\Carriers\Manual\ManualPickupPointRepository;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\ManualDeliveryCarrier;
 use WallsShop\WDC\Checkout\Comments\DeliveryCustomerCommentSnapshotBuilder;
@@ -376,6 +399,9 @@ use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wdc_options']['wdc_core_settings'] = array( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY => 0 );
@@ -386,6 +412,7 @@ $manual_settings = new ManualDeliverySettings( $settings_repo );
 $manual_geography = new ManualDeliveryGeographyRepository( $GLOBALS['wpdb'] );
 $manual_matcher = new ManualDeliveryGeographyMatcher( $manual_geography );
 $manual_weight_ranges = new ManualDeliveryWeightRangeRepository( $GLOBALS['wpdb'] );
+$manual_pickup_points = new ManualPickupPointRepository( $GLOBALS['wpdb'] );
 $manual_pricing_calculator = new ManualDeliveryPricingCalculator();
 $manual_pricing_service = new ManualDeliveryPricingService( $manual_settings, $manual_weight_ranges, $manual_pricing_calculator );
 $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
@@ -436,8 +463,9 @@ $services->update_service( (int) $nsk->id, array( 'enabled' => 1 ) );
 $services->soft_delete_service( (int) $pickup->id );
 wdc_manual_assert( null === $services->find_by_service_key( 'manual_pickup_store' ), 'Manual service soft delete must hide service from runtime lookup.' );
 
-$carrier = new ManualDeliveryCarrier( $services, $manual_settings, $manual_matcher, $manual_pricing_service );
+$carrier = new ManualDeliveryCarrier( $services, $manual_settings, $manual_matcher, $manual_pricing_service, $manual_pickup_points );
 wdc_manual_assert( ManualDeliverySettings::CARRIER_KEY === $carrier->get_identity()->key && 'manual' === $carrier->get_identity()->type, 'Manual runtime carrier identity must be stable.' );
+wdc_manual_assert( ManualDeliverySettings::DELIVERY_TYPE_COURIER === $manual_settings->delivery_type( (int) $nsk->id )['type'], 'Existing manual services without delivery-type settings must default to courier.' );
 
 $request_for = static function ( string $service_key, string $country = 'RU', string $city = 'Новосибирск', string $region = 'Новосибирская область', array $context = array(), int $weight_g = 1000 ): QuoteRequest {
 	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), max( 0, $weight_g ), 10, 10, 10 );
@@ -460,6 +488,53 @@ $request_for = static function ( string $service_key, string $country = 'RU', st
 		$context
 	);
 };
+
+$manual_settings->save_delivery_type( (int) $nsk->id, ManualDeliverySettings::DELIVERY_TYPE_COURIER );
+wdc_manual_assert( DeliveryType::COURIER === $carrier->quote( $request_for( 'manual_nsk_courier' ) )->rates[0]->delivery_type, 'Manual courier delivery type must map to DeliveryType::COURIER.' );
+$manual_settings->save_delivery_type( (int) $nsk->id, ManualDeliverySettings::DELIVERY_TYPE_CUSTOM, 'До склада ТК' );
+$custom_rate = $carrier->quote( $request_for( 'manual_nsk_courier' ) )->rates[0];
+wdc_manual_assert( DeliveryType::UNKNOWN === $custom_rate->delivery_type && ! $custom_rate->requires_pickup_point && 'До склада ТК' === (string) $custom_rate->meta['manual_delivery_type_label'], 'Manual custom delivery type must use neutral DeliveryType::UNKNOWN and preserve custom label.' );
+$manual_settings->save_delivery_type( (int) $nsk->id, ManualDeliverySettings::DELIVERY_TYPE_COURIER );
+
+$pickup_a_id = $services->create_service( array( 'service_key' => 'manual_pickup_a', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual pickup A', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'deleted' => 0 ) );
+$pickup_b_id = $services->create_service( array( 'service_key' => 'manual_pickup_b', 'carrier_key' => ManualDeliverySettings::CARRIER_KEY, 'service_type' => DeliveryService::TYPE_MANUAL, 'title' => 'Manual pickup B', 'enabled' => 1, 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, 'use_default_rules_when_no_service_rules' => 0, 'round_up_to_ruble' => 0, 'minimum_price_rub' => 0, 'deleted' => 0 ) );
+$manual_settings->save_flat_pricing( $pickup_a_id, '410' );
+$manual_settings->save_flat_pricing( $pickup_b_id, '420' );
+$manual_settings->save_delivery_type( $pickup_a_id, ManualDeliverySettings::DELIVERY_TYPE_PICKUP );
+$manual_settings->save_delivery_type( $pickup_b_id, ManualDeliverySettings::DELIVERY_TYPE_PICKUP );
+$countries->replace_countries( $pickup_a_id, array( 'RU' ) );
+$countries->replace_countries( $pickup_b_id, array( 'RU' ) );
+wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->success, 'Manual pickup service must be unavailable when destination has no active eligible pickup points.' );
+$manual_pickup_points->replace_points(
+	$pickup_a_id,
+	array(
+		array( 'code' => 'manual-a-1', 'title' => 'ПВЗ A', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'active' => 1 ),
+	)
+);
+$manual_pickup_points->replace_points(
+	$pickup_b_id,
+	array(
+		array( 'code' => 'manual-b-1', 'title' => 'ПВЗ B', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 2', 'active' => 1 ),
+	)
+);
+$pickup_rate_a = $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->rates[0] ?? null;
+wdc_manual_assert( null !== $pickup_rate_a && DeliveryType::PICKUP === $pickup_rate_a->delivery_type && $pickup_rate_a->requires_pickup_point && 'manual:manual_pickup_a:pickup' === (string) $pickup_rate_a->meta['pickup_family'], 'Manual pickup rate must use DeliveryType::PICKUP, require pickup point, and isolate family by service key.' );
+$provider = new ManualPickupPointProvider( $services, $manual_pickup_points );
+$registry = new CarrierPickupPointProviderRegistry( array( $provider ) );
+wdc_manual_assert( $registry->has( ManualDeliverySettings::CARRIER_KEY ) && 1 === count( $registry->all() ), 'Manual pickup provider must be registered once for the manual carrier.' );
+$session_manager = new CheckoutSessionManager();
+$rate_mapper = new WooCommerceRateMapper();
+$wc_rate = $rate_mapper->map( $pickup_rate_a );
+$session_manager->save_rates( array( $wc_rate['id'] => array_merge( $wc_rate['meta_data'], array( 'rate_id' => $wc_rate['id'] ) ) ) );
+$resolver = new CheckoutPickupPointProviderQueryResolver( $session_manager );
+$query = $resolver->resolve( $wc_rate['id'], ManualDeliverySettings::CARRIER_KEY, 'manual:manual_pickup_a:pickup' );
+wdc_manual_assert( 'manual_pickup_a' === $query->normalized_service_key() && 'Новосибирск' === $query->location_name && 'Новосибирская область' === $query->region_name, 'Pickup provider query must carry trusted concrete service key and canonical locality from rate metadata.' );
+$points_a = $provider->search( $query );
+wdc_manual_assert( 1 === count( $points_a ) && 'manual-a-1' === $points_a[0]->code, 'Manual provider search must return only points belonging to the selected manual service and locality.' );
+wdc_manual_assert( null === $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, 'manual-b-1' ) ), 'Manual provider resolve_selection must reject a point code from another manual service.' );
+wdc_manual_assert( $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, 'manual-a-1' ) ) instanceof \WallsShop\WDC\Domain\Pickup\PickupPoint, 'Manual provider resolve_selection must re-resolve selected point server-side.' );
+$manual_pickup_points->replace_points( $pickup_a_id, array( array( 'code' => 'manual-a-1', 'title' => 'ПВЗ A', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'active' => 0 ) ) );
+wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->success, 'Manual pickup rate must disappear after deactivating the last eligible pickup point.' );
 
 $quote = $carrier->quote( $request_for( 'manual_nsk_courier' ) );
 wdc_manual_assert( $quote->success && 1 === count( $quote->rates), 'Manual flat runtime must return one rate for an active manual service.' );
@@ -620,7 +695,7 @@ NewShippingMethod::configure(
 	new CheckoutSessionManager(),
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.151.2' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.0' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -814,16 +889,24 @@ $order_mapper_source = (string) file_get_contents( $root . '/src/Orders/Applicat
 $admin_source = (string) file_get_contents( $root . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $manual_geo_source = (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryGeographyRepository.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryGeographyMatcher.php' );
 $manual_pricing_source = (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryPricingCalculator.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryPricingService.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualDeliveryWeightRangeRepository.php' );
+$manual_pickup_source = (string) file_get_contents( $root . '/src/Carriers/Manual/ManualPickupPointRepository.php' ) . (string) file_get_contents( $root . '/src/Carriers/Manual/ManualPickupPointProvider.php' );
+$pickup_query_source = (string) file_get_contents( $root . '/src/Pickup/Providers/CarrierPickupPointQuery.php' ) . (string) file_get_contents( $root . '/src/Pickup/Providers/CheckoutPickupPointProviderQueryResolver.php' );
+$pickup_rest_source = (string) file_get_contents( $root . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' );
 $migration_0061_source = (string) file_get_contents( $root . '/database/migrations/0061_make_manual_delivery_geography_country_aware.php' );
 $migration_0062_source = (string) file_get_contents( $root . '/database/migrations/0062_create_manual_delivery_weight_ranges.php' );
+$migration_0063_source = (string) file_get_contents( $root . '/database/migrations/0063_create_manual_delivery_pickup_points.php' );
 wdc_manual_assert( ! str_contains( $shipment_creation, 'ManualDelivery' ) && ! str_contains( $shipment_creation, "carrier_key' => 'manual" ), 'Manual delivery foundation must not add a ShipmentCreationService branch.' );
 wdc_manual_assert( ! str_contains( $shipments_metabox, 'ManualDelivery' ) && ! str_contains( $shipments_metabox, "carrier_key' => 'manual" ), 'Manual delivery foundation must not add an OrderShipmentsMetabox branch.' );
 wdc_manual_assert( ! str_contains( $shipment_js, 'ManualDelivery' ) && ! str_contains( $shipment_js, "manual-delivery" ), 'Manual delivery foundation must not add generic shipment JS logic.' );
 wdc_manual_assert( ! str_contains( $plugin, 'ManualDeliveryShipmentDocumentProvider' ) && ! str_contains( $plugin, 'ManualDeliveryShipmentModalExtension' ) && ! str_contains( $plugin, 'ManualDeliveryShipmentPersistenceMapper' ), 'Manual delivery foundation must not register shipment document/modal/persistence extensions.' );
 wdc_manual_assert( str_contains( $plugin, 'ManualDeliveryCarrier::class' ) && str_contains( $plugin, '$registry->register( $this->container->get( ManualDeliveryCarrier::class ) );' ), 'Manual runtime carrier must be registered only through CarrierRegistry.' );
+wdc_manual_assert( str_contains( $plugin, 'ManualPickupPointProvider::class' ) && str_contains( $plugin, '$this->container->get( ManualPickupPointProvider::class )' ) && ! str_contains( $plugin, 'ManualDeliveryPickupRestController' ), 'Manual pickup must register one generic carrier provider and must not add a manual REST endpoint.' );
 wdc_manual_assert( ! str_contains( $checkout_orchestrator_source, 'ManualDeliveryGeography' ) && ! str_contains( $checkout_orchestrator_source, 'ManualDeliveryPricing' ) && ! str_contains( $checkout_orchestrator_source, 'wdc_manual_delivery_' ), 'CheckoutOrchestrator must not contain manual geography/pricing SQL or carrier-specific branches.' );
 wdc_manual_assert( ! str_contains( $manual_geo_source, 'location_id' ) && ! str_contains( $manual_geo_source, 'wp_wdc_locations.id' ), 'Manual geography must not depend on permanent location IDs.' );
 wdc_manual_assert( str_contains( $manual_pricing_source, 'billing_weight_g' ) && str_contains( $manual_pricing_source, 'price_per_kg_kopecks * $billing_weight_g' ) && ! str_contains( $manual_pricing_source, 'zone_id' ) && ! str_contains( $manual_pricing_source, 'dbDelta' ), 'Manual pricing must be carrier-owned, integer based, zone-free, and must not create runtime schema.' );
+wdc_manual_assert( str_contains( $manual_pickup_source, 'wdc_manual_delivery_pickup_points' ) && str_contains( $manual_pickup_source, 'service_key' ) && ! str_contains( $manual_pickup_source, 'manual_service_key' ) && ! str_contains( $manual_pickup_source, 'dbDelta' ), 'Manual pickup storage/provider must be manual-owned, service-key aware, and must not create runtime schema.' );
+wdc_manual_assert( str_contains( $pickup_query_source, 'service_key' ) && str_contains( $pickup_query_source, 'normalized_service_key' ) && ! str_contains( $pickup_query_source, 'manual_service_key' ), 'Pickup provider query must expose generic service_key context, not a manual-specific browser authority.' );
+wdc_manual_assert( str_contains( $pickup_rest_source, "\$this->param( \$request, 'pickup_family' )" ) && str_contains( $pickup_rest_source, '$this->provider_query_resolver->resolve( $method_id, $carrier, $family )' ), 'Checkout pickup selection save must use the trusted rate pickup family context for service-specific provider queries.' );
 wdc_manual_assert( str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_region_search" ) && str_contains( $admin_source, "wp_ajax_wdc_manual_delivery_location_search" ) && str_contains( $admin_source, "current_user_can( AdminMenu::CAPABILITY )" ) && str_contains( $admin_source, "check_ajax_referer( 'wdc_manual_delivery_geography', 'nonce', false )" ), 'Manual geography admin search must use capability and nonce protected AJAX.' );
 wdc_manual_assert( str_contains( $admin_source, 'manual_pricing_mode_options' ) && str_contains( $admin_source, 'manual_weight_ranges_from_post' ) && str_contains( $admin_source, 'manual_delivery_weight_ranges->validate_ranges' ) && str_contains( $admin_source, 'wdc_manual_pricing_notice' ), 'Manual pricing admin UI/save must expose typed modes and validate ranges before replacing stored rows.' );
 wdc_manual_assert( str_contains( $admin_source, 'resolve_active_by_place_and_region' ) && str_contains( $admin_source, "'country_code' => strtoupper( trim( \$canonical->country_code ) )" ) && str_contains( $admin_source, "'location_name' => \$canonical->resolved_place_name()" ) && str_contains( $admin_source, "'region_name' => \$canonical->region_name" ) && str_contains( $admin_source, 'name="manual_locations[]"' ) && ! str_contains( $admin_source, 'name="manual_location_ids[]"' ), 'Manual geography admin save must canonicalize locations server-side as country_code plus location_name plus region_name, not location ID.' );
@@ -831,5 +914,6 @@ wdc_manual_assert( str_contains( $admin_source, 'save_manual_delivery_geography'
 wdc_manual_assert( str_contains( $order_mapper_source, 'canonical_location' ) && str_contains( $order_mapper_source, 'resolved_place_name()' ) && str_contains( $order_mapper_source, "'place_name'" ) && str_contains( $order_mapper_source, '$address->settlement ?: $address->city' ), 'Order-admin quote mapping must build trusted region_name and place_name from canonical Location when a location id is selected.' );
 wdc_manual_assert( str_contains( $migration_0061_source, 'country_code' ) && str_contains( $migration_0061_source, "country_code = 'RU'" ) && str_contains( $migration_0061_source, 'ux_manual_region_country' ) && str_contains( $migration_0061_source, 'ux_manual_location_country' ), 'Migration 0061 must add/backfill country-aware manual geography identity and unique indexes.' );
 wdc_manual_assert( str_contains( $migration_0062_source, 'wdc_manual_delivery_weight_ranges' ) && str_contains( $migration_0062_source, 'ux_manual_weight_range' ) && str_contains( $migration_0062_source, 'from_weight_g' ) && str_contains( $migration_0062_source, 'price_kopecks' ), 'Migration 0062 must create manual delivery weight ranges with grams, kopecks, and unique range identity.' );
+wdc_manual_assert( str_contains( $migration_0063_source, 'wdc_manual_delivery_pickup_points' ) && str_contains( $migration_0063_source, 'ux_manual_pickup_service_code' ) && str_contains( $migration_0063_source, 'country_code' ) && str_contains( $migration_0063_source, 'location_name' ) && str_contains( $migration_0063_source, 'region_name' ), 'Migration 0063 must create manual pickup points with stable per-service code and textual locality identity.' );
 
 echo "Manual delivery foundation smoke test passed.\n";

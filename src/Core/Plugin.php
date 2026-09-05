@@ -158,6 +158,8 @@ use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingCalculator;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingService;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
+use WallsShop\WDC\Carriers\Manual\ManualPickupPointProvider;
+use WallsShop\WDC\Carriers\Manual\ManualPickupPointRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
@@ -568,7 +570,7 @@ final class Plugin {
 		$this->container->register( PekCargoConstraintsConverter::class, fn(): PekCargoConstraintsConverter => new PekCargoConstraintsConverter() );
 		$this->container->register( PekTerminalService::class, fn(): PekTerminalService => new PekTerminalService( $this->container->get( PekLocationResolver::class ), $this->container->get( PekApiClient::class ), $this->container->get( PekCargoConstraintsConverter::class ), $this->container->get( PekDestinationTerminalSearchCache::class ), $this->container->get( PekTerminalRepository::class ), $this->container->get( PekSettings::class ) ) );
 		$this->container->register( PekPickupPointProvider::class, fn(): PekPickupPointProvider => new PekPickupPointProvider( $this->container->get( PekTerminalService::class ) ) );
-		$this->container->register( CarrierPickupPointProviderRegistry::class, fn(): CarrierPickupPointProviderRegistry => new CarrierPickupPointProviderRegistry( array( $this->container->get( PekPickupPointProvider::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ) ) ) );
+		$this->container->register( CarrierPickupPointProviderRegistry::class, fn(): CarrierPickupPointProviderRegistry => new CarrierPickupPointProviderRegistry( array( $this->container->get( PekPickupPointProvider::class ), $this->container->get( OzonDeliveryPickupPointProvider::class ), $this->container->get( ManualPickupPointProvider::class ) ) ) );
 		$this->container->register( PekDestinationPickupDiagnosticStore::class, fn(): PekDestinationPickupDiagnosticStore => new PekDestinationPickupDiagnosticStore() );
 		$this->container->register( PekDestinationPickupDiagnosticService::class, fn(): PekDestinationPickupDiagnosticService => new PekDestinationPickupDiagnosticService( $this->container->get( CarrierPickupPointProviderRegistry::class ), $this->container->get( LocationRepository::class ), $this->container->get( PekTerminalService::class ), $this->container->get( PekSettings::class ), $this->container->get( PekCredentials::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( PekQuoteCargoBuilder::class, fn(): PekQuoteCargoBuilder => new PekQuoteCargoBuilder() );
@@ -760,9 +762,11 @@ final class Plugin {
 		$this->container->register( ManualDeliveryGeographyRepository::class, fn(): ManualDeliveryGeographyRepository => new ManualDeliveryGeographyRepository() );
 		$this->container->register( ManualDeliveryGeographyMatcher::class, fn(): ManualDeliveryGeographyMatcher => new ManualDeliveryGeographyMatcher( $this->container->get( ManualDeliveryGeographyRepository::class ) ) );
 		$this->container->register( ManualDeliveryWeightRangeRepository::class, fn(): ManualDeliveryWeightRangeRepository => new ManualDeliveryWeightRangeRepository() );
+		$this->container->register( ManualPickupPointRepository::class, fn(): ManualPickupPointRepository => new ManualPickupPointRepository() );
+		$this->container->register( ManualPickupPointProvider::class, fn(): ManualPickupPointProvider => new ManualPickupPointProvider( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualPickupPointRepository::class ) ) );
 		$this->container->register( ManualDeliveryPricingCalculator::class, fn(): ManualDeliveryPricingCalculator => new ManualDeliveryPricingCalculator() );
 		$this->container->register( ManualDeliveryPricingService::class, fn(): ManualDeliveryPricingService => new ManualDeliveryPricingService( $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryWeightRangeRepository::class ), $this->container->get( ManualDeliveryPricingCalculator::class ) ) );
-		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryGeographyMatcher::class ), $this->container->get( ManualDeliveryPricingService::class ) ) );
+		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryGeographyMatcher::class ), $this->container->get( ManualDeliveryPricingService::class ), $this->container->get( ManualPickupPointRepository::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -1059,6 +1063,7 @@ final class Plugin {
 				$this->container->get( ManualDeliveryGeographyRepository::class ),
 				$this->container->get( ManualDeliveryWeightRangeRepository::class ),
 				$this->container->get( DeliveryServiceKeyRenameService::class ),
+				$this->container->get( ManualPickupPointRepository::class ),
 				$this->container->get( DeliveryServiceSettingsRepository::class ),
 				$this->container->get( RussianPostSettings::class ),
 				$this->container->get( RussianPostCountriesAdminPage::class ),

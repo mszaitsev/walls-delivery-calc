@@ -18,7 +18,10 @@ final class CarrierPickupPointQuery {
 		public readonly PickupCargoConstraints $cargo,
 		public readonly string $purpose = self::PURPOSE_DESTINATION_PICKUP,
 		public readonly int $radius_km = 50,
-		public readonly int $limit = 50
+		public readonly int $limit = 50,
+		public readonly string $service_key = '',
+		public readonly string $region_name = '',
+		public readonly string $location_name = ''
 	) {
 	}
 
@@ -28,6 +31,10 @@ final class CarrierPickupPointQuery {
 
 	public function normalized_country_code(): string {
 		return strtoupper( trim( $this->country_code ) );
+	}
+
+	public function normalized_service_key(): string {
+		return strtolower( preg_replace( '/[^a-z0-9_\-]+/', '', trim( $this->service_key ) ) ?? '' );
 	}
 
 	/** @return array<int,string> */

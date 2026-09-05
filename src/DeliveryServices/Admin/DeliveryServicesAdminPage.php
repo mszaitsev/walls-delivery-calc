@@ -25,6 +25,7 @@ use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticGeographyAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\Admin\JetLogisticStatusAdminPage;
 use WallsShop\WDC\Carriers\JetLogistic\JetLogisticSettings;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyRepository;
+use WallsShop\WDC\Carriers\Manual\ManualPickupPointRepository;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryWeightRangeRepository;
 use WallsShop\WDC\Carriers\Pek\Admin\PekAdminPage;
@@ -110,6 +111,7 @@ final class DeliveryServicesAdminPage {
 		private ManualDeliveryGeographyRepository $manual_delivery_geography,
 		private ManualDeliveryWeightRangeRepository $manual_delivery_weight_ranges,
 		private DeliveryServiceKeyRenameService $delivery_service_key_rename,
+		private ManualPickupPointRepository $manual_pickup_points,
 		private ?DeliveryServiceSettingsRepository $settings = null,
 		private ?RussianPostSettings $russian_post_settings = null,
 		private ?RussianPostCountriesAdminPage $russian_post_countries = null,
@@ -335,6 +337,7 @@ final class DeliveryServicesAdminPage {
 			$region = trim( $location->region_name );
 			$country = strtoupper( trim( $location->country_code ) );
 			$items[] = array(
+				'id' => (int) $location->id,
 				'country_code' => $country,
 				'location_name' => $place,
 				'region_name' => $region,
@@ -979,7 +982,9 @@ final class DeliveryServicesAdminPage {
 					try {
 						$this->save_manual_delivery_settings( (int) $service->id );
 					} catch ( \InvalidArgumentException $exception ) {
-						wp_safe_redirect( add_query_arg( 'wdc_manual_pricing_notice', $exception->getMessage(), $this->service_tab_url_by_key( $service->service_key, 'calculation' ) ) );
+						$message = $exception->getMessage();
+						$is_main_notice = str_starts_with( $message, 'manual_delivery_type_' ) || str_starts_with( $message, 'manual_pickup_' );
+						wp_safe_redirect( add_query_arg( $is_main_notice ? 'wdc_manual_delivery_type_notice' : 'wdc_manual_pricing_notice', $message, $this->service_tab_url_by_key( $service->service_key, $is_main_notice ? 'main' : 'calculation' ) ) );
 						exit;
 					}
 					$this->clear_delivery_quote_cache();
@@ -1921,7 +1926,9 @@ final class DeliveryServicesAdminPage {
 					<input type="hidden" name="countries" value="<?php echo esc_attr( implode( ',', $this->countries->countries( (int) $service->id ) ) ); ?>">
 				<?php endif; ?>
 				<?php if ( $this->is_manual_service( $service ) ) : ?>
+					<?php $this->render_manual_delivery_type_rows( $service ); ?>
 					<?php $this->render_manual_geography_rows( $service ); ?>
+					<?php $this->render_manual_pickup_point_rows( $service ); ?>
 				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить службу', 'walls-delivery-calc' ) ); ?>
@@ -4819,6 +4826,14 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		} elseif ( array_key_exists( 'manual_flat_price_rub', $_POST ) ) {
 			$this->manual_delivery_settings->save_flat_pricing( $service_id, wp_unslash( $_POST['manual_flat_price_rub'] ) );
 		}
+		if ( array_key_exists( 'manual_delivery_type', $_POST ) ) {
+			$this->manual_delivery_settings->save_delivery_type(
+				$service_id,
+				sanitize_key( wp_unslash( $_POST['manual_delivery_type'] ?? ManualDeliverySettings::DELIVERY_TYPE_COURIER ) ),
+				sanitize_text_field( wp_unslash( $_POST['manual_delivery_type_label'] ?? '' ) )
+			);
+			$this->manual_pickup_points->replace_points( $service_id, $this->manual_pickup_points_from_post() );
+		}
 		if ( array_key_exists( 'manual_delivery_min_days', $_POST ) || array_key_exists( 'manual_delivery_max_days', $_POST ) ) {
 			$this->manual_delivery_settings->save_delivery_days(
 				$service_id,
@@ -5070,6 +5085,107 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		<?php
 	}
 
+	private function render_manual_delivery_type_rows( DeliveryService $service ): void {
+		$delivery_type = null !== $service->id ? $this->manual_delivery_settings->delivery_type( (int) $service->id ) : array( 'type' => ManualDeliverySettings::DELIVERY_TYPE_COURIER, 'label' => '' );
+		$notice = sanitize_key( wp_unslash( $_GET['wdc_manual_delivery_type_notice'] ?? '' ) );
+		?>
+		<tr><th colspan="2"><h3><?php echo esc_html__( 'Тип ручной доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<?php if ( '' !== $notice ) : ?>
+			<tr><th></th><td><div class="notice notice-error inline"><p><?php echo esc_html( $this->manual_delivery_type_notice( $notice ) ); ?></p></div></td></tr>
+		<?php endif; ?>
+		<?php $this->select_assoc_row( 'manual_delivery_type', __( 'Тип доставки', 'walls-delivery-calc' ), $delivery_type['type'], $this->manual_delivery_type_options() ); ?>
+		<tr data-wdc-manual-delivery-type-custom>
+			<th scope="row"><?php echo esc_html__( 'Название типа доставки', 'walls-delivery-calc' ); ?></th>
+			<td>
+				<input type="text" class="regular-text" name="manual_delivery_type_label" value="<?php echo esc_attr( $delivery_type['label'] ); ?>">
+				<p class="description"><?php echo esc_html__( 'Используется только для варианта «Иной вариант». Machine-readable тип остаётся нейтральным.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
+		<?php
+	}
+
+	private function render_manual_pickup_point_rows( DeliveryService $service ): void {
+		$service_id = null !== $service->id ? (int) $service->id : 0;
+		$points = $service_id > 0 ? $this->manual_pickup_points->list_by_service( $service_id ) : array();
+		?>
+		<tr data-wdc-manual-delivery-type-pickup><th colspan="2"><h3><?php echo esc_html__( 'Пункты выдачи', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<tr data-wdc-manual-delivery-type-pickup>
+			<th scope="row"><?php echo esc_html__( 'Добавить ПВЗ', 'walls-delivery-calc' ); ?></th>
+			<td>
+				<div data-wdc-manual-pickup-points>
+					<p>
+						<input type="search" data-wdc-manual-pickup-location-query class="regular-text" autocomplete="off" placeholder="<?php echo esc_attr__( 'Найти населённый пункт', 'walls-delivery-calc' ); ?>">
+						<button type="button" class="button" data-wdc-manual-pickup-location-search><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
+					</p>
+					<div data-wdc-manual-pickup-location-results style="margin-top:8px;"></div>
+					<table class="widefat striped" data-wdc-manual-pickup-table style="margin-top:12px;">
+						<thead><tr><th><?php echo esc_html__( 'Название', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Населённый пункт', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Адрес', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Координаты', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Активен', 'walls-delivery-calc' ); ?></th><th></th></tr></thead>
+						<tbody data-wdc-manual-pickup-list>
+							<?php foreach ( $points as $index => $point ) : ?>
+								<?php $this->render_manual_pickup_point_row( $index, $point ); ?>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+				<p class="description"><?php echo esc_html__( 'Населённый пункт выбирается из текущей базы locations. Сохраняется country_code + resolved_place_name + region_name; location ID не становится постоянной identity ПВЗ.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
+		<?php
+	}
+
+	/** @param array<string,mixed> $point */
+	private function render_manual_pickup_point_row( int $index, array $point ): void {
+		$prefix = 'manual_pickup_points[' . $index . ']';
+		$location_label = trim( (string) $point['location_name'] . ' — ' . (string) $point['region_name'] . ' — ' . $this->manual_country_label( (string) $point['country_code'] ) );
+		?>
+		<tr data-wdc-manual-pickup-row data-wdc-manual-pickup-index="<?php echo esc_attr( (string) $index ); ?>">
+			<td>
+				<input type="hidden" name="<?php echo esc_attr( $prefix ); ?>[code]" value="<?php echo esc_attr( (string) $point['code'] ); ?>">
+				<input type="hidden" name="<?php echo esc_attr( $prefix ); ?>[country_code]" value="<?php echo esc_attr( (string) $point['country_code'] ); ?>">
+				<input type="hidden" name="<?php echo esc_attr( $prefix ); ?>[location_name]" value="<?php echo esc_attr( (string) $point['location_name'] ); ?>">
+				<input type="hidden" name="<?php echo esc_attr( $prefix ); ?>[region_name]" value="<?php echo esc_attr( (string) $point['region_name'] ); ?>">
+				<input type="text" name="<?php echo esc_attr( $prefix ); ?>[title]" value="<?php echo esc_attr( (string) $point['title'] ); ?>" placeholder="<?php echo esc_attr__( 'Название', 'walls-delivery-calc' ); ?>">
+			</td>
+			<td><span data-wdc-manual-pickup-location-label><?php echo esc_html( $location_label ); ?></span></td>
+			<td>
+				<input type="text" name="<?php echo esc_attr( $prefix ); ?>[address]" value="<?php echo esc_attr( (string) $point['address'] ); ?>" placeholder="<?php echo esc_attr__( 'Адрес', 'walls-delivery-calc' ); ?>" required>
+				<input type="text" name="<?php echo esc_attr( $prefix ); ?>[postcode]" value="<?php echo esc_attr( (string) $point['postcode'] ); ?>" placeholder="<?php echo esc_attr__( 'Индекс', 'walls-delivery-calc' ); ?>" style="margin-top:4px;">
+				<textarea name="<?php echo esc_attr( $prefix ); ?>[work_time]" placeholder="<?php echo esc_attr__( 'Режим работы', 'walls-delivery-calc' ); ?>" style="margin-top:4px;width:100%;"><?php echo esc_textarea( (string) $point['work_time'] ); ?></textarea>
+				<textarea name="<?php echo esc_attr( $prefix ); ?>[comment]" placeholder="<?php echo esc_attr__( 'Комментарий', 'walls-delivery-calc' ); ?>" style="margin-top:4px;width:100%;"><?php echo esc_textarea( (string) $point['comment'] ); ?></textarea>
+			</td>
+			<td>
+				<input type="text" name="<?php echo esc_attr( $prefix ); ?>[latitude]" value="<?php echo esc_attr( null !== $point['latitude'] ? (string) $point['latitude'] : '' ); ?>" placeholder="<?php echo esc_attr__( 'Широта', 'walls-delivery-calc' ); ?>" style="width:95px;">
+				<input type="text" name="<?php echo esc_attr( $prefix ); ?>[longitude]" value="<?php echo esc_attr( null !== $point['longitude'] ? (string) $point['longitude'] : '' ); ?>" placeholder="<?php echo esc_attr__( 'Долгота', 'walls-delivery-calc' ); ?>" style="width:95px;">
+			</td>
+			<td><input type="hidden" name="<?php echo esc_attr( $prefix ); ?>[active]" value="0"><label><input type="checkbox" name="<?php echo esc_attr( $prefix ); ?>[active]" value="1" <?php checked( ! empty( $point['active'] ) ); ?>> <?php echo esc_html__( 'да', 'walls-delivery-calc' ); ?></label></td>
+			<td>
+				<input type="hidden" name="<?php echo esc_attr( $prefix ); ?>[delete]" value="0" data-wdc-manual-pickup-delete>
+				<button type="button" class="button-link-delete" data-wdc-manual-pickup-remove><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
+			</td>
+		</tr>
+		<?php
+	}
+
+	/** @return array<string,string> */
+	private function manual_delivery_type_options(): array {
+		return array(
+			ManualDeliverySettings::DELIVERY_TYPE_COURIER => __( 'Курьер', 'walls-delivery-calc' ),
+			ManualDeliverySettings::DELIVERY_TYPE_PICKUP => __( 'ПВЗ', 'walls-delivery-calc' ),
+			ManualDeliverySettings::DELIVERY_TYPE_CUSTOM => __( 'Иной вариант', 'walls-delivery-calc' ),
+		);
+	}
+
+	private function manual_delivery_type_notice( string $code ): string {
+		return match ( $code ) {
+			'manual_delivery_type_invalid' => __( 'Тип доставки недопустим.', 'walls-delivery-calc' ),
+			'manual_delivery_type_label_required' => __( 'Для варианта «Иной вариант» укажите название типа доставки.', 'walls-delivery-calc' ),
+			'manual_pickup_location_required' => __( 'Для каждого ПВЗ выберите населённый пункт из справочника locations.', 'walls-delivery-calc' ),
+			'manual_pickup_address_required' => __( 'Для каждого ПВЗ укажите адрес.', 'walls-delivery-calc' ),
+			'manual_pickup_coordinates_invalid' => __( 'Координаты ПВЗ должны содержать корректные широту и долготу либо быть пустыми.', 'walls-delivery-calc' ),
+			default => __( 'Настройки типа доставки не сохранены. Проверьте данные ПВЗ.', 'walls-delivery-calc' ),
+		};
+	}
+
 	/** @param array<int,string> $allowed_countries @return array<int,array{country_code:string,region_name:string}> */
 	private function manual_regions_from_post( array $allowed_countries = array() ): array {
 		$raw = wp_unslash( $_POST['manual_regions'] ?? array() );
@@ -5133,6 +5249,72 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 
 		return $result;
+	}
+
+	/** @return array<int,array<string,mixed>> */
+	private function manual_pickup_points_from_post(): array {
+		$raw = wp_unslash( $_POST['manual_pickup_points'] ?? array() );
+		if ( ! is_array( $raw ) ) {
+			return array();
+		}
+		$result = array();
+		foreach ( $raw as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$canonical = $this->manual_pickup_location_from_row( $row );
+			$result[] = array(
+				'code' => sanitize_key( (string) ( $row['code'] ?? '' ) ),
+				'title' => sanitize_text_field( (string) ( $row['title'] ?? '' ) ),
+				'country_code' => $canonical['country_code'],
+				'location_name' => $canonical['location_name'],
+				'region_name' => $canonical['region_name'],
+				'address' => sanitize_text_field( (string) ( $row['address'] ?? '' ) ),
+				'postcode' => sanitize_text_field( (string) ( $row['postcode'] ?? '' ) ),
+				'latitude' => $this->manual_optional_coordinate( $row['latitude'] ?? null ),
+				'longitude' => $this->manual_optional_coordinate( $row['longitude'] ?? null ),
+				'work_time' => sanitize_textarea_field( (string) ( $row['work_time'] ?? '' ) ),
+				'comment' => sanitize_textarea_field( (string) ( $row['comment'] ?? '' ) ),
+				'active' => ! empty( $row['active'] ),
+				'delete' => ! empty( $row['delete'] ),
+			);
+		}
+
+		return $result;
+	}
+
+	/** @param array<string,mixed> $row @return array{country_code:string,location_name:string,region_name:string} */
+	private function manual_pickup_location_from_row( array $row ): array {
+		if ( $this->locations instanceof LocationRepository ) {
+			$location_id = max( 0, (int) ( $row['location_id'] ?? 0 ) );
+			$location = $location_id > 0 ? $this->locations->find_by_id( $location_id ) : null;
+			if ( null === $location ) {
+				$country = $this->normalize_manual_country_code( (string) ( $row['country_code'] ?? '' ) );
+				$location_name = sanitize_text_field( (string) ( $row['location_name'] ?? '' ) );
+				$region_name = sanitize_text_field( (string) ( $row['region_name'] ?? '' ) );
+				if ( '' !== $country && '' !== $location_name && '' !== $region_name ) {
+					$match = $this->locations->resolve_active_by_place_and_region( $location_name, $region_name, '', $country );
+					$location = $match->matches[0] ?? null;
+				}
+			}
+			if ( null !== $location ) {
+				return array(
+					'country_code' => strtoupper( trim( $location->country_code ) ),
+					'location_name' => $location->resolved_place_name(),
+					'region_name' => $location->region_name,
+				);
+			}
+		}
+
+		return array( 'country_code' => '', 'location_name' => '', 'region_name' => '' );
+	}
+
+	private function manual_optional_coordinate( mixed $value ): ?float {
+		if ( null === $value || '' === trim( (string) $value ) ) {
+			return null;
+		}
+
+		return is_numeric( $value ) ? (float) $value : INF;
 	}
 
 	private function manual_geography_key( string $value ): string {

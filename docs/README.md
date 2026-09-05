@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.151.2
+Version: 0.152.0
+
+0.152.0 adds manual delivery type selection and manual pickup points. Existing manual services default to courier without resaving; new manual settings support `courier`, `pickup`, and `custom`, where custom uses the neutral `DeliveryType::UNKNOWN` plus a display label. Manual pickup services use the existing Pickup Framework: one `manual` pickup provider is registered, provider queries receive trusted `service_key` and locality metadata from stored rate context, selections are re-resolved server-side, and order pickup snapshots stay generic. Manual pickup points live in `wdc_manual_delivery_pickup_points` with per-service stable `code` and textual locality identity `country_code + resolved_place_name() + region_name`; `wp_wdc_locations.id` is only a transient admin lookup key.
 
 0.151.2 hardens zero-weight checkout behavior. A physical WooCommerce package with items and `0 g` weight remains valid package data: manual `flat` pricing can quote it, while manual `per_kg` and `weight_ranges` still fail closed on non-positive chargeable weight. The quote cache now includes item quantity and a package item signature, so an empty package cannot share a cache key with a zero-weight physical package.
 

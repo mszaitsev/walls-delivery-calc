@@ -390,7 +390,7 @@ final class PickupPointsRestController {
 			if ( PekSettings::CARRIER_KEY === $carrier ) {
 				$formatted[] = $this->pek_formatter->format( $point, $fingerprint, $query->location_id, $query->country_code );
 			} else {
-				$formatted[] = $this->registry_point_payload( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code );
+				$formatted[] = $this->registry_point_payload( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code, $query->service_key );
 			}
 		}
 
@@ -400,7 +400,7 @@ final class PickupPointsRestController {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function registry_point_payload( PickupPoint $point, string $carrier, string $family, string $fingerprint, int $location_id, string $country_code ): array {
+	private function registry_point_payload( PickupPoint $point, string $carrier, string $family, string $fingerprint, int $location_id, string $country_code, string $service_key = '' ): array {
 		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
 		$type = $this->registry_presentation_value( $raw, 'presentation_type', $point->type );
 		if ( ! in_array( $type, array( 'pvz', 'postamat', 'terminal', 'warehouse', 'unknown' ), true ) ) {
@@ -417,7 +417,7 @@ final class PickupPointsRestController {
 		$requires_rate_refresh = $this->registry_boolean_value( $raw, 'requires_rate_refresh' );
 		$snapshot = array(
 			'carrier_key' => $carrier,
-			'service_key' => $carrier,
+			'service_key' => '' !== trim( $service_key ) ? $service_key : $carrier,
 			'pickup_family' => $family,
 			'point_code' => $point->code,
 			'point_id' => $point->code,

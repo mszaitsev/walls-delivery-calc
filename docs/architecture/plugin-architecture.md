@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.151.2
+Version: 0.152.0
+
+0.152.0 keeps manual delivery on one runtime carrier and adds one registry-backed manual pickup provider. `ManualDeliveryCarrier` remains an orchestration layer: it resolves the trusted manual service, checks country/geography, checks pickup-point availability only for pickup-type services, delegates base pricing to `ManualDeliveryPricingService`, and returns canonical `DeliveryRate` metadata. Generic pickup contracts now carry a trusted `service_key` so multi-service carriers can isolate provider searches without reading browser-supplied service identity. Manual pickup storage/provider classes stay under `src/Carriers/Manual`; CheckoutOrchestrator, Rule Engine, Packaging, and Shipment Framework stay free of manual pickup branches.
 
 0.151.2 keeps manual delivery as one runtime carrier and keeps zero-weight package handling generic. `CheckoutOrchestrator` stays generic: service country availability and packaging policy are applied before carrier execution, then `ManualDeliveryCarrier` resolves the service, checks manual geography, delegates base-price calculation to `ManualDeliveryPricingService`, and returns a canonical `DeliveryRate`. The quote cache distinguishes zero-weight physical packages from empty packages through generic package item identity, not manual-specific branches. The pricing calculator knows only typed manual config, integer grams, and integer kopecks; it does not apply Rule Engine rules, service minimum/rounding, lead time, comments, order snapshots, geography, WooCommerce product hooks, or cache invalidation. The Shipment Framework remains untouched: no manual document provider, modal extension, persistence mapper, fake shipment record, or generic shipment JS branch is registered.
 

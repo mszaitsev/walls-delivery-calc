@@ -388,7 +388,10 @@ final class CheckoutPickupPointRestController {
 	}
 
 	private function save_registry_backed_selection( mixed $request, string $method_id, string $carrier, string $selection_intent ): mixed {
-		$family = $this->session_manager->shipping_method_family( $method_id );
+		$family = $this->session_manager->normalize_pickup_family( $this->param( $request, 'pickup_family' ) );
+		if ( '' === $family ) {
+			$family = $this->session_manager->shipping_method_family( $method_id );
+		}
 		try {
 			$query = $this->provider_query_resolver->resolve( $method_id, $carrier, $family );
 		} catch ( \RuntimeException $exception ) {
@@ -416,13 +419,13 @@ final class CheckoutPickupPointRestController {
 		if ( '' === trim( $fingerprint ) ) {
 			return $this->error( 'provider_rate_context_missing', 'Pickup rate context is missing.', 400 );
 		}
-		$selection = $this->selection_from_provider_point( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code );
+		$selection = $this->selection_from_provider_point( $point, $carrier, $family, $fingerprint, $query->location_id, $query->country_code, $query->service_key );
 		$this->save_selection( $selection, $carrier, $method_id, $selection_intent );
 
 		return $this->selection_response( $selection, $method_id );
 	}
 
-	private function selection_from_provider_point( PickupPoint $point, string $carrier, string $family, string $destination_fingerprint, int $location_id, string $country_code ): array {
+	private function selection_from_provider_point( PickupPoint $point, string $carrier, string $family, string $destination_fingerprint, int $location_id, string $country_code, string $service_key = '' ): array {
 		$raw = is_array( $point->raw_reference ) ? $point->raw_reference : array();
 		$source = (string) ( $raw['source'] ?? '' );
 		$type = 'paid' === $source ? 'pvz' : ( 'free' === $source || 'terminal' === $point->type ? 'terminal' : 'pvz' );
@@ -447,7 +450,7 @@ final class CheckoutPickupPointRestController {
 		$point_name = $this->public_provider_point_name( $point, $raw );
 		$snapshot = array(
 			'carrier_key' => $carrier,
-			'service_key' => $carrier,
+			'service_key' => '' !== trim( $service_key ) ? $service_key : $carrier,
 			'pickup_family' => $family,
 			'point_code' => $point->code,
 			'point_id' => $point->code,

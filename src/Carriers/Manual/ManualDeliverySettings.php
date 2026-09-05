@@ -17,6 +17,10 @@ final class ManualDeliverySettings {
 	public const PRICING_MODE_WEIGHT_RANGES = 'weight_ranges';
 	public const PRICING_SETTING_KEY = 'manual_pricing';
 	public const DELIVERY_DAYS_SETTING_KEY = 'manual_delivery_days';
+	public const DELIVERY_TYPE_SETTING_KEY = 'manual_delivery_type';
+	public const DELIVERY_TYPE_COURIER = 'courier';
+	public const DELIVERY_TYPE_PICKUP = 'pickup';
+	public const DELIVERY_TYPE_CUSTOM = 'custom';
 	public const BILLING_STEP_NONE_G = 1;
 	public const BILLING_STEP_100_G = 100;
 	public const BILLING_STEP_500_G = 500;
@@ -155,6 +159,47 @@ final class ManualDeliverySettings {
 	}
 
 	/**
+	 * @return array{type:string,label:string}
+	 */
+	public function delivery_type( int $service_id ): array {
+		$value = $this->settings->get_setting( $service_id, self::DELIVERY_TYPE_SETTING_KEY, array() );
+		if ( ! is_array( $value ) ) {
+			$value = array( 'type' => (string) $value );
+		}
+
+		$type = $this->normalize_delivery_type( (string) ( $value['type'] ?? self::DELIVERY_TYPE_COURIER ) );
+		if ( '' === $type ) {
+			$type = self::DELIVERY_TYPE_COURIER;
+		}
+
+		return array(
+			'type' => $type,
+			'label' => sanitize_text_field( (string) ( $value['label'] ?? '' ) ),
+		);
+	}
+
+	public function save_delivery_type( int $service_id, string $type, string $label = '' ): void {
+		$type = $this->normalize_delivery_type( $type );
+		if ( '' === $type ) {
+			throw new \InvalidArgumentException( 'manual_delivery_type_invalid' );
+		}
+		$label = sanitize_text_field( $label );
+		if ( self::DELIVERY_TYPE_CUSTOM === $type && '' === trim( $label ) ) {
+			throw new \InvalidArgumentException( 'manual_delivery_type_label_required' );
+		}
+
+		$this->settings->set_setting(
+			$service_id,
+			self::DELIVERY_TYPE_SETTING_KEY,
+			array(
+				'type' => $type,
+				'label' => $label,
+			),
+			'json'
+		);
+	}
+
+	/**
 	 * @return array{pricing_mode:string,flat_price_kopecks:int,price_per_kg_kopecks:int,minimum_price_kopecks:?int,billing_weight_step_g:int}
 	 */
 	private function invalid_pricing(): array {
@@ -175,6 +220,10 @@ final class ManualDeliverySettings {
 
 	public function default_billing_weight_step( string $mode ): int {
 		return self::PRICING_MODE_PER_KG === $mode ? self::BILLING_STEP_1_KG : self::BILLING_STEP_NONE_G;
+	}
+
+	public function normalize_delivery_type( string $type ): string {
+		return in_array( $type, array( self::DELIVERY_TYPE_COURIER, self::DELIVERY_TYPE_PICKUP, self::DELIVERY_TYPE_CUSTOM ), true ) ? $type : '';
 	}
 
 	/** @param array<string,mixed> $values */
