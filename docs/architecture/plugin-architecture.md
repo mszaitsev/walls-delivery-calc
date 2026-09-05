@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.1
+Version: 0.152.2
+
+0.152.2 keeps the fix generic in checkout presentation: `CheckoutRateRenderer` accepts keyed WooCommerce meta-entry arrays and no manual-specific renderer branch is added.
 
 0.152.1 keeps the architecture unchanged and fixes manual delivery presentation using existing generic contracts: custom manual rates set `preserve_rate_title`, while pickup rates omit `no_pickup_selection` so the standard pickup selector renders.
 

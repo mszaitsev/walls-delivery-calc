@@ -255,6 +255,52 @@ if ( ! class_exists( 'wpdb' ) ) {
 }
 
 if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	final class WdcManualSmokeMetaData {
+		public function __construct( public string $key, public mixed $value ) {
+		}
+
+		/** @return array{key:string,value:mixed} */
+		public function get_data(): array {
+			return array( 'key' => $this->key, 'value' => $this->value );
+		}
+	}
+
+	class WC_Shipping_Rate {
+		/** @var array<int,WdcManualSmokeMetaData> */
+		private array $meta_data = array();
+
+		/**
+		 * @param array<string,mixed> $meta_data
+		 */
+		public function __construct(
+			public string $id,
+			public string $label,
+			public string $cost,
+			array $meta_data = array()
+		) {
+			$index = 100;
+			foreach ( $meta_data as $key => $value ) {
+				$this->meta_data[ ++$index ] = new WdcManualSmokeMetaData( (string) $key, $value );
+			}
+		}
+
+		public function get_meta( string $key, bool $single = true ): mixed {
+			unset( $single );
+			foreach ( $this->meta_data as $meta ) {
+				if ( $meta->key === $key ) {
+					return $meta->value;
+				}
+			}
+
+			return '';
+		}
+
+		/** @return array<int,WdcManualSmokeMetaData> */
+		public function get_meta_data(): array {
+			return $this->meta_data;
+		}
+	}
+
 	class WC_Shipping_Method {
 		public string $id = '';
 		public int $instance_id = 0;
@@ -266,9 +312,13 @@ if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 		public array $supports = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $rates = array();
+		/** @var array<string,WC_Shipping_Rate> */
+		public array $rate_objects = array();
 
 		public function add_rate( array $rate ): void {
 			$this->rates[] = $rate;
+			$id = (string) ( $rate['id'] ?? '' );
+			$this->rate_objects[ $id ] = new WC_Shipping_Rate( $id, (string) ( $rate['label'] ?? '' ), (string) ( $rate['cost'] ?? '' ), is_array( $rate['meta_data'] ?? null ) ? $rate['meta_data'] : array() );
 		}
 	}
 }
@@ -715,7 +765,28 @@ $zero_wc_package = array(
 	'contents_weight' => 0,
 	'contents' => array( array( 'data' => new WdcManualZeroWeightProduct(), 'quantity' => 1, 'line_total' => 400 ) ),
 );
-$zero_mapper = new WooCommercePackageMapper();
+$checkout_session_for_zero_package = new CheckoutSessionManager();
+$checkout_session_for_zero_package->save_selected_city(
+	array(
+		'id'           => 10,
+		'display_name' => 'Новосибирская область, г Новосибирск',
+		'country_code' => 'RU',
+		'region_name'  => 'Новосибирская область',
+		'place_name'   => 'Новосибирск',
+		'city_name'    => 'Новосибирск',
+	)
+);
+$checkout_session_for_zero_package->save_city_context(
+	array(
+		'location_id'  => 10,
+		'display_name' => 'Новосибирская область, г Новосибирск',
+		'country_code' => 'RU',
+		'region_name'  => 'Новосибирская область',
+		'place_name'   => 'Новосибирск',
+		'city_name'    => 'Новосибирск',
+	)
+);
+$zero_mapper = new WooCommercePackageMapper( null, $checkout_session_for_zero_package );
 $zero_request = $zero_mapper->map( $zero_wc_package );
 wdc_manual_assert( 1 === count( $zero_request->package->items ) && 1 === $zero_request->package->get_total_quantity() && 0 === $zero_request->package->weight_g && 0 === $zero_request->package->get_total_weight_g(), 'WooCommerce package mapper must preserve zero-weight physical items without substituting 1 g or dropping the item.' );
 $zero_result = $orchestrator->calculate( $zero_request, array(), RateSorter::CHEAPEST, false );
@@ -725,10 +796,10 @@ NewShippingMethod::configure(
 	$orchestrator,
 	$zero_mapper,
 	new WooCommerceRateMapper(),
-	new CheckoutSessionManager(),
+	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.1' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.2' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -736,6 +807,24 @@ $zero_method = new NewShippingMethod();
 $zero_method->calculate_shipping( $zero_wc_package );
 $zero_wc_keys = array_values( array_map( static fn ( array $rate ): string => (string) ( $rate['meta_data']['service_key'] ?? '' ), array_filter( $zero_method->rates, static fn ( array $rate ): bool => ManualDeliverySettings::CARRIER_KEY === (string) ( $rate['meta_data']['carrier_key'] ?? '' ) && str_starts_with( (string) ( $rate['meta_data']['service_key'] ?? '' ), 'manual_zero_' ) ) ) );
 wdc_manual_assert( array( 'manual_zero_flat' ) === $zero_wc_keys, 'NewShippingMethod must render only the flat manual rate for a zero-weight physical WooCommerce product.' );
+$actual_pickup_rate = $zero_method->rate_objects['manual:manual_pickup_b'] ?? null;
+wdc_manual_assert( $actual_pickup_rate instanceof WC_Shipping_Rate, 'NewShippingMethod::calculate_shipping must create an actual WC_Shipping_Rate-like object for manual pickup.' );
+wdc_manual_assert( DeliveryType::PICKUP === $actual_pickup_rate->get_meta( 'delivery_type', true ) && true === $actual_pickup_rate->get_meta( 'requires_pickup_point', true ) && 'manual:manual_pickup_b:pickup' === $actual_pickup_rate->get_meta( 'pickup_family', true ) && empty( $actual_pickup_rate->get_meta( 'no_pickup_selection', true ) ), 'Actual WC_Shipping_Rate manual pickup metadata must preserve pickup selector capabilities.' );
+$actual_meta_shape = $actual_pickup_rate->get_meta_data();
+wdc_manual_assert( array() !== $actual_meta_shape && array_keys( $actual_meta_shape ) !== range( 0, count( $actual_meta_shape ) - 1 ), 'Manual smoke WC_Shipping_Rate stub must expose non-list meta objects like real WooCommerce can.' );
+ob_start();
+( new CheckoutRateRenderer( new CheckoutSessionManager() ) )->render( $actual_pickup_rate, 0 );
+$actual_pickup_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $actual_pickup_html, 'data-wdc-pickup-checkout' ) && str_contains( $actual_pickup_html, 'data-wdc-pickup-open' ) && str_contains( $actual_pickup_html, 'Выбрать пункт выдачи' ), 'CheckoutRateRenderer must render the pickup selector for the actual WC_Shipping_Rate produced by NewShippingMethod::add_rate.' );
+$manual_pickup_points->replace_points( $pickup_b_id, array( array( 'code' => 'manual-b-1', 'title' => 'ПВЗ B', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 2', 'latitude' => 55.0302, 'longitude' => 82.9204, 'active' => 1 ) ) );
+$coords_method = new NewShippingMethod();
+$coords_method->calculate_shipping( $zero_wc_package );
+$coords_pickup_rate = $coords_method->rate_objects['manual:manual_pickup_b'] ?? null;
+wdc_manual_assert( $coords_pickup_rate instanceof WC_Shipping_Rate, 'Manual pickup rate with coordinates must still be produced through NewShippingMethod.' );
+ob_start();
+( new CheckoutRateRenderer( new CheckoutSessionManager() ) )->render( $coords_pickup_rate, 0 );
+$coords_pickup_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $coords_pickup_html, 'data-wdc-pickup-open' ) && str_contains( $coords_pickup_html, 'Выбрать пункт выдачи' ), 'Manual pickup coordinates must not control whether the selector button is rendered.' );
 
 wdc_manual_assert( $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'RU' ), 'Selected-country manual service must be available for selected country.' );
 wdc_manual_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'KZ' ), 'Selected-country manual service must not be available for an unselected country.' );

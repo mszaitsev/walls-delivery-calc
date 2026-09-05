@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.1
+Version: 0.152.2
+
+0.152.2 fixes the manual pickup selector integration against the real WooCommerce shipping-rate metadata shape. `CheckoutRateRenderer` now normalizes keyed `WC_Meta_Data` entries instead of treating any associative array from `WC_Shipping_Rate::get_meta_data()` as already-normalized metadata, so manual pickup rates produced through `NewShippingMethod::add_rate()` render the existing "Выбрать пункт выдачи" control.
 
 0.152.1 fixes manual delivery type presentation after live checkout testing. Custom manual delivery types now mark the carrier-owned title with `preserve_rate_title`, so `CheckoutOrchestrator` service decoration does not hide the custom label. Normal manual pickup rates no longer set `no_pickup_selection`; that flag remains a generic suppression contract, not a "pickup not selected yet" marker, so manual pickup uses the existing checkout pickup selector button, session selection, validation, and provider-backed point search.
 

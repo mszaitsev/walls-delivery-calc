@@ -238,7 +238,7 @@ final class CheckoutRateRenderer {
 	 * @return array<string,mixed>
 	 */
 	private function normalize_meta_data( array $meta ): array {
-		if ( $this->is_assoc( $meta ) ) {
+		if ( $this->is_assoc( $meta ) && ! $this->contains_meta_entries( $meta ) ) {
 			return $meta;
 		}
 
@@ -263,6 +263,22 @@ final class CheckoutRateRenderer {
 		}
 
 		return $normalized;
+	}
+
+	/**
+	 * @param array<mixed> $meta
+	 */
+	private function contains_meta_entries( array $meta ): bool {
+		foreach ( $meta as $entry ) {
+			if ( is_object( $entry ) && ( method_exists( $entry, 'get_data' ) || isset( $entry->key ) ) ) {
+				return true;
+			}
+			if ( is_array( $entry ) && array_key_exists( 'key', $entry ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
