@@ -27,6 +27,7 @@ function __( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
 function esc_url( mixed $value ): string { return (string) $value; }
+function wp_verify_nonce( string $nonce, string $action ): bool { return 'nonce' === $nonce && 'wp_rest' === $action; }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -425,6 +426,7 @@ use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceSessionBootstrapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -454,8 +456,12 @@ use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointProviderRegistry;
+use WallsShop\WDC\Pickup\Providers\CarrierPickupPointQuery;
 use WallsShop\WDC\Pickup\Providers\CheckoutPickupPointProviderQueryResolver;
 use WallsShop\WDC\Pickup\Providers\CarrierPickupPointSelectionQuery;
+use WallsShop\WDC\Pickup\Providers\PickupCargoConstraints;
+use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wdc_options']['wdc_core_settings'] = array( SettingsRepository::SHOP_PROCESSING_WORKING_DAYS_KEY => 0 );
@@ -574,8 +580,8 @@ $manual_pickup_points->replace_points(
 $pickup_rate_a = $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->rates[0] ?? null;
 wdc_manual_assert( null !== $pickup_rate_a && DeliveryType::PICKUP === $pickup_rate_a->delivery_type && $pickup_rate_a->requires_pickup_point && 'manual:manual_pickup_a:pickup' === (string) $pickup_rate_a->meta['pickup_family'], 'Manual pickup rate must use DeliveryType::PICKUP, require pickup point, and isolate family by service key.' );
 $provider = new ManualPickupPointProvider( $services, $manual_pickup_points );
-$registry = new CarrierPickupPointProviderRegistry( array( $provider ) );
-wdc_manual_assert( $registry->has( ManualDeliverySettings::CARRIER_KEY ) && 1 === count( $registry->all() ), 'Manual pickup provider must be registered once for the manual carrier.' );
+$pickup_provider_registry = new CarrierPickupPointProviderRegistry( array( $provider ) );
+wdc_manual_assert( $pickup_provider_registry->has( ManualDeliverySettings::CARRIER_KEY ) && 1 === count( $pickup_provider_registry->all() ), 'Manual pickup provider must be registered once for the manual carrier.' );
 $session_manager = new CheckoutSessionManager();
 $rate_mapper = new WooCommerceRateMapper();
 $wc_rate = $rate_mapper->map( $pickup_rate_a );
@@ -583,10 +589,81 @@ $session_manager->save_rates( array( $wc_rate['id'] => array_merge( $wc_rate['me
 $resolver = new CheckoutPickupPointProviderQueryResolver( $session_manager );
 $query = $resolver->resolve( $wc_rate['id'], ManualDeliverySettings::CARRIER_KEY, 'manual:manual_pickup_a:pickup' );
 wdc_manual_assert( 'manual_pickup_a' === $query->normalized_service_key() && 'Новосибирск' === $query->location_name && 'Новосибирская область' === $query->region_name, 'Pickup provider query must carry trusted concrete service key and canonical locality from rate metadata.' );
+$textual_locator_query = new CarrierPickupPointQuery(
+	ManualDeliverySettings::CARRIER_KEY,
+	0,
+	'RU',
+	'',
+	null,
+	null,
+	new PickupCargoConstraints( 1000, 0, 0, 1000, 2 ),
+	CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
+	50,
+	50,
+	'manual_pickup_a',
+	'Новосибирская область',
+	'Новосибирск'
+);
+wdc_manual_assert( array() === $textual_locator_query->validate(), 'CarrierPickupPointQuery must accept country+region+location textual locality as a valid destination locator when location_id is 0.' );
+$missing_locator_query = new CarrierPickupPointQuery(
+	ManualDeliverySettings::CARRIER_KEY,
+	0,
+	'RU',
+	'',
+	null,
+	null,
+	new PickupCargoConstraints( 1000, 0, 0, 1000, 1 ),
+	CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP,
+	50,
+	50,
+	'manual_pickup_a'
+);
+wdc_manual_assert( array() !== $missing_locator_query->validate(), 'CarrierPickupPointQuery must reject snapshots without any location id, textual locality, fallback address, or coordinates.' );
+$textual_snapshot = $wc_rate['meta_data']['rate_meta']['pickup_provider_query'];
+$textual_snapshot['location_id'] = 0;
+$textual_snapshot['region_name'] = 'Новосибирская область';
+$textual_snapshot['location_name'] = 'Новосибирск';
+$textual_snapshot['cargo']['places_count'] = 2;
+$textual_session_rate = array_merge(
+	$wc_rate['meta_data'],
+	array(
+		'rate_id' => $wc_rate['id'],
+		'pickup_provider_query' => $textual_snapshot,
+		'rate_meta' => array_merge( $wc_rate['meta_data']['rate_meta'], array( 'pickup_provider_query' => $textual_snapshot ) ),
+	)
+);
+$session_manager->save_rates( array( $wc_rate['id'] => $textual_session_rate, NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'] => $textual_session_rate ) );
+$textual_query = $resolver->resolve( NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], ManualDeliverySettings::CARRIER_KEY, 'manual:manual_pickup_a:pickup' );
+wdc_manual_assert( 0 === $textual_query->location_id && 2 === $textual_query->cargo->places_count && 'Новосибирск' === $textual_query->location_name, 'Checkout pickup provider resolver must accept textual locality with location_id=0 and multi-place cargo.' );
 $points_a = $provider->search( $query );
 wdc_manual_assert( 1 === count( $points_a ) && 'manual-a-1' === $points_a[0]->code, 'Manual provider search must return only points belonging to the selected manual service and locality.' );
 wdc_manual_assert( null === $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, 'manual-b-1' ) ), 'Manual provider resolve_selection must reject a point code from another manual service.' );
 wdc_manual_assert( $provider->resolve_selection( new CarrierPickupPointSelectionQuery( $query, 'manual-a-1' ) ) instanceof \WallsShop\WDC\Domain\Pickup\PickupPoint, 'Manual provider resolve_selection must re-resolve selected point server-side.' );
+$_SERVER['HTTP_X_WP_NONCE'] = 'nonce';
+$pickup_rest = new PickupPointsRestController(
+	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	$pickup_provider_registry,
+	$resolver,
+	null,
+	new WooCommerceSessionBootstrapper()
+);
+$rest_points_without_coords = $pickup_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
+wdc_manual_assert( is_array( $rest_points_without_coords ) && 1 === count( $rest_points_without_coords ) && 'manual-a-1' === (string) ( $rest_points_without_coords[0]['point_code'] ?? '' ), 'PickupPointsRestController must return a manual point through resolver/provider when location_id is 0 and textual locality is present.' );
+$manual_pickup_points->replace_points(
+	$pickup_a_id,
+	array(
+		array( 'code' => 'manual-a-1', 'title' => 'ПВЗ A', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'latitude' => 55.0302, 'longitude' => 82.9204, 'active' => 1 ),
+	)
+);
+$rest_points_with_coords = $pickup_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup', 'limit' => 50 ) );
+wdc_manual_assert( is_array( $rest_points_with_coords ) && 1 === count( $rest_points_with_coords ) && 'manual-a-1' === (string) ( $rest_points_with_coords[0]['point_code'] ?? '' ) && 55.0302 === (float) $rest_points_with_coords[0]['lat'], 'Manual pickup REST must return points with coordinates through the same generic resolver path.' );
 $manual_pickup_points->replace_points( $pickup_a_id, array( array( 'code' => 'manual-a-1', 'title' => 'ПВЗ A', 'country_code' => 'RU', 'location_name' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'address' => 'Красный проспект, 1', 'active' => 0 ) ) );
 wdc_manual_assert( ! $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->success, 'Manual pickup rate must disappear after deactivating the last eligible pickup point.' );
 
@@ -799,7 +876,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.3' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.4' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -825,6 +902,76 @@ ob_start();
 ( new CheckoutRateRenderer( new CheckoutSessionManager() ) )->render( $coords_pickup_rate, 0 );
 $coords_pickup_html = (string) ob_get_clean();
 wdc_manual_assert( str_contains( $coords_pickup_html, 'data-wdc-pickup-open' ) && str_contains( $coords_pickup_html, 'Выбрать пункт выдачи' ), 'Manual pickup coordinates must not control whether the selector button is rendered.' );
+$manual_pickup_points->replace_points(
+	$pickup_b_id,
+	array(
+		array( 'code' => 'manual-b-1', 'title' => 'ПВЗ B', 'country_code' => 'RU', 'location_name' => 'Тестград', 'region_name' => 'Тестовая область', 'address' => 'Тестовая, 2', 'active' => 1 ),
+	)
+);
+WC()->session = new WdcManualSmokeSession();
+$cold_checkout_session = new CheckoutSessionManager();
+$cold_checkout_session->save_selected_city(
+	array(
+		'display_name' => 'Тестовая область, г Тестград',
+		'country_code' => 'RU',
+		'region_name'  => 'Тестовая область',
+		'place_name'   => 'Тестград',
+		'city_name'    => 'Тестград',
+	)
+);
+$cold_checkout_session->save_city_context(
+	array(
+		'location_id'  => 0,
+		'display_name' => 'Тестовая область, г Тестград',
+		'country_code' => 'RU',
+		'region_name'  => 'Тестовая область',
+		'place_name'   => 'Тестград',
+		'city_name'    => 'Тестград',
+	)
+);
+$cold_wc_package = $zero_wc_package;
+$cold_wc_package['destination']['city'] = 'Тестград';
+$cold_wc_package['destination']['state'] = 'Тестовая область';
+$cold_mapper = new WooCommercePackageMapper( null, $cold_checkout_session );
+NewShippingMethod::configure(
+	$orchestrator,
+	$cold_mapper,
+	new WooCommerceRateMapper(),
+	$cold_checkout_session,
+	$rules,
+	new SettingsRepository(),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.4' ),
+	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
+	$manager
+);
+$cold_method = new NewShippingMethod();
+$cold_method->calculate_shipping( $cold_wc_package );
+$cold_pickup_rate = $cold_method->rate_objects['manual:manual_pickup_b'] ?? null;
+wdc_manual_assert( $cold_pickup_rate instanceof WC_Shipping_Rate, 'Cold first checkout calculation must produce a manual pickup WC rate.' );
+$cold_saved_rate = $cold_checkout_session->rates()['manual:manual_pickup_b'] ?? array();
+$cold_rate_meta = is_array( $cold_saved_rate['rate_meta'] ?? null ) ? $cold_saved_rate['rate_meta'] : array();
+$cold_provider_snapshot = is_array( $cold_rate_meta['pickup_provider_query'] ?? null ) ? $cold_rate_meta['pickup_provider_query'] : array();
+wdc_manual_assert( 0 === (int) ( $cold_provider_snapshot['location_id'] ?? -1 ) && 'Тестград' === (string) ( $cold_provider_snapshot['location_name'] ?? '' ) && 'Тестовая область' === (string) ( $cold_provider_snapshot['region_name'] ?? '' ), 'Cold first checkout calculation must save a provider snapshot that relies on textual locality when location_id is 0.' );
+ob_start();
+( new CheckoutRateRenderer( $cold_checkout_session ) )->render( $cold_pickup_rate, 0 );
+$cold_pickup_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $cold_pickup_html, 'data-wdc-pickup-checkout' ) && str_contains( $cold_pickup_html, 'data-wdc-pickup-open' ) && str_contains( $cold_pickup_html, 'Выбрать пункт выдачи' ), 'Cold first checkout request must render the manual pickup selector before any reload.' );
+$cold_rest = new PickupPointsRestController(
+	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	null,
+	$pickup_provider_registry,
+	new CheckoutPickupPointProviderQueryResolver( $cold_checkout_session ),
+	null,
+	new WooCommerceSessionBootstrapper()
+);
+$cold_rest_points = $cold_rest->points( array( 'carrier' => 'manual', 'shipping_method_id' => 'manual:manual_pickup_b', 'pickup_family' => 'manual:manual_pickup_b:pickup', 'limit' => 50 ) );
+wdc_manual_assert( is_array( $cold_rest_points ) && 1 === count( $cold_rest_points ) && 'manual-b-1' === (string) ( $cold_rest_points[0]['point_code'] ?? '' ), 'Manual pickup provider context must be available to REST immediately after the first checkout calculation.' );
 
 wdc_manual_assert( $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'RU' ), 'Selected-country manual service must be available for selected country.' );
 wdc_manual_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'manual_nsk_courier' ), 'KZ' ), 'Selected-country manual service must not be available for an unselected country.' );

@@ -39,11 +39,45 @@ function checkoutHarness() {
 	};
 	const instrumented = checkoutSource.replace(
 		/\}\)\(window, document\);\s*$/,
-		'window.__wdcPickupRoutingTest = { shippingMethodFamily: shippingMethodFamily, pickupCarrierFromFamily: pickupCarrierFromFamily, withCarrierContext: withCarrierContext, prefetchIdentity: prefetchIdentity, prefetchIdentityMatches: prefetchIdentityMatches }; })(window, document);'
+		'window.__wdcPickupRoutingTest = { shippingMethodFamily: shippingMethodFamily, pickupCarrierFromFamily: pickupCarrierFromFamily, withCarrierContext: withCarrierContext, prefetchIdentity: prefetchIdentity, prefetchIdentityMatches: prefetchIdentityMatches, registerPickupContainerContext: registerPickupContainerContext, isPickupRateValue: isPickupRateValue }; })(window, document);'
 	);
 	vm.runInNewContext(instrumented, sandbox, { filename: 'wdc-pickup-checkout.js' });
 
 	return sandbox.window.__wdcPickupRoutingTest;
+}
+
+function coldCheckoutHarness() {
+	const documentObject = {
+		body: {
+			addEventListener() {},
+			dispatchEvent() { return true; },
+			querySelectorAll() { return []; }
+		},
+		addEventListener() {},
+		querySelector() { return null; },
+		querySelectorAll() { return []; }
+	};
+	const sandbox = {
+		window: {
+			wdcPickupCheckout: {
+				carrier: '',
+				pickupFamilies: [],
+				initialContext: {}
+			}
+		},
+		document: documentObject,
+		console,
+		setTimeout,
+		clearTimeout,
+		AbortController: class AbortController {}
+	};
+	const instrumented = checkoutSource.replace(
+		/\}\)\(window, document\);\s*$/,
+		'window.__wdcPickupRoutingTest = { shippingMethodFamily: shippingMethodFamily, registerPickupContainerContext: registerPickupContainerContext, isPickupRateValue: isPickupRateValue, withCarrierContext: withCarrierContext }; })(window, document);'
+	);
+	vm.runInNewContext(instrumented, sandbox, { filename: 'wdc-pickup-checkout.js' });
+
+	return { api: sandbox.window.__wdcPickupRoutingTest, window: sandbox.window };
 }
 
 async function apiHarness() {
@@ -106,6 +140,27 @@ async function apiHarness() {
 	assert.strictEqual(context.carrier_key, 'manual');
 	assert.strictEqual(context.pickup_family, 'manual:manual_nsk:pickup');
 	assert.strictEqual(context.shipping_method_id, 'manual:manual_nsk');
+
+	const cold = coldCheckoutHarness();
+	const coldContainer = {
+		getAttribute(name) {
+			return name === 'data-shipping-method-id' ? 'manual:manual_cold_pickup' : '';
+		},
+		querySelector(selector) {
+			if (selector === '[data-wdc-pickup-family]') {
+				return { value: 'manual:manual_cold_pickup:pickup' };
+			}
+			return null;
+		}
+	};
+	assert.strictEqual(cold.api.isPickupRateValue('manual:manual_cold_pickup'), false);
+	cold.api.registerPickupContainerContext(coldContainer);
+	assert.strictEqual(cold.api.shippingMethodFamily('manual:manual_cold_pickup'), 'manual:manual_cold_pickup:pickup');
+	assert.strictEqual(cold.api.isPickupRateValue('manual:manual_cold_pickup'), true);
+	assert.strictEqual(JSON.stringify(cold.window.wdcPickupCheckout.pickupFamilies), JSON.stringify(['manual:manual_cold_pickup:pickup']));
+	const coldContext = cold.api.withCarrierContext({ carrier: 'russian_post' }, 'manual:manual_cold_pickup');
+	assert.strictEqual(coldContext.carrier, 'manual');
+	assert.strictEqual(coldContext.pickup_family, 'manual:manual_cold_pickup:pickup');
 
 	const explicitContext = checkout.withCarrierContext({ carrier: 'russian_post', pickup_family: 'manual:manual_shop:pickup' }, 'manual:manual_shop');
 	assert.strictEqual(explicitContext.carrier, 'manual');

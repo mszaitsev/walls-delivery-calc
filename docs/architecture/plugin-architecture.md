@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.3
+Version: 0.152.4
+
+0.152.4 keeps the fix generic in Pickup Framework boundaries: `CarrierPickupPointQuery` owns destination locator validity, checkout provider resolution reuses that contract, and cold checkout pickup capability discovery reads rendered rate DOM before hiding selectors. No manual-specific renderer, REST endpoint, fake location ID, or Shipment Framework branch is added.
 
 0.152.3 keeps pickup routing generic: multi-segment pickup families route by the first carrier segment and final `pickup` marker, REST points routes validate carrier/family/method consistency, and no manual-specific frontend/provider branch is introduced.
 

@@ -51,6 +51,7 @@ window.wdcPickupCheckout.pickupRateCapabilities = pickupRateCapabilities;
 var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
+		registerPickupContainerContext(container);
 		if (container.dataset.wdcPickupReady) {
 			toggleForMethod(container);
 			schedulePrefetch();
@@ -62,6 +63,26 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		rememberDestinationFingerprint();
 		toggleForMethod(container);
 		schedulePrefetch();
+	}
+
+	function registerPickupContainerContext(container) {
+		var method = containerMethod(container);
+		var family = containerSelectedPickupFamily(container);
+		if (!family || !isPickupFamily(family)) {
+			return;
+		}
+		if (pickupFamilies.indexOf(family) === -1) {
+			pickupFamilies.push(family);
+		}
+		if (method && !pickupRateCapabilities[method]) {
+			pickupRateCapabilities[method] = {};
+		}
+		if (!window.wdcPickupCheckout) {
+			window.wdcPickupCheckout = {};
+		}
+		window.wdcPickupCheckout.pickupFamilies = pickupFamilies;
+		window.wdcPickupCheckout.pickupRateCapabilities = pickupRateCapabilities;
+		window.wdcPickupCheckout.pickup_rate_capabilities = pickupRateCapabilities;
 	}
 
 	function openModal(container, method) {
@@ -1935,6 +1956,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return true;
 		}
 		if (/:pickup(?::|$)/.test(value)) {
+			return true;
+		}
+		if (isPickupFamily(shippingMethodFamily(value))) {
 			return true;
 		}
 		return pickupFamilies.some(function (family) {

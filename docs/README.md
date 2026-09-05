@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.3
+Version: 0.152.4
+
+0.152.4 hardens manual pickup integration on the first checkout load. The pickup frontend now learns current pickup families from rendered rate DOM before toggling visibility, so a cold session does not hide the manual selector until a reload. Registry-backed pickup query validation now accepts canonical textual locality (`country_code + region_name + location_name`) when `location_id=0`, and multi-place cargo follows the shared `places_count >= 1` contract.
 
 0.152.3 fixes manual pickup provider routing in the existing pickup picker. Pickup family parsing now treats the first family segment as the carrier and the final segment as the `pickup` marker, so `manual:<service_key>:pickup` routes to the single manual provider. Generic pickup requests without a trusted carrier context fail closed instead of silently falling back to Russian Post points.
 

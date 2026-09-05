@@ -458,14 +458,28 @@ final class WooCommercePackageMapper {
 		if ( $city_id > 0 ) {
 			return $this->location_context_result( (string) $city_id, 'frontend', 'resolved', null, $city );
 		}
+		if ( $this->has_textual_location_identity( $city ) ) {
+			return $this->location_context_result( '', 'frontend_textual', 'resolved', null, $city );
+		}
 
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
 		$context_id = $this->positive_location_id( $context['location_id'] ?? $context['id'] ?? '' );
 		if ( $context_id > 0 ) {
 			return $this->location_context_result( (string) $context_id, 'session', 'resolved', null, $context );
 		}
+		if ( $this->has_textual_location_identity( $context ) ) {
+			return $this->location_context_result( '', 'session_textual', 'resolved', null, $context );
+		}
 
 		return $this->recover_checkout_location_context( $destination, $address, $country_code );
+	}
+
+	/** @param array<string,mixed> $context */
+	private function has_textual_location_identity( array $context ): bool {
+		$region = trim( (string) ( $context['region_name'] ?? $context['state_value'] ?? '' ) );
+		$location = trim( (string) ( $context['place_name'] ?? $context['settlement_name'] ?? $context['city_name'] ?? '' ) );
+
+		return '' !== $region && '' !== $location;
 	}
 
 	/**

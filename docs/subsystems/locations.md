@@ -1,6 +1,8 @@
 # Locations And Pickup
 
-Version: 0.152.3
+Version: 0.152.4
+
+Manual pickup provider queries do not require a persistent `wp_wdc_locations.id`. A checkout/provider snapshot with `location_id=0` remains valid when it carries canonical textual locality: `country_code + region_name + location_name`. This is the same durable identity used by manual geography and manual pickup point storage.
 
 Manual pickup points use the same textual locality identity as manual geography: `country_code + resolved_place_name() + region_name`. Admin UI may use a current `wp_wdc_locations.id` only to reload the canonical `Location` during save; persisted manual pickup rows store `country_code`, `location_name`, and `region_name`, never the location ID. Point codes are stable per manual service and survive title/address edits so saved checkout/order pickup snapshots remain meaningful.
 

@@ -114,9 +114,10 @@ final class CheckoutPickupPointProviderQueryResolver {
 			&& (string) ( $snapshot['carrier_key'] ?? '' ) === $requested_carrier
 			&& '' !== trim( (string) ( $snapshot['service_key'] ?? '' ) )
 			&& CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP === (string) ( $snapshot['purpose'] ?? '' )
-			&& (int) ( $snapshot['location_id'] ?? 0 ) > 0
 			&& '' !== trim( (string) ( $snapshot['country_code'] ?? '' ) )
-			&& '' !== trim( (string) ( $snapshot['destination_fingerprint'] ?? '' ) );
+			&& '' !== trim( (string) ( $snapshot['destination_fingerprint'] ?? '' ) )
+			&& $this->valid_destination_locator( $snapshot )
+			&& $this->valid_coordinates( $snapshot );
 	}
 
 	/** @param array<string,mixed> $snapshot */
@@ -126,13 +127,12 @@ final class CheckoutPickupPointProviderQueryResolver {
 			|| (string) ( $snapshot['carrier_key'] ?? '' ) !== $requested_carrier
 			|| '' === trim( (string) ( $snapshot['service_key'] ?? '' ) )
 			|| CarrierPickupPointQuery::PURPOSE_DESTINATION_PICKUP !== (string) ( $snapshot['purpose'] ?? '' )
-			|| (int) ( $snapshot['location_id'] ?? 0 ) <= 0
 			|| '' === trim( (string) ( $snapshot['country_code'] ?? '' ) )
 			|| '' === trim( (string) ( $snapshot['destination_fingerprint'] ?? '' ) )
 		) {
 			return false;
 		}
-		if ( ! $this->valid_coordinates( $snapshot ) ) {
+		if ( ! $this->valid_destination_locator( $snapshot ) || ! $this->valid_coordinates( $snapshot ) ) {
 			return false;
 		}
 		$cargo = is_array( $snapshot['cargo'] ?? null ) ? $snapshot['cargo'] : array();
@@ -142,7 +142,20 @@ final class CheckoutPickupPointProviderQueryResolver {
 			}
 		}
 
-		return 1 === (int) ( $cargo['places_count'] ?? 0 );
+		return (int) ( $cargo['places_count'] ?? 0 ) >= 1;
+	}
+
+	/** @param array<string,mixed> $snapshot */
+	private function valid_destination_locator( array $snapshot ): bool {
+		return CarrierPickupPointQuery::valid_destination_locator(
+			(int) ( $snapshot['location_id'] ?? 0 ),
+			(string) ( $snapshot['country_code'] ?? '' ),
+			(string) ( $snapshot['region_name'] ?? '' ),
+			(string) ( $snapshot['location_name'] ?? '' ),
+			(string) ( $snapshot['fallback_address'] ?? '' ),
+			$snapshot['latitude'] ?? null,
+			$snapshot['longitude'] ?? null
+		);
 	}
 
 	/** @param array<string,mixed> $snapshot */
