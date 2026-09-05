@@ -136,7 +136,7 @@ final class CheckoutRateRenderer {
 		$family = trim( (string) ( $meta['pickup_family'] ?? '' ) );
 		$family = '' !== $family ? $this->session_manager->normalize_pickup_family( $family ) : $this->session_manager->shipping_method_family( $rate_id );
 		$selection = $this->session_manager->checkout_pickup_point_for_family( $family );
-		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id );
+		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id, $family );
 		$has_selection = $matches
 			&& array() !== $selection
 			&& '' !== trim( (string) ( $selection['point_code'] ?? '' ) )

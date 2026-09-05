@@ -1,6 +1,6 @@
 # Locations And Pickup
 
-Version: 0.152.7
+Version: 0.152.8
 
 Manual pickup provider lookup can be restored from the current WooCommerce shipping-rate metadata even when `wdc_platform_rates` has not been written on the same request. The locality identity is still textual and server-owned: no synthetic `location_id` is introduced for cached-rate provider resolution.
 

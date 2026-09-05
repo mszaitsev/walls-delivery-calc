@@ -371,8 +371,12 @@ final class CheckoutSessionManager {
 		return array();
 	}
 
-	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
-		$rate_family = $this->shipping_method_family( $rateId );
+	public function pickup_selection_matches( string $carrierKey, string $rateId, string $pickupFamily = '' ): bool {
+		$explicit_family = $this->normalize_pickup_family( $pickupFamily );
+		if ( '' !== $explicit_family && ! str_ends_with( $explicit_family, ':pickup' ) ) {
+			return false;
+		}
+		$rate_family = '' !== $explicit_family ? $explicit_family : $this->shipping_method_family( $rateId );
 		$selection = str_ends_with( $rate_family, ':pickup' ) ? $this->pickup_selection_for_family( $rate_family ) : $this->pickup_selection();
 		if ( array() === $selection || ! $this->selection_has_point_identity( $selection ) ) {
 			return false;

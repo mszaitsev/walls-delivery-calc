@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.7
+Version: 0.152.8
 
-0.152.7 hardens manual pickup selection save. Registry-backed checkout selection now resolves the canonical pickup family from the authoritative server-side shipping rate metadata, using the current WooCommerce rate first and the WDC snapshot only as fallback; browser `pickup_family` remains a consistency assertion, so service-specific manual families such as `manual:<service_key>:pickup` save without a second request or string-derived family guess.
+0.152.8 hardens checkout pickup selection rendering. When a rate already carries authoritative `pickup_family` metadata, selection matching uses that exact family instead of deriving a family from the shipping method id, so service-specific manual pickup selections saved under `manual:<service_key>:pickup` render their selected card immediately after save and after reload.
 
 0.152.4 hardens manual pickup integration on the first checkout load. The pickup frontend now learns current pickup families from rendered rate DOM before toggling visibility, so a cold session does not hide the manual selector until a reload. Registry-backed pickup query validation now accepts canonical textual locality (`country_code + region_name + location_name`) when `location_id=0`, and multi-place cargo follows the shared `places_count >= 1` contract.
 

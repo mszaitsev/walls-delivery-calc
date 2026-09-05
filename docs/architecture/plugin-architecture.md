@@ -1,8 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.7
+Version: 0.152.8
 
-0.152.7 keeps the pickup framework generic while fixing manual pickup selection persistence. Registry-backed save flows must derive `pickup_family`, provider query, and destination fingerprint from authoritative rate metadata instead of parsing the shipping method id; browser family/carrier values are assertions and mismatches fail closed.
+0.152.8 keeps the pickup framework generic while fixing selected pickup card rendering for service-specific pickup families. Presentation layers that already have rate metadata must pass the explicit authoritative `pickup_family` into session matching; `shipping_method_family(rate_id)` remains only the fallback for legacy callers without metadata.
 
 0.152.4 keeps the fix generic in Pickup Framework boundaries: `CarrierPickupPointQuery` owns destination locator validity, checkout provider resolution reuses that contract, and cold checkout pickup capability discovery reads rendered rate DOM before hiding selectors. No manual-specific renderer, REST endpoint, fake location ID, or Shipment Framework branch is added.
 

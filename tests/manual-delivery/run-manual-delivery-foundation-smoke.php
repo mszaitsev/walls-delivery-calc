@@ -769,6 +769,36 @@ $wrong_point_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual
 wdc_manual_assert( is_array( $wrong_point_save ) && 'not_found' === (string) ( $wrong_point_save['code'] ?? '' ), 'Manual pickup selection save must re-resolve the stable point code server-side and reject points owned by another manual service.' );
 $saved_state = $cached_wc_selection_rest->state( array( 'pickup_family' => 'manual:manual_pickup_a:pickup' ) );
 wdc_manual_assert( is_array( $saved_state ) && 'manual-a-1' === (string) ( $saved_state['selected_pickup_point']['point_code'] ?? '' ) && 'manual:manual_pickup_a:pickup' === (string) ( $saved_state['active_pickup_family'] ?? '' ), 'Checkout state must expose the manual point saved under the authoritative service-specific family.' );
+wdc_manual_assert( true === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:manual_pickup_a:pickup' ), 'Manual selection matching must accept the exact authoritative service-specific pickup family.' );
+wdc_manual_assert( false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:manual_pickup_a' ) && false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:pickup' ) && false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:other_service:pickup' ), 'Manual selection matching must not introduce manual:<service>, manual:pickup, or other-service compatibility aliases.' );
+ob_start();
+( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate, 0 );
+$saved_manual_pickup_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $saved_manual_pickup_html, 'Тестовый ПВЗ' ) && str_contains( $saved_manual_pickup_html, 'Красный проспект, 1' ) && str_contains( $saved_manual_pickup_html, 'Комментарий:' ) && str_contains( $saved_manual_pickup_html, 'Отличный ПВЗ' ) && str_contains( $saved_manual_pickup_html, 'Изменить пункт выдачи' ) && str_contains( $saved_manual_pickup_html, 'data-wdc-pickup-empty-open aria-hidden="true" hidden' ), 'CheckoutRateRenderer must show the saved manual pickup card immediately after REST save by matching the authoritative pickup_family from rate metadata.' );
+$pickup_rate_b = $carrier->quote( $request_for( 'manual_pickup_b', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->rates[0] ?? null;
+$wc_rate_b = $pickup_rate_b ? $rate_mapper->map( $pickup_rate_b ) : array();
+$cached_wc_rate_b = new WC_Shipping_Rate( (string) ( $wc_rate_b['id'] ?? '' ), (string) ( $wc_rate_b['label'] ?? '' ), (string) ( $wc_rate_b['cost'] ?? '' ), is_array( $wc_rate_b['meta_data'] ?? null ) ? $wc_rate_b['meta_data'] : array() );
+$empty_wdc_rates_session->save_pickup_selection_for_family(
+	'manual:manual_pickup_b:pickup',
+	array(
+		'carrier_key' => 'manual',
+		'service_key' => 'manual_pickup_b',
+		'pickup_family' => 'manual:manual_pickup_b:pickup',
+		'point_code' => 'manual-b-1',
+		'point_address' => 'Красный проспект, 2',
+		'point_title' => 'ПВЗ B',
+		'rate_id' => 'manual:manual_pickup_b',
+	)
+);
+ob_start();
+( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate, 0 );
+$manual_a_isolation_html = (string) ob_get_clean();
+ob_start();
+( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate_b, 0 );
+$manual_b_isolation_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $manual_a_isolation_html, 'Тестовый ПВЗ' ) && ! str_contains( $manual_a_isolation_html, 'ПВЗ B' ) && str_contains( $manual_b_isolation_html, 'ПВЗ B' ) && ! str_contains( $manual_b_isolation_html, 'Тестовый ПВЗ' ), 'CheckoutRateRenderer must keep multiple manual pickup service selections isolated by explicit pickup_family.' );
+$empty_wdc_rates_session->save_city_context( array( 'country_code' => 'RU', 'region_name' => 'Московская область', 'city_name' => 'Москва' ) );
+wdc_manual_assert( false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:manual_pickup_a:pickup' ), 'Manual selection matching must still fail when the current destination fingerprint changes.' );
 WC()->session = new WdcManualSmokeSession();
 $stale_wdc_rates_session = new CheckoutSessionManager();
 $stale_wdc_rates_session->save_rates(
@@ -1027,7 +1057,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.7' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.8' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1091,7 +1121,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.7' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.8' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
