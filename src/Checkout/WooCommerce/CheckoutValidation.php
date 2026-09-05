@@ -98,7 +98,7 @@ final class CheckoutValidation {
 		$this->stale_yandex_5post_post_blocked = false;
 		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
 		if ( array() !== $active_selection && $this->session_manager->valid_pickup_selection_for_checkout( $active_family ) ) {
-			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id, $active_family );
 			return;
 		}
 		if ( PekSettings::PICKUP_FAMILY === $active_family && array() !== $active_selection ) {
@@ -106,12 +106,12 @@ final class CheckoutValidation {
 		}
 		$matches_before_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		if ( $matches_before_restore ) {
-			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id, $active_family );
 			return;
 		}
 		$restored = $this->restore_posted_pickup_selection( $data, $rate );
 		if ( $restored ) {
-			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id, $active_family );
 			return;
 		}
 

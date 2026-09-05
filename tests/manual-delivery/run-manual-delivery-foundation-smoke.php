@@ -456,6 +456,7 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
@@ -559,7 +560,8 @@ $services->update_service( (int) $nsk->id, array( 'enabled' => 1 ) );
 $services->soft_delete_service( (int) $pickup->id );
 wdc_manual_assert( null === $services->find_by_service_key( 'manual_pickup_store' ), 'Manual service soft delete must hide service from runtime lookup.' );
 
-$carrier = new ManualDeliveryCarrier( $services, $manual_settings, $manual_matcher, $manual_pricing_service, $manual_pickup_points );
+$location_fingerprint = new CheckoutLocationFingerprint();
+$carrier = new ManualDeliveryCarrier( $services, $manual_settings, $manual_matcher, $manual_pricing_service, $manual_pickup_points, $location_fingerprint );
 wdc_manual_assert( ManualDeliverySettings::CARRIER_KEY === $carrier->get_identity()->key && 'manual' === $carrier->get_identity()->type, 'Manual runtime carrier identity must be stable.' );
 wdc_manual_assert( ManualDeliverySettings::DELIVERY_TYPE_COURIER === $manual_settings->delivery_type( (int) $nsk->id )['type'], 'Existing manual services without delivery-type settings must default to courier.' );
 
@@ -621,7 +623,17 @@ wdc_manual_assert( $pickup_provider_registry->has( ManualDeliverySettings::CARRI
 $session_manager = new CheckoutSessionManager();
 wdc_manual_assert( 'manual:manual_pickup_a:pickup' === $session_manager->normalize_pickup_family( 'manual:manual_pickup_a:pickup' ), 'Checkout pickup family normalization must preserve service-specific manual pickup families.' );
 $rate_mapper = new WooCommerceRateMapper();
+$known_location_fingerprint = $location_fingerprint->fingerprint( array( 'country_code' => 'RU', 'location_id' => 10, 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) );
+wdc_manual_assert( 'country=RU|location_id=10' === $known_location_fingerprint, 'Canonical checkout location fingerprint must prefer a positive location_id over textual locality.' );
+wdc_manual_assert( $known_location_fingerprint === $location_fingerprint->fingerprint( array( 'country' => 'RU', 'location_id' => 10, 'state_value' => 'Другая область', 'place_name' => 'Другой город' ) ), 'Canonical checkout location fingerprint aliases must keep a positive location_id authoritative.' );
+wdc_manual_assert( $location_fingerprint->fingerprint( array( 'country_code' => 'RU', 'location_id' => 0, 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) ) === $location_fingerprint->fingerprint( array( 'country' => 'RU', 'state_value' => 'Новосибирская область', 'place_name' => 'Новосибирск' ) ), 'Canonical checkout location fingerprint must fall back to textual locality when location_id is 0.' );
+wdc_manual_assert( 'country=RU|place=новосибирская область|новосибирск' === $location_fingerprint->fingerprint( array( 'country_code' => 'RU', 'location_id' => 0, 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) ), 'Canonical textual checkout location fingerprint must normalize country, region, and city.' );
+wdc_manual_assert( $location_fingerprint->fingerprint( array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) ) !== $location_fingerprint->fingerprint( array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Бердск' ) ), 'Canonical checkout location fingerprint must differ for a different city.' );
+wdc_manual_assert( $location_fingerprint->fingerprint( array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) ) !== $location_fingerprint->fingerprint( array( 'country_code' => 'KZ', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) ), 'Canonical checkout location fingerprint must differ for a different country.' );
 $wc_rate = $rate_mapper->map( $pickup_rate_a );
+wdc_manual_assert( $known_location_fingerprint === (string) ( $pickup_rate_a->meta['destination_fingerprint'] ?? '' ) && $known_location_fingerprint === (string) ( $pickup_rate_a->meta['pickup_provider_query']['destination_fingerprint'] ?? '' ) && $known_location_fingerprint === (string) ( $pickup_rate_a->meta['pickup_provider_query']['provider_destination_fingerprint'] ?? '' ), 'Manual pickup carrier must use the canonical checkout destination fingerprint in rate and provider query metadata.' );
+$textual_pickup_rate_a = $carrier->quote( $request_for( 'manual_pickup_a', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 0 ) ) )->rates[0] ?? null;
+wdc_manual_assert( null !== $textual_pickup_rate_a && 'country=RU|place=новосибирская область|новосибирск' === (string) ( $textual_pickup_rate_a->meta['destination_fingerprint'] ?? '' ), 'Manual pickup carrier must use the same canonical textual fingerprint when checkout has no positive location_id.' );
 $session_manager->save_rates( array( $wc_rate['id'] => array_merge( $wc_rate['meta_data'], array( 'rate_id' => $wc_rate['id'] ) ) ) );
 $resolver = new CheckoutPickupPointProviderQueryResolver( $session_manager );
 $query = $resolver->resolve( $wc_rate['id'], ManualDeliverySettings::CARRIER_KEY, 'manual:manual_pickup_a:pickup' );
@@ -721,6 +733,7 @@ WC()->shipping()->set_packages(
 wdc_manual_assert( 'manual:manual_pickup_a:pickup' === (string) ( WooCommerceRateMetaNormalizer::meta( $cached_wc_rate )['pickup_family'] ?? '' ), 'Reusable WooCommerce rate meta normalizer must unwrap real WC meta objects for manual pickup family context.' );
 WC()->session = new WdcManualSmokeSession();
 $empty_wdc_rates_session = new CheckoutSessionManager();
+$empty_wdc_rates_session->save_city_context( array( 'country_code' => 'RU', 'location_id' => 10, 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск' ) );
 wdc_manual_assert( array() === $empty_wdc_rates_session->rates(), 'Regression setup must start with an empty WDC duplicate rates snapshot.' );
 ob_start();
 ( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate, 0 );
@@ -769,12 +782,25 @@ $wrong_point_save = $cached_wc_selection_rest->save( array( 'carrier' => 'manual
 wdc_manual_assert( is_array( $wrong_point_save ) && 'not_found' === (string) ( $wrong_point_save['code'] ?? '' ), 'Manual pickup selection save must re-resolve the stable point code server-side and reject points owned by another manual service.' );
 $saved_state = $cached_wc_selection_rest->state( array( 'pickup_family' => 'manual:manual_pickup_a:pickup' ) );
 wdc_manual_assert( is_array( $saved_state ) && 'manual-a-1' === (string) ( $saved_state['selected_pickup_point']['point_code'] ?? '' ) && 'manual:manual_pickup_a:pickup' === (string) ( $saved_state['active_pickup_family'] ?? '' ), 'Checkout state must expose the manual point saved under the authoritative service-specific family.' );
+wdc_manual_assert( true === $empty_wdc_rates_session->valid_pickup_selection_for_checkout( 'manual:manual_pickup_a:pickup' ), 'Manual pickup selection saved from the authoritative rate fingerprint must remain valid for the same checkout destination.' );
+wdc_manual_assert( $known_location_fingerprint === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['destination_fingerprint'] ?? '' ), 'Manual pickup selection must store the canonical checkout destination fingerprint, not a carrier-specific hash.' );
+$empty_wdc_rates_session->update_pickup_selection_rate_id( $wc_rate['id'], 'manual:manual_pickup_a:pickup' );
+wdc_manual_assert( array() === $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a' ) && $wc_rate['id'] === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['rate_id'] ?? '' ), 'update_pickup_selection_rate_id must update the exact service-specific family when an authoritative family is provided.' );
 wdc_manual_assert( true === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:manual_pickup_a:pickup' ), 'Manual selection matching must accept the exact authoritative service-specific pickup family.' );
 wdc_manual_assert( false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:manual_pickup_a' ) && false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:pickup' ) && false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:other_service:pickup' ), 'Manual selection matching must not introduce manual:<service>, manual:pickup, or other-service compatibility aliases.' );
 ob_start();
 ( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate, 0 );
 $saved_manual_pickup_html = (string) ob_get_clean();
 wdc_manual_assert( str_contains( $saved_manual_pickup_html, 'Тестовый ПВЗ' ) && str_contains( $saved_manual_pickup_html, 'Красный проспект, 1' ) && str_contains( $saved_manual_pickup_html, 'Комментарий:' ) && str_contains( $saved_manual_pickup_html, 'Отличный ПВЗ' ) && str_contains( $saved_manual_pickup_html, 'Изменить пункт выдачи' ) && str_contains( $saved_manual_pickup_html, 'data-wdc-pickup-empty-open aria-hidden="true" hidden' ), 'CheckoutRateRenderer must show the saved manual pickup card immediately after REST save by matching the authoritative pickup_family from rate metadata.' );
+ob_start();
+( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate, 0 );
+$updated_checkout_manual_pickup_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $updated_checkout_manual_pickup_html, 'Тестовый ПВЗ' ) && str_contains( $updated_checkout_manual_pickup_html, 'Изменить пункт выдачи' ), 'Manual pickup card must survive a same-destination updated_checkout render.' );
+$reload_session_manager = new CheckoutSessionManager( $location_fingerprint );
+ob_start();
+( new CheckoutRateRenderer( $reload_session_manager ) )->render( $cached_wc_rate, 0 );
+$reloaded_manual_pickup_html = (string) ob_get_clean();
+wdc_manual_assert( str_contains( $reloaded_manual_pickup_html, 'Тестовый ПВЗ' ) && str_contains( $reloaded_manual_pickup_html, 'Изменить пункт выдачи' ), 'Manual pickup card must survive a same-session page reload with the same checkout destination.' );
 $pickup_rate_b = $carrier->quote( $request_for( 'manual_pickup_b', 'RU', 'Новосибирск', 'Новосибирская область', array( 'location_id' => 10 ) ) )->rates[0] ?? null;
 $wc_rate_b = $pickup_rate_b ? $rate_mapper->map( $pickup_rate_b ) : array();
 $cached_wc_rate_b = new WC_Shipping_Rate( (string) ( $wc_rate_b['id'] ?? '' ), (string) ( $wc_rate_b['label'] ?? '' ), (string) ( $wc_rate_b['cost'] ?? '' ), is_array( $wc_rate_b['meta_data'] ?? null ) ? $wc_rate_b['meta_data'] : array() );
@@ -1057,7 +1083,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.8' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.9' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1121,7 +1147,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.8' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.152.9' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );

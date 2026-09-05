@@ -243,6 +243,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
@@ -766,7 +767,7 @@ final class Plugin {
 		$this->container->register( ManualPickupPointProvider::class, fn(): ManualPickupPointProvider => new ManualPickupPointProvider( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualPickupPointRepository::class ) ) );
 		$this->container->register( ManualDeliveryPricingCalculator::class, fn(): ManualDeliveryPricingCalculator => new ManualDeliveryPricingCalculator() );
 		$this->container->register( ManualDeliveryPricingService::class, fn(): ManualDeliveryPricingService => new ManualDeliveryPricingService( $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryWeightRangeRepository::class ), $this->container->get( ManualDeliveryPricingCalculator::class ) ) );
-		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryGeographyMatcher::class ), $this->container->get( ManualDeliveryPricingService::class ), $this->container->get( ManualPickupPointRepository::class ) ) );
+		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryGeographyMatcher::class ), $this->container->get( ManualDeliveryPricingService::class ), $this->container->get( ManualPickupPointRepository::class ), $this->container->get( CheckoutLocationFingerprint::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -823,7 +824,8 @@ final class Plugin {
 				$this->container->get( DeliveryCustomerCommentSnapshotBuilder::class )
 			)
 		);
-		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
+		$this->container->register( CheckoutLocationFingerprint::class, fn(): CheckoutLocationFingerprint => new CheckoutLocationFingerprint() );
+		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager( $this->container->get( CheckoutLocationFingerprint::class ) ) );
 		$this->container->register( WooCommerceSessionBootstrapper::class, fn(): WooCommerceSessionBootstrapper => new WooCommerceSessionBootstrapper() );
 		$this->container->register( CheckoutPickupPointProviderQueryResolver::class, fn(): CheckoutPickupPointProviderQueryResolver => new CheckoutPickupPointProviderQueryResolver(
 			$this->container->get( CheckoutSessionManager::class ),

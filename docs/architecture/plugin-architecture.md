@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.152.8
+Version: 0.152.9
+
+0.152.9 keeps pickup destination identity generic by moving checkout location fingerprinting into `CheckoutLocationFingerprint`. `CheckoutSessionManager` and manual pickup rates use the same owner for `destination_fingerprint`; carriers must not invent their own stale-selection fingerprint algorithms.
 
 0.152.8 keeps the pickup framework generic while fixing selected pickup card rendering for service-specific pickup families. Presentation layers that already have rate metadata must pass the explicit authoritative `pickup_family` into session matching; `shipping_method_family(rate_id)` remains only the fallback for legacy callers without metadata.
 

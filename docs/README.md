@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.152.8
+Version: 0.152.9
+
+0.152.9 makes manual pickup destination fingerprints use the same canonical checkout destination identity as `CheckoutSessionManager`. Manual pickup selections saved under `manual:<service_key>:pickup` now survive same-destination checkout refreshes and page reloads, while destination changes still invalidate stale selections.
 
 0.152.8 hardens checkout pickup selection rendering. When a rate already carries authoritative `pickup_family` metadata, selection matching uses that exact family instead of deriving a family from the shipping method id, so service-specific manual pickup selections saved under `manual:<service_key>:pickup` render their selected card immediately after save and after reload.
 

@@ -8,6 +8,7 @@ use WallsShop\WDC\Carriers\Manual\ManualDeliveryGeographyMatcher;
 use WallsShop\WDC\Carriers\Manual\ManualPickupPointRepository;
 use WallsShop\WDC\Carriers\Manual\ManualDeliveryPricingService;
 use WallsShop\WDC\Carriers\Manual\ManualDeliverySettings;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutLocationFingerprint;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
@@ -27,7 +28,8 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 		private ManualDeliverySettings $settings,
 		private ManualDeliveryGeographyMatcher $geography,
 		private ManualDeliveryPricingService $pricing,
-		private ManualPickupPointRepository $pickup_points
+		private ManualPickupPointRepository $pickup_points,
+		private CheckoutLocationFingerprint $location_fingerprint
 	) {
 	}
 
@@ -202,7 +204,32 @@ final class ManualDeliveryCarrier implements CarrierAdapterInterface {
 	}
 
 	private function destination_fingerprint( QuoteRequest $request, ?array $destination ): string {
-		return md5( implode( '|', array( $request->country_code, (string) ( $request->customer_context['location_id'] ?? 0 ), (string) ( $destination['region_name'] ?? '' ), (string) ( $destination['location_name'] ?? '' ) ) ) );
+		$country = trim( (string) ( $destination['country_code'] ?? '' ) );
+		if ( '' === $country ) {
+			$country = $request->country_code ?: $request->destination->country_code;
+		}
+
+		$region = trim( (string) ( $destination['region_name'] ?? '' ) );
+		if ( '' === $region ) {
+			$region = $request->destination->region_name;
+		}
+
+		$city = trim( (string) ( $destination['location_name'] ?? '' ) );
+		if ( '' === $city ) {
+			$city = $request->destination->settlement ?: $request->destination->city;
+		}
+
+		return $this->location_fingerprint->fingerprint(
+			array_merge(
+				$request->customer_context,
+				array(
+					'country_code' => $country,
+					'location_id' => (string) ( $request->customer_context['location_id'] ?? 0 ),
+					'region_name' => $region,
+					'city_name' => $city,
+				)
+			)
+		);
 	}
 
 	private function quote_id( QuoteRequest $request, string $suffix ): string {

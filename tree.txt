@@ -604,12 +604,13 @@ C:.
 |   |   |       CheckoutAddressValidation.php
 |   |   |
 |   |   \---WooCommerce
-|   |           CheckoutAddressRenderer.php
-|   |           CheckoutDebugPanel.php
-|   |           CheckoutDeliveryTypeSelector.php
-|   |           CheckoutFeatureGate.php
-|   |           CheckoutRateRenderer.php
-|   |           CheckoutSessionManager.php
+  |   |           CheckoutAddressRenderer.php
+  |   |           CheckoutDebugPanel.php
+  |   |           CheckoutDeliveryTypeSelector.php
+  |   |           CheckoutFeatureGate.php
+  |   |           CheckoutLocationFingerprint.php
+  |   |           CheckoutRateRenderer.php
+  |   |           CheckoutSessionManager.php
 |   |           CheckoutSortSelector.php
 |   |           CheckoutValidation.php
 |   |           CourierRateSupport.php
