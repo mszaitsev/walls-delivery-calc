@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.153.1
+Version: 0.153.2
 
-0.153.1 removes the obsolete manual flat-only save fallback and unreachable/dead cleanup code; no runtime behavior change is intended.
+0.153.2 resolves pickup reset/delete service-specific pickup family from authoritative rate context for registry-backed multi-service carriers.
 
 0.153.0 connects manual delivery services to the existing Shipment Framework. The single `manual` shipment adapter supports manual attach, local remove, and generic manual actual cost for the concrete historical manual service saved on the order; preview/create, carrier cancellation, status API, autosync, documents, returns, and manual shipment storage tables remain unsupported.
 

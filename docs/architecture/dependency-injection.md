@@ -4,9 +4,9 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.153.1
+Version: 0.153.2
 
-Version 0.153.1 removes the obsolete manual flat-only save fallback and unreachable/dead cleanup code; no runtime behavior change is intended.
+Version 0.153.2 resolves pickup reset/delete service-specific pickup family from authoritative rate context for registry-backed multi-service carriers.
 
 Version 0.153.0 registers `ManualShipmentService` and `ManualShipmentAdapter` in `Plugin.php`. The adapter is added to `CarrierShipmentAdapterRegistry` only; it is intentionally not added to `ShipmentCreationService` create adapters, persistence mappers, document providers, modal extensions, or status autosync. Manual shipment persistence flows through `OrderShipmentRepository`, and manual actual cost flows through `ShipmentActualCostService`.
 

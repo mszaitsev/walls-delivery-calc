@@ -1,8 +1,8 @@
 # Locations And Pickup
 
-Version: 0.153.1
+Version: 0.153.2
 
-0.153.1 removes the obsolete manual flat-only save fallback and unreachable/dead cleanup code; no runtime behavior change is intended.
+0.153.2 resolves pickup reset/delete service-specific pickup family from authoritative rate context for registry-backed multi-service carriers.
 
 0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
 

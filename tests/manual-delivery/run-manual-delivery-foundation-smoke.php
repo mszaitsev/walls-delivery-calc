@@ -869,6 +869,91 @@ ob_start();
 ( new CheckoutRateRenderer( $empty_wdc_rates_session ) )->render( $cached_wc_rate_b, 0 );
 $manual_b_isolation_html = (string) ob_get_clean();
 wdc_manual_assert( str_contains( $manual_a_isolation_html, 'Тестовый ПВЗ' ) && ! str_contains( $manual_a_isolation_html, 'ПВЗ B' ) && str_contains( $manual_b_isolation_html, 'ПВЗ B' ) && ! str_contains( $manual_b_isolation_html, 'Тестовый ПВЗ' ), 'CheckoutRateRenderer must keep multiple manual pickup service selections isolated by explicit pickup_family.' );
+$save_manual_ab_selections = static function ( CheckoutSessionManager $target_session ) use ( $known_location_fingerprint ): void {
+	$target_session->save_pickup_selection_for_family(
+		'manual:manual_pickup_a:pickup',
+		array(
+			'carrier_key' => 'manual',
+			'service_key' => 'manual_pickup_a',
+			'pickup_family' => 'manual:manual_pickup_a:pickup',
+			'point_code' => 'manual-a-1',
+			'point_address' => 'Красный проспект, 1',
+			'point_title' => 'ПВЗ A',
+			'rate_id' => 'manual:manual_pickup_a',
+			'destination_fingerprint' => $known_location_fingerprint,
+		)
+	);
+	$target_session->save_pickup_selection_for_family(
+		'manual:manual_pickup_b:pickup',
+		array(
+			'carrier_key' => 'manual',
+			'service_key' => 'manual_pickup_b',
+			'pickup_family' => 'manual:manual_pickup_b:pickup',
+			'point_code' => 'manual-b-1',
+			'point_address' => 'Красный проспект, 2',
+			'point_title' => 'ПВЗ B',
+			'rate_id' => 'manual:manual_pickup_b',
+			'destination_fingerprint' => $known_location_fingerprint,
+		)
+	);
+};
+$save_manual_ab_selections( $empty_wdc_rates_session );
+$delete_without_family = $cached_wc_selection_rest->delete( array( 'shipping_method_id' => $wc_rate['id'] ) );
+wdc_manual_assert( is_array( $delete_without_family ) && null === ( $delete_without_family['pickup_point'] ?? null ) && 'manual:manual_pickup_a:pickup' === (string) ( $delete_without_family['active_pickup_family'] ?? '' ), 'Manual pickup DELETE without browser family must report the authoritative service-specific active family.' );
+wdc_manual_assert( ! array_key_exists( 'manual:manual_pickup_a:pickup', $delete_without_family['pickup_selections'] ?? array() ) && 'manual-b-1' === (string) ( $delete_without_family['pickup_selections']['manual:manual_pickup_b:pickup']['point_code'] ?? '' ), 'Manual pickup DELETE without browser family must clear only service A and preserve service B.' );
+wdc_manual_assert( array() === $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a' ) && array() === $empty_wdc_rates_session->pickup_selection_for_family( 'manual:pickup' ), 'Manual pickup DELETE must not create compatibility buckets while resolving the service-specific family.' );
+$save_manual_ab_selections( $empty_wdc_rates_session );
+$delete_correct_family = $cached_wc_selection_rest->delete( array( 'shipping_method_id' => NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_a:pickup' ) );
+wdc_manual_assert( is_array( $delete_correct_family ) && ! array_key_exists( 'manual:manual_pickup_a:pickup', $delete_correct_family['pickup_selections'] ?? array() ) && 'manual-b-1' === (string) ( $delete_correct_family['pickup_selections']['manual:manual_pickup_b:pickup']['point_code'] ?? '' ), 'Manual pickup DELETE with a matching browser family assertion must clear only that canonical family.' );
+$save_manual_ab_selections( $empty_wdc_rates_session );
+$delete_wrong_family = $cached_wc_selection_rest->delete( array( 'shipping_method_id' => $wc_rate['id'], 'pickup_family' => 'manual:manual_pickup_b:pickup' ) );
+wdc_manual_assert( is_array( $delete_wrong_family ) && 'provider_rate_context_mismatch' === (string) ( $delete_wrong_family['code'] ?? '' ), 'Manual pickup DELETE must reject a browser family assertion that does not match the authoritative current rate.' );
+wdc_manual_assert( 'manual-a-1' === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['point_code'] ?? '' ) && 'manual-b-1' === (string) ( $empty_wdc_rates_session->pickup_selection_for_family( 'manual:manual_pickup_b:pickup' )['point_code'] ?? '' ), 'Manual pickup DELETE wrong-family rejection must not clear service A or service B.' );
+WC()->shipping()->set_packages( array() );
+$wdc_fallback_session = new CheckoutSessionManager();
+$wdc_fallback_rate = array_merge( $wc_rate['meta_data'], array( 'rate_id' => $wc_rate['id'] ) );
+$wdc_fallback_session->save_rates( array( $wc_rate['id'] => $wdc_fallback_rate ) );
+$save_manual_ab_selections( $wdc_fallback_session );
+$wdc_fallback_delete_rest = new CheckoutPickupPointRestController(
+	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+	$wdc_fallback_session,
+	null,
+	null,
+	null,
+	null,
+	null,
+	$pickup_provider_registry,
+	new CheckoutPickupPointProviderQueryResolver( $wdc_fallback_session ),
+	new WooCommerceSessionBootstrapper()
+);
+$delete_from_wdc_fallback = $wdc_fallback_delete_rest->delete( array( 'shipping_method_id' => $wc_rate['id'] ) );
+wdc_manual_assert( is_array( $delete_from_wdc_fallback ) && ! array_key_exists( 'manual:manual_pickup_a:pickup', $delete_from_wdc_fallback['pickup_selections'] ?? array() ) && 'manual-b-1' === (string) ( $delete_from_wdc_fallback['pickup_selections']['manual:manual_pickup_b:pickup']['point_code'] ?? '' ), 'Manual pickup DELETE must use the WDC rate snapshot only as fallback when the actual WooCommerce rate is unavailable.' );
+$missing_context_session = new CheckoutSessionManager();
+$save_manual_ab_selections( $missing_context_session );
+$missing_context_delete_rest = new CheckoutPickupPointRestController(
+	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
+	$missing_context_session,
+	null,
+	null,
+	null,
+	null,
+	null,
+	$pickup_provider_registry,
+	new CheckoutPickupPointProviderQueryResolver( $missing_context_session ),
+	new WooCommerceSessionBootstrapper()
+);
+$delete_missing_context = $missing_context_delete_rest->delete( array( 'shipping_method_id' => 'manual:missing' ) );
+wdc_manual_assert( is_array( $delete_missing_context ) && 'provider_rate_context_missing' === (string) ( $delete_missing_context['code'] ?? '' ), 'Registry-backed manual pickup DELETE without authoritative rate context must fail closed.' );
+wdc_manual_assert( 'manual-a-1' === (string) ( $missing_context_session->pickup_selection_for_family( 'manual:manual_pickup_a:pickup' )['point_code'] ?? '' ) && 'manual-b-1' === (string) ( $missing_context_session->pickup_selection_for_family( 'manual:manual_pickup_b:pickup' )['point_code'] ?? '' ), 'Missing-context manual pickup DELETE must not perform a global reset.' );
+WC()->shipping()->set_packages(
+	array(
+		array(
+			'rates' => array(
+				NewShippingMethod::METHOD_ID . ':' . $wc_rate['id'] => $cached_wc_rate_without_explicit_family,
+			),
+		),
+	)
+);
 $empty_wdc_rates_session->save_city_context( array( 'country_code' => 'RU', 'region_name' => 'Московская область', 'city_name' => 'Москва' ) );
 wdc_manual_assert( false === $empty_wdc_rates_session->pickup_selection_matches( 'manual', $wc_rate['id'], 'manual:manual_pickup_a:pickup' ), 'Manual selection matching must still fail when the current destination fingerprint changes.' );
 WC()->session = new WdcManualSmokeSession();
@@ -1129,7 +1214,7 @@ NewShippingMethod::configure(
 	$checkout_session_for_zero_package,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.1' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.2' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
@@ -1193,7 +1278,7 @@ NewShippingMethod::configure(
 	$cold_checkout_session,
 	$rules,
 	new SettingsRepository(),
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.1' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.153.2' ),
 	new \WallsShop\WDC\Infrastructure\Logging\Logger(),
 	$manager
 );
