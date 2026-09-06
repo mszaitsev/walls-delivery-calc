@@ -89,6 +89,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	 */
 	public function calculate_shipping( $package = array() ): void {
 		try {
+			$previous_chosen_methods = $this->chosen_shipping_methods();
 			$this->session_manager->expire_stale_yandex_5post_selection();
 			$sort = $this->sort_mode();
 			$this->session_manager->save_sort_mode( $sort );
@@ -131,6 +132,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			}
 
 			$this->session_manager->save_rates( $stored );
+			$this->clear_pickup_selections_for_unavailable_rates( $stored );
+			$this->reconcile_shipping_method_choices( $previous_chosen_methods, $stored );
 			$this->session_manager->save_debug(
 				array(
 					'rates_count'    => count( $result->rates ),
@@ -210,7 +213,6 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		}
 
 		$this->session_manager->clear_pickup_selection_for_family( $family, 'carrier_selected_pickup_quote_failed' );
-		$this->preserve_shipping_method_choice( $method_id );
 	}
 
 	/**
@@ -240,15 +242,138 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		);
 	}
 
-	private function preserve_shipping_method_choice( string $method_id ): void {
+	/**
+	 * @return array<int|string,string>
+	 */
+	private function chosen_shipping_methods(): array {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'get' ) ) {
+			return array();
+		}
+
+		$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
+		if ( ! is_array( $chosen ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $chosen as $index => $method_id ) {
+			if ( is_scalar( $method_id ) ) {
+				$normalized[ $index ] = (string) $method_id;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * @param array<int|string,string> $previous_chosen_methods
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 */
+	private function reconcile_shipping_method_choices( array $previous_chosen_methods, array $stored_rates ): void {
 		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'set' ) ) {
 			return;
 		}
-		$method_id = $this->session_manager->normalize_rate_id( $method_id );
-		if ( '' === $method_id ) {
+
+		if ( array() === $previous_chosen_methods ) {
 			return;
 		}
-		WC()->session->set( 'chosen_shipping_methods', array( self::METHOD_ID . ':' . $method_id ) );
+
+		$available = $this->available_rate_ids( $stored_rates );
+		if ( array() === $available ) {
+			return;
+		}
+
+		$next = $previous_chosen_methods;
+		$changed = false;
+		foreach ( $previous_chosen_methods as $index => $method_id ) {
+			if ( ! $this->is_wdc_shipping_method_choice( $method_id ) ) {
+				continue;
+			}
+
+			$normalized_rate_id = $this->session_manager->normalize_rate_id( $method_id );
+			if ( '' !== $normalized_rate_id && isset( $available[ $normalized_rate_id ] ) ) {
+				$fresh_method_id = self::METHOD_ID . ':' . $normalized_rate_id;
+				if ( $fresh_method_id !== $method_id ) {
+					$next[ $index ] = $fresh_method_id;
+					$changed = true;
+				}
+				continue;
+			}
+
+			unset( $next[ $index ] );
+			$changed = true;
+		}
+
+		if ( $changed ) {
+			WC()->session->set( 'chosen_shipping_methods', $next );
+		}
+	}
+
+	private function is_wdc_shipping_method_choice( string $method_id ): bool {
+		$method_id = trim( $method_id );
+
+		return str_starts_with( $method_id, self::METHOD_ID . ':' )
+			|| str_starts_with( $method_id, 'wdc_platform:' );
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 * @return array<string,bool>
+	 */
+	private function available_rate_ids( array $stored_rates ): array {
+		$available = array();
+		foreach ( $stored_rates as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) );
+			if ( '' !== $rate_id ) {
+				$available[ $rate_id ] = true;
+			}
+			$stored_rate_id = $this->session_manager->normalize_rate_id( (string) $stored_rate_id );
+			if ( '' !== $stored_rate_id ) {
+				$available[ $stored_rate_id ] = true;
+			}
+		}
+
+		return $available;
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 */
+	private function clear_pickup_selections_for_unavailable_rates( array $stored_rates ): void {
+		$available_families = $this->available_pickup_families( $stored_rates );
+		$selections = $this->session_manager->pickup_selections_for_current_destination( false );
+		foreach ( $selections as $family => $selection ) {
+			$family = $this->session_manager->normalize_pickup_family( (string) ( $selection['pickup_family'] ?? $family ) );
+			if ( '' === $family || ! str_ends_with( $family, ':pickup' ) ) {
+				continue;
+			}
+			if ( ! isset( $available_families[ $family ] ) ) {
+				$this->session_manager->clear_pickup_selection_for_family( $family, 'shipping_method_unavailable' );
+			}
+		}
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $stored_rates
+	 * @return array<string,bool>
+	 */
+	private function available_pickup_families( array $stored_rates ): array {
+		$families = array();
+		foreach ( $stored_rates as $stored_rate_id => $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+			$rate_id = $this->session_manager->normalize_rate_id( (string) ( $rate['rate_id'] ?? $stored_rate_id ) );
+			$family = PickupFamilyResolver::from_meta( $rate, $rate_id );
+			if ( '' !== $family && str_ends_with( $family, ':pickup' ) ) {
+				$families[ $family ] = true;
+			}
+		}
+
+		return $families;
 	}
 
 	/**

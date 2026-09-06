@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000BA A0AC:74BD
+Volume serial number is 00000030 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -1089,6 +1089,7 @@ C:.
     +---checkout
     |       run-checkout-city-selector-smoke.js
     |       run-checkout-location-picker-smoke.php
+    |       run-checkout-selection-smoke.php
     |       run-checkout-smoke.php
     |       run-pickup-map-lifecycle-smoke.js
     |       run-pickup-provider-routing-smoke.js

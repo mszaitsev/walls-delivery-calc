@@ -4,7 +4,9 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.155.1
+Version: 0.155.2
+
+Version 0.155.2 keeps the checkout selection preservation patch inside the existing WooCommerce shipping method composition: `NewShippingMethod` uses its injected `CheckoutSessionManager`, package mapper, rate mapper, and orchestrator, and no new DI service or Shipment Framework wiring is required.
 
 Version 0.155.1 keeps self-pickup wiring only in the composition root: `SelfPickupSettings`, `SelfPickupDiscountPolicy`, `SelfPickupDiscountService`, and `SelfPickupCarrier`. `SelfPickupCarrier` is registered once in `CarrierRegistry`; `SelfPickupDiscountService` registers the checkout `woocommerce_cart_calculate_fees` hook, evaluates promotion availability/application through the policy, and reads chosen shipping through `CheckoutSessionManager`. Shipment Framework registries intentionally do not receive a self-pickup adapter, mapper, document provider, modal extension, lifecycle continuation, autosync service, or API client.
 

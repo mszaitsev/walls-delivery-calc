@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.1
+Version: 0.155.2
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.1 hardens the built-in checkout-only `self_pickup` delivery service after live verification. The fixed store card now renders only for the chosen rate and has a separate card title setting; the promo comment means “promotion available” while the negative WooCommerce fee means “discount applied”; zero-price checkout methods are sorted after paid methods in generic CHEAPEST sorting; and non-shipment orders keep only the service identity in the shipments metabox.
+Current stage: 0.155.2 preserves the user's checkout delivery selection across cart recalculations when the same freshly calculated WDC rate remains available. The lifecycle stores only the previous method identity from WooCommerce session, recalculates authoritative rates/prices/comments first, then reconciles the old choice against the new rate set; pickup selections remain family-scoped and are cleared only when stale by destination, rejected by the carrier, or absent from the fresh rate set.
 
 ## Quick Start
 

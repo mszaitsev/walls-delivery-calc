@@ -1,6 +1,8 @@
 # New Carrier Guide
 
-Version: 0.155.1
+Version: 0.155.2
+
+0.155.2 clarifies checkout selection expectations for all carriers. If a cart recalculation changes price, delivery period, or cargo context but the same canonical WDC rate id remains available, the checkout layer may preserve only the user's selected method identity. Carriers must not rely on stale session rate payloads: pickup cargo validity must be expressed through fresh quote success or generic `pickup_selection_rejected` metadata, and grouped tariff methods must expose stable checkout group ids plus fresh tariff variants.
 
 0.155.1 refines the checkout-only/non-shipment built-in service pattern. Use this pattern only when the method is a real delivery choice but has no carrier API, selectable pickup provider, shipment creation, tracking, documents, cancellation, autosync, or shipment storage. The runtime carrier may quote a canonical `DeliveryRate` and provide server-owned presentation metadata such as `fixed_pickup_point_snapshot`; fixed cards are rendered only for the chosen checkout rate, and card title should be stored separately from method title. Order/admin presentation may use generic `non_shipment_state` suppression flags so the shipment block keeps service identity without status/actions. Do not use `manual` unless the method really wants manual shipment attach/local remove semantics.
 
