@@ -1,8 +1,8 @@
 # Plugin Architecture
 
-Version: 0.153.5
+Version: 0.153.6
 
-0.153.5 localizes pickup-map fallback messages, resolves RU postcode searches from local Russian Post pickup anchors for every provider, fixes Russian Post nearest ordering, and preserves family buckets during manual pickup activation.
+0.153.6 preserves explicit user shipping-method choice across WooCommerce checkout redraws when the selected rate remains available.
 
 0.153.0 wires manual delivery into the existing Shipment Framework through one `ManualShipmentAdapter` and one `ManualShipmentService`. Manual shipments use `OrderShipmentRepository`, preserve the concrete historical `service_key` and service title from the order delivery snapshot, delegate actual cost to `ShipmentActualCostService`, and do not add API-create branches, document providers, autosync, modal providers, fake persistence mappers, or manual shipment tables.
 

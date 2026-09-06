@@ -1192,6 +1192,7 @@ function createCheckoutNoticeHarness(options) {
 	let stateResponse = options.stateResponse;
 	let stateCalls = 0;
 	let pointCalls = 0;
+	let updateCheckoutTriggers = 0;
 	const resetCalls = [];
 	const mapContexts = [];
 	const modalRoots = [];
@@ -1314,7 +1315,14 @@ function createCheckoutNoticeHarness(options) {
 			},
 			jQuery: (target) => ({
 				on: (event, callback) => { jqueryHandlers[event] = callback; },
-				trigger: (event) => { if (jqueryHandlers[event]) { jqueryHandlers[event](); } },
+				trigger: (event) => {
+					if (event === 'update_checkout') {
+						updateCheckoutTriggers += 1;
+					}
+					if (jqueryHandlers[event]) {
+						jqueryHandlers[event]();
+					}
+				},
 				one: (event, callback) => { jqueryHandlers[event] = callback; },
 				off: () => {}
 			}),
@@ -1363,6 +1371,39 @@ function createCheckoutNoticeHarness(options) {
 		Object.keys(shippingInputs).forEach((key) => { shippingInputs[key].checked = key === method; });
 		(listeners.change || []).forEach((callback) => callback({ target: shippingInputs[method] }));
 	}
+	function redrawShippingMethods(checkedMethod, availableMethods, disabledMethods) {
+		const available = availableMethods || Object.keys(shippingInputs);
+		const disabled = new Set(disabledMethods || []);
+		Object.keys(shippingInputs).forEach((key) => {
+			shippingInputs[key].checked = key === checkedMethod;
+			shippingInputs[key].disabled = disabled.has(key);
+			shippingInputs[key].matches = (selector) => selector === 'input[name^="shipping_method"]' && available.indexOf(key) !== -1;
+		});
+		documentStub.querySelector = (selector) => {
+			if (selector === '[data-wdc-pickup-checkout]') {
+				return containers[0] ? containers[0].container : null;
+			}
+			if (selector === 'input[name^="shipping_method"]:checked') {
+				return available.map((key) => shippingInputs[key]).find((input) => input && input.checked) || null;
+			}
+			const nameMatch = selector.match(/^\[name="([^"]+)"\]$/);
+			if (nameMatch) {
+				const field = new FakeElement(nameMatch[1]);
+				field.value = fields[nameMatch[1]] || '';
+				return field.value ? field : null;
+			}
+			return null;
+		};
+		documentStub.querySelectorAll = (selector) => {
+			if (selector === '[data-wdc-pickup-checkout]') {
+				return containers.map((item) => item.container);
+			}
+			if (selector === 'input[name^="shipping_method"]') {
+				return available.map((key) => shippingInputs[key]).filter(Boolean);
+			}
+			return [];
+		};
+	}
 	function changeDestination(locationId, displayName) {
 		fields.wdc_platform_location_id = locationId;
 		fields.wdc_platform_location_display_name = displayName;
@@ -1381,9 +1422,111 @@ function createCheckoutNoticeHarness(options) {
 		}));
 	}
 	function apiCounts() {
-		return { state: stateCalls, points: pointCalls };
+		return { state: stateCalls, points: pointCalls, updateCheckout: updateCheckoutTriggers };
 	}
-	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, resetCalls, sandbox, open, mapContexts, modalRoots, shippingInputs, apiCounts };
+	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, redrawShippingMethods, changeDestination, setStateResponse, resetCalls, sandbox, open, mapContexts, modalRoots, shippingInputs, apiCounts };
+}
+
+async function explicitShippingMethodChoiceSurvivesCheckoutRedraw() {
+	const harness = createCheckoutNoticeHarness();
+	harness.redrawShippingMethods('pek:pickup', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.dispatchDomReady();
+	harness.changeMethod('ozon_delivery:pickup');
+	assert.strictEqual(harness.shippingInputs['ozon_delivery:pickup'].checked, true, 'explicit user shipping-method choice must be checked immediately.');
+	harness.redrawShippingMethods('manual:service_a', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.shippingInputs['ozon_delivery:pickup'].checked, true, 'explicit user choice must be restored after WooCommerce redraw when the rate is still available.');
+	assert.strictEqual(harness.apiCounts().updateCheckout, 1, 'restoring an explicit user choice may trigger at most one recovery checkout update.');
+}
+
+async function explicitShippingMethodChoiceSurvivesStaleCheckoutRedraw() {
+	const harness = createCheckoutNoticeHarness();
+	harness.redrawShippingMethods('pek:pickup', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.dispatchDomReady();
+	harness.changeMethod('ozon_delivery:pickup');
+	harness.redrawShippingMethods('pek:pickup', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.shippingInputs['ozon_delivery:pickup'].checked, true, 'explicit user choice must survive a stale checkout redraw that re-checks the previous method.');
+}
+
+async function unavailableExplicitShippingMethodIsNotForced() {
+	const missingHarness = createCheckoutNoticeHarness();
+	missingHarness.redrawShippingMethods('pek:pickup', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	missingHarness.dispatchDomReady();
+	missingHarness.changeMethod('ozon_delivery:pickup');
+	missingHarness.redrawShippingMethods('manual:service_a', ['pek:pickup', 'manual:service_a']);
+	missingHarness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(missingHarness.shippingInputs['manual:service_a'].checked, true, 'missing explicit method must not be recreated or forced after redraw.');
+	assert.strictEqual(missingHarness.apiCounts().updateCheckout, 0, 'missing explicit method must not start a recovery update loop.');
+
+	const disabledHarness = createCheckoutNoticeHarness();
+	disabledHarness.redrawShippingMethods('pek:pickup', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	disabledHarness.dispatchDomReady();
+	disabledHarness.changeMethod('ozon_delivery:pickup');
+	disabledHarness.redrawShippingMethods('manual:service_a', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a'], ['ozon_delivery:pickup']);
+	disabledHarness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(disabledHarness.shippingInputs['manual:service_a'].checked, true, 'disabled explicit method must not be forced after redraw.');
+	assert.strictEqual(disabledHarness.apiCounts().updateCheckout, 0, 'disabled explicit method must not start a recovery update loop.');
+}
+
+async function checkoutRedrawWithoutExplicitChoiceIsNotOverridden() {
+	const harness = createCheckoutNoticeHarness();
+	harness.redrawShippingMethods('pek:pickup', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.dispatchDomReady();
+	harness.redrawShippingMethods('manual:service_a', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.shippingInputs['manual:service_a'].checked, true, 'checkout redraw without explicit user choice must keep the WooCommerce-selected default.');
+	assert.strictEqual(harness.apiCounts().updateCheckout, 0, 'default checkout redraw must not trigger a recovery update.');
+}
+
+async function explicitShippingMethodRedrawPreservesPickupSelections() {
+	const context = { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' };
+	const ozon = {
+		id: 'ozon-a',
+		point_code: 'ozon-a',
+		pickup_family: 'ozon_delivery:pickup',
+		point_address: 'Москва, Ozon',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	const manual = {
+		id: 'manual-a',
+		point_code: 'manual-a',
+		pickup_family: 'manual:service_a:pickup',
+		point_address: 'Москва, Manual',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	const harness = createCheckoutNoticeHarness({
+		currentContext: context,
+		initialContext: context,
+		stateResponse: {
+			active_pickup_family: 'ozon_delivery:pickup',
+			city_context: context,
+			pickup_selections: {
+				'ozon_delivery:pickup': ozon,
+				'manual:service_a:pickup': manual
+			}
+		}
+	});
+	harness.sandbox.window.wdcPickupCheckout.pickupSelections = {
+		'ozon_delivery:pickup': ozon,
+		'manual:service_a:pickup': manual
+	};
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoints = Object.assign({}, harness.sandbox.window.wdcPickupCheckout.pickupSelections);
+	harness.redrawShippingMethods('manual:service_a', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.dispatchDomReady();
+	harness.changeMethod('ozon_delivery:pickup');
+	harness.redrawShippingMethods('pek:pickup', ['pek:pickup', 'ozon_delivery:pickup', 'manual:service_a']);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.shippingInputs['ozon_delivery:pickup'].checked, true, 'explicit pickup method must be restored after redraw.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['ozon_delivery:pickup'].point_code, 'ozon-a', 'active family bucket must survive explicit-method recovery.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['manual:service_a:pickup'].point_code, 'manual-a', 'inactive family bucket must survive explicit-method recovery.');
+	assert.strictEqual(harness.resetCalls.length, 0, 'explicit-method recovery must not call pickup reset.');
 }
 
 async function shippingMethodSwitchPreservesInactiveFamilySelections() {
@@ -2176,6 +2319,11 @@ async function run() {
 		&& source.includes('Карта недоступна')
 		&& source.includes('Не удалось загрузить пункты выдачи'), 'Pickup map user-facing fallback messages must be localized in Russian.');
 	await checkoutInlineNoticeLatchLifecycle();
+	await explicitShippingMethodChoiceSurvivesCheckoutRedraw();
+	await explicitShippingMethodChoiceSurvivesStaleCheckoutRedraw();
+	await unavailableExplicitShippingMethodIsNotForced();
+	await checkoutRedrawWithoutExplicitChoiceIsNotOverridden();
+	await explicitShippingMethodRedrawPreservesPickupSelections();
 	await shippingMethodSwitchPreservesInactiveFamilySelections();
 	await shippingMethodSwitchToEmptyFamilyPreservesPreviousSelection();
 	await destinationFingerprintChangeResetsLocalSelection();

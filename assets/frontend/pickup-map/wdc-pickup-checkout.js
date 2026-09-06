@@ -2302,6 +2302,16 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 	}
 
+	function rememberExplicitShippingMethod(method) {
+		method = normalizeShippingMethod(method);
+		if (!method) {
+			return;
+		}
+		preferredShippingMethod = method;
+		preferredShippingMethodPending = true;
+		preferredShippingMethodRecoveryUpdateSent = false;
+	}
+
 	function clearPreferredShippingMethod() {
 		preferredShippingMethod = '';
 		preferredShippingMethodPending = false;
@@ -2499,6 +2509,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (event.target.matches('input[name^="shipping_method"]')) {
 			var previousMethod = activeMethod;
 			var nextMethod = currentShippingMethod() || normalizeShippingMethod(event.target.value);
+			rememberExplicitShippingMethod(nextMethod);
 			if (isSamePickupMethodFamily(previousMethod, nextMethod)) {
 				activeMethod = nextMethod;
 				syncSelectedPickupRate(nextMethod);

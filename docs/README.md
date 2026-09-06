@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.153.5
+Version: 0.153.6
 
-0.153.5 localizes pickup-map fallback messages, resolves RU postcode searches from local Russian Post pickup anchors for every provider, fixes Russian Post nearest ordering, and preserves family buckets during manual pickup activation.
+0.153.6 preserves explicit user shipping-method choice across WooCommerce checkout redraws when the selected rate remains available.
 
 0.153.0 connects manual delivery services to the existing Shipment Framework. The single `manual` shipment adapter supports manual attach, local remove, and generic manual actual cost for the concrete historical manual service saved on the order; preview/create, carrier cancellation, status API, autosync, documents, returns, and manual shipment storage tables remain unsupported.
 
