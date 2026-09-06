@@ -549,15 +549,6 @@
 		}
 
 		function runSearch(query, initial) {
-			if (!initial && !viewportReloadRequired() && visiblePoints.length) {
-				listFilterQuery = normalizeListSearchQuery(query);
-				renderCurrentList();
-				updateListSelectButton();
-				if (!listPointsForCurrentBounds().length) {
-					card.textContent = labels.notFound || labels.empty || '';
-				}
-				return Promise.resolve([]);
-			}
 			if (controller) {
 				controller.abort();
 			}

@@ -204,8 +204,8 @@ function createHarness(api) {
 							selected: null,
 							cancelledFit: 0,
 							pendingFit: false,
-							renderMarkers(points) {
-								calls.push(['renderMarkers', points]);
+							renderMarkers(points, options) {
+								calls.push(['renderMarkers', points, options || {}]);
 							},
 							clearMarkers() {
 								calls.push(['clearMarkers']);
@@ -907,9 +907,6 @@ async function fixedAreaLargeDatasetDoesNotReloadOnViewportChange() {
 	harness.list.dispatch('scroll');
 	await wait(30);
 	assert(harness.list.innerHTML.includes('p06403'), 'virtualized sidebar must make the last point reachable by scroll');
-	await harness.map.search('Address p06403');
-	assert.strictEqual(pointRequests, 1, 'fixed-area local search must use the loaded source array');
-	assert(harness.list.innerHTML.includes('p06403'), 'fixed-area local search must find points outside the initially rendered DOM window');
 	harness.map.destroy();
 }
 
@@ -971,9 +968,82 @@ async function manualFixedDatasetKeepsTitleCommentAndSingleRequest() {
 	assert.strictEqual((popupHtml.match(/Отличный ПВЗ/g) || []).length, 1, 'manual point popup must render the ordinary comment exactly once');
 	assert(popupHtml.includes('Комментарий:'), 'manual point popup must label ordinary comments as comments');
 	assert(!popupHtml.includes('Описание:</strong><span>Отличный ПВЗ'), 'manual point popup must not duplicate ordinary comments as description');
-	await harness.map.search('Отличный');
-	assert.strictEqual(pointRequests, 1, 'manual fixed pickup dataset search must use the loaded local array instead of address search or duplicate points calls');
-	assert(harness.list.innerHTML.includes('Тестовый ПВЗ'), 'manual fixed dataset local search must keep the matching point in the list');
+	harness.map.destroy();
+}
+
+async function fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints() {
+	let pointRequests = 0;
+	let addressSearchCalls = 0;
+	const near = Object.assign(point('manual-near', 55.0405, 82.9310), {
+		point_title: 'Северный пункт',
+		address: 'улица Ленина, 8'
+	});
+	const far = Object.assign(point('manual-far', 55.1000, 83.1200), {
+		point_title: 'Южный пункт',
+		address: 'улица Советская, 10'
+	});
+	const api = {
+		context: {
+			carrier: 'manual',
+			pickup_family: 'manual:manual_pickup_a:pickup',
+			reload_on_viewport_change: false
+		},
+		points: () => {
+			pointRequests += 1;
+			return Promise.resolve([far, near]);
+		},
+		addressSearch: (query, context) => {
+			addressSearchCalls += 1;
+			assert.strictEqual(query, 'Красный проспект 25', 'main pickup search must pass the user query to address search.');
+			assert.strictEqual(context.carrier, 'manual', 'address search must keep the current pickup context.');
+			return Promise.resolve({
+				address: { value: 'Красный проспект, 25', lat: 55.0410, lng: 82.9300 },
+				points: []
+			});
+		}
+	};
+	const harness = createHarness(api);
+	await wait(120);
+	assert.strictEqual(pointRequests, 1, 'manual fixed pickup dataset must load the point dataset once initially.');
+	await harness.map.search('Красный проспект 25');
+	await wait(40);
+	assert.strictEqual(addressSearchCalls, 1, 'manual fixed pickup dataset search must call generic address search.');
+	assert.strictEqual(pointRequests, 1, 'manual fixed pickup dataset address search must not duplicate the point dataset request.');
+	assert.deepStrictEqual(harness.calls.filter((call) => call[0] === 'setCenter').pop().slice(1), [55.041, 82.93, 15], 'address search must center on the found address.');
+	const lastMarkers = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
+	assert.strictEqual(lastMarkers[2].searchMarker.type, 'search', 'address search must render a search origin marker.');
+	assert.strictEqual(lastMarkers[2].searchMarker.value, 'Красный проспект, 25', 'search marker must use the found address label.');
+	assert.strictEqual(lastMarkers[1][0].point_code, 'manual-near', 'fixed dataset points must be re-sorted by distance from the searched address.');
+	assert(harness.list.innerHTML.includes('manual-near') && harness.list.innerHTML.includes('manual-far'), 'address search must not text-filter fixed dataset pickup points.');
+	assert(harness.list.innerHTML.indexOf('manual-near') < harness.list.innerHTML.indexOf('manual-far'), 'fixed dataset list must follow recalculated distance order.');
+	harness.map.destroy();
+}
+
+async function dynamicDatasetSearchReloadsByAddressBounds() {
+	let pointRequests = 0;
+	let lastBbox = '';
+	const api = {
+		context: {
+			carrier: 'cdek',
+			reload_on_viewport_change: true
+		},
+		points: (bbox) => {
+			pointRequests += 1;
+			lastBbox = bbox;
+			return Promise.resolve(pointRequests === 1 ? [point('initial', 55.75, 37.61)] : [point('searched', 55.041, 82.93)]);
+		},
+		addressSearch: () => Promise.resolve({
+			address: { value: 'Красный проспект, 25', lat: 55.0410, lng: 82.9300 },
+			points: []
+		})
+	};
+	const harness = createHarness(api);
+	await wait(120);
+	await harness.map.search('Красный проспект 25');
+	await wait(80);
+	assert.strictEqual(pointRequests, 2, 'dynamic pickup provider must reload points around the searched address.');
+	assert.deepStrictEqual(lastBbox.split(',').map((value) => Number(value).toFixed(3)), ['82.810', '54.921', '83.050', '55.161'], 'dynamic pickup provider reload must use the searched address bbox.');
+	assert(harness.list.innerHTML.includes('searched'), 'dynamic pickup provider list must show points returned for the searched address.');
 	harness.map.destroy();
 }
 
@@ -1126,12 +1196,18 @@ function createCheckoutNoticeHarness(options) {
 	const shippingInputs = {
 		'pek:pickup': new FakeElement('shipping-pek'),
 		yandex_pickup: new FakeElement('shipping-yandex'),
-		'ozon_delivery:pickup': new FakeElement('shipping-ozon')
+		'ozon_delivery:pickup': new FakeElement('shipping-ozon'),
+		'manual:service_a': new FakeElement('shipping-manual-a'),
+		'manual:service_b': new FakeElement('shipping-manual-b'),
+		'russian_post:pickup': new FakeElement('shipping-russian-post')
 	};
 	shippingInputs['pek:pickup'].value = 'pek:pickup';
 	shippingInputs['pek:pickup'].checked = true;
 	shippingInputs.yandex_pickup.value = 'wdc_platform_delivery:yandex_pickup';
 	shippingInputs['ozon_delivery:pickup'].value = 'ozon_delivery:pickup';
+	shippingInputs['manual:service_a'].value = 'manual:service_a';
+	shippingInputs['manual:service_b'].value = 'manual:service_b';
+	shippingInputs['russian_post:pickup'].value = 'russian_post:pickup';
 	Object.keys(shippingInputs).forEach((key) => {
 		shippingInputs[key].matches = (selector) => selector === 'input[name^="shipping_method"]';
 	});
@@ -1306,6 +1382,176 @@ function createCheckoutNoticeHarness(options) {
 		return { state: stateCalls, points: pointCalls };
 	}
 	return { setContainers, dispatchDomReady, updatedCheckout, changeMethod, changeDestination, setStateResponse, resetCalls, sandbox, open, mapContexts, modalRoots, shippingInputs, apiCounts };
+}
+
+async function shippingMethodSwitchPreservesInactiveFamilySelections() {
+	const context = { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' };
+	const manualA = {
+		id: 'manual-a',
+		point_code: 'manual-a',
+		carrier_key: 'manual',
+		service_key: 'service_a',
+		pickup_family: 'manual:service_a:pickup',
+		point_address: 'Москва, A',
+		address: 'Москва, A',
+		country_code: 'RU',
+		location_id: '153912',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	const manualB = {
+		id: 'manual-b',
+		point_code: 'manual-b',
+		carrier_key: 'manual',
+		service_key: 'service_b',
+		pickup_family: 'manual:service_b:pickup',
+		point_address: 'Москва, B',
+		address: 'Москва, B',
+		country_code: 'RU',
+		location_id: '153912',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	const ozon = {
+		id: 'ozon-a',
+		point_code: 'ozon-a',
+		carrier_key: 'ozon_delivery',
+		service_key: 'ozon_delivery',
+		pickup_family: 'ozon_delivery:pickup',
+		point_address: 'Москва, Ozon',
+		address: 'Москва, Ozon',
+		country_code: 'RU',
+		location_id: '153912',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	const russianPost = {
+		id: 'rp-a',
+		point_code: 'rp-a',
+		carrier_key: 'russian_post',
+		service_key: 'russian_post',
+		pickup_family: 'russian_post:pickup',
+		point_address: 'Москва, RP',
+		address: 'Москва, RP',
+		country_code: 'RU',
+		location_id: '153912',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'manual:service_a:pickup',
+		activeShippingMethod: 'manual:service_a',
+		currentContext: context,
+		initialContext: context,
+		stateResponse: {
+			active_pickup_family: 'manual:service_a:pickup',
+			city_context: context,
+			pickup_selections: {
+				'manual:service_a:pickup': manualA,
+				'manual:service_b:pickup': manualB,
+				'ozon_delivery:pickup': ozon,
+				'russian_post:pickup': russianPost
+			}
+		}
+	});
+	harness.sandbox.window.wdcPickupCheckout.pickupFamilies = [
+		'manual:service_a:pickup',
+		'manual:service_b:pickup',
+		'ozon_delivery:pickup',
+		'russian_post:pickup'
+	];
+	harness.sandbox.window.wdcPickupCheckout.pickupSelections = {
+		'manual:service_a:pickup': manualA,
+		'manual:service_b:pickup': manualB,
+		'ozon_delivery:pickup': ozon,
+		'russian_post:pickup': russianPost
+	};
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoints = Object.assign({}, harness.sandbox.window.wdcPickupCheckout.pickupSelections);
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint = manualA;
+	const manualAContainer = createCheckoutContainer('manual:service_a', 'manual:service_a:pickup', '', manualA);
+	const manualBContainer = createCheckoutContainer('manual:service_b', 'manual:service_b:pickup', '', manualB);
+	harness.setContainers([manualAContainer]);
+	harness.dispatchDomReady();
+	await wait(30);
+	harness.changeMethod('manual:service_b');
+	harness.setContainers([manualBContainer]);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.resetCalls.length, 0, 'shipping method switch must not call the reset endpoint.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['manual:service_a:pickup'].point_code, 'manual-a', 'manual A selection must survive switching to manual B.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['manual:service_b:pickup'].point_code, 'manual-b', 'manual B selection must remain isolated.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['ozon_delivery:pickup'].point_code, 'ozon-a', 'Ozon selection must survive switching to manual.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['russian_post:pickup'].point_code, 'rp-a', 'Russian Post selection must survive switching to manual.');
+	assert.strictEqual(manualBContainer.fields['[data-wdc-pickup-point-code]'].value, 'manual-b', 'switching to B must restore the active B selection.');
+	harness.changeMethod('manual:service_a');
+	harness.setContainers([manualAContainer]);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(manualAContainer.fields['[data-wdc-pickup-point-code]'].value, 'manual-a', 'switching back to A must restore the previous A selection.');
+	harness.changeMethod('ozon_delivery:pickup');
+	harness.setContainers([createCheckoutContainer('ozon_delivery:pickup', 'ozon_delivery:pickup', '', ozon)]);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['manual:service_a:pickup'].point_code, 'manual-a', 'manual selection must survive switching to Ozon.');
+}
+
+async function shippingMethodSwitchToEmptyFamilyPreservesPreviousSelection() {
+	const context = { country_code: 'RU', location_id: '153912', display_name: 'Москва', city_name: 'Москва' };
+	const manualA = {
+		id: 'manual-a',
+		point_code: 'manual-a',
+		carrier_key: 'manual',
+		service_key: 'service_a',
+		pickup_family: 'manual:service_a:pickup',
+		point_address: 'Москва, A',
+		address: 'Москва, A',
+		country_code: 'RU',
+		location_id: '153912',
+		destination_fingerprint: 'country=RU|location_id=153912'
+	};
+	const harness = createCheckoutNoticeHarness({
+		activePickupFamily: 'manual:service_a:pickup',
+		activeShippingMethod: 'manual:service_a',
+		currentContext: context,
+		initialContext: context,
+		stateResponse: {
+			active_pickup_family: 'manual:service_b:pickup',
+			city_context: context,
+			pickup_selections: {
+				'manual:service_a:pickup': manualA
+			}
+		}
+	});
+	harness.sandbox.window.wdcPickupCheckout.pickupFamilies = [
+		'manual:service_a:pickup',
+		'manual:service_b:pickup'
+	];
+	harness.sandbox.window.wdcPickupCheckout.pickupSelections = {
+		'manual:service_a:pickup': manualA
+	};
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoints = Object.assign({}, harness.sandbox.window.wdcPickupCheckout.pickupSelections);
+	harness.sandbox.window.wdcPickupCheckout.selectedPickupPoint = manualA;
+	const manualAContainer = createCheckoutContainer('manual:service_a', 'manual:service_a:pickup', '', manualA);
+	const manualBContainer = createCheckoutContainer('manual:service_b', 'manual:service_b:pickup', '');
+	harness.setContainers([manualAContainer]);
+	harness.dispatchDomReady();
+	await wait(30);
+	harness.changeMethod('manual:service_b');
+	harness.setContainers([manualBContainer]);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(harness.resetCalls.length, 0, 'switching to an empty pickup family must not call reset.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['manual:service_a:pickup'].point_code, 'manual-a', 'previous family selection must survive while the new active family is empty.');
+	assert.strictEqual(harness.sandbox.window.wdcPickupCheckout.pickupSelections['manual:service_b:pickup'], undefined, 'switching to an empty pickup family must not create a compatibility bucket.');
+	assert.strictEqual(manualBContainer.fields['[data-wdc-pickup-point-code]'].value, '', 'empty active family must keep its visible pickup card empty.');
+	harness.setStateResponse({
+		active_pickup_family: 'manual:service_a:pickup',
+		city_context: context,
+		pickup_selections: {
+			'manual:service_a:pickup': manualA
+		}
+	});
+	harness.changeMethod('manual:service_a');
+	harness.setContainers([manualAContainer]);
+	harness.updatedCheckout();
+	await wait(30);
+	assert.strictEqual(manualAContainer.fields['[data-wdc-pickup-point-code]'].value, 'manual-a', 'switching back to the previous family must restore its stored selection.');
 }
 
 async function destinationFingerprintChangeResetsLocalSelection() {
@@ -1922,6 +2168,8 @@ async function run() {
 		&& !checkoutSource.includes("carrier_key === 'manual'")
 		&& !checkoutSource.includes("pickupFamily(point) === 'manual:"), 'Manual pickup must rely on generic requires_rate_refresh metadata and must not add a frontend carrier branch.');
 	await checkoutInlineNoticeLatchLifecycle();
+	await shippingMethodSwitchPreservesInactiveFamilySelections();
+	await shippingMethodSwitchToEmptyFamilyPreservesPreviousSelection();
 	await destinationFingerprintChangeResetsLocalSelection();
 	await pickupRateCapabilitySurvivesCheckoutStateRefresh();
 	await prefetchPointsCapabilityControlsBackgroundFetch();
@@ -1953,6 +2201,8 @@ async function run() {
 	await destroyAfterAddressSearchPreventsLatePointsMutation();
 	await fixedAreaLargeDatasetDoesNotReloadOnViewportChange();
 	await manualFixedDatasetKeepsTitleCommentAndSingleRequest();
+	await fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints();
+	await dynamicDatasetSearchReloadsByAddressBounds();
 	await presentationCommentStaysSeparateWhenDistinct();
 	await viewportFilteredFixedDatasetUpdatesListWithoutLoader();
 	console.log('Pickup map lifecycle smoke OK');

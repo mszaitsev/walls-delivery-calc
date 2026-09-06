@@ -549,16 +549,19 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		}
 		Object.keys(pickupInlineNotices).forEach(function (family) {
 			var point = authoritativeSelectedPointForFamily(family);
+			var hasContainer = hasPickupContainerForFamily(family);
 			if (
 				point
-				&& hasPickupContainerForFamily(family)
+				&& hasContainer
 				&& isValidSelectedPointForCard(point, family)
 				&& sameSelectionDestination(point)
 			) {
 				clearPickupInlineNotice(family);
 				return;
 			}
-			removeLocalPickupSelection(family);
+			if (hasContainer) {
+				removeLocalPickupSelection(family);
+			}
 		});
 		syncPickupInlineNotices();
 	}

@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.153.3
+Version: 0.153.4
 
-0.153.3 deduplicates pickup provider rate/snapshot resolution and validation without changing pickup behavior.
+0.153.4 unifies pickup-map search as address/geolocation origin across providers and preserves family-scoped pickup selections when switching shipping methods.
 
 0.153.0 connects manual delivery services to the existing Shipment Framework. The single `manual` shipment adapter supports manual attach, local remove, and generic manual actual cost for the concrete historical manual service saved on the order; preview/create, carrier cancellation, status API, autosync, documents, returns, and manual shipment storage tables remain unsupported.
 
