@@ -25,33 +25,37 @@ final class SelfPickupDiscountService {
 		if ( ! is_object( $cart ) || ! method_exists( $cart, 'add_fee' ) || ! $this->cart_needs_shipping( $cart ) ) {
 			return;
 		}
-		$service = $this->services->find_by_service_key( SelfPickupSettings::SERVICE_KEY );
-		if ( null === $service || null === $service->id ) {
+		$result = $this->current_discount_result( $cart );
+		if ( ! $result->applied || $result->amount_kopecks <= 0 ) {
 			return;
 		}
-		$result = $this->policy->calculate(
-			$this->self_pickup_selected(),
-			$this->cart_item_total_after_coupons_kopecks( $cart ),
-			$this->settings->discount_policy( (int) $service->id )
-		);
-		if ( ! $result->eligible || $result->amount_kopecks <= 0 ) {
-			return;
-		}
-		$label = trim( $result->fee_label );
+		$label = $this->resolve_fee_label( $result->fee_label, $result->percent );
 		if ( '' === $label ) {
-			$label = SelfPickupSettings::DEFAULT_DISCOUNT_FEE_LABEL;
+			$label = $this->resolve_fee_label( SelfPickupSettings::DEFAULT_DISCOUNT_FEE_LABEL, $result->percent );
 		}
 		$cart->add_fee( $label, -1 * ( $result->amount_kopecks / 100 ), false );
 	}
 
 	public function current_discount_result( mixed $cart = null ): SelfPickupDiscountResult {
+		return $this->evaluate( $cart, $this->self_pickup_selected() );
+	}
+
+	public function current_promotion_result( mixed $cart = null ): SelfPickupDiscountResult {
+		return $this->evaluate( $cart, false );
+	}
+
+	private function evaluate( mixed $cart, bool $selected ): SelfPickupDiscountResult {
 		$service = $this->services->find_by_service_key( SelfPickupSettings::SERVICE_KEY );
 		if ( null === $service || null === $service->id ) {
-			return new SelfPickupDiscountResult( false, 0, 0.0, 0, SelfPickupSettings::DEFAULT_DISCOUNT_FEE_LABEL );
+			return new SelfPickupDiscountResult( false, false, false, 0, 0.0, 0, SelfPickupSettings::DEFAULT_DISCOUNT_FEE_LABEL );
+		}
+		$cart = is_object( $cart ) ? $cart : $this->cart();
+		if ( ! $this->cart_needs_shipping( $cart ) ) {
+			return new SelfPickupDiscountResult( false, false, false, 0, 0.0, 0, $this->settings->discount_fee_label( (int) $service->id ) );
 		}
 		return $this->policy->calculate(
-			$this->self_pickup_selected(),
-			is_object( $cart ) ? $this->cart_item_total_after_coupons_kopecks( $cart ) : $this->cart_item_total_after_coupons_kopecks( $this->cart() ),
+			$selected,
+			$this->cart_item_total_after_coupons_kopecks( $cart ),
 			$this->settings->discount_policy( (int) $service->id )
 		);
 	}
@@ -106,5 +110,13 @@ final class SelfPickupDiscountService {
 
 	private function cart(): mixed {
 		return function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->cart ) ? WC()->cart : null;
+	}
+
+	private function resolve_fee_label( string $template, float $percent ): string {
+		return trim( str_replace( '{s}', $this->percent_label( $percent ), $template ) );
+	}
+
+	private function percent_label( float $percent ): string {
+		return rtrim( rtrim( number_format( $percent, 2, '.', '' ), '0' ), '.' );
 	}
 }

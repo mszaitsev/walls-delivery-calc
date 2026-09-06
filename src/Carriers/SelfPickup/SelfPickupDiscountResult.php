@@ -7,6 +7,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class SelfPickupDiscountResult {
 	public function __construct(
+		public readonly bool $available,
+		public readonly bool $applied,
 		public readonly bool $eligible,
 		public readonly int $amount_kopecks,
 		public readonly float $percent,

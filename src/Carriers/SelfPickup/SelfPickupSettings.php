@@ -12,6 +12,7 @@ final class SelfPickupSettings {
 	public const CARRIER_KEY = 'self_pickup';
 	public const SERVICE_KEY = 'self_pickup';
 	public const TITLE = 'Самовывоз';
+	public const CARD_TITLE_KEY = 'self_pickup_card_title';
 	public const ADDRESS_KEY = 'self_pickup_address';
 	public const WORKING_HOURS_KEY = 'self_pickup_working_hours';
 	public const CUSTOMER_COMMENT_ENABLED_KEY = 'self_pickup_customer_comment_enabled';
@@ -24,9 +25,10 @@ final class SelfPickupSettings {
 	public const DISCOUNT_COMMENT_KEY = 'self_pickup_discount_comment';
 
 	public const DEFAULT_ADDRESS = 'Новосибирск, ул. Некрасова, д.63/1, 1 этаж (со стороны ул. Достоевского)';
+	public const DEFAULT_CARD_TITLE = 'Самовывоз из магазина';
 	public const DEFAULT_WORKING_HOURS = 'Ежедневно, 10:00-20:00';
 	public const DEFAULT_CUSTOMER_COMMENT = 'Готовый заказ будет ждать вас 7 дней. Также можно забрать заказ любой доставкой-такси, которую заказывает покупатель самостоятельно.';
-	public const DEFAULT_DISCOUNT_FEE_LABEL = 'Скидка 10% за самовывоз. Подробнее в разделе "Акции"';
+	public const DEFAULT_DISCOUNT_FEE_LABEL = 'Скидка {s}% за самовывоз. Подробнее в разделе "Акции"';
 	public const DEFAULT_DISCOUNT_COMMENT = 'Скидка {s}% по акции';
 
 	public function __construct(
@@ -36,6 +38,10 @@ final class SelfPickupSettings {
 
 	public function address( int $service_id ): string {
 		return $this->text_setting( $service_id, self::ADDRESS_KEY, self::DEFAULT_ADDRESS );
+	}
+
+	public function card_title( int $service_id ): string {
+		return $this->text_setting( $service_id, self::CARD_TITLE_KEY, self::DEFAULT_CARD_TITLE );
 	}
 
 	public function working_hours( int $service_id ): string {
@@ -89,6 +95,7 @@ final class SelfPickupSettings {
 
 	/** @param array<string,mixed> $input */
 	public function save_main_from_admin( int $service_id, array $input ): void {
+		$this->settings->set_setting( $service_id, self::CARD_TITLE_KEY, $this->sanitize_text( $input[ self::CARD_TITLE_KEY ] ?? self::DEFAULT_CARD_TITLE ), 'string' );
 		$this->settings->set_setting( $service_id, self::ADDRESS_KEY, $this->sanitize_text( $input[ self::ADDRESS_KEY ] ?? self::DEFAULT_ADDRESS ), 'string' );
 		$this->settings->set_setting( $service_id, self::WORKING_HOURS_KEY, $this->sanitize_textarea( $input[ self::WORKING_HOURS_KEY ] ?? self::DEFAULT_WORKING_HOURS ), 'string' );
 		$this->settings->set_setting( $service_id, self::CUSTOMER_COMMENT_ENABLED_KEY, ! empty( $input[ self::CUSTOMER_COMMENT_ENABLED_KEY ] ), 'bool' );

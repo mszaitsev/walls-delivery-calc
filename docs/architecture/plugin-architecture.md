@@ -1,8 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.0
+Version: 0.155.1
 
-0.155.0 adds `self_pickup` as a builtin checkout-only Delivery Service. `SelfPickupCarrier` is registered only in the checkout `CarrierRegistry`; it owns the zero-price quote, fixed pickup-location metadata, and buyer-facing comments. The discount is a separate WooCommerce totals integration that adds a standard negative fee after coupons based on stable WDC rate identity, not on the display title. Self-pickup is intentionally non-shipment: no shipment adapter, mapper, document provider, modal extension, lifecycle continuation, autosync, fake shipment record, pickup provider, or carrier API is registered.
+0.155.1 hardens `self_pickup` as a builtin checkout-only Delivery Service. `SelfPickupCarrier` remains registered only in the checkout `CarrierRegistry`; it owns the zero-price quote, fixed pickup-location metadata, separate card title, and buyer-facing comments. `SelfPickupDiscountPolicy` distinguishes promotion availability from applied discount, while `SelfPickupDiscountService` adds a standard negative fee only after stable WDC identity confirms self-pickup is chosen. Admin Rules tab hiding lives in Delivery Services presentation, not Rule Engine. Self-pickup is intentionally non-shipment: no shipment adapter, mapper, document provider, modal extension, lifecycle continuation, autosync, fake shipment record, pickup provider, or carrier API is registered.
 
 The generic presentation extension for non-selectable fulfillment locations is `fixed_pickup_point_snapshot` on rate/order metadata. Checkout and order persistence/rendering consume that snapshot without carrier-specific branches. The generic Shipment admin extension for intentionally non-shipment deliveries is `non_shipment_state`, which carries a static informational message and false action capabilities; `OrderShipmentsMetabox`, AJAX payloads, and shipment JS must remain free of `self_pickup` branches.
 

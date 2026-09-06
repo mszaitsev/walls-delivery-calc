@@ -95,6 +95,9 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 					'presentation' => $this->carrier_presentation( $carrier_key ),
 					'status' => 'non_shipment',
 					'carrier_status_title' => $non_shipment_state['message'],
+					'non_shipment_state_active' => true,
+					'suppress_status_block' => true,
+					'suppress_actions' => true,
 					'tracking_checked_at' => '',
 					'has_shipment' => false,
 					'can_create' => false,
@@ -148,8 +151,9 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 				'presentation' => $presentation,
 			)
 		);
-		$status = $this->actual_costs->enrich_status_payload( $status, $shipment, $order );
-		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
+		$non_shipment_active = $this->non_shipment_state_active( $status );
+		$status = $non_shipment_active ? $status : $this->actual_costs->enrich_status_payload( $status, $shipment, $order );
+		$document_actions = $non_shipment_active ? array() : $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		if ( array() !== $document_actions ) {
 			$status['document_actions'] = $document_actions;
 		}
@@ -161,12 +165,17 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 			'presentation' => $presentation,
 			'document_actions' => $document_actions,
 			'has_shipment' => ! empty( $status['has_shipment'] ),
-			'can_create' => ! empty( $status['can_create'] ),
-			'can_attach_manual' => ! empty( $status['can_attach_manual'] ),
-			'can_update_status' => ! empty( $status['can_update_status'] ),
-			'can_cancel' => ! empty( $status['can_cancel'] ),
-			'can_remove_from_order' => ! empty( $status['can_remove_from_order'] ),
+			'can_create' => ! $non_shipment_active && ! empty( $status['can_create'] ),
+			'can_attach_manual' => ! $non_shipment_active && ! empty( $status['can_attach_manual'] ),
+			'can_update_status' => ! $non_shipment_active && ! empty( $status['can_update_status'] ),
+			'can_cancel' => ! $non_shipment_active && ! empty( $status['can_cancel'] ),
+			'can_remove_from_order' => ! $non_shipment_active && ! empty( $status['can_remove_from_order'] ),
 		);
+	}
+
+	/** @param array<string,mixed> $status */
+	private function non_shipment_state_active( array $status ): bool {
+		return ! empty( $status['non_shipment_state_active'] ) || ! empty( $status['non_shipment'] );
 	}
 
 	private function tracking_presentation( array $status, array $presentation, string $fallback_value ): array {

@@ -185,6 +185,8 @@ final class OrderShipmentDraftFactory {
 				'postoffice_codes' => array(),
 				'modal_capabilities' => array(
 					'non_shipment' => true,
+					'suppress_status_block' => true,
+					'suppress_actions' => true,
 					'can_create' => false,
 					'can_attach_manual' => false,
 					'can_update_status' => false,

@@ -267,15 +267,16 @@ final class OrderShipmentsMetabox {
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
 		$status_payload = $this->status_payload_for_carrier( $order, $carrier_key );
 		$status_payload = array_merge( $status_payload, array( 'carrier_key' => $carrier_key ) );
-		$status_payload = $this->actual_costs->enrich_status_payload( $status_payload, $shipment, $order );
+		$non_shipment_active = $this->non_shipment_state_active( $status_payload );
+		$status_payload = $non_shipment_active ? $status_payload : $this->actual_costs->enrich_status_payload( $status_payload, $shipment, $order );
 		$presentation = $this->carrier_presentation( $carrier_key );
 		$tracking_presentation = $this->tracking_presentation( $status_payload, $presentation, $barcode );
-		$price_label = (string) $status_payload['actual_cost_label'];
-		$price_compare_status = (string) $status_payload['actual_cost_compare_status'];
-		$price_compare_message = (string) $status_payload['actual_cost_compare_message'];
-		$has_actual_cost = (bool) $status_payload['has_actual_cost'];
+		$price_label = $non_shipment_active ? '' : (string) $status_payload['actual_cost_label'];
+		$price_compare_status = $non_shipment_active ? '' : (string) $status_payload['actual_cost_compare_status'];
+		$price_compare_message = $non_shipment_active ? '' : (string) $status_payload['actual_cost_compare_message'];
+		$has_actual_cost = ! $non_shipment_active && (bool) $status_payload['has_actual_cost'];
 		$yandex_self_pickup_code = trim( (string) ( $status_payload['yandex_self_pickup_node_code'] ?? $shipment['yandex_self_pickup_node_code'] ?? '' ) );
-		$button_policy = $this->button_policy()->resolve( $carrier_key, $shipment, $status_payload, $this->can_cancel_shipment( $shipment ) );
+		$button_policy = $non_shipment_active ? array( 'has_shipment' => false, 'show_create' => false, 'show_manual_attach' => false, 'show_update' => false, 'show_cancel' => false, 'show_remove' => false ) : $this->button_policy()->resolve( $carrier_key, $shipment, $status_payload, $this->can_cancel_shipment( $shipment ) );
 		$has_created = ! empty( $button_policy['has_shipment'] );
 		$can_cancel = ! empty( $button_policy['can_cancel'] );
 		$show_primary_actions = ! empty( $button_policy['show_create'] );
@@ -283,8 +284,8 @@ final class OrderShipmentsMetabox {
 		$show_update = ! empty( $button_policy['show_update'] );
 		$show_cancel = ! empty( $button_policy['show_cancel'] );
 		$show_remove = ! empty( $button_policy['show_remove'] );
-		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
-		$modal_extension = $this->modal_extensions instanceof ShipmentModalExtensionRegistry ? $this->modal_extensions->get( $carrier_key ) : null;
+		$document_actions = $non_shipment_active ? array() : $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
+		$modal_extension = ! $non_shipment_active && $this->modal_extensions instanceof ShipmentModalExtensionRegistry ? $this->modal_extensions->get( $carrier_key ) : null;
 		$modal_extension_context = $modal_extension instanceof CarrierShipmentModalExtensionInterface ? $modal_extension->modal_context( $order, $draft ) : array();
 		$modal_create_button_label = __( 'Создать отправление', 'walls-delivery-calc' );
 		if ( array_key_exists( 'requires_tariff', $modal_extension_context ) ) {
@@ -312,6 +313,7 @@ final class OrderShipmentsMetabox {
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox data-carrier-key="<?php echo esc_attr( $carrier_key ); ?>" data-has-shipment="<?php echo $has_created ? '1' : '0'; ?>" <?php $this->render_presentation_attrs( $presentation ); ?>>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
+			<?php if ( ! $non_shipment_active ) : ?>
 			<p><strong><?php echo esc_html__( 'Статус посылки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-summary-status><?php echo esc_html( $this->shipment_status_label( $shipment ) ); ?></span></p>
 			<?php $tracking_items = is_array( $tracking_presentation['items'] ?? null ) ? $tracking_presentation['items'] : array(); ?>
 			<p data-wdc-tracking-row <?php echo array() === $tracking_items && '' === $tracking_presentation['display_text'] && '' === $tracking_presentation['copy_value'] ? 'hidden' : ''; ?>><strong data-wdc-tracking-label><?php echo esc_html( $tracking_presentation['label'] ); ?></strong>: <span data-wdc-tracking-number><?php $this->render_tracking_value( $tracking_presentation ); ?></span> <?php if ( array() === $tracking_items ) : ?><button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $tracking_presentation['copy_value'] ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $tracking_presentation['copy_value'] ); ?>>🗐</button><?php endif; ?> <span class="description" data-wdc-copy-tracking-status></span></p>
@@ -453,6 +455,7 @@ final class OrderShipmentsMetabox {
 					</div>
 				</div>
 			</div>
+			<?php endif; ?>
 		</div>
 		<?php
 	}
@@ -641,6 +644,11 @@ final class OrderShipmentsMetabox {
 		return $this->button_policy;
 	}
 
+	/** @param array<string,mixed> $status */
+	private function non_shipment_state_active( array $status ): bool {
+		return ! empty( $status['non_shipment_state_active'] ) || ! empty( $status['non_shipment'] );
+	}
+
 	/**
 	 * @param array<string,mixed> $status
 	 */
@@ -672,6 +680,9 @@ final class OrderShipmentsMetabox {
 					'presentation' => $this->carrier_presentation( $carrier_key ),
 					'status' => 'non_shipment',
 					'carrier_status_title' => $non_shipment_state['message'],
+					'non_shipment_state_active' => true,
+					'suppress_status_block' => true,
+					'suppress_actions' => true,
 					'tracking_checked_at' => '',
 					'has_shipment' => false,
 					'can_create' => false,

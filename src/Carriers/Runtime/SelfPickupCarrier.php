@@ -40,14 +40,14 @@ final class SelfPickupCarrier implements CarrierAdapterInterface {
 		$service_id = max( 0, (int) ( $request->customer_context['service_id'] ?? 0 ) );
 		$service_title = trim( (string) ( $request->customer_context['service_title'] ?? SelfPickupSettings::TITLE ) );
 		$title = '' !== $service_title ? $service_title : SelfPickupSettings::TITLE;
-		$snapshot = $this->fixed_location_snapshot( $service_id, $title );
+		$snapshot = $this->fixed_location_snapshot( $service_id );
 		$comments = array();
 		if ( $service_id > 0 && $this->settings->customer_comment_enabled( $service_id ) ) {
 			$comments[] = $this->settings->customer_comment( $service_id );
 		}
 		if ( $service_id > 0 && $this->settings->discount_comment_enabled( $service_id ) && $this->discounts instanceof SelfPickupDiscountService ) {
-			$discount = $this->discounts->current_discount_result();
-			if ( $discount->eligible ) {
+			$discount = $this->discounts->current_promotion_result();
+			if ( $discount->available ) {
 				$comments[] = $this->discount_comment( $service_id, $discount->percent );
 			}
 		}
@@ -85,6 +85,8 @@ final class SelfPickupCarrier implements CarrierAdapterInterface {
 				'order_recalculation_requires_address' => false,
 				'non_shipment_state' => array(
 					'message' => 'Самовывоз покупателем',
+					'suppress_status_block' => true,
+					'suppress_actions' => true,
 					'can_create' => false,
 					'can_attach_manual' => false,
 					'can_update_status' => false,
@@ -100,7 +102,8 @@ final class SelfPickupCarrier implements CarrierAdapterInterface {
 	}
 
 	/** @return array<string,mixed> */
-	private function fixed_location_snapshot( int $service_id, string $title ): array {
+	private function fixed_location_snapshot( int $service_id ): array {
+		$card_title = $service_id > 0 ? $this->settings->card_title( $service_id ) : SelfPickupSettings::DEFAULT_CARD_TITLE;
 		$address = $service_id > 0 ? $this->settings->address( $service_id ) : SelfPickupSettings::DEFAULT_ADDRESS;
 		$work_time = $service_id > 0 ? $this->settings->working_hours( $service_id ) : SelfPickupSettings::DEFAULT_WORKING_HOURS;
 
@@ -110,9 +113,9 @@ final class SelfPickupCarrier implements CarrierAdapterInterface {
 			'pickup_family' => SelfPickupSettings::CARRIER_KEY . ':pickup',
 			'point_type' => 'store_pickup',
 			'point_type_label' => 'Самовывоз из магазина',
-			'point_title' => $title,
-			'card_title' => 'Самовывоз из магазина',
-			'point_name' => $title,
+			'point_title' => $card_title,
+			'card_title' => $card_title,
+			'point_name' => $card_title,
 			'point_address' => $address,
 			'address' => $address,
 			'point_work_time' => $work_time,

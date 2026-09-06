@@ -29,7 +29,8 @@ final class DeliveryCustomerCommentRenderer {
 			return esc_html( (string) ( $comment['text'] ?? '' ) );
 		}
 		$url = $this->safe_url( (string) ( $comment['url'] ?? '' ) );
-		$text = esc_html( (string) ( $comment['text_before'] ?? '' ) );
+		$text_before = (string) ( $comment['text_before'] ?? '' );
+		$text = esc_html( $this->text_before_link( $text_before ) );
 		if ( '' === $url ) {
 			$text .= esc_html( (string) ( $comment['label'] ?? '' ) );
 		} else {
@@ -47,5 +48,13 @@ final class DeliveryCustomerCommentRenderer {
 		}
 
 		return $url;
+	}
+
+	private function text_before_link( string $text ): string {
+		if ( '' === trim( $text ) || (bool) preg_match( '/\s$/u', $text ) ) {
+			return $text;
+		}
+
+		return $text . ' ';
 	}
 }

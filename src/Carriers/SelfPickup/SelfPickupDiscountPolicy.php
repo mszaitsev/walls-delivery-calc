@@ -10,13 +10,14 @@ final class SelfPickupDiscountPolicy {
 	public function calculate( bool $selected, int $base_kopecks, array $settings ): SelfPickupDiscountResult {
 		$percent = max( 0.0, min( 100.0, (float) $settings['percent'] ) );
 		$minimum = max( 0, (int) $settings['minimum_kopecks'] );
-		if ( ! $selected || empty( $settings['enabled'] ) || $percent <= 0.0 || $base_kopecks < $minimum ) {
-			return new SelfPickupDiscountResult( false, 0, $percent, $minimum, (string) $settings['fee_label'] );
-		}
+		$available = ! empty( $settings['enabled'] ) && $percent > 0.0 && $base_kopecks >= $minimum;
+		$applied = $available && $selected;
 
 		return new SelfPickupDiscountResult(
-			true,
-			max( 0, (int) round( $base_kopecks * $percent / 100 ) ),
+			$available,
+			$applied,
+			$applied,
+			$applied ? max( 0, (int) round( $base_kopecks * $percent / 100 ) ) : 0,
 			$percent,
 			$minimum,
 			(string) $settings['fee_label']

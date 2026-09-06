@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.155.0
+Version: 0.155.1
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current stage: 0.155.0 adds the built-in checkout-only `self_pickup` delivery service. Самовывоз is a zero-price pickup-style method with a server-owned fixed store-location snapshot, safe buyer-facing comments, and an optional negative WooCommerce fee discount; it does not participate in Shipment Framework lifecycle, carrier APIs, pickup providers, or shipment registries.
+Current stage: 0.155.1 hardens the built-in checkout-only `self_pickup` delivery service after live verification. The fixed store card now renders only for the chosen rate and has a separate card title setting; the promo comment means “promotion available” while the negative WooCommerce fee means “discount applied”; zero-price checkout methods are sorted after paid methods in generic CHEAPEST sorting; and non-shipment orders keep only the service identity in the shipments metabox.
 
 ## Quick Start
 
