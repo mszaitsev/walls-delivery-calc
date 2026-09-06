@@ -1,12 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.141.19
+Version: 0.155.0
 
 WooCommerce delivery calculation and shipment management plugin.
 
 Canonical documentation starts at [docs/README.md](docs/README.md).
 
-Current Ozon Delivery scope: pickup checkout pricing for `Ozon до ПВЗ` is implemented through the carrier-owned quote layer and official Ozon Delivery checkout contract, but remains fail-closed until a safe admin live diagnostic succeeds for the configured `shipment_method_id`. Version 0.141.19 adds one INFO record after each successful Ozon checkout quote. Its carrier-owned allowlist includes package counts/weights, packing strategy, safe parcel dimensions, normalized declared values, normalized posting delivery/insurance totals, and final totals; it excludes buyer, address, raw API, product, pickup-row, and credential data. Packaging, pricing, pickup filtering, map behavior, and Shipment Framework remain unchanged.
+Current stage: 0.155.0 adds the built-in checkout-only `self_pickup` delivery service. Самовывоз is a zero-price pickup-style method with a server-owned fixed store-location snapshot, safe buyer-facing comments, and an optional negative WooCommerce fee discount; it does not participate in Shipment Framework lifecycle, carrier APIs, pickup providers, or shipment registries.
 
 ## Quick Start
 

@@ -55,6 +55,7 @@ final class DeliveryServiceManager {
 		if ( ! $ozon_exists && null !== $ozon->id ) {
 			$this->countries->replace_countries( (int) $ozon->id, array( 'RU' ) );
 		}
+		$this->services->ensure_self_pickup_service();
 	}
 
 	public function service_available_for_country( DeliveryService $service, string $country_code ): bool {

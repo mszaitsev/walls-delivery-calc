@@ -53,7 +53,7 @@ final class OrderShipmentDraftFactory {
 	}
 
 	public function supports_order( object $order ): bool {
-		return $this->supports_carrier_key( $this->active_carrier_key( $order ) );
+		return array() !== $this->non_shipment_state( $order ) || $this->supports_carrier_key( $this->active_carrier_key( $order ) );
 	}
 
 	public function supports_carrier_key( string $carrier_key ): bool {
@@ -156,6 +156,47 @@ final class OrderShipmentDraftFactory {
 	 * @return array<string,mixed>
 	 */
 	public function draft_array( object $order ): array {
+		$non_shipment_state = $this->non_shipment_state( $order );
+		if ( array() !== $non_shipment_state ) {
+			$carrier_key = $this->active_carrier_key( $order );
+			$service_key = $this->meta_string( $order, '_wdc_platform_service_key' );
+			$delivery_type = $this->meta_string( $order, '_wdc_platform_delivery_type' );
+
+			return array(
+				'request' => array(
+					'order_id' => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
+					'carrier_key' => $carrier_key,
+					'delivery_type' => '' !== $delivery_type ? $delivery_type : DeliveryType::PICKUP,
+					'rate_id' => $this->meta_string( $order, '_wdc_platform_rate_id' ),
+					'recipient_address' => '',
+					'pickup_point' => null,
+					'places' => array(),
+					'declared_value' => 0,
+					'services' => array(),
+					'recipient' => array(),
+					'meta' => array(
+						'service_key' => $service_key,
+						'delivery_type' => '' !== $delivery_type ? $delivery_type : DeliveryType::PICKUP,
+						'service_title' => $this->meta_string( $order, '_wdc_platform_service_title' ),
+						'non_shipment_state' => $non_shipment_state,
+					),
+				),
+				'services' => array(),
+				'postoffice_codes' => array(),
+				'modal_capabilities' => array(
+					'non_shipment' => true,
+					'can_create' => false,
+					'can_attach_manual' => false,
+					'can_update_status' => false,
+					'can_cancel' => false,
+					'can_remove_from_order' => false,
+					'requires_tariff' => false,
+					'requires_postoffice' => false,
+					'requires_successful_preview' => false,
+				),
+			);
+		}
+
 		$request = $this->create_request_from_order( $order );
 		if ( CdekSettings::CARRIER_KEY === $request->carrier_key ) {
 			return array(
@@ -2673,6 +2714,22 @@ final class OrderShipmentDraftFactory {
 		$value = $order->get_meta( $key, true );
 
 		return is_scalar( $value ) ? trim( (string) $value ) : '';
+	}
+
+	/** @return array<string,mixed> */
+	private function non_shipment_state( object $order ): array {
+		$rate_meta = $this->order_meta_array( $order, '_wdc_platform_rate_meta' );
+		$state = is_array( $rate_meta['non_shipment_state'] ?? null ) ? $rate_meta['non_shipment_state'] : array();
+		if ( array() === $state ) {
+			return array();
+		}
+		$message = trim( (string) ( $state['message'] ?? '' ) );
+		if ( '' === $message ) {
+			return array();
+		}
+		$state['message'] = $message;
+
+		return $state;
 	}
 
 	/**

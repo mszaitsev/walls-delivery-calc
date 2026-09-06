@@ -430,6 +430,7 @@ final class CheckoutOrchestrator {
 
 	private function request_for_service( QuoteRequest $request, DeliveryService $service, string $delivery_type = '' ): QuoteRequest {
 		$context = array(
+			'service_id' => $service->id,
 			'service_key' => $service->service_key,
 			'service_title' => $service->title,
 			'service_carrier_key' => $service->carrier_key,

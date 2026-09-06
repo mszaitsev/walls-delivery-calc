@@ -4,7 +4,9 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.154.0
+Version: 0.155.0
+
+Version 0.155.0 wires self-pickup only through the composition root: `SelfPickupSettings`, `SelfPickupDiscountPolicy`, `SelfPickupDiscountService`, and `SelfPickupCarrier`. `SelfPickupCarrier` is registered once in `CarrierRegistry`; `SelfPickupDiscountService` registers the checkout `woocommerce_cart_calculate_fees` hook and reads chosen shipping through `CheckoutSessionManager`. Shipment Framework registries intentionally do not receive a self-pickup adapter, mapper, document provider, modal extension, lifecycle continuation, autosync service, or API client.
 
 Version 0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
 

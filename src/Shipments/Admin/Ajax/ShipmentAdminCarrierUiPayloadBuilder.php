@@ -86,6 +86,25 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 	 * @return array<string,mixed>
 	 */
 	private function status_payload_for_carrier( object $order, string $carrier_key, array $shipment ): array {
+		$non_shipment_state = $this->non_shipment_state( $order );
+		if ( array() !== $non_shipment_state ) {
+			return array_merge(
+				$non_shipment_state,
+				array(
+					'carrier_key' => $carrier_key,
+					'presentation' => $this->carrier_presentation( $carrier_key ),
+					'status' => 'non_shipment',
+					'carrier_status_title' => $non_shipment_state['message'],
+					'tracking_checked_at' => '',
+					'has_shipment' => false,
+					'can_create' => false,
+					'can_attach_manual' => false,
+					'can_update_status' => false,
+					'can_cancel' => false,
+					'can_remove_from_order' => false,
+				)
+			);
+		}
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
 			return array_merge( $this->cdek_status_updates->status_payload( $shipment, $order ), array( 'presentation' => $this->carrier_presentation( $carrier_key ) ) );
 		}
@@ -97,6 +116,22 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 			array( 'carrier_key' => $carrier_key, 'presentation' => $this->carrier_presentation( $carrier_key ) ),
 			$shipment
 		);
+	}
+
+	/** @return array<string,mixed> */
+	private function non_shipment_state( object $order ): array {
+		$rate_meta = method_exists( $order, 'get_meta' ) ? $order->get_meta( '_wdc_platform_rate_meta', true ) : array();
+		$state = is_array( $rate_meta ) && is_array( $rate_meta['non_shipment_state'] ?? null ) ? $rate_meta['non_shipment_state'] : array();
+		if ( array() === $state ) {
+			return array();
+		}
+		$message = trim( (string) ( $state['message'] ?? '' ) );
+		if ( '' === $message ) {
+			return array();
+		}
+		$state['message'] = $message;
+
+		return $state;
 	}
 
 	public function carrier_ui_payload( object $order, string $carrier_key, ?array $shipment_override = null ): array {

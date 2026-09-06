@@ -52,6 +52,7 @@ final class CheckoutRateRenderer {
 
 		$this->render_tariff_selector( $meta );
 		$this->render_pickup_selector( $meta, $method );
+		$this->render_fixed_pickup_card( $meta, $method );
 		$this->render_courier_address_summary( $meta );
 		$this->render_customer_link_comments( $meta );
 
@@ -180,6 +181,38 @@ final class CheckoutRateRenderer {
 			),
 			true,
 			! $has_selection,
+			false
+		);
+		echo '</div>';
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_fixed_pickup_card( array $meta, mixed $method ): void {
+		if ( DeliveryType::PICKUP !== (string) ( $meta['delivery_type'] ?? '' ) || ! empty( $meta['requires_pickup_point'] ) ) {
+			return;
+		}
+		$snapshot = is_array( $meta['fixed_pickup_point_snapshot'] ?? null ) ? $meta['fixed_pickup_point_snapshot'] : array();
+		if ( array() === $snapshot ) {
+			$rate_meta = is_array( $meta['rate_meta'] ?? null ) ? $meta['rate_meta'] : array();
+			$snapshot = is_array( $rate_meta['fixed_pickup_point_snapshot'] ?? null ) ? $rate_meta['fixed_pickup_point_snapshot'] : array();
+		}
+		if ( array() === $snapshot ) {
+			return;
+		}
+		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
+		echo '<div class="wdc-fixed-pickup-checkout" data-wdc-fixed-pickup-card data-shipping-method-id="' . esc_attr( $rate_id ) . '">';
+		echo $this->card_renderer->render(
+			array_merge(
+				$snapshot,
+				array(
+					'rate_id' => $rate_id,
+					'snapshot' => $snapshot,
+				)
+			),
+			false,
+			false,
 			false
 		);
 		echo '</div>';

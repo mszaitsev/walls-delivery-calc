@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.154.0
+Version: 0.155.0
+
+0.155.0 adds the built-in checkout-only `self_pickup` delivery service for classic store pickup. The method uses stable `carrier_key=service_key=self_pickup`, zero delivery price, standard Delivery Services country availability with default `Все страны`, a server-owned fixed pickup-location snapshot, safe structured buyer comments, and an optional negative WooCommerce fee discount. It intentionally does not use the `manual` carrier and does not register Shipment Framework adapters, persistence mappers, document providers, modal extensions, autosync, lifecycle continuation, or pickup providers.
 
 0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
 

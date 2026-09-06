@@ -1,6 +1,8 @@
 # Locations And Pickup
 
-Version: 0.154.0
+Version: 0.155.0
+
+0.155.0 adds a non-selectable fixed fulfillment-location snapshot for store pickup. `self_pickup` stores address and working hours in Delivery Service settings, emits them as `fixed_pickup_point_snapshot`, and persists the historical snapshot into the existing order pickup presentation metadata. This is not a pickup provider/catalog flow: there is no map, point search, browser authority, selectable code, or provider registration.
 
 0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
 

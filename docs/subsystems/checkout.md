@@ -2,7 +2,9 @@
 
 PEK checkout remains the source of trusted destination terminal selection for shipment creation. For PEK pickup shipments the saved `pek:pickup` point code is the receiver warehouse ID and is revalidated server-side for the current shipment cargo before submit; courier shipments use the WooCommerce shipping address and do not reuse city-center or terminal coordinates. Order meta persists DaData house, short/full house type, block, short/full block type, stead, stead type, flat, and short/full flat type fields for billing and shipping without a migration; old orders without these fields use the PEK conservative address fallback. Generic `_wdc_platform_city_fias_id` from server-side checkout city context is retained as city-level evidence for historical courier shipment identity recovery when numeric PEK rate `location_id` and selected-location FIAS are absent.
 
-Version: 0.154.0
+Version: 0.155.0
+
+0.155.0 adds the checkout-only `self_pickup` runtime. It maps to one zero-price pickup-style WooCommerce rate with stable `carrier_key=service_key=self_pickup`, `requires_pickup_point=false`, no pickup provider, and no select/change pickup buttons. Fixed store pickup presentation is carried by server-owned `fixed_pickup_point_snapshot` metadata and rendered by the generic checkout rate renderer. The optional pickup promotion is applied by `SelfPickupDiscountService` as a negative WooCommerce fee only when the current chosen shipping method has the self-pickup WDC identity and the post-coupon cart item total meets the threshold.
 
 0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
 
