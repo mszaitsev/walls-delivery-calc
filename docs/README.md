@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.153.4
+Version: 0.153.5
 
-0.153.4 unifies pickup-map search as address/geolocation origin across providers and preserves family-scoped pickup selections when switching shipping methods.
+0.153.5 localizes pickup-map fallback messages, resolves RU postcode searches from local Russian Post pickup anchors for every provider, fixes Russian Post nearest ordering, and preserves family buckets during manual pickup activation.
 
 0.153.0 connects manual delivery services to the existing Shipment Framework. The single `manual` shipment adapter supports manual attach, local remove, and generic manual actual cost for the concrete historical manual service saved on the order; preview/create, carrier cancellation, status API, autosync, documents, returns, and manual shipment storage tables remain unsupported.
 

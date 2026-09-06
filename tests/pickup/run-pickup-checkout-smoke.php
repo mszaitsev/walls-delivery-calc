@@ -806,6 +806,27 @@ pickup_checkout_assert( false === $session->clear_pickup_selection_if_allowed( '
 pickup_checkout_assert( '630001-a' === (string) ( $session->pickup_selections()[ $pickup_group_id ]['point_code'] ?? '' ) && 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'blocked automatic clear must keep all pickup family buckets.' );
 pickup_checkout_assert( false === $session->clear_pickup_selection_if_allowed( 'method_family_changed', $courier_group_id ), 'method-family switching must not perform a global pickup bucket reset.' );
 pickup_checkout_assert( '630001-a' === (string) ( $session->pickup_selections()[ $pickup_group_id ]['point_code'] ?? '' ) && 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'switching away from pickup must preserve other service buckets for restore.' );
+$session->save_city_context( array( 'location_id' => 650000, 'country_code' => 'RU', 'city_name' => 'Новосибирск' ) );
+$session->save_pickup_selection_for_family( 'ozon_delivery:pickup', array( 'carrier_key' => 'ozon_delivery', 'service_key' => 'ozon_delivery', 'pickup_family' => 'ozon_delivery:pickup', 'point_code' => 'OZON-NSK', 'point_address' => 'Новосибирск, Ozon', 'destination_fingerprint' => 'country=RU|location_id=650000' ) );
+$session->save_pickup_selection_for_family( 'manual:service_a:pickup', array( 'carrier_key' => 'manual', 'service_key' => 'service_a', 'pickup_family' => 'manual:service_a:pickup', 'point_code' => 'MANUAL-NSK', 'point_address' => 'Новосибирск, Manual', 'destination_fingerprint' => 'country=RU|location_id=650000' ) );
+$session->save_rates(
+	array(
+		'manual:service_a' => array(
+			'rate_id' => 'manual:service_a',
+			'carrier_key' => 'manual',
+			'service_key' => 'service_a',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+			'pickup_family' => 'manual:service_a:pickup',
+			'rate_meta' => array( 'pickup_family' => 'manual:service_a:pickup' ),
+		),
+	)
+);
+pickup_checkout_assert( false === $session->clear_pickup_selection_if_allowed( 'address_fingerprint_changed', 'manual:service_a' ), 'Manual pickup activation with an existing same-destination manual bucket must resolve the canonical family from saved rate metadata and block a global reset.' );
+pickup_checkout_assert( 'OZON-NSK' === (string) ( $session->pickup_selections()['ozon_delivery:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $session->pickup_selections()[ $pickup_group_id ]['point_code'] ?? '' ) && 'MANUAL-NSK' === (string) ( $session->pickup_selections()['manual:service_a:pickup']['point_code'] ?? '' ), 'Ozon, Russian Post, and Manual family buckets must survive same-destination manual activation.' );
+$session->clear_pickup_selection_for_family( 'manual:service_a:pickup', 'manual_empty_fixture' );
+pickup_checkout_assert( true === $session->clear_pickup_selection_if_allowed( 'address_fingerprint_changed', 'manual:service_a' ), 'Manual pickup activation without a manual bucket may clear only the active manual family.' );
+pickup_checkout_assert( 'OZON-NSK' === (string) ( $session->pickup_selections()['ozon_delivery:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $session->pickup_selections()[ $pickup_group_id ]['point_code'] ?? '' ) && ! isset( $session->pickup_selections()['manual:service_a:pickup'] ), 'Manual empty-family cleanup must not remove other carrier pickup buckets.' );
 $session->clear_pickup_selection_for_family( 'cdek:pickup', 'family_reset_smoke' );
 pickup_checkout_assert( ! isset( $session->pickup_selections()['cdek:pickup'] ) && '630001-a' === (string) ( $session->pickup_selections()[ $pickup_group_id ]['point_code'] ?? '' ), 'CDEK family reset must not remove Russian Post bucket.' );
 $session->save_pickup_selection( array( 'carrier_key' => 'cdek', 'service_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'rate_id' => 'cdek:pickup:136', 'point_code' => 'KEM7', 'point_address' => 'CDEK address' ) );

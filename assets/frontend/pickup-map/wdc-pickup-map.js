@@ -84,7 +84,7 @@
 		}
 
 		if (!providerFactory || typeof providerFactory.create !== 'function') {
-			card.textContent = labels.error || 'Map provider is not available.';
+			card.textContent = labels.error || 'Карта недоступна.';
 			return noopMap();
 		}
 
@@ -501,12 +501,12 @@
 					preview(visiblePoints[0], { focus: false, initial: true });
 				}
 				endLoading(requestId);
-			}).catch(function (error) {
-				if (!destroyed && error.name !== 'AbortError') {
-					card.textContent = labels.error || 'Error';
-				}
-				endLoading(requestId);
-			});
+				}).catch(function (error) {
+					if (!destroyed && error.name !== 'AbortError') {
+					card.textContent = labels.error || 'Не удалось загрузить пункты выдачи';
+					}
+					endLoading(requestId);
+				});
 		}
 
 		var debouncedLoad = debounce(function (bbox) {
@@ -577,7 +577,7 @@
 					endLoading(requestId);
 				}).catch(function (error) {
 					if (!destroyed && error.name !== 'AbortError') {
-						card.textContent = labels.error || 'Error';
+						card.textContent = labels.error || 'Не удалось загрузить пункты выдачи';
 					}
 					endLoading(requestId);
 				});
@@ -592,7 +592,7 @@
 					endLoading(requestId);
 				}).catch(function (error) {
 					if (!destroyed && error.name !== 'AbortError') {
-						card.textContent = labels.error || 'Error';
+						card.textContent = labels.error || 'Не удалось загрузить пункты выдачи';
 					}
 					endLoading(requestId);
 				});
@@ -632,7 +632,7 @@
 			}
 			searchAddress = normalizeAddressMarker(result.address);
 			userLocation = null;
-			originStatus = labels.addressFound || 'Address found.';
+			originStatus = labels.addressFound || 'Адрес найден';
 			originStatusType = '';
 			distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
 			claimViewportForExplicitAction();
@@ -641,7 +641,7 @@
 			if (Array.isArray(result.points) && result.points.length > 0) {
 				listFilterQuery = '';
 				renderMarkers(result.points, labels.empty || '');
-				card.textContent = labels.addressFound || 'Address found.';
+				card.textContent = labels.addressFound || 'Адрес найден';
 				return;
 			}
 			refreshDistancesFromOrigin();

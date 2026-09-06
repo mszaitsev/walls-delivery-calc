@@ -408,7 +408,7 @@ async function pointsFetchErrorHidesLoaderAndShowsError() {
 	pending.reject(new Error('network'));
 	await wait(40);
 	assert.strictEqual(mapLoader(harness).hidden, true, 'request error must hide loader');
-	assert.strictEqual(harness.card.textContent, 'Error', 'request error must show the generic error text');
+	assert.strictEqual(harness.card.textContent, 'Не удалось загрузить пункты выдачи', 'request error must show the localized generic error text');
 	assert.strictEqual(harness.list.innerHTML.includes('Загружаем'), false, 'request error must not leave stale list loading text');
 	harness.map.destroy();
 }
@@ -1010,6 +1010,8 @@ async function fixedDatasetSearchUsesAddressOriginWithoutReloadingPoints() {
 	assert.strictEqual(addressSearchCalls, 1, 'manual fixed pickup dataset search must call generic address search.');
 	assert.strictEqual(pointRequests, 1, 'manual fixed pickup dataset address search must not duplicate the point dataset request.');
 	assert.deepStrictEqual(harness.calls.filter((call) => call[0] === 'setCenter').pop().slice(1), [55.041, 82.93, 15], 'address search must center on the found address.');
+	assert.strictEqual(harness.card.textContent, 'Адрес найден.', 'successful address search must show the Russian address-found message.');
+	assert(!harness.list.innerHTML.includes('Address found.'), 'successful address search must not render the old English address-found fallback.');
 	const lastMarkers = harness.calls.filter((call) => call[0] === 'renderMarkers').pop();
 	assert.strictEqual(lastMarkers[2].searchMarker.type, 'search', 'address search must render a search origin marker.');
 	assert.strictEqual(lastMarkers[2].searchMarker.value, 'Красный проспект, 25', 'search marker must use the found address label.');
@@ -2167,6 +2169,12 @@ async function run() {
 	assert(!checkoutSource.includes("carrier === 'manual'")
 		&& !checkoutSource.includes("carrier_key === 'manual'")
 		&& !checkoutSource.includes("pickupFamily(point) === 'manual:"), 'Manual pickup must rely on generic requires_rate_refresh metadata and must not add a frontend carrier branch.');
+	assert(!source.includes('Address found.')
+		&& !source.includes('Map provider is not available.')
+		&& !source.includes("'Error'")
+		&& source.includes('Адрес найден')
+		&& source.includes('Карта недоступна')
+		&& source.includes('Не удалось загрузить пункты выдачи'), 'Pickup map user-facing fallback messages must be localized in Russian.');
 	await checkoutInlineNoticeLatchLifecycle();
 	await shippingMethodSwitchPreservesInactiveFamilySelections();
 	await shippingMethodSwitchToEmptyFamilyPreservesPreviousSelection();

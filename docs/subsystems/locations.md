@@ -1,8 +1,8 @@
 # Locations And Pickup
 
-Version: 0.153.4
+Version: 0.153.5
 
-0.153.4 unifies pickup-map search as address/geolocation origin across providers and preserves family-scoped pickup selections when switching shipping methods.
+0.153.5 localizes pickup-map fallback messages, resolves RU postcode searches from local Russian Post pickup anchors for every provider, fixes Russian Post nearest ordering, and preserves family buckets during manual pickup activation.
 
 0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
 

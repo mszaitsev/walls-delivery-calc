@@ -315,11 +315,8 @@ final class RussianPostPickupPointRepository {
 		if ( $lat < -90.0 || $lat > 90.0 || $lng < -180.0 || $lng > 180.0 ) {
 			return array();
 		}
-		$where = array( 'active = 1' );
-		$args = array();
-		$this->append_filters( $where, $args, $filters );
 		$limit = $this->limit_from_filters( $filters, 50, 100 );
-		$rows = $this->select_rows( $where, $args, 1000 );
+		$rows = $this->nearest_candidate_rows( $lat, $lng, $filters, $limit );
 		foreach ( $rows as &$row ) {
 			$row['distance_meters'] = $this->distance_meters( $lat, $lng, (float) ( $row['latitude'] ?? 0 ), (float) ( $row['longitude'] ?? 0 ) );
 		}
@@ -331,6 +328,33 @@ final class RussianPostPickupPointRepository {
 		);
 
 		return array_slice( $rows, 0, $limit );
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function nearest_candidate_rows( float $lat, float $lng, array $filters, int $limit ): array {
+		$candidates = array();
+		foreach ( array( 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0 ) as $radius ) {
+			$query_filters = array_merge( $filters, array( 'limit' => 1000 ) );
+			$rows = $this->find_rows_by_bbox(
+				max( -180.0, $lng - $radius ),
+				max( -90.0, $lat - $radius ),
+				min( 180.0, $lng + $radius ),
+				min( 90.0, $lat + $radius ),
+				$query_filters
+			);
+			foreach ( $rows as $row ) {
+				$key = (string) ( $row['id'] ?? $row['point_code'] ?? count( $candidates ) );
+				$candidates[ $key ] = $row;
+			}
+			if ( count( $candidates ) >= $limit ) {
+				break;
+			}
+		}
+
+		return array_values( $candidates );
 	}
 
 	/**
