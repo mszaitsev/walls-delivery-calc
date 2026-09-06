@@ -26,6 +26,8 @@ return array(
 	'manual-delivery.pickup-provider-routing' => array( 'path' => 'tests/checkout/run-pickup-provider-routing-smoke.php', 'groups' => array( 'manual-delivery' ) ),
 	'manual-delivery.shipments' => array( 'path' => 'tests/manual-delivery/run-manual-delivery-shipments-smoke.php', 'groups' => array( 'manual-delivery' ) ),
 
+	'self-pickup.foundation' => array( 'path' => 'tests/self-pickup/run-self-pickup-smoke.php', 'groups' => array( 'self-pickup' ) ),
+
 	'russian-post.shipments' => array( 'path' => 'tests/shipments/run-russian-post-shipments-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.price' => array( 'path' => 'tests/shipments/run-russian-post-shipment-price-smoke.php', 'groups' => array( 'russian-post' ) ),
 	'russian-post.cancel' => array( 'path' => 'tests/shipments/run-russian-post-cancel-shipment-smoke.php', 'groups' => array( 'russian-post' ) ),

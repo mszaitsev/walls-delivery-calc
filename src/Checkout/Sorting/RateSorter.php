@@ -103,11 +103,14 @@ final class RateSorter {
 				?: strnatcasecmp( $left->rate_id, $right->rate_id );
 		}
 
-		return $this->original_cost_kopecks( $left ) <=> $this->original_cost_kopecks( $right )
-			?: $this->original_min_days( $left ) <=> $this->original_min_days( $right )
-			?: strnatcasecmp( $left->title, $right->title )
-			?: strnatcasecmp( $left->tariff_key, $right->tariff_key )
-			?: strnatcasecmp( $left->rate_id, $right->rate_id );
+		return $this->compare_cheapest_rates(
+			$left,
+			$right,
+			$this->original_cost_kopecks( $left ),
+			$this->original_cost_kopecks( $right ),
+			$this->original_min_days( $left ),
+			$this->original_min_days( $right )
+		);
 	}
 
 	private function compare_method_rates( DeliveryRate $left, DeliveryRate $right, string $mode ): int {
@@ -119,8 +122,29 @@ final class RateSorter {
 				?: strnatcasecmp( $left->rate_id, $right->rate_id );
 		}
 
-		return $this->final_cost_kopecks( $left ) <=> $this->final_cost_kopecks( $right )
-			?: $this->final_min_days( $left ) <=> $this->final_min_days( $right )
+		return $this->compare_cheapest_rates(
+			$left,
+			$right,
+			$this->final_cost_kopecks( $left ),
+			$this->final_cost_kopecks( $right ),
+			$this->final_min_days( $left ),
+			$this->final_min_days( $right )
+		);
+	}
+
+	private function compare_cheapest_rates( DeliveryRate $left, DeliveryRate $right, int $left_cost, int $right_cost, int $left_min_days, int $right_min_days ): int {
+		$left_zero = 0 === $left_cost;
+		$right_zero = 0 === $right_cost;
+		if ( $left_zero || $right_zero ) {
+			return ( (int) $left_zero <=> (int) $right_zero )
+				?: strnatcasecmp( $left->title, $right->title )
+				?: $left_min_days <=> $right_min_days
+				?: strnatcasecmp( $left->tariff_key, $right->tariff_key )
+				?: strnatcasecmp( $left->rate_id, $right->rate_id );
+		}
+
+		return $left_cost <=> $right_cost
+			?: $left_min_days <=> $right_min_days
 			?: strnatcasecmp( $left->title, $right->title )
 			?: strnatcasecmp( $left->tariff_key, $right->tariff_key )
 			?: strnatcasecmp( $left->rate_id, $right->rate_id );

@@ -29,6 +29,8 @@ final class WooCommerceRateMapper {
 				'comments'        => $rate->comments,
 				'customer_link_comments' => is_array( $rate->meta['customer_link_comments'] ?? null ) ? array_values( $rate->meta['customer_link_comments'] ) : array(),
 				'customer_comments' => is_array( $rate->meta['customer_comments'] ?? null ) ? array_values( $rate->meta['customer_comments'] ) : array(),
+				'fixed_pickup_point_snapshot' => is_array( $rate->meta['fixed_pickup_point_snapshot'] ?? null ) ? $rate->meta['fixed_pickup_point_snapshot'] : array(),
+				'non_shipment_state' => is_array( $rate->meta['non_shipment_state'] ?? null ) ? $rate->meta['non_shipment_state'] : array(),
 				'disabled'        => $rate->disabled,
 				'disabled_reason' => $rate->disabled_reason,
 				'service_key'     => $rate->service_key,

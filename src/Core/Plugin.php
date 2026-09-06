@@ -211,7 +211,11 @@ use WallsShop\WDC\Carriers\Runtime\OzonDeliveryCarrier;
 use WallsShop\WDC\Carriers\Runtime\PekCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Carriers\Runtime\SelfPickupCarrier;
 use WallsShop\WDC\Carriers\Runtime\YandexDeliveryCarrier;
+use WallsShop\WDC\Carriers\SelfPickup\SelfPickupDiscountPolicy;
+use WallsShop\WDC\Carriers\SelfPickup\SelfPickupDiscountService;
+use WallsShop\WDC\Carriers\SelfPickup\SelfPickupSettings;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
@@ -772,6 +776,10 @@ final class Plugin {
 		$this->container->register( ManualDeliveryPricingCalculator::class, fn(): ManualDeliveryPricingCalculator => new ManualDeliveryPricingCalculator() );
 		$this->container->register( ManualDeliveryPricingService::class, fn(): ManualDeliveryPricingService => new ManualDeliveryPricingService( $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryWeightRangeRepository::class ), $this->container->get( ManualDeliveryPricingCalculator::class ) ) );
 		$this->container->register( ManualDeliveryCarrier::class, fn(): ManualDeliveryCarrier => new ManualDeliveryCarrier( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ManualDeliverySettings::class ), $this->container->get( ManualDeliveryGeographyMatcher::class ), $this->container->get( ManualDeliveryPricingService::class ), $this->container->get( ManualPickupPointRepository::class ), $this->container->get( CheckoutLocationFingerprint::class ) ) );
+		$this->container->register( SelfPickupSettings::class, fn(): SelfPickupSettings => new SelfPickupSettings( $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
+		$this->container->register( SelfPickupDiscountPolicy::class, fn(): SelfPickupDiscountPolicy => new SelfPickupDiscountPolicy() );
+		$this->container->register( SelfPickupDiscountService::class, fn(): SelfPickupDiscountService => new SelfPickupDiscountService( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( SelfPickupSettings::class ), $this->container->get( SelfPickupDiscountPolicy::class ), $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( SelfPickupCarrier::class, fn(): SelfPickupCarrier => new SelfPickupCarrier( $this->container->get( SelfPickupSettings::class ), $this->container->get( SelfPickupDiscountService::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -783,6 +791,7 @@ final class Plugin {
 				$registry->register( $this->container->get( YandexDeliveryCarrier::class ) );
 				$registry->register( $this->container->get( JetLogisticCarrier::class ) );
 				$registry->register( $this->container->get( ManualDeliveryCarrier::class ) );
+				$registry->register( $this->container->get( SelfPickupCarrier::class ) );
 				$registry->register( $this->container->get( PekCarrier::class ) );
 				$registry->register( $this->container->get( OzonDeliveryCarrier::class ) );
 
@@ -1125,6 +1134,7 @@ final class Plugin {
 				$this->container->get( PekAdminPage::class ),
 				$this->container->get( PekStatusAdminPage::class ),
 				$this->container->get( OzonDeliveryAdminPage::class ),
+				$this->container->get( SelfPickupSettings::class ),
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper( $this->container->get( LocationRepository::class ) ) );
@@ -1201,6 +1211,7 @@ final class Plugin {
 			$this->container->get( PickupPointOrderDisplay::class )->register();
 			$this->container->get( OrderDeliveryCustomerCommentsDisplay::class )->register();
 			$this->container->get( CheckoutDebugPanel::class )->register();
+			$this->container->get( SelfPickupDiscountService::class )->register();
 		}
 
 		if ( is_admin() ) {

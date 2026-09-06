@@ -104,6 +104,7 @@ final class OrderShippingMetaPersister {
 		}
 
 		$pickup = $this->pickup_selection_for_rate( $rate );
+		$fixed_pickup = $this->fixed_pickup_snapshot_for_rate( $rate );
 		if (
 			'pickup' === (string) ( $rate['delivery_type'] ?? '' )
 			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
@@ -150,6 +151,23 @@ final class OrderShippingMetaPersister {
 				$map['_wdc_yandex_delivery_pickup_longitude']           = $this->first_meaningful( $pickup['lng'] ?? '', $snapshot['lng'] ?? '' );
 			}
 			$this->set_pickup_shipping_address( $order, $pickup, $address );
+		} elseif ( 'pickup' === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $fixed_pickup ) {
+			$map['_wdc_platform_pickup_code']       = (string) ( $fixed_pickup['point_code'] ?? '' );
+			$map['_wdc_platform_pickup_address']    = $this->pickup_address( $fixed_pickup );
+			$map['_wdc_platform_pickup_comment']    = $this->first_meaningful( $fixed_pickup['description'] ?? '', $fixed_pickup['point_comment'] ?? '' );
+			$map['_wdc_platform_pickup_work_time']  = $this->first_meaningful( $fixed_pickup['point_work_time'] ?? '', $fixed_pickup['work_time'] ?? '' );
+			$map['_wdc_pickup_point_id']            = (string) ( $fixed_pickup['point_id'] ?? $fixed_pickup['id'] ?? '' );
+			$map['_wdc_pickup_point_code']          = (string) ( $fixed_pickup['point_code'] ?? '' );
+			$map['_wdc_pickup_point_type']          = (string) ( $fixed_pickup['point_type'] ?? '' );
+			$map['_wdc_pickup_carrier_key']         = (string) ( $fixed_pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' );
+			$map['_wdc_pickup_service_key']         = (string) ( $fixed_pickup['service_key'] ?? $rate['service_key'] ?? '' );
+			$map['_wdc_pickup_family']              = (string) ( $fixed_pickup['pickup_family'] ?? '' );
+			$map['_wdc_pickup_point_type_label']    = (string) ( $fixed_pickup['point_type_label'] ?? '' );
+			$map['_wdc_pickup_point_title']         = (string) ( $fixed_pickup['point_title'] ?? $fixed_pickup['card_title'] ?? '' );
+			$map['_wdc_pickup_marker_type']         = (string) ( $fixed_pickup['marker_type'] ?? '' );
+			$map['_wdc_pickup_point_address']       = $this->pickup_address( $fixed_pickup );
+			$map['_wdc_pickup_point_postcode']      = $this->first_meaningful( $fixed_pickup['point_postcode'] ?? '', $fixed_pickup['postcode'] ?? '', $fixed_pickup['postal_code'] ?? '' );
+			$map['_wdc_pickup_point_snapshot']      = function_exists( 'wp_json_encode' ) ? wp_json_encode( $this->pickup_snapshot_without_customer_comments( $fixed_pickup ), JSON_UNESCAPED_UNICODE ) : json_encode( $this->pickup_snapshot_without_customer_comments( $fixed_pickup ) );
 		}
 
 		$calculation_data = $this->delivery_calculation_data( $rate, $map );
@@ -230,7 +248,10 @@ final class OrderShippingMetaPersister {
 
 		$pickup = $this->pickup_selection_for_rate( $rate );
 		if ( ! $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
-			return array();
+			$pickup = $this->fixed_pickup_snapshot_for_rate( $rate );
+			if ( array() === $pickup ) {
+				return array();
+			}
 		}
 		$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
 		$is_handout = array_key_exists( 'is_handout', $pickup ) ? filter_var( $pickup['is_handout'], FILTER_VALIDATE_BOOLEAN ) : ( array_key_exists( 'is_handout', $snapshot ) ? filter_var( $snapshot['is_handout'], FILTER_VALIDATE_BOOLEAN ) : null );
@@ -262,6 +283,18 @@ final class OrderShippingMetaPersister {
 			'raw_sanitized' => is_array( $snapshot['raw_sanitized'] ?? null ) ? $snapshot['raw_sanitized'] : ( is_array( $snapshot['raw'] ?? null ) ? $snapshot['raw'] : array() ),
 		);
 		return $pickup_data;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function fixed_pickup_snapshot_for_rate( array $rate ): array {
+		if ( is_array( $rate['fixed_pickup_point_snapshot'] ?? null ) ) {
+			return $rate['fixed_pickup_point_snapshot'];
+		}
+		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		return is_array( $rate_meta['fixed_pickup_point_snapshot'] ?? null ) ? $rate_meta['fixed_pickup_point_snapshot'] : array();
 	}
 
 	/**

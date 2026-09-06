@@ -1,6 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.154.0
+Version: 0.155.1
+
+0.155.1 refines the built-in checkout-only `self_pickup` delivery service after live verification. `Самовывоз` still uses stable `carrier_key=service_key=self_pickup`, zero delivery price, standard Delivery Services country availability with default `Все страны`, server-owned fixed pickup-location snapshots, safe structured buyer comments, and a negative WooCommerce fee discount. The fixed card is now shown only for the chosen checkout rate, card title is stored separately from method title, `{s}` in the financial fee label resolves to the configured discount percent, promo comments describe promotion availability before the customer selects self-pickup, and the shipments metabox suppresses shipment status/action UI for generic non-shipment orders.
 
 0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
 

@@ -86,6 +86,28 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 	 * @return array<string,mixed>
 	 */
 	private function status_payload_for_carrier( object $order, string $carrier_key, array $shipment ): array {
+		$non_shipment_state = $this->non_shipment_state( $order );
+		if ( array() !== $non_shipment_state ) {
+			return array_merge(
+				$non_shipment_state,
+				array(
+					'carrier_key' => $carrier_key,
+					'presentation' => $this->carrier_presentation( $carrier_key ),
+					'status' => 'non_shipment',
+					'carrier_status_title' => $non_shipment_state['message'],
+					'non_shipment_state_active' => true,
+					'suppress_status_block' => true,
+					'suppress_actions' => true,
+					'tracking_checked_at' => '',
+					'has_shipment' => false,
+					'can_create' => false,
+					'can_attach_manual' => false,
+					'can_update_status' => false,
+					'can_cancel' => false,
+					'can_remove_from_order' => false,
+				)
+			);
+		}
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
 			return array_merge( $this->cdek_status_updates->status_payload( $shipment, $order ), array( 'presentation' => $this->carrier_presentation( $carrier_key ) ) );
 		}
@@ -97,6 +119,22 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 			array( 'carrier_key' => $carrier_key, 'presentation' => $this->carrier_presentation( $carrier_key ) ),
 			$shipment
 		);
+	}
+
+	/** @return array<string,mixed> */
+	private function non_shipment_state( object $order ): array {
+		$rate_meta = method_exists( $order, 'get_meta' ) ? $order->get_meta( '_wdc_platform_rate_meta', true ) : array();
+		$state = is_array( $rate_meta ) && is_array( $rate_meta['non_shipment_state'] ?? null ) ? $rate_meta['non_shipment_state'] : array();
+		if ( array() === $state ) {
+			return array();
+		}
+		$message = trim( (string) ( $state['message'] ?? '' ) );
+		if ( '' === $message ) {
+			return array();
+		}
+		$state['message'] = $message;
+
+		return $state;
 	}
 
 	public function carrier_ui_payload( object $order, string $carrier_key, ?array $shipment_override = null ): array {
@@ -113,8 +151,9 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 				'presentation' => $presentation,
 			)
 		);
-		$status = $this->actual_costs->enrich_status_payload( $status, $shipment, $order );
-		$document_actions = $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
+		$non_shipment_active = $this->non_shipment_state_active( $status );
+		$status = $non_shipment_active ? $status : $this->actual_costs->enrich_status_payload( $status, $shipment, $order );
+		$document_actions = $non_shipment_active ? array() : $this->document_actions_for_carrier( $order, $carrier_key, $shipment );
 		if ( array() !== $document_actions ) {
 			$status['document_actions'] = $document_actions;
 		}
@@ -126,12 +165,17 @@ final class ShipmentAdminCarrierUiPayloadBuilder {
 			'presentation' => $presentation,
 			'document_actions' => $document_actions,
 			'has_shipment' => ! empty( $status['has_shipment'] ),
-			'can_create' => ! empty( $status['can_create'] ),
-			'can_attach_manual' => ! empty( $status['can_attach_manual'] ),
-			'can_update_status' => ! empty( $status['can_update_status'] ),
-			'can_cancel' => ! empty( $status['can_cancel'] ),
-			'can_remove_from_order' => ! empty( $status['can_remove_from_order'] ),
+			'can_create' => ! $non_shipment_active && ! empty( $status['can_create'] ),
+			'can_attach_manual' => ! $non_shipment_active && ! empty( $status['can_attach_manual'] ),
+			'can_update_status' => ! $non_shipment_active && ! empty( $status['can_update_status'] ),
+			'can_cancel' => ! $non_shipment_active && ! empty( $status['can_cancel'] ),
+			'can_remove_from_order' => ! $non_shipment_active && ! empty( $status['can_remove_from_order'] ),
 		);
+	}
+
+	/** @param array<string,mixed> $status */
+	private function non_shipment_state_active( array $status ): bool {
+		return ! empty( $status['non_shipment_state_active'] ) || ! empty( $status['non_shipment'] );
 	}
 
 	private function tracking_presentation( array $status, array $presentation, string $fallback_value ): array {

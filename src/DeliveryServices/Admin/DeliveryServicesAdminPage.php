@@ -50,6 +50,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Carriers\SelfPickup\SelfPickupSettings;
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
@@ -167,6 +168,7 @@ final class DeliveryServicesAdminPage {
 		private ?PekAdminPage $pek_admin = null,
 		private ?PekStatusAdminPage $pek_statuses = null,
 		private ?OzonDeliveryAdminPage $ozon_delivery_admin = null,
+		private ?SelfPickupSettings $self_pickup_settings = null,
 	) {
 	}
 
@@ -1018,6 +1020,10 @@ final class DeliveryServicesAdminPage {
 				if ( $service instanceof DeliveryService && $this->is_yandex_delivery_service( $service ) && null !== $service->id ) {
 					$this->save_yandex_delivery_main_settings( (int) $service->id );
 				}
+				if ( $service instanceof DeliveryService && $this->is_self_pickup_service( $service ) && null !== $service->id && $this->self_pickup_settings instanceof SelfPickupSettings ) {
+					$this->self_pickup_settings->save_main_from_admin( (int) $service->id, $_POST );
+					$this->clear_delivery_quote_cache();
+				}
 				if ( $service instanceof DeliveryService && $this->is_dpd_service( $service ) && $this->dpd_settings instanceof DpdSettings ) {
 					$this->dpd_settings->save_runtime_titles_from_admin( $_POST );
 					$this->clear_delivery_quote_cache();
@@ -1033,6 +1039,10 @@ final class DeliveryServicesAdminPage {
 				}
 				if ( $service instanceof DeliveryService && $this->is_yandex_delivery_service( $service ) && null !== $service->id ) {
 					$this->save_yandex_delivery_calculation_settings( (int) $service->id );
+				}
+				if ( $service instanceof DeliveryService && $this->is_self_pickup_service( $service ) && null !== $service->id && $this->self_pickup_settings instanceof SelfPickupSettings ) {
+					$this->self_pickup_settings->save_discount_from_admin( (int) $service->id, $_POST );
+					$this->clear_delivery_quote_cache();
 				}
 			}
 			if ( 'save_shipments' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
@@ -1773,8 +1783,10 @@ final class DeliveryServicesAdminPage {
 		$tabs = array(
 			'main' => 'Основное',
 			'calculation' => 'Расчет',
-			'rules' => 'Правила',
 		);
+		if ( ! $this->is_self_pickup_service( $service ) ) {
+			$tabs['rules'] = 'Правила';
+		}
 		if ( RussianPostSettings::SERVICE_KEY === $service->service_key ) {
 			$tabs['russian_post_countries'] = 'Страны Почты России';
 		}
@@ -1817,6 +1829,9 @@ final class DeliveryServicesAdminPage {
 			$tabs['ozon_api'] = 'API Ozon';
 			$tabs['ozon_pickup'] = 'ПВЗ Ozon';
 			$tabs['ozon_statuses'] = 'Статусы Ozon';
+		}
+		if ( ! isset( $tabs[ $current_tab ] ) ) {
+			$current_tab = 'main';
 		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
@@ -1930,6 +1945,9 @@ final class DeliveryServicesAdminPage {
 					<?php $this->render_manual_geography_rows( $service ); ?>
 					<?php $this->render_manual_pickup_point_rows( $service ); ?>
 				<?php endif; ?>
+				<?php if ( $this->is_self_pickup_service( $service ) && $this->self_pickup_settings instanceof SelfPickupSettings && null !== $service->id ) : ?>
+					<?php $this->render_self_pickup_main_rows( (int) $service->id ); ?>
+				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить службу', 'walls-delivery-calc' ) ); ?>
 		</form>
@@ -1986,6 +2004,9 @@ final class DeliveryServicesAdminPage {
 				<?php endif; ?>
 				<?php if ( $this->is_manual_service( $service ) ) : ?>
 					<?php $this->render_manual_pricing_rows( $service ); ?>
+				<?php endif; ?>
+				<?php if ( $this->is_self_pickup_service( $service ) && $this->self_pickup_settings instanceof SelfPickupSettings && null !== $service->id ) : ?>
+					<?php $this->render_self_pickup_discount_rows( (int) $service->id ); ?>
 				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить расчет', 'walls-delivery-calc' ) ); ?>
@@ -4775,6 +4796,60 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		<?php
 	}
 
+	private function render_self_pickup_main_rows( int $service_id ): void {
+		if ( ! $this->self_pickup_settings instanceof SelfPickupSettings ) {
+			return;
+		}
+		$comment = $this->self_pickup_settings->customer_comment( $service_id );
+		?>
+		<tr><th colspan="2"><h3><?php echo esc_html__( 'Самовывоз', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<?php $this->text_row( SelfPickupSettings::CARD_TITLE_KEY, __( 'Название в карточке', 'walls-delivery-calc' ), $this->self_pickup_settings->card_title( $service_id ) ); ?>
+		<?php $this->textarea_row( SelfPickupSettings::ADDRESS_KEY, __( 'Адрес магазина', 'walls-delivery-calc' ), $this->self_pickup_settings->address( $service_id ) ); ?>
+		<?php $this->textarea_row( SelfPickupSettings::WORKING_HOURS_KEY, __( 'Время работы магазина', 'walls-delivery-calc' ), $this->self_pickup_settings->working_hours( $service_id ) ); ?>
+		<?php $this->checkbox_row( SelfPickupSettings::CUSTOMER_COMMENT_ENABLED_KEY, __( 'Показывать комментарий покупателю', 'walls-delivery-calc' ), $this->self_pickup_settings->customer_comment_enabled( $service_id ) ); ?>
+		<?php $this->structured_comment_rows( SelfPickupSettings::CUSTOMER_COMMENT_KEY, __( 'Комментарий покупателю', 'walls-delivery-calc' ), $comment ); ?>
+		<?php
+	}
+
+	private function render_self_pickup_discount_rows( int $service_id ): void {
+		if ( ! $this->self_pickup_settings instanceof SelfPickupSettings ) {
+			return;
+		}
+		$minimum = number_format( $this->self_pickup_settings->discount_minimum_kopecks( $service_id ) / 100, 2, '.', '' );
+		$comment = $this->self_pickup_settings->discount_comment( $service_id );
+		?>
+		<tr><th colspan="2"><h3><?php echo esc_html__( 'Скидка за самовывоз', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<?php $this->checkbox_row( SelfPickupSettings::DISCOUNT_ENABLED_KEY, __( 'Включить скидку', 'walls-delivery-calc' ), $this->self_pickup_settings->discount_enabled( $service_id ) ); ?>
+		<?php $this->text_row( SelfPickupSettings::DISCOUNT_PERCENT_KEY, __( 'Процент скидки', 'walls-delivery-calc' ), (string) $this->self_pickup_settings->discount_percent( $service_id ) ); ?>
+		<?php $this->text_row( SelfPickupSettings::DISCOUNT_MINIMUM_KOPECKS_KEY, __( 'Минимальная сумма товаров после купонов, руб.', 'walls-delivery-calc' ), $minimum ); ?>
+		<tr>
+			<th scope="row"><label for="<?php echo esc_attr( SelfPickupSettings::DISCOUNT_FEE_LABEL_KEY ); ?>"><?php echo esc_html__( 'Название финансовой строки скидки', 'walls-delivery-calc' ); ?></label></th>
+			<td>
+				<input id="<?php echo esc_attr( SelfPickupSettings::DISCOUNT_FEE_LABEL_KEY ); ?>" class="regular-text" type="text" name="<?php echo esc_attr( SelfPickupSettings::DISCOUNT_FEE_LABEL_KEY ); ?>" value="<?php echo esc_attr( $this->self_pickup_settings->discount_fee_label( $service_id ) ); ?>">
+				<p class="description"><?php echo esc_html__( 'Можно использовать {s}; при расчете он заменится на текущий процент скидки.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
+		<?php $this->checkbox_row( SelfPickupSettings::DISCOUNT_COMMENT_ENABLED_KEY, __( 'Показывать промо-комментарий, когда акция доступна для корзины', 'walls-delivery-calc' ), $this->self_pickup_settings->discount_comment_enabled( $service_id ) ); ?>
+		<?php $this->structured_comment_rows( SelfPickupSettings::DISCOUNT_COMMENT_KEY, __( 'Условный промо-комментарий', 'walls-delivery-calc' ), $comment ); ?>
+		<?php
+	}
+
+	/** @param array<string,string> $comment */
+	private function structured_comment_rows( string $name, string $label, array $comment ): void {
+		?>
+		<tr>
+			<th scope="row"><?php echo esc_html( $label ); ?></th>
+			<td>
+				<textarea class="large-text" rows="3" name="<?php echo esc_attr( $name ); ?>[text]"><?php echo esc_textarea( (string) ( $comment['text'] ?? '' ) ); ?></textarea>
+				<p><input class="regular-text" name="<?php echo esc_attr( $name ); ?>[text_before]" placeholder="<?php echo esc_attr__( 'Текст до ссылки', 'walls-delivery-calc' ); ?>" value="<?php echo esc_attr( (string) ( $comment['text_before'] ?? '' ) ); ?>"></p>
+				<p><input class="regular-text" name="<?php echo esc_attr( $name ); ?>[label]" placeholder="<?php echo esc_attr__( 'Текст ссылки', 'walls-delivery-calc' ); ?>" value="<?php echo esc_attr( (string) ( $comment['label'] ?? '' ) ); ?>"></p>
+				<p><input class="regular-text" name="<?php echo esc_attr( $name ); ?>[url]" placeholder="https://example.com" value="<?php echo esc_url( (string) ( $comment['url'] ?? '' ) ); ?>"></p>
+				<p><input class="regular-text" name="<?php echo esc_attr( $name ); ?>[text_after]" placeholder="<?php echo esc_attr__( 'Текст после ссылки', 'walls-delivery-calc' ); ?>" value="<?php echo esc_attr( (string) ( $comment['text_after'] ?? '' ) ); ?>"></p>
+			</td>
+		</tr>
+		<?php
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -5922,6 +5997,10 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 
 	private function is_yandex_delivery_service( ?DeliveryService $service ): bool {
 		return $service instanceof DeliveryService && YandexDeliverySettings::SERVICE_KEY === $service->service_key && YandexDeliverySettings::CARRIER_KEY === $service->carrier_key;
+	}
+
+	private function is_self_pickup_service( ?DeliveryService $service ): bool {
+		return $service instanceof DeliveryService && SelfPickupSettings::SERVICE_KEY === $service->service_key && SelfPickupSettings::CARRIER_KEY === $service->carrier_key;
 	}
 
 	private function service_tab_url( DeliveryService $service, string $tab ): string {

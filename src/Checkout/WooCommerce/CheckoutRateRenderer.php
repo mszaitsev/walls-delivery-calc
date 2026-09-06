@@ -52,6 +52,7 @@ final class CheckoutRateRenderer {
 
 		$this->render_tariff_selector( $meta );
 		$this->render_pickup_selector( $meta, $method );
+		$this->render_fixed_pickup_card( $meta, $method );
 		$this->render_courier_address_summary( $meta );
 		$this->render_customer_link_comments( $meta );
 
@@ -89,7 +90,7 @@ final class CheckoutRateRenderer {
 			$text_after = (string) ( $comment['text_after'] ?? '' );
 			echo '<div class="wdc-platform-delivery-comment wdc-platform-delivery-link-comment wdc-shipping-rate-comment">';
 			if ( '' !== trim( $text_before ) ) {
-				echo esc_html( $text_before );
+				echo esc_html( $this->text_before_link( $text_before ) );
 			}
 			echo '<a class="wdc-platform-delivery-comment-link" href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer">' . esc_html( $label ) . '</a>';
 			if ( '' !== trim( $text_after ) ) {
@@ -185,6 +186,41 @@ final class CheckoutRateRenderer {
 		echo '</div>';
 	}
 
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_fixed_pickup_card( array $meta, mixed $method ): void {
+		if ( DeliveryType::PICKUP !== (string) ( $meta['delivery_type'] ?? '' ) || ! empty( $meta['requires_pickup_point'] ) ) {
+			return;
+		}
+		$snapshot = is_array( $meta['fixed_pickup_point_snapshot'] ?? null ) ? $meta['fixed_pickup_point_snapshot'] : array();
+		if ( array() === $snapshot ) {
+			$rate_meta = is_array( $meta['rate_meta'] ?? null ) ? $meta['rate_meta'] : array();
+			$snapshot = is_array( $rate_meta['fixed_pickup_point_snapshot'] ?? null ) ? $rate_meta['fixed_pickup_point_snapshot'] : array();
+		}
+		if ( array() === $snapshot ) {
+			return;
+		}
+		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
+		if ( ! $this->rate_is_chosen( $rate_id ) ) {
+			return;
+		}
+		echo '<div class="wdc-fixed-pickup-checkout" data-wdc-fixed-pickup-card data-shipping-method-id="' . esc_attr( $rate_id ) . '">';
+		echo $this->card_renderer->render(
+			array_merge(
+				$snapshot,
+				array(
+					'rate_id' => $rate_id,
+					'snapshot' => $snapshot,
+				)
+			),
+			false,
+			false,
+			false
+		);
+		echo '</div>';
+	}
+
 	/** @param array<string,mixed> $meta */
 	private function render_pickup_inline_notice( array $meta ): void {
 		$message = $this->pickup_inline_notice_message( $meta );
@@ -214,7 +250,14 @@ final class CheckoutRateRenderer {
 	}
 
 	private function method_id( mixed $method ): string {
-		return is_object( $method ) && isset( $method->id ) ? (string) $method->id : '';
+		if ( is_object( $method ) && isset( $method->id ) ) {
+			return (string) $method->id;
+		}
+		if ( is_array( $method ) && isset( $method['id'] ) ) {
+			return (string) $method['id'];
+		}
+
+		return '';
 	}
 
 	/**
@@ -226,6 +269,38 @@ final class CheckoutRateRenderer {
 
 	private function format_money( int $kopecks ): string {
 		return rtrim( rtrim( number_format( $kopecks / 100, 2, '.', ' ' ), '0' ), '.' ) . ' руб.';
+	}
+
+	private function rate_is_chosen( string $rate_id ): bool {
+		$rate_id = $this->session_manager->normalize_rate_id( $rate_id );
+		if ( '' === $rate_id ) {
+			return false;
+		}
+		foreach ( $this->chosen_shipping_methods() as $chosen ) {
+			if ( $rate_id === $this->session_manager->normalize_rate_id( $chosen ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** @return array<int,string> */
+	private function chosen_shipping_methods(): array {
+		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) && is_object( WC()->session ) && method_exists( WC()->session, 'get' ) ) {
+			$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
+			return is_array( $chosen ) ? array_values( array_map( 'strval', $chosen ) ) : array();
+		}
+
+		return array();
+	}
+
+	private function text_before_link( string $text ): string {
+		if ( '' === trim( $text ) || (bool) preg_match( '/\s$/u', $text ) ) {
+			return $text;
+		}
+
+		return $text . ' ';
 	}
 
 	/**

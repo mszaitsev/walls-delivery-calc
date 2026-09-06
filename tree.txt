@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000052 A0AC:74BD
+Volume serial number is 000000BA A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -473,6 +473,7 @@ C:.
 |   |   |       PekCarrier.php
 |   |   |       RussianPostDomesticCarrier.php
 |   |   |       RussianPostInternationalCarrier.php
+|   |   |       SelfPickupCarrier.php
 |   |   |       YandexDeliveryCarrier.php
 |   |   |
 |   |   +---RussianPost
@@ -498,6 +499,12 @@ C:.
 |   |   |   |
 |   |   |   \---Tracking
 |   |   |           RussianPostTrackingApiClient.php
+|   |   |
+|   |   +---SelfPickup
+|   |   |       SelfPickupDiscountPolicy.php
+|   |   |       SelfPickupDiscountResult.php
+|   |   |       SelfPickupDiscountService.php
+|   |   |       SelfPickupSettings.php
 |   |   |
 |   |   \---YandexDelivery
 |   |       |   YandexDeliveryCredentials.php
@@ -1222,6 +1229,9 @@ C:.
     |
     +---runtime
     |       run-no-legacy-smoke.php
+    |
+    +---self-pickup
+    |       run-self-pickup-smoke.php
     |
     +---shipments
     |   |   actual-cost-test-helpers.php
