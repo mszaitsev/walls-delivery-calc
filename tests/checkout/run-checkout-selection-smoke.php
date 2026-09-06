@@ -181,8 +181,10 @@ use WallsShop\WDC\Checkout\Runtime\DeliveryLeadTimeNormalizer;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -423,11 +425,28 @@ function checkout_selection_method( CheckoutSelectionSmokeCarrier $carrier, Chec
 		$session,
 		new RuleRepository(),
 		$settings,
-		new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.155.2' ),
+		new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.155.3' ),
 		new Logger()
 	);
 
 	return new NewShippingMethod();
+}
+
+function checkout_selection_registrar( CheckoutSelectionSmokeCarrier $carrier, CheckoutSessionManager $session ): ShippingMethodRegistrar {
+	$settings = new SettingsRepository();
+	$settings->set( 'enable_new_checkout_shipping', true );
+
+	return new ShippingMethodRegistrar(
+		new CheckoutFeatureGate( $settings ),
+		$settings,
+		checkout_selection_orchestrator( $carrier ),
+		new WooCommercePackageMapper( null, $session ),
+		new WooCommerceRateMapper(),
+		$session,
+		new RuleRepository(),
+		new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.155.3' ),
+		new Logger()
+	);
 }
 
 function checkout_selection_reset(): CheckoutSessionManager {
@@ -523,6 +542,23 @@ $stored = $session->rates();
 checkout_selection_assert( array( NewShippingMethod::METHOD_ID . ':self_pickup' ) === WC()->session->get( 'chosen_shipping_methods', array() ), 'Self-pickup-shaped checkout-only rates must preserve method identity when the fresh rate remains available.' );
 checkout_selection_assert( isset( $stored['self_pickup']['fixed_pickup_point_snapshot'] ) && 0.0 === (float) ( $stored['self_pickup']['cost'] ?? -1 ), 'Self-pickup preservation must still use fresh zero-price fixed-card metadata.' );
 
+$session = checkout_selection_reset();
+$registrar = checkout_selection_registrar( $carrier, $session );
+$method_a = NewShippingMethod::METHOD_ID . ':selection_demo:a';
+$method_b = NewShippingMethod::METHOD_ID . ':selection_demo:b';
+$method_c = NewShippingMethod::METHOD_ID . ':selection_demo:c';
+$old_rate_order = array( $method_a, $method_b, $method_c );
+$new_rate_order = array( $method_b, $method_a, $method_c );
+checkout_selection_assert( $old_rate_order !== $new_rate_order, 'WooCommerce treats ordered rate-key changes as significant for chosen-method arbitration.' );
+checkout_selection_assert( $method_b === $registrar->preserve_chosen_wdc_method( $method_a, array_fill_keys( $new_rate_order, new stdClass() ), $method_b ), 'Fresh previous WDC choice must survive Woo default-selection filter when rate order changes to B,A,C.' );
+checkout_selection_assert( $method_b === $registrar->preserve_chosen_wdc_method( $method_c, array_fill_keys( array( $method_c, $method_a, $method_b ), new stdClass() ), $method_b ), 'Fresh previous WDC choice must survive Woo default-selection filter when rate order changes to C,A,B.' );
+checkout_selection_assert( $method_b === $registrar->preserve_chosen_wdc_method( $method_a, array( $method_b => (object) array( 'cost' => 250 ), $method_a => (object) array( 'cost' => 350 ) ), $method_b ), 'Price-caused reorder must keep the previously selected WDC method with the fresh rate key.' );
+checkout_selection_assert( $method_a === $registrar->preserve_chosen_wdc_method( $method_a, array( $method_a => new stdClass(), $method_c => new stdClass() ), $method_b ), 'Disappeared previous WDC method must fall back to WooCommerce default.' );
+checkout_selection_assert( $method_b === $registrar->preserve_chosen_wdc_method( $method_a, array_fill_keys( array( $method_b, $method_a ), new stdClass() ), 'wdc_platform:selection_demo:b' ), 'Legacy WDC chosen prefix must normalize to the canonical fresh Woo method id.' );
+checkout_selection_assert( 'flat_rate:1' === $registrar->preserve_chosen_wdc_method( 'flat_rate:1', array( 'external_rate:2' => new stdClass() ), 'external_rate:2' ), 'Woo chosen-method filter must not override non-WDC shipping methods.' );
+checkout_selection_assert( NewShippingMethod::METHOD_ID . ':selection_demo:pickup' === $registrar->preserve_chosen_wdc_method( $method_a, array( NewShippingMethod::METHOD_ID . ':selection_demo:pickup' => new stdClass(), $method_a => new stdClass() ), NewShippingMethod::METHOD_ID . ':selection_demo:pickup' ), 'Pickup WDC method must survive order-only changes when the fresh pickup rate exists.' );
+checkout_selection_assert( NewShippingMethod::METHOD_ID . ':self_pickup' === $registrar->preserve_chosen_wdc_method( $method_a, array( $method_a => new stdClass(), NewShippingMethod::METHOD_ID . ':self_pickup' => new stdClass() ), NewShippingMethod::METHOD_ID . ':self_pickup' ), 'Self-pickup WDC method must survive order-only changes when the fresh zero-price rate exists.' );
+
 $new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/NewShippingMethod.php' );
 $reconcile_start = strpos( $new_shipping_method_source, 'private function reconcile_shipping_method_choices' );
 $reconcile_source = false === $reconcile_start ? '' : substr( $new_shipping_method_source, $reconcile_start, 2500 );
@@ -530,5 +566,7 @@ foreach ( array( "'cdek'", "'self_pickup'", "'dpd'", "'yandex_delivery'", "'pek'
 	checkout_selection_assert( ! str_contains( $reconcile_source, $forbidden_branch ), 'Checkout selection reconciliation must not branch on carrier key ' . $forbidden_branch . '.' );
 }
 checkout_selection_assert( str_contains( $new_shipping_method_source, 'save_rates( $stored )' ) && strpos( $new_shipping_method_source, 'save_rates( $stored )' ) < strpos( $new_shipping_method_source, 'reconcile_shipping_method_choices' ), 'Shipping choice reconciliation must happen after fresh rates are saved.' );
+$shipping_registrar_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
+checkout_selection_assert( str_contains( $shipping_registrar_source, "add_filter( 'woocommerce_shipping_chosen_method'" ) && str_contains( $shipping_registrar_source, 'preserve_chosen_wdc_method' ) && str_contains( $shipping_registrar_source, 'fresh_wdc_rate_id' ), 'Shipping registrar must hook the final WooCommerce chosen-method boundary using fresh package rates.' );
 
 echo "Checkout selection smoke test passed.\n";

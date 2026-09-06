@@ -4,7 +4,9 @@ Version 0.136.0 wires PEK shipment dependencies and the generic `ShipmentCreatio
 
 Sender warehouse read-only HTTP 403 fallback is also carrier-owned inside `PekSenderWarehouseService`: the service preserves the previous search cache until a new search succeeds, converts search failures into safe results for admin AJAX, and accepts only exact matching persisted `free` snapshots after local constraints/availability checks. It does not require new DI wiring and does not reintroduce `/branches/all/` as sender warehouse authority. SMS release diagnostics reuse the injected PEK quote message sanitizer inside `PekSmsReleaseAvailabilityService` so geography, private-token, connected-services, contract, CODMaxSum, and business-unavailable evidence share the same redaction boundary without storing private tokens or raw PEK responses.
 
-Version: 0.155.2
+Version: 0.155.3
+
+Version 0.155.3 keeps the order-sensitive checkout preservation fix inside existing WooCommerce checkout wiring. `ShippingMethodRegistrar` registers the `woocommerce_shipping_chosen_method` filter when the new checkout shipping feature is enabled; no new service, carrier wiring, or Shipment Framework dependency is introduced.
 
 Version 0.155.2 keeps the checkout selection preservation patch inside the existing WooCommerce shipping method composition: `NewShippingMethod` uses its injected `CheckoutSessionManager`, package mapper, rate mapper, and orchestrator, and no new DI service or Shipment Framework wiring is required.
 

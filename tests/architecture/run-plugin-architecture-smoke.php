@@ -707,6 +707,14 @@ plugin_architecture_assert(
 	&& str_contains( $shipping_registrar_source, 'wdc-platform-pickup-foundation' ),
 	'Checkout pickup frontend identifiers must preserve their established class and style handle.'
 );
+plugin_architecture_assert(
+	str_contains( $shipping_registrar_source, "add_filter( 'woocommerce_shipping_chosen_method'" )
+	&& str_contains( $shipping_registrar_source, 'preserve_chosen_wdc_method' )
+	&& str_contains( $shipping_registrar_source, 'fresh_wdc_rate_id' )
+	&& str_contains( $shipping_registrar_source, 'array_key_exists( $chosen_method, $rates )' )
+	&& ! str_contains( $shipping_registrar_source, "label ===" ),
+	'WooCommerce chosen-method preservation must run at the final shipping filter boundary and use only fresh package rates plus stable WDC method identity.'
+);
 
 $js_source = '';
 foreach ( plugin_architecture_generic_js_files() as $file ) {

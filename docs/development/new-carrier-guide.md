@@ -1,6 +1,8 @@
 # New Carrier Guide
 
-Version: 0.155.2
+Version: 0.155.3
+
+0.155.3 clarifies that carrier rate ordering must not be part of user selection identity. If a carrier's fresh price or delivery period changes and sorting moves the method, WDC can still preserve the previous chosen method through WooCommerce's selected-method filter as long as the fresh package rates contain the same canonical WDC method id. Carrier code must still emit fresh rate data and must not depend on label/title comparisons.
 
 0.155.2 clarifies checkout selection expectations for all carriers. If a cart recalculation changes price, delivery period, or cargo context but the same canonical WDC rate id remains available, the checkout layer may preserve only the user's selected method identity. Carriers must not rely on stale session rate payloads: pickup cargo validity must be expressed through fresh quote success or generic `pickup_selection_rejected` metadata, and grouped tariff methods must expose stable checkout group ids plus fresh tariff variants.
 

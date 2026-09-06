@@ -40,6 +40,7 @@ final class ShippingMethodRegistrar {
 	public function register(): void {
 		add_filter( 'woocommerce_shipping_methods', array( $this, 'register_shipping_method' ) );
 		if ( $this->feature_gate->enabled() ) {
+			add_filter( 'woocommerce_shipping_chosen_method', array( $this, 'preserve_chosen_wdc_method' ), 10, 3 );
 			add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 			add_action( 'wp_ajax_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
 			add_action( 'wp_ajax_nopriv_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
@@ -70,6 +71,55 @@ final class ShippingMethodRegistrar {
 		$methods[ NewShippingMethod::METHOD_ID ] = NewShippingMethod::class;
 
 		return $methods;
+	}
+
+	/**
+	 * @param array<string,mixed> $rates
+	 */
+	public function preserve_chosen_wdc_method( string $default, array $rates, string $chosen_method ): string {
+		$chosen_method = trim( $chosen_method );
+		if ( '' === $chosen_method || ! $this->is_wdc_shipping_method_choice( $chosen_method ) ) {
+			return $default;
+		}
+
+		$fresh_method_id = $this->fresh_wdc_rate_id( $chosen_method, $rates );
+
+		return '' !== $fresh_method_id ? $fresh_method_id : $default;
+	}
+
+	private function is_wdc_shipping_method_choice( string $method_id ): bool {
+		return str_starts_with( $method_id, NewShippingMethod::METHOD_ID . ':' )
+			|| str_starts_with( $method_id, 'wdc_platform:' );
+	}
+
+	/**
+	 * @param array<string,mixed> $rates
+	 */
+	private function fresh_wdc_rate_id( string $chosen_method, array $rates ): string {
+		if ( array_key_exists( $chosen_method, $rates ) ) {
+			return $chosen_method;
+		}
+
+		$chosen_rate_id = $this->session_manager->normalize_rate_id( $chosen_method );
+		if ( '' === $chosen_rate_id ) {
+			return '';
+		}
+
+		foreach ( $rates as $rate_id => $rate ) {
+			$candidate_id = is_string( $rate_id ) ? $rate_id : '';
+			if ( '' === $candidate_id && is_object( $rate ) && method_exists( $rate, 'get_id' ) ) {
+				$candidate_id = (string) $rate->get_id();
+			}
+			$candidate_id = trim( $candidate_id );
+			if ( '' === $candidate_id || ! $this->is_wdc_shipping_method_choice( $candidate_id ) ) {
+				continue;
+			}
+			if ( $chosen_rate_id === $this->session_manager->normalize_rate_id( $candidate_id ) ) {
+				return $candidate_id;
+			}
+		}
+
+		return '';
 	}
 
 	public function enqueue_assets(): void {

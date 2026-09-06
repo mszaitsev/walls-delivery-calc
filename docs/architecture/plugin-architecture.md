@@ -1,6 +1,8 @@
 # Plugin Architecture
 
-Version: 0.155.2
+Version: 0.155.3
+
+0.155.3 adds the final WooCommerce selected-method integration point for checkout selection preservation. `ShippingMethodRegistrar` owns the `woocommerce_shipping_chosen_method` filter and returns a previous WDC method only when that method is present in the fresh package rate array supplied by WooCommerce. This complements `NewShippingMethod` post-calculation reconciliation: the shipping method still owns stale cleanup and canonical session normalization, while the Woo filter protects against WooCommerce order-sensitive default selection after sorted rate order changes.
 
 0.155.2 adds a generic checkout selection reconciliation lifecycle in `NewShippingMethod`. The WooCommerce checkout layer may remember previous WDC method identity from `chosen_shipping_methods`, but authoritative delivery data always comes from the freshly calculated rate set saved to `wdc_platform_rates`. Reconciliation happens after fresh rates are saved and never branches on carrier keys. Pickup validity remains split between destination fingerprint checks in `CheckoutSessionManager` and carrier/provider rejection metadata; invalid pickup selections are cleared by family.
 

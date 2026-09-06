@@ -1,6 +1,8 @@
 # Locations And Pickup
 
-Version: 0.155.2
+Version: 0.155.3
+
+0.155.3 does not change destination fingerprinting. The WooCommerce selected-method filter may preserve only the method id after rate reordering; stale pickup points still depend on current `CheckoutLocationFingerprint` and carrier/provider validation.
 
 0.155.2 keeps destination identity authoritative for pickup selections during checkout recalculation. Same-destination cart changes may preserve a valid selected point, but a changed `CheckoutLocationFingerprint` still clears stale pickup selections before fresh carrier/provider validation.
 
