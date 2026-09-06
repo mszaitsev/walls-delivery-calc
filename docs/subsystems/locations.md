@@ -1,8 +1,8 @@
 # Locations And Pickup
 
-Version: 0.153.7
+Version: 0.154.0
 
-0.153.7 preserves current-destination pickup family selections when switching to courier/custom/non-pickup shipping methods; global pickup invalidation remains limited to real destination/context resets.
+0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
 
 0.153.0 does not change manual pickup locality storage or lookup. Manual shipment attach uses the order's historical delivery snapshot and does not create shipment-time location identities, fake `location_id` values, or manual pickup schema changes.
 

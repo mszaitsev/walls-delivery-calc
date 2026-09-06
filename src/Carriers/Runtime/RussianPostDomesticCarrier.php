@@ -104,7 +104,13 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			$rates[] = $this->rate_from_result( $service_key, $delivery_type, $variant, $postcode, $params, $api_result, $parsed, $price_kopecks, $package, $settings );
 		}
 
-		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key . ':' . $delivery_type ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'delivery_type' => $delivery_type, 'skipped_tariffs' => $skipped, 'variant_diagnostics' => $variant_diagnostics ) );
+		$filter_result = $this->filter_rates_by_price_and_delivery_days( $rates );
+		$rates = $filter_result['rates'];
+		if ( array() !== $filter_result['removed'] ) {
+			$this->debug( 'Russian Post domestic tariff rates filtered by price and delivery days.', array( 'service_key' => $service_key, 'postcode' => $postcode, 'removed_tariffs' => $filter_result['removed'] ), $service_key );
+		}
+
+		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key . ':' . $delivery_type ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'delivery_type' => $delivery_type, 'skipped_tariffs' => $skipped, 'variant_diagnostics' => $variant_diagnostics, 'russian_post_filter_removed_count' => count( $filter_result['removed'] ), 'russian_post_filter_removed_tariffs' => $filter_result['removed'] ) );
 	}
 
 	private function empty_quote( QuoteRequest $request, string $reason ): DeliveryQuote {
@@ -371,6 +377,74 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 
 	private function delivery_comment( DateRange $range ): string {
 		return DeliveryDaysFormatter::format( $range );
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 * @return array{rates:array<int,DeliveryRate>,removed:array<int,array<string,mixed>>}
+	 */
+	private function filter_rates_by_price_and_delivery_days( array $rates ): array {
+		$remove = array();
+		$removed = array();
+		foreach ( $rates as $index => $rate ) {
+			foreach ( $rates as $candidate_index => $candidate ) {
+				if ( $index === $candidate_index || isset( $remove[ $index ] ) ) {
+					continue;
+				}
+				$reason = $this->russian_post_filter_removal_reason( $candidate, $rate );
+				if ( '' === $reason ) {
+					continue;
+				}
+				$remove[ $index ] = true;
+				$removed[] = array(
+					'tariff_key' => $rate->tariff_key,
+					'tariff_name' => $rate->tariff_name,
+					'price_rub' => $rate->price->get_rubles(),
+					'delivery_min_days' => $rate->delivery_days->min_days,
+					'delivery_max_days' => $rate->delivery_days->max_days,
+					'removed_by_tariff_key' => $candidate->tariff_key,
+					'removed_by_price_rub' => $candidate->price->get_rubles(),
+					'removed_by_delivery_min_days' => $candidate->delivery_days->min_days,
+					'removed_by_delivery_max_days' => $candidate->delivery_days->max_days,
+					'reason' => $reason,
+				);
+			}
+		}
+
+		if ( array() === $remove ) {
+			return array( 'rates' => array_values( $rates ), 'removed' => array() );
+		}
+
+		return array(
+			'rates' => array_values( array_filter( $rates, static fn ( DeliveryRate $rate, int $index ): bool => ! isset( $remove[ $index ] ), ARRAY_FILTER_USE_BOTH ) ),
+			'removed' => $removed,
+		);
+	}
+
+	private function russian_post_filter_removal_reason( DeliveryRate $candidate, DeliveryRate $rate ): string {
+		$candidate_min = $candidate->delivery_days->min_days;
+		$candidate_max = $candidate->delivery_days->max_days;
+		$rate_min = $rate->delivery_days->min_days;
+		$rate_max = $rate->delivery_days->max_days;
+		if ( null === $candidate_min || null === $candidate_max || null === $rate_min || null === $rate_max ) {
+			return '';
+		}
+
+		$candidate_price = $candidate->price->get_kopecks();
+		$rate_price = $rate->price->get_kopecks();
+		if ( $candidate_min === $rate_min && $candidate_max === $rate_max && $candidate_price < $rate_price ) {
+			return 'same_delivery_days_higher_price';
+		}
+		if (
+			$candidate_min <= $rate_min
+			&& $candidate_max <= $rate_max
+			&& $candidate_price <= $rate_price
+			&& ( $candidate_min < $rate_min || $candidate_max < $rate_max || $candidate_price < $rate_price )
+		) {
+			return 'dominated_by_price_and_delivery_days';
+		}
+
+		return '';
 	}
 
 	/**

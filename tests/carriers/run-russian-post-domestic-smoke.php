@@ -22,6 +22,7 @@ use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
@@ -163,6 +164,31 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 42, 'errormsg' => 'bad domestic request' ) ) );
 	}
 	$object = (int) ( $params['object'] ?? 0 );
+	if ( isset( $GLOBALS['wdc_rpd_tariff_fixtures'][ $object ] ) && is_array( $GLOBALS['wdc_rpd_tariff_fixtures'][ $object ] ) ) {
+		$fixture = $GLOBALS['wdc_rpd_tariff_fixtures'][ $object ];
+		$body = array(
+			'pay' => (int) ( $fixture['price_kopecks'] ?? 0 ),
+			'nds' => 0,
+			'paynds' => (int) ( $fixture['price_kopecks'] ?? 0 ),
+			'transtype' => 1,
+			'delivery-to' => (string) ( $params['to'] ?? '' ),
+			'items' => array(),
+		);
+		if ( array_key_exists( 'min_days', $fixture ) || array_key_exists( 'max_days', $fixture ) ) {
+			$body['delivery'] = array_filter(
+				array(
+					'min' => $fixture['min_days'] ?? null,
+					'max' => $fixture['max_days'] ?? null,
+				),
+				static fn( mixed $value ): bool => null !== $value
+			);
+		}
+		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( $body ) );
+	}
+	$default_delivery = match ( $object ) {
+		54020, 52030 => array( 'min' => 4, 'max' => 7 ),
+		default => array( 'min' => 5, 'max' => 6 ),
+	};
 	return array(
 		'response' => array( 'code' => 200 ),
 		'body' => json_encode(
@@ -170,7 +196,7 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 				'pay' => ( 400 + $object % 100 ) * 100,
 				'nds' => 0,
 				'paynds' => ( 400 + $object % 100 ) * 100,
-				'delivery' => array( 'min' => 5, 'max' => 6 ),
+				'delivery' => $default_delivery,
 				'transtype' => 1,
 				'delivery-to' => (string) ( $params['to'] ?? '' ),
 				'items' => array(
@@ -240,6 +266,49 @@ function rpd_replace_service_settings( wpdb $db, array $values ): void {
 	$db->service_settings = $rows;
 }
 
+function rpd_tariff_variant( int $object_code, string $delivery_type, int $sort_order ): array {
+	return DomesticTariffVariant::from_array(
+		array(
+			'object_code' => $object_code,
+			'title' => 'Тариф ' . $object_code,
+			'enabled' => true,
+			'delivery_type' => $delivery_type,
+			'requires_declared_value' => false,
+			'always_available' => false,
+			'sort_order' => $sort_order,
+		)
+	)->to_array();
+}
+
+/**
+ * @param array<int,array<string,mixed>> $fixtures
+ */
+function rpd_quote_fixture( RussianPostDomesticCarrier $carrier, wpdb $service_db, RussianPostDomesticSettings $domestic_settings, Package $package, string $delivery_type, array $fixtures ): DeliveryQuote {
+	$GLOBALS['wdc_rpd_tariff_fixtures'] = $fixtures;
+	$GLOBALS['wdc_rpd_requests'] = array();
+	$GLOBALS['wdc_rpd_transients'] = array();
+	$variants = array();
+	$sort = 1;
+	foreach ( array_keys( $fixtures ) as $object_code ) {
+		$variants[] = rpd_tariff_variant( (int) $object_code, $delivery_type, $sort++ );
+	}
+	rpd_replace_service_settings( $service_db, array_merge( $domestic_settings->all(), array( 'insurance_enabled' => false, 'tariff_variants' => $variants ) ) );
+	$quote = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::SERVICE_KEY, 'delivery_type' => $delivery_type ) ) );
+	unset( $GLOBALS['wdc_rpd_tariff_fixtures'] );
+
+	return $quote;
+}
+
+/**
+ * @param array<int,array<string,mixed>> $fixtures
+ * @return array<int,string>
+ */
+function rpd_quote_fixture_objects( RussianPostDomesticCarrier $carrier, wpdb $service_db, RussianPostDomesticSettings $domestic_settings, Package $package, string $delivery_type, array $fixtures ): array {
+	$quote = rpd_quote_fixture( $carrier, $service_db, $domestic_settings, $package, $delivery_type, $fixtures );
+
+	return array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $quote->rates );
+}
+
 $settings = new SettingsRepository();
 $service_db = new wpdb();
 $service_db->services = array(
@@ -292,6 +361,165 @@ rpd_assert( 1 === count( $saved_variants ) && 27030 === $saved_variants[0]->obje
 $item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000 );
 $package = Package::from_items( array( $item ), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) );
 $request = new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::SERVICE_KEY, 'delivery_type' => DeliveryType::PICKUP ) );
+
+$same_period_quote = rpd_quote_fixture(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91001 => array( 'price_kopecks' => 50000, 'min_days' => 3, 'max_days' => 5 ),
+		91002 => array( 'price_kopecks' => 65000, 'min_days' => 3, 'max_days' => 5 ),
+	)
+);
+$same_period = array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $same_period_quote->rates );
+rpd_assert( array( '91001' ) === $same_period, 'Russian Post same-period expensive tariff must be removed.' );
+$same_period_removed = $same_period_quote->raw_reference['russian_post_filter_removed_tariffs'][0] ?? array();
+rpd_assert( 1 === (int) ( $same_period_quote->raw_reference['russian_post_filter_removed_count'] ?? 0 ) && '91002' === (string) ( $same_period_removed['tariff_key'] ?? '' ) && '91001' === (string) ( $same_period_removed['removed_by_tariff_key'] ?? '' ) && 'same_delivery_days_higher_price' === (string) ( $same_period_removed['reason'] ?? '' ), 'Russian Post filter diagnostics must expose removed tariff, dominating tariff, and reason.' );
+
+$fast_cheap = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91003 => array( 'price_kopecks' => 50000, 'min_days' => 2, 'max_days' => 3 ),
+		91004 => array( 'price_kopecks' => 65000, 'min_days' => 4, 'max_days' => 6 ),
+	)
+);
+rpd_assert( array( '91003' ) === $fast_cheap, 'Russian Post faster and cheaper tariff must dominate slower expensive tariff.' );
+
+$fast_same_price = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91005 => array( 'price_kopecks' => 50000, 'min_days' => 2, 'max_days' => 3 ),
+		91006 => array( 'price_kopecks' => 50000, 'min_days' => 4, 'max_days' => 5 ),
+	)
+);
+rpd_assert( array( '91005' ) === $fast_same_price, 'Russian Post faster same-price tariff must dominate slower same-price tariff.' );
+
+$meaningful_tradeoff = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91007 => array( 'price_kopecks' => 70000, 'min_days' => 2, 'max_days' => 3 ),
+		91008 => array( 'price_kopecks' => 50000, 'min_days' => 4, 'max_days' => 6 ),
+	)
+);
+rpd_assert( array( '91007', '91008' ) === $meaningful_tradeoff, 'Russian Post fast expensive and slow cheap trade-off must keep both tariffs.' );
+
+$overlap = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91009 => array( 'price_kopecks' => 50000, 'min_days' => 2, 'max_days' => 5 ),
+		91010 => array( 'price_kopecks' => 60000, 'min_days' => 3, 'max_days' => 4 ),
+	)
+);
+rpd_assert( array( '91009', '91010' ) === $overlap, 'Russian Post partial overlapping delivery periods without full dominance must keep both tariffs.' );
+
+$range_dominated = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91011 => array( 'price_kopecks' => 50000, 'min_days' => 2, 'max_days' => 4 ),
+		91012 => array( 'price_kopecks' => 50000, 'min_days' => 3, 'max_days' => 5 ),
+	)
+);
+rpd_assert( array( '91011' ) === $range_dominated, 'Russian Post fully faster same-price range must dominate slower range.' );
+
+$unknown_days = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91013 => array( 'price_kopecks' => 50000 ),
+		91014 => array( 'price_kopecks' => 60000, 'min_days' => 3, 'max_days' => 5 ),
+	)
+);
+rpd_assert( array( '91013', '91014' ) === $unknown_days, 'Russian Post tariff with unknown delivery days must not be removed by dominance filtering.' );
+
+$exact_duplicates = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91015 => array( 'price_kopecks' => 50000, 'min_days' => 3, 'max_days' => 5 ),
+		91016 => array( 'price_kopecks' => 50000, 'min_days' => 3, 'max_days' => 5 ),
+	)
+);
+rpd_assert( array( '91015', '91016' ) === $exact_duplicates, 'Russian Post exact same days and price duplicates must keep deterministic non-destructive result.' );
+
+$ordered_a = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91017 => array( 'price_kopecks' => 50000, 'min_days' => 2, 'max_days' => 3 ),
+		91018 => array( 'price_kopecks' => 65000, 'min_days' => 4, 'max_days' => 6 ),
+	)
+);
+$ordered_b = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91018 => array( 'price_kopecks' => 65000, 'min_days' => 4, 'max_days' => 6 ),
+		91017 => array( 'price_kopecks' => 50000, 'min_days' => 2, 'max_days' => 3 ),
+	)
+);
+rpd_assert( array( '91017' ) === $ordered_a && $ordered_a === $ordered_b, 'Russian Post dominance filtering must be independent of API variant order.' );
+
+$courier_same_period = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::COURIER,
+	array(
+		92001 => array( 'price_kopecks' => 50000, 'min_days' => 3, 'max_days' => 5 ),
+		92002 => array( 'price_kopecks' => 65000, 'min_days' => 3, 'max_days' => 5 ),
+	)
+);
+rpd_assert( array( '92001' ) === $courier_same_period, 'Russian Post courier same-period expensive tariff must be removed.' );
+
+$courier_tradeoff = rpd_quote_fixture_objects(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::COURIER,
+	array(
+		92003 => array( 'price_kopecks' => 70000, 'min_days' => 2, 'max_days' => 3 ),
+		92004 => array( 'price_kopecks' => 50000, 'min_days' => 4, 'max_days' => 6 ),
+	)
+);
+rpd_assert( array( '92003', '92004' ) === $courier_tradeoff, 'Russian Post courier meaningful price/speed trade-off must keep both tariffs.' );
+
+rpd_replace_service_settings( $service_db, array_merge( $domestic_settings->all(), array( 'insurance_enabled' => false, 'tariff_variants' => array() ) ) );
 $quote = $carrier->quote( $request );
 
 rpd_assert( $quote->has_available_rates(), 'Domestic pickup quote must return rates when postcode exists.' );
@@ -348,7 +576,8 @@ $GLOBALS['wdc_rpd_transients'] = array();
 $configured_package = Package::from_items( array( new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000 ) ), 0, Money::from_rubles( 1500 ), Money::from_rubles( 1000 ) );
 $configured_quote = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $configured_package, 'card', Money::from_rubles( 1500 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::SERVICE_KEY, 'delivery_type' => DeliveryType::PICKUP ) ) );
 $configured_quote_objects = array_map( static fn( $rate ): string => $rate->tariff_key, $configured_quote->rates );
-rpd_assert( in_array( '23020', $configured_quote_objects, true ) && in_array( '23030', $configured_quote_objects, true ) && in_array( '47030', $configured_quote_objects, true ), 'Explicitly configured pickup tariffs must all be quoted when API returns prices.' );
+rpd_assert( array( '23020', '23030', '47030' ) === array_map( static fn( array $request ): string => (string) ( $request['object'] ?? '' ), $GLOBALS['wdc_rpd_requests'] ), 'Explicitly configured pickup tariffs must all be calculated before dominance filtering.' );
+rpd_assert( array() !== $configured_quote_objects, 'Explicitly configured pickup tariffs must leave at least one canonical quoted rate when API returns prices.' );
 rpd_assert( '23020' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['object'] ?? '' ) && isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ) && 100000 === (int) $GLOBALS['wdc_rpd_requests'][0]['sumoc'], '23020 request params must include sumoc from package item totals.' );
 rpd_assert( '23030' === (string) ( $GLOBALS['wdc_rpd_requests'][1]['object'] ?? '' ) && ! isset( $GLOBALS['wdc_rpd_requests'][1]['sumoc'] ), '23030 request params must not include sumoc.' );
 $base_domestic_settings = array_merge( $domestic_settings->all(), array( 'insurance_enabled' => false, 'tariff_variants' => array() ) );
@@ -494,6 +723,25 @@ $mapper = new WooCommerceRateMapper();
 $mapped_single_rate = $mapper->map( $single_rate );
 rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ', Посылка онлайн - 5-6 дней' === $mapped_single_rate['label'], 'Single-tariff domestic grouped label must include selected tariff and planned delivery comment.' );
 rpd_assert( true === ( $mapped_single_rate['meta_data']['domestic_tariff_grouped'] ?? false ), 'Single-tariff domestic grouped meta must keep grouped marker for checkout rendering.' );
+$session_manager->save_selected_tariff( $pickup_group_id, array( 'object_code' => '91002', 'title' => 'Dominated tariff' ) );
+$filtered_single_rate = $selector_method->invoke( $method, $pickup_group_id, $same_period_quote->rates );
+$filtered_single_session = $session_manager->selected_tariff( $pickup_group_id );
+rpd_assert( $filtered_single_rate instanceof DeliveryRate && 500.0 === $filtered_single_rate->price->get_rubles() && '91001' === (string) ( $filtered_single_rate->meta['selected_tariff_object'] ?? '' ) && array() === ( $filtered_single_rate->meta['tariff_variants'] ?? array() ), 'Filtered one-rate domestic checkout group must collapse without tariff variants and select the surviving tariff.' );
+rpd_assert( '91001' === (string) ( $filtered_single_session['object_code'] ?? '' ), 'Dominated selected Russian Post tariff must be replaced by the surviving tariff.' );
+$filtered_tradeoff_quote = rpd_quote_fixture(
+	$carrier,
+	$service_db,
+	$domestic_settings,
+	$package,
+	DeliveryType::PICKUP,
+	array(
+		91007 => array( 'price_kopecks' => 70000, 'min_days' => 2, 'max_days' => 3 ),
+		91008 => array( 'price_kopecks' => 50000, 'min_days' => 4, 'max_days' => 6 ),
+	)
+);
+$filtered_tradeoff_rate = $selector_method->invoke( $method, $pickup_group_id, $filtered_tradeoff_quote->rates );
+$filtered_tradeoff_variants = $filtered_tradeoff_rate->meta['tariff_variants'] ?? array();
+rpd_assert( $filtered_tradeoff_rate instanceof DeliveryRate && 2 === count( $filtered_tradeoff_variants ) && array( '91007', '91008' ) === array_map( static fn( array $variant ): string => (string) ( $variant['object_code'] ?? '' ), $filtered_tradeoff_variants ), 'Filtered meaningful Russian Post trade-offs must remain as selectable checkout tariff variants.' );
 $single_wc_rate = new class( $mapped_single_rate['meta_data'] ) {
 	/** @param array<string,mixed> $meta */
 	public function __construct( private array $meta ) {}
