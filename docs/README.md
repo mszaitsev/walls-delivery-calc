@@ -1,8 +1,8 @@
 # Walls Delivery Calc Documentation
 
-Version: 0.153.7
+Version: 0.154.0
 
-0.153.7 preserves current-destination pickup family selections when switching to courier/custom/non-pickup shipping methods; global pickup invalidation remains limited to real destination/context resets.
+0.154.0 filters dominated Russian Post domestic tariff rates by price and delivery period for checkout and order recalculation, preserving only meaningful price/speed trade-offs.
 
 0.153.0 connects manual delivery services to the existing Shipment Framework. The single `manual` shipment adapter supports manual attach, local remove, and generic manual actual cost for the concrete historical manual service saved on the order; preview/create, carrier cancellation, status API, autosync, documents, returns, and manual shipment storage tables remain unsupported.
 

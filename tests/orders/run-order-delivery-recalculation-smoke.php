@@ -1608,6 +1608,30 @@ $multi_rate_payloads = $normalize_rates_method->invoke(
 );
 recalc_smoke_assert( true === (bool) ( $multi_rate_payloads[0]['is_grouped'] ?? false ) && 2 === count( $multi_rate_payloads[0]['tariff_variants'] ?? array() ), 'Two or more final tariffs must keep grouped selector payload.' );
 
+$single_russian_post_payloads = $normalize_rates_method->invoke(
+	$service,
+	array(
+		new DeliveryRate( RussianPostDomesticSettings::rate_id( DeliveryType::PICKUP, '91001' ), RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::SERVICE_KEY, RussianPostDomesticSettings::TITLE, '91001', 'Посылка онлайн', DeliveryType::PICKUP, 'Посылка онлайн', Money::from_rubles( 500 ), null, null, DateRange::range( 3, 5 ), '', '', array(), false, '', true, false, array( 'tariff_selector_group' => true, 'checkout_group_id' => RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP ), 'pickup_method_title' => RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, 'api_base_price_rub' => 500 ) ),
+	)
+);
+$single_russian_post_payload = $single_russian_post_payloads[0] ?? array();
+recalc_smoke_assert( false === (bool) ( $single_russian_post_payload['is_grouped'] ?? true ) && array() === ( $single_russian_post_payload['tariff_variants'] ?? null ) && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE === (string) ( $single_russian_post_payload['label'] ?? '' ) && '91001' === (string) ( $single_russian_post_payload['selected_tariff_object'] ?? '' ), 'Single final Russian Post domestic tariff group must collapse to the service method payload without losing tariff identity.' );
+$single_russian_post_html = ( new OrderDeliveryRateRenderer() )->render( $single_russian_post_payloads );
+recalc_smoke_assert( str_contains( $single_russian_post_html, RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' - 3-5 дней' ) && str_contains( $single_russian_post_html, '500 руб.' ) && ! str_contains( $single_russian_post_html, 'wdc-order-delivery-tariffs' ) && ! str_contains( $single_russian_post_html, 'wdc_order_delivery_preview_tariff_' ), 'One surviving Russian Post tariff must render as one order recalculation method without nested tariff radios.' );
+
+$multi_russian_post_payloads = $normalize_rates_method->invoke(
+	$service,
+	array(
+		new DeliveryRate( RussianPostDomesticSettings::rate_id( DeliveryType::PICKUP, '91007' ), RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::SERVICE_KEY, RussianPostDomesticSettings::TITLE, '91007', 'Быстрый тариф', DeliveryType::PICKUP, 'Быстрый тариф', Money::from_rubles( 700 ), null, null, DateRange::range( 2, 3 ), '', '', array(), false, '', true, false, array( 'tariff_selector_group' => true, 'checkout_group_id' => RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP ), 'pickup_method_title' => RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ) ),
+		new DeliveryRate( RussianPostDomesticSettings::rate_id( DeliveryType::PICKUP, '91008' ), RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::SERVICE_KEY, RussianPostDomesticSettings::TITLE, '91008', 'Экономичный тариф', DeliveryType::PICKUP, 'Экономичный тариф', Money::from_rubles( 500 ), null, null, DateRange::range( 4, 6 ), '', '', array(), false, '', true, false, array( 'tariff_selector_group' => true, 'checkout_group_id' => RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP ), 'pickup_method_title' => RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ) ),
+	)
+);
+$multi_russian_post_payload = $multi_russian_post_payloads[0] ?? array();
+$multi_russian_post_tariffs = is_array( $multi_russian_post_payload['tariff_variants'] ?? null ) ? $multi_russian_post_payload['tariff_variants'] : array();
+recalc_smoke_assert( true === (bool) ( $multi_russian_post_payload['is_grouped'] ?? false ) && array( '91008', '91007' ) === array_map( static fn( array $tariff ): string => (string) ( $tariff['object_code'] ?? '' ), $multi_russian_post_tariffs ), 'Multiple meaningful Russian Post domestic tariffs must remain grouped and selectable in order recalculation.' );
+$multi_russian_post_html = ( new OrderDeliveryRateRenderer() )->render( $multi_russian_post_payloads );
+recalc_smoke_assert( str_contains( $multi_russian_post_html, 'wdc-order-delivery-tariffs' ) && str_contains( $multi_russian_post_html, 'wdc_order_delivery_preview_tariff_' . RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP ) ) && str_contains( $multi_russian_post_html, 'Быстрый тариф - 2-3 дня' ) && str_contains( $multi_russian_post_html, 'Экономичный тариф - 4-6 дней' ), 'Multiple surviving Russian Post tariffs must render nested order recalculation tariff radios.' );
+
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Preview must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Preview must not change order totals.' );
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Preview must not change delivery calculation meta.' );
